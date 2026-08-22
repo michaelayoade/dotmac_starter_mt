@@ -1,0 +1,167 @@
+# Customer-journey owner source inventory
+
+As of 2026-08-22. This is read-only extraction evidence, not a release or
+cutover claim. Read it under the same two cautions as every file in this
+directory ([README](README.md)): facts go stale, and a row here is not
+permission to extract anything.
+
+## Immutable source pins
+
+| Repository | Audited ref | Revision | Disposition |
+|---|---|---|---|
+| Starter | `origin/main` | `f7a37385` | Target package/runtime contract |
+| Sub | PR #2624 | `883a0ff1` | Qualifying source for all four owners |
+
+The audit that produced this file walked Sub's customer journey end to end and
+asked one question per step: **is there durable state here that no Starter
+ledger row owns?** Four steps answered yes. Every other gap it found resolved to
+an existing owner, to the Sub assembly, or to a boundary still needing
+adjudication — those are recorded in the sequence note at the end rather than
+turned into packages.
+
+## 1. Service Orders — Sub first
+
+Sub's `ServiceOrder` is the production delivery aggregate, and
+`ProvisioningReadinessDecision`/`ProvisioningReadinessCheck` are already an
+append-only decision with normalized evidence and a one-check-per-kind
+constraint. The reusable slice is that decision, not the provisioning transport
+it observes.
+
+- Source: `app/models/provisioning.py` (`ServiceOrder`,
+  `ProvisioningReadinessDecision`, `ProvisioningReadinessCheck`),
+  `app/services/provisioning_lifecycle.py`,
+  `app/services/service_order_lifecycle.py`.
+- Preserve: `tests/test_provisioning_lifecycle.py`,
+  `tests/test_sales_to_service_lifecycle.py`.
+- Exclude: install appointments, provisioning workflows/steps/runs, vendor
+  adapters, service state machine, project and task graph, work-order
+  execution, IP assignment.
+- Boundary change on port: Sub's `_evaluate_facts` READS Projects, Project
+  Tasks, Work Orders and IP Assignments to build its checks. Those are other
+  owners' facts, so the module takes normalized checks as input and keeps only
+  the decision rule.
+
+## 2. Payments — Sub first
+
+Sub's `topup_intents` is the payment-intent record; `payments` carries the
+confirmed fact; `payment_proofs` carries the bank-transfer evidence and its
+review. The reusable slice is intent plus the correlation between it and an
+external settlement fact.
+
+- Source: `app/models/billing.py` (`topup_intents`, `payments`),
+  `app/models/payment_proof.py`.
+- Preserve: the source's top-up intent and proof-review suites.
+- Exclude: invoices, credit notes, allocations, settlements, reconciliation
+  evidence, refunds, reversals, withholding tax, ledger entries, collection
+  accounts and provider credentials.
+- Defect NOT ported: `uq_payments_active_external_id` is partial on
+  `provider_id IS NOT NULL`, so CRM-origin payments fall outside it and needed
+  a second partial index (`uq_payments_active_crm_external_id`) to stop a
+  concurrent push double-recording cash. The module makes external-reference
+  uniqueness unconditional per (tenant, provider type, reference).
+
+## 3. Service Changes — Sub first
+
+Sub's `SubscriptionChangeRequest` is the durable customer request, and its
+`execution_state` is already the cross-domain checkpoint chain. The reusable
+slice is the request, its decision, its evidence and the ordering.
+
+- Source: `app/models/subscription_change.py`,
+  `app/services/subscription_change_execution.py`,
+  `app/services/events/handlers/subscription_change_execution.py`.
+- Preserve: the source's change-execution suite.
+- Exclude: catalogue offers, addresses, qualification decisions, fee pricing,
+  invoices, credit notes, account adjustments, payments, service orders, work
+  orders, Radius profiles and users.
+- Shape change on port: Sub carries each crossed owner as a nullable FK column
+  on the request. That cannot record WHEN a domain was reached, cannot hold two
+  observations for one domain, and grows a column per collaborator. Typed
+  append-only checkpoint rows carry the same facts without a schema change per
+  owner.
+- Defect NOT ported: `execution_state` is written by several handlers with no
+  single guard, so a request can reach `fulfillment_released` with no
+  settlement recorded. The module advances one declared step at a time.
+
+## 4. Operational Escalations — Sub first
+
+Sub's `OperationalEscalationPolicy`/`OperationalEscalationEvent` are the
+production escalation decision. The reusable slice is policy terms and the
+raised instance — not delivery.
+
+- Source: `app/models/operational_escalation.py`.
+- Preserve: the source's operational-escalation suite.
+- Exclude: owners and watchers, room links and providers, notification
+  channels' transport, `OperationalEscalationDelivery` and every delivery
+  status.
+- Defect NOT ported: the policy row is MUTABLE. Editing it silently rewrites
+  the terms every already-open escalation was raised under, and nothing can
+  read back what the policy said at raise time. The module makes versions
+  immutable, allows exactly one ACTIVE version per policy (enforced by a
+  partial unique index, not only by the writer), and binds each instance to the
+  exact version.
+
+## What the audit found and did NOT turn into a package
+
+Recorded here so the same ground is not re-walked:
+
+- `customer.experience_lifecycle` is a read composer; it belongs in the Sub
+  assembly.
+- Account lifecycle, close/restore/recovery: `dotmac-customers` already claims
+  account lifecycle and `dotmac-records` already owns retention, legal holds
+  and disposition. Sub PR #2624's
+  `docs/designs/SUBSCRIBER_ACCOUNT_LIFECYCLE_SOURCES.md` records "No owner" and
+  proposes a new Starter module; that claim is wrong and needs correcting
+  before it becomes accepted evidence.
+- Field expenses: `dotmac-expenses` already inventories Sub's implementation,
+  so the governance rationale of "no ISP writer" does not hold.
+- Migration mechanics stay in `dotmac-imports` — chunking, checkpoints,
+  dry-run/apply, resumability. Each target module owns its own mappings.
+- Addresses and Reporting are already-known build gaps, not new findings.
+
+## Cohort-6 capability updates
+
+Three existing owners were named in the same audit. Only one of them is a
+Starter change:
+
+- **Inbox Operations — BUILT (`0.1.0a2`, migration `io_0002`).** Sub keeps
+  durable FIFO admission (`inbox_conversation_queue_entries`) and durable
+  round-robin rotation (`inbox_team_round_robin_cursors`); the module had
+  neither. Both are ported: position is a stored, per-queue-unique column
+  rather than a read-time ordering, and rotation state is durable because an
+  in-memory cursor restarts at the same agent after every deploy. Promotion
+  goes through `assign_conversation`, so the queue decides ORDER while the
+  existing presence and capacity refusals still decide admissibility.
+- **Surveys — no Starter change needed.** Its `EXTRACTION.toml` already names
+  `dotmac_sub` as cutover 1 with the composition and retirement posture
+  spelled out. What the audit found missing is a COHORT ASSIGNMENT in the
+  governance programme, which lives in `dotmac_governance` (pinned by exact
+  revision in `.dotmac/standards-profile.json`) and cannot be made from this
+  repository.
+- **Campaigns — no Starter change needed, same reason.** The package is
+  audit-complete with Sub as cutover 1; the missing adoption cohort is a
+  governance-repo row.
+
+Both governance rows remain outstanding after this change. Recorded here rather
+than left implicit, because "the package is fine" and "the programme knows when
+it lands" are different claims and only the first is true today.
+
+## Boundaries still needing adjudication
+
+Not built, and deliberately: customer service agreements (generalize Commercial
+Agreements with a tenant plane, or a narrow `dotmac-service-agreements`);
+contractor delivery (split Procurement, Fiber Plant, Inventory/Payables and the
+residual lifecycle first); work materials (extend Work Orders or extract
+material requirement/consumption — not Inventory); appointments (Workforce
+capability versus a dedicated owner); KYC/customer verification (establish the
+owner and a provider-neutral contract first, with provider I/O in Integrator);
+notification read state (typed storage, but no omnibus notifications module
+until Kernel, Inbox and Template responsibilities are reconciled).
+
+## Adoption and retirement gate
+
+All four are `audit-complete` and uncomposed. Sub remains the writer for every
+one of them until, per package, a history backfill, a read-only shadow and a
+zero-drift comparison complete and a separately authorized writer switch
+occurs. Service Changes additionally requires cohorts 2-5 to be composable,
+because a change request that cannot record a Qualification, Billing, Payment
+or Service Order checkpoint is not exercising the boundary it exists for.

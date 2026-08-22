@@ -111,6 +111,13 @@ dotmac-service-access-policy = { path = "packages/dotmac-service-access-policy",
 dotmac-inbox-operations = { path = "packages/dotmac-inbox-operations", develop = true }
 dotmac-workforce = { path = "packages/dotmac-workforce", develop = true }
 dotmac-fx-policy = { path = "packages/dotmac-fx-policy", develop = true }
+# The customer-journey owners (2026-08-22 audit of Sub PR #2624). Built and
+# proven here, deliberately uncomposed and release-unallowlisted until Sub's
+# named cutover; Service Changes additionally waits on cohorts 2-5.
+dotmac-service-orders = { path = "packages/dotmac-service-orders", develop = true }
+dotmac-payments = { path = "packages/dotmac-payments", develop = true }
+dotmac-service-changes = { path = "packages/dotmac-service-changes", develop = true }
+dotmac-operational-escalations = { path = "packages/dotmac-operational-escalations", develop = true }
 # Tenant-only stock-ledger and traceability owner (ADR-0036). The network
 # suite reuses this owner for equipment while it is stocked; deployment does
 # not turn Network Inventory into a second quantity or valuation writer.
@@ -290,6 +297,10 @@ module = [
     "dotmac_inbox_operations.*",
     "dotmac_workforce.*",
     "dotmac_fx_policy.*",
+    "dotmac_service_orders.*",
+    "dotmac_payments.*",
+    "dotmac_service_changes.*",
+    "dotmac_operational_escalations.*",
     "dotmac_inventory.*",
     "dotmac_assets.*",
     "dotmac_ipam.*",
@@ -403,6 +414,10 @@ root_packages = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_service_orders",
+    "dotmac_payments",
+    "dotmac_service_changes",
+    "dotmac_operational_escalations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -527,6 +542,10 @@ source_modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_service_orders",
+    "dotmac_payments",
+    "dotmac_service_changes",
+    "dotmac_operational_escalations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -645,6 +664,10 @@ modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_service_orders",
+    "dotmac_payments",
+    "dotmac_service_changes",
+    "dotmac_operational_escalations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -746,6 +769,10 @@ forbidden_modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_service_orders",
+    "dotmac_payments",
+    "dotmac_service_changes",
+    "dotmac_operational_escalations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",

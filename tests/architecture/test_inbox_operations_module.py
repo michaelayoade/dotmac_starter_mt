@@ -15,6 +15,16 @@ from dotmac_kernel.namespaces import (
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/io_0001_inbox_operations.py"
+ADMISSION = ROOT / "migrations/versions/io_0002_queue_admission.py"
+# The lineage root created five tables; a2 added the two admission tables.
+ROOT_TABLES = (
+    "inbox_queues",
+    "inbox_routing_rules",
+    "inbox_agent_presence",
+    "conversation_assignments",
+    "inbox_workflow_events",
+)
+ADMISSION_TABLES = ("inbox_queue_entries", "inbox_round_robin_cursors")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -32,6 +42,8 @@ def test_manifest_and_secure_plane_are_exact() -> None:
         "inbox_agent_presence",
         "conversation_assignments",
         "inbox_workflow_events",
+        "inbox_queue_entries",
+        "inbox_round_robin_cursors",
     )
     assert tuple(module.platform_tables) == ()
     for name in module.tables:
@@ -101,12 +113,52 @@ def test_root_migration_declares_the_whole_forced_rls_plane() -> None:
     assert ast.literal_eval(assigned["down_revision"]) is None
     assert ast.literal_eval(assigned["branch_labels"]) == ("inbox_operations",)
     assert ast.literal_eval(assigned["REQUIRES"]) == tuple(module.requires)
-    for table in module.tables:
+    for table in ROOT_TABLES:
         qualified = f"mod_inbox_ops.{table}"
         assert f"{qualified} ENABLE ROW LEVEL SECURITY" in source
         assert f"{qualified} FORCE ROW LEVEL SECURITY" in source
         assert f"CREATE POLICY {table}_tenant_isolation" in source
         assert f"ON {qualified} TO app_user" in source
+
+
+def test_the_admission_revision_extends_the_same_forced_rls_plane() -> None:
+    """A later revision is where a tenant table most often arrives WITHOUT its
+    policy: the root migration gets reviewed as a plane, an increment gets
+    reviewed as a feature. Both admission tables are checked here for the same
+    four properties the root is."""
+    source = ADMISSION.read_text(encoding="utf-8")
+    assigned = {
+        target.id: node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert ast.literal_eval(assigned["revision"]) == "io_0002_queue_admission"
+    assert ast.literal_eval(assigned["down_revision"]) == "io_0001_inbox_operations"
+    assert ast.literal_eval(assigned["REQUIRES"]) == tuple(module.requires)
+    assert ast.literal_eval(assigned["_TENANT_TABLES"]) == ADMISSION_TABLES
+    assert set(ROOT_TABLES) | set(ADMISSION_TABLES) == set(module.tables)
+    assert "for table in _TENANT_TABLES:" in source
+    assert "ALTER TABLE mod_inbox_ops.{table} ENABLE ROW LEVEL SECURITY" in source
+    assert "ALTER TABLE mod_inbox_ops.{table} FORCE ROW LEVEL SECURITY" in source
+    assert "CREATE POLICY {table}_tenant_isolation ON mod_inbox_ops.{table}" in source
+    assert "mod_inbox_ops.{table} TO app_user" in source
+
+
+def test_a_stored_queue_position_is_unique_within_its_queue() -> None:
+    """The FIFO guarantee only holds if two conversations cannot occupy one
+    place; without this the position is decoration."""
+    from dotmac_inbox_operations import models
+
+    table = models.metadata_table("inbox_queue_entries")
+    unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in table.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("tenant_id", "queue_id", "queue_position") in unique_columns
+    assert ("tenant_id", "conversation_reference") in unique_columns
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:

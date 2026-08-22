@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Staffed inbox queues, routing, agent presence and conversation assignment"
-contract = "Own inbox queues, provider-neutral routing rules, inbox-specific agent presence/capacity, opaque conversation assignments and workflow evidence. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications, AI, workforce shifts or field availability."
+contract = "Own inbox queues, provider-neutral routing rules, inbox-specific agent presence/capacity, durable FIFO queue admission and stored queue position, durable per-queue round-robin rotation state, opaque conversation assignments and workflow evidence. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications, AI, workforce shifts or field availability."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/team_inbox.py",

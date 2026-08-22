@@ -10,7 +10,7 @@ from dotmac_inbox_operations.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="inbox_operations",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="inbox_ops",
     migration_prefix="io",

@@ -23,6 +23,8 @@ TABLES = (
     "inbox_agent_presence",
     "conversation_assignments",
     "inbox_workflow_events",
+    "inbox_queue_entries",
+    "inbox_round_robin_cursors",
 )
 
 
@@ -138,6 +140,23 @@ def test_inbox_operation_rows_are_cross_tenant_isolated(
                     "VALUES (:id, :tenant, :assignment, 'ASSIGNED', now(), 'route')"
                 ),
                 values | {"id": uuid.uuid4()},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_inbox_ops.inbox_queue_entries "
+                    "(id, tenant_id, queue_id, conversation_reference, "
+                    "queue_position, status, entered_at) VALUES "
+                    "(:id, :tenant, :queue, :conversation, 1, 'QUEUED', now())"
+                ),
+                values | {"id": uuid.uuid4(), "conversation": f"queued-{index}"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_inbox_ops.inbox_round_robin_cursors "
+                    "(id, tenant_id, queue_id, last_assigned_agent_reference, "
+                    "rotation_count) VALUES (:id, :tenant, :queue, :agent, 1)"
+                ),
+                values | {"id": uuid.uuid4(), "agent": f"agent-{index}"},
             )
     admin.dispose()
     app = create_engine(app_url)

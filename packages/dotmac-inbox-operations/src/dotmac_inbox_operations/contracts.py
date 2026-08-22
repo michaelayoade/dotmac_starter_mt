@@ -27,6 +27,33 @@ class AssignmentStatus(enum.StrEnum):
     RELEASED = "RELEASED"
 
 
+class QueueEntryStatus(enum.StrEnum):
+    QUEUED = "QUEUED"
+    PROMOTED = "PROMOTED"
+    CANCELLED = "CANCELLED"
+
+
+@dataclass(frozen=True, slots=True)
+class AdmitToQueue:
+    """Admit one conversation to the back of a queue.
+
+    `conversation_reference` is opaque: this module owns the ORDER, never the
+    conversation. Admission is idempotent on that reference, because a retried
+    inbound webhook must not take two places in the line.
+    """
+
+    queue_id: UUID
+    conversation_reference: str
+    entered_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PromoteFromQueue:
+    queue_id: UUID
+    agent_reference: str
+    promoted_at: datetime | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class CreateQueue:
     code: str

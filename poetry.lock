@@ -880,6 +880,24 @@ type = "directory"
 url = "packages/dotmac-content"
 
 [[package]]
+name = "dotmac-customers"
+version = "0.1.0a1"
+description = "Tenant customer accounts, profiles, and party references"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-customers"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a2"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
@@ -1059,6 +1077,24 @@ type = "directory"
 url = "packages/dotmac-forms"
 
 [[package]]
+name = "dotmac-fx-policy"
+version = "0.1.0a1"
+description = "Effective FX observations, selection policy, and determination evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-fx-policy"
+
+[[package]]
 name = "dotmac-imports"
 version = "0.1.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
@@ -1093,6 +1129,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-inbox"
+
+[[package]]
+name = "dotmac-inbox-operations"
+version = "0.1.0a2"
+description = "Staffed inbox queues, routing, presence, and assignments"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
@@ -1151,7 +1205,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a90"
+version = "0.1.0a91"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1339,6 +1393,24 @@ type = "directory"
 url = "packages/dotmac-numbering"
 
 [[package]]
+name = "dotmac-operational-escalations"
+version = "0.1.0a1"
+description = "Versioned operational escalation policy, instances and acknowledgement"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-operational-escalations"
+
+[[package]]
 name = "dotmac-party"
 version = "0.1.0a1"
 description = "Tenant Party roles, relationships, memberships, and reachability evidence"
@@ -1373,6 +1445,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-payables"
+
+[[package]]
+name = "dotmac-payments"
+version = "0.1.0a1"
+description = "Payment intent and confirmation correlation"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-payments"
 
 [[package]]
 name = "dotmac-payroll"
@@ -1519,6 +1609,24 @@ type = "directory"
 url = "packages/dotmac-publishing"
 
 [[package]]
+name = "dotmac-qualification"
+version = "0.1.0a1"
+description = "Time-bounded service qualification evidence and decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-qualification"
+
+[[package]]
 name = "dotmac-records"
 version = "0.1.0a1"
 description = "Declared-record retention, holds, preservation and disposition authority"
@@ -1607,6 +1715,96 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-reseller-management"
+
+[[package]]
+name = "dotmac-service-access-policy"
+version = "0.1.0a1"
+description = "Per-service desired network-access policy decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-access-policy"
+
+[[package]]
+name = "dotmac-service-catalog"
+version = "0.1.0a1"
+description = "Technical service specifications, plan families, characteristics, and eligibility inputs"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-catalog"
+
+[[package]]
+name = "dotmac-service-changes"
+version = "0.1.0a1"
+description = "Durable customer service-change requests and cross-domain checkpoints"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-changes"
+
+[[package]]
+name = "dotmac-service-orders"
+version = "0.1.0a1"
+description = "Service-delivery orders and activation-readiness decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-orders"
+
+[[package]]
+name = "dotmac-services"
+version = "0.1.0a1"
+description = "Authoritative tenant service-instance lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-services"
 
 [[package]]
 name = "dotmac-sites"
@@ -1734,6 +1932,42 @@ type = "directory"
 url = "packages/dotmac-ui"
 
 [[package]]
+name = "dotmac-usage"
+version = "0.1.0a1"
+description = "Normalized usage observations, corrections, and projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-usage"
+
+[[package]]
+name = "dotmac-usage-rating"
+version = "0.1.0a1"
+description = "Effective usage-rating rules and pre-tax obligations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-usage-rating"
+
+[[package]]
 name = "dotmac-web-analytics"
 version = "0.1.0a1"
 description = "Privacy-first first-party website observations and deterministic analytical projections"
@@ -1787,6 +2021,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-workflow-runtime"
+
+[[package]]
+name = "dotmac-workforce"
+version = "0.1.0a1"
+description = "Workforce teams, skills, scheduling, availability, and dispatch"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-workforce"
 
 [[package]]
 name = "email-validator"
@@ -3950,4 +4202,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "11e9cad1b9c20f23c2d9b49f05fd782b33de2b70e4aba8fdfda54e83f4471fc1"
+content-hash = "917e529a7c9a557242927d52523d8625f9ebed2f89fa6d878cd58e1d56987f20"
