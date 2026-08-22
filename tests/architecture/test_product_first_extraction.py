@@ -42,6 +42,7 @@ consumer forces ``adopted``, two force ``reuse-proven``.
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -359,6 +360,118 @@ def _adoption_evidence_problems(
     return problems
 
 
+#: What a named product DOES with the capability, as a closed vocabulary.
+#:
+#: `source_repositories` cannot answer this and never could: it records which
+#: repositories were INVENTORIED, not which hold a writer. Reading it as
+#: "has a writer" makes every inventoried-but-clean product look like debt, and
+#: reading `local_copy_retirement` prose instead is worse — a sentence is not a
+#: claim a checker can compare.
+#:
+#: Governance cites these values across the repository boundary, so the
+#: vocabulary is closed and each member means exactly one thing:
+#:
+#: - `qualifying_source` — the implementation being extracted FROM. Has writers
+#:   by definition, and they retire at its own cutover.
+#: - `legacy_writer` — writes the capability today and must stop. This is the
+#:   state a "no writer here" claim is refuted by.
+#: - `no_writer` — does not write it. The only state that supports such a claim.
+#: - `inventory_only` — was read while inventorying and writes nothing. Distinct
+#:   from `no_writer` because it records that somebody LOOKED, which is what
+#:   makes the claim checkable rather than merely unrefuted.
+#: A claim measured against a moving branch is not a claim.
+IMMUTABLE_REVISION = re.compile(r"^[0-9a-f]{40}$")
+
+PRODUCT_WRITER_STATES = frozenset(
+    {"qualifying_source", "legacy_writer", "no_writer", "inventory_only"}
+)
+
+PRODUCT_WRITER_FIELDS = frozenset(
+    {"product", "writer_state", "retirement_required", "revision", "evidence_paths"}
+)
+
+
+def _product_writer_problems(dossier: dict[str, Any]) -> list[str]:
+    """Validate `[[product_writers]]`, the typed claim Governance reads.
+
+    Absent entirely is allowed and is NOT the same as "no product writes this".
+    A consumer that cannot find the entry it needs must fail as UNKNOWN, which
+    is the whole reason the state is typed: silence and a claim of absence have
+    to be distinguishable, or a missing file reads as a clean bill of health.
+    """
+
+    entries = dossier.get("product_writers")
+    if entries is None:
+        return []
+    problems: list[str] = []
+    if not isinstance(entries, list) or not entries:
+        return ["product_writers must be a non-empty array of tables when present"]
+
+    seen: set[str] = set()
+    for index, entry in enumerate(entries):
+        where = f"product_writers[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{where} must be a table")
+            continue
+        unknown = sorted(set(entry) - PRODUCT_WRITER_FIELDS)
+        if unknown:
+            problems.append(f"{where} has unknown fields: {', '.join(unknown)}")
+
+        product = entry.get("product")
+        if not isinstance(product, str) or not product.strip():
+            problems.append(f"{where}.product must be a non-empty string")
+        else:
+            if product in seen:
+                problems.append(f"{where}.product duplicates {product!r}")
+            seen.add(product)
+            declared = dossier.get("source_repositories")
+            if isinstance(declared, list) and product not in declared:
+                problems.append(
+                    f"{where}.product {product!r} is not in source_repositories; a "
+                    "writer claim about a product nobody inventoried is a guess"
+                )
+
+        state = entry.get("writer_state")
+        if state not in PRODUCT_WRITER_STATES:
+            problems.append(
+                f"{where}.writer_state must be one of "
+                f"{', '.join(sorted(PRODUCT_WRITER_STATES))}"
+            )
+
+        retirement = entry.get("retirement_required")
+        if not isinstance(retirement, bool):
+            problems.append(f"{where}.retirement_required must be a boolean")
+        elif state in {"no_writer", "inventory_only"} and retirement:
+            problems.append(
+                f"{where} claims {state!r} and retirement_required=true; nothing "
+                "that writes nothing has anything to retire"
+            )
+        elif state == "legacy_writer" and not retirement:
+            problems.append(
+                f"{where} claims legacy_writer and retirement_required=false; a "
+                "writer that never retires is a second permanent authority"
+            )
+
+        revision = entry.get("revision")
+        if not isinstance(revision, str) or not IMMUTABLE_REVISION.fullmatch(revision):
+            problems.append(
+                f"{where}.revision must be an immutable 40-character commit — the "
+                "claim is only true of the tree it was measured against"
+            )
+
+        evidence = entry.get("evidence_paths")
+        if not isinstance(evidence, list) or not all(
+            isinstance(item, str) and item.strip() for item in evidence
+        ):
+            problems.append(f"{where}.evidence_paths must be a string list")
+        elif state in {"qualifying_source", "legacy_writer"} and not evidence:
+            problems.append(
+                f"{where} claims {state!r} and cites no evidence path; the paths "
+                "are what a reviewer checks the claim against"
+            )
+    return problems
+
+
 def _validate_dossier(
     dossier: dict[str, Any],
     *,
@@ -391,6 +504,8 @@ def _validate_dossier(
         if not isinstance(references, list):
             continue
         problems.extend(_reference_problems(field, references))
+
+    problems.extend(_product_writer_problems(dossier))
 
     inventory_references = dossier.get("inventory_evidence")
     if isinstance(inventory_references, list):
@@ -678,6 +793,138 @@ def test_every_shared_distribution_has_a_valid_extraction_dossier() -> None:
             distribution_name=distribution_name,
             package_dir=package_dir,
         )
+
+
+# --------------------------------------------------------------------------
+# typed product writer claims — what Governance reads across the repo boundary
+# --------------------------------------------------------------------------
+
+
+def _writers(**overrides: Any) -> dict[str, Any]:
+    entry = {
+        "product": "dotmac_sub",
+        "writer_state": "no_writer",
+        "retirement_required": False,
+        "revision": "883a0ff1aff89e3ea5e241897a4b965527e9bce1",
+        "evidence_paths": [],
+    }
+    entry.update(overrides)
+    return {
+        "source_repositories": ["dotmac_sub", "dotmac_erp"],
+        "product_writers": [entry],
+    }
+
+
+def test_an_absent_claim_is_allowed_and_is_not_a_claim_of_absence() -> None:
+    """The distinction the whole design rests on.
+
+    A dossier with no `product_writers` is valid. It does NOT say "no product
+    writes this" — it says nothing, and a consumer needing an answer must fail
+    as UNKNOWN. Treating silence as a clean bill of health is the failure that
+    let two capabilities be rostered as having no Sub writer while their own
+    dossiers named Sub writers requiring retirement.
+    """
+
+    assert _product_writer_problems({"source_repositories": ["dotmac_sub"]}) == []
+
+
+def test_the_expenses_failure_would_now_be_refused() -> None:
+    """SENSITIVITY: the original defect, as a typed claim.
+
+    Expenses was rostered "no ISP writer in scope" while Sub held two writers
+    its own `local_copy_retirement` required to ratchet to zero. Under the
+    typed vocabulary that is `legacy_writer` + `retirement_required = true`,
+    which a `no_product_writer` rationale cannot cite.
+    """
+
+    dossier = _writers(
+        writer_state="legacy_writer",
+        retirement_required=True,
+        evidence_paths=["app/services/field/expense_requests.py"],
+    )
+    assert _product_writer_problems(dossier) == []
+    claim = dossier["product_writers"][0]
+    assert claim["writer_state"] == "legacy_writer"
+    assert claim["retirement_required"] is True
+
+
+def test_the_surveys_failure_would_now_be_refused() -> None:
+    """SENSITIVITY: Sub was cutover 1 while the roster said nothing was scheduled."""
+
+    dossier = _writers(
+        writer_state="qualifying_source",
+        retirement_required=True,
+        evidence_paths=["app/services/surveys.py"],
+    )
+    assert _product_writer_problems(dossier) == []
+    assert dossier["product_writers"][0]["writer_state"] == "qualifying_source"
+
+
+def test_an_inventory_only_product_is_valid_and_supports_the_claim() -> None:
+    """SENSITIVITY: the case that must PASS.
+
+    A product read while inventorying that writes nothing is the legitimate
+    shape of "no writer here". It is distinct from `no_writer` because it
+    records that somebody LOOKED — which is what makes the claim checkable
+    rather than merely unrefuted. Refusing it would make the control unusable
+    for exactly the capabilities it is meant to clear.
+    """
+
+    assert _product_writer_problems(_writers(writer_state="inventory_only")) == []
+
+
+def test_a_writer_that_never_retires_is_refused() -> None:
+    problems = _product_writer_problems(
+        _writers(
+            writer_state="legacy_writer",
+            retirement_required=False,
+            evidence_paths=["app/x.py"],
+        )
+    )
+    assert any(
+        "second permanent authority" in problem for problem in problems
+    ), problems
+
+
+def test_a_non_writer_with_retirement_work_is_refused() -> None:
+    problems = _product_writer_problems(
+        _writers(writer_state="no_writer", retirement_required=True)
+    )
+    assert any("anything to retire" in problem for problem in problems), problems
+
+
+def test_a_writer_claim_without_evidence_paths_is_refused() -> None:
+    problems = _product_writer_problems(
+        _writers(
+            writer_state="legacy_writer", retirement_required=True, evidence_paths=[]
+        )
+    )
+    assert any("cites no evidence path" in problem for problem in problems), problems
+
+
+def test_a_moving_revision_is_refused() -> None:
+    """A claim measured against a branch is not a claim."""
+
+    problems = _product_writer_problems(_writers(revision="main"))
+    assert any(
+        "immutable 40-character commit" in problem for problem in problems
+    ), problems
+
+
+def test_an_untyped_writer_state_is_refused_rather_than_ignored() -> None:
+    problems = _product_writer_problems(_writers(writer_state="probably fine"))
+    assert any(
+        "writer_state must be one of" in problem for problem in problems
+    ), problems
+
+
+def test_a_claim_about_an_uninventoried_product_is_refused() -> None:
+    """A writer claim about a product nobody inventoried is a guess."""
+
+    problems = _product_writer_problems(_writers(product="dotmac_crm"))
+    assert any(
+        "not in source_repositories" in problem for problem in problems
+    ), problems
 
 
 def test_adopted_without_evidence_is_rejected() -> None:

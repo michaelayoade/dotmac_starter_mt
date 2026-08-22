@@ -53,3 +53,16 @@ first_cutover = "dotmac_sub is cutover 1 because communications.surveys is the o
 shadow_and_drift = "For every Sub definition, compare normalized name/slug/question order and lifecycle; for every eligible owner event, compare the selected survey, opaque recipient/subject mapping and one-invitation semantic identity; for every tracked/public response, compare refusal reason, normalized answers, rating, NPS and aggregate projections. Expected deltas are classified before cutover: tenant_id and FORCE RLS are new; product FKs and trigger enums leave the module; provider delivery state remains in Sub's outbox; activated definitions become immutable; response evidence replaces mutable Ticket metadata CSAT; aggregates use exact Decimal rather than CRM float. Backfill never infers eligibility from timestamps and never copies raw provider payloads. Cutover requires zero unexplained differences, PostgreSQL cross-tenant proof and one sealed response writer."
 local_copy_retirement = "After Sub's one-writer seal, retire the Survey/SurveyInvitation/SurveyResponse persistence and generic writers in app.models.comms and app.services.surveys, plus the mutable Ticket metadata.csat writer. Retain thin Sub adapters for survey selection, subject eligibility, public presentation, audit/event declarations and consequences. CRM's generic fork, conversation CSAT delivery engine and tasks retire through the existing CRM-to-Sub programme; delivery/retry functionality relocates only to the established delivery/Integrator owners, never into this module. ERP later retires only its overlapping definition/question/response/aggregate persistence after HR policy adapters are proven. Two-directional model/caller/table ratchets reach zero before any local owner is declared retired."
 next_action = "Validate the audit-complete package on Observer in a fresh worktree pinned to the exact branch commit. Then land Sub's expand migration and typed composition adapter as the first adoption slice. Keep kernel a84 and Surveys a1 unpublished until that proof. Do not compose dotmac-surveys from the Starter reference assembly, and do not add routers, product trigger enums, delivery, targeting, workforce policy, performance scoring or retention behavior without an adopter-owned contract and canaries."
+
+# Typed product claims. Sub was rostered in Governance as having no scheduled
+# ISP work; this dossier's own `first_cutover` opens "dotmac_sub is cutover 1".
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "3f8d74825bee47b98c3c532229b72f3a8a5b16aa"
+evidence_paths = [
+  "app/models/comms.py",
+  "app/services/surveys.py",
+  "app/services/events/handlers/surveys.py",
+]

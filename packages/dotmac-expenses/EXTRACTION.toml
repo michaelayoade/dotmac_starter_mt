@@ -42,3 +42,33 @@ first_cutover = "dotmac_erp is the qualifying source and first exact-pin adopter
 shadow_and_drift = "Compare tenant counts and stable references plus requester/claimant, status, claimed/approved totals, category, receipt completeness, exact policy revision/rule outcome and reimbursement eligibility. Report missing, extra and conflicting rows. Shadow reads never write either owner."
 local_copy_retirement = "After the sealed switch, two-directional ratchets reach zero for ERP category/claim/line/receipt-policy/limit/lifecycle writers and CRM/Sub request/line writers plus ERP-state mirrors. Finance handoff, compatibility reads and audit export have separate ratchets. A row deletion or a remote-status mirror is never authority-cutover evidence."
 next_action = "Run the package architecture/unit/PostgreSQL canaries on Observer from an exact committed branch revision, then check in ERP's exact kernel/module pins plus its versioned backfill/shadow/cutover adapter. Keep Backoffice uncomposed until ERP proves the first adoption."
+
+# Typed product claims. Governance cites these across the repository boundary,
+# so they are declarations rather than prose: `source_repositories` above says
+# who was INVENTORIED, and these say what each one DOES.
+#
+# Sub was rostered in Governance as having "no ISP writer in scope". It has
+# two, and `local_copy_retirement` already required their ratchet to zero.
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "b969a889e8aba7255e32aa466960c22347c02fd8"
+evidence_paths = ["app/models/expense.py", "app/services/expenses"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "510b80ca7fab4f54a57f261872f94b5e972c8eb6"
+evidence_paths = [
+  "app/models/field_expense.py",
+  "app/services/field/expense_requests.py",
+]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/expense.py"]
