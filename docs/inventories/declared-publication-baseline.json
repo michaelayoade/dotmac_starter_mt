@@ -82,6 +82,11 @@
       "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
       "state": "never-published"
     },
+    "dotmac-sales": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE FIRST SUB ADOPTION. The accepted-quote owner is audit-complete and uncomposed: the assembly does not install it, and it is deliberately absent from the release allowlist. Its kernel floor is 0.1.0a88 — `sales` won the three-way `sa` arbitration in #321 and the row entered kernel source at a87, which was never dispatched, so a88 is the first installable kernel that can register the lineage. THE KERNEL IS NOT WHAT HOLDS THIS ROW OPEN; adoption is. Publishing before Sub's backfill and shadow would put an installable sales owner beside a product still writing its own quotes. Remove this row in the release change that adds the allowlist entry and records the Sub adoption; never by editing the declared version or the floor down.",
+      "state": "never-published"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",

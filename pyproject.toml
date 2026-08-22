@@ -178,6 +178,9 @@ dotmac-ai-operations = { path = "packages/dotmac-ai-operations", develop = true 
 # deterministic projections (ADR-0055). The adopting product supplies origin,
 # event, consent and retention policy; the reference assembly installs none.
 dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true }
+# Tenant sales authority through the immutable accepted Quote (ADR-0033).
+# Built and proven here; Sub composes the first `sa` lineage after shadowing.
+dotmac-sales = { path = "packages/dotmac-sales", develop = true }
 # Stateless semantic projection and rendering for immutable issued-document
 # facts. It is installed for verification here, but not composed or releasable.
 dotmac-document-rendering = { path = "packages/dotmac-document-rendering", develop = true }
@@ -311,6 +314,7 @@ module = [
     "dotmac_compliance_reporting.*",
     "dotmac_ai_operations.*",
     "dotmac_web_analytics.*",
+    "dotmac_sales.*",
     "dotmac_document_rendering.*",
     "dotmac_forms.*",
     "dotmac_workflow_runtime.*",
@@ -418,6 +422,7 @@ root_packages = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -528,6 +533,7 @@ source_modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -637,6 +643,7 @@ modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -728,6 +735,7 @@ forbidden_modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_fulfillment",
+    "dotmac_sales",
     "dotmac_auth_oidc",
 ]
 
