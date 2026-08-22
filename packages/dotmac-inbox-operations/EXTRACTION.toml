@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Staffed inbox queues, routing, agent presence and conversation assignment"
-contract = "Own inbox queues, provider-neutral routing rules, inbox-specific agent presence/capacity, durable FIFO queue admission and stored queue position, durable per-queue round-robin rotation state, opaque conversation assignments and workflow evidence. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications, AI, workforce shifts or field availability."
+contract = "Own inbox queues, executable provider-neutral routing rules and immutable decision evidence, inbox-specific agent presence/capacity, durable FIFO queue admission and stored queue position, capacity-safe eligible-agent assignment, repeatable release/reassign/requeue history, fair per-queue dispatch, durable per-queue round-robin rotation state and workflow evidence. Eligibility arrives as opaque caller-supplied references; Workforce retains teams, skills, shifts and field availability. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications or AI."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/team_inbox.py",
@@ -35,6 +35,6 @@ candidate_consumers = ["dotmac_sub", "dotmac_crm"]
 composition_boundary = "Inbox supplies opaque conversation references; channel traits are provider-neutral routing inputs; assignments never read message content. Workforce identities are opaque Party references and inbox presence is not a shift projection."
 inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
 first_cutover = "Sub is the first writer cutover after queue/rule/presence/assignment backfill and zero-drift shadow; CRM's duplicate workqueue/assignment paths retire after synchronization proof."
-shadow_and_drift = "Compare queue/rule identity and priority, channel code, agent presence/capacity, conversation assignment, workflow event and occurrence time; never copy content."
+shadow_and_drift = "Compare queue/rule identity and priority, selected routing rule and queue-entry evidence, eligible-agent cohort, presence freshness/capacity, FIFO position, round-robin winner, release/reassign/requeue history, workflow event and occurrence time; never copy content."
 local_copy_retirement = "Reduce Sub queue/routing/presence/assignment writers to zero at first cutover, then retire CRM's corresponding workqueue and presence decision paths after API synchronization verification."
-next_action = "Compose in Sub, backfill operational state, shadow dispatch decisions, then migrate CRM as an API consumer and retire both local decision copies."
+next_action = "Run the a3 Postgres concurrency and migration canaries on Observer, then compose in Sub, backfill operational state, shadow routing and dispatch decisions, seal the Sub writer switch, and retire its local queue/routing/presence/assignment writers before migrating CRM as an API consumer."

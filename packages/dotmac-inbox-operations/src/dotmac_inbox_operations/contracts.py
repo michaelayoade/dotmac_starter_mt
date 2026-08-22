@@ -50,7 +50,8 @@ class AdmitToQueue:
 @dataclass(frozen=True, slots=True)
 class PromoteFromQueue:
     queue_id: UUID
-    agent_reference: str
+    eligible_agent_references: tuple[str, ...]
+    presence_fresh_after: datetime
     promoted_at: datetime | None = None
 
 
@@ -81,15 +82,72 @@ class AssignConversation:
     queue_id: UUID
     agent_reference: str
     assigned_at: datetime
+    eligible_agent_references: tuple[str, ...]
+    presence_fresh_after: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseConversation:
+    assignment_id: UUID
+    released_at: datetime
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class RouteConversation:
+    """Resolve and durably record one routing decision.
+
+    The reference belongs to the ingress adapter and makes delivery replay
+    idempotent. The channel is a provider-neutral Inbox vocabulary member.
+    """
+
+    decision_reference: str
+    conversation_reference: str
+    channel_code: str
+    routed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RoutedConversation:
+    decision_id: UUID
+    rule_id: UUID
+    queue_id: UUID
+    queue_entry_id: UUID
+    queue_position: int
+
+
+@dataclass(frozen=True, slots=True)
+class QueueEligibility:
+    """A Workforce/product eligibility projection for one dispatch attempt."""
+
+    queue_id: UUID
+    agent_references: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchQueues:
+    """Attempt one FIFO promotion per queue so a blocked queue cannot starve peers."""
+
+    queues: tuple[QueueEligibility, ...]
+    dispatched_at: datetime
+    presence_fresh_after: datetime
 
 
 __all__ = [
+    "AdmitToQueue",
     "AssignConversation",
     "AssignmentStatus",
     "Conflict",
     "CreateQueue",
     "CreateRoutingRule",
+    "DispatchQueues",
     "InboxOperationsError",
     "PresenceState",
+    "PromoteFromQueue",
+    "QueueEligibility",
+    "QueueEntryStatus",
+    "ReleaseConversation",
+    "RouteConversation",
+    "RoutedConversation",
     "SetAgentPresence",
 ]

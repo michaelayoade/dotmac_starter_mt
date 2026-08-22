@@ -82,3 +82,26 @@ complete shadow fingerprints, a sealed one-writer switch, rollback evidence and
 retirement of every displaced local writer. Cross-application synchronization
 uses versioned APIs/webhooks and durable outbox delivery; no application reads
 another application's database.
+
+## Amendment — 2026-08-22: Inbox Operations executes the decision
+
+Inbox Operations owns a routing rule only if it can execute that rule and
+retain the selected rule/queue evidence. A caller may supply provider-neutral
+work attributes and a Workforce/product-derived set of opaque eligible agent
+references, but it may not select the queue-promotion winner. The module
+combines that eligibility with fresh Inbox presence, current assignment
+capacity and its durable round-robin cursor in one locked promotion path.
+
+Queue admission serializes position allocation on the queue row. Promotion
+locks the queue/front entry and eligible presence rows before it creates the
+assignment and advances the cursor. A multi-queue sweep attempts one item from
+every declared queue cohort; it must not take a global oldest window in which a
+saturated queue can hide another queue with capacity.
+
+Assignments and queue entries are lifecycle evidence, not one-row-per-thread
+entities. Only `ASSIGNED` assignments and `QUEUED` entries are unique by
+conversation. Release, promotion and cancellation settle the active row, and
+a later assignment or admission creates a new history row. Migration
+`io_0003_operational_safety` and package `0.1.0a3` implement this amendment.
+Workforce continues to own teams, skills, shifts and field availability; this
+module stores none of them.

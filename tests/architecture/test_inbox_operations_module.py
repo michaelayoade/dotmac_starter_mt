@@ -16,7 +16,9 @@ from dotmac_kernel.namespaces import (
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/io_0001_inbox_operations.py"
 ADMISSION = ROOT / "migrations/versions/io_0002_queue_admission.py"
-# The lineage root created five tables; a2 added the two admission tables.
+SAFETY = ROOT / "migrations/versions/io_0003_operational_safety.py"
+# The lineage root created five tables; a2 added admission state; a3 adds
+# durable routing evidence while changing lifecycle uniqueness to active-only.
 ROOT_TABLES = (
     "inbox_queues",
     "inbox_routing_rules",
@@ -25,6 +27,7 @@ ROOT_TABLES = (
     "inbox_workflow_events",
 )
 ADMISSION_TABLES = ("inbox_queue_entries", "inbox_round_robin_cursors")
+SAFETY_TABLES = ("inbox_routing_decisions",)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -44,6 +47,7 @@ def test_manifest_and_secure_plane_are_exact() -> None:
         "inbox_workflow_events",
         "inbox_queue_entries",
         "inbox_round_robin_cursors",
+        "inbox_routing_decisions",
     )
     assert tuple(module.platform_tables) == ()
     for name in module.tables:
@@ -158,7 +162,60 @@ def test_a_stored_queue_position_is_unique_within_its_queue() -> None:
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
     assert ("tenant_id", "queue_id", "queue_position") in unique_columns
-    assert ("tenant_id", "conversation_reference") in unique_columns
+
+
+def test_assignment_and_queue_uniqueness_only_cover_active_work() -> None:
+    assignments = models.metadata_table("conversation_assignments")
+    entries = models.metadata_table("inbox_queue_entries")
+    assignment_index = next(
+        index
+        for index in assignments.indexes
+        if index.name == "uq_conversation_assignments_active_conversation"
+    )
+    queue_index = next(
+        index
+        for index in entries.indexes
+        if index.name == "uq_inbox_queue_entries_active_conversation"
+    )
+    assert assignment_index.unique
+    assert queue_index.unique
+    assert str(assignment_index.dialect_options["postgresql"]["where"]) == (
+        "status = 'ASSIGNED'"
+    )
+    assert str(queue_index.dialect_options["postgresql"]["where"]) == (
+        "status = 'QUEUED'"
+    )
+
+
+def test_operational_safety_revision_extends_rls_and_replaces_lifecycle_keys() -> None:
+    source = SAFETY.read_text(encoding="utf-8")
+    assigned = {
+        target.id: node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert ast.literal_eval(assigned["revision"]) == "io_0003_operational_safety"
+    assert ast.literal_eval(assigned["down_revision"]) == "io_0002_queue_admission"
+    assert ast.literal_eval(assigned["REQUIRES"]) == tuple(module.requires)
+    assert ast.literal_eval(assigned["_TENANT_TABLES"]) == SAFETY_TABLES
+    assert set(ROOT_TABLES) | set(ADMISSION_TABLES) | set(SAFETY_TABLES) == set(
+        module.tables
+    )
+    assert "uq_conversation_assignments_tenant_conversation" in source
+    assert "uq_conversation_assignments_active_conversation" in source
+    assert "status = 'ASSIGNED'" in source
+    assert "uq_inbox_queue_entries_tenant_conversation" in source
+    assert "uq_inbox_queue_entries_active_conversation" in source
+    assert "status = 'QUEUED'" in source
+    assert "CREATE FUNCTION mod_inbox_ops.refuse_routing_decision_mutation()" in source
+    assert "CREATE TRIGGER inbox_routing_decisions_append_only" in source
+    assert "BEFORE UPDATE OR DELETE ON mod_inbox_ops.inbox_routing_decisions" in source
+    assert "for table in _TENANT_TABLES:" in source
+    assert "ALTER TABLE mod_inbox_ops.{table} ENABLE ROW LEVEL SECURITY" in source
+    assert "ALTER TABLE mod_inbox_ops.{table} FORCE ROW LEVEL SECURITY" in source
+    assert "CREATE POLICY {table}_tenant_isolation ON mod_inbox_ops.{table}" in source
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:
