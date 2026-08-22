@@ -6,7 +6,13 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a89 — UNRELEASED
+## 0.1.0a89 — 2026-08-22
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `17e395d3` by release run
+`32568273236`. Publication makes the provisioning participant contract and
+the four commerce lineage allocations installable; it composes or adopts no
+module.
 
 Completes the product-neutral provisioning participant contract required by
 Fulfillment, and allocates the four remaining commerce lineages. This is a new
