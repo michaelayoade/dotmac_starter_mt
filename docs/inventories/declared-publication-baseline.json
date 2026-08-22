@@ -62,19 +62,9 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-ai-operations": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. The product-first policy, operation, attempt and advisory-insight owner is implemented without provider clients, endpoints, credentials or payloads. Publish just in time for Sub's exact pin, typed migration and first Integrator-plugin execution; then seal the corresponding Sub state/client writers.",
-      "state": "never-published"
-    },
     "dotmac-app-sync": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
-      "state": "never-published"
-    },
-    "dotmac-compliance-reporting": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. Sub's anti-fabrication pack behavior now has an independent lineage and exact filing lifecycle, but its source packs are not backfilled or shadow-compared. Publish with that cutover and retire CRM's copied aggregator only after complete digest/refusal parity.",
       "state": "never-published"
     },
     "dotmac-document-rendering": {
@@ -82,39 +72,14 @@
       "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless package is built and gate-proven here but deliberately NOT release-allowlisted. Its kernel >=0.1.0a87 floor is still unpublished, and its EXTRACTION.toml withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence after the a87 artifact is registry-verified; never by editing the declared version or floor down.",
       "state": "never-published"
     },
-    "dotmac-forms": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. ERP is the qualifying seven-table product source and remains authoritative. The package, lineage and parity canaries are built on the ADR-0040 integration branch, but Backoffice has not exact-pinned, backfilled, shadow-compared or sealed ERP's writer. Publish just in time for that authorized cutover; package construction alone is not adoption.",
-      "state": "never-published"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
       "state": "never-published"
     },
-    "dotmac-platform-health": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The greenfield-after-inventory platform owner is implemented with immutable bounded observations and rebuildable freshness projections, but Vendor Control Plane has not exact-pinned or shadow-compared it. Publish just in time for the authenticated-source cutover; never treat a health fact as deployment authority.",
-      "state": "never-published"
-    },
-    "dotmac-remote-access": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. The greenfield-after-inventory finite grant owner is implemented, but Sub has not exact-pinned it or proven every device toggle correlates to one active grant. Publish only with the fail-closed Network Control gate and retirement of direct bypass paths.",
-      "state": "never-published"
-    },
-    "dotmac-support-access": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The greenfield-after-inventory platform owner is implemented with exact approval binding and credential-free finite descriptors, but Vendor Control Plane has not exact-pinned it or correlated every enforced session to one active grant. Publish only with that cutover and retirement of direct temporary issuance paths.",
-      "state": "never-published"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
-      "state": "never-published"
-    },
-    "dotmac-workflow-runtime": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The product-neutral runtime is ported from ERP's execution and retry evidence, but Backoffice has not exact-pinned it or classified source executions by immutable definition/checkpoint eligibility. Publish only with the authorized backfill, shadow, writer-seal and local execution-owner retirement slice.",
       "state": "never-published"
     }
   }
