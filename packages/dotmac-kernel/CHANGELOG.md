@@ -6,6 +6,59 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a90 — 2026-08-22
+
+**Machine credentials** — an `X-Api-Key` principal that is not a person.
+Extracted product-first from `dotmac_sub` and `dotmac_erp`
+(`docs/inventories/machine-credential-sources.md`), which both authenticate
+machines with this header and **disagree about what a credential means**.
+
+### Added
+
+- `dotmac_kernel.machine_auth` — `MachinePrincipal`, `authenticate_machine`,
+  `require_machine_scope`, `hash_machine_key`, `API_KEY_HEADER`,
+  `MACHINE_KEY_SECRET_NAME`, `MachineKeyUnavailableError`.
+- `dotmac_kernel.machine_models.MachineCredential` and migration
+  `0027_machine_credentials`: `tenant_id NOT NULL`, composite uniques, RLS
+  ENABLEd *and* FORCEd with an isolation policy, and the online grants — hard
+  rule 11 in one migration.
+
+### The behaviour this facility refuses, and why
+
+Each refusal is a defect in at least one source, not a preference:
+
+- **Empty scopes authorize NOTHING.** ERP's `has_scope` returns `True` for every
+  scope when the list is empty — its own docstring calls that the grandfathered
+  default. Sub does the opposite. A credential created or migrated without
+  scopes is inert in one product and omnipotent in the other, which is the
+  single strongest argument for one owner. `scopes` is `NOT NULL` with no
+  default, so the row cannot exist without an answer.
+- **No unsalted-SHA-256 fallback.** Sub hashes with HMAC when a secret is
+  configured and plain SHA-256 when it is not, then accepts either form. The
+  comment says production always has the key — but the fallback is a property of
+  the CODE, not the environment. Here a missing key raises
+  `MachineKeyUnavailableError`: a deployment fault reported as one, not as an
+  invalid credential.
+- **A dedicated held key.** Sub derives its HMAC subkey from the
+  connector-credential encryption key, so rotating one invalidates the other.
+  This reads its own secret by name (ADR-0009: held at boot, never dereferenced
+  on the request path).
+- **No write during authentication.** Sub commits `last_used_at` — and an
+  unconditional rehash-on-use — inside a GET. There is no `last_used_at` column
+  here, so the write cannot return.
+- **No human requirement, no roles, no wildcard.** ERP refuses a credential
+  without a `person_id`; a machine is not a person wearing a service label.
+
+### Adoption is credential REISSUANCE, not a hash migration
+
+A stored digest holds neither the raw key nor material to re-key from, so no
+conversion or backfill exists. Both products must reissue. Sub's cutover is a
+migration under that gate — it holds a legacy verifier — and ERP's is
+additionally gated on resolving every active null/empty-scoped key. See the
+kernel dossier's `local_copy_retirement`.
+
+Composes and adopts no module.
+
 ## 0.1.0a89 — 2026-08-22
 
 Published, installed back from the private index, conformance-checked and
