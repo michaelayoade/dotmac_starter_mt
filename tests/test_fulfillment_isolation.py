@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from threading import Event, Thread
 
 import pytest
@@ -67,8 +67,9 @@ def fulfillment_database() -> Iterator[tuple[str, str]]:
     admin_url = _url_for(superuser, name, user="app_admin")
     previous_url = os.environ.get("MIGRATION_DATABASE_URL")
     try:
-        from alembic import command
         from alembic.config import Config
+
+        from alembic import command
 
         config = Config(str(REPO_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -337,11 +338,26 @@ def test_two_workers_cannot_both_dispatch_the_same_step(
 
     first = Thread(target=worker, args=(1,), daemon=True)
     second = Thread(target=worker, args=(2,), daemon=True)
+
+    def _why_not(event_name: str) -> str:
+        """`worker` funnels every exception into `results` rather than raising on
+        the thread, so a wait that times out otherwise fails as a bare
+        `assert False` with the real cause sitting unread in the queue. Drain it
+        into the assertion message instead.
+        """
+        try:
+            index, exc = results.get(timeout=1)
+        except Empty:
+            return f"{event_name} never set and no worker returned"
+        return f"{event_name} never set; worker {index} returned {exc!r}"
+
     try:
         first.start()
-        assert first_inside_publish.wait(timeout=10)
+        assert first_inside_publish.wait(timeout=10), _why_not("first_inside_publish")
         second.start()
-        assert second_entering_service.wait(timeout=10)
+        assert second_entering_service.wait(timeout=10), _why_not(
+            "second_entering_service"
+        )
         release_first.set()
         first.join(timeout=15)
         second.join(timeout=15)

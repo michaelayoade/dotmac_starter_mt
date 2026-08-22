@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -33,6 +34,7 @@ from dotmac_fulfillment import (
 )
 from dotmac_fulfillment.manifest import module as fulfillment_module
 from dotmac_fulfillment.models import (
+    SCHEMA,
     FulfillmentAttempt,
     FulfillmentOutcomeReceipt,
     FulfillmentRun,
@@ -41,6 +43,7 @@ from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict, IdempotencyRecord
+from dotmac_kernel.models import Base
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.providers.provisioning import (
     CompensationDisposition as ProviderCompensationDisposition,
@@ -54,9 +57,45 @@ from dotmac_kernel.providers.provisioning import (
 from dotmac_kernel.testing import (
     FakeProvisioningProvider,
     check_provisioning_provider_contract,
+    create_test_engine,
+    isolated_session,
 )
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+
+
+# `tests/unit/conftest.py`'s shared engine deliberately attaches only
+# `mod_appdir` and `mod_tstudio` — the two module schemas the reference
+# assembly's own service tests consume — and says so: "Independent packages
+# build their own narrow engines", because SQLite allows ten attachments and
+# the package inventory keeps growing. `dotmac-fulfillment` is not composed by
+# this assembly, so it takes that route rather than widening the shared set,
+# which would read as composition the assembly does not perform.
+#
+# The selection is every public table plus this package's own — the public half
+# is what `tenant_row` needs to grant entitlements and what the service writes
+# audit and idempotency rows into; `create_test_engine` derives the single
+# ATTACH from the tables it is handed.
+@pytest.fixture(scope="module")
+def fulfillment_engine():
+    engine = create_test_engine(
+        tables=tuple(
+            table
+            for table in Base.metadata.tables.values()
+            if table.schema is None or table.schema == SCHEMA
+        )
+    )
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture()
+def db(fulfillment_engine) -> Iterator[Session]:
+    """Overrides the conftest fixture of the same name, so `tenant_row` and
+    every test in this module resolve to the narrow engine above.
+    """
+    with isolated_session(fulfillment_engine) as session:
+        yield session
 
 
 def _registry(*codes: str) -> ParticipantRegistry:
