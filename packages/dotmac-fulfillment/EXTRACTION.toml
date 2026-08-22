@@ -32,6 +32,7 @@ preserved_tests = [
   "dotmac_sub:tests/architecture/test_provisioning_lifecycle_sot.py",
   "dotmac_sub:tests/architecture/test_service_order_status_writers.py",
   "dotmac_starter_mt:tests/unit/test_provisioning_provider.py",
+  "dotmac_starter_mt:tests/unit/test_fulfillment_contract.py",
   "dotmac_starter_mt:tests/architecture/test_fulfillment_module.py",
   "dotmac_starter_mt:tests/test_fulfillment_isolation.py",
 ]
