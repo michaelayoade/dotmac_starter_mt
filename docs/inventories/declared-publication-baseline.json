@@ -67,31 +67,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-connector-flutterwave": {
-      "declared": "0.1.0a2",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Version a2 adds Flutterwave-v4-only OAuth charge reconciliation beside the already published ingress contract and floors on the declared Integration a11 POLL engine. Remove this row after the exact wheel is registry-verified and tagged. Sub's v3-to-v4 shadow, callback and polling cutover, direct-client deletion and ratchet reduction remain independently owed; publication moves no financial authority.",
-      "state": "declared-newer-than-published"
-    },
-    "dotmac-connector-linkedin": {
-      "declared": "0.1.0a1",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. The greenfield-after-fleet-inventory connector implements current LinkedIn webhook validation, exact-byte signature verification and provider-neutral organization-social and Lead Sync observations with deny-all egress. Remove this row after registry verification and tagging. Integrator pinning, subscription configuration and each destination product's typed-port shadow remain independently owed.",
-      "state": "never-published"
-    },
-    "dotmac-connector-mono": {
-      "declared": "0.1.0a1",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. The product-first Mono v2 connector preserves exact lowest-denomination amounts, refuses off-origin pagination and delegates checkpoint ownership to Integration a11. Remove this row after registry verification and tagging. ERP's exact pin, statement-observation shadow, direct-client deletion and external-connector ratchet reduction remain independently owed.",
-      "state": "never-published"
-    },
-    "dotmac-connector-paystack": {
-      "declared": "0.1.0a2",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Version a2 adds authenticated paged transaction reconciliation beside the published exact-byte webhook contract and floors on the declared Integration a11 POLL engine. Remove this row after registry verification and tagging. Sub and ERP retain every financial decision until their independent typed-port shadow, cutover, direct-client deletion and ratchet reduction complete.",
-      "state": "declared-newer-than-published"
-    },
-    "dotmac-connector-remita": {
-      "declared": "0.1.0a1",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. The product-first Remita connector performs authenticated RRR status transport, parses the provider response and carries status evidence verbatim without ERP's disputed lifecycle mapping. Remove this row after registry verification and tagging. ERP's exact pin, shadow comparison, RRR transport cutover, direct-client deletion and ratchet reduction remain independently owed.",
-      "state": "never-published"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
