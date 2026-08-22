@@ -92,11 +92,6 @@
       "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a2 adds Sub's durable FIFO admission and round-robin rotation state (io_0002). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a91",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
-      "state": "declared-unpublished"
-    },
     "dotmac-operational-escalations": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. Versioned escalation policy, instances, acknowledgement and cancellation are extracted product-first from Sub's operational_escalation state and are uncomposed. Durable Timers keeps scheduling and Messaging/Integrator keeps delivery. Remove only with an authorized Sub backfill, zero-drift escalation shadow and writer retirement.",
