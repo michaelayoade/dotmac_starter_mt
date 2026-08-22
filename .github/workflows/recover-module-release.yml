@@ -33,56 +33,63 @@ on:
         required: true
         type: choice
         options:
-          - dotmac-release-catalog
-          - dotmac-entitlement-allocation
-          - dotmac-files
-          - dotmac-ticketing
-          - dotmac-numbering
-          - dotmac-integration
-          - dotmac-approvals
-          - dotmac-application-directory
-          - dotmac-people
-          - dotmac-positioning
-          - dotmac-durable-timers
-          - dotmac-commercial-agreements
-          - dotmac-licensing
-          - dotmac-deployment-control
-          - dotmac-brand-profiles
-          - dotmac-media-observations
-          - dotmac-content
-          - dotmac-publishing
-          - dotmac-sites
-          - dotmac-referrals
-          - dotmac-reseller-management
           - dotmac-accounting
+          - dotmac-ai-operations
           - dotmac-analytics
-          - dotmac-banking
-          - dotmac-documents
-          - dotmac-expenses
-          - dotmac-finance
-          - dotmac-inbox
-          - dotmac-party
-          - dotmac-payables
-          - dotmac-payroll
-          - dotmac-procurement
-          - dotmac-projects
-          - dotmac-records
-          - dotmac-surveys
-          - dotmac-tax
-          - dotmac-work-orders
-          - dotmac-inventory
+          - dotmac-application-directory
+          - dotmac-approvals
           - dotmac-assets
+          - dotmac-banking
+          - dotmac-brand-profiles
+          - dotmac-campaigns
+          - dotmac-commercial-agreements
+          - dotmac-compliance-reporting
+          - dotmac-content
+          - dotmac-deployment-control
+          - dotmac-documents
+          - dotmac-durable-timers
+          - dotmac-entitlement-allocation
+          - dotmac-expenses
+          - dotmac-fiber-plant
+          - dotmac-files
+          - dotmac-finance
+          - dotmac-forms
+          - dotmac-inbox
+          - dotmac-integration
+          - dotmac-inventory
           - dotmac-ipam
+          - dotmac-licensing
+          - dotmac-media-observations
+          - dotmac-network-access
+          - dotmac-network-assurance
+          - dotmac-network-control
           - dotmac-network-inventory
           - dotmac-network-observability
           - dotmac-network-topology
-          - dotmac-network-assurance
-          - dotmac-network-control
-          - dotmac-fiber-plant
-          - dotmac-network-access
+          - dotmac-numbering
+          - dotmac-party
+          - dotmac-payables
+          - dotmac-payroll
+          - dotmac-people
+          - dotmac-platform-health
           - dotmac-pon-access
+          - dotmac-positioning
+          - dotmac-procurement
+          - dotmac-projects
+          - dotmac-publishing
+          - dotmac-records
+          - dotmac-referrals
+          - dotmac-release-catalog
+          - dotmac-remote-access
+          - dotmac-reseller-management
+          - dotmac-sites
+          - dotmac-support-access
+          - dotmac-surveys
+          - dotmac-tax
+          - dotmac-ticketing
           - dotmac-web-analytics
-          - dotmac-campaigns
+          - dotmac-work-orders
+          - dotmac-workflow-runtime
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

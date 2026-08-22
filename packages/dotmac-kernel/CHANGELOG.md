@@ -9,8 +9,9 @@ here.
 ## 0.1.0a89 — UNRELEASED
 
 Completes the product-neutral provisioning participant contract required by
-Fulfillment. This is a new kernel version because a88 is published and
-immutable. It publishes, composes and adopts no Fulfillment module.
+Fulfillment, and allocates the four remaining commerce lineages. This is a new
+kernel version because a88 is published and immutable. It publishes, composes
+and adopts no module.
 
 ### Added
 
@@ -26,6 +27,16 @@ immutable. It publishes, composes and adopts no Fulfillment module.
   or requires manual work; callers never invent an inverse operation.
 - Matching deterministic fake/provider conformance coverage in
   `dotmac_kernel.testing`.
+- `BILLING_MIGRATION_OWNER` (`mod_billing`, prefix `bi`),
+  `COLLECTIONS_MIGRATION_OWNER` (`mod_coll`, `cl`),
+  `ORDERS_MIGRATION_OWNER` (`mod_orders`, `or`) and
+  `SUBSCRIPTIONS_MIGRATION_OWNER` (`mod_subscriptions`, `su`). With `sales`,
+  allocated in a88 by the three-way `sa` arbitration, this completes the
+  sell-to-collect chain so the whole set composes against one ledger and
+  shares one floor. Recovered from a branch that carried 482 files against
+  kernel a75 and was closed rather than rebased; these four rows were its only
+  content main did not already have. Physical lineage identity only — no
+  module is composed, published or adopted by the allocation.
 
 ### Changed
 

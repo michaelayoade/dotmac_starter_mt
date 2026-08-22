@@ -908,7 +908,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a87"
+dotmac-kernel = ">=0.1.0a88"
 
 [package.source]
 type = "directory"
