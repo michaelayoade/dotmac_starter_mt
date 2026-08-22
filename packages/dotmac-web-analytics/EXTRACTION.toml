@@ -43,3 +43,22 @@ first_cutover = "Compose the exact released tenant-plane package in the Dotmac E
 shadow_and_drift = "Before switching any overlapping tracker, compare accepted, replayed, conflicting and filtered event identities; deterministic sessions; route/source/device/event aggregates; funnel results; retention expiry; and projection digests for a full agreed window. Zero unexplained drift is required. The comparison names protocol, registry, classifier, session-rule and projection versions so matching counts under different rules cannot pass."
 local_copy_retirement = "No qualifying first-party writer exists to port. After Dotmac ERP and Sub independently adopt the release and shadow evidence is clean, retire only the overlapping visitor/session/full-URL/fingerprint analytics behavior in CRM's chat widget. Keep CRM's chat identity/lead workflow and campaigns' delivery/open/click lifecycle with their owners. Mkt's provider aggregate reader stays an external-observation concern and never writes this event ledger."
 next_action = "Validate the a85-restacked release candidate in a fresh isolated Observer worktree, merge only after all required GitHub checks are green, then publish and registry-verify the exact protected-main kernel and module artifacts. Backoffice and Sub adoption remain separate and must pin the exact release independently."
+
+# Typed product claims. `local_copy_retirement` states "No qualifying
+# first-party writer exists to port", and the only behaviour it retires is
+# CRM's chat-widget analytics. Sub is a planned ADOPTER with nothing to retire,
+# which is a different thing from Sub being uninvolved — and it is the shape a
+# `no_product_writer` roster claim is allowed to cite.
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "no_writer"
+retirement_required = false
+revision = "883a0ff1aff89e3ea5e241897a4b965527e9bce1"
+evidence_paths = []
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/services/chat_widget"]
