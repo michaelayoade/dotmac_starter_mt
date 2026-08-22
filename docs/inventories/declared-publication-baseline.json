@@ -95,7 +95,7 @@
     "dotmac-kernel": {
       "declared": "0.1.0a91",
       "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
-      "state": "never-published"
+      "state": "declared-unpublished"
     },
     "dotmac-operational-escalations": {
       "declared": "0.1.0a1",
