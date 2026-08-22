@@ -138,6 +138,10 @@ class FeatureManifest:
     # resolve these routing codes against the installed manifest set before
     # enqueueing; see `dotmac_kernel.outbox_event_types`.
     outbox_event_types: Sequence[str] = field(default_factory=tuple)
+    # Provisioning participants implemented by this feature. Fulfillment treats
+    # these as an open manifest-owned vocabulary and never branches on a
+    # concrete participant code.
+    provisioning_participants: Sequence[str] = field(default_factory=tuple)
     # Setting domains this module DECLARES and OWNS. A domain groups settings
     # under one owner; `dotmac_kernel.settings_resolver` rejects a spec or a
     # write naming one no module declares. See
