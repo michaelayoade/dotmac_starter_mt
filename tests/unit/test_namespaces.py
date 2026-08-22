@@ -245,6 +245,14 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `web_analytics` is the fifty-second: privacy-minimised first-party
     # observations and deterministic projections (ADR-0055). Property, origin,
     # consent and consequence policy remains with each adopting product.
+    # ADR-0055's ten ISP essential owners follow. `services` takes `se` because
+    # Surveys already owns `sv`, and `service_access_policy` takes the `sap`
+    # settled by the three-way `sa` arbitration above rather than the `sa` its
+    # own branch had claimed while unable to see Sales.
+    # The four customer-journey owners (Sub PR #2624 audit, 2026-08-22) close
+    # the set: service delivery readiness, payment intent, the durable change
+    # request, and escalation policy. Each is narrower than the journey it
+    # closes — the journey crosses owners; the module owns one decision in it.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -325,6 +333,62 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "collections",
         "orders",
         "subscriptions",
+        "customers",
+        "service_catalog",
+        "qualification",
+        "services",
+        "usage",
+        "usage_rating",
+        "inbox_operations",
+        "workforce",
+        "fx_policy",
+        "service_orders",
+        "payments",
+        "service_changes",
+        "operational_escalations",
+    }
+
+    allocations = {
+        owner.owner: (owner.db_schema, owner.prefix, owner.branch_label)
+        for owner in modules
+    }
+    assert {
+        name: allocations[name]
+        for name in (
+            "customers",
+            "service_catalog",
+            "qualification",
+            "services",
+            "usage",
+            "usage_rating",
+            "service_access_policy",
+            "inbox_operations",
+            "workforce",
+            "fx_policy",
+            "service_orders",
+            "payments",
+            "service_changes",
+            "operational_escalations",
+        )
+    } == {
+        "customers": ("mod_customers", "cu", "customers"),
+        "service_catalog": ("mod_svc_cat", "sc", "service_catalog"),
+        "qualification": ("mod_qual", "qu", "qualification"),
+        "services": ("mod_services", "se", "services"),
+        "usage": ("mod_usage", "us", "usage"),
+        "usage_rating": ("mod_usage_rate", "ur", "usage_rating"),
+        "service_access_policy": (
+            "mod_serviceaccess",
+            "sap",
+            "service_access_policy",
+        ),
+        "inbox_operations": ("mod_inbox_ops", "io", "inbox_operations"),
+        "workforce": ("mod_workforce", "wf", "workforce"),
+        "fx_policy": ("mod_fx_policy", "fx", "fx_policy"),
+        "service_orders": ("mod_serviceorders", "so", "service_orders"),
+        "payments": ("mod_payments", "pm", "payments"),
+        "service_changes": ("mod_servicechanges", "sch", "service_changes"),
+        "operational_escalations": ("mod_escalations", "oe", "operational_escalations"),
     }
 
 
