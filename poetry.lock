@@ -1735,6 +1735,24 @@ type = "directory"
 url = "packages/dotmac-reseller-management"
 
 [[package]]
+name = "dotmac-sales"
+version = "0.1.0a1"
+description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sales"
+
+[[package]]
 name = "dotmac-service-access-policy"
 version = "0.1.0a1"
 description = "Per-service desired network-access policy decisions"
@@ -4220,4 +4238,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "41465a6c8d423f109c82d423482ddc73977d3251d642439a76d71e4989612b2f"
+content-hash = "b859707bea2e599d36959600fc138d6db4dd43de4f8a78082c254c50d26c34db"
