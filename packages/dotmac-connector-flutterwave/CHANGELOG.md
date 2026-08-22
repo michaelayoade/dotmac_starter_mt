@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0a2 — unreleased
+
+- Adds API-v4-only OAuth authentication and paged charge reconciliation.
+- Uses only the documented sandbox/live v4 hosts and retains the a1 ingress
+  manifest as the bounded adoption window; there is no v3 fallback.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

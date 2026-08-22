@@ -9,7 +9,7 @@ document is the bug.
 | | |
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a10`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, and a10 implements **SPI 1.3** |
-| Declared | No unreleased version |
+| Declared | `0.1.0a11` adds the executable POLL engine without changing SPI 1.3 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -117,6 +117,11 @@ survived a request either.
 `dispatch.invoke` additionally calls `require_mode(plugin, DELIVERY)` before the
 handler lookup, so a binding pointed at a connector that cannot deliver produces
 a stated refusal naming the connector and what it *does* declare.
+
+The POLL mode is executed by `prepare_poll` -> `invoke_poll` ->
+`record_poll_batch`. Provider I/O runs after the prepare unit of work has closed;
+the normalized batch and next cursor then commit together. This is package
+machinery rather than a new SPI shape, so `CURRENT_SPI_VERSION` remains 1.3.
 
 ## The ingress contract
 

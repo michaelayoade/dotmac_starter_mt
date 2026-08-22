@@ -7,8 +7,10 @@ differences, each of which is a defect the dossier recorded in the source:
 * no column here is a foreign key into a domain table — Sub's shared row table
   carries `payment_id` and `record_created`, welding one domain's money
   concerns into the ledger every other domain would share;
-* the input is a `dotmac-files` id and its checksum rather than the payload
-  inline in a `Text` column, which is what Sub's own comment predicted.
+* the input and its bounded partitions are `dotmac-files` ids plus checksums,
+  rather than payloads inline in `Text` columns; and
+* the partition table carries immutable ranges, integrity evidence and worker
+  checkpoints, never a copied source row.
 """
 
 from __future__ import annotations
@@ -147,11 +149,80 @@ class ImportRunRow(Base, TimestampMixin):
     )
 
 
-TENANT_TABLES: tuple[str, ...] = ("import_runs", "import_run_rows")
+class ImportPartition(Base, TimestampMixin):
+    """One immutable stored-file partition plus its bounded worker lease."""
+
+    __tablename__ = "import_partitions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_import_partitions_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "run_id",
+            "ordinal",
+            name="uq_import_partitions_tenant_run_ordinal",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "run_id",
+            "partition_file_id",
+            name="uq_import_partitions_tenant_run_file",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"],
+            [f"{SCHEMA}.import_runs.tenant_id", f"{SCHEMA}.import_runs.id"],
+            ondelete="CASCADE",
+            name="fk_import_partitions_run",
+        ),
+        Index("ix_import_partitions_tenant_run", "tenant_id", "run_id"),
+        Index(
+            "ix_import_partitions_tenant_claim",
+            "tenant_id",
+            "run_id",
+            "status",
+            "ordinal",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), sa.ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+
+    # Immutable plan. The file is owned by dotmac-files and deliberately has
+    # no cross-module FK; these fields are the integrity and range evidence.
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_row: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    partition_file_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    partition_checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Mutable execution checkpoint. A claim token is opaque and replaced on
+    # expiry; the token must still match when outcomes and completion settle.
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    leased_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+TENANT_TABLES: tuple[str, ...] = (
+    "import_runs",
+    "import_run_rows",
+    "import_partitions",
+)
 
 __all__ = [
     "SCHEMA",
     "TENANT_TABLES",
+    "ImportPartition",
     "ImportRun",
     "ImportRunRow",
 ]

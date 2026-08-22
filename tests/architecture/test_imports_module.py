@@ -15,7 +15,12 @@ import tomllib
 import dotmac_imports
 import pytest
 from dotmac_imports.manifest import module
-from dotmac_imports.models import TENANT_TABLES, ImportRun, ImportRunRow
+from dotmac_imports.models import (
+    TENANT_TABLES,
+    ImportPartition,
+    ImportRun,
+    ImportRunRow,
+)
 from dotmac_kernel.namespaces import (
     IMPORTS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
@@ -29,6 +34,7 @@ PACKAGE = (
     / "packages/dotmac-imports/src/dotmac_imports"
 )
 SERVICE = PACKAGE / "service.py"
+PARTITIONING = PACKAGE / "partitioning.py"
 MIGRATION = PACKAGE / "migrations/versions/im_0001_import_runs.py"
 
 
@@ -83,6 +89,12 @@ def test_the_dry_run_entry_point_holds_nothing_that_could_mutate() -> None:
     assert not _mentions_an_applier(
         _function(SERVICE.read_text(encoding="utf-8"), "validate_next_chunk")
     )
+    assert not _mentions_an_applier(
+        _function(
+            PARTITIONING.read_text(encoding="utf-8"),
+            "validate_claimed_partition",
+        )
+    )
 
 
 def test_the_detector_fires_on_a_function_that_does_hold_one() -> None:
@@ -135,7 +147,11 @@ def test_no_ledger_column_is_a_foreign_key_into_a_domain_table() -> None:
     other domain would share. The reference runs the other way here."""
     # `fullname` omits the schema for the kernel's own `public` tables.
     permitted = {"tenants", "mod_imports.import_runs"}
-    for table in (ImportRun.__table__, ImportRunRow.__table__):
+    for table in (
+        ImportRun.__table__,
+        ImportRunRow.__table__,
+        ImportPartition.__table__,
+    ):
         for constraint in table.constraints:
             if not isinstance(constraint, ForeignKeyConstraint):
                 continue
@@ -150,7 +166,11 @@ def test_no_column_name_suggests_a_domain() -> None:
     """A weaker but independent guard on the same rule: a column named for one
     product's noun is the shape the defect took in the source."""
     forbidden = ("payment", "invoice", "customer", "subscriber", "employee", "asset")
-    for table in (ImportRun.__table__, ImportRunRow.__table__):
+    for table in (
+        ImportRun.__table__,
+        ImportRunRow.__table__,
+        ImportPartition.__table__,
+    ):
         for column in table.columns:
             assert not any(word in column.name for word in forbidden), column.name
 
@@ -175,7 +195,10 @@ def test_the_row_ledger_minimises_imported_content() -> None:
 # ── tenancy ─────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("table", (ImportRun.__table__, ImportRunRow.__table__))
+@pytest.mark.parametrize(
+    "table",
+    (ImportRun.__table__, ImportRunRow.__table__, ImportPartition.__table__),
+)
 def test_every_ledger_table_is_tenant_scoped(table) -> None:  # type: ignore[no-untyped-def]
     """Hard rule 11. Neither source product has a tenant column at all, so this
     is added by the extraction rather than ported by it."""
@@ -230,7 +253,11 @@ def test_the_manifest_matches_its_immutable_ledger_row() -> None:
 def test_the_manifest_declares_exactly_the_tables_the_models_define() -> None:
     registry = NamespaceRegistry.from_manifests([module])
     assert registry.declared_tables("mod_imports") == frozenset(TENANT_TABLES)
-    assert {ImportRun.__tablename__, ImportRunRow.__tablename__} == set(TENANT_TABLES)
+    assert {
+        ImportRun.__tablename__,
+        ImportRunRow.__tablename__,
+        ImportPartition.__tablename__,
+    } == set(TENANT_TABLES)
 
 
 def test_no_platform_plane_is_declared() -> None:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0a2 — unreleased
+
+- Adds authenticated paged transaction reconciliation through the engine-owned
+  POLL checkpoint and the existing settlement-observation capability.
+- Keeps amount/fee subunits exact and provider status verbatim; allocation and
+  every financial consequence remain product decisions.
+
 ## 0.1.0a1 — 2026-08-20
 
 Published, installed back from the private index, conformance-checked and

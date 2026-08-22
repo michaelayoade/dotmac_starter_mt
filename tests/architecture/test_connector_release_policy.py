@@ -638,21 +638,28 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     """The real entry resolves while every neighbouring lane remains refused."""
     assert set(_policy()["connectors"]) == {
         "dotmac-connector-flutterwave",
+        "dotmac-connector-linkedin",
         "dotmac-connector-meta-social",
+        "dotmac-connector-mono",
         "dotmac-connector-paystack",
+        "dotmac-connector-remita",
         "dotmac-connector-whatsapp",
     }
     gate = _gate()
     resolved_keys = {
-        distribution: gate.resolve(distribution, tags={"dotmac-integration-v0.1.0a10"})[
-            "connector_key"
-        ]
+        distribution: gate.resolve(
+            distribution,
+            tags={"dotmac-integration-v0.1.0a10", "dotmac-integration-v0.1.0a11"},
+        )["connector_key"]
         for distribution in _policy()["connectors"]
     }
     assert resolved_keys == {
         "dotmac-connector-flutterwave": "flutterwave",
+        "dotmac-connector-linkedin": "linkedin",
         "dotmac-connector-meta-social": "meta_social",
+        "dotmac-connector-mono": "mono",
         "dotmac-connector-paystack": "paystack",
+        "dotmac-connector-remita": "remita",
         "dotmac-connector-whatsapp": "meta_whatsapp",
     }
     for attempt in (
@@ -709,14 +716,14 @@ def test_the_paystack_entry_resolves_through_the_release_command(
 
     gate = _gate()
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-paystack", version="0.1.0a1")
+        argparse.Namespace(distribution="dotmac-connector-paystack", version="0.1.0a2")
     )
     output = capsys.readouterr().out
     assert "connector_key=paystack" in output
-    assert "tag=dotmac-connector-paystack-v0.1.0a1" in output
+    assert "tag=dotmac-connector-paystack-v0.1.0a2" in output
 
 
 def test_the_flutterwave_entry_resolves_through_the_release_command(
@@ -726,16 +733,67 @@ def test_the_flutterwave_entry_resolves_through_the_release_command(
 
     gate = _gate()
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
     )
     gate.cmd_resolve(
         argparse.Namespace(
-            distribution="dotmac-connector-flutterwave", version="0.1.0a1"
+            distribution="dotmac-connector-flutterwave", version="0.1.0a2"
         )
     )
     output = capsys.readouterr().out
     assert "connector_key=flutterwave" in output
-    assert "tag=dotmac-connector-flutterwave-v0.1.0a1" in output
+    assert "tag=dotmac-connector-flutterwave-v0.1.0a2" in output
+
+
+def test_the_mono_entry_resolves_through_the_release_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    gate = _gate()
+    monkeypatch.setattr(
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+    )
+    gate.cmd_resolve(
+        argparse.Namespace(distribution="dotmac-connector-mono", version="0.1.0a1")
+    )
+    output = capsys.readouterr().out
+    assert "connector_key=mono" in output
+    assert "tag=dotmac-connector-mono-v0.1.0a1" in output
+
+
+def test_the_linkedin_entry_resolves_through_the_release_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    gate = _gate()
+    monkeypatch.setattr(
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+    )
+    gate.cmd_resolve(
+        argparse.Namespace(distribution="dotmac-connector-linkedin", version="0.1.0a1")
+    )
+    output = capsys.readouterr().out
+    assert "connector_key=linkedin" in output
+    assert "tag=dotmac-connector-linkedin-v0.1.0a1" in output
+
+
+def test_the_remita_entry_resolves_through_the_release_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    gate = _gate()
+    monkeypatch.setattr(
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+    )
+    gate.cmd_resolve(
+        argparse.Namespace(distribution="dotmac-connector-remita", version="0.1.0a1")
+    )
+    output = capsys.readouterr().out
+    assert "connector_key=remita" in output
+    assert "tag=dotmac-connector-remita-v0.1.0a1" in output
 
 
 def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:
