@@ -85,6 +85,11 @@ dotmac-auth-oidc = { path = "packages/dotmac-auth-oidc", develop = true }
 # Approval state on two declared planes (ADR-0026). Same posture as the three
 # above: built and proven here, composed by the first product adopter.
 dotmac-approvals = { path = "packages/dotmac-approvals", develop = true }
+# Tenant sales authority through accepted Quote; Sub composes the `sa`
+# lineage after shadowing. Declared here so the package is importable — the
+# import-linter contracts below name `dotmac_sales`, and a contract naming a
+# package that is not on the path fails the build rather than checking it.
+dotmac-sales = { path = "packages/dotmac-sales", develop = true }
 dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
