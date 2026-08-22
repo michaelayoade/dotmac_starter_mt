@@ -177,6 +177,69 @@ def test_removing_an_absent_row_is_a_no_op_not_a_failure() -> None:
     assert after == before
 
 
+# ── The wrapper fails loudly ────────────────────────────────────────────────
+
+
+def test_an_unopened_record_fails_the_run_rather_than_warning() -> None:
+    """The correction that made #357 worth having.
+
+    The first version of `open_release_record_pr.sh` exited 0 and printed a
+    `::warning::` when it could not open the record, reasoning that the
+    artifact is already published so the run should not report a successful
+    publication as failed.
+
+    That reasoning was wrong, and it rebuilt the exact failure class the
+    script exists to close: correctness went back to depending on somebody
+    READING a warning inside a green run — and a green run with no record
+    looks, at a glance, exactly like a green run with one. "Tag exists,
+    record missing" has to be visible where people already look.
+
+    Asserted on the source rather than by running the script, because every
+    `give_up` path needs a network, a token and a real tag. The properties
+    are textual and this is what makes them stay true.
+    """
+    script = (PROJECT_ROOT / "scripts" / "open_release_record_pr.sh").read_text(
+        encoding="utf-8"
+    )
+    body = script.split("give_up() {", 1)
+    assert len(body) == 2, "give_up() is gone; this guard needs rewriting"
+    # Split on the closing brace at column 0, NOT the first `}` — the body is
+    # full of `${TAG}` and `${MANUAL}`, and splitting on those truncated the
+    # handler to nothing while every assertion below still "passed".
+    handler = body[1].split("\n}", 1)[0]
+
+    assert "exit 1" in handler, (
+        "give_up must FAIL the run. Exiting 0 puts correctness back on somebody "
+        "noticing a warning in a green run, which is the failure this closes"
+    )
+    assert "exit 0" not in handler
+    assert "::warning::" not in handler, "a warning is what did not work"
+
+    # It must also say the artifact is fine, or the loud failure invites the
+    # one genuinely harmful reaction: re-running the publish.
+    assert "DO NOT RE-RUN THE PUBLISH" in handler
+    assert "already" in handler and "published" in handler
+
+    # ...and name the manual repair, since that is what the reader must do.
+    assert "${MANUAL}" in handler
+
+
+def test_the_only_successful_exits_are_a_record_opened_or_already_complete() -> None:
+    """Two success paths, both meaning the record EXISTS. Any third would be a
+    way for the run to go green with the ledger still stale."""
+    script = (PROJECT_ROOT / "scripts" / "open_release_record_pr.sh").read_text(
+        encoding="utf-8"
+    )
+    exits = [
+        line.strip() for line in script.splitlines() if line.strip().startswith("exit ")
+    ]
+    assert (
+        exits.count("exit 0") == 1
+    ), f"expected exactly one exit 0 (the already-complete path), found {exits}"
+    # `exit 2` is argument misuse, which is a failure like any other.
+    assert set(exits) <= {"exit 0", "exit 1", "exit 2"}, exits
+
+
 # ── Refusals ────────────────────────────────────────────────────────────────
 
 
