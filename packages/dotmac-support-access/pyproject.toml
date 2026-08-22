@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-support-access"
+version = "0.1.0a1"
+description = "Purpose-bound temporary platform support access workflow"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_support_access", from = "src" }]
+include = [
+  { path = "src/dotmac_support_access/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_support_access/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
