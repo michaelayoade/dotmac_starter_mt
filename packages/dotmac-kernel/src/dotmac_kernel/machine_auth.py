@@ -134,6 +134,22 @@ class MachinePrincipal:
         return scope in self.scopes
 
 
+def _has_expired(expires_at: datetime | None, moment: datetime) -> bool:
+    """Compare an expiry against `moment`, tolerating a naive stored value.
+
+    A `DateTime(timezone=True)` column round-trips as AWARE on PostgreSQL and
+    NAIVE on SQLite, and comparing the two raises. Reading a naive value as UTC
+    is correct rather than merely convenient: every writer here stores UTC, and
+    the alternative — refusing to compare — would make a credential
+    unauthenticatable on the backend the unit suite runs on.
+    """
+    if expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= moment
+
+
 def authenticate_machine(
     db: Session, raw_key: str, *, now: datetime | None = None
 ) -> MachinePrincipal:
@@ -158,9 +174,7 @@ def authenticate_machine(
     # that this key does not work here and nothing about why, because the
     # difference between "revoked" and "never existed" is information about
     # another tenant's key management.
-    if credential is None or (
-        credential.expires_at is not None and credential.expires_at <= moment
-    ):
+    if credential is None or _has_expired(credential.expires_at, moment):
         raise UnauthorizedError("machine credential is not valid")
 
     return MachinePrincipal(

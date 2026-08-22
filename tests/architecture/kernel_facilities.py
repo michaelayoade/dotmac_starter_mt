@@ -251,6 +251,15 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "deps:authorize_party": "identity seam; the auth tier owns it",
     "platform_auth:require_platform_admin": "platform identity seam",
     "external_identity": "kernel-owned identity binding; no module calls it",
+    # Same shape as the two identity seams above: the table is the KERNEL's
+    # own (migration 0027), and a module never sees the credential row — it
+    # receives a MachinePrincipal from a route dependency. There is no
+    # cross-module prerequisite to declare because there is no cross-module
+    # storage dependency.
+    "machine_auth": (
+        "kernel-owned machine identity seam; modules receive a "
+        "MachinePrincipal, never the credential row"
+    ),
     "entitlements": "kernel-owned grants; modules read decisions, not tables",
     "consent": "kernel-owned suppression; delivery reads decisions",
     "delivery": "kernel-owned receipts",

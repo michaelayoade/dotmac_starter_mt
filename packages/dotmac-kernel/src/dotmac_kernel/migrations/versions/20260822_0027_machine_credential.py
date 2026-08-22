@@ -39,7 +39,13 @@ row it cannot see, which is a denial and a disclosure at once. The composite is
 also stronger isolation, because a key minted for one tenant cannot authenticate
 in another.
 
-Revision ID: 0027_machine_credentials
+Revision ID: 0027_machine_credential
+
+Singular, and not by preference: `credentials.` is a SECRET_SHAPED_MARKER, so
+`..._machine_credentials.py` is refused at publish time. The guard says rename
+rather than exempt, and it is right to — a false positive costs a filename, a
+missed true positive ships key material in a wheel. The TABLE is still
+`machine_credentials`; only the file and revision are singular.
 Revises: 0026_platform_audit_log
 Create Date: 2026-08-22
 """
@@ -50,7 +56,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0027_machine_credentials"
+revision = "0027_machine_credential"
 down_revision = "0026_platform_audit_log"
 branch_labels = None
 depends_on = None
