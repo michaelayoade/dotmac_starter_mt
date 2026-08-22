@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Durable customer service-change requests, their evidence and cross-domain checkpoint ordering"
 contract = "Own the customer-initiated plan-change, relocation and vacation request, its approval decision, append-only per-domain checkpoint evidence, and the single guarded execution chain. Subject, offer, location and evidence identifiers are opaque. NOT eligibility decisions, pricing or fee raising, receivables, payment confirmation, delivery orders, field work, service lifecycle or access enforcement."
-source_repositories = ["dotmac_sub", "dotmac_starter_mt"]
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/subscription_change.py",
   "dotmac_sub:app/services/subscription_change_execution.py",

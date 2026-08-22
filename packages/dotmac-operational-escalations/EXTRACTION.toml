@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Versioned escalation policy, escalation instances, acknowledgement and cancellation"
 contract = "Own escalation policy identity, immutable policy versions with exactly one active version, raised escalation instances bound to the exact version, cooldown refusal, acknowledgement, resolution and cancellation. Subject and actor identifiers are opaque. NOT ticket/outage/conversation lifecycle, ownership or watcher rosters, room links, scheduling mechanics, message rendering, delivery attempts or delivery outcomes."
-source_repositories = ["dotmac_sub", "dotmac_starter_mt"]
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/operational_escalation.py",
 ]

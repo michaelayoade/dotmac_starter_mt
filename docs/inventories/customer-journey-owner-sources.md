@@ -11,6 +11,7 @@ permission to extract anything.
 |---|---|---|---|
 | Starter | `origin/main` | `f7a37385` | Target package/runtime contract |
 | Sub | PR #2624 | `883a0ff1` | Qualifying source for all four owners |
+| ERP | `origin/main` | `0e40d799` | Inventoried; qualifying source for none — see below |
 
 The audit that produced this file walked Sub's customer journey end to end and
 asked one question per step: **is there durable state here that no Starter
@@ -99,6 +100,52 @@ raised instance — not delivery.
   immutable, allows exactly one ACTIVE version per policy (enforced by a
   partial unique index, not only by the writer), and binds each instance to the
   exact version.
+
+## ERP inventory — inventoried, and why it is the source of none
+
+The product-first rule (ADR-0006 amendment, `AGENTS.md` rule 22) is inventory
+BOTH products before extracting, so this section records what ERP holds for
+each of the four owners. It was added after
+`test_every_shared_distribution_has_a_valid_extraction_dossier` correctly
+refused four dossiers that named only Sub: an audit that never opened ERP
+cannot claim Sub is the qualifying source, it can only claim nobody looked.
+
+**Payments — ERP has a competing implementation, and it does not qualify.**
+`app/models/finance/payments/` carries `PaymentIntent` (`payments.payment_intent`),
+`PaymentWebhook` and `TransferBatch`, with `PaymentIntentStatus`, a
+`PaymentDirection` INBOUND/OUTBOUND split and bank-account linkage for
+settlement. This is a real second payment-intent record, not an incidental
+name collision, and it is the one finding that changes what this file may
+claim.
+
+It is nonetheless not the extraction source, because the provider is welded
+into the schema rather than carried as data: `paystack_reference` (unique),
+`paystack_access_code` and `authorization_url` are first-class columns, and
+`PaymentWebhook`'s identity is `paystack_event_id`. Porting it would make one
+provider a structural property of every adopter's tables — the exact coupling
+the module exists to remove. Sub's record is provider-neutral, so the module
+keeps a generic `provider_type` and makes correlation unique per (tenant,
+provider type, external reference), which is the invariant ERP's Paystack
+columns express for a single provider and cannot express for two.
+
+ERP's copy is therefore an adoption and retirement candidate for a later
+cutover, not an authority and not a second writer. Its INBOUND/OUTBOUND
+direction and settlement bank-account linkage are recorded here as capability
+ERP has and the module does not; neither is ported now, because outbound
+payouts are a different decision from customer settlement and belong with the
+owner that adjudicates them.
+
+**Service Orders, Service Changes, Operational Escalations — nothing in ERP.**
+No service-order, provisioning-readiness, subscription-change or
+operational-escalation model exists at the pinned ref. The near-matches were
+checked and rejected by domain, not by name: `MaintenanceWorkOrder`
+(`app/models/fixed_assets/`) is fixed-asset maintenance, not service delivery;
+escalation in ERP appears only as approval routing inside expense limit rules
+(`AUTO_ESCALATE`, `escalate_to_employee_id`) and HR grievance, which is
+approval policy rather than an operational escalation instance; and
+`RELOCATION` appears only as a project type and an HR allowance, not a
+customer change request. For these three, Sub is the sole implementation, and
+"Sub first" is a fact about the fleet rather than a preference.
 
 ## What the audit found and did NOT turn into a package
 
