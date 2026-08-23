@@ -446,11 +446,6 @@
       "dotmac_crm",
       "dotmac_erp"
     ],
-    "dotmac-tax": [
-      "dotmac_crm",
-      "dotmac_erp",
-      "dotmac_sub"
-    ],
     "dotmac-template-studio": [
       "dotmac_erp",
       "dotmac_sub"

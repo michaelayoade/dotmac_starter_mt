@@ -1899,7 +1899,7 @@ url = "packages/dotmac-sites"
 
 [[package]]
 name = "dotmac-subscriptions"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane recurring commercial contracts and occurrences"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1908,7 +1908,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a89"
+dotmac-kernel = ">=0.1.0a94"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1953,10 +1953,10 @@ url = "packages/dotmac-surveys"
 
 [[package]]
 name = "dotmac-tax"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Composable tax determination, statutory reporting and return-lifecycle owner"
 optional = false
-python-versions = ">=3.12,<3.14"
+python-versions = ">=3.11,<3.14"
 groups = ["main"]
 files = []
 develop = true

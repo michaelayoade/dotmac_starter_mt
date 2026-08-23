@@ -128,9 +128,14 @@
       "state": "never-published"
     },
     "dotmac-subscriptions": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED COORDINATED-COMMERCE CANDIDATE. The product-first dual-plane offer, contract, cadence and recurring-occurrence owner exists in source, but exact-revision CI, a real Cloud composition, product shadow/adoption and release authorization are not complete. Keep it unallowlisted and unpublished until those gates pass and remove this row only in the authorized release record; do not edit the version down.",
+      "declared": "0.1.0a2",
+      "reason": "AUTHORIZED RELEASE CANDIDATE AFTER KERNEL A94. This is the package-only salvage of the recurring-commercial owner onto current Starter main; the unrelated branch payload was discarded. a2 supports explicit tenant/platform plane selection, stable offers and immutable effective versions, optional reference prices, positive contract-line prices, exact cadence/rating evidence and replay-safe occurrences. Publication waits for the a94 manifest vocabulary dependency plus package, migration, dual-plane isolation and repository gates. It does not move Sub or Vendor authority; adopter backfill, zero-drift shadow and local-writer retirement remain separate. Remove this row only in the registry-verified release record for dotmac-subscriptions-v0.1.0a2.",
       "state": "never-published"
+    },
+    "dotmac-tax": {
+      "declared": "0.1.0a2",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Published a1 is registry-verified at release run 32480725191 and tag dotmac-tax-v0.1.0a1; a2 adds the additive tx_0002 multi-component determination set and evidenced tax-specific party/supply/place classifications while retaining the a1 single-tax API. Release a2 only after its PostgreSQL migration/RLS, released-byte, unit, architecture and package gates are green. Publication does not move product authority: ERP remains the first statutory-policy/reporting cutover after its accounting consequence seam, backfill and zero-drift shadow; Sub containment may precede that cutover but Sub remains a fact producer. Remove this row in the release record change after registry verification writes dotmac-tax-v0.1.0a2.",
+      "state": "declared-unpublished"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",

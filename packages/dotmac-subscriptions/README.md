@@ -3,20 +3,25 @@
 Reusable recurring-commercial ownership for explicit tenant and platform
 planes.
 
-The module owns stable offers, immutable published offer/price versions,
+The module owns stable offers, immutable published offer versions and optional
+positive reference prices,
 stable subscription contracts with immutable effective-dated versions and line
 lineage, calendar cadence and declared proration, and one replayable recurring
 charge occurrence per natural identity. It emits exact pre-tax rated facts and
 commercial-intent projections. The consuming assembly maps those outputs to
 the independently owned Billing or entitlement/access services.
 
-The checked-in Cloud composition canary proves that the Billing mapping
-preserves source identity, the rated service period, collection timing and
-declared money scale without rounding. Timer generation is deliberately absent
-from Billing identity. Corrections require the assembly to resolve the original
-Subscriptions occurrence to the independently minted Billing obligation ID.
-This is conformance evidence only; neither candidate product is claimed as an
-adopter until it pins a released package and retires its local writer.
+`list_effective_offers` is the owner read for discovery: it returns one
+effective immutable version per stable offer with exact price and provenance
+facts. It does not decide product family, search facets, stock availability,
+eligibility, locale formatting or which action a viewer may take.
+
+Every offer version declares one product-owned charge model and a closed
+pricing mode. `catalog_price` requires at least one strictly positive reference
+price. `contract_price` may intentionally publish none: negotiated price then
+lives only on the immutable contract line, where every active line still
+requires a strictly positive unit price. A zero-price offer or contract line is
+not the complimentary-service mechanism.
 
 It does not own invoices, tax, FX, receivables, payments, collections policy,
 service state, licences, provider integrations, documents, or the general
@@ -30,7 +35,3 @@ selection belongs to each consuming assembly.
 The extraction dossier is [EXTRACTION.toml](EXTRACTION.toml); source and parity
 evidence remain in `docs/inventories/subscriptions-sources.md` and
 `docs/inventories/subscriptions-extraction-dossier.md`.
-
-The first release candidate is `0.1.0a1` and requires
-`dotmac-kernel>=0.1.0a89` plus `alembic>=1.13` for its dual-plane migration and
-linking surface.

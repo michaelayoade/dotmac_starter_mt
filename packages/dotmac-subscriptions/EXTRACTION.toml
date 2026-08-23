@@ -6,19 +6,22 @@ source_mode = "product-first"
 
 owner = "The reusable recurring-commercial core on explicit tenant and platform planes: stable offers, immutable offer and price versions, stable subscription contracts with immutable effective-dated versions and lines, composable cadence and calendar arithmetic, declared proration, and unique replayable recurring charge occurrences with pre-tax rating provenance."
 
-contract = "Publish immutable offer versions and price children beneath a stable offer identity; record immutable effective-dated subscription contract versions and stable line lineage; resolve half-open periods, declared proration and rate units from BillingCadence; and emit exact pre-tax RatedObligationOutputV1 and money-free CommercialEntitlementProjectionV1 facts. NOT invoices, receivables, payments, settlement, allocation, tax, FX, collections policy, product access, licences, providers, usage metering, documents, or the general ledger."
+contract = "Publish immutable offer versions and price children beneath a stable offer identity; list one effective immutable version per stable offer with exact price provenance; record immutable effective-dated subscription contract versions and stable line lineage; resolve half-open periods, declared proration and rate units from BillingCadence; and emit exact pre-tax RatedObligationOutputV1 and money-free CommercialEntitlementProjectionV1 facts. NOT invoices, receivables, payments, settlement, allocation, tax, FX, collections policy, product access, licences, providers, usage metering, documents, stock, assets, or the general ledger."
 
 source_repositories = [
-  "dotmac_sub",
   "dotmac_erp",
+  "dotmac_sub",
   "dotmac_vendor_control_plane",
 ]
 source_revisions = [
-  "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
-  "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
-  "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
+  "dotmac_erp:0f4b1698ddbf",
+  "dotmac_sub:943bc59f8e4ca0849c7de578bc9dbc17c57b116f",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
 ]
 source_paths = [
+  "dotmac_erp:app/models/inventory/price_list.py",
+  "dotmac_erp:app/services/inventory/price_list.py",
+  "dotmac_erp:app/services/finance/automation/recurring.py",
   "dotmac_sub:app/services/billing/cadence.py",
   "dotmac_sub:app/services/billing/contracts.py",
   "dotmac_sub:app/services/billing/rating.py",
@@ -27,8 +30,6 @@ source_paths = [
   "dotmac_sub:app/models/catalog.py",
   "dotmac_sub:app/services/catalog/offers.py",
   "dotmac_sub:app/services/catalog_billing_governance.py",
-  "dotmac_erp:app/models/inventory/price_list.py",
-  "dotmac_erp:app/services/inventory/price_list.py",
   "dotmac_vendor_control_plane:src/vendor_cp/offers/models.py",
   "dotmac_vendor_control_plane:src/vendor_cp/offers/service.py",
   "dotmac_vendor_control_plane:alembic/versions/v002_offer_versions.py",
@@ -46,7 +47,6 @@ preserved_tests = [
   "dotmac_sub:tests/test_catalog_billing_governance.py",
   "dotmac_sub:tests/test_offer_contracted_amount.py",
   "dotmac_sub:tests/test_offer_name_uniqueness.py",
-  "dotmac_erp:tests/ifrs/inv/test_price_list_service.py",
   "dotmac_vendor_control_plane:tests/unit/test_offers.py",
   "dotmac_vendor_control_plane:tests/migration/test_vendor_migration_rehearsals.py",
 ]
@@ -69,35 +69,46 @@ shadow_and_drift = "Vendor characterizes every offer/version/price/currency/capa
 
 local_copy_retirement = "Vendor removes vendor_cp.offers writers/models/routes and the local offer_versions table after zero drift. Sub removes generic offer/price writes, billing-contract/version/line writers, nine parallel cadence owners, monthly-only prepaid and separate postpaid recurrence, and legacy invoice-line dedupe. Every retirement uses a two-directional ratchet with sensitivity proof; no permanent parallel writer or fallback remains."
 
-next_action = "Commit the coordinated Subscriptions/Billing/Collections candidate, obtain exact-revision CI unit/integration/migration evidence, and release only when authorized. Then wire the real Cloud assembly and execute Vendor CP followed by Sub shadow/cutover retirement. Do not count a contract consumer until a real adopter has pinned the released package, composed the selected lineage plane, cut over its writer, and removed its local owner."
+next_action = "Release kernel a94's commercial declaration seams, complete this package's dual-plane Observer proof, publish a2, then compose the exact release in Sub for stable-id backfill, full shadow comparison and local-writer retirement. Do not count a contract consumer before that cutover."
+
+# Typed product claims refreshed from the exact revisions above. Sub is the
+# qualifying source for cadence/contracts/recurrence; Vendor CP supplies the
+# immutable-offer publication delta. ERP's mutable, orphaned price-list writer
+# is a legacy commercial-catalogue authority that retires on ERP's own schedule;
+# dotmac-subscriptions is not its replacement. Every local writer retires only
+# in its owning product after backfill and zero-drift shadow evidence.
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
+evidence_paths = [
+  "app/models/inventory/price_list.py",
+  "app/services/inventory/price_list.py",
+  "app/services/operations/inv_web.py",
+]
 
 [[product_writers]]
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "27c76aaeebb792f089000af764d80f4dfe45c104"
+revision = "943bc59f8e4ca0849c7de578bc9dbc17c57b116f"
 evidence_paths = [
   "app/services/billing/cadence.py",
   "app/services/billing/contracts.py",
+  "app/services/billing/rating.py",
+  "app/services/billing/obligations.py",
+  "app/models/billing_contract.py",
+  "app/models/catalog.py",
   "app/services/catalog/offers.py",
-]
-
-[[product_writers]]
-product = "dotmac_erp"
-writer_state = "inventory_only"
-retirement_required = false
-revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
-evidence_paths = [
-  "app/models/inventory/price_list.py",
-  "app/services/inventory/price_list.py",
-  "tests/ifrs/inv/test_price_list_service.py",
+  "app/services/catalog_billing_governance.py",
 ]
 
 [[product_writers]]
 product = "dotmac_vendor_control_plane"
-writer_state = "legacy_writer"
+writer_state = "qualifying_source"
 retirement_required = true
-revision = "89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8"
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
 evidence_paths = [
   "src/vendor_cp/offers/models.py",
   "src/vendor_cp/offers/service.py",

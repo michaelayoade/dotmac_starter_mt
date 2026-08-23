@@ -24,6 +24,22 @@ series. Callers supply an explicit `TenantScope` or `PlatformScope`, exact
 decimals, currency, timezone, cadence, provenance, and product link; no product
 or deployment default is part of the contract.
 
+`list_effective_offers` returns `OfferCatalogPage`, `OfferCatalogItem` and typed
+`OfferCatalogPrice` rows. The read is half-open at `effective_at`, chooses one
+latest effective published version per stable published offer, sorts by
+normalized name/code/id, and caps each page at 100 rows. Search treats `%` and
+`_` as literal input through the kernel query helper. Exact prices are owner
+facts, never localized display strings; product adapters remain responsible for
+facets, eligibility, availability and actions.
+
+`PublishOfferVersionCommand` declares an open-vocabulary `charge_model_code`
+and a closed `OfferPricingMode`. `catalog_price` requires positive reference
+price children. `contract_price` permits an empty reference-price tuple, while
+an optional genuine reference price remains positive. This is how a product
+declares a `dedicated_negotiated` model without adding that member to the
+kernel or this package. Contract lines always carry the actual strictly
+positive price; a charge-model mismatch between line and offer is refused.
+
 Persistence compatibility is owned by the `subscriptions` Alembic lineage.
 Assemblies select tenant, platform, or both declared planes and bind the
 manifest prerequisites. They may not create a parallel migration or repoint the

@@ -2369,7 +2369,7 @@
     },
     "dotmac-tax": {
       "$comment": [
-        "Tenant tax policy versions, jurisdictions and computed tax evidence.",
+        "Tenant tax policy, classifications, ordered components and computed evidence.",
         "Product-first from ERP; pricing and posting consequences stay with their owners.",
         "Kernel a85 allocates mod_tax / tx / tax."
       ],
@@ -2386,6 +2386,7 @@
           "dotmac_tax/manifest.py",
           "dotmac_tax/migrations/__init__.py",
           "dotmac_tax/migrations/versions/tx_0001_tax.py",
+          "dotmac_tax/migrations/versions/tx_0002_multi_tax.py",
           "dotmac_tax/models.py",
           "dotmac_tax/service.py"
         ],

@@ -22,7 +22,9 @@ from dotmac_subscriptions import (
     ExactAmount,
     GenerateRecurringChargeCommand,
     IntervalUnit,
+    OfferCatalogPage,
     OfferPriceInput,
+    OfferPricingMode,
     ProrationPolicy,
     PublishOfferVersionCommand,
     RateBasis,
@@ -32,13 +34,17 @@ from dotmac_subscriptions import (
     SubscriptionVocabularyRegistry,
     TimerCancelResult,
     TimerScheduleResult,
+    WithdrawOfferVersionCommand,
     cadence_of,
     effective_version_at,
     end_contract_version,
     generate_recurring_charge,
+    list_effective_offers,
+    offer_version_snapshot,
     publish_offer_version,
     record_contract_version,
     unacknowledged_outputs,
+    withdraw_offer_version,
 )
 from dotmac_subscriptions.models import (
     PlatformOffer,
@@ -84,7 +90,7 @@ def registry() -> SubscriptionVocabularyRegistry:
             ModuleManifest(
                 code="product",
                 version="1.0.0",
-                charge_models=("recurring_access",),
+                charge_models=("recurring_access", "dedicated_negotiated"),
                 obligation_sources=("accepted_order_line",),
             ),
         )
@@ -147,6 +153,8 @@ def _publish(
         offer_id=None,
         offer_code="access.standard",
         offer_name="Standard access",
+        charge_model_code="recurring_access",
+        pricing_mode=OfferPricingMode.catalog_price,
         version=1,
         prices=(
             OfferPriceInput(
@@ -211,6 +219,75 @@ def _contract_command(
         correlation_id=uuid4(),
         idempotency_key=idempotency_key,
     )
+
+
+def test_contract_priced_offer_has_no_fake_reference_price_and_line_stays_positive(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, template = _publish(db, registry)
+    price_less = replace(
+        template,
+        offer_id=None,
+        offer_code="access.dedicated",
+        offer_name="Dedicated negotiated access",
+        charge_model_code="dedicated_negotiated",
+        pricing_mode=OfferPricingMode.contract_price,
+        prices=(),
+        source_id=uuid4(),
+        command_id=uuid4(),
+    )
+    published = publish_offer_version(db, price_less, registry=registry)
+    snapshot = offer_version_snapshot(
+        db, scope=PlatformScope(), offer_version_id=published.offer_version_id
+    )
+    assert snapshot.pricing_mode is OfferPricingMode.contract_price
+    assert snapshot.charge_model_code == "dedicated_negotiated"
+    assert snapshot.prices == ()
+
+    command = _contract_command(published.offer_version_id)
+    line = replace(
+        command.lines[0],
+        charge_model_code="dedicated_negotiated",
+        product_link_ref="product:access:dedicated",
+    )
+    zero_line = replace(
+        command,
+        lines=(replace(line, unit_price=ExactAmount(Decimal("0.00"), "EUR", 2)),),
+    )
+    with pytest.raises(SubscriptionDataError, match="strictly positive"):
+        record_contract_version(db, zero_line, registry=registry, timer=FakeTimer())
+    recorded = record_contract_version(
+        db, replace(command, lines=(line,)), registry=registry, timer=FakeTimer()
+    )
+    assert recorded.version == 1
+
+
+def test_catalog_priced_offer_requires_a_positive_reference_price(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, template = _publish(db, registry)
+    with pytest.raises(SubscriptionDataError, match="catalog-priced"):
+        publish_offer_version(
+            db,
+            replace(template, offer_id=None, prices=(), command_id=uuid4()),
+            registry=registry,
+        )
+    zero = replace(
+        template.prices[0], unit_price=ExactAmount(Decimal("0.00"), "EUR", 2)
+    )
+    with pytest.raises(SubscriptionDataError, match="strictly positive"):
+        publish_offer_version(
+            db,
+            replace(
+                template,
+                offer_id=None,
+                offer_code="access.zero",
+                prices=(zero,),
+                source_id=uuid4(),
+                command_id=uuid4(),
+            ),
+            registry=registry,
+        )
 
 
 def test_publish_contract_rate_and_replay_share_one_transactional_path(
@@ -337,6 +414,169 @@ def test_same_offer_version_with_a_different_command_is_a_conflict(
             db,
             replace(command, command_id=uuid4()),
             registry=registry,
+        )
+
+
+def test_effective_offer_catalog_selects_one_latest_version_with_exact_prices(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    first_version_id, first_command = _publish(db, registry)
+    first_version = db.get(PlatformOfferVersion, first_version_id)
+    assert first_version is not None
+    boundary = datetime(2026, 9, 1, tzinfo=UTC)
+    second = publish_offer_version(
+        db,
+        replace(
+            first_command,
+            offer_id=first_version.offer_id,
+            version=2,
+            prices=(
+                replace(
+                    first_command.prices[0],
+                    unit_price=ExactAmount(Decimal("125.50"), "EUR", 2),
+                ),
+            ),
+            effective_from=boundary,
+            source_version=2,
+            command_id=uuid4(),
+        ),
+        registry=registry,
+    )
+
+    before = list_effective_offers(
+        db, scope=PlatformScope(), effective_at=NOW, limit=20, offset=0
+    )
+    after = list_effective_offers(
+        db, scope=PlatformScope(), effective_at=boundary, limit=20, offset=0
+    )
+
+    assert before == OfferCatalogPage(
+        items=before.items,
+        total=1,
+        limit=20,
+        offset=0,
+        effective_at=NOW,
+    )
+    assert before.items[0].offer_version_id == first_version_id
+    assert after.items[0].offer_version_id == second.offer_version_id
+    assert after.items[0].code == "access.standard"
+    assert after.items[0].name == "Standard access"
+    assert after.items[0].prices[0].unit_price == ExactAmount(
+        Decimal("125.50"), "EUR", 2
+    )
+
+
+def test_effective_offer_catalog_searches_and_pages_stable_offers(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, command = _publish(db, registry)
+    for code, name in (
+        ("access.business", "Business Fiber"),
+        ("access.home", "Home Fiber"),
+    ):
+        publish_offer_version(
+            db,
+            replace(
+                command,
+                offer_id=None,
+                offer_code=code,
+                offer_name=name,
+                source_id=uuid4(),
+                command_id=uuid4(),
+            ),
+            registry=registry,
+        )
+
+    page = list_effective_offers(
+        db,
+        scope=PlatformScope(),
+        effective_at=NOW,
+        search="fiber",
+        limit=1,
+        offset=1,
+    )
+
+    assert page.total == 2
+    assert page.limit == 1
+    assert page.offset == 1
+    assert [item.name for item in page.items] == ["Home Fiber"]
+
+
+def test_effective_offer_catalog_treats_like_wildcards_as_literal_search(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, command = _publish(db, registry)
+    for code, name in (
+        ("access.fifty-percent", "Fiber 50%"),
+        ("access.five-hundred", "Fiber 500"),
+    ):
+        publish_offer_version(
+            db,
+            replace(
+                command,
+                offer_id=None,
+                offer_code=code,
+                offer_name=name,
+                source_id=uuid4(),
+                command_id=uuid4(),
+            ),
+            registry=registry,
+        )
+
+    page = list_effective_offers(
+        db,
+        scope=PlatformScope(),
+        effective_at=NOW,
+        search="50%",
+    )
+
+    assert page.total == 1
+    assert [item.code for item in page.items] == ["access.fifty-percent"]
+
+
+def test_effective_offer_catalog_excludes_withdrawn_versions(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    withdraw_offer_version(
+        db,
+        WithdrawOfferVersionCommand(
+            scope=PlatformScope(),
+            offer_version_id=offer_version_id,
+            reason="no longer sold",
+            command_id=uuid4(),
+            withdrawn_at=NOW,
+        ),
+    )
+
+    page = list_effective_offers(
+        db,
+        scope=PlatformScope(),
+        effective_at=NOW,
+    )
+
+    assert page.total == 0
+    assert page.items == ()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"limit": 0}, "limit"),
+        ({"limit": 101}, "limit"),
+        ({"offset": -1}, "offset"),
+        ({"search": "x" * 201}, "search"),
+    ],
+)
+def test_effective_offer_catalog_rejects_unbounded_queries(
+    db: Session, kwargs: dict[str, object], match: str
+) -> None:
+    with pytest.raises(SubscriptionDataError, match=match):
+        list_effective_offers(
+            db,
+            scope=PlatformScope(),
+            effective_at=NOW,
+            **kwargs,
         )
 
 

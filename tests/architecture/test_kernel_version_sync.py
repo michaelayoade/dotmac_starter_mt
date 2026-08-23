@@ -170,6 +170,11 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # The lineage itself was allocated in a91. The a2 package also consumes
+    # the product-owned `charge_models` and `obligation_sources` declaration
+    # seams introduced in a94, so a91 can locate its schema but cannot import
+    # its manifest contract. Capability therefore outranks allocation.
+    "dotmac-subscriptions": ("0.1.0a94", "0.1.0a91"),
     # Immutable tag inspection is the evidence here: a71's changelog described
     # the campaign allocation early, but CAMPAIGNS_MIGRATION_OWNER first exists
     # in published tag a72. a73 is the operative floor because Sub-first
