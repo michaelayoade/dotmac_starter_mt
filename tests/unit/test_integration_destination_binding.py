@@ -42,6 +42,7 @@ from dotmac_integration import (
     ConnectorConfigRevision,
     ConnectorInstallation,
     Corroboration,
+    DeliveryError,
     DestinationBinding,
     DestinationBindingError,
     DestinationDisagreement,
@@ -63,6 +64,7 @@ from dotmac_integration import (
     require_corroborated,
     require_profile,
     resolve_destination,
+    resolve_product_observation_source,
 )
 from dotmac_integration import destination_binding as module_under_test
 from dotmac_integration.destination_binding import _reset_destination_profiles
@@ -143,6 +145,56 @@ def _descriptor(**overrides: object) -> ProductPortDescriptorSnapshot:
     return replace(
         candidate, descriptor_digest=product_port_descriptor_digest(candidate)
     )
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    [
+        "dotmac.io/product-port-descriptor/v1",
+        "dotmac.io/product-port-descriptor/v2",
+    ],
+)
+def test_published_descriptor_versions_are_accepted(
+    db: Session, schema_version: str
+) -> None:
+    binding = _bound(db, destination=None)
+
+    reconcile_product_port_descriptor(
+        db,
+        capability_binding_id=binding.id,
+        descriptor=_descriptor(schema_version=schema_version),
+        registry=REGISTRY,
+    )
+
+
+def test_an_unknown_descriptor_version_is_refused(db: Session) -> None:
+    binding = _bound(db, destination=None)
+
+    with pytest.raises(ProductPortDescriptorInvalid, match="unsupported"):
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=_descriptor(
+                schema_version="dotmac.io/product-port-descriptor/v3"
+            ),
+            registry=REGISTRY,
+        )
+
+
+def test_product_observation_source_is_resolved_from_the_durable_binding(
+    db: Session,
+) -> None:
+    binding = _bound(db)
+
+    source = resolve_product_observation_source(db, capability_binding_id=binding.id)
+
+    assert source.installation_id == binding.installation_id
+    assert source.connector_key == "fake_connector"
+
+
+def test_product_observation_source_refuses_an_unknown_binding(db: Session) -> None:
+    with pytest.raises(DeliveryError, match="durable connector installation source"):
+        resolve_product_observation_source(db, capability_binding_id=uuid.uuid4())
 
 
 def _bound(

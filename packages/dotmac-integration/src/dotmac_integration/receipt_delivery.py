@@ -97,7 +97,11 @@ from uuid import UUID
 from dotmac_integration.capability_registry import CapabilityRegistry
 from dotmac_integration.destination_binding import resolve_destination
 from dotmac_integration.execution import LostClaim, payload_digest
-from dotmac_integration.models import SCHEMA
+from dotmac_integration.models import (
+    SCHEMA,
+    CapabilityBinding,
+    ConnectorInstallation,
+)
 from dotmac_integration.retry import Outcome, OutcomeStatus, next_state
 
 __all__ = [
@@ -109,6 +113,8 @@ __all__ = [
     "claim_statement",
     "settle_statement",
     "ProductAcceptance",
+    "PRODUCT_OBSERVATION_SCHEMA_VERSION",
+    "ProductObservationSource",
     "ProductPortClient",
     "ProductOutcome",
     "ProductRequest",
@@ -121,7 +127,9 @@ __all__ = [
     "build_product_request",
     "deliver_receipt",
     "idempotency_key_for",
+    "product_observation_document",
     "request_fingerprint_for",
+    "resolve_product_observation_source",
     "require_stable_fingerprint",
 ]
 
@@ -237,6 +245,68 @@ def _frozen(value: object) -> object:
     return value
 
 
+def _json_value(value: object) -> object:
+    """Return a JSON-serializable copy of a deeply frozen value."""
+    if isinstance(value, Mapping):
+        return {str(k): _json_value(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_value(v) for v in value]
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ProductObservationSource:
+    """Durable engine provenance for one provider observation.
+
+    The installation is the control-plane identity operators bind to a local
+    product owner. The connector key is corroborating transport provenance; a
+    product must never use it to select the local business owner.
+    """
+
+    installation_id: UUID
+    connector_key: str
+
+    def __post_init__(self) -> None:
+        if not self.connector_key or self.connector_key != self.connector_key.strip():
+            raise DeliveryError(
+                "connector_key must be a non-empty value without surrounding whitespace"
+            )
+
+
+def resolve_product_observation_source(
+    session: Any, *, capability_binding_id: UUID
+) -> ProductObservationSource:
+    """Resolve engine-owned source provenance from one durable binding.
+
+    Both the leased delivery path and the read-only shadow path need the same
+    answer. Keeping the join here prevents a composing assembly from growing a
+    second persistence interpretation just because shadow deliberately claims
+    nothing.
+    """
+
+    from sqlalchemy import select
+
+    row = session.execute(
+        select(
+            ConnectorInstallation.id,
+            ConnectorInstallation.connector_key,
+        )
+        .join(
+            CapabilityBinding,
+            CapabilityBinding.installation_id == ConnectorInstallation.id,
+        )
+        .where(CapabilityBinding.id == capability_binding_id)
+    ).one_or_none()
+    if row is None:
+        raise DeliveryError(
+            "the capability binding has no durable connector installation source"
+        )
+    return ProductObservationSource(
+        installation_id=row.id,
+        connector_key=row.connector_key,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ReceiptClaim:
     """One worker's exclusive, TIME-BOUNDED right to deliver one receipt.
@@ -250,6 +320,7 @@ class ReceiptClaim:
     attempt: int
     leased_until: datetime
     destination: TrustedDestination
+    source: ProductObservationSource
     provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
@@ -278,6 +349,7 @@ class ProductRequest:
     """
 
     destination: TrustedDestination
+    source: ProductObservationSource
     contract_version: int
     idempotency_key: str
     request_fingerprint: str
@@ -428,6 +500,7 @@ def idempotency_key_for(*, receipt_id: UUID, destination: TrustedDestination) ->
 def request_fingerprint_for(
     *,
     destination: TrustedDestination,
+    source: ProductObservationSource,
     provider_event_id: str,
     event_type: str,
     observation: Mapping[str, object],
@@ -451,6 +524,10 @@ def request_fingerprint_for(
                 "ref": destination.scope.ref,
             },
             "contract_version": destination.contract_version,
+            "source": {
+                "installation_id": str(source.installation_id),
+                "connector_key": source.connector_key,
+            },
             "provider_event_id": provider_event_id,
             "event_type": event_type,
             "observation": observation,
@@ -488,6 +565,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
     """
     fingerprint = request_fingerprint_for(
         destination=claim.destination,
+        source=claim.source,
         provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
@@ -495,6 +573,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
     require_stable_fingerprint(claim.stored_fingerprint, fingerprint)
     return ProductRequest(
         destination=claim.destination,
+        source=claim.source,
         contract_version=claim.destination.contract_version,
         idempotency_key=idempotency_key_for(
             receipt_id=claim.receipt_id, destination=claim.destination
@@ -506,6 +585,36 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
         event_type=claim.event_type,
         observation=claim.observation,
     )
+
+
+PRODUCT_OBSERVATION_SCHEMA_VERSION = "dotmac.io/product-observation/v1"
+
+
+def product_observation_document(request: ProductRequest) -> dict[str, object]:
+    """Project one generic ProductObservation v1 wire document.
+
+    Addressing comes only from the immutable product descriptor resolved during
+    the claim. Source provenance comes only from the module's installation and
+    binding rows. The connector-normalized observation is carried as product
+    input, never interpreted here.
+    """
+
+    return {
+        "schema_version": PRODUCT_OBSERVATION_SCHEMA_VERSION,
+        "capability_id": request.destination.capability_id,
+        "contract_version": request.contract_version,
+        "source": {
+            "installation_id": str(request.source.installation_id),
+            "connector_key": request.source.connector_key,
+        },
+        "provider_event_id": request.provider_event_id,
+        "event_type": request.event_type,
+        "scope": {
+            "kind": request.destination.scope.kind,
+            "ref": request.destination.scope.ref,
+        },
+        "observation": _json_value(request.observation),
+    }
 
 
 # ── The two seams ───────────────────────────────────────────────────────────
@@ -716,6 +825,9 @@ class ReceiptClaims:
                 capability_binding_id=row.capability_binding_id,
                 registry=self._registry,
             )
+            source = resolve_product_observation_source(
+                session, capability_binding_id=row.capability_binding_id
+            )
             session.execute(
                 text(
                     f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
@@ -738,6 +850,7 @@ class ReceiptClaims:
             attempt=row.attempt_count,
             leased_until=row.leased_until,
             destination=destination,
+            source=source,
             provider_event_id=row.provider_event_id,
             event_type=row.event_type,
             observation=row.payload_json or {},

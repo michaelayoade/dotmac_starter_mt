@@ -49,13 +49,24 @@ than a red test.
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from dotmac_integration.receipt_delivery import claim_statement, settle_statement
+from dotmac_integration import (
+    CapabilityContract,
+    CapabilityOwner,
+    CapabilityRegistry,
+)
+from dotmac_integration.receipt_delivery import (
+    ReceiptClaims,
+    claim_statement,
+    settle_statement,
+)
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 # Reused, not re-declared: a second copy of the scratch-database fixture would
 # drift from the one in the module that owns it, and this suite has no reason to
@@ -176,6 +187,75 @@ def test_claim_returns_the_receipts_provider_identity(
     engine.dispose()
 
     assert claimed.provider_event_id == "wamid.PROVIDER-IDENTITY-1"
+
+
+def test_the_real_claim_derives_source_from_its_installation_not_the_payload(
+    migrated_scratch: tuple[str, str],  # noqa: F811
+    request: pytest.FixtureRequest,
+) -> None:
+    """The ProductObservation source is engine provenance, not provider input."""
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    receipt_id = uuid.uuid4()
+    destination_id = uuid.uuid4()
+    hostile_installation_id = uuid.uuid4()
+    with engine.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.capability_destination_revisions ("
+                "id, capability_binding_id, revision, application, scope_kind, "
+                "scope_ref, contract_version) VALUES ("
+                ":id, :binding, 1, 'sub', 'payment_provider_events', "
+                "'verified', 1)"
+            ),
+            {"id": destination_id, "binding": binding_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.inbox_receipts ("
+                "id, installation_id, capability_binding_id, provider_event_id, "
+                "event_type, payload_digest, payload_json, state) VALUES ("
+                ":id, :installation, :binding, 'settlement-event-1', "
+                "'conformance.echo.v1', :digest, CAST(:payload AS jsonb), "
+                "'verified')"
+            ),
+            {
+                "id": receipt_id,
+                "installation": installation_id,
+                "binding": binding_id,
+                "digest": "e" * 64,
+                "payload": json.dumps(
+                    {
+                        "source": {
+                            "installation_id": str(hostile_installation_id),
+                            "connector_key": "hostile_payload_key",
+                        },
+                        "provider_status": "successful",
+                    }
+                ),
+            },
+        )
+
+    registry = CapabilityRegistry.from_declarations(
+        [
+            CapabilityContract(
+                capability_id="conformance.echo.v1",
+                owner=CapabilityOwner(application="sub", module="settlements"),
+                summary="Synthetic settlement observation",
+            )
+        ]
+    )
+    claims = ReceiptClaims(sessionmaker(bind=engine), registry=registry)
+
+    claim = claims.claim(receipt_id=receipt_id)
+    engine.dispose()
+
+    assert claim is not None
+    assert claim.source.installation_id == installation_id
+    assert claim.source.connector_key == "fake"
+    assert claim.source.installation_id != hostile_installation_id
 
 
 # ── The ratchet ─────────────────────────────────────────────────────────────

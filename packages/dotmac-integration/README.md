@@ -12,7 +12,7 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a11`; `0.1.0a12` is declared and
+**Released: `0.1.0a1` through `0.1.0a12`; `0.1.0a13` is declared and
 unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
@@ -22,6 +22,9 @@ and durable legal-hold history. a11 makes the existing POLL protocol executable
 through a session-free provider phase followed by atomic receipt/cursor commit.
 a12 projects one authenticated product-port descriptor onto every binding that
 carries its capability, without putting a binding list in the assembly.
+a13 accepts the product-owned v2 descriptor and projects a generic
+ProductObservation v1 document with engine-derived installation provenance;
+connector SPI remains 1.3.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
@@ -74,7 +77,9 @@ meaning. A destination application publishes one authenticated
 `ProductPortDescriptorSnapshot`;
 `reconcile_product_port_descriptor_for_capability` verifies and appends the
 snapshot to every matching binding's destination revision history. Claimed receipts
-carry their durable `provider_event_id` into `ProductRequest`, and
+carry their durable `provider_event_id` and module-derived installation source
+into `ProductRequest`; `product_observation_document` then serializes the
+provider-neutral envelope without interpreting the product-owned observation. And
 `InboundDisposition.RECORD_ONLY` closes transport evidence that must never
 enter the product consequence worker. These are engine contracts, not provider
 branches.

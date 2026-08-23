@@ -243,7 +243,12 @@ class DestinationBinding:
         return f"{self.application}/{self.scope} @{self.capability_id}"
 
 
-_DESCRIPTOR_SCHEMA = "dotmac.io/product-port-descriptor/v1"
+_DESCRIPTOR_SCHEMAS = frozenset(
+    {
+        "dotmac.io/product-port-descriptor/v1",
+        "dotmac.io/product-port-descriptor/v2",
+    }
+)
 _DESCRIPTOR_STATES = frozenset(
     {"configured_disabled", "enabled", "quarantined", "retired"}
 )
@@ -303,7 +308,7 @@ def _require_relative_product_path(path: str, *, field: str) -> None:
 
 
 def _require_valid_descriptor(descriptor: ProductPortDescriptorSnapshot) -> None:
-    if descriptor.schema_version != _DESCRIPTOR_SCHEMA:
+    if descriptor.schema_version not in _DESCRIPTOR_SCHEMAS:
         raise ProductPortDescriptorInvalid(
             f"unsupported product-port descriptor {descriptor.schema_version!r}"
         )
