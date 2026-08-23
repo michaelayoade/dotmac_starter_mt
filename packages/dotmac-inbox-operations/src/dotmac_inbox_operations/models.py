@@ -117,11 +117,6 @@ class ConversationAssignment(Base, TimestampMixin):
         UniqueConstraint(
             "tenant_id", "id", name="uq_conversation_assignments_tenant_id_id"
         ),
-        UniqueConstraint(
-            "tenant_id",
-            "conversation_reference",
-            name="uq_conversation_assignments_tenant_conversation",
-        ),
         ForeignKeyConstraint(
             ["tenant_id", "queue_id"],
             [f"{SCHEMA}.inbox_queues.tenant_id", f"{SCHEMA}.inbox_queues.id"],
@@ -132,6 +127,14 @@ class ConversationAssignment(Base, TimestampMixin):
             "tenant_id",
             "agent_reference",
             "status",
+        ),
+        Index(
+            "uq_conversation_assignments_active_conversation",
+            "tenant_id",
+            "conversation_reference",
+            unique=True,
+            postgresql_where=sa.text("status = 'ASSIGNED'"),
+            sqlite_where=sa.text("status = 'ASSIGNED'"),
         ),
         schema_table_args(SCHEMA),
     )
@@ -209,11 +212,6 @@ class InboxQueueEntry(Base, TimestampMixin):
         UniqueConstraint("tenant_id", "id", name="uq_inbox_queue_entries_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
-            "conversation_reference",
-            name="uq_inbox_queue_entries_tenant_conversation",
-        ),
-        UniqueConstraint(
-            "tenant_id",
             "queue_id",
             "queue_position",
             name="uq_inbox_queue_entries_tenant_queue_position",
@@ -233,6 +231,14 @@ class InboxQueueEntry(Base, TimestampMixin):
             "queue_id",
             "status",
             "queue_position",
+        ),
+        Index(
+            "uq_inbox_queue_entries_active_conversation",
+            "tenant_id",
+            "conversation_reference",
+            unique=True,
+            postgresql_where=sa.text("status = 'QUEUED'"),
+            sqlite_where=sa.text("status = 'QUEUED'"),
         ),
         schema_table_args(SCHEMA),
     )
@@ -296,6 +302,64 @@ class InboxRoundRobinCursor(Base, TimestampMixin):
     rotation_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class InboxRoutingDecision(Base, TimestampMixin):
+    """Append-only evidence for the rule that admitted a conversation."""
+
+    __tablename__ = "inbox_routing_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_inbox_routing_decisions_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "decision_reference",
+            name="uq_inbox_routing_decisions_tenant_reference",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "rule_id"],
+            [
+                f"{SCHEMA}.inbox_routing_rules.tenant_id",
+                f"{SCHEMA}.inbox_routing_rules.id",
+            ],
+            name="fk_inbox_routing_decisions_tenant_rule",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "queue_id"],
+            [f"{SCHEMA}.inbox_queues.tenant_id", f"{SCHEMA}.inbox_queues.id"],
+            name="fk_inbox_routing_decisions_tenant_queue",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "queue_entry_id"],
+            [
+                f"{SCHEMA}.inbox_queue_entries.tenant_id",
+                f"{SCHEMA}.inbox_queue_entries.id",
+            ],
+            name="fk_inbox_routing_decisions_tenant_queue_entry",
+        ),
+        Index(
+            "ix_inbox_routing_decisions_tenant_conversation_time",
+            "tenant_id",
+            "conversation_reference",
+            "decided_at",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    decision_reference: Mapped[str] = mapped_column(String(180), nullable=False)
+    conversation_reference: Mapped[str] = mapped_column(String(180), nullable=False)
+    channel_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    rule_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    queue_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    queue_entry_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer(), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 TENANT_TABLES = (
     "inbox_queues",
     "inbox_routing_rules",
@@ -304,6 +368,7 @@ TENANT_TABLES = (
     "inbox_workflow_events",
     "inbox_queue_entries",
     "inbox_round_robin_cursors",
+    "inbox_routing_decisions",
 )
 _TABLES: dict[str, sa.Table] = {
     model.__tablename__: cast(sa.Table, model.__table__)
@@ -315,6 +380,7 @@ _TABLES: dict[str, sa.Table] = {
         InboxWorkflowEvent,
         InboxQueueEntry,
         InboxRoundRobinCursor,
+        InboxRoutingDecision,
     )
 }
 
@@ -331,6 +397,7 @@ __all__ = [
     "InboxQueue",
     "InboxQueueEntry",
     "InboxRoundRobinCursor",
+    "InboxRoutingDecision",
     "InboxRoutingRule",
     "InboxWorkflowEvent",
     "metadata_table",

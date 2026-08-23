@@ -131,6 +131,21 @@ def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
     assert emitted["tag"] == "dotmac-files-v0.1.0a3"
 
 
+def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:
+    """Publication is the first executable gate in Sub's named adoption.
+
+    A dossier naming Sub is not enough: without this closed-list row the
+    release workflow refuses the distribution and Sub cannot pin immutable
+    artifacts for its backfill and shadow phases.
+    """
+    result = _resolve("dotmac-inbox-operations", version="0.1.0a3")
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    assert emitted["kernel_floor"] == "0.1.0a91"
+    assert emitted["db_schema"] == "mod_inbox_ops"
+    assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a3"
+
+
 def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
     """The gate the ERP-first ticket adoption programme had to pass first.
 

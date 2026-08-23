@@ -93,8 +93,8 @@
       "state": "never-published"
     },
     "dotmac-inbox-operations": {
-      "declared": "0.1.0a2",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a2 adds Sub's durable FIFO admission and round-robin rotation state (io_0002). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
+      "declared": "0.1.0a3",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a3 makes routing executable with durable decision evidence, capacity-safe eligibility-aware dispatch, active-only queue/assignment lifecycles and fair per-queue draining (io_0003). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
       "state": "never-published"
     },
     "dotmac-kernel": {

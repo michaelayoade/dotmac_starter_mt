@@ -178,14 +178,14 @@ Recorded here so the same ground is not re-walked:
 Three existing owners were named in the same audit. Only one of them is a
 Starter change:
 
-- **Inbox Operations — BUILT (`0.1.0a2`, migration `io_0002`).** Sub keeps
-  durable FIFO admission (`inbox_conversation_queue_entries`) and durable
-  round-robin rotation (`inbox_team_round_robin_cursors`); the module had
-  neither. Both are ported: position is a stored, per-queue-unique column
-  rather than a read-time ordering, and rotation state is durable because an
-  in-memory cursor restarts at the same agent after every deploy. Promotion
-  goes through `assign_conversation`, so the queue decides ORDER while the
-  existing presence and capacity refusals still decide admissibility.
+- **Inbox Operations — BUILT (`0.1.0a3`, migration `io_0003`).** Sub's durable
+  FIFO admission and round-robin rotation remain the product-first base. The
+  a3 safety slice makes rules executable with durable decision evidence,
+  accepts Workforce/product eligibility only as opaque references, locks queue
+  position and presence capacity decisions, chooses the promotion winner
+  inside the owner, and attempts one item per queue so a saturated queue cannot
+  hide an assignable peer. Active-only uniqueness retains released assignments
+  and settled entries while permitting later reassign/requeue cycles.
 - **Surveys — no Starter change needed.** Its `EXTRACTION.toml` already names
   `dotmac_sub` as cutover 1 with the composition and retirement posture
   spelled out. What the audit found missing is a COHORT ASSIGNMENT in the

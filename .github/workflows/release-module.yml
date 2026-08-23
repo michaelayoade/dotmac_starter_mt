@@ -67,6 +67,7 @@ on:
           - dotmac-finance
           - dotmac-forms
           - dotmac-inbox
+          - dotmac-inbox-operations
           - dotmac-integration
           - dotmac-inventory
           - dotmac-ipam
@@ -373,4 +374,3 @@ jobs:
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
             --package-dir "${{ needs.build.outputs.package_dir }}"
-

@@ -1,5 +1,24 @@
 # Changelog — dotmac-inbox-operations
 
+## 0.1.0a3 — 2026-08-22 (unreleased)
+
+- Makes routing executable and records an idempotent append-only routing
+  decision bound to the selected rule, queue and durable queue entry.
+- Requires callers to supply queue-eligible opaque agent references and a
+  presence-freshness cutoff. Atomic promotion chooses the agent from current
+  capacity and the durable round-robin cursor; callers no longer choose the
+  queue winner.
+- Serializes admission on the queue row and capacity decisions on presence
+  rows; FIFO claims use `FOR UPDATE SKIP LOCKED` and expected uniqueness races
+  stay inside kernel conflict savepoints.
+- Replaces lifetime conversation uniqueness with active-only partial indexes,
+  allowing release/reassignment and promotion/cancellation/requeue while
+  retaining historical rows and workflow evidence.
+- Adds a fair cohort dispatcher that attempts one item from every queue rather
+  than allowing a blocked global-oldest window to starve another queue.
+- Adds migration `io_0003_operational_safety` and real-Postgres concurrency
+  canaries for queue positions and assignment capacity.
+
 ## 0.1.0a2 — 2026-08-22
 
 - Adds Sub's durable FIFO admission (`inbox_queue_entries`) and round-robin

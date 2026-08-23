@@ -134,8 +134,15 @@ which is the separate `dotmac-inbox` candidate.
   CRM `tests/test_crm_assignment_presence_guards.py`,
   `tests/test_two_queue_dispatch.py`,
   `tests/services/test_workqueue_aggregator.py`.
+- Starter implementation: `0.1.0a3` / `io_0003` records executable routing
+  decisions, accepts queue eligibility as opaque caller-supplied references,
+  serializes position and capacity decisions, selects the promotion winner,
+  attempts each queue in a fair cohort, and retains repeatable
+  release/reassign/requeue history through active-only uniqueness.
 - Exclude: conversations/messages/read cursors, ticket/work-order lifecycle,
-  transport/connectors, notifications, AI and Workforce shift/availability.
+  transport/connectors, notifications, AI and Workforce teams/skills/shifts/
+  field availability. Inbox Operations consumes an eligibility projection; it
+  does not become a second Workforce writer.
 
 ## 9. Workforce — Sub/CRM/ERP adjudication
 

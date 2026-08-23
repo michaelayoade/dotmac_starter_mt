@@ -1150,7 +1150,7 @@ url = "packages/dotmac-inbox"
 
 [[package]]
 name = "dotmac-inbox-operations"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Staffed inbox queues, routing, presence, and assignments"
 optional = false
 python-versions = ">=3.11,<3.14"
