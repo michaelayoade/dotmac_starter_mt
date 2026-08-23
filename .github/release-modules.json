@@ -443,7 +443,7 @@
     "dotmac-campaigns": {
       "$comment": [
         "Provider-neutral outbound campaign lifecycle, immutable audiences and",
-        "ordered recipient progression (ADR-0032). Product-first from Sub;",
+        "ordered recipient progression (ADR-0056). Product-first from Sub;",
         "consent, delivery transport and commercial consequence stay elsewhere.",
         "Kernel a72 allocates mod_campaigns / ca / campaigns; a73 is the floor",
         "because the consent, idempotency and delivery services need a73's",

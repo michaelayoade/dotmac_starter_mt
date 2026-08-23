@@ -102,7 +102,7 @@ floors at the first installable cohort kernel, a81. PR #284 passed all sixteen
 required checks and merged as exact main revision `8f99413`; kernel a81 and all
 four a1 modules are published, registry-verified and tagged from that revision.
 None is adopted. Backoffice is the default first adopter; campaigns is the
-ADR-0032 exception, with Sub cutover 1 and Backoffice cutover 2 as the
+ADR-0056 exception, with Sub cutover 1 and Backoffice cutover 2 as the
 independent reuse proof.
 
 | Candidate distribution | Source mode and selected source | First implementation gate |

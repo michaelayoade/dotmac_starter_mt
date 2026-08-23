@@ -44,7 +44,7 @@ contract_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac-erp", "dotmac_crm"]
 inventory_evidence = [
   "docs/inventories/campaigns-sources.md",
-  "docs/adr/0032-campaigns-own-outbound-progression.md",
+  "docs/adr/0056-campaigns-own-outbound-progression.md",
 ]
 composition_boundary = "ADR-0024/0032: each adopter installs its own tenant-only ca lineage and owns only its local campaign progression rows. The module imports the kernel but no sibling or product. Product assemblies supply typed audience facts and bind Template Studio, Durable Timers, sender resolution, delivery-gate and Sales/Inbox correlation adapters. Applications share contracts and normalized observations through versioned APIs/webhooks, never a mod_campaigns database or ORM model."
 first_cutover = "dotmac_sub is cutover 1, overriding the broad marketing programme's Backoffice-first sequence for this vertical because Sub is the qualifying production source. Backoffice is cutover 2 as the independent greenfield reuse proof on the exact released package. CRM follows after preserving open/click and reply-correlation parity. dotmac_mkt remains the independent editorial/media owner and is not a default adopter."
