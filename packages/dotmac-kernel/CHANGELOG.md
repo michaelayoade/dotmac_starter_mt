@@ -77,7 +77,7 @@ consumer needs to change anything.
 function, no migration of the kernel's own. A consumer on a90 that installs
 none of these fourteen modules sees no difference.
 
-### Added — the ADR-0055 ISP essential-domain cohort
+### Added — the ADR-0058 ISP essential-domain cohort
 
 `customers`/`cu`, `service_catalog`/`sc`, `qualification`/`qu`, `services`/`se`,
 `usage`/`us`, `usage_rating`/`ur`, `service_access_policy`/`sap`,
@@ -333,7 +333,7 @@ allocation.
 - Permanent migration owners for Customers (`cu`), Service Catalog (`sc`),
   Qualification (`qu`), Services (`se`), Usage (`us`), Usage Rating (`ur`),
   Service Access Policy (`sa`), Inbox Operations (`io`), Workforce (`wf`) and
-  FX Policy (`fx`) (ADR-0055). Services uses `se` because Surveys already owns
+  FX Policy (`fx`) (ADR-0058). Services uses `se` because Surveys already owns
   `sv`; the collision was resolved before either Services publication or
   product composition.
 

@@ -99,7 +99,7 @@ dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
 dotmac-people = { path = "packages/dotmac-people", develop = true }
-# ADR-0055 ISP essential-domain cohort. Built and proven here, but deliberately
+# ADR-0058 ISP essential-domain cohort. Built and proven here, but deliberately
 # uncomposed and release-unallowlisted until each source product's named cutover.
 dotmac-customers = { path = "packages/dotmac-customers", develop = true }
 dotmac-service-catalog = { path = "packages/dotmac-service-catalog", develop = true }

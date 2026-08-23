@@ -1200,7 +1200,7 @@ HOSTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("hosting"),
 )
 
-# ISP essential-domain cohort (ADR-0055). Ten tenant owners share the current
+# ISP essential-domain cohort (ADR-0058). Ten tenant owners share the current
 # unpublished a85 allocation release while retaining independent schemas and
 # lineages. Services uses `se`: current main had already allocated `sv`
 # permanently to Surveys before this isolated cohort was integrated.

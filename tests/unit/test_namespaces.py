@@ -245,7 +245,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `web_analytics` is the fifty-second: privacy-minimised first-party
     # observations and deterministic projections (ADR-0055). Property, origin,
     # consent and consequence policy remains with each adopting product.
-    # ADR-0055's ten ISP essential owners follow. `services` takes `se` because
+    # ADR-0058's ten ISP essential owners follow. `services` takes `se` because
     # Surveys already owns `sv`, and `service_access_policy` takes the `sap`
     # settled by the three-way `sa` arbitration above rather than the `sa` its
     # own branch had claimed while unable to see Sales.

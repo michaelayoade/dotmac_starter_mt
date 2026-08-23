@@ -1,4 +1,12 @@
-# ADR-0055: ISP essential domains have ten independent owners
+# ADR-0058: ISP essential domains have ten independent owners
+
+> **Renumbered 2026-08-23.** This record was accepted as ADR-0055 on
+> 2026-08-20 and collided with ADR-0055 *Web analytics owns first-party
+> observations*, accepted 2026-08-18. Resolved chronologically — the rule
+> applied to ADR-0010/0011 on 2026-08-15 — so the earlier record keeps the
+> number. This completes the three duplicate ADR numbers found on
+> 2026-08-23; the others became ADR-0056 (Campaigns) and ADR-0057 (the
+> vendor control plane).
 
 - Status: accepted
 - Date: 2026-08-20
