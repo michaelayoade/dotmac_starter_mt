@@ -178,17 +178,53 @@ def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
     assert emitted["tag"] == "dotmac-ticketing-v0.1.0a4"
 
 
-def test_only_ticketing_may_require_alembic_at_runtime() -> None:
-    """Specificity for the allowlist entry's widened `allowed_requires`.
+#: The only distributions whose `allowed_requires` may carry `alembic`, each
+#: because it ships per-plane link helpers that emit DDL into a CONSUMING
+#: product's own migration lineage — which makes `from alembic import op` a real
+#: runtime import rather than a build-time one.
+#:
+#: `dotmac-billing` joined `dotmac-ticketing` on 2026-08-23. It is a second
+#: instance of the same mechanism, not the copy-paste spread the original
+#: single-module form warned about: `dotmac_billing.linking` says in its own
+#: docstring that "the helpers emit a link table into the adopter's own
+#: migration lineage", and carries the identical tenant-composite-FK-with-forced
+#: RLS versus platform-revoke split.
+#:
+#: Membership is by MECHANISM, never by convenience. A module that merely wants
+#: the dependency does not qualify; one that emits DDL into someone else's
+#: lineage does, and must be added here deliberately.
+LINK_HELPER_DISTRIBUTIONS: frozenset[str] = frozenset(
+    {"dotmac-ticketing", "dotmac-billing"}
+)
 
-    `dotmac_ticketing.linking`'s per-plane link helpers emit DDL into a
-    CONSUMING product's migration, which makes Alembic a real runtime import.
-    That reasoning applies to this module and no other, so the exception must
-    not spread by copy-paste into the next entry.
-    """
+
+def test_only_link_helper_modules_may_require_alembic_at_runtime() -> None:
+    """Specificity for the allowlist entries' widened `allowed_requires`."""
     for distribution, entry in _allowlist().items():
         permits_alembic = "alembic" in entry["wheel_contents"]["allowed_requires"]
-        assert permits_alembic == (distribution == "dotmac-ticketing"), distribution
+        expected = distribution in LINK_HELPER_DISTRIBUTIONS
+        assert permits_alembic == expected, distribution
+
+
+def test_every_alembic_exception_actually_imports_alembic() -> None:
+    """The exemption states an ENFORCEABLE premise (ADR-0018).
+
+    Listing a distribution above claims it imports Alembic at runtime. If that
+    stopped being true the entry would silently become a permission nobody
+    needs, so the claim is checked against the source rather than trusted — the
+    same reason the allowlist verifies a schema against the manifest instead of
+    believing the JSON.
+    """
+    for distribution in sorted(LINK_HELPER_DISTRIBUTIONS):
+        package = distribution.replace("-", "_")
+        linking = (
+            PROJECT_ROOT / "packages" / distribution / "src" / package / "linking.py"
+        )
+        assert linking.is_file(), f"{distribution} has no linking module"
+        assert "from alembic import op" in linking.read_text(encoding="utf-8"), (
+            f"{distribution} is exempted to require alembic but its linking "
+            "module does not import it — remove the exemption or the dependency"
+        )
 
 
 def test_a_mismatched_version_is_refused_rather_than_inferred() -> None:
