@@ -194,10 +194,41 @@ migration.
 | Registrar — gTLDs | **Openprovider** | ~1,900–2,000 TLDs on one REST API with a full OT&E sandbox. Flat annual membership + cost-price beats volume tiers at launch volume, and it accepts wire transfer and multiple currencies, which matters paying from Nigeria. CentralNic Reseller was the runner-up on API rigour (OpenAPI 3.0) but is priced for larger resellers. |
 | Authoritative DNS | **Self-hosted PowerDNS Authoritative** | Hidden primary + branded public secondaries, AXFR/IXFR with TSIG, DNSSEC live-signing on the primary, across at least two ASNs (on-prem AS328160 for in-country latency, Contabo for off-net diversity). Reached through an Integrator connector, never imported. |
 | Hosting panel | **DirectAdmin** | Flat per-server licence, so margin does not erode as accounts grow; full API in standard pricing; real multi-tenant account isolation. |
-| Outbound email | **Postmark — RECOMMENDED, NOT YET APPROVED** | Deliverability-first with enforced separation of transactional and marketing streams, which matters given the fleet's recorded SPF/DMARC/PTR risk. No connector code until Michael approves the exact distribution (§6). |
+| Outbound email | **No provider is selected, by decision** | Ruled 2026-08-23: outbound email reaches its provider ONLY through an Integrator connector capability. Cloud names no email provider anywhere — see §E.1. |
 
 Every name above is an installation binding. None may reach a schema column, a
 lifecycle enum, or a business decision.
+
+#### E.1 Outbound email is a capability, not a vendor
+
+Michael ruled on 2026-08-23 that the email provider connection goes over the
+Integrator and that nothing hardcodes to a provider. This is stronger than
+"pick a good provider later" — it removes the question from the bill of
+materials.
+
+- Cloud and every business owner emit **delivery-intent facts**. They never
+  call an email API, hold an email credential, or name a vendor.
+- The Integrator owns the outbound delivery capability
+  (provisionally `messaging.email.delivery.v1`), and one connector
+  distribution implements it. Which distribution is installed is an
+  installation binding, exactly like the PSP, registrar, DNS and panel slots.
+- Therefore **no `postmark_*`, `ses_*`, `sendgrid_*` or `mailgun_*` field,
+  enum, setting key or conditional may appear in Cloud, in any module, or in
+  any dossier.** A message ID returned by a provider is opaque transport
+  evidence, never a typed provider identifier.
+- Template content stays with `dotmac-template-studio`; consent, channel
+  selection, suppression and receipts stay with the kernel messaging owners;
+  retry, checkpoints and delivery evidence stay with `dotmac-integration`.
+  The connector translates one wire format and nothing else.
+- Deliverability posture (dedicated sending IP, SPF/DKIM/DMARC alignment,
+  PTR, and separating transactional from marketing streams) is a DEPLOYMENT
+  and DNS concern, given the fleet's recorded SPF/DMARC/PTR risk. It is
+  satisfied by configuration and by the authoritative-DNS build, not by a
+  vendor name in code.
+
+Selecting the exact distribution remains a Phase 4 authorization under §6,
+and it changes no Cloud or module code when it happens. That is the test that
+this boundary is real.
 
 ### F. Storefront is a shared stateless module
 
