@@ -55,6 +55,7 @@ on:
           - dotmac-finance
           - dotmac-forms
           - dotmac-inbox
+          - dotmac-inbox-operations
           - dotmac-integration
           - dotmac-inventory
           - dotmac-ipam

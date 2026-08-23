@@ -1008,6 +1008,48 @@
         ]
       }
     },
+    "dotmac-inbox-operations": {
+      "$comment": [
+        "Staffed inbox queues, executable routing decisions, agent presence,",
+        "capacity-safe assignment and durable FIFO admission.",
+        "Product-first from Sub and CRM. Inbox keeps conversation/message facts;",
+        "Workforce keeps teams, skills and shifts; Integrator keeps transport.",
+        "Sub is the named first adopter and must complete backfill, zero-drift",
+        "shadow comparison and sealed local-writer retirement before authority",
+        "moves. Authorization to publish is not evidence that cutover occurred.",
+        "Kernel a91 allocates mod_inbox_ops / io / inbox_operations."
+      ],
+      "package_dir": "packages/dotmac-inbox-operations",
+      "import_name": "dotmac_inbox_operations",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_inbox_ops",
+      "tag_prefix": "dotmac-inbox-operations-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_inbox_operations/py.typed",
+          "dotmac_inbox_operations/contracts.py",
+          "dotmac_inbox_operations/manifest.py",
+          "dotmac_inbox_operations/migrations/__init__.py",
+          "dotmac_inbox_operations/migrations/versions/io_0001_inbox_operations.py",
+          "dotmac_inbox_operations/migrations/versions/io_0002_queue_admission.py",
+          "dotmac_inbox_operations/migrations/versions/io_0003_operational_safety.py",
+          "dotmac_inbox_operations/models.py",
+          "dotmac_inbox_operations/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-integration": {
       "$comment": [
         "The connector control plane (ADR-0024 §§ 6-7). Listed so the",
