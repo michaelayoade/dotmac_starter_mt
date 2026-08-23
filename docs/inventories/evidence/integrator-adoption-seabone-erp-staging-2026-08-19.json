@@ -1,0 +1,169 @@
+{
+  "bindings": [],
+  "coverage": {
+    "checkpoints": true,
+    "connector_scheduling": true,
+    "delivery_retries": true,
+    "integration_tables": true,
+    "provider_clients": true,
+    "provider_credentials": true,
+    "webhook_verification": true
+  },
+  "legacy_surfaces": [
+    {
+      "count": 1,
+      "evidence_kind": "aggregate-active-count",
+      "observation": "active",
+      "surface_id": "erp-runtime-health-probes"
+    },
+    {
+      "count": 1,
+      "evidence_kind": "aggregate-configured-count",
+      "observation": "configured",
+      "surface_id": "erp-secret-materialization"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-local-license-validation"
+    },
+    {
+      "count": 1,
+      "evidence_kind": "aggregate-configured-count",
+      "observation": "configured",
+      "surface_id": "erp-object-storage"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-turnstile-captcha"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-fcm-push"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-llm-insights"
+    },
+    {
+      "count": 10760,
+      "evidence_kind": "aggregate-active-historical-count",
+      "observation": "active",
+      "surface_id": "erp-crm-sync"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-sub-operational-sync"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-sub-financial-sync"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-academy-events"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-finance-configured-webhooks"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-mono-banking"
+    },
+    {
+      "count": 825,
+      "evidence_kind": "aggregate-configured-active-historical-count",
+      "observation": "active",
+      "surface_id": "erp-paystack-payments"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-remita-payments"
+    },
+    {
+      "count": 150,
+      "evidence_kind": "aggregate-historical-count",
+      "observation": "historical",
+      "surface_id": "erp-exchange-rate-observation"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-generic-service-hooks"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-mailcow-administration"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "erp-nextcloud-talk"
+    },
+    {
+      "count": 4,
+      "evidence_kind": "aggregate-configured-count",
+      "observation": "configured",
+      "surface_id": "erp-smtp-email"
+    },
+    {
+      "count": 97774,
+      "evidence_kind": "aggregate-historical-count",
+      "observation": "historical",
+      "surface_id": "erp-legacy-sync-markers"
+    }
+  ],
+  "safety_observations": {
+    "billing_non_interference_proven": false,
+    "database_isolation_level": "repeatable read",
+    "database_read_only_proven": true,
+    "database_session_count": 2,
+    "financial_cutover_authorized": false,
+    "financial_surface_counts": {
+      "erp-exchange-rate-observation": 150,
+      "erp-finance-configured-webhooks": 0,
+      "erp-mono-banking": 0,
+      "erp-paystack-payments": 825,
+      "erp-remita-payments": 0,
+      "erp-sub-financial-sync": 0
+    },
+    "financial_surface_fingerprint": "8059a564efa4c44b6ccf82a031bf14997d80a69af9442e35a3761ab04b3fdd4f",
+    "organization_count": 1
+  },
+  "schema_version": 1,
+  "shared_table_counts": {},
+  "source": {
+    "application": "dotmac_erp",
+    "capture_method": "product-owned read-only tenant-catalog discovery plus one repeatable-read/read-only RLS-primed snapshot per organization; aggregate identities and counts only",
+    "captured_at": "2026-08-19T05:23:45.073474Z",
+    "database_name": "dotmac_erp_inventory_staging_clone",
+    "environment": "staging",
+    "image_digest": "sha256:32231dda51a5d8df414f44f69571479c5dc751646c2c87c38d8ad9d16b7df68c",
+    "server_name": "seabone",
+    "source_revision": "4aab5681e52377830a26de464944454559b3d746"
+  }
+}

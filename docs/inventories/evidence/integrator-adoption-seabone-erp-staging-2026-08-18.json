@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "source": {
+    "application": "dotmac_erp",
+    "environment": "staging",
+    "server_name": "dotmac-erp-staging",
+    "host_alias": "seabone",
+    "database_name": "dotmac_erp",
+    "captured_at": "2026-08-18T10:06:00Z",
+    "source_revision": "990e17f9a45c2f4089e6e3467118dcbc02254ad9",
+    "image_digest": "sha256:c0aca05beb6370fa5508fb62c4e5200fab9c064b6669d6467ce9f2f1a179f89b",
+    "capture_method": "read-only aggregate SQL plus container identity and environment-variable names; no configuration, payload, customer, credential, secret-reference, or secret values selected"
+  },
+  "coverage": {
+    "integration_tables": true,
+    "provider_clients": false,
+    "provider_credentials": false,
+    "webhook_verification": false,
+    "connector_scheduling": false,
+    "checkpoints": true,
+    "delivery_retries": false
+  },
+  "bindings": [],
+  "shared_table_counts": {},
+  "legacy_surfaces": [
+    {
+      "surface_id": "erp-crm-sync",
+      "observation": "active",
+      "count": 1,
+      "evidence_kind": "active sync.integration_config rows for DOTMAC_CRM"
+    },
+    {
+      "surface_id": "erp-legacy-sync-markers",
+      "observation": "historical",
+      "count": 2653,
+      "evidence_kind": "aggregate sync.sync_history rows for erpnext and splynx"
+    },
+    {
+      "surface_id": "erp-mono-banking",
+      "observation": "absent",
+      "count": 0,
+      "evidence_kind": "banking.bank_accounts rows with mono_account_id"
+    },
+    {
+      "surface_id": "erp-paystack-payments",
+      "observation": "historical",
+      "count": 820,
+      "evidence_kind": "aggregate payment_intent and payment_webhook rows"
+    },
+    {
+      "surface_id": "erp-smtp-email",
+      "observation": "configured",
+      "count": 9,
+      "evidence_kind": "inactive email_profile rows plus present global SMTP setting names"
+    },
+    {
+      "surface_id": "erp-object-storage",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "S3 environment-variable names present on the app container"
+    }
+  ],
+  "safety_observations": {
+    "financial_rows_present": true,
+    "financial_paths_held": true,
+    "billing_non_interference_proven": false,
+    "interpretation": "The staging database contains substantial Paystack history, including failed webhook rows; recency was not measured, so this is historical rather than proof of current activity. A non-financial rehearsal must keep ERP payment tasks, webhooks and settings untouched and prove their aggregate fingerprint is unchanged."
+  }
+}

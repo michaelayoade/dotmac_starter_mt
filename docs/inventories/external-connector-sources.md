@@ -1,7 +1,6 @@
 # External-connector sources — what the Integrator has to absorb
 
-**As of:** 2026-08-15 (counts 2026-08-14; coverage and execution record
-2026-08-15)
+**As of:** 2026-08-19 (counts frozen 2026-08-18; Academy census refreshed 2026-08-19)
 **Measured by:** [`scripts/external_connector_sweep.py`](../../scripts/external_connector_sweep.py)
 **Frozen baseline:** [`external-connector-baseline.json`](external-connector-baseline.json)
 **Ratchet:** `tests/architecture/test_external_connector_ratchet.py`
@@ -39,6 +38,7 @@ actually deletes.
 | Repo | http_client | webhook_surface | provider_credential | connector_task | sync_checkpoint | delivery_retry |
 |---|---:|---:|---:|---:|---:|---:|
 | `dotmac_academy_app` | 3 | 0 | 2 | 0 | 0 | 0 |
+| `dotmac_backoffice` | 0 | 0 | 0 | 0 | 0 | 0 |
 | `dotmac_crm` | 33 | 7 | 5 | 10 | 4 | 9 |
 | `dotmac_erp` | 21 | 11 | 3 | 12 | 7 | 6 |
 | `dotmac_sub` | 37 | 4 | 2 | 18 | 8 | 8 |
@@ -57,15 +57,21 @@ actually deletes.
   in the `dotmac-integration` module. The mechanism (installations, bindings,
   checkpoints, retries) ports; the catalogue becomes plugin package metadata. A port that
   brings the enum has rebuilt the thing the ADR rejects.
-- **The vendor control plane is already at the target shape** — zero in every
-  category. It is the proof the layering is reachable, and the ratchet asserts
-  it stays there.
+- **Vendor CP and Backoffice are already at the target shape** — zero in every
+  category. Backoffice is the continuing ERP-replacement application, so its
+  zero is measured rather than exempted; the ratchet now prevents the new
+  application from recreating product-local connector machinery.
 - **CRM's 33 `http_client` files are mostly retirement, not migration.** CRM is
   being decommissioned; per Michael's sequence, *do not recreate ERPNext or CRM
   plugins if those systems are being retired.* Those counts should fall to zero
   by deletion, not by porting.
-- **Academy is small and late.** 3 clients, 2 credential holders, no webhooks —
-  it can adopt the Integrator after the first real cutover rather than during.
+- **Academy's ratchet is smaller than its real inventory.** Its three detected
+  clients and two credential holders cover the ERP APIs and SMTP, but the
+  complete product-owned census has seven surfaces: it also accounts for the
+  lab-console proxy, dynamically imported GlitchTip/Sentry instrumentation and
+  authenticated Prometheus metrics. Only SMTP is external transport debt; the
+  typed ERP APIs remain direct application synchronization and the three
+  operational surfaces remain product-local.
 
 ## What each detector sees — and does not
 
@@ -115,24 +121,25 @@ Tests, migrations and scripts are excluded everywhere. A test that fakes a
 provider is how a connector is verified, not a connector; a connector in a
 migration is history.
 
-## Coverage — what the measurement does not reach (2026-08-15)
+## Coverage — what the measurement does not reach (2026-08-18)
 
 A bounded measurement that does not state its bounds reads as "covered
 everything": the strongest possible claim made by the weakest possible evidence.
 The sweep therefore prints a `COVERAGE` block on **every** run — not behind a
-flag, because a disclosure nobody turned on is not a disclosure. Four bounds
-exist and all four are now said out loud rather than left to be inferred from
+flag, because a disclosure nobody turned on is not a disclosure. Five bounds
+exist and all five are now said out loud rather than left to be inferred from
 the source.
 
-**1. Only one subtree per repository is read.** As measured on 2026-08-15:
+**1. Only one subtree per repository is read.** As measured on 2026-08-18:
 
 | Repo | Subtree | Files measured | Runtime `.py` files elsewhere in the repo |
 |---|---|---:|---:|
 | `dotmac_academy_app` | `app/` | 152 | 4 |
+| `dotmac_backoffice` | `src/dotmac_backoffice/` | 6 | 0 |
 | `dotmac_crm` | `app/` | 784 | 73 |
 | `dotmac_erp` | `app/` | 1452 | 185 |
-| `dotmac_sub` | `app/` | 1931 | 282 |
-| `dotmac_vendor_control_plane` | `src/vendor_cp/` | 59 | 1 |
+| `dotmac_sub` | `app/` | 1951 | 291 |
+| `dotmac_vendor_control_plane` | `src/vendor_cp/` | 70 | 5 |
 
 The right-hand column is the size of the bound, and it is stated as a number so
 a reviewer can weigh it rather than guess at it. ERP's figure is 185 and not the
@@ -152,7 +159,7 @@ Such files are now named, and they make `--check` refuse. Zero today.
 **3. An absent enumerated repository is UNMEASURED, never zero** — unchanged,
 and the ratchet abstains.
 
-**4. Five repositories are measured; the fleet has more.** Every other Dotmac
+**4. Six repositories are measured; the fleet has more.** Every other Dotmac
 Python distribution is now listed in the sweep's `OUT_OF_SCOPE` with a premise a
 reader can check against that repository, per ADR-0018 — an exemption states an
 enforceable premise or the region is unmonitored rather than exempt, and
@@ -165,11 +172,18 @@ UNCLASSIFIED; `--strict-coverage` turns that into a refusal, which is how CI
 runs it, while a workstation carrying a second clone of an already-measured repo
 is not a governance defect.
 
+**5. An inaccessible fleet-root entry is not evidence of absence.** The sweep
+names it as UNINSPECTABLE instead of crashing or treating it as a
+non-repository. Non-strict workstation runs continue after disclosing it;
+`--strict-coverage` refuses because CI cannot claim it classified a sibling it
+could not inspect.
+
 ### Execution record
 
 | Date | Fleet root | Result |
 |---|---|---|
 | 2026-08-15 | `/Users/michaelayoade/Downloads/management` | **PASS** — every count identical to the frozen baseline; zero unmeasurable files; 4 unclassified entries, all local clones of already-measured repositories (`crm-wt`, `crm-verify`, `erp-wt`, `academy-metrics-wt`) |
+| 2026-08-18 | `/Users/michaelayoade/Downloads/management` | **PASS** — Backoffice added as a measured zero product; every prior count unchanged; zero unmeasurable files; the same 4 local-clone entries remain unclassified |
 
 The baseline is therefore **unchanged by this execution**, which is the outcome
 worth recording: a ratchet run that produces no diff is evidence the frozen

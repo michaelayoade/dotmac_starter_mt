@@ -1,0 +1,649 @@
+{
+  "schema_version": 1,
+  "programme": {
+    "goal": "One independently deployed Integrator owns external transport; product applications own typed domain ports and local decisions",
+    "platform_retirement_claimed": false,
+    "production_inventory_status": "unmeasured",
+    "financial_cutover_authorized": false,
+    "current_target_cohort_id": "sub-whatsapp-receive",
+    "required_applications": [
+      "dotmac_sub",
+      "dotmac_erp",
+      "dotmac_crm",
+      "dotmac_academy_app",
+      "dotmac_backoffice",
+      "dotmac_vendor_control_plane"
+    ],
+    "source_catalogue": "docs/inventories/integrator-sub-connector-catalogue.json",
+    "legacy_source_catalogues": [
+      "docs/inventories/integrator-academy-source-catalogue.json",
+      "docs/inventories/integrator-erp-source-catalogue.json",
+      "docs/inventories/integrator-crm-source-catalogue.json"
+    ],
+    "fleet_surface_baseline": "docs/inventories/external-connector-baseline.json",
+    "application_inventories": [
+      {
+        "application": "dotmac_sub",
+        "surface_status": "capability-catalogued",
+        "disposition": "mixed",
+        "owner": "Sub domain owners + Integrator transport",
+        "evidence": [
+          "docs/inventories/integrator-sub-connector-catalogue.json",
+          "docs/inventories/external-connector-baseline.json"
+        ],
+        "next_gate": "Land and deploy Sub's product-owned read-only capture adapter, then reconcile every production binding and explicit catalogue absence at the exact deployed revision"
+      },
+      {
+        "application": "dotmac_erp",
+        "surface_status": "source-mapped",
+        "disposition": "unclassified",
+        "owner": "ERP domain owners + Integrator transport",
+        "evidence": [
+          "docs/inventories/external-connector-baseline.json",
+          "docs/inventories/integrator-erp-source-catalogue.json",
+          "docs/inventories/evidence/integrator-adoption-seabone-erp-staging-2026-08-19.json",
+          "docs/inventories/evidence/integrator-adoption-seabone-erp-migration-rehearsal-2026-08-19.json"
+        ],
+        "next_gate": "Land the product-owned census and three upgrade repairs, then collect the same complete inventory from an explicitly named production target before capability classification"
+      },
+      {
+        "application": "dotmac_crm",
+        "surface_status": "source-mapped",
+        "disposition": "retire",
+        "owner": "CRM retirement programme",
+        "evidence": [
+          "docs/inventories/external-connector-baseline.json",
+          "docs/inventories/integrator-crm-source-catalogue.json"
+        ],
+        "next_gate": "Production usage inventory and zero-traffic evidence must prove each surface retires rather than migrates",
+        "retirement_evidence": {
+          "status": "missing",
+          "evidence": []
+        }
+      },
+      {
+        "application": "dotmac_academy_app",
+        "surface_status": "source-mapped",
+        "disposition": "mixed",
+        "owner": "Academy domain owners + Integrator transport",
+        "evidence": [
+          "docs/inventories/external-connector-baseline.json",
+          "docs/inventories/integrator-academy-source-catalogue.json",
+          "docs/inventories/evidence/integrator-adoption-seabone-academy-staging-2026-08-19.json",
+          "docs/inventories/evidence/integrator-adoption-seabone-academy-migration-rehearsal-2026-08-19.json"
+        ],
+        "next_gate": "Land the product-owned census, capture the same seven surfaces on an explicitly named production target, and build the SMTP delivery packet; the three ERP product APIs and three operational surfaces remain local"
+      },
+      {
+        "application": "dotmac_backoffice",
+        "surface_status": "measured-zero",
+        "disposition": "not-applicable",
+        "owner": "Backoffice",
+        "evidence": [
+          "docs/inventories/external-connector-baseline.json"
+        ],
+        "next_gate": "Keep the replacement application at zero product-local connector machinery while typed domain ports are added"
+      },
+      {
+        "application": "dotmac_vendor_control_plane",
+        "surface_status": "measured-zero",
+        "disposition": "not-applicable",
+        "owner": "Vendor Control Plane",
+        "evidence": [
+          "docs/inventories/external-connector-baseline.json"
+        ],
+        "next_gate": "Production-derived zero and the existing no-growth ratchet must both hold"
+      }
+    ],
+    "shared_sub_control_plane_tables": [
+      "integration_installations",
+      "integration_config_revisions",
+      "integration_capability_bindings",
+      "integration_checkpoints",
+      "integration_event_subscriptions",
+      "integration_deliveries",
+      "integration_inbox"
+    ]
+  },
+  "cohorts": [
+    {
+      "id": "sub-fiber-inquiry",
+      "application": "dotmac_sub",
+      "connector_key": "fiber.inquiry.http",
+      "capabilities": [
+        "communications.fiber_inquiry.receive.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub sales intake + Integrator transport",
+      "disposition_basis": "ADR-0024 §6; continuing first-party fiber inquiry ingress",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-lead-capture",
+      "application": "dotmac_sub",
+      "connector_key": "lead.capture.http",
+      "capabilities": [
+        "sales.lead_capture.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub sales capture + Integrator transport",
+      "disposition_basis": "ADR-0024 §6; continuing provider-neutral lead intake",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-integrator-product-port",
+      "application": "dotmac_sub",
+      "connector_key": "dotmac.integrator.http",
+      "capabilities": [
+        "messaging.receive.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 5,
+      "owner": "Sub communications product port",
+      "disposition_basis": "The desired product port stays, but its dependency on Sub's shared integration control plane must be retired before the shared tables can go",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-generic-webhook",
+      "application": "dotmac_sub",
+      "connector_key": "webhook.http",
+      "capabilities": [
+        "events.deliver.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub event owners + Integrator transport",
+      "disposition_basis": "ADR-0024 §6; generic outbound delivery is Integrator transport",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-crm",
+      "application": "dotmac_sub",
+      "connector_key": "dotmac.crm",
+      "capabilities": [
+        "crm.subscriber_observation.v1",
+        "crm.ticket_observation.v1",
+        "crm.operational_observation.v1",
+        "crm.portal_session.v1",
+        "crm.chat_session.v1",
+        "crm.quote_command.v1",
+        "crm.events.receive.v1"
+      ],
+      "disposition": "retire",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "CRM retirement programme",
+      "disposition_basis": "Approved CRM exit: retire these capabilities instead of recreating a connector for a system being decommissioned",
+      "retirement": {
+        "zero_traffic_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-whatsapp-receive",
+      "application": "dotmac_sub",
+      "connector_key": "whatsapp",
+      "capabilities": [
+        "messaging.receive.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": true,
+      "financial": false,
+      "cutover_wave": 1,
+      "owner": "Sub communications observation owner + Integrator WhatsApp transport",
+      "disposition_basis": "First approved Integrator adoption; only WhatsApp receive moves in this cutover",
+      "packet": {
+        "connector_distribution": {
+          "status": "ready",
+          "evidence": [
+            "dotmac-connector-whatsapp==0.1.0a1"
+          ]
+        },
+        "product_port": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_sub:app/api/integrator_observations.py",
+            "dotmac_sub:app/schemas/integrator_observation.py"
+          ]
+        },
+        "descriptor": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_sub:app/services/integrations/product_port_descriptor.py"
+          ]
+        },
+        "reconciler": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_starter_mt:packages/dotmac-integration/src/dotmac_integration/destination_binding.py::reconcile_product_port_descriptor"
+          ]
+        },
+        "secret_mapping": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_integrator:src/dotmac_integrator/secret_loading.py",
+            "dotmac_integrator:src/dotmac_integrator/secret_resolver.py"
+          ]
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_sub:docs/INTEGRATOR_MESSAGING_RECEIVE_CUTOVER.md#9-rollback"
+          ]
+        },
+        "retirement_gate": {
+          "status": "ready",
+          "evidence": [
+            "dotmac_sub:docs/INTEGRATOR_MESSAGING_RECEIVE_CUTOVER.md#7-what-is-retired-in-the-same-change"
+          ]
+        }
+      }
+    },
+    {
+      "id": "sub-whatsapp-send-templates",
+      "application": "dotmac_sub",
+      "connector_key": "whatsapp",
+      "capabilities": [
+        "messaging.send.v1",
+        "messaging.templates.read.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub communications owner + Integrator WhatsApp transport",
+      "disposition_basis": "The first cutover explicitly retains send/templates; continuing provider I/O still migrates before shared-plane retirement",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-nextcloud-talk",
+      "application": "dotmac_sub",
+      "connector_key": "nextcloud.talk",
+      "capabilities": [
+        "collaboration.message.send.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub staff collaboration owner + Integrator transport",
+      "disposition_basis": "Continuing external collaboration delivery belongs behind an Integrator plugin",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-meta-social",
+      "application": "dotmac_sub",
+      "connector_key": "meta.social",
+      "capabilities": [
+        "messaging.send.v1",
+        "messaging.receive.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 2,
+      "owner": "Sub communications observation owner + Integrator Meta transport",
+      "disposition_basis": "Continuing Meta messaging uses the same provider-neutral Sub owner and an Integrator connector",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-erp",
+      "application": "dotmac_sub",
+      "connector_key": "dotmac.erp",
+      "capabilities": [
+        "erp.outbox.deliver.v1",
+        "erp.status.read.v1",
+        "erp.inventory.read.v1",
+        "erp.operational_context.sync.v1",
+        "erp.regulatory.read.v1",
+        "workforce.attendance.read.v1",
+        "workforce.attendance.punch.v1",
+        "erp.material_status.webhook.v1"
+      ],
+      "disposition": "migrate",
+      "programme_required": false,
+      "financial": false,
+      "cutover_wave": 3,
+      "owner": "Sub domain owners + ERP product ports + Integrator transport",
+      "disposition_basis": "ERP remains an independent application; every continuing cross-app capability migrates through typed ports",
+      "packet": {
+        "connector_distribution": {
+          "status": "missing",
+          "evidence": []
+        },
+        "product_port": {
+          "status": "missing",
+          "evidence": []
+        },
+        "descriptor": {
+          "status": "missing",
+          "evidence": []
+        },
+        "reconciler": {
+          "status": "missing",
+          "evidence": []
+        },
+        "secret_mapping": {
+          "status": "missing",
+          "evidence": []
+        },
+        "mirror_evidence": {
+          "status": "missing",
+          "evidence": []
+        },
+        "rollback_plan": {
+          "status": "missing",
+          "evidence": []
+        },
+        "retirement_gate": {
+          "status": "missing",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "id": "sub-paystack",
+      "application": "dotmac_sub",
+      "connector_key": "paystack",
+      "capabilities": [
+        "payments.intent.v1",
+        "payments.webhook.v1",
+        "payments.reconcile.v1",
+        "payments.refund.v1"
+      ],
+      "disposition": "retain-temporarily",
+      "programme_required": false,
+      "financial": true,
+      "cutover_wave": 4,
+      "owner": "Sub financial payment owners",
+      "disposition_basis": "Billing/payment migration is deliberately deferred and may not be absorbed by a messaging cutover",
+      "retain_until_gate": "Accepted payment-connector adoption plan, Finance approval, and financial shadow/cutover gates"
+    },
+    {
+      "id": "sub-flutterwave",
+      "application": "dotmac_sub",
+      "connector_key": "flutterwave",
+      "capabilities": [
+        "payments.intent.v1",
+        "payments.webhook.v1",
+        "payments.reconcile.v1",
+        "payments.refund.v1"
+      ],
+      "disposition": "retain-temporarily",
+      "programme_required": false,
+      "financial": true,
+      "cutover_wave": 4,
+      "owner": "Sub financial payment owners",
+      "disposition_basis": "Billing/payment migration is deliberately deferred and may not be absorbed by a messaging cutover",
+      "retain_until_gate": "Accepted payment-connector adoption plan, Finance approval, and financial shadow/cutover gates"
+    }
+  ],
+  "catalogue_only": [
+    {
+      "connector_key": "3cx",
+      "disposition": "retire",
+      "capabilities": [],
+      "owner": "Sub integration catalogue",
+      "disposition_basis": "Catalogue-only declaration with no runtime or capability; delete rather than manufacture an Integrator plugin"
+    },
+    {
+      "connector_key": "freepbx",
+      "disposition": "retire",
+      "capabilities": [],
+      "owner": "Sub integration catalogue",
+      "disposition_basis": "Catalogue-only declaration with no runtime or capability; delete rather than manufacture an Integrator plugin"
+    }
+  ]
+}

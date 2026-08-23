@@ -32,6 +32,7 @@ jobs:
             migration-gate,
             ui-check,
             module-catalog-check,
+            integrator-adoption-check,
             format-check,
           ]
     steps:

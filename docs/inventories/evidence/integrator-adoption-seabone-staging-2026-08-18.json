@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "source": {
+    "application": "dotmac_sub",
+    "environment": "staging",
+    "server_name": "dotmac-sub-staging",
+    "host_alias": "seabone",
+    "database_name": "dotmac_sub",
+    "captured_at": "2026-08-18T06:39:35Z",
+    "source_revision": "6c9f5215c1dd71e56f4fe0e9d629f4710ad27b46",
+    "source_tree": "ef48463ab29b16db04edea10336ebab41e62d29f",
+    "image_digest": "sha256:30a16b93b2c8f833c27f71c2e934995796cf2d68d6af7d3d6f5ff1d4448496c0",
+    "build_run": "32100089810",
+    "database_head": "541_staff_session_party_ratchet",
+    "capture_method": "read-only aggregate SQL; no configuration, payload, header, consequence, credential, or secret-reference values selected"
+  },
+  "coverage": {
+    "integration_tables": true,
+    "provider_clients": false,
+    "provider_credentials": false,
+    "webhook_verification": false,
+    "connector_scheduling": false,
+    "checkpoints": true,
+    "delivery_retries": false
+  },
+  "bindings": [
+    {
+      "connector_key": "nextcloud.talk",
+      "connector_version": "1.0.0",
+      "environment": "sandbox",
+      "installation_state": "enabled",
+      "capability_id": "collaboration.message.send.v1",
+      "binding_state": "enabled",
+      "count": 1
+    }
+  ],
+  "shared_table_counts": {
+    "integration_installations": 1,
+    "integration_config_revisions": 1,
+    "integration_capability_bindings": 1,
+    "integration_checkpoints": 0,
+    "integration_event_subscriptions": 0,
+    "integration_deliveries": 0,
+    "integration_inbox": 0
+  },
+  "legacy_surfaces": [],
+  "safety_observations": {
+    "celery_beat_present": false,
+    "billing_worker_present": true,
+    "billing_non_interference_proven": false,
+    "interpretation": "Useful staging topology evidence only. It is not production-derived integration usage and cannot authorize a cutover or shared-plane retirement."
+  }
+}
+

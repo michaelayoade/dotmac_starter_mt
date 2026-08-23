@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "source": {
+    "application": "dotmac_academy_app",
+    "repository": "michaelayoade/dotmac_academy_app",
+    "revision": "a5e25e4e829350e503e66a03d73739529ba7da7f",
+    "captured_at": "2026-08-19T06:31:28.101916Z",
+    "method": "Current origin/main source map, the ADR-0024 AST ratchet, and a complete product-owned exact-image Seabone staging census; production use remains unmeasured"
+  },
+  "ratchet_classified_paths": [
+    "app/config.py",
+    "app/services/erp_assessment_sync.py",
+    "app/services/erp_sync.py",
+    "app/services/settings_store.py",
+    "app/web/labs.py"
+  ],
+  "surfaces": [
+    {
+      "id": "academy-erp-course-completion",
+      "system": "dotmac_erp",
+      "direction": "outbound",
+      "authority_class": "internal-app-transport",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-api",
+      "production_usage": "unmeasured",
+      "owner": "Academy training completion + ERP workforce domain",
+      "next_gate": "Production capture must measure the pending and delivered populations; the versioned Academy-to-ERP application API remains the transport unless an authority decision replaces it",
+      "source_paths": [
+        "app/config.py",
+        "app/models/completion.py",
+        "app/services/erp_sync.py"
+      ],
+      "test_paths": [
+        "tests/services/test_erp_sync.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-erp-assessment-registration",
+      "system": "dotmac_erp",
+      "direction": "inbound",
+      "authority_class": "internal-app-transport",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-api",
+      "production_usage": "unmeasured",
+      "owner": "Academy admissions",
+      "next_gate": "Production capture must count accepted ERP registrations; Academy admissions remains the direct typed application port",
+      "source_paths": [
+        "app/api/erp_applicant_assessments.py",
+        "app/services/erp_applicant_assessments.py",
+        "app/services/erp_integration_security.py"
+      ],
+      "test_paths": [
+        "tests/test_erp_applicant_assessment_api.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-erp-assessment-result",
+      "system": "dotmac_erp",
+      "direction": "outbound",
+      "authority_class": "internal-app-transport",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-api",
+      "production_usage": "unmeasured",
+      "owner": "Academy assessment result + ERP recruitment domain",
+      "next_gate": "Production capture must measure pending and delivered result observations; the versioned Academy-to-ERP application API remains the transport",
+      "source_paths": [
+        "app/models/admissions.py",
+        "app/services/erp_assessment_sync.py",
+        "app/services/erp_sync.py"
+      ],
+      "test_paths": [
+        "tests/services/test_erp_assessment_sync.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-smtp-delivery",
+      "system": "smtp",
+      "direction": "outbound",
+      "authority_class": "external-transport",
+      "financial": false,
+      "capability": {
+        "status": "unassigned",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-temporarily",
+      "exit_gate": "An owned email-delivery capability, Integrator connector distribution, secret mapping, shadow evidence and rollback packet are ready; Academy's SMTP client and credential settings then retire together",
+      "production_usage": "unmeasured",
+      "owner": "Academy notification decisions + Integrator transport",
+      "next_gate": "Declare the provider-neutral email-delivery capability and capture production SMTP use without credential values",
+      "source_paths": [
+        "app/config.py",
+        "app/services/email.py",
+        "app/services/settings_store.py"
+      ],
+      "test_paths": [
+        "tests/services/test_email.py",
+        "tests/services/test_email_outbox.py",
+        "tests/web/test_settings.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-lab-console-proxy",
+      "system": "academy-lab-host",
+      "direction": "interactive",
+      "authority_class": "product-local-infrastructure",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-local",
+      "production_usage": "unmeasured",
+      "owner": "Academy lab runtime",
+      "next_gate": "Keep the authenticated lab-session adapter local unless a separate architecture decision assigns a remote owner",
+      "source_paths": [
+        "app/web/labs.py"
+      ],
+      "test_paths": [
+        "tests/web/test_console_ws.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-glitchtip-error-tracking",
+      "system": "glitchtip-sentry-protocol",
+      "direction": "outbound",
+      "authority_class": "product-local-operational",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-local",
+      "production_usage": "unmeasured",
+      "owner": "Academy runtime observability",
+      "next_gate": "Keep exception instrumentation product-local; production capture must still record configured or absent without emitting its DSN",
+      "source_paths": [
+        "app/config.py",
+        "app/error_tracking.py"
+      ],
+      "test_paths": [
+        "tests/test_error_tracking.py"
+      ],
+      "test_status": "qualifying"
+    },
+    {
+      "id": "academy-prometheus-metrics",
+      "system": "prometheus",
+      "direction": "inbound",
+      "authority_class": "product-local-operational",
+      "financial": false,
+      "capability": {
+        "status": "not-applicable",
+        "id": null,
+        "owner": null
+      },
+      "disposition": "retain-product-local",
+      "production_usage": "unmeasured",
+      "owner": "Academy runtime observability",
+      "next_gate": "Keep the authenticated product metrics endpoint local; production capture must record configured or absent without emitting its bearer token",
+      "source_paths": [
+        "app/config.py",
+        "app/operational.py"
+      ],
+      "test_paths": [
+        "tests/test_metrics.py"
+      ],
+      "test_status": "qualifying"
+    }
+  ]
+}

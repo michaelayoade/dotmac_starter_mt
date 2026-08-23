@@ -88,6 +88,21 @@ def test_the_vendor_control_plane_has_no_direct_connector_surface() -> None:
     )
 
 
+def test_backoffice_is_a_measured_zero_product_not_an_exemption() -> None:
+    """Backoffice is a continuing application, not connector infrastructure.
+
+    Its current zero is the cheapest moment to put it under the ratchet.  An
+    out-of-scope entry would let the replacement ERP grow product-local
+    provider machinery while the migration programme claimed the opposite.
+    """
+    sweep = _sweep()
+    assert "dotmac_backoffice" in sweep.REPOS
+    assert "dotmac_backoffice" not in sweep.OUT_OF_SCOPE_REASONS
+    assert _baseline()["counts"]["dotmac_backoffice"] == dict.fromkeys(
+        sweep.CATEGORIES, 0
+    )
+
+
 # ── The ratchet ─────────────────────────────────────────────────────────────
 
 
@@ -306,6 +321,31 @@ def test_an_unclassified_fleet_distribution_is_named(
     measured, _ = sweep.measure(tmp_path)
     assert measured["coverage"]["repos_unclassified"] == ["dotmac_something_new"]
     assert "UNCLASSIFIED" in sweep.coverage_report(measured)
+
+
+def test_an_uninspectable_fleet_entry_is_named(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SENSITIVITY: unreadable siblings cannot disappear as non-repositories."""
+    sweep = _sweep()
+    (tmp_path / "dotmac_erp" / "app").mkdir(parents=True)
+    inaccessible = tmp_path / "unreadable-mount"
+    inaccessible.mkdir()
+    original_is_file = pathlib.Path.is_file
+
+    def refuse_entry(path: pathlib.Path) -> bool:
+        if path.parent == inaccessible:
+            raise PermissionError("test refusal")
+        return original_is_file(path)
+
+    monkeypatch.setattr(pathlib.Path, "is_file", refuse_entry)
+
+    measured, _ = sweep.measure(tmp_path)
+    assert measured["coverage"]["repos_uninspectable"] == [
+        "unreadable-mount: PermissionError"
+    ]
+    assert "UNINSPECTABLE" in sweep.coverage_report(measured)
 
 
 def test_a_classified_repository_is_not_reported_as_unclassified(
