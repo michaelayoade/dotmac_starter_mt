@@ -94,7 +94,10 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id", "source_run_id"],
-            [f"{_SCHEMA}.{_RUNS}.tenant_id", f"{_SCHEMA}.{_RUNS}.id"],
+            [
+                "mod_imports.import_runs.tenant_id",
+                "mod_imports.import_runs.id",
+            ],
             ondelete="RESTRICT",
             name="fk_import_runs_source_run",
         ),
@@ -146,7 +149,10 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id", "run_id"],
-            [f"{_SCHEMA}.{_RUNS}.tenant_id", f"{_SCHEMA}.{_RUNS}.id"],
+            [
+                "mod_imports.import_runs.tenant_id",
+                "mod_imports.import_runs.id",
+            ],
             ondelete="CASCADE",
             name="fk_import_run_rows_run",
         ),
@@ -199,7 +205,10 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id", "run_id"],
-            [f"{_SCHEMA}.{_RUNS}.tenant_id", f"{_SCHEMA}.{_RUNS}.id"],
+            [
+                "mod_imports.import_runs.tenant_id",
+                "mod_imports.import_runs.id",
+            ],
             ondelete="CASCADE",
             name="fk_import_partitions_run",
         ),

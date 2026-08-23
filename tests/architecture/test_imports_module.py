@@ -21,6 +21,7 @@ from dotmac_imports.models import (
     ImportRun,
     ImportRunRow,
 )
+from dotmac_kernel.migrations.gate import scan_revision_file
 from dotmac_kernel.namespaces import (
     IMPORTS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
@@ -264,6 +265,31 @@ def test_the_migration_names_its_schema_in_every_raw_statement() -> None:
             "composed migration gate can read the schema it names"
         )
         assert "mod_imports" in statement.value
+
+
+def test_the_migration_gate_can_resolve_every_inline_fk_referent() -> None:
+    """A qualified f-string is valid SQL but opaque to the static gate."""
+    record = scan_revision_file(MIGRATION, MIGRATION.parent)
+    assert record is not None
+    assert "ForeignKeyConstraint(referent)" not in record.unqualified_ops
+
+
+def test_the_inline_fk_guard_is_sensitive(tmp_path: pathlib.Path) -> None:
+    planted = tmp_path / "im_0001_bad.py"
+    planted.write_text(
+        "revision = 'im_0001_bad'\n"
+        "down_revision = None\n"
+        "branch_labels = ('imports',)\n"
+        "depends_on = None\n"
+        "def upgrade():\n"
+        "    op.create_table('rows', "
+        "sa.ForeignKeyConstraint(['run_id'], ['import_runs.id']), "
+        "schema='mod_imports')\n",
+        encoding="utf-8",
+    )
+    record = scan_revision_file(planted, tmp_path)
+    assert record is not None
+    assert "ForeignKeyConstraint(referent)" in record.unqualified_ops
 
 
 # ── allocation and composition ──────────────────────────────────────────────
