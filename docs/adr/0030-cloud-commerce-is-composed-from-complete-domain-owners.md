@@ -305,6 +305,18 @@ cutover, and because a module inherits a defect it was never told about.
     consequence → restoration. Test partial fulfillment and provider-success /
     callback-loss before external customers.
 
+**Implementation status note — 2026-08-19.** This is progress evidence, not a
+rewrite of the build-order decision. Numbering and Durable Timers are released.
+Billing, Orders, Subscriptions and Collections now have committed
+`audit-complete` package implementations on the coordinated module train, but
+none has a contract consumer and package construction has therefore not been
+mistaken for adoption. Domains is active uncommitted work in a separate
+worktree. Hosting, Fulfillment and Document Rendering still have source audits
+only and remain the unstarted package-construction rows in this sequence,
+subject to each owner's existing authorization gates. The exact branch/ref
+evidence and next gates live in
+[`cloud-module-implementation-status.md`](../inventories/cloud-module-implementation-status.md).
+
 This order does not mean one giant release. Each numbered owner ends at its own
 completion gate and can be reviewed, versioned and adopted independently.
 
