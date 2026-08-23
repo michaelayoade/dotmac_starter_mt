@@ -152,9 +152,14 @@ def _scope_shape_violations(source: str) -> set[str]:
                 violations.add("nullable_tenant_id")
         if isinstance(node, ast.Name) and node.id == "scope_kind":
             violations.add("scope_kind")
-        if isinstance(node, ast.Name) and "sentinel_tenant" in node.id:
-            violations.add("sentinel_tenant")
-        if isinstance(node, ast.arg) and "sentinel_tenant" in node.arg:
+        identifier = (
+            node.id
+            if isinstance(node, ast.Name)
+            else node.arg
+            if isinstance(node, ast.arg)
+            else ""
+        )
+        if "sentinel_tenant" in identifier:
             violations.add("sentinel_tenant")
     return violations
 
@@ -316,6 +321,7 @@ def test_commercial_inputs_have_no_implicit_defaults() -> None:
         BillingCadence,
         ContractLineInput,
         ExactAmount,
+        PublishOfferVersionCommand,
         RecordSubscriptionContractVersionCommand,
     )
 
@@ -328,6 +334,10 @@ def test_commercial_inputs_have_no_implicit_defaults() -> None:
     for value_type, names in (
         (ExactAmount, {"amount", "currency", "scale"}),
         (ContractLineInput, {"product_link_ref", "unit_price", "quantity"}),
+        (
+            PublishOfferVersionCommand,
+            {"charge_model_code", "pricing_mode", "prices"},
+        ),
         (
             RecordSubscriptionContractVersionCommand,
             {"currency", "cadence", "source_code"},
@@ -400,14 +410,14 @@ def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
 
     assert dossier["source_repositories"] == [
-        "dotmac_sub",
         "dotmac_erp",
+        "dotmac_sub",
         "dotmac_vendor_control_plane",
     ]
     assert dossier["source_revisions"] == [
-        "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
-        "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
-        "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
+        "dotmac_erp:0f4b1698ddbf",
+        "dotmac_sub:943bc59f8e4ca0849c7de578bc9dbc17c57b116f",
+        "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
     ]
-    assert len(dossier["source_paths"]) >= 11
+    assert len(dossier["source_paths"]) >= 14
     assert len(dossier["preserved_tests"]) >= 14

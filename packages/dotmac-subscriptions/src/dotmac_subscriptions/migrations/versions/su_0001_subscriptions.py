@@ -74,6 +74,8 @@ def _offer_version_columns() -> list[sa.Column[Any]]:
     return [
         sa.Column("offer_id", sa.Uuid(), nullable=False),
         sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column("charge_model_code", sa.String(120), nullable=False),
+        sa.Column("pricing_mode", sa.String(24), nullable=False),
         sa.Column("state", sa.String(24), nullable=False),
         sa.Column("effective_from", sa.DateTime(timezone=True), nullable=False),
         sa.Column("effective_until", sa.DateTime(timezone=True), nullable=True),
@@ -336,6 +338,10 @@ def _upgrade_tenant() -> None:
             name="ck_offer_versions_state",
         ),
         sa.CheckConstraint(
+            "pricing_mode IN ('catalog_price', 'contract_price')",
+            name="ck_offer_versions_pricing_mode",
+        ),
+        sa.CheckConstraint(
             "effective_until IS NULL OR effective_until > effective_from",
             name="ck_offer_versions_interval",
         ),
@@ -363,7 +369,7 @@ def _upgrade_tenant() -> None:
             name="uq_offer_version_prices_key",
         ),
         sa.CheckConstraint(
-            "amount >= 0 AND quantity > 0", name="ck_offer_version_prices_amounts"
+            "amount > 0 AND quantity > 0", name="ck_offer_version_prices_amounts"
         ),
         sa.CheckConstraint("scale >= 0 AND scale <= 6", name="ck_offer_prices_scale"),
         schema=_SCHEMA,
@@ -457,7 +463,7 @@ def _upgrade_tenant() -> None:
             name="uq_contract_lines_component",
         ),
         sa.CheckConstraint(
-            "quantity > 0 AND unit_price >= 0", name="ck_contract_lines_amounts"
+            "quantity > 0 AND unit_price > 0", name="ck_contract_lines_amounts"
         ),
         sa.CheckConstraint("scale >= 0 AND scale <= 6", name="ck_contract_lines_scale"),
         sa.CheckConstraint(
@@ -640,6 +646,10 @@ def _upgrade_platform() -> None:
             name="ck_platform_offer_versions_state",
         ),
         sa.CheckConstraint(
+            "pricing_mode IN ('catalog_price', 'contract_price')",
+            name="ck_platform_offer_versions_pricing_mode",
+        ),
+        sa.CheckConstraint(
             "effective_until IS NULL OR effective_until > effective_from",
             name="ck_platform_offer_versions_interval",
         ),
@@ -659,7 +669,7 @@ def _upgrade_platform() -> None:
             "offer_version_id", "price_key", name="uq_platform_offer_prices_key"
         ),
         sa.CheckConstraint(
-            "amount >= 0 AND quantity > 0", name="ck_platform_offer_prices_amounts"
+            "amount > 0 AND quantity > 0", name="ck_platform_offer_prices_amounts"
         ),
         sa.CheckConstraint(
             "scale >= 0 AND scale <= 6", name="ck_platform_offer_prices_scale"
@@ -729,7 +739,7 @@ def _upgrade_platform() -> None:
             name="uq_platform_contract_lines_component",
         ),
         sa.CheckConstraint(
-            "quantity > 0 AND unit_price >= 0",
+            "quantity > 0 AND unit_price > 0",
             name="ck_platform_contract_lines_amounts",
         ),
         sa.CheckConstraint(

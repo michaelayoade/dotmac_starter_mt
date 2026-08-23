@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
@@ -27,12 +28,21 @@ class OfferPriceInput:
     quantity: Decimal
 
 
+class OfferPricingMode(StrEnum):
+    """Whether catalogue price evidence is mandatory or contract-owned."""
+
+    catalog_price = "catalog_price"
+    contract_price = "contract_price"
+
+
 @dataclass(frozen=True, slots=True)
 class PublishOfferVersionCommand:
     scope: Scope
     offer_id: UUID | None
     offer_code: str
     offer_name: str
+    charge_model_code: str
+    pricing_mode: OfferPricingMode
     version: int
     prices: tuple[OfferPriceInput, ...]
     effective_from: datetime
@@ -185,6 +195,7 @@ __all__ = [
     "GenerateRecurringChargeCommand",
     "OccurrenceResult",
     "OfferPriceInput",
+    "OfferPricingMode",
     "PublishOfferVersionCommand",
     "PublishOfferVersionResult",
     "RecordSubscriptionContractVersionCommand",
