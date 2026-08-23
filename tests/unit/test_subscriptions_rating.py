@@ -82,6 +82,19 @@ def test_rating_is_deterministic_for_the_same_recorded_inputs() -> None:
     assert replay == first
 
 
+def test_rating_refuses_zero_contract_line_price() -> None:
+    with pytest.raises(SubscriptionDataError, match="strictly positive"):
+        RatingInput(
+            unit_price=ExactAmount(Decimal("0.00"), "EUR", 2),
+            quantity=Decimal("1"),
+            cadence=_cadence(),
+            period=PERIOD,
+            coverage=PERIOD,
+            rating_policy_version=FIXED_RATING_POLICY_VERSION,
+            offer_version_ref="offer-version:1",
+        )
+
+
 def test_unknown_rating_policy_has_no_implicit_replay_implementation() -> None:
     with pytest.raises(SubscriptionDataError, match="no installed replay"):
         rate_recurring_line(

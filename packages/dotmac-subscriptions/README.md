@@ -31,7 +31,7 @@ The extraction dossier is [EXTRACTION.toml](EXTRACTION.toml); source and parity
 evidence remain in `docs/inventories/subscriptions-sources.md` and
 `docs/inventories/subscriptions-extraction-dossier.md`.
 
-The first release candidate is `0.1.0a1` and requires
+The current release candidate is `0.1.0a2` and requires
 `dotmac-kernel>=0.1.0a94` plus `alembic>=1.13`. Kernel `a89` supplies the
 subscriptions lineage allocation; `a94` is the actual minimum because it adds
 the manifest-owned `charge_models` and `obligation_sources` declarations that

@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from dotmac_kernel.cache import Scope, TenantScope, scope_segment
-from sqlalchemy import Select, select
+from dotmac_kernel.query import apply_pagination, escape_like
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -40,6 +41,7 @@ from dotmac_subscriptions.commands import (
     EndContractVersionResult,
     GenerateRecurringChargeCommand,
     OccurrenceResult,
+    OfferPricingMode,
     PublishOfferVersionCommand,
     PublishOfferVersionResult,
     RecordSubscriptionContractVersionCommand,
@@ -151,6 +153,8 @@ class OfferVersionSnapshot:
     offer_id: UUID
     offer_version_id: UUID
     version: int
+    charge_model_code: str
+    pricing_mode: OfferPricingMode
     state: str
     effective_from: datetime
     effective_until: datetime | None
@@ -158,6 +162,47 @@ class OfferVersionSnapshot:
     source_id: UUID
     source_version: int
     prices: tuple[tuple[str, str, ExactAmount, Decimal], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogPrice:
+    """One exact price row on an immutable effective offer version."""
+
+    price_key: str
+    charge_model_code: str
+    unit_price: ExactAmount
+    quantity: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogItem:
+    """One effective recurring offer with its immutable price snapshot."""
+
+    offer_id: UUID
+    code: str
+    name: str
+    description: str | None
+    offer_version_id: UUID
+    version: int
+    charge_model_code: str
+    pricing_mode: OfferPricingMode
+    effective_from: datetime
+    effective_until: datetime | None
+    source_code: str
+    source_id: UUID
+    source_version: int
+    prices: tuple[OfferCatalogPrice, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogPage:
+    """A bounded, deterministic page of effective recurring offers."""
+
+    items: tuple[OfferCatalogItem, ...]
+    total: int
+    limit: int
+    offset: int
+    effective_at: datetime
 
 
 def _models(scope: Scope) -> _PlaneModels:
@@ -254,6 +299,8 @@ def _offer_digest(command: PublishOfferVersionCommand) -> str:
             "offer_id": str(command.offer_id) if command.offer_id else None,
             "offer_code": command.offer_code,
             "offer_name": command.offer_name,
+            "charge_model_code": command.charge_model_code,
+            "pricing_mode": command.pricing_mode.value,
             "version": command.version,
             "prices": [
                 {
@@ -345,18 +392,29 @@ def publish_offer_version(
             raise SubscriptionDataError(
                 "offers.invalid_interval", "Offer effective interval is empty."
             )
-    if command.version < 1 or command.source_version < 1 or not command.prices:
+    if command.version < 1 or command.source_version < 1:
         raise SubscriptionDataError(
             "offers.incomplete_version",
-            "Positive source/version values and at least one price are required.",
+            "Positive source and offer version values are required.",
         )
     if not command.offer_code or not command.offer_name:
         raise SubscriptionDataError(
             "offers.missing_identity", "Offer code and name are required."
         )
+    registry.require_charge_model(command.charge_model_code)
+    if command.pricing_mode is OfferPricingMode.catalog_price and not command.prices:
+        raise SubscriptionDataError(
+            "offers.catalog_price_required",
+            "A catalog-priced offer version requires a positive reference price.",
+        )
     price_keys: set[str] = set()
     for price in command.prices:
         registry.require_charge_model(price.charge_model_code)
+        if price.charge_model_code != command.charge_model_code:
+            raise SubscriptionDataError(
+                "offers.mixed_charge_model",
+                "Reference prices must use the offer version's charge model.",
+            )
         if not price.price_key or price.price_key in price_keys:
             raise SubscriptionDataError(
                 "offers.duplicate_price_key", "Price keys must be present and unique."
@@ -365,9 +423,10 @@ def publish_offer_version(
             raise SubscriptionDataError(
                 "offers.invalid_quantity", "Price quantity must be an exact Decimal."
             )
-        if price.quantity <= 0 or price.unit_price.amount < 0:
+        if price.quantity <= 0 or price.unit_price.amount <= 0:
             raise SubscriptionDataError(
-                "offers.invalid_price", "Price and quantity fall outside their range."
+                "offers.invalid_price",
+                "Reference price and quantity must be strictly positive.",
             )
         price_keys.add(price.price_key)
     registry.require_obligation_source(command.source_code)
@@ -439,6 +498,8 @@ def publish_offer_version(
             id=version_id,
             offer_id=offer.id,
             version=command.version,
+            charge_model_code=command.charge_model_code,
+            pricing_mode=command.pricing_mode.value,
             state="published",
             effective_from=command.effective_from.astimezone(UTC),
             effective_until=(
@@ -706,9 +767,10 @@ def _validate_line(
         raise SubscriptionDataError(
             "contracts.invalid_quantity", "Line quantity must be an exact Decimal."
         )
-    if line.quantity <= 0 or line.unit_price.amount < 0:
+    if line.quantity <= 0 or line.unit_price.amount <= 0:
         raise SubscriptionDataError(
-            "contracts.invalid_line", "Line quantity and unit price are invalid."
+            "contracts.invalid_line",
+            "Contract-line quantity and unit price must be strictly positive.",
         )
     if line.unit_price.currency != currency:
         raise SubscriptionDataError(
@@ -923,26 +985,37 @@ def record_contract_version(
             else first_period.ends_at
         )
         for line_input in command.lines:
-            offer_version = session.execute(
-                _scoped(
-                    select(plane.offer_version).where(
-                        plane.offer_version.id == line_input.offer_version_id,
-                        plane.offer_version.version == line_input.offer_version,
-                        plane.offer_version.state == "published",
-                        plane.offer_version.effective_from <= command.starts_at,
-                        (
-                            plane.offer_version.effective_until.is_(None)
-                            | (plane.offer_version.effective_until > command.starts_at)
+            offer_version = cast(
+                OfferVersionRow | None,
+                session.execute(
+                    _scoped(
+                        select(plane.offer_version).where(
+                            plane.offer_version.id == line_input.offer_version_id,
+                            plane.offer_version.version == line_input.offer_version,
+                            plane.offer_version.state == "published",
+                            plane.offer_version.effective_from <= command.starts_at,
+                            (
+                                plane.offer_version.effective_until.is_(None)
+                                | (
+                                    plane.offer_version.effective_until
+                                    > command.starts_at
+                                )
+                            ),
                         ),
-                    ),
-                    command.scope,
-                    plane.offer_version,
-                )
-            ).scalar_one_or_none()
+                        command.scope,
+                        plane.offer_version,
+                    )
+                ).scalar_one_or_none(),
+            )
             if offer_version is None:
                 raise SubscriptionDataError(
                     "contracts.offer_version_unavailable",
                     "Every line must reference a published immutable offer version.",
+                )
+            if offer_version.charge_model_code != line_input.charge_model_code:
+                raise SubscriptionDataError(
+                    "contracts.offer_charge_model_mismatch",
+                    "Contract line and offer version must use one charge model.",
                 )
             line_key = line_input.contract_line_key or uuid4()
             line_keys.append(line_key)
@@ -1211,6 +1284,8 @@ def offer_version_snapshot(
         offer_id=version.offer_id,
         offer_version_id=version.id,
         version=version.version,
+        charge_model_code=version.charge_model_code,
+        pricing_mode=OfferPricingMode(version.pricing_mode),
         state=version.state,
         effective_from=_stored_utc(version.effective_from),
         effective_until=(
@@ -1230,6 +1305,172 @@ def offer_version_snapshot(
             )
             for price in prices
         ),
+    )
+
+
+def _catalog_search_pattern(search: str | None) -> str | None:
+    if search is None:
+        return None
+    normalized = search.strip()
+    if len(normalized) > 200:
+        raise SubscriptionDataError(
+            "offers.search_too_long",
+            "Offer catalog search is limited to 200 characters.",
+        )
+    if not normalized:
+        return None
+    escaped = escape_like(normalized.lower())
+    return f"%{escaped}%"
+
+
+def list_effective_offers(
+    db: Session,
+    *,
+    scope: Scope,
+    effective_at: datetime,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> OfferCatalogPage:
+    """List one current immutable version per stable recurring offer.
+
+    This is an owner read, not a presentation decision. It returns exact money
+    and source provenance; a product adapter decides formatting, grouping,
+    eligibility, availability, and actions before handing display-only values
+    to a UI component.
+    """
+    _require_aware(effective_at, "effective_at")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise SubscriptionDataError(
+            "offers.invalid_limit", "Offer catalog limit must be between 1 and 100."
+        )
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise SubscriptionDataError(
+            "offers.invalid_offset", "Offer catalog offset cannot be negative."
+        )
+    pattern = _catalog_search_pattern(search)
+    plane = _models(scope)
+
+    ranked_versions = _scoped(
+        select(
+            plane.offer_version.id.label("offer_version_id"),
+            func.row_number()
+            .over(
+                partition_by=plane.offer_version.offer_id,
+                order_by=(
+                    plane.offer_version.effective_from.desc(),
+                    plane.offer_version.version.desc(),
+                    plane.offer_version.id.desc(),
+                ),
+            )
+            .label("effective_rank"),
+        ).where(
+            plane.offer_version.state == "published",
+            plane.offer_version.effective_from <= effective_at,
+            (
+                plane.offer_version.effective_until.is_(None)
+                | (plane.offer_version.effective_until > effective_at)
+            ),
+        ),
+        scope,
+        plane.offer_version,
+    ).subquery()
+
+    statement = (
+        select(plane.offer, plane.offer_version)
+        .join(
+            plane.offer_version,
+            plane.offer_version.offer_id == plane.offer.id,
+        )
+        .join(
+            ranked_versions,
+            (ranked_versions.c.offer_version_id == plane.offer_version.id)
+            & (ranked_versions.c.effective_rank == 1),
+        )
+        .where(plane.offer.status == "published")
+    )
+    statement = _scoped(statement, scope, plane.offer)
+    statement = _scoped(statement, scope, plane.offer_version)
+    if pattern is not None:
+        statement = statement.where(
+            or_(
+                func.lower(plane.offer.code).like(pattern, escape="\\"),
+                func.lower(plane.offer.name).like(pattern, escape="\\"),
+                func.lower(plane.offer.description).like(pattern, escape="\\"),
+            )
+        )
+
+    identities = statement.with_only_columns(plane.offer.id).order_by(None).subquery()
+    total = int(db.execute(select(func.count()).select_from(identities)).scalar_one())
+    rows = db.execute(
+        apply_pagination(
+            statement.order_by(
+                func.lower(plane.offer.name),
+                func.lower(plane.offer.code),
+                plane.offer.id,
+            ),
+            limit=limit,
+            offset=offset,
+        )
+    ).all()
+
+    version_ids = [row[1].id for row in rows]
+    prices_by_version: dict[UUID, list[OfferCatalogPrice]] = {
+        version_id: [] for version_id in version_ids
+    }
+    if version_ids:
+        price_statement = select(plane.price).where(
+            plane.price.offer_version_id.in_(version_ids)
+        )
+        price_statement = _scoped(price_statement, scope, plane.price)
+        prices = cast(
+            Iterable[PriceRow],
+            db.execute(
+                price_statement.order_by(
+                    plane.price.offer_version_id,
+                    plane.price.price_key,
+                )
+            ).scalars(),
+        )
+        for price in prices:
+            prices_by_version[price.offer_version_id].append(
+                OfferCatalogPrice(
+                    price_key=price.price_key,
+                    charge_model_code=price.charge_model_code,
+                    unit_price=ExactAmount(price.amount, price.currency, price.scale),
+                    quantity=price.quantity,
+                )
+            )
+
+    items = tuple(
+        OfferCatalogItem(
+            offer_id=offer.id,
+            code=offer.code,
+            name=offer.name,
+            description=offer.description,
+            offer_version_id=version.id,
+            version=version.version,
+            charge_model_code=version.charge_model_code,
+            pricing_mode=OfferPricingMode(version.pricing_mode),
+            effective_from=_stored_utc(version.effective_from),
+            effective_until=(
+                _stored_utc(version.effective_until)
+                if version.effective_until is not None
+                else None
+            ),
+            source_code=version.source_code,
+            source_id=version.source_id,
+            source_version=version.source_version,
+            prices=tuple(prices_by_version[version.id]),
+        )
+        for offer, version in rows
+    )
+    return OfferCatalogPage(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        effective_at=effective_at.astimezone(UTC),
     )
 
 
@@ -1590,6 +1831,9 @@ def acknowledge_output(
 
 
 __all__ = [
+    "OfferCatalogItem",
+    "OfferCatalogPage",
+    "OfferCatalogPrice",
     "OfferVersionSnapshot",
     "acknowledge_output",
     "cadence_of",
@@ -1597,6 +1841,7 @@ __all__ = [
     "end_contract_version",
     "entitlement_projections_for_version",
     "generate_recurring_charge",
+    "list_effective_offers",
     "occurrences_for_contract",
     "offer_version_snapshot",
     "publish_offer_version",
