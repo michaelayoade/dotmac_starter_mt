@@ -17,6 +17,16 @@ extract anything**. ADR-0006 § "The extraction rule" and its 2026-08-08
 product-first amendment still gate every move. A capability family below is a
 *measurement bucket*, not an approved package boundary.
 
+> **Current-state addendum — 2026-08-19.** A fresh exact-revision scan at ERP
+> `0f4b1698`, CRM `c64b5aa0` and Sub `91c1ec47` still measures 149 duplicated
+> names, but Sub now has 590 tables rather than 576. The frozen baseline is not
+> rewritten because fourteen added rows first need target-owner disposition;
+> doing so blindly would legalise new monolith state. The classified drift,
+> active concurrent module work, remaining owner audits and UI ruling are in
+> [`decomposition-current-state.md`](decomposition-current-state.md). The
+> frozen snapshot below remains the ratchet until that review is accepted and
+> its changes are recorded deliberately.
+
 > **Placement, decided 2026-08-12.** `dotmac_governance` owns the programme
 > matrix and approvals. **Starter owns the reusable implementation and the
 > composition/conformance machinery** — and therefore the measurement, the

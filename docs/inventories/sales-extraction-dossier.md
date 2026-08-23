@@ -1,7 +1,7 @@
 # `dotmac-sales` extraction dossier
 
 **Status:** Source audit and contract complete; P11 met; implementation authorized
-**As of:** 2026-08-18
+**As of:** 2026-08-19
 **Owner:** Dotmac Sales domain; decision owner Michael
 **Source mode:** `product-first`
 **Qualifying source:** Sub
@@ -26,12 +26,18 @@ re-audit.
 The module owns tenant-scoped Leads, Pipelines, opportunity Stages, Quote
 authoring and lines, Quote discount evidence, Quote lifecycle through
 acceptance, accepted-snapshot immutability and
-`AcceptedQuoteHandoffV1` publication.
+`AcceptedQuoteHandoffV1` publication. The snapshot includes exact currency
+minor units, accepted price/terms/specification provenance, component taxes and
+finite fulfillment-eligibility requirement membership.
 
 The module owns the decision “this exact commercial snapshot was accepted.” It
 does not own the downstream decision “create/advance an Order,” customer-account
 conversion, project/field execution, billing, provisioning or service
 activation.
+
+Sales owns the finite requirement membership accepted with the Quote. Orders
+owns the later fulfillment-eligibility decision over explicitly addressed
+owner evidence; the assembly only translates the handoff.
 
 ### Public command surface
 

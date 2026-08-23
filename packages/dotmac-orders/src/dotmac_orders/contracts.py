@@ -194,6 +194,17 @@ class CoverageResolutionV1:
 
 
 @dataclass(frozen=True, slots=True)
+class FulfillmentEligibilityDecisionV1:
+    """Orders-owned, reasoned decision over registered owner evidence."""
+
+    eligible: bool
+    reason_code: str
+    requirement_refs: tuple[str, ...]
+    satisfied_requirement_refs: tuple[str, ...]
+    missing_requirement_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CoverageSnapshotV1:
     """Finite coverage membership and the immutable observations received."""
 
@@ -201,6 +212,7 @@ class CoverageSnapshotV1:
     obligation_refs: tuple[str, ...]
     resolutions: tuple[CoverageResolutionV1, ...]
     satisfied_at: datetime | None
+    eligibility: FulfillmentEligibilityDecisionV1
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +291,7 @@ __all__ = [
     "CancelOrderCommand",
     "CoverageResolutionV1",
     "CoverageSnapshotV1",
+    "FulfillmentEligibilityDecisionV1",
     "FulfillmentRequestV1",
     "FxSnapshotV1",
     "LineInput",

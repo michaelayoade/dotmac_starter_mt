@@ -7,6 +7,7 @@ from dotmac_orders.contracts import (
     CancelOrderCommand,
     CoverageResolutionV1,
     CoverageSnapshotV1,
+    FulfillmentEligibilityDecisionV1,
     FulfillmentRequestV1,
     FxSnapshotV1,
     LineInput,
@@ -31,6 +32,7 @@ from dotmac_orders.engine import (
     calculate_line_snapshot,
     calculate_order_totals,
     default_order_state_registry,
+    evaluate_fulfillment_eligibility,
     snapshot_fingerprint,
 )
 from dotmac_orders.errors import OrderConflict, OrderError, OrderNotFound
@@ -57,6 +59,7 @@ __all__ = [
     "CancelOrderCommand",
     "CoverageResolutionV1",
     "CoverageSnapshotV1",
+    "FulfillmentEligibilityDecisionV1",
     "FulfillmentRequestV1",
     "FxSnapshotV1",
     "LineInput",
@@ -84,6 +87,7 @@ __all__ = [
     "calculate_order_totals",
     "cancel_order",
     "default_order_state_registry",
+    "evaluate_fulfillment_eligibility",
     "get_order_snapshot",
     "get_order_timeline",
     "module",

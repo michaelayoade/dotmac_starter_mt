@@ -204,6 +204,10 @@ class Quote(Base, TimestampMixin):
             ondelete="RESTRICT",
             name="fk_sales_quotes_lead",
         ),
+        sa.CheckConstraint(
+            "currency_minor_units BETWEEN 0 AND 6",
+            name="ck_sales_quotes_currency_minor_units",
+        ),
         Index("ix_sales_quotes_tenant_status", "tenant_id", "status"),
         Index("ix_sales_quotes_tenant_lead", "tenant_id", "lead_id"),
         schema_table_args(SCHEMA),
@@ -213,14 +217,17 @@ class Quote(Base, TimestampMixin):
     lead_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    subtotal: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    currency_minor_units: Mapped[int] = mapped_column(Integer(), nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     discount_type: Mapped[str | None] = mapped_column(String(30))
     discount_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
-    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     discount_revision: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
-    tax_rate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False)
-    tax_total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    total: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    tax_total: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    total: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    fulfillment_eligibility_requirement_refs: Mapped[list[str]] = mapped_column(
+        _JSON, nullable=False
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text())
     authored_by_kind: Mapped[str] = mapped_column(String(60), nullable=False)
@@ -274,12 +281,19 @@ class QuoteLine(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    gross_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    tax_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     catalogue_ref: Mapped[str | None] = mapped_column(String(240))
-    pricing_snapshot_ref: Mapped[str | None] = mapped_column(String(240))
+    price_version_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    terms_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    terms_snapshot: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)
+    specification_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    tax_rates: Mapped[list[dict[str, object]]] = mapped_column(_JSON, nullable=False)
+    tax_components: Mapped[list[dict[str, object]]] = mapped_column(
+        _JSON, nullable=False
+    )
     quote: Mapped[Quote] = relationship(back_populates="lines")
 
 
@@ -318,7 +332,7 @@ class QuoteDiscountRevision(Base):
     action: Mapped[str] = mapped_column(String(30), nullable=False)
     discount_type: Mapped[str | None] = mapped_column(String(30))
     discount_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
-    discount_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     actor_kind: Mapped[str] = mapped_column(String(60), nullable=False)
     actor_opaque_id: Mapped[str] = mapped_column(String(200), nullable=False)

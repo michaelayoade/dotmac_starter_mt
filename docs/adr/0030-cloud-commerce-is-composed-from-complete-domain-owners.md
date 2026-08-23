@@ -481,6 +481,36 @@ is `NUMERIC(20,6)`; `Invoice` has no `amount_paid` column at all, so the
 coverage operand must be reconstructed from settlement history; and there are
 125 float-on-money casts across 33 files where the dossier recorded one.
 
+### 5f. Orders owns fulfillment eligibility; Sales owns requirement membership
+
+Amended 2026-08-19 after the first Sales and Orders candidates were compared as
+real contracts. This amendment supersedes §5b's historical sentence saying
+Orders would adopt a Billing coverage/funding fact. Billing V1 correctly
+publishes no such fact, and no assembly may reconstruct one from a receivable
+position, balance or allocation arithmetic.
+
+The decision boundary is now:
+
+- Sales freezes the finite set of opaque fulfillment-eligibility requirement
+  references as part of the accepted commercial intent;
+- the owner of an external decision publishes explicit, versioned evidence
+  addressed to one registered requirement — accepted settlement, accountable
+  order waiver and deliberately extended credit remain distinct facts;
+- Orders is the sole fulfillment-eligibility decision owner. Its pure
+  `evaluate_fulfillment_eligibility` predicate compares the frozen membership
+  with received owner evidence and returns a reasoned answer; and
+- product adapters only translate facts. They do not infer eligibility, query
+  live catalogue state, or create a second decision path.
+
+`AcceptedQuoteHandoffV1` now carries the explicit currency minor-unit contract,
+accepted terms content, price/specification provenance, component tax evidence
+and finite eligibility membership needed to construct `SubmitOrderCommand`
+mechanically. A cross-module architecture canary proves that mapping without a
+database or catalogue read. This closes the module contract gap; each adopter
+still must bind real evidence producers. Sub's existing finite funding receipts
+are the first cutover source, while a greenfield product fails closed until it
+has equivalent explicit producers.
+
 ### 6. Implementation authorization and gates
 
 Michael's direction to start the composable Cloud modules is the named

@@ -183,3 +183,18 @@ Package, lineage and red-first canary implementation may therefore begin from
 the completed product-first dossier. This amendment changes no ownership
 boundary and advances no sales-specific release, Sub tenant/RLS, adoption,
 cutover, CRM retirement, deployment or production-data gate.
+
+## Amendment — 2026-08-19: the accepted snapshot is Orders-complete
+
+The unreleased V1 contract now makes the accepted commercial intent complete
+enough for a mechanical Sales-to-Orders adapter. In addition to the historical
+fields in decision 2, it carries explicit currency minor units, immutable price
+and specification references, the accepted terms content, per-line component
+tax provenance and a finite set of fulfillment-eligibility requirement refs.
+
+Sales owns that requirement membership because it is part of what the customer
+accepted. It does not decide later satisfaction. ADR-0030's 2026-08-19
+amendment names Orders as the sole reasoned fulfillment-eligibility owner over
+explicit evidence supplied by the owners of settlement, waiver or extended
+credit decisions. Sales still stops before Order creation and imports no
+sibling module.

@@ -58,18 +58,18 @@ accountable order decision rather than manufactured payment evidence. The
 historical finding remains below because it explains the boundary, but the
 current source is proof that the boundary can be retired in the first adopter.
 
-The concurrent Billing package exposes a separate adoption gap. Its pending
-`0.1.0a1` contract says allocation and coverage are internal derivations and
-publishes `ReceivablePositionV1`/accounting facts, but no owner-decided
-per-obligation coverage-resolution fact. Orders cannot derive one from balance
-or allocation arithmetic without becoming a second financial decision owner,
-and an assembly adapter cannot make that decision either. Before Sub cutover,
-Billing V1 will not publish a coverage fact. A different named owner must supply
-a typed eligibility-resolution fact that maps mechanically
-to `RecordCoverageResolutionCommand`, or the adopted profile must omit this
-financial gate.
-Until then the Orders command is a safe seam with no valid Billing producer,
-and adoption is blocked rather than guessed.
+The concurrent Billing package confirms the correct negative boundary. Its
+pending `0.1.0a1` contract keeps allocation and coverage internal and publishes
+`ReceivablePositionV1`/accounting facts, but no per-order coverage verdict.
+Orders does not derive one from balance or allocation arithmetic, and an
+assembly adapter cannot make that decision either. The named split is now:
+Sales freezes finite eligibility requirement membership; the owner of each
+external decision publishes explicit evidence addressed to one requirement;
+Orders alone evaluates whether the complete registered set is present and
+returns a reasoned `FulfillmentEligibilityDecisionV1`. Billing therefore need
+not publish a synthetic coverage API. Sub's existing finite funding receipts
+are the first evidence source; a greenfield adopter fails closed until it binds
+equivalent explicit producers.
 
 The separate committed `dotmac-sales` candidate explains why an Orders module
 could look as though it already existed, but it does not own one. Its checked-in
@@ -78,16 +78,13 @@ contract explicitly stops at an immutable accepted Quote, publishes
 That is the correct upstream boundary and confirms `dotmac-orders` is a distinct
 owner rather than a duplicate package.
 
-Its current `AcceptedQuoteHandoffV1` is not yet a mechanically consumable Orders
-input. It carries exact line/totals values and a pricing snapshot reference, but
-omits the accepted terms content, specification provenance, component tax
-evidence, currency minor-unit contract and finite coverage membership required
-by `SubmitOrderCommand`. A product adapter cannot fill those fields from live
-catalogue rows after acceptance without becoming a second commercial decision
-path. Before the first cutover, Sales must extend its frozen owner output (or a
-different named owner must publish the missing immutable fact) so the assembly
-only translates fields. This is a second adoption gate alongside Billing's
-missing coverage-resolution output.
+`AcceptedQuoteHandoffV1` is now a mechanically consumable Orders input. It
+carries exact line/totals values, explicit currency minor units, accepted terms
+content, price and specification provenance, component tax evidence and the
+finite eligibility requirement membership required by `SubmitOrderCommand`.
+`tests/architecture/test_sales_orders_handoff.py` proves a product adapter can
+translate those fields without a live catalogue read or a new commercial
+decision. Sales remains the accepted-Quote owner and still creates no order.
 
 ## Sub source
 
@@ -388,10 +385,10 @@ Version one **owns**:
 - **submission, acceptance and cancellation** — the transition ladder with actor,
   instant and reason, refused by default (ERP's shape, product-neutral names),
   with cancellation refused once a fulfillment request has been accepted;
-- **funding/coverage observation receipts** — Sub's finite-set gate,
-  generalised: a registered set of opaque coverage-obligation references, one
-  typed deduplicated resolution receipt each, no advance on partial coverage, one
-  advance ever, unregistered references refused, set frozen once satisfied; and
+- **fulfillment eligibility** — Sales supplies the accepted finite membership;
+  Orders owns an askable set decision over opaque requirement references and
+  typed deduplicated owner receipts: no advance on partial evidence, one advance
+  ever, unregistered references refused, set frozen once satisfied; and
 - **fulfillment request publication** — one typed per-line fulfillment request
   emitted through the outbox when the order is accepted and covered, carrying the
   frozen line snapshot rather than a live read.
@@ -400,7 +397,8 @@ It does **NOT** own:
 
 - CRM quote authoring, quote lifecycle, discount negotiation, leads or pipelines;
 - invoice existence, invoice state, receivable, settlement, allocation or dunning
-  — Billing owns those (ADR-0020) and Orders only observes coverage receipts;
+  — Billing owns those (ADR-0020); Orders only observes explicitly addressed
+  evidence and owns the separate fulfillment-eligibility decision;
 - subscription contracts, cadence, proration or recurrence — `dotmac-subscriptions`;
 - offer or price definition and versioning — `dotmac-subscriptions` publishes the
   immutable price version this module references;

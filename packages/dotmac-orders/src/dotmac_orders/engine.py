@@ -9,7 +9,12 @@ from enum import StrEnum
 
 from dotmac_kernel.money import CurrencyMismatchError, Money
 
-from dotmac_orders.contracts import LineInput, LineSnapshot, OrderTotals
+from dotmac_orders.contracts import (
+    FulfillmentEligibilityDecisionV1,
+    LineInput,
+    LineSnapshot,
+    OrderTotals,
+)
 from dotmac_orders.errors import OrderError
 
 
@@ -113,6 +118,47 @@ DEFAULT_ORDER_STATES: tuple[OrderStateSpec, ...] = (
 
 def default_order_state_registry() -> OrderStateRegistry:
     return OrderStateRegistry(DEFAULT_ORDER_STATES)
+
+
+def evaluate_fulfillment_eligibility(
+    *,
+    requirement_refs: Sequence[str],
+    satisfied_requirement_refs: Iterable[str],
+) -> FulfillmentEligibilityDecisionV1:
+    """Decide readiness from frozen membership and explicit owner evidence.
+
+    The caller supplies facts, not balances or allocation inputs.  Orders owns
+    the set comparison and the reason code so adapters never create a parallel
+    eligibility decision.
+    """
+
+    requirements = tuple(sorted(set(requirement_refs)))
+    satisfied = tuple(sorted(set(satisfied_requirement_refs)))
+    requirement_set = set(requirements)
+    satisfied_set = set(satisfied)
+    unknown = satisfied_set - requirement_set
+    missing = tuple(sorted(requirement_set - satisfied_set))
+
+    if not requirements:
+        reason_code = "eligibility_requirements_not_registered"
+        eligible = False
+    elif unknown:
+        reason_code = "unregistered_eligibility_evidence"
+        eligible = False
+    elif missing:
+        reason_code = "eligibility_requirements_missing"
+        eligible = False
+    else:
+        reason_code = "eligibility_requirements_satisfied"
+        eligible = True
+
+    return FulfillmentEligibilityDecisionV1(
+        eligible=eligible,
+        reason_code=reason_code,
+        requirement_refs=requirements,
+        satisfied_requirement_refs=satisfied,
+        missing_requirement_refs=missing,
+    )
 
 
 def _required(value: str, *, field: str) -> str:

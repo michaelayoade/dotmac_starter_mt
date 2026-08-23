@@ -15,6 +15,18 @@ have argued for building `flex` once.
 > only one product runs, which is the extraction the ADR-0006 § 5 gate exists to
 > refuse. Everything above and below it still stands as measurement.
 
+> **Current-state addendum — 2026-08-19.** `dotmac-ui` now has reuse-proven
+> token and empty-state slices plus audit-complete Map Frame and Catalog Grid
+> slices. Do not split another UI package. Finish the pending component
+> adoptions, then add narrowly named contracts: the strongest next boundary is
+> Sub's server-owned list contract (kernel values plus token-native `dotmac-ui`
+> rendering), followed by the identical live Sub/CRM recent-activity panel and
+> generic form behaviours after their product logic is removed. The identical
+> Sub/ERP CSV parser belongs with Imports, not UI; CRM's copied alert/modal
+> templates have no live caller and should be deleted rather than promoted.
+> Exact pins, counts and boundaries are in
+> [`decomposition-current-state.md`](decomposition-current-state.md#ui-decomposition-recommendation).
+
 ## The finding that changes the plan
 
 `dotmac_erp` and `dotmac_sub` do not have independent design systems. They have

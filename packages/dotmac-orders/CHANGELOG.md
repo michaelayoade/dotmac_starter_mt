@@ -7,6 +7,8 @@
   specification provenance.
 - Add finite coverage-obligation receipts and replayable fulfillment request
   publication through the kernel outbox.
+- Name Orders as the fulfillment-eligibility decision owner and expose the
+  pure, reasoned `evaluate_fulfillment_eligibility` result on snapshots.
 - Add exact derived-total and complete-FX checks plus deferred PostgreSQL
   guards that refuse unfrozen or internally inconsistent committed snapshots.
 - Fingerprint the normalized full commercial snapshot, not only the line set;

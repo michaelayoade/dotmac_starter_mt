@@ -28,6 +28,9 @@ if TYPE_CHECKING:
         LeadStatus,
         QuoteLineDraft,
         QuoteStatus,
+        QuoteTaxRateV1,
+        QuoteTermsSnapshotV1,
+        QuoteTermValueV1,
         SalesActorRef,
         SalesActorSnapshot,
         SalesSubjectRef,
@@ -89,6 +92,9 @@ def _load_sales_after_reference_engine(unit_engine: object) -> Iterator[None]:
         "DiscountType",
         "LeadStatus",
         "QuoteLineDraft",
+        "QuoteTaxRateV1",
+        "QuoteTermsSnapshotV1",
+        "QuoteTermValueV1",
         "QuoteStatus",
         "SalesActorRef",
         "SalesActorSnapshot",
@@ -246,21 +252,60 @@ def _author(db: Session, *, expires_at: datetime | None = None) -> Quote:
             lead_id=lead.id,
             status=QuoteStatus.DRAFT,
             currency="ngn",
+            currency_minor_units=2,
             expires_at=expires_at,
             lines=(
                 QuoteLineDraft(
-                    "Dedicated internet",
-                    Decimal("2"),
-                    Decimal("100.005"),
-                    "offer:dia:v4",
-                    "price:dia:2026-08-18",
+                    description="Dedicated internet",
+                    quantity=Decimal("2"),
+                    unit_price=Decimal("100.005"),
+                    catalogue_ref="offer:dia:v4",
+                    price_version_ref="price:dia:2026-08-18",
+                    terms_ref="terms:dia:v3",
+                    terms_snapshot=QuoteTermsSnapshotV1(
+                        version_ref="terms:dia:v3",
+                        values=(
+                            QuoteTermValueV1("minimum_term_months", "12"),
+                            QuoteTermValueV1("billing_timing", "advance"),
+                        ),
+                    ),
+                    specification_ref="spec:dia:v8",
+                    taxes=(
+                        QuoteTaxRateV1(
+                            tax_code="vat",
+                            source_version="ng-vat:2026-01",
+                            rate=Decimal("7.5"),
+                        ),
+                    ),
                 ),
-                QuoteLineDraft("Installation", Decimal("1"), Decimal("50")),
+                QuoteLineDraft(
+                    description="Installation",
+                    quantity=Decimal("1"),
+                    unit_price=Decimal("50"),
+                    catalogue_ref="offer:install:v2",
+                    price_version_ref="price:install:2026-08-18",
+                    terms_ref="terms:install:v1",
+                    terms_snapshot=QuoteTermsSnapshotV1(
+                        version_ref="terms:install:v1",
+                        values=(QuoteTermValueV1("delivery", "once"),),
+                    ),
+                    specification_ref="spec:install:v2",
+                    taxes=(
+                        QuoteTaxRateV1(
+                            tax_code="vat",
+                            source_version="ng-vat:2026-01",
+                            rate=Decimal("7.5"),
+                        ),
+                    ),
+                ),
+            ),
+            fulfillment_eligibility_requirement_refs=(
+                "settlement:quote",
+                "credit-authorization:quote",
             ),
             discount=DiscountInput(
                 DiscountType.PERCENTAGE, Decimal("10"), "launch offer"
             ),
-            tax_rate=Decimal("7.5"),
         ),
         actor_port=ActorPort(),
         subject_port=SubjectPort(),
@@ -357,11 +402,35 @@ def test_acceptance_emits_one_product_neutral_handoff_and_replays(db: Session) -
     payload = output.events[0][2]
     assert payload["schema_version"] == 1
     assert payload["accepted_snapshot_sha256"] == first.accepted_snapshot_sha256
+    assert payload["currency_minor_units"] == 2
+    assert payload["fulfillment_eligibility_requirement_refs"] == [
+        "credit-authorization:quote",
+        "settlement:quote",
+    ]
     assert payload["sales_subject"] == {
         "kind": "party",
         "opaque_id": "party-9",
         "version": "3",
     }
+    first_line = payload["lines"][0]
+    assert first_line["price_version_ref"] == "price:dia:2026-08-18"
+    assert first_line["terms_snapshot"] == {
+        "version_ref": "terms:dia:v3",
+        "values": [
+            {"name": "billing_timing", "value": "advance"},
+            {"name": "minimum_term_months", "value": "12"},
+        ],
+    }
+    assert first_line["specification_ref"] == "spec:dia:v8"
+    assert first_line["taxes"] == [
+        {
+            "tax_code": "vat",
+            "source_version": "ng-vat:2026-01",
+            "taxable_basis": "180.01",
+            "rate": "7.5",
+            "amount": "13.50",
+        }
+    ]
     assert {
         "sales_order_id",
         "project_id",

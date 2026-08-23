@@ -72,9 +72,10 @@ def test_every_sales_model_is_tenant_scoped_in_its_own_schema() -> None:
 
 
 def test_handoff_cannot_carry_downstream_owner_ids() -> None:
-    from dotmac_sales import AcceptedQuoteHandoffV1
+    from dotmac_sales import AcceptedQuoteHandoffV1, AcceptedQuoteLineV1
 
     names = {field.name for field in fields(AcceptedQuoteHandoffV1)}
+    line_names = {field.name for field in fields(AcceptedQuoteLineV1)}
     forbidden = {
         "sales_order_id",
         "subscriber_id",
@@ -84,6 +85,17 @@ def test_handoff_cannot_carry_downstream_owner_ids() -> None:
         "invoice_id",
     }
     assert names.isdisjoint(forbidden)
+    assert {
+        "currency_minor_units",
+        "fulfillment_eligibility_requirement_refs",
+    } <= names
+    assert {
+        "price_version_ref",
+        "terms_ref",
+        "terms_snapshot",
+        "specification_ref",
+        "taxes",
+    } <= line_names
 
 
 def test_module_never_imports_orders_or_product_assemblies() -> None:

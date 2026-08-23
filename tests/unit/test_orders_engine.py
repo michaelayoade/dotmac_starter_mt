@@ -9,6 +9,7 @@ import pytest
 from dotmac_kernel.money import Money, currency
 from dotmac_orders import (
     DEFAULT_ORDER_STATES,
+    FulfillmentEligibilityDecisionV1,
     LineInput,
     OrderError,
     OrderPhase,
@@ -19,6 +20,7 @@ from dotmac_orders import (
     TermValueV1,
     calculate_line_snapshot,
     calculate_order_totals,
+    evaluate_fulfillment_eligibility,
     snapshot_fingerprint,
 )
 
@@ -193,3 +195,42 @@ def test_an_undeclared_state_or_transition_is_refused_by_default() -> None:
     with pytest.raises(OrderError) as backwards:
         registry.transition("accepted", "submitted")
     assert backwards.value.code == "order_transition_refused"
+
+
+def test_orders_owns_the_reasoned_fulfillment_eligibility_decision() -> None:
+    partial = evaluate_fulfillment_eligibility(
+        requirement_refs=("settlement:quote-7", "credit:quote-7"),
+        satisfied_requirement_refs=("credit:quote-7",),
+    )
+
+    assert partial == FulfillmentEligibilityDecisionV1(
+        eligible=False,
+        reason_code="eligibility_requirements_missing",
+        requirement_refs=("credit:quote-7", "settlement:quote-7"),
+        satisfied_requirement_refs=("credit:quote-7",),
+        missing_requirement_refs=("settlement:quote-7",),
+    )
+
+    complete = evaluate_fulfillment_eligibility(
+        requirement_refs=("settlement:quote-7", "credit:quote-7"),
+        satisfied_requirement_refs=("settlement:quote-7", "credit:quote-7"),
+    )
+
+    assert complete.eligible
+    assert complete.reason_code == "eligibility_requirements_satisfied"
+    assert complete.missing_requirement_refs == ()
+
+
+def test_eligibility_fails_closed_for_an_empty_or_unregistered_evidence_set() -> None:
+    empty = evaluate_fulfillment_eligibility(
+        requirement_refs=(), satisfied_requirement_refs=()
+    )
+    unknown = evaluate_fulfillment_eligibility(
+        requirement_refs=("settlement:quote-7",),
+        satisfied_requirement_refs=("balance-derived:quote-7",),
+    )
+
+    assert not empty.eligible
+    assert empty.reason_code == "eligibility_requirements_not_registered"
+    assert not unknown.eligible
+    assert unknown.reason_code == "unregistered_eligibility_evidence"

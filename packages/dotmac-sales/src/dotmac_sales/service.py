@@ -15,6 +15,7 @@ from dotmac_sales.contracts import (
     AcceptedQuoteHandoffV1,
     AcceptedQuoteImmutable,
     AcceptedQuoteLineV1,
+    AcceptedQuoteTaxComponentV1,
     AcceptQuoteCommand,
     ActorPort,
     AuthorQuoteCommand,
@@ -34,6 +35,8 @@ from dotmac_sales.contracts import (
     QuoteAcceptanceOutcome,
     QuoteLineDraft,
     QuoteStatus,
+    QuoteTermsSnapshotV1,
+    QuoteTermValueV1,
     SalesActorSnapshot,
     SalesConflict,
     SalesNotFound,
@@ -51,7 +54,6 @@ from dotmac_sales.models import (
     QuoteLine,
 )
 
-MONEY = Decimal("0.01")
 ACCEPTED_QUOTE_EVENT_V1 = "sales.accepted-quote.v1"
 ACCEPT_QUOTE_SCOPE_V1 = "sales.accept-quote.v1"
 
@@ -163,7 +165,9 @@ def create_lead(
     )
     _probability(probability)
     estimated = (
-        None if command.estimated_value is None else _money(command.estimated_value)
+        None
+        if command.estimated_value is None
+        else _money(command.estimated_value, minor_units=2)
     )
     if estimated is not None and estimated < 0:
         raise ValueError("estimated value cannot be negative")
@@ -272,14 +276,17 @@ def author_quote(
         lead_id=command.lead_id,
         status=command.status.value,
         currency=_currency(command.currency),
-        subtotal=Decimal("0.00"),
+        currency_minor_units=_minor_units(command.currency_minor_units),
+        subtotal=_money(Decimal("0"), minor_units=command.currency_minor_units),
         discount_type=None,
         discount_value=None,
-        discount_amount=Decimal("0.00"),
+        discount_amount=_money(Decimal("0"), minor_units=command.currency_minor_units),
         discount_revision=0,
-        tax_rate=_rate(command.tax_rate, "tax rate"),
-        tax_total=Decimal("0.00"),
-        total=Decimal("0.00"),
+        tax_total=_money(Decimal("0"), minor_units=command.currency_minor_units),
+        total=_money(Decimal("0"), minor_units=command.currency_minor_units),
+        fulfillment_eligibility_requirement_refs=list(
+            _eligibility_requirements(command.fulfillment_eligibility_requirement_refs)
+        ),
         expires_at=command.expires_at,
         notes=_optional_text(command.notes),
         authored_by_kind=actor.ref.kind,
@@ -288,7 +295,13 @@ def author_quote(
         sent_at=clock.now() if command.status is QuoteStatus.SENT else None,
     )
     quote.lines = [
-        _new_line(command.tenant_id, command.quote_id, position, draft)
+        _new_line(
+            command.tenant_id,
+            command.quote_id,
+            position,
+            draft,
+            minor_units=command.currency_minor_units,
+        )
         for position, draft in enumerate(command.lines, start=1)
     ]
     db.add(quote)
@@ -559,13 +572,51 @@ def _subject_ref(lead: Lead) -> SalesSubjectRef:
 
 
 def _new_line(
-    tenant_id: UUID, quote_id: UUID, position: int, draft: QuoteLineDraft
+    tenant_id: UUID,
+    quote_id: UUID,
+    position: int,
+    draft: QuoteLineDraft,
+    *,
+    minor_units: int,
 ) -> QuoteLine:
     if draft.quantity <= 0:
         raise ValueError("Quote line quantity must be positive")
     if draft.unit_price < 0:
         raise ValueError("Quote line unit price cannot be negative")
-    gross = _money(draft.quantity * draft.unit_price)
+    gross = _money(draft.quantity * draft.unit_price, minor_units=minor_units)
+    terms_ref = _required(draft.terms_ref, "terms ref")
+    if draft.terms_snapshot.version_ref != terms_ref:
+        raise ValueError("terms snapshot version must match terms_ref")
+    terms_values: list[dict[str, str]] = []
+    term_names: set[str] = set()
+    for term in sorted(draft.terms_snapshot.values, key=lambda item: item.name):
+        name = _required(term.name, "term name")
+        value = _required(term.value, "term value")
+        if name in term_names:
+            raise ValueError(f"term {name!r} appears more than once")
+        term_names.add(name)
+        terms_values.append({"name": name, "value": value})
+    if not terms_values:
+        raise ValueError("a Quote line requires its accepted terms content")
+
+    tax_rates: list[dict[str, str]] = []
+    tax_keys: set[tuple[str, str]] = set()
+    for tax in sorted(
+        draft.taxes, key=lambda item: (item.tax_code, item.source_version)
+    ):
+        code = _required(tax.tax_code, "tax code")
+        source_version = _required(tax.source_version, "tax source version")
+        key = (code, source_version)
+        if key in tax_keys:
+            raise ValueError(f"tax rate {key!r} appears more than once")
+        tax_keys.add(key)
+        tax_rates.append(
+            {
+                "tax_code": code,
+                "source_version": source_version,
+                "rate": format(_rate(tax.rate, "tax rate"), "f"),
+            }
+        )
     return QuoteLine(
         tenant_id=tenant_id,
         quote_id=quote_id,
@@ -574,11 +625,16 @@ def _new_line(
         quantity=draft.quantity,
         unit_price=draft.unit_price,
         gross_amount=gross,
-        discount_amount=Decimal("0.00"),
-        tax_amount=Decimal("0.00"),
+        discount_amount=_money(Decimal("0"), minor_units=minor_units),
+        tax_amount=_money(Decimal("0"), minor_units=minor_units),
         amount=gross,
         catalogue_ref=_optional_text(draft.catalogue_ref),
-        pricing_snapshot_ref=_optional_text(draft.pricing_snapshot_ref),
+        price_version_ref=_required(draft.price_version_ref, "price version ref"),
+        terms_ref=terms_ref,
+        terms_snapshot={"version_ref": terms_ref, "values": terms_values},
+        specification_ref=_required(draft.specification_ref, "specification ref"),
+        tax_rates=tax_rates,
+        tax_components=[],
     )
 
 
@@ -596,49 +652,83 @@ def _apply_discount(quote: Quote, discount: DiscountInput | None) -> None:
 
 
 def _recalculate(quote: Quote) -> None:
-    gross = [_money(line.quantity * line.unit_price) for line in quote.lines]
-    subtotal = _money(sum(gross, Decimal("0")))
+    minor_units = quote.currency_minor_units
+    gross = [
+        _money(line.quantity * line.unit_price, minor_units=minor_units)
+        for line in quote.lines
+    ]
+    subtotal = _money(sum(gross, Decimal("0")), minor_units=minor_units)
     if quote.discount_type is None or quote.discount_value is None:
-        discount_total = Decimal("0.00")
+        discount_total = _money(Decimal("0"), minor_units=minor_units)
     elif quote.discount_type == DiscountType.PERCENTAGE.value:
-        discount_total = _money(subtotal * quote.discount_value / Decimal("100"))
+        discount_total = _money(
+            subtotal * quote.discount_value / Decimal("100"),
+            minor_units=minor_units,
+        )
     else:
-        discount_total = _money(quote.discount_value)
+        discount_total = _money(quote.discount_value, minor_units=minor_units)
     if discount_total > subtotal:
         raise ValueError("discount cannot exceed Quote subtotal")
-    discounts = _allocate(discount_total, gross)
+    discounts = _allocate(discount_total, gross, minor_units=minor_units)
     taxable = [
-        _money(value - reduction)
+        _money(value - reduction, minor_units=minor_units)
         for value, reduction in zip(gross, discounts, strict=False)
     ]
-    tax_total = _money(sum(taxable, Decimal("0")) * quote.tax_rate / Decimal("100"))
-    taxes = _allocate(tax_total, taxable)
-    for line, line_gross, line_discount, line_tax in zip(
-        quote.lines, gross, discounts, taxes, strict=False
+    tax_total = _money(Decimal("0"), minor_units=minor_units)
+    for line, line_gross, line_discount, taxable_basis in zip(
+        quote.lines, gross, discounts, taxable, strict=False
     ):
+        components: list[dict[str, object]] = []
+        line_tax = _money(Decimal("0"), minor_units=minor_units)
+        for raw in line.tax_rates:
+            code = str(raw["tax_code"])
+            source_version = str(raw["source_version"])
+            rate = Decimal(str(raw["rate"]))
+            amount = _money(
+                taxable_basis * rate / Decimal("100"),
+                minor_units=minor_units,
+            )
+            line_tax += amount
+            components.append(
+                {
+                    "tax_code": code,
+                    "source_version": source_version,
+                    "taxable_basis": _money_string(
+                        taxable_basis, minor_units=minor_units
+                    ),
+                    "rate": format(rate, "f"),
+                    "amount": _money_string(amount, minor_units=minor_units),
+                }
+            )
         line.gross_amount = line_gross
         line.discount_amount = line_discount
         line.tax_amount = line_tax
-        line.amount = _money(line_gross - line_discount + line_tax)
+        line.tax_components = components
+        line.amount = _money(
+            line_gross - line_discount + line_tax, minor_units=minor_units
+        )
+        tax_total += line_tax
     quote.subtotal = subtotal
     quote.discount_amount = discount_total
     quote.tax_total = tax_total
-    quote.total = _money(subtotal - discount_total + tax_total)
+    quote.total = _money(subtotal - discount_total + tax_total, minor_units=minor_units)
 
 
-def _allocate(total: Decimal, weights: list[Decimal]) -> list[Decimal]:
+def _allocate(
+    total: Decimal, weights: list[Decimal], *, minor_units: int
+) -> list[Decimal]:
     if not weights:
         return []
     weight_total = sum(weights, Decimal("0"))
     if total == 0 or weight_total == 0:
-        return [Decimal("0.00") for _ in weights]
+        return [_money(Decimal("0"), minor_units=minor_units) for _ in weights]
     values: list[Decimal] = []
-    running = Decimal("0.00")
+    running = _money(Decimal("0"), minor_units=minor_units)
     for index, weight in enumerate(weights):
         share = (
             total - running
             if index == len(weights) - 1
-            else _money(total * weight / weight_total)
+            else _money(total * weight / weight_total, minor_units=minor_units)
         )
         values.append(share)
         running += share
@@ -715,28 +805,97 @@ def _handoff(
         },
         sales_subject_label=subject_label,
         currency=quote.currency,
-        subtotal=_money_string(quote.subtotal),
-        discount_amount=_money_string(quote.discount_amount),
-        tax_total=_money_string(quote.tax_total),
-        total=_money_string(quote.total),
+        currency_minor_units=quote.currency_minor_units,
+        subtotal=_money_string(quote.subtotal, minor_units=quote.currency_minor_units),
+        discount_amount=_money_string(
+            quote.discount_amount, minor_units=quote.currency_minor_units
+        ),
+        tax_total=_money_string(
+            quote.tax_total, minor_units=quote.currency_minor_units
+        ),
+        total=_money_string(quote.total, minor_units=quote.currency_minor_units),
         lines=tuple(
             AcceptedQuoteLineV1(
-                line.id,
-                line.position,
-                line.description,
-                format(line.quantity, "f"),
-                format(line.unit_price, "f"),
-                _money_string(line.gross_amount),
-                _money_string(line.discount_amount),
-                _money_string(line.tax_amount),
-                _money_string(line.amount),
-                line.catalogue_ref,
-                line.pricing_snapshot_ref,
+                line_id=line.id,
+                position=line.position,
+                description=line.description,
+                quantity=format(line.quantity, "f"),
+                unit_price=_money_string(
+                    line.unit_price, minor_units=quote.currency_minor_units
+                ),
+                gross_amount=_money_string(
+                    line.gross_amount, minor_units=quote.currency_minor_units
+                ),
+                discount_amount=_money_string(
+                    line.discount_amount, minor_units=quote.currency_minor_units
+                ),
+                tax_amount=_money_string(
+                    line.tax_amount, minor_units=quote.currency_minor_units
+                ),
+                amount=_money_string(
+                    line.amount, minor_units=quote.currency_minor_units
+                ),
+                catalogue_ref=line.catalogue_ref,
+                price_version_ref=line.price_version_ref,
+                terms_ref=line.terms_ref,
+                terms_snapshot=_stored_terms_snapshot(line.terms_snapshot),
+                specification_ref=line.specification_ref,
+                taxes=_stored_tax_components(line.tax_components),
             )
             for line in quote.lines
         ),
+        fulfillment_eligibility_requirement_refs=tuple(
+            quote.fulfillment_eligibility_requirement_refs
+        ),
         accepted_snapshot_sha256=digest,
     )
+
+
+def _stored_terms_snapshot(payload: Mapping[str, object]) -> QuoteTermsSnapshotV1:
+    version_ref = payload.get("version_ref")
+    raw_values = payload.get("values")
+    if not isinstance(version_ref, str) or not isinstance(raw_values, list):
+        raise SalesConflict("stored Quote terms snapshot is invalid")
+    values: list[QuoteTermValueV1] = []
+    for raw in raw_values:
+        if not isinstance(raw, Mapping):
+            raise SalesConflict("stored Quote terms snapshot is invalid")
+        name = raw.get("name")
+        value = raw.get("value")
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise SalesConflict("stored Quote terms snapshot is invalid")
+        values.append(QuoteTermValueV1(name=name, value=value))
+    return QuoteTermsSnapshotV1(version_ref=version_ref, values=tuple(values))
+
+
+def _stored_tax_components(
+    payload: list[dict[str, object]],
+) -> tuple[AcceptedQuoteTaxComponentV1, ...]:
+    output: list[AcceptedQuoteTaxComponentV1] = []
+    for raw in payload:
+        tax_code = raw.get("tax_code")
+        source_version = raw.get("source_version")
+        taxable_basis = raw.get("taxable_basis")
+        rate = raw.get("rate")
+        amount = raw.get("amount")
+        if (
+            not isinstance(tax_code, str)
+            or not isinstance(source_version, str)
+            or not isinstance(taxable_basis, str)
+            or (rate is not None and not isinstance(rate, str))
+            or not isinstance(amount, str)
+        ):
+            raise SalesConflict("stored Quote tax component is invalid")
+        output.append(
+            AcceptedQuoteTaxComponentV1(
+                tax_code=tax_code,
+                source_version=source_version,
+                taxable_basis=taxable_basis,
+                rate=rate,
+                amount=amount,
+            )
+        )
+    return tuple(output)
 
 
 def _stored_acceptance(quote: Quote, *, quote_replayed: bool) -> dict[str, object]:
@@ -760,18 +919,38 @@ def _mutable(quote: Quote) -> None:
         raise AcceptedQuoteImmutable(f"accepted Quote {quote.id} is immutable")
 
 
-def _money(value: Decimal) -> Decimal:
-    return value.quantize(MONEY, rounding=ROUND_HALF_UP)
+def _money(value: Decimal, *, minor_units: int) -> Decimal:
+    quantum = Decimal(1).scaleb(-minor_units)
+    return value.quantize(quantum, rounding=ROUND_HALF_UP)
 
 
-def _money_string(value: Decimal) -> str:
-    return format(_money(value), ".2f")
+def _money_string(value: Decimal, *, minor_units: int) -> str:
+    return format(_money(value, minor_units=minor_units), f".{minor_units}f")
 
 
 def _rate(value: Decimal, label: str) -> Decimal:
-    if value < 0 or value > 100:
+    if isinstance(value, float) or not isinstance(value, Decimal):
+        raise ValueError(f"{label} must be an exact Decimal")
+    if not value.is_finite() or value < 0 or value > 100:
         raise ValueError(f"{label} must be between 0 and 100")
     return value
+
+
+def _minor_units(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 6:
+        raise ValueError("currency_minor_units must be an integer from zero to six")
+    return value
+
+
+def _eligibility_requirements(values: tuple[str, ...]) -> tuple[str, ...]:
+    requirements = tuple(
+        sorted(_required(value, "eligibility requirement ref") for value in values)
+    )
+    if not requirements:
+        raise ValueError("a Quote requires a finite fulfillment eligibility set")
+    if len(set(requirements)) != len(requirements):
+        raise ValueError("fulfillment eligibility requirement refs must be unique")
+    return requirements
 
 
 def _probability(value: int) -> None:

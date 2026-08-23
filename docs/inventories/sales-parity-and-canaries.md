@@ -50,6 +50,7 @@ AcceptedQuoteHandoffV1
   lead_id
   sales_subject {kind, opaque_id, version?}
   currency
+  currency_minor_units
   subtotal
   discount {kind?, value?, amount, revision}
   tax_total
@@ -57,8 +58,12 @@ AcceptedQuoteHandoffV1
   lines[] {
     line_id, position, description, quantity, unit_price,
     discount_amount, tax_amount, amount,
-    catalogue_ref?, offer_version_ref?, pricing_snapshot_ref?
+    catalogue_ref?, price_version_ref,
+    terms_ref, terms_snapshot {version_ref, values[]},
+    specification_ref,
+    taxes[] {tax_code, source_version, taxable_basis, rate?, amount}
   }
+  fulfillment_eligibility_requirement_refs[]
   source_ref?
   correlation_id?
   causation_id?
@@ -71,6 +76,8 @@ for version 1; a semantic change requires a new schema version.
 
 There is deliberately no `sales_order_id`, account row, project/service data,
 provider payload, campaign object or delivery address owned by another domain.
+Sales freezes requirement membership as accepted commercial intent; it does not
+decide whether those requirements have later been satisfied.
 
 ## Canary catalogue
 

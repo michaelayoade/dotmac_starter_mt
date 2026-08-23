@@ -48,6 +48,7 @@ from dotmac_orders.engine import (
     calculate_line_snapshot,
     calculate_order_totals,
     default_order_state_registry,
+    evaluate_fulfillment_eligibility,
     fits_numeric,
 )
 from dotmac_orders.errors import OrderConflict, OrderError, OrderNotFound
@@ -554,6 +555,12 @@ def get_order_snapshot(
             .order_by(CoverageResolutionReceipt.obligation_ref)
         ).all()
     )
+    eligibility = evaluate_fulfillment_eligibility(
+        requirement_refs=obligations,
+        satisfied_requirement_refs=tuple(
+            resolution.obligation_ref for resolution in resolutions
+        ),
+    )
     submitted_by = _optional_actor(
         order.submitted_actor_type,
         order.submitted_actor_id,
@@ -600,6 +607,7 @@ def get_order_snapshot(
             obligation_refs=obligations,
             resolutions=resolutions,
             satisfied_at=gate.satisfied_at,
+            eligibility=eligibility,
         ),
         fx_snapshot=fx_snapshot,
     )
@@ -1278,18 +1286,28 @@ def record_coverage_resolution(
         )
         session.add(receipt)
         session.flush()
-        gate.resolved_count = int(
-            session.scalar(
-                select(func.count(CoverageResolutionReceipt.id)).where(
+        registered_refs = tuple(
+            session.scalars(
+                select(CoverageObligation.obligation_ref).where(
+                    CoverageObligation.tenant_id == scope.tenant_id,
+                    CoverageObligation.gate_id == gate.id,
+                )
+            ).all()
+        )
+        satisfied_refs = tuple(
+            session.scalars(
+                select(CoverageResolutionReceipt.obligation_ref).where(
                     CoverageResolutionReceipt.tenant_id == scope.tenant_id,
                     CoverageResolutionReceipt.gate_id == gate.id,
                 )
-            )
-            or 0
+            ).all()
         )
-        became_satisfied = (
-            gate.resolved_count == gate.obligation_count and gate.satisfied_at is None
+        eligibility = evaluate_fulfillment_eligibility(
+            requirement_refs=registered_refs,
+            satisfied_requirement_refs=satisfied_refs,
         )
+        gate.resolved_count = len(eligibility.satisfied_requirement_refs)
+        became_satisfied = eligibility.eligible and gate.satisfied_at is None
         if became_satisfied:
             gate.state = "satisfied"
             gate.satisfied_at = resolved_at
@@ -1306,6 +1324,7 @@ def record_coverage_resolution(
             details={
                 "obligation_ref": obligation_ref,
                 "resolution_ref": resolution_ref,
+                "eligibility_reason": eligibility.reason_code,
             },
         )
         if (

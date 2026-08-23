@@ -6,9 +6,14 @@ discount history, Quote lifecycle and exactly-once acceptance.
 
 Acceptance publishes `sales.accepted-quote.v1` with an
 `AcceptedQuoteHandoffV1`. The handoff contains a stable subject reference, exact
-lines and totals, and a canonical snapshot digest. It never contains or creates
-a subscriber, SalesOrder, project, work order, invoice or service. The consuming
-product owns every consequence beyond that boundary.
+lines and totals, explicit currency minor units, immutable price/terms/
+specification provenance, component tax evidence, the finite set of
+fulfillment-eligibility requirement references, and a canonical snapshot
+digest. It never contains or creates a subscriber, SalesOrder, project, work
+order, invoice or service. Sales owns requirement membership because it is part
+of the accepted commercial intent; Orders owns the later reasoned eligibility
+decision over explicit owner evidence. The consuming product owns every
+consequence beyond that boundary.
 
 Services mutate and flush a caller-owned session. Acceptance reuses the kernel
 idempotency ledger and default transactional outbox adapter. Source authority

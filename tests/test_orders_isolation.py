@@ -598,6 +598,11 @@ def test_partial_out_of_order_and_unregistered_coverage_converge_once(
         assert partial.coverage_resolution.obligation_ref == "settlement:1"
         assert partial.order.coverage.state == "open"
         assert len(partial.order.coverage.resolutions) == 1
+        assert not partial.order.coverage.eligibility.eligible
+        assert (
+            partial.order.coverage.eligibility.reason_code
+            == "eligibility_requirements_missing"
+        )
         gate = session.scalar(select(CoverageGate))
         assert gate is not None
         assert gate.state == "open"
@@ -631,6 +636,11 @@ def test_partial_out_of_order_and_unregistered_coverage_converge_once(
         assert completed.order.coverage.state == "satisfied"
         assert completed.order.coverage.satisfied_at == NOW
         assert len(completed.order.coverage.resolutions) == 2
+        assert completed.order.coverage.eligibility.eligible
+        assert (
+            completed.order.coverage.eligibility.reason_code
+            == "eligibility_requirements_satisfied"
+        )
         assert gate.state == "satisfied"
         assert session.scalar(select(func.count()).select_from(FulfillmentRequest)) == 2
 

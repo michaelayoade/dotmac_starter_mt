@@ -163,12 +163,35 @@ class CaptureLeadOriginCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class QuoteTermValueV1:
+    name: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class QuoteTermsSnapshotV1:
+    version_ref: str
+    values: tuple[QuoteTermValueV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QuoteTaxRateV1:
+    tax_code: str
+    source_version: str
+    rate: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class QuoteLineDraft:
     description: str
     quantity: Decimal
     unit_price: Decimal
+    price_version_ref: str
+    terms_ref: str
+    terms_snapshot: QuoteTermsSnapshotV1
+    specification_ref: str
+    taxes: tuple[QuoteTaxRateV1, ...]
     catalogue_ref: str | None = None
-    pricing_snapshot_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +210,10 @@ class AuthorQuoteCommand:
     lead_id: UUID
     status: QuoteStatus
     currency: str
+    currency_minor_units: int
     lines: tuple[QuoteLineDraft, ...]
+    fulfillment_eligibility_requirement_refs: tuple[str, ...]
     discount: DiscountInput | None = None
-    tax_rate: Decimal = Decimal("0")
     expires_at: datetime | None = None
     notes: str | None = None
 
@@ -233,7 +257,20 @@ class AcceptedQuoteLineV1:
     tax_amount: str
     amount: str
     catalogue_ref: str | None
-    pricing_snapshot_ref: str | None
+    price_version_ref: str
+    terms_ref: str
+    terms_snapshot: QuoteTermsSnapshotV1
+    specification_ref: str
+    taxes: tuple[AcceptedQuoteTaxComponentV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedQuoteTaxComponentV1:
+    tax_code: str
+    source_version: str
+    taxable_basis: str
+    rate: str | None
+    amount: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,11 +285,13 @@ class AcceptedQuoteHandoffV1:
     sales_subject: Mapping[str, str | None]
     sales_subject_label: str
     currency: str
+    currency_minor_units: int
     subtotal: str
     discount_amount: str
     tax_total: str
     total: str
     lines: tuple[AcceptedQuoteLineV1, ...]
+    fulfillment_eligibility_requirement_refs: tuple[str, ...]
     accepted_snapshot_sha256: str
 
     def as_payload(self) -> dict[str, object]:
@@ -295,6 +334,7 @@ __all__ = [
     "AcceptedQuoteHandoffV1",
     "AcceptedQuoteImmutable",
     "AcceptedQuoteLineV1",
+    "AcceptedQuoteTaxComponentV1",
     "ActorPort",
     "AuthorQuoteCommand",
     "CaptureLeadOriginCommand",
@@ -312,6 +352,9 @@ __all__ = [
     "OwnerOutputPort",
     "QuoteAcceptanceOutcome",
     "QuoteLineDraft",
+    "QuoteTaxRateV1",
+    "QuoteTermsSnapshotV1",
+    "QuoteTermValueV1",
     "QuoteStatus",
     "SalesActorRef",
     "SalesActorSnapshot",

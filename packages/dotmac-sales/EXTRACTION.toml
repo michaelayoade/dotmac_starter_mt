@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Commercial intent from Lead qualification through an immutable accepted Quote and its versioned owner-output handoff"
-contract = "Own tenant-scoped pipelines, stages, Leads, append-only Lead-origin evidence, Quote authoring, exact money, discount revisions, Quote lifecycle and exactly-once acceptance. Acceptance freezes one canonical snapshot and publishes sales.accepted-quote.v1. Stop there: never create, import or identify a subscriber, SalesOrder, project, work order, invoice, service or campaign; never own delivery transport."
+contract = "Own tenant-scoped pipelines, stages, Leads, append-only Lead-origin evidence, Quote authoring, exact money with explicit minor units, discount revisions, Quote lifecycle and exactly-once acceptance. Acceptance freezes one canonical snapshot containing price, terms, specification and component-tax provenance plus finite fulfillment-eligibility requirement membership, and publishes sales.accepted-quote.v1. Stop there: never create, import or identify a subscriber, SalesOrder, project, work order, invoice, service or campaign; never decide downstream eligibility or own delivery transport."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/sales.py",
@@ -20,10 +20,11 @@ preserved_tests = [
   "dotmac_sub:tests/test_quote_authoring.py",
   "dotmac_sub:tests/test_quote_acceptance.py",
   "dotmac_sub:tests/test_sales.py",
+  "dotmac_starter_mt:tests/architecture/test_sales_orders_handoff.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac_crm"]
-composition_boundary = "ADR-0024: each adopter installs and migrates its own sa lineage. Applications share AcceptedQuoteHandoffV1 over a versioned boundary; they never share mod_sales rows or read another application's database. Sales imports neither an assembly nor another module. Subject, actor and delivery arrive through typed product-neutral ports."
+composition_boundary = "ADR-0024: each adopter installs and migrates its own sa lineage. Applications share AcceptedQuoteHandoffV1 over a versioned boundary; they never share mod_sales rows or read another application's database. Sales imports neither an assembly nor another module. Subject, actor and delivery arrive through typed product-neutral ports. Sales owns the accepted finite eligibility requirement membership; Orders owns the later eligibility decision from explicit owner evidence."
 inventory_evidence = [
   "docs/inventories/sales-sources.md",
   "docs/inventories/sales-caller-inventory.md",
@@ -35,4 +36,4 @@ inventory_evidence = [
 first_cutover = "dotmac_sub is cutover 1 because it is the qualifying production-used and tested source. Install sa, backfill in-scope state, run read-only shadow comparisons and reconcile every mismatch before switching one writer family at a time. CRM supplies parity and retirement evidence only; it cannot become a second owner."
 shadow_and_drift = "Compare every Sub row's tenant, lifecycle, stage/probability, subject reference, origin identity/evidence, Quote currency/expiry/lines, exact subtotal/discount/tax/total and discount history. Dual-run authoring and acceptance against captured fixtures while only legacy performs live consequences; compare canonical accepted snapshots. Prove one handoff under replay/concurrency, rollback-safe output, cross-tenant refusal and zero mutable accepted rows."
 local_copy_retirement = "After Sub reconciliation, replace its Lead/Pipeline/Quote writers with thin adapters and retire acceptance consequences in favor of a downstream-owned handoff consumer. Then remove corresponding CRM routes, jobs, webhooks and writers. Keep campaigns unverified and untouched; keep SalesOrder/order-line ownership outside. No permanent mirror, parallel writer or forked lifecycle."
-next_action = "Implementation and the prescribed static, unit/architecture and PostgreSQL canaries were green in the dedicated worktree. The integrated branch allocates Sales on the unreleased kernel 0.1.0a75 floor. Revalidate the exact combined commit on Observe, then release only after separate authorization and just in time for Sub backfill, shadow comparison and reconciliation. Do not cut over or retire CRM writers before the release and adoption evidence is accepted."
+next_action = "The Sales-to-Orders handoff gap is closed in source: AcceptedQuoteHandoffV1 now carries explicit minor units, terms content, price/specification provenance, component taxes and finite eligibility membership, and a cross-module canary constructs SubmitOrderCommand mechanically. Revalidate the exact combined commit on Observe, including static, unit/architecture, PostgreSQL isolation/immutability and clean-wheel proofs. Then release only after separate authorization and just in time for Sub backfill, shadow comparison and reconciliation. Do not cut over or retire CRM writers before the release and adoption evidence is accepted."
