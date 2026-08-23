@@ -29,8 +29,8 @@
     "was that the allowlist row was the wrong half, and it was removed rather",
     "than the module published. Two states this file must keep distinct:",
     "",
-    "  * INTENDED \u2014 the distribution is meant to be unpublished right now",
-    "    (`dotmac-auth-oidc`, `dotmac-imports`). The row records the decision so",
+    "  * INTENDED \u2014 the distribution is meant to be unpublished right now.",
+    "    The row records the decision so",
     "    the next reader does not undo it by dispatching a release.",
     "  * OUTSTANDING \u2014 a version is genuinely owed to consumers. The row",
     "    records evidence a decision still needs. Two worked examples have now",
@@ -89,7 +89,7 @@
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",
-      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "reason": "OUTSTANDING UNTIL THE AUTHORIZED A2 RELEASE COMPLETES. The 2026-08-15 decision to remove the speculative release row was correct on its old premise. That premise has now changed: ERP has the named first-adopter implementation with the Organization-to-Tenant mapping, composed im lineage, dotmac-files partitions, product-owned customer validator/applier, claim-read-settle worker boundary, shadow parity guard, repair enqueue surface and non-vacuous PostgreSQL concurrency evidence. The module is re-authorized in the closed release lane so ERP can resolve an exact registry pin and lock; this row must be removed immediately after the registry-verified dotmac-imports-v0.1.0a2 tag exists. Publication still does not make EXTRACTION.toml.contract_consumers non-empty, move customer authority or retire ERP's legacy importer \u2014 only the merged ERP pin and subsequent real shadow cutover can do that. Do not repair this state by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-inbox-operations": {
