@@ -19,9 +19,8 @@ revision (ADR-0006 D1 amendment).
   a tenant-scoped `get_run_outcomes` projection for row-for-row adopter parity;
   the projection exposes no imported values, domain result payloads or ORM rows.
 - Exposes the installed Alembic lineage through the fleet-standard public
-  `versions_dir()` locator. This completes composition readiness without
-  publishing or selecting an adopter; a2 remains intentionally unreleased
-  until ERP is ready for the coordinated cohort cutover.
+  `versions_dir()` locator. ERP is the named first adopter; release eligibility
+  does not make it a proven contract consumer before its exact pin merges.
 - `im_0001_import_runs` previously read
   `depends_on = ("0001_initial_tenant_schema",)`. That edge is true only in an
   assembly that runs the kernel lineage: ERP hosts `public.tenants` in its own
@@ -66,4 +65,5 @@ writer, domain foreign keys on the shared row table, and the uploaded payload
 stored inline in a `Text` column.
 
 XLSX/XLS decoding is not in this release; `SourceLayout.XLSX` is declarable and
-`decode` refuses it. No product consumer yet — the dossier is `audit-complete`.
+`decode` refuses it. No proven product consumer yet — the dossier remains
+`audit-complete` until ERP's exact pin and shadow cutover merge.

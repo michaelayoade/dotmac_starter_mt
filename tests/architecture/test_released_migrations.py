@@ -161,6 +161,12 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-ai-operations/src/dotmac_ai_operations"
         / "migrations/versions"
     ),
+    "dotmac-payments": (
+        REPO_ROOT / "packages/dotmac-payments/src/dotmac_payments/migrations/versions"
+    ),
+    "dotmac-imports": (
+        REPO_ROOT / "packages/dotmac-imports/src/dotmac_imports/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -178,6 +184,8 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-remote-access": "ra_*.py",
     "dotmac-compliance-reporting": "cr_*.py",
     "dotmac-ai-operations": "ao_*.py",
+    "dotmac-payments": "pm_*.py",
+    "dotmac-imports": "im_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -185,6 +193,15 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-integration": "dotmac-integration-v",
     "dotmac-entitlement-allocation": "dotmac-entitlement-allocation-v",
     "dotmac-files": "dotmac-files-v",
+    "dotmac-forms": "dotmac-forms-v",
+    "dotmac-workflow-runtime": "dotmac-workflow-runtime-v",
+    "dotmac-platform-health": "dotmac-platform-health-v",
+    "dotmac-support-access": "dotmac-support-access-v",
+    "dotmac-remote-access": "dotmac-remote-access-v",
+    "dotmac-compliance-reporting": "dotmac-compliance-reporting-v",
+    "dotmac-ai-operations": "dotmac-ai-operations-v",
+    "dotmac-payments": "dotmac-payments-v",
+    "dotmac-imports": "dotmac-imports-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -806,6 +823,26 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-payments ──
+    "dotmac-payments-v0.1.0a1": (
+        "dotmac-payments",
+        "04b97713",
+        {
+            "pm_0001_payment_intents.py": (
+                "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
+            ),
+        },
+    ),
+    # ── dotmac-imports ──
+    "dotmac-imports-v0.1.0a2": (
+        "dotmac-imports",
+        "5876ffd0",
+        {
+            "im_0001_import_runs.py": (
+                "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
+            ),
+        },
+    ),
 }
 
 
@@ -879,6 +916,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
     "dotmac-ai-operations": frozenset(),
+    "dotmac-payments": frozenset(),
+    "dotmac-imports": frozenset(),
 }
 
 
@@ -972,6 +1011,11 @@ def test_the_map_records_something_to_check() -> None:
     # DISTRIBUTIONS with no tag would look enrolled and check nothing.
     covered = {owner for owner, _, _ in RELEASED_TAGS.values()}
     assert covered == set(DISTRIBUTIONS), sorted(set(DISTRIBUTIONS) - covered)
+    missing_prefixes = sorted(set(DISTRIBUTIONS) - set(TAG_PREFIXES))
+    assert set(TAG_PREFIXES) == set(DISTRIBUTIONS), (
+        "every monitored distribution needs a tag prefix, or a later release "
+        f"can evade the external tag oracle: {missing_prefixes}"
+    )
 
 
 @pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
@@ -1361,12 +1405,15 @@ def test_the_ci_tag_checkout_guard_detects_a_missing_fetch_depth() -> None:
     assert not _job_fetches_full_history(workflow, "integration")
 
 
-def test_the_tag_inventory_rejects_an_unrecorded_future_release() -> None:
-    """Sensitivity: adding a real tag without its byte history must fail."""
-    fake = "dotmac-integration-v99.0.0"
+@pytest.mark.parametrize("distribution", sorted(TAG_PREFIXES))
+def test_the_tag_inventory_rejects_an_unrecorded_future_release(
+    distribution: str,
+) -> None:
+    """Sensitivity: every enrolled lineage refuses an unrecorded future tag."""
+    fake = f"{TAG_PREFIXES[distribution]}99.0.0"
     problems = _tag_inventory_problems(set(RELEASED_TAGS) | {fake})
     assert problems == [
-        "dotmac-integration: published tags missing from RELEASED_TAGS: " f"['{fake}']"
+        f"{distribution}: published tags missing from RELEASED_TAGS: ['{fake}']"
     ]
 
 
@@ -1391,7 +1438,9 @@ def test_the_recorded_digests_are_what_the_tag_actually_holds(tag: str) -> None:
     )
     assert listing.returncode == 0, listing.stderr
     at_tag = {
-        line.rsplit("/", 1)[-1] for line in listing.stdout.splitlines() if line.strip()
+        line.rsplit("/", 1)[-1]
+        for line in listing.stdout.splitlines()
+        if line.strip() and not line.endswith("/__init__.py")
     }
     assert at_tag == set(files), (
         f"{tag} ({commit}) contains {sorted(at_tag)} but the map records "

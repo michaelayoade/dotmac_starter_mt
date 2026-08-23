@@ -14,6 +14,8 @@ release workflow immediately after tagging:
 - it never removes a row describing a DIFFERENT version;
 - it is idempotent, so a re-run after a partial repair converges;
 - it edits the JSON as text, so the ledger's prose survives untouched.
+- it enrols every migration-history map on a distribution's first release;
+- it validates both record files before writing either one.
 
 The digest half is proven against a real published tag rather than a fixture:
 a hand-built record already in `RELEASED_TAGS` is the oracle, and the writer
@@ -59,6 +61,20 @@ def _recorded_entry(writer, tag: str):
 
 def _ledger_text(writer) -> str:
     return writer.LEDGER.read_text(encoding="utf-8")
+
+
+def _mapping_keys(source: str, name: str) -> set[str]:
+    """Literal string keys from one top-level dictionary assignment."""
+    tree = ast.parse(source)
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == name
+    )
+    assert isinstance(assignment.value, ast.Dict)
+    return {ast.literal_eval(key) for key in assignment.value.keys if key is not None}
 
 
 # ── The digest path, against a real tag ─────────────────────────────────────
@@ -283,14 +299,97 @@ def test_a_row_describing_a_different_version_is_refused() -> None:
     assert "describes a different" in str(refusal.value)
 
 
-def test_an_unanchorable_distribution_refuses_rather_than_guessing() -> None:
-    """A distribution with no existing entry has no established position in the
-    map. Appending it somewhere arbitrary would make the file's ordering an
-    accident, so the first entry stays a human decision."""
+def test_a_first_release_enrols_every_migration_guard_map() -> None:
+    """The release workflow must be able to record a module's first tag.
+
+    Appending only ``RELEASED_TAGS`` is not enough: the guard then rejects the
+    unknown owner and still leaves main red. First-release enrolment is one
+    mechanical operation over all four owner maps plus the immutable tag map.
+    """
     writer = _writer()
     text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    distribution = "dotmac-nonesuch"
+    tag = "dotmac-nonesuch-v1.0.0"
+    assert distribution not in _mapping_keys(text, "DISTRIBUTIONS")
+
+    updated, added = writer.add_released_tag(
+        text,
+        tag,
+        distribution,
+        "abcdef12",
+        {"ns_0001_nonesuch.py": "a" * 64},
+        package_dir="packages/dotmac-nonesuch",
+        import_name="dotmac_nonesuch",
+    )
+
+    assert added
+    ast.parse(updated)
+    for mapping in ("DISTRIBUTIONS", "LINEAGE_GLOBS", "TAG_PREFIXES", "UNRELEASED"):
+        assert distribution in _mapping_keys(updated, mapping)
+    assert tag in _mapping_keys(updated, "RELEASED_TAGS")
+    assert '"dotmac-nonesuch": "ns_*.py"' in updated
+    assert '"dotmac-nonesuch": "dotmac-nonesuch-v"' in updated
+    assert "packages/dotmac-nonesuch" in updated
+    assert "dotmac_nonesuch/migrations/versions" in updated
+
+    unchanged, added_again = writer.add_released_tag(
+        updated,
+        tag,
+        distribution,
+        "abcdef12",
+        {"ns_0001_nonesuch.py": "a" * 64},
+    )
+    assert not added_again
+    assert unchanged == updated
+
+    long_entry = writer._first_release_entries(
+        distribution="dotmac-operational-escalations",
+        tag="dotmac-operational-escalations-v0.1.0a1",
+        commit="abcdef12",
+        digests={"oe_0001_escalation_policy.py": "b" * 64},
+        package_dir="packages/dotmac-operational-escalations",
+        import_name="dotmac_operational_escalations",
+    )["DISTRIBUTIONS"]
+    assert max(map(len, long_entry.splitlines())) <= 88
+    assert '/ "packages/dotmac-operational-escalations"' in long_entry
+    assert '/ "src/dotmac_operational_escalations/migrations/versions"' in long_entry
+
+
+def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both record files change together only after every premise validates."""
+    writer = _writer()
+    ledger = tmp_path / "declared-publication-baseline.json"
+    released = tmp_path / "test_released_migrations.py"
+    ledger.write_text(_ledger_text(writer), encoding="utf-8")
+    released.write_text(
+        writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    ledger_before = ledger.read_text(encoding="utf-8")
+    released_before = released.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(writer, "LEDGER", ledger)
+    monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released)
+    monkeypatch.setattr(writer, "tag_commit", lambda _tag: "abcdef12")
+    monkeypatch.setattr(
+        writer,
+        "migration_digests",
+        lambda *_args: {
+            "oe_0001_escalation_policy.py": "a" * 64,
+            "wrong_0002_second_lineage.py": "b" * 64,
+        },
+    )
+
     with pytest.raises(writer.ReleaseRecordError) as refusal:
-        writer.add_released_tag(
-            text, "dotmac-nonesuch-v1.0.0", "dotmac-nonesuch", "abcdef12", {"a.py": "x"}
+        writer.write_record(
+            distribution="dotmac-operational-escalations",
+            version="0.1.0a1",
+            tag="dotmac-operational-escalations-v0.1.0a1",
+            package_dir="packages/dotmac-operational-escalations",
+            import_name="dotmac_operational_escalations",
         )
-    assert "anchor" in str(refusal.value)
+
+    assert "one migration prefix" in str(refusal.value)
+    assert ledger.read_text(encoding="utf-8") == ledger_before
+    assert released.read_text(encoding="utf-8") == released_before

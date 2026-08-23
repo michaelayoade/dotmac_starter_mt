@@ -89,11 +89,21 @@
     "ADR-0026 section 8 set for dotmac-approvals and PR #180 applied to",
     "dotmac-auth-oidc: the entry lands WITH the proof, never ahead of it.",
     "",
-    "The row is re-added with ERP's adoption proof, which the dossier names as",
-    "cutover 1 and gates behind the E8 Organization-to-Tenant and",
-    "composed-lineage decision. Until then the state is recorded, deliberately",
-    "and with its reason, in docs/inventories/declared-publication-baseline.json",
-    "so the next reader does not 'repair' it by dispatching a release."
+    "## dotmac-imports was RE-AUTHORIZED on 2026-08-23",
+    "",
+    "The premise changed. ERP now has the first-adopter slice: its authoritative",
+    "Organization UUID supplies TenantScope; the im lineage is composed; source",
+    "and derived partitions use dotmac-files; the customer vocabulary, validator",
+    "and applier remain ERP-owned; workers commit an atomic claim, read storage",
+    "without a session, then settle outcomes with the domain effect; parity and",
+    "two concurrent disjoint claims have PostgreSQL evidence. The release is now",
+    "the prerequisite for ERP's exact registry pin and lock, not speculative code.",
+    "",
+    "This row names dotmac_erp as the intended adopter under the rule above. It",
+    "does NOT make `EXTRACTION.toml.contract_consumers` non-empty, claim cutover,",
+    "or retire the legacy importer. Those claims wait for ERP's merged exact pin",
+    "and real shadow evidence. The publication-baseline row remains OUTSTANDING",
+    "only until the registry-verified tag exists, then it must be removed."
   ],
   "modules": {
     "dotmac-accounting": {
@@ -957,6 +967,45 @@
           "dotmac_forms/manifest.py",
           "dotmac_forms/migrations/__init__.py",
           "dotmac_forms/migrations/versions/fm_0001_forms.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-imports": {
+      "$comment": [
+        "Tenant durable import runs, immutable partition plans, atomic claims,",
+        "resumable checkpoints and minimised row outcomes.",
+        "Product-first from ERP and Sub; ERP is the named first adopter and",
+        "retains customer vocabulary, validation, mutation and compensation.",
+        "Kernel a56 is the first published prerequisite-contract provider."
+      ],
+      "package_dir": "packages/dotmac-imports",
+      "import_name": "dotmac_imports",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a56",
+      "db_schema": "mod_imports",
+      "tag_prefix": "dotmac-imports-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_imports/py.typed",
+          "dotmac_imports/contracts.py",
+          "dotmac_imports/manifest.py",
+          "dotmac_imports/migrations/__init__.py",
+          "dotmac_imports/migrations/versions/im_0001_import_runs.py",
+          "dotmac_imports/models.py",
+          "dotmac_imports/partitioning.py",
+          "dotmac_imports/service.py",
+          "dotmac_imports/tabular.py"
         ],
         "forbidden_prefixes": [
           "app/",

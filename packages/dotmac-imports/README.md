@@ -135,13 +135,19 @@ and FORCEd RLS. No platform plane is declared: the audit found no control-plane
 import capability anywhere in the fleet, and declaring a plane no product uses
 would be speculative.
 
-## Not in this release
+## Release and adoption state
+
+Version `0.1.0a2` is authorized for publication for the named ERP first
+adopter. That release eligibility does not claim adoption: the dossier's
+`contract_consumers` remains empty until ERP merges the exact registry lock,
+composes the `im` lineage and completes the shadow cutover.
+
+## Not in a2
 
 XLSX/XLS decoding. `SourceLayout.XLSX` is declarable so a run records its true
 layout, but `decode` refuses it. ERP's spreadsheet readers are the source to
-port, and they arrive with ERP's cutover — with the library and the parity tests
-that make them provable — rather than as an untested optional extra shipped
-ahead of any consumer.
+port after the CSV cutover, with the library and parity tests that make them
+provable, rather than as an untested optional extra.
 
 Database extraction, PostgreSQL COPY and automatic partition-worker scaling are
 also not in this release. The durable lane is ready for a real ERP pilot; those
