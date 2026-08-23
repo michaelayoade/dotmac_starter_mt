@@ -109,7 +109,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-tax": "0.1.0a85",
     "dotmac-work-orders": "0.1.0a85",
     "dotmac-workflow-runtime": "0.1.0a88",
-    # The ISP essential-domain cohort (ADR-0055) and the four customer-journey
+    # The ISP essential-domain cohort (ADR-0058) and the four customer-journey
     # owners land their ledger rows together in a91. The cohort was authored
     # against an isolated a85 that only ever existed on its own branch: every
     # PUBLISHED a85..a90 artifact carries none of these fourteen rows, so a85

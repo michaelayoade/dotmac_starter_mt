@@ -69,7 +69,7 @@
     },
     "dotmac-customers": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
     "dotmac-document-rendering": {
@@ -84,12 +84,12 @@
     },
     "dotmac-fx-policy": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
     "dotmac-inbox-operations": {
       "declared": "0.1.0a3",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a3 makes routing executable with durable decision evidence, capacity-safe eligibility-aware dispatch, active-only queue/assignment lifecycles and fair per-queue draining (io_0003). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a3 makes routing executable with durable decision evidence, capacity-safe eligibility-aware dispatch, active-only queue/assignment lifecycles and fair per-queue draining (io_0003). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
       "state": "never-published"
     },
     "dotmac-operational-escalations": {
@@ -99,7 +99,7 @@
     },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
     "dotmac-sales": {
@@ -109,12 +109,12 @@
     },
     "dotmac-service-access-policy": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
       "state": "never-published"
     },
     "dotmac-service-catalog": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
     "dotmac-service-changes": {
@@ -124,7 +124,7 @@
     },
     "dotmac-services": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
@@ -134,17 +134,17 @@
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first normalized usage owner is audit-complete and uncomposed; raw AAA, rating, billing and accounting remain separate. Remove only with authorized history backfill, dedupe proof, aggregate shadow and writer cutover.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first normalized usage owner is audit-complete and uncomposed; raw AAA, rating, billing and accounting remain separate. Remove only with authorized history backfill, dedupe proof, aggregate shadow and writer cutover.",
       "state": "never-published"
     },
     "dotmac-usage-rating": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first pre-tax usage-rating owner is audit-complete and uncomposed; invoices, tax, payments and accounting remain separate. Remove only with authorized rule/obligation backfill, amount shadow and sole-writer cutover.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first pre-tax usage-rating owner is audit-complete and uncomposed; invoices, tax, payments and accounting remain separate. Remove only with authorized rule/obligation backfill, amount shadow and sole-writer cutover.",
       "state": "never-published"
     },
     "dotmac-workforce": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/ERP/CRM-adjudicated workforce scheduling and dispatch owner is audit-complete and uncomposed. Remove only with authorized Sub/ERP backfill and shadow cutovers plus verified CRM decision-copy retirement.",
+      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub/ERP/CRM-adjudicated workforce scheduling and dispatch owner is audit-complete and uncomposed. Remove only with authorized Sub/ERP backfill and shadow cutovers plus verified CRM decision-copy retirement.",
       "state": "never-published"
     }
   }
