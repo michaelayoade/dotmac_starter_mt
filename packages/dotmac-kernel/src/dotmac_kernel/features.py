@@ -142,6 +142,11 @@ class FeatureManifest:
     # these as an open manifest-owned vocabulary and never branches on a
     # concrete participant code.
     provisioning_participants: Sequence[str] = field(default_factory=tuple)
+    # Product-owned recurring charge-model and obligation-source codes. The
+    # Subscriptions package consumes these open vocabularies without importing
+    # or enumerating the products that declare their members.
+    charge_models: Sequence[str] = field(default_factory=tuple)
+    obligation_sources: Sequence[str] = field(default_factory=tuple)
     # Setting domains this module DECLARES and OWNS. A domain groups settings
     # under one owner; `dotmac_kernel.settings_resolver` rejects a spec or a
     # write naming one no module declares. See

@@ -78,9 +78,10 @@ specifics) points here and must never fork these rules.
     dynamically by `tests/test_rls_catalog.py` plus the per-feature
     isolation canaries — Postgres only (`make test-db-up &&
     make test-integration`); SQLite cannot enforce RLS.
-12. **Manifest declarations are unique, referenced, and consumed.** SIX
+12. **Manifest declarations are unique, referenced, and consumed.** NINE
     vocabularies work this way — permissions, capabilities, audit actions,
-    outbox event types, feature flags, setting domains — and every later
+    outbox event types, feature flags, setting domains, provisioning
+    participants, charge models and obligation sources — and every later
     vocabulary whose members belong to modules must be another declaration
     registry, never an enum or a fixed list. ADR-0008 is a FLEET-WIDE standard:
     it binds every Dotmac
@@ -88,9 +89,11 @@ specifics) points here and must never fork these rules.
     vocabulary another layer owns members of. Each member is declared by
     exactly ONE module's manifest; a consumer may only reference a DECLARED
     member (`require_permission` refuses the boot, `require_capability`,
-    `write_audit_event`, `resolve_flag` and the settings write path refuse
-    the operation); every declared member needs a real consumer outside its
-    own `feature.py`; and the backing DB column stays a plain string, since
+    `write_audit_event`, `resolve_flag`, the settings write path,
+    Fulfillment's `ParticipantRegistry`, and Subscriptions'
+    `SubscriptionVocabularyRegistry` refuse the operation); every declared
+    member needs a real consumer outside its own `feature.py`; and the backing
+    DB column stays a plain string, since
     a CHECK constraint would re-close the list and cost a kernel migration
     per consuming product. Orphan allowlists are EMPTY and may only shrink.
     (`tests/architecture/test_manifest_declarations.py`;

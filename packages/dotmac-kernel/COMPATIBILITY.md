@@ -506,7 +506,7 @@ revision ids are already recorded in live `alembic_version` rows, so
 exempts them from the strict id and `schema=` rules. Their tables legitimately
 live in `public`. Every installable module gets the strict rules.
 
-### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.outbox_event_types`, `dotmac_kernel.setting_domains`)
+### Manifest declaration catalogues
 
 Siblings of `dotmac_kernel.capabilities.CapabilityCatalogue` and
 `dotmac_kernel.flags.FlagCatalogue` — same shape, same fail-closed posture, same
@@ -516,8 +516,8 @@ invented anywhere else.** Pure and in-memory; no engine, no I/O.
 **ADR-0008 makes this the standard.** A kernel-level vocabulary whose members
 belong to modules is declared on manifests and validated by a registry — never
 enumerated by the kernel as an enum or a fixed list, and never pinned by a CHECK
-constraint on the backing column. If you are adding a sixth, copy
-`dotmac_kernel.audit_actions` and change the nouns.
+constraint on the backing column. A new vocabulary ships its declaration and
+real consumer together; an inert manifest field is not a compatibility surface.
 
 - **`PermissionSpec(code, description="", default_roles=("admin",))`** — one
   permission a module owns. `default_roles` is the code-declared default binding
@@ -544,6 +544,14 @@ constraint on the backing column. If you are adding a sixth, copy
   `String(120)` and correctness comes from the write boundary. Kernel-owned
   domains are bound as class attributes (`SettingDomain.branding`); a product
   constructs its own (`SettingDomain("payroll")`).
+- **`provisioning_participants`** — a bare-code declaration carried on both
+  manifest shapes and consumed by
+  `dotmac_fulfillment.participants.ParticipantRegistry`; the kernel never owns
+  a provider or participant list.
+- **`charge_models` / `obligation_sources`** — independent bare-code
+  declarations carried on both manifest shapes and consumed by
+  `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry`; the kernel
+  never owns a charge model or business-source list.
 - **Process-active install.** `install_permissions` / `install_audit_actions` /
   `install_outbox_event_types` / `install_setting_domains` set the process-active
   catalogue and registries; `active_permissions` / `active_audit_actions` /

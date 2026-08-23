@@ -5,6 +5,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      allocation_base_sha:
+        description: Immutable 40-character base SHA for the allocation gate
+        required: true
+        type: string
 
 jobs:
   quality:
@@ -78,7 +83,7 @@ jobs:
     # Deliberately NOT in the `quality` matrix: that list must equal `make
     # check`'s prerequisites exactly (`test_ci_runs_canonical_check.py`), and
     # `check` must stay runnable offline, while this needs the base branch.
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,8 +103,15 @@ jobs:
       #
       # Passed through `env:` and quoted rather than interpolated into the
       # script line, so the value can never be parsed as shell.
-      - env:
+      - name: Enforce allocation against the pull-request base
+        if: github.event_name == 'pull_request'
+        env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python scripts/check_allocation_serialized.py --base "$BASE_SHA"
+      - name: Enforce allocation against the dispatched immutable base
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BASE_SHA: ${{ inputs.allocation_base_sha }}
         run: python scripts/check_allocation_serialized.py --base "$BASE_SHA"
 
   unit:

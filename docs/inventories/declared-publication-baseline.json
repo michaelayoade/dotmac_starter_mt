@@ -67,6 +67,16 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. The audited dual-plane Billing tree has been rebased onto the published a89+ allocation floor and now owns the sole ReceivablePositionV1, kernel Money, financial state and immutable reversal movements. Source presence is not CI, registry or adoption evidence. Keep the package unallowlisted and unpublished until the exact revision passes the direct Git-hosted PostgreSQL, wheel and composition gates and Michael separately authorizes release; do not edit the version down.",
+      "state": "never-published"
+    },
+    "dotmac-collections": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. Collections declares its distinct ReceivableObservationV1, one lifecycle over selectable tenant/platform persistence planes, and no Billing-owned financial position, money lanes or reversed steady state. It still has no production adopter or authority cutover. Keep it unallowlisted and unpublished until exact-revision direct CI, the real composition adapter and the Sub/Vendor shadow, isolation and writer-retirement gates are complete; do not edit the version down.",
+      "state": "never-published"
+    },
     "dotmac-customers": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
@@ -86,6 +96,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a94",
+      "reason": "OUTSTANDING RELEASE CANDIDATE - NOT to be repaired by editing the version down. a94 adds the optional manifest-owned charge_models and obligation_sources declaration seams consumed by the checked-in dotmac-subscriptions candidate. It owns no vocabulary members, composes no module and performs no adopter cutover. a93 is published and immutable, so this additive public surface requires a new version. Publication still requires Michael's separate authorization. Remove this row only after the dedicated release-kernel workflow publishes, installs back, verifies and tags a94, in the same release-record change.",
+      "state": "declared-unpublished"
     },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
@@ -110,6 +125,11 @@
     "dotmac-services": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNRELEASED COORDINATED-COMMERCE CANDIDATE. The product-first dual-plane offer, contract, cadence and recurring-occurrence owner exists in source, but exact-revision CI, a real Cloud composition, product shadow/adoption and release authorization are not complete. Keep it unallowlisted and unpublished until those gates pass and remove this row only in the authorized release record; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

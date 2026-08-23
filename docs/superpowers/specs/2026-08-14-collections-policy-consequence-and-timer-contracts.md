@@ -19,6 +19,29 @@
 - **Measured at:** starter `5417e51`, Sub `27c76aaee`, ERP `0f4b1698`,
   vendor CP `8984801`.
 
+> **Superseded contract note — 2026-08-23.** ADR-0030's accepted amendment now
+> governs the inbound read seam. Every later reference in this historical spec
+> to a Collections-owned `ReceivablePositionV1`, `funding_available`,
+> `resolved_state = reversed`, or a combined financial/projection `authority`
+> is stale. Billing alone publishes `ReceivablePositionV1` using kernel Money
+> and owns `open | partially_resolved | resolved | cancelled`; Collections
+> declares the narrower `ReceivableObservationV1`. The assembly maps between
+> them, preserving service-period, due-date, financial-authority, projection
+> mode and completeness evidence. Unknown/unverified due evidence fails closed.
+
+> **Implementation completion note — 2026-08-23.** The unreleased module now
+> carries the complete scheduling seam described here. Immutable step rows own
+> notice purpose or action/effect scope, receipt requirement and ordered retry
+> offsets. Case opening/replanning schedules one exact generation through the
+> caller-owned `CollectionsTimer`; pause/closure cancels it. A current neutral
+> wake is accepted inside `CollectionCaseService.process_step_due`, which
+> rereads the receivable and atomically writes the policy-selected request plus
+> kernel outbox intent. Accepted receipts schedule the next step; retryable
+> receipts use the next stored retry offset; transient source unavailability
+> replaces the timer without emitting a consequence. The port fake is module
+> evidence only. A production adopter still owes its assembly-local
+> `dotmac-durable-timers` adapter, exact revision tests and cutover evidence.
+
 This document specifies three things and nothing else: the **inbound
 receivable-position contract and the port that carries it**, the **outbound
 consequence-request contract**, and the **timer port** the module needs and is
@@ -47,7 +70,7 @@ mistake.
 
 ---
 
-## 2. The read seam: `ReceivablesReader` and `ReceivablePositionV1`
+## 2. The read seam: `ReceivablesReader` and the historical position proposal
 
 ### 2.1 The rule
 
@@ -418,10 +441,14 @@ class TimerRequest:
     expected_source_version: int
 
 class Timer(Protocol):
-    def schedule(self, req: TimerRequest) -> TimerHandle: ...   # create OR replace
-    def cancel(self, *, owner, entity_kind, entity_id, purpose) -> bool: ...
-    def current(self, *, owner, entity_kind, entity_id, purpose) -> TimerHandle | None: ...
+    def schedule(self, db: Session, req: TimerRequest) -> TimerHandle: ...
+    def cancel(self, db: Session, *, owner, entity_kind, entity_id, purpose) -> bool: ...
+    def current(self, db: Session, *, owner, entity_kind, entity_id, purpose) -> TimerHandle | None: ...
 ```
+
+The caller-owned `Session` is part of every mutating and generation-reading
+method, including trigger acceptance. The neutral wake-up type is
+`collections.case.step_due.v1`; it carries no notice/action decision.
 
 The contract suite — the definition, which the fake and any real implementation
 must both pass:
@@ -517,6 +544,13 @@ restate them:
 | Which channels does this class of message go out on? | `dotmac_kernel.channel_policy.resolve_channels(db, spec, tenant_id=…, event=…, category=…)` | a `channel` column on a policy step used as the only answer |
 | What did the provider say, and does it suppress? | `dotmac_kernel.delivery.record_receipt` | a local delivery-status enum |
 | Queue, retry, backoff, worker lease | `dotmac_kernel.messaging` outbox/relay | a notification queue in the collections schema |
+
+The Collections writer persists the immutable request evidence and exactly one
+manifest-declared `collections.notice.requested.v1` or
+`collections.action.requested.v1` row in the matching kernel tenant/platform
+outbox before the caller commits. An idempotent replay emits no second intent;
+outbox delivery is therefore at-least-once while request identity remains
+stable for the receiving owner.
 
 `channel_preference` on a policy step is a **preference**, resolved against
 `resolve_channels`; where they disagree, channel policy wins and the disagreement

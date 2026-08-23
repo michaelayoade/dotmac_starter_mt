@@ -63,11 +63,15 @@ def test_manifest_normalizes_sequences_to_tuples() -> None:
         api_routers=[APIRouter()],
         nav=[NavItem("Inventory", "/admin/inventory")],
         capabilities=["inventory.use"],
+        charge_models=["inventory.recurring"],
+        obligation_sources=["inventory.accepted_order"],
     )
     assert manifest.dependencies == ("parties",)
     assert isinstance(manifest.api_routers, tuple)
     assert isinstance(manifest.nav, tuple)
     assert manifest.capabilities == ("inventory.use",)
+    assert manifest.charge_models == ("inventory.recurring",)
+    assert manifest.obligation_sources == ("inventory.accepted_order",)
     assert manifest.contract_version == KERNEL_MODULE_CONTRACT_VERSION
 
 
@@ -103,6 +107,8 @@ def test_from_feature_carries_every_field_across() -> None:
         capabilities=["legacy.use"],
         outbox_event_types=["legacy.wake"],
         provisioning_participants=["legacy.provision"],
+        charge_models=["legacy.recurring"],
+        obligation_sources=["legacy.accepted_order"],
         seed=lambda: seed_calls.append(1),
     )
     adapted = ModuleManifest.from_feature(feature)
@@ -116,6 +122,8 @@ def test_from_feature_carries_every_field_across() -> None:
     assert adapted.capabilities == ("legacy.use",)
     assert adapted.outbox_event_types == ("legacy.wake",)
     assert adapted.provisioning_participants == ("legacy.provision",)
+    assert adapted.charge_models == ("legacy.recurring",)
+    assert adapted.obligation_sources == ("legacy.accepted_order",)
     assert adapted.seed is not None
     adapted.seed()
     assert seed_calls == [1]

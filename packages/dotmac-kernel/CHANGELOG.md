@@ -6,6 +6,32 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a94 — 2026-08-23
+
+**Declare product-owned recurring-commerce vocabularies without closing
+them.** This additive release gives Subscriptions the same manifest-owned
+extension shape already used for capabilities, permissions, flags, audit
+actions, outbox routing, settings domains and fulfillment participants.
+
+### Added
+
+- Optional `charge_models` and `obligation_sources` declarations on both
+  `FeatureManifest` and `ModuleManifest`.
+- Tuple normalization and complete `FeatureManifest` → `ModuleManifest`
+  adaptation for both fields, preserving frozen-manifest semantics.
+
+The kernel carries declarations only. It owns no charge-model or obligation-
+source member and introduces no enum or database constraint. The checked-in
+`dotmac-subscriptions` candidate is the real consumer: its
+`SubscriptionVocabularyRegistry` rejects duplicate ownership and its offer,
+contract and recurrence commands fail before writing when a code is undeclared.
+The fields are optional, so the module contract generation remains V1 and every
+existing manifest continues to load unchanged.
+
+This release composes or adopts no module and performs no product writer
+cutover. Publication, install-back verification and tagging remain the dedicated
+kernel release workflow's responsibility.
+
 ## 0.1.0a93 — 2026-08-23
 
 **Allocate the two Cloud service-lifecycle lineages.** Allocation-only: this
