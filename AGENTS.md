@@ -450,19 +450,38 @@ specifics) points here and must never fork these rules.
     credential must lack the permission to approve deployments; until that is
     in place this rule is discipline, and discipline is the weaker half.
 
-    Exception on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22,
-    kernel `0.1.0a91`.
+    Exceptions on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22 kernel
+    `0.1.0a91` and 2026-08-23 kernel `0.1.0a93`.
 
 32. **A release holds a short, named freeze.** `publish` re-asserts that the
     run's SHA is still the tip of protected `main`, and that check runs AFTER
     the approval wait — so any merge between dispatch and verification voids
-    the run. One release captain holds merges from dispatch through
-    verification and tagging, and announces the window opening and closing.
+    the run. One release captain holds every merge except the generated release
+    record from dispatch through verification, tagging, the record pull
+    request's green merge, and verification that protected `main` contains the
+    truthful record and is green. The captain announces both ends of the
+    window. A tag is not the closing event: it is the instant the checked-in
+    publication baseline becomes false.
 
     This is a real control, not ceremony: the first a91 attempt was voided
     mid-flight by a merge landing during the approval wait, and it stopped
     BEFORE publication. Keep the check; the freeze is what stops it from
-    costing a wasted build every time.
+    costing a wasted build every time. If record automation fails after the
+    tag, the freeze stays open while the already-pushed branch is opened,
+    reviewed and merged; publication is never re-run to repair bookkeeping.
+
+    The record branch push and pull request use one dedicated recorder App,
+    not the publisher's persisted checkout credential. GitHub's required
+    pull-request-write permission also reaches the review API, so do not claim
+    the token is review-incapable. Enforce the real separation instead: the App
+    authors and last-pushes its PR; protected `main` requires one fresh approval
+    from another actor, dismisses stale approvals, requires approval of the most
+    recent reviewable push and permits no bypass. The App receives contents and
+    pull-request write only — never Actions, deployment, environment or
+    administration authority. The tagging job's ordinary workflow token has
+    exactly `contents: write`, never pull-request write; the loud fallback can
+    push the truthful record branch but cannot become a second automatic PR
+    identity if a repository setting changes.
     (`scripts/assert_current_main.sh`)
 
 33. **A writer claim is TYPED, and the prose channel only shrinks.**
@@ -541,5 +560,7 @@ CI remains the merge acceptance owner.
   workflows now open that record themselves
   (`scripts/open_release_record_pr.sh` calling
   `scripts/write_release_record.py`, straight after tagging) — merge that pull
-  request as soon as it is green. Run the writer by hand only to repair an
-  older gap; never edit a declared version down to make the gates agree.
+  request as soon as it is green, then verify the resulting protected `main`
+  revision is truthful and green before the release captain ends the freeze.
+  Run the writer by hand only to repair an older gap; never edit a declared
+  version down to make the gates agree.
