@@ -14,6 +14,7 @@ rather than asserted in a docstring.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,10 +22,12 @@ from typing import Any
 
 import pytest
 from dotmac_integration.receipt_delivery import (
+    DeliveryError,
     DeliveryReport,
     FingerprintConflict,
     LostClaim,
     ProductAcceptance,
+    ProductObservationSource,
     ProductOutcome,
     ProductRequest,
     ReceiptClaim,
@@ -33,6 +36,7 @@ from dotmac_integration.receipt_delivery import (
     build_product_request,
     deliver_receipt,
     idempotency_key_for,
+    product_observation_document,
     request_fingerprint_for,
     require_stable_fingerprint,
 )
@@ -61,7 +65,7 @@ class _Destination:
     application: str
     scope: _Scope
     contract_version: int
-    config_revision_id: uuid.UUID
+    destination_revision_id: uuid.UUID
 
 
 def _destination(**overrides: Any) -> _Destination:
@@ -71,7 +75,7 @@ def _destination(**overrides: Any) -> _Destination:
         "application": "sub",
         "scope": _Scope(kind="inbox", ref="support"),
         "contract_version": 1,
-        "config_revision_id": uuid.UUID(int=2),
+        "destination_revision_id": uuid.UUID(int=2),
     }
     base.update(overrides)
     return _Destination(**base)
@@ -83,6 +87,9 @@ def _claim(**overrides: Any) -> ReceiptClaim:
         "attempt": 1,
         "leased_until": datetime.now(UTC) + timedelta(seconds=300),
         "destination": _destination(),
+        "source": ProductObservationSource(
+            installation_id=uuid.UUID(int=3), connector_key="synthetic_connector"
+        ),
         "provider_event_id": "provider-event-7",
         "event_type": "message.received",
         "observation": {"text": "hello", "from": "+2348000000000"},
@@ -362,6 +369,7 @@ def test_the_same_request_replays_safely() -> None:
     claim = _claim()
     fingerprint = request_fingerprint_for(
         destination=claim.destination,
+        source=claim.source,
         provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
@@ -405,38 +413,85 @@ def test_the_fingerprint_follows_the_content_and_the_destination() -> None:
     base = _claim()
     same = request_fingerprint_for(
         destination=base.destination,
+        source=base.source,
         provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation=base.observation,
     )
     other_text = request_fingerprint_for(
         destination=base.destination,
+        source=base.source,
         provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation={"text": "goodbye", "from": "+2348000000000"},
     )
     other_version = request_fingerprint_for(
         destination=_destination(contract_version=2),
+        source=base.source,
         provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation=base.observation,
     )
     other_event = request_fingerprint_for(
         destination=base.destination,
+        source=base.source,
         provider_event_id=base.provider_event_id,
         event_type="message.deleted",
         observation=base.observation,
     )
     other_provider_identity = request_fingerprint_for(
         destination=base.destination,
+        source=base.source,
         provider_event_id="provider-event-8",
         event_type=base.event_type,
         observation=base.observation,
     )
 
     assert (
-        len({same, other_text, other_version, other_event, other_provider_identity})
+        len(
+            {
+                same,
+                other_text,
+                other_version,
+                other_event,
+                other_provider_identity,
+            }
+        )
         == 5
+    )
+
+
+def test_the_fingerprint_follows_engine_owned_source_provenance() -> None:
+    base = _claim()
+    other_installation = request_fingerprint_for(
+        destination=base.destination,
+        source=ProductObservationSource(
+            installation_id=uuid.UUID(int=4), connector_key=base.source.connector_key
+        ),
+        provider_event_id=base.provider_event_id,
+        event_type=base.event_type,
+        observation=base.observation,
+    )
+    other_connector = request_fingerprint_for(
+        destination=base.destination,
+        source=ProductObservationSource(
+            installation_id=base.source.installation_id,
+            connector_key="other_connector",
+        ),
+        provider_event_id=base.provider_event_id,
+        event_type=base.event_type,
+        observation=base.observation,
+    )
+
+    assert (
+        len(
+            {
+                build_product_request(base).request_fingerprint,
+                other_installation,
+                other_connector,
+            }
+        )
+        == 3
     )
 
 
@@ -446,12 +501,14 @@ def test_key_order_does_not_change_the_fingerprint() -> None:
     destination = _destination()
     first = request_fingerprint_for(
         destination=destination,
+        source=_claim().source,
         provider_event_id="provider-event-1",
         event_type="e",
         observation={"a": 1, "b": {"c": 2, "d": 3}},
     )
     second = request_fingerprint_for(
         destination=destination,
+        source=_claim().source,
         provider_event_id="provider-event-1",
         event_type="e",
         observation={"b": {"d": 3, "c": 2}, "a": 1},
@@ -491,6 +548,69 @@ def test_the_request_carries_the_destinations_contract_version() -> None:
 def test_the_request_carries_provider_identity_from_the_claim() -> None:
     request = build_product_request(_claim(provider_event_id="wamid.PROVIDER-1"))
     assert request.provider_event_id == "wamid.PROVIDER-1"
+
+
+def test_product_observation_v1_is_built_only_from_trusted_claim_facts() -> None:
+    claim = _claim(
+        destination=_destination(
+            capability_id="payments.settlement.observation.v1",
+            application="sub",
+            scope=_Scope(kind="payment_provider_events", ref="verified"),
+        ),
+        event_type="payments.settlement.observation.v1",
+        observation={
+            "capability_id": "payments.settlement.observation.v1",
+            "provider_status": "successful",
+            "source": {
+                "installation_id": str(uuid.UUID(int=999)),
+                "connector_key": "payload_cannot_replace_engine_provenance",
+            },
+            "scope": {"kind": "hostile", "ref": "hostile"},
+        },
+    )
+
+    document = product_observation_document(build_product_request(claim))
+
+    assert document == {
+        "schema_version": "dotmac.io/product-observation/v1",
+        "capability_id": "payments.settlement.observation.v1",
+        "contract_version": 1,
+        "source": {
+            "installation_id": str(uuid.UUID(int=3)),
+            "connector_key": "synthetic_connector",
+        },
+        "provider_event_id": "provider-event-7",
+        "event_type": "payments.settlement.observation.v1",
+        "scope": {"kind": "payment_provider_events", "ref": "verified"},
+        "observation": {
+            "capability_id": "payments.settlement.observation.v1",
+            "provider_status": "successful",
+            "source": {
+                "installation_id": str(uuid.UUID(int=999)),
+                "connector_key": "payload_cannot_replace_engine_provenance",
+            },
+            "scope": {"kind": "hostile", "ref": "hostile"},
+        },
+    }
+    assert json.loads(json.dumps(document)) == document
+
+
+def test_product_observation_builder_has_no_provider_or_application_input() -> None:
+    import inspect
+
+    assert list(inspect.signature(product_observation_document).parameters) == [
+        "request"
+    ]
+
+
+@pytest.mark.parametrize("connector_key", ["", "   ", " leading", "trailing "])
+def test_product_observation_source_refuses_an_ambiguous_connector_key(
+    connector_key: str,
+) -> None:
+    with pytest.raises(DeliveryError):
+        ProductObservationSource(
+            installation_id=uuid.UUID(int=3), connector_key=connector_key
+        )
 
 
 def test_the_protocol_matches_team_3s_binding() -> None:
@@ -544,7 +664,5 @@ def test_boundary_contracts_are_deeply_immutable() -> None:
 def test_a_claim_must_be_a_real_claim() -> None:
     """Attempt 0 is not a held claim — the conditional UPDATE increments the
     counter, so anything less than 1 means the caller built a claim by hand."""
-    from dotmac_integration.receipt_delivery import DeliveryError
-
     with pytest.raises(DeliveryError):
         _claim(attempt=0)

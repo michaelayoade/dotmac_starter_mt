@@ -266,6 +266,7 @@ from dotmac_integration.polling import (
     record_poll_batch,
 )
 from dotmac_integration.receipt_delivery import (
+    PRODUCT_OBSERVATION_SCHEMA_VERSION,
     DeliveryError,
     DeliveryReport,
     FingerprintConflict,
@@ -273,6 +274,7 @@ from dotmac_integration.receipt_delivery import (
     # `dispatch`, and re-importing it here would be a redefinition of the same
     # name at this module's surface.
     ProductAcceptance,
+    ProductObservationSource,
     ProductOutcome,
     ProductPortClient,
     ProductRequest,
@@ -285,8 +287,10 @@ from dotmac_integration.receipt_delivery import (
     build_product_request,
     deliver_receipt,
     idempotency_key_for,
+    product_observation_document,
     request_fingerprint_for,
     require_stable_fingerprint,
+    resolve_product_observation_source,
 )
 from dotmac_integration.retention import (
     REDACTION_MARKER,
@@ -385,7 +389,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a12"
+__version__ = "0.1.0a13"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -479,6 +483,8 @@ __all__ = [
     "DeliveryReport",
     "FingerprintConflict",
     "ProductAcceptance",
+    "PRODUCT_OBSERVATION_SCHEMA_VERSION",
+    "ProductObservationSource",
     "ProductPortClient",
     "ProductOutcome",
     "ProductRequest",
@@ -491,7 +497,9 @@ __all__ = [
     "build_product_request",
     "deliver_receipt",
     "idempotency_key_for",
+    "product_observation_document",
     "request_fingerprint_for",
+    "resolve_product_observation_source",
     "require_stable_fingerprint",
     # ── Revisioned product-port shadow evidence ────────────────────────────
     "RETRYABLE_SHADOW_VERDICTS",

@@ -10,6 +10,10 @@ run `32587960069`.
 `0.1.0a12` is the latest published version. It adds the capability-wide
 product-port reconciliation `dotmac_integrator` composes.
 
+`0.1.0a13` is declared and unreleased. It adds the provider-neutral
+ProductObservation v1 document and accepts product-port descriptor v2 without
+changing connector SPI 1.3.
+
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
 
@@ -69,6 +73,23 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a13 — unreleased
+
+### Generic product-observation delivery
+
+- Adds `ProductObservationSource`, derived during the claim transaction from
+  the module-owned installation and binding rather than from connector payload.
+- Exposes that one derivation through `resolve_product_observation_source`, so
+  read-only shadow projection does not reimplement module persistence in its
+  composing assembly.
+- Adds `product_observation_document`, a provider- and product-neutral
+  ProductObservation v1 projection whose addressing comes only from the
+  authenticated product descriptor and whose observation remains product-owned.
+- Covers source provenance in the request fingerprint, so the same delivery
+  identity cannot silently move between installations or connector packages.
+- Accepts product-port descriptor v2 alongside v1. Unknown descriptor versions
+  still fail closed; connector SPI remains 1.3.
 
 ## 0.1.0a12 — released 2026-08-22
 
