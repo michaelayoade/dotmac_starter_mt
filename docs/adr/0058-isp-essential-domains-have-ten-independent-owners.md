@@ -113,3 +113,30 @@ a later assignment or admission creates a new history row. Migration
 `io_0003_operational_safety` and package `0.1.0a3` implement this amendment.
 Workforce continues to own teams, skills, shifts and field availability; this
 module stores none of them.
+
+## Amendment — 2026-08-23: technical variants require versioned values
+
+The pre-release `dotmac-service-catalog` draft proved schema isolation and kept
+commercial fields out, but its initial four-table shape stored only current
+names and characteristic definitions. It could describe that download speed
+was an integer without recording that a concrete technical shape was 25 Mbps.
+Its `PlanFamily` also pointed to one specification, which could not group many
+speed/access shapes under one stable family. That shape could not accept Sub's
+technical-offer backfill and therefore was not release-ready.
+
+Before the first release, the `sc_0001_technical_catalog` root is corrected to
+make `PlanFamily` the stable grouping identity and allow many stable
+`ServiceSpecification` identities beneath it. Effective-dated, evidenced
+`PlanFamilyVersion` and `ServiceSpecificationVersion` rows own published
+technical state. Typed characteristic values belong to a specification version;
+definitions still declare their primitive type, requiredness and unit.
+Consequently speed, access type, aggregation and similar technical properties
+can vary without duplicating a commercial offer, while offers, prices,
+contracts, subscriptions, tax and billing cadence remain outside this module.
+
+This amendment changes no released migration bytes. As of the 2026-08-23 audit,
+the repository's declared-publication oracle recorded no package tag and the
+extraction dossier recorded no contract consumer; the D2 release owner must
+refresh both facts before publication. Sub adoption still requires an exact
+released pin, stable-id backfill, complete shadow comparison and retirement of
+the offer-owned technical writers.
