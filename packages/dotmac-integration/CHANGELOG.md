@@ -2,12 +2,16 @@
 
 ## Release state — read this before pinning
 
-**Eleven versions have been released. Pin `0.1.0a11`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a11`; a11 was published, installed
-back from the private index and tagged from `f25df1ad`.
+**Twelve versions have been released. Pin `0.1.0a12`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a12`; a12 was published, installed
+back from the private index, registered and tagged from `9f59d02b` by release
+run `32587960069`.
 
-`0.1.0a11` is the latest published version. It keeps SPI 1.3 and makes the
-declared POLL mode executable through a three-phase engine.
+`0.1.0a12` is the latest published version. It adds the capability-wide
+product-port reconciliation `dotmac_integrator` composes.
+
+`0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
+three-phase engine; it was published and tagged from `f25df1ad`.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -48,9 +52,16 @@ This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
 does not exist, or something it should not. It has since been wrong in the other
-direction twice: a2 and then a3 were each tagged while this preamble still called
-them unreleased. The table of tags and commits above is what a reader should
-trust, because `git ls-remote --tags` checks it.
+direction three times: a2, a3 and then a12 were each tagged while this preamble
+still called them unreleased — a12 for long enough that it told readers to pin
+a11 while `dotmac_integrator` was already composing a12. The table of tags and
+commits above is what a reader should trust, because `git ls-remote --tags`
+checks it.
+
+Check it with `sort -V`. `git ls-remote --tags | tail` sorts lexicographically,
+where `a12` falls between `a11` and `a2` rather than after `a11` — which is how
+a published a12 came to be read as absent while this preamble agreed with the
+mistake.
 
 Everything under a `## 0.1.0a2` heading below shipped in that tag. There are
 four such headings because a2's content landed across four merges (SPI 1.1,
@@ -59,7 +70,10 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a12 — unreleased
+## 0.1.0a12 — released 2026-08-22
+
+Published, installed back from the private index, registered and tagged from
+exact protected-main revision `9f59d02b` by release run `32587960069`.
 
 ### Capability-wide product-port reconciliation
 
