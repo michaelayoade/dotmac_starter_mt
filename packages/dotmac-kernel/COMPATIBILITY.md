@@ -379,6 +379,8 @@ retired prefix is never reused.
 | `payments` | `mod_payments` | `pm` | `payments` |
 | `service_changes` | `mod_servicechanges` | `sch` | `service_changes` |
 | `operational_escalations` | `mod_escalations` | `oe` | `operational_escalations` |
+| `domains` | `mod_domains` | `dn` | `domains` |
+| `hosting` | `mod_hosting` | `hs` | `hosting` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
