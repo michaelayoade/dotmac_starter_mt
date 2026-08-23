@@ -199,7 +199,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # and the control plane allocates vendor-side series no tenant may read.
     # `people` is the eleventh: a tenant-only employment directory that links
     # to, and never duplicates, the kernel Party-person catalogue.
-    # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
+    # `campaigns` (ADR-0056) is the twelfth and tenant-only because the source
     # audit found no real named platform consumer.
     # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
     # than adding another due-work engine. `commercial_agreements` (ADR-0033) is

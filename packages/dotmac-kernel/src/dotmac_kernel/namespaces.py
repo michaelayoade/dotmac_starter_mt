@@ -602,7 +602,7 @@ PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-campaigns` — the tenant-only outbound campaign progression owner
-# accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
+# accepted by ADR-0056. `campaigns` is intentionally explicit in live catalog
 # dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
 # No platform plane was allocated by inference: the audit found no named
 # control-plane consumer, and the module manifest declares tenant tables only.

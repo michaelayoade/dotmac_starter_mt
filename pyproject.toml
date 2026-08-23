@@ -150,7 +150,7 @@ dotmac-integration = { path = "packages/dotmac-integration", develop = true }
 # Immutable, provider-neutral external media facts. Built and proven here but
 # deliberately not composed by Starter or any product while adoption is paused.
 dotmac-media-observations = { path = "packages/dotmac-media-observations", develop = true }
-# Tenant-only outbound campaign progression (ADR-0032). Built and proven here,
+# Tenant-only outbound campaign progression (ADR-0056). Built and proven here,
 # composed first by Sub and then by Backoffice; the reference assembly does not
 # install its lineage or import it from `app`.
 dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
