@@ -490,9 +490,9 @@ packages/dotmac-files/           optional dual-plane stored-byte lifecycle
                  authorization and retention; import parsing is separate.
 packages/dotmac-imports/         optional bulk-import run ledger
   pyproject.toml                 distribution dotmac-imports; audit-complete,
-  EXTRACTION.toml                with ERP, then Sub, then CRM as candidate
-                                 cutovers (ADR-0025); ERP E8 is the same
-                                 prerequisite and none is counted yet
+  EXTRACTION.toml                with ERP then Sub as candidate cutovers and
+                                 CRM as source evidence (ADR-0025); the release
+                                 lane is authorized, but no cutover is counted
   src/dotmac_imports/            run/row contract, CSV decoding, alias-based
                  column mapping and preview, the validate/promote/apply
                  service, manifest, and independent `im` lineage in schema

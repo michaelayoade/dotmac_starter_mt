@@ -131,6 +131,15 @@ def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
     assert emitted["tag"] == "dotmac-files-v0.1.0a3"
 
 
+def test_imports_is_release_allowlisted_for_the_erp_first_adopter() -> None:
+    result = _resolve("dotmac-imports", version="0.1.0a2")
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    assert emitted["kernel_floor"] == "0.1.0a56"
+    assert emitted["db_schema"] == "mod_imports"
+    assert emitted["tag"] == "dotmac-imports-v0.1.0a2"
+
+
 def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:
     """Publication is the first executable gate in Sub's named adoption.
 

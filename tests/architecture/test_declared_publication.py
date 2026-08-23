@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -152,10 +153,9 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
     """ADR-0018: an exemption states an ENFORCEABLE premise, or the region is
     unmonitored rather than exempt. "Grandfathered" is a description of history
     and is refused so it cannot become the boilerplate that ends the argument.
-    "Reviewed and correct" stays distinct from "we have not got to it yet",
-    which is what `dotmac-imports` actually is. `dotmac-auth-oidc` was the
-    first kind and has since moved on: its pilot ran, it is allowlisted, and its
-    row now says to delete itself at tag time — a reason that expires is the
+    "Reviewed and correct" stays distinct from "we have not got to it yet".
+    `dotmac-imports` has now moved from deliberately withheld to OUTSTANDING:
+    its row says to delete itself at tag time — a reason that expires is the
     healthiest shape an entry here can have."""
     for distribution, entry in _ledger().items():
         reason = entry["reason"]
@@ -222,11 +222,10 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
     precedes the adoption. That is the state this rule exists to police rather
     than forbid: each of the four carries a ledger row saying when its row goes.
 
-    The distinction from `dotmac-imports` is the whole point and is not a
-    precedent being softened. Imports had NO adopter and its own dossier said to
-    stay unreleased, so an allowlist row asserted something untrue. These four
-    have a named adopter, a dated cutover and a release that is the next step in
-    it.
+    Imports used to be the counterexample: it had no ready adopter and its own
+    dossier said to stay unreleased, so its old allowlist row asserted something
+    untrue. The premise has since changed and ERP is now its named adopter; the
+    generic rule covers Imports and every other member of the intersection.
 
     Deliberately NOT asserting the intersection is non-empty. Releasing the
     cohort empties it again and that is the desired end state, so a
@@ -248,51 +247,50 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
         assert distribution in _ledger(), distribution
 
 
-def test_imports_is_unreleased_by_decision_not_by_omission() -> None:
-    """The 2026-08-15 ruling, pinned so neither half can drift back.
+def test_imports_release_lane_names_erp_without_claiming_adoption() -> None:
+    """Publication is now due, while product adoption remains unclaimed.
 
-    `dotmac-imports` was reported as an anomaly because it was
-    release-allowlisted with no tag in any version. The anomaly was the
-    ALLOWLIST ROW: its own `EXTRACTION.toml` says to keep the module
-    audit-complete and unreleased until a real first adopter is ready, and to
-    publish just in time for that cutover. So the row was removed and the module
-    was NOT published — the opposite repair from the one the report suggested.
+    The 2026-08-15 removal was correct when Imports had no ready adopter. ERP's
+    first-adopter slice now supplies the domain port, composed lineage, bounded
+    storage adapter, scheduling/repair surface, parity check and PostgreSQL
+    concurrency proof. Under the later named-adopter rule, that makes a2
+    release-eligible; it does not make ERP a proven contract consumer before
+    ERP can resolve the release and merge its exact lock pin.
 
-    Three things are asserted together because each alone can be undone by
-    somebody acting in good faith: the row stays out, the package stays intact,
-    and the ledger says which of the two is the decision.
+    This assertion survives publication: before the tag the outstanding ledger
+    row must authorize release; after the tag that row must disappear.
     """
     sweep, survey = _survey()
     allowlist = json.loads(
         (PROJECT_ROOT / ".github" / "release-modules.json").read_text(encoding="utf-8")
     )["modules"]
-    assert "dotmac-imports" not in allowlist, (
-        "dotmac-imports is allowlisted again. Its dossier gates release on ERP's "
-        "first-adopter cutover; re-add the row WITH that proof, not before it"
-    )
-    # The package is untouched: removal from the lane is not retirement.
+    assert "dotmac-imports" in allowlist
     package = PROJECT_ROOT / "packages" / "dotmac-imports"
     assert (package / "pyproject.toml").is_file()
-    assert survey["distributions"]["dotmac-imports"]["declared"] == "0.1.0a2"
-    assert survey["distributions"]["dotmac-imports"]["state"] == sweep.NEVER_PUBLISHED
-    # …and the dossier still says why, so the ledger reason is not the only copy.
-    dossier = (package / "EXTRACTION.toml").read_text(encoding="utf-8")
-    assert "audit-complete and unreleased until a real first adopter" in dossier
+    finding = survey["distributions"]["dotmac-imports"]
+    assert finding["declared"] == "0.1.0a2"
 
-    reason = _ledger()["dotmac-imports"]["reason"]
-    assert "DO NOT" in reason and "dispatching a release" in reason
+    dossier = tomllib.loads((package / "EXTRACTION.toml").read_text(encoding="utf-8"))
+    assert dossier["status"] == "audit-complete"
+    assert dossier["contract_consumers"] == []
+    assert dossier["candidate_consumers"][0] == "dotmac_erp"
+
+    published = finding["state"] == sweep.PUBLISHED
+    recorded = "dotmac-imports" in _ledger()
+    assert published != recorded
+    if recorded:
+        reason = _ledger()["dotmac-imports"]["reason"]
+        assert "OUTSTANDING" in reason
+        assert "dotmac-imports-v0.1.0a2" in reason
 
 
-def test_a_removed_allowlist_row_is_explained_where_it_was_removed_from() -> None:
-    """A deletion is the least self-explanatory diff there is: the next reader
-    sees a module with a package, a catalogue entry and no lane, and the
-    cheapest explanation is 'someone forgot'. The reason has to live in the file
-    the row left, not only in a ledger they may never open."""
+def test_imports_allowlist_history_and_reauthorization_are_both_explained() -> None:
+    """The earlier removal stays visible, followed by the changed premise."""
     allowlist = (PROJECT_ROOT / ".github" / "release-modules.json").read_text(
         encoding="utf-8"
     )
     assert "dotmac-imports was REMOVED from this file" in allowlist
-    assert "re-added with ERP's adoption proof" in allowlist
+    assert "dotmac-imports was RE-AUTHORIZED" in allowlist
 
 
 # ── Sensitivity proofs (ADR-0018) ───────────────────────────────────────────
