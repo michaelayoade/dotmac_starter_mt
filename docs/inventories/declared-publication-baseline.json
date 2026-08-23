@@ -87,11 +87,6 @@
       "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
-    "dotmac-imports": {
-      "declared": "0.1.0a2",
-      "reason": "OUTSTANDING UNTIL THE AUTHORIZED A2 RELEASE COMPLETES. The 2026-08-15 decision to remove the speculative release row was correct on its old premise. That premise has now changed: ERP has the named first-adopter implementation with the Organization-to-Tenant mapping, composed im lineage, dotmac-files partitions, product-owned customer validator/applier, claim-read-settle worker boundary, shadow parity guard, repair enqueue surface and non-vacuous PostgreSQL concurrency evidence. The module is re-authorized in the closed release lane so ERP can resolve an exact registry pin and lock; this row must be removed immediately after the registry-verified dotmac-imports-v0.1.0a2 tag exists. Publication still does not make EXTRACTION.toml.contract_consumers non-empty, move customer authority or retire ERP's legacy importer \u2014 only the merged ERP pin and subsequent real shadow cutover can do that. Do not repair this state by editing the declared version down.",
-      "state": "never-published"
-    },
     "dotmac-inbox-operations": {
       "declared": "0.1.0a3",
       "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a3 makes routing executable with durable decision evidence, capacity-safe eligibility-aware dispatch, active-only queue/assignment lifecycles and fair per-queue draining (io_0003). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
