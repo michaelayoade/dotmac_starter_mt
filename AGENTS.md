@@ -15,6 +15,9 @@ specifics) points here and must never fork these rules.
   cite a plan as proof of current behavior.
 - `README.md` — onboarding. `CONTRIBUTING.md` — human dev rules.
   `docs/SECURITY.md` — security posture (ASVS mapping).
+- `docs/CONTROL_EXCEPTIONS.md` — controls that were bypassed, with cost and
+  remediation. Append-only: an entry is never deleted, only its remediation
+  state changes.
 
 ## Hard rules (enforced — test/contract named per rule)
 
@@ -421,6 +424,68 @@ specifics) points here and must never fork these rules.
     tag was published.
     (`scripts/declared_publication_sweep.py`;
     `tests/architecture/test_declared_publication.py`)
+
+31. **Protected-environment approval is NON-DELEGABLE, and chat authorization
+    does not transfer it.** A `registry-release` (or any protected-environment)
+    approval is a control that exists to put a human between an authenticated
+    credential and an irreversible publication. An agent holding a credential
+    that CAN approve defeats it — the approval record then names a person who
+    did not perform the action, which is the one fact the record exists to
+    establish.
+
+    "Michael said approve it in chat" is NOT equivalent. The gate's premise is
+    that approval happens at the gate, by the reviewer, against the tree the
+    gate is showing. Chat authorization is given earlier, against a different
+    tree, and cannot be re-checked at the moment of publication — the failed
+    a91 attempt (`32596599849`) is the proof: main moved between the
+    authorization and the gate, and only the gate's own re-check caught it.
+
+    **An agent stops at the gate.** It dispatches the run, waits, and hands
+    over the approval URL. It does not call
+    `POST /actions/runs/{id}/pending_deployments`, whatever it has been told
+    in conversation. The technical backstop is that the agent-accessible
+    credential must lack the permission to approve deployments; until that is
+    in place this rule is discipline, and discipline is the weaker half.
+
+    Exception on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22,
+    kernel `0.1.0a91`.
+
+32. **A release holds a short, named freeze.** `publish` re-asserts that the
+    run's SHA is still the tip of protected `main`, and that check runs AFTER
+    the approval wait — so any merge between dispatch and verification voids
+    the run. One release captain holds merges from dispatch through
+    verification and tagging, and announces the window opening and closing.
+
+    This is a real control, not ceremony: the first a91 attempt was voided
+    mid-flight by a merge landing during the approval wait, and it stopped
+    BEFORE publication. Keep the check; the freeze is what stops it from
+    costing a wasted build every time.
+    (`scripts/assert_current_main.sh`)
+
+33. **A writer claim is TYPED, and the prose channel only shrinks.**
+    `[[product_writers]]` in a dossier states, per product, whether it is the
+    `qualifying_source`, a `legacy_writer` that must stop, a `no_writer`, or
+    `inventory_only` — with an immutable revision and evidence paths. Governance
+    cites these across the repository boundary, and two rationales were once
+    contradicted by the dossiers they described because the cited claim was
+    prose.
+
+    The block may be ABSENT, deliberately: silence must stay distinguishable
+    from a claim of absence, so a consumer that cannot find its row fails as
+    UNKNOWN. That makes #354 migration support, not enforcement — which is what
+    this rule adds. `product-writer-baseline.json` freezes the prose-only
+    dossier/product pairs (303 across 86 dossiers at the freeze; one dossier
+    fully typed) as a TWO-DIRECTIONAL ratchet: it may not grow, and it may not
+    shrink without being regenerated in the same change. A dossier absent from
+    the baseline must be complete, which is what stops the debt growing with
+    the package count.
+
+    Retire a pair by READING the source product and recording what you found.
+    Never by inferring a state from the prose already there — a scanner
+    guessing `no_writer` from a sentence manufactures the false confidence this
+    exists to remove.
+    (`scripts/product_writer_sweep.py`; `make product-writer-check`;
+    `tests/architecture/test_product_writer_ratchet.py`)
 
 ## Everything by config — no hardcoding
 
