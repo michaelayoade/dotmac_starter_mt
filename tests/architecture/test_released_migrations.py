@@ -73,14 +73,11 @@ tagged meaning and proves its additive upgrade on PostgreSQL.
 
 ## Scope
 
-Three distributions: `dotmac-approvals`, `dotmac-integration`, and
-`dotmac-entitlement-allocation`.
-Each was added by the change that was tempted to edit its released bytes —
-integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
-digests were read out of the tags in that same change. That is the enrolment
-rule, and it is the reason this is still not generalised to "every allowlisted
-module": a distribution enters when somebody has actually verified its tags,
-because a guard populated by guesswork is worse than an absent one.
+The monitored distributions below each entered when somebody read their
+published migration bytes from the tags. That is the enrolment rule, and it is
+the reason this is still not generalised to "every allowlisted module": a
+distribution enters when somebody has actually verified its tags, because a
+guard populated by guesswork is worse than an absent one.
 
 Enrolment is therefore a data edit — a row in `DISTRIBUTIONS`, its tags in
 `RELEASED_TAGS`, and its still-editable files in `UNRELEASED`. The
@@ -119,6 +116,9 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-integration": (
         REPO_ROOT
         / "packages/dotmac-integration/src/dotmac_integration/migrations/versions"
+    ),
+    "dotmac-imports": (
+        REPO_ROOT / "packages/dotmac-imports/src/dotmac_imports/migrations/versions"
     ),
     "dotmac-entitlement-allocation": (
         REPO_ROOT
@@ -169,6 +169,7 @@ DISTRIBUTIONS: dict[str, Path] = {
 LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-approvals": "ap_*.py",
     "dotmac-integration": "ig_*.py",
+    "dotmac-imports": "im_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
     "dotmac-files": "fi_*.py",
     "dotmac-forms": "fm_*.py",
@@ -183,6 +184,7 @@ LINEAGE_GLOBS: dict[str, str] = {
 TAG_PREFIXES: dict[str, str] = {
     "dotmac-approvals": "dotmac-approvals-v",
     "dotmac-integration": "dotmac-integration-v",
+    "dotmac-imports": "dotmac-imports-v",
     "dotmac-entitlement-allocation": "dotmac-entitlement-allocation-v",
     "dotmac-files": "dotmac-files-v",
 }
@@ -644,6 +646,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-imports ──────────────────────────────────────────────────────
+    "dotmac-imports-v0.1.0a2": (
+        "dotmac-imports",
+        "5876ffd0",
+        {
+            "im_0001_import_runs.py": (
+                "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -870,6 +882,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
+    "dotmac-imports": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
