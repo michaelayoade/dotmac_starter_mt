@@ -27,9 +27,12 @@ def test_manifest_and_secure_plane_are_exact() -> None:
         module.db_schema,
     ) == ("service_catalog", "svc_cat", "sc", "mod_svc_cat")
     assert tuple(module.tables) == (
-        "service_specifications",
         "plan_families",
+        "plan_family_versions",
+        "service_specifications",
+        "service_specification_versions",
         "characteristic_definitions",
+        "service_specification_characteristics",
         "eligibility_input_definitions",
     )
     assert tuple(module.platform_tables) == ()
@@ -65,6 +68,27 @@ def test_catalogue_carries_no_commercial_or_contract_fields() -> None:
         for column in models.metadata_table(name).columns
     }
     assert not columns & forbidden
+
+
+def test_catalogue_versions_carry_effectivity_source_and_typed_shape_values() -> None:
+    for table_name in ("plan_family_versions", "service_specification_versions"):
+        columns = set(models.metadata_table(table_name).c.keys())
+        assert {
+            "version",
+            "effective_from",
+            "effective_until",
+            "source_code",
+            "source_id",
+            "source_version",
+            "command_id",
+            "content_digest",
+        } <= columns
+    value_columns = set(
+        models.metadata_table("service_specification_characteristics").c.keys()
+    )
+    assert {"string_value", "integer_value", "decimal_value", "boolean_value"} <= (
+        value_columns
+    )
 
 
 def test_service_is_flush_only_and_package_independent() -> None:
