@@ -24,7 +24,7 @@
   have no campaign owner; Backoffice is the independent reuse proof, not a
   source.
 
-This inventory is characterization evidence, not authority. ADR-0032 owns the
+This inventory is characterization evidence, not authority. ADR-0056 owns the
 campaign boundary and cutover sequence. `packages/dotmac-campaigns/EXTRACTION.toml`
 is the executable extraction dossier.
 

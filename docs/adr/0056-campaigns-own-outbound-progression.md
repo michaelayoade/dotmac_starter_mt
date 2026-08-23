@@ -1,4 +1,11 @@
-# ADR-0032: Campaigns own outbound campaign progression
+# ADR-0056: Campaigns own outbound campaign progression
+
+> **Renumbered 2026-08-23.** This record was accepted as ADR-0032 on
+> 2026-08-18 and collided with ADR-0032 *Unobserved is UNKNOWN, never
+> ABSENT*, accepted 2026-08-16. Resolved chronologically, the same rule
+> Michael applied to the ADR-0010/0011 collision on 2026-08-15: the earlier
+> record keeps the number. Every citation moved with this file in the same
+> change, so no reference points at the wrong decision.
 
 - Status: Accepted
 - Date: 2026-08-18
