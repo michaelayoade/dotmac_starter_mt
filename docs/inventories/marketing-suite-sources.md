@@ -3,7 +3,7 @@
 **Status:** Source audit complete; media observations, content, publishing and Sites are released and registry-verified; none is adopted
 **As of:** 2026-08-20
 **Decision owner:** Michael
-**Default first adopter:** Backoffice; campaigns is the Sub-first ADR-0032 exception
+**Default first adopter:** Backoffice; campaigns is the Sub-first ADR-0056 exception
 **Later adopter:** Sub, as an independent application
 **Release main:** `8f99413826e5adf3d35379ebc6deb79bcb5c8242`
 
@@ -41,7 +41,7 @@ kernel floors and engineering standards.
 
 That milestone is **not adoption**. Campaigns `0.1.0a1` remains unallowlisted,
 unpublished and at dossier status `audit-complete` with no contract consumer.
-ADR-0032 makes Sub cutover 1 for campaigns because Sub is its qualifying source;
+ADR-0056 makes Sub cutover 1 for campaigns because Sub is its qualifying source;
 Backoffice is cutover 2 and the independent reuse proof. Backoffice remains the
 default first adopter for the other suite modules.
 
@@ -269,7 +269,7 @@ marketing suite and follow their independently selected project/work owner.
    `docs/ARCHITECTURE.md`.
 4. Publish exact package releases and compose Backoffice without path or
    editable dependencies. Backoffice is the default first adopter and owns its
-   rows; campaigns follows ADR-0032's source-first sequence of Sub then
+   rows; campaigns follows ADR-0056's source-first sequence of Sub then
    Backoffice.
 5. Backfill each selected source, shadow-read and reconcile, switch one writer
    at a time, prove parity and drift repair, then remove the old writer and
