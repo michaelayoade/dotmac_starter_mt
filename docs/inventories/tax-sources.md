@@ -1,10 +1,10 @@
 # Tax extraction audit — determination, reporting and returns
 
-- **As of:** 2026-08-19
-- **Starter:** `f7d69f7d3db6`
-- **ERP:** `0f4b1698ddbf`
-- **Sub:** `91c1ec477b3a`
-- **CRM:** `c64b5aa0f790`
+- **As of:** 2026-08-23
+- **Starter:** `5876ffd0bce1`
+- **ERP:** `0dc07e4b6dd3`
+- **Sub:** `943bc59f8e4c`
+- **CRM:** `60daaa2dd305`
 - **Backoffice:** `fcdd8270262d`
 - **Vendor control plane:** `e6b2bbee815c`
 
@@ -23,10 +23,14 @@ formats. Those are source-product couplings, not the reusable contract.
 
 Sub has a mature, narrower source-fact owner in
 `app/services/tax_accounting.py`: billing tax amounts and withholding lifecycle.
-It explicitly does not own tax-account mapping or posting. Sub therefore
-supplies typed facts to the tax owner; `dotmac-tax` never reads Sub's tables.
-CRM carries quote/vendor tax-rate inputs, not a general tax engine. Backoffice
-and the vendor control plane have no competing tenant tax owner.
+It explicitly does not own tax-account mapping or posting. Sub also has legacy
+tax-policy and determination writers in `TaxRate`, `CustomerTaxPolicy`, offer
+VAT fields, recurring billing and prepaid renewal. Those local decisions must
+retire while Sub's source facts remain. `dotmac-tax` never reads Sub's tables.
+CRM is not a general engine, but it still computes VAT from an environment
+default in `revenue_service_report.py` and stores/recalculates vendor-quote VAT
+in `vendor.py`; both are typed legacy writers, not evidence of no writer.
+Backoffice and the vendor control plane have no competing tenant tax owner.
 
 ## Current-law source check
 
@@ -45,7 +49,8 @@ engine records which version produced each consequence.
 ## Target owner
 
 `dotmac-tax` owns tenant-configured authorities, jurisdictions, tax codes,
-effective rules and bands; deterministic tax determinations from exact typed
+effective rules and bands; tax-specific, effective-dated party/supply/place
+classifications; deterministic ordered determination sets from exact typed
 facts; versioned statutory-report definitions/boxes and generated snapshots;
 explicit filing obligations/due dates; and prepare/review/file/accept/reject/
 amend return evidence.
@@ -59,10 +64,18 @@ journal entries, fiscal periods, or country vocabulary compiled into code.
 - Authority, jurisdiction, tax-kind code, recognition basis, rate, band,
   recoverability, report box, multiplier, period and due date are data.
 - A product submits source identity/version, evidence reference, occurrence
-  date, side, recognition basis, money and classification facts.
+  date, side, recognition basis, money and opaque party/supply/place refs. The
+  tax owner resolves evidenced classifications per tax code; direct category
+  inputs remain only for a1 compatibility and must agree with owned rows.
 - Rule selection fails closed when equally ranked rules overlap.
-- Determination lines snapshot the selected rule/version and amounts; a changed
-  source version is a new fact, not an in-place rewrite of evidence.
+- One source fact may select multiple tax codes. The immutable determination
+  set snapshots net/tax/gross totals, and ordered components snapshot each
+  selected rule/version, calculation base, treatment, classifications and
+  amounts. A changed source version is a new fact, not an in-place rewrite of
+  evidence.
+- Standard-rated, zero-rated, exempt and out-of-scope remain distinct evidence
+  even when they all produce a zero amount. VAT is one configured tax code;
+  custom levies use the same owner and do not require a product migration.
 - Report values snapshot configured boxes; return events are append-only.
 
 The approved Dotmac VAT accounting policy remains a product/operator policy
