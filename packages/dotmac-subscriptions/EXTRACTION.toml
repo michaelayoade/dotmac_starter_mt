@@ -10,10 +10,12 @@ contract = "Publish immutable offer versions and price children beneath a stable
 
 source_repositories = [
   "dotmac_sub",
+  "dotmac_erp",
   "dotmac_vendor_control_plane",
 ]
 source_revisions = [
   "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
+  "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
   "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
 ]
 source_paths = [
@@ -25,6 +27,8 @@ source_paths = [
   "dotmac_sub:app/models/catalog.py",
   "dotmac_sub:app/services/catalog/offers.py",
   "dotmac_sub:app/services/catalog_billing_governance.py",
+  "dotmac_erp:app/models/inventory/price_list.py",
+  "dotmac_erp:app/services/inventory/price_list.py",
   "dotmac_vendor_control_plane:src/vendor_cp/offers/models.py",
   "dotmac_vendor_control_plane:src/vendor_cp/offers/service.py",
   "dotmac_vendor_control_plane:alembic/versions/v002_offer_versions.py",
@@ -42,6 +46,7 @@ preserved_tests = [
   "dotmac_sub:tests/test_catalog_billing_governance.py",
   "dotmac_sub:tests/test_offer_contracted_amount.py",
   "dotmac_sub:tests/test_offer_name_uniqueness.py",
+  "dotmac_erp:tests/ifrs/inv/test_price_list_service.py",
   "dotmac_vendor_control_plane:tests/unit/test_offers.py",
   "dotmac_vendor_control_plane:tests/migration/test_vendor_migration_rehearsals.py",
 ]
@@ -75,6 +80,17 @@ evidence_paths = [
   "app/services/billing/cadence.py",
   "app/services/billing/contracts.py",
   "app/services/catalog/offers.py",
+]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
+evidence_paths = [
+  "app/models/inventory/price_list.py",
+  "app/services/inventory/price_list.py",
+  "tests/ifrs/inv/test_price_list_service.py",
 ]
 
 [[product_writers]]
