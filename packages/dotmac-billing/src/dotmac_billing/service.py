@@ -414,12 +414,14 @@ def accept_rated_obligation(
 
     def operation(session: Session) -> dict[str, object]:
         if command.supersedes_obligation_id is not None:
+            # The mutable account lock acquired above serializes corrections.
+            # Obligations are append-only, so online roles intentionally lack
+            # the UPDATE privilege PostgreSQL requires for ``FOR UPDATE``.
             previous = _one(
                 session,
                 scope=scope,
                 model=plane.obligation,
                 row_id=command.supersedes_obligation_id,
-                lock=True,
             )
             if previous.billing_account_id != command.billing_account_id:
                 raise BillingRuleViolation(
@@ -865,6 +867,10 @@ def _post_group(
         )
     )
     db.add(group)
+    # Posting models deliberately carry scalar foreign keys instead of ORM
+    # relationships. Persist the parent before its effect/allocation children
+    # so PostgreSQL never has to infer an insertion order it cannot see.
+    db.flush()
     effect_rows = []
     for lane, amount in effects:
         row = plane.effect(
