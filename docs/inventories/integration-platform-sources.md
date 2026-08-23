@@ -25,8 +25,11 @@ Two facts shape the whole extraction:
    **platform-plane only** under ADR-0023 — `platform_tables` with an empty
    tenant `tables` tuple.
 2. **It has zero cross-product consumers.** ERP, CRM and Academy reference none
-   of these tables or models. So this is a single-source extraction, and
-   "a second consumer proves reuse" comes after the first cutover, not before.
+   of Sub's seven tables or models. CRM does have a separate, narrower generic
+   target/job/run engine of its own; that is legacy deletion evidence, not a
+   consumer and not a second qualifying source. So this remains a single-source
+   extraction, and "a second consumer proves reuse" comes after the first
+   cutover, not before.
 
 ## The seven tables
 
@@ -125,7 +128,9 @@ Ported **with the code they prove**, slice by slice — not in one batch.
 Sub retires the engine modules above once the module is composed and cut over,
 keeping its `*_capability.py` handlers.
 
-ERP, CRM and Academy have **no dependency on this platform**; their retirement is
-of their own direct connector surface, already frozen and counted in
-[`external-connector-sources.md`](external-connector-sources.md) — 21, 33 and 3
-`http_client` files respectively. CRMs is deletion, not migration.
+ERP, CRM and Academy have **no dependency on Sub's platform**. ERP and Academy
+retire their direct connector surfaces, already frozen and counted in
+[`external-connector-sources.md`](external-connector-sources.md). CRM retires
+both its 33-file direct connector surface and its own `integration_targets`,
+`integration_jobs` and `integration_runs` engine. CRM's path is deletion, not
+migration or permission to preserve a second control plane.

@@ -18,6 +18,11 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+]
 source_paths = [
   "dotmac_vendor_control_plane:src/vendor_cp/contracts/service.py",
   "dotmac_vendor_control_plane:src/vendor_cp/contracts/models.py",
@@ -53,3 +58,22 @@ first_cutover = "Completed GREENFIELD on 2026-08-21 in dotmac_vendor_control_pla
 shadow_and_drift = "No shadow phase is owed, and the reason is measurable rather than convenient. The capability exists in exactly one product (Knowledge `vendor-cp-capability-gaps-and-composable-plan`, Tier B: contracts 972 LOC / 2 tables), so there is no second writer to reconcile against and no parallel evaluator to compare. What IS owed at cutover is a data-bearing migration of the existing vendor_cp.contracts and contract_lines rows, because those rows are real: preserve every content_hash unchanged (an agreement whose digest moves invalidates its own approval), map pending_approval -> proposed, synthesise one AgreementEvent per historical transition from the platform audit log rather than inventing a clean history, and prove the pre- and post-cutover accepted snapshots digest identically. A populated legacy table encountered at cutover must fail the migration, not be silently skipped."
 local_copy_retirement = "Complete for cutover 1 on 2026-08-21: src/vendor_cp/contracts/ service and models, and public.contracts / public.contract_lines are gone, verified absent on the production database. Original audit text follows. Owed by dotmac_vendor_control_plane at cutover: src/vendor_cp/contracts/{models,service,schemas,router,feature}.py, the contracts and contract_lines tables, and the ContractService call sites in the allocations consumer. The vendor keeps its own routes, its console screens and its vendor_accounts binding — a thin adapter that translates its account id into this module's opaque counterparty_ref. No product may keep a compatibility contracts table or a parallel lifecycle evaluator."
 next_action = "Hold at `adopted`. `reuse-proven` requires a SECOND real control plane completing its own cutover; there is no second candidate today. Keep the Vendor authority and zero-local-writer ratchets green. Do not add a delivery or acknowledgement concern here — dotmac-licensing owns that lifecycle and ADR-0010 moves its transport half to the Integrator."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/contracts/adapter.py", "src/vendor_cp/contracts_authority.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

@@ -6,6 +6,11 @@ source_mode = "product-first"
 owner = "Staffed inbox queues, routing, agent presence and conversation assignment"
 contract = "Own inbox queues, executable provider-neutral routing rules and immutable decision evidence, inbox-specific agent presence/capacity, durable FIFO queue admission and stored queue position, capacity-safe eligible-agent assignment, repeatable release/reassign/requeue history, fair per-queue dispatch, durable per-queue round-robin rotation state and workflow evidence. Eligibility arrives as opaque caller-supplied references; Workforce retains teams, skills, shifts and field availability. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications or AI."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_sub:app/models/team_inbox.py",
   "dotmac_sub:app/services/team_inbox_assignment.py",
@@ -38,3 +43,22 @@ first_cutover = "Sub is the first writer cutover after queue/rule/presence/assig
 shadow_and_drift = "Compare queue/rule identity and priority, selected routing rule and queue-entry evidence, eligible-agent cohort, presence freshness/capacity, FIFO position, round-robin winner, release/reassign/requeue history, workflow event and occurrence time; never copy content."
 local_copy_retirement = "Reduce Sub queue/routing/presence/assignment writers to zero at first cutover, then retire CRM's corresponding workqueue and presence decision paths after API synchronization verification."
 next_action = "Run the a3 Postgres concurrency and migration canaries on Observer, then compose in Sub, backfill operational state, shadow routing and dispatch decisions, seal the Sub writer switch, and retire its local queue/routing/presence/assignment writers before migrating CRM as an API consumer."
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/crm/queue.py", "app/models/crm/presence.py", "app/services/crm/inbox/routing.py", "app/services/workqueue/aggregator.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/team_inbox.py", "app/services/team_inbox_assignment.py", "app/services/team_inbox_routing.py", "app/services/team_inbox_operations.py"]

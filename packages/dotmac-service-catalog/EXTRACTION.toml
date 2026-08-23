@@ -6,6 +6,11 @@ source_mode = "product-first"
 owner = "Technical service specifications, plan families, characteristics, and eligibility-input declarations"
 contract = "Own provider-neutral technical service specifications, plan-family classification, characteristic definitions, and the input vocabulary a qualification decision may consume. NOT offers, prices, discounts, contracts, subscriptions, billing cycles, tax, fixed recurrence, provisioning, or qualification decisions."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
 source_paths = [
   "dotmac_sub:app/models/plan_family_catalogue.py",
   "dotmac_sub:app/models/catalog.py",
@@ -28,3 +33,15 @@ first_cutover = "Sub remains catalogue writer through backfill and read-only sha
 shadow_and_drift = "Compare specification/family identity, active state, characteristic type/requiredness, and eligibility-input declarations. Commercial fields are excluded rather than shadowed."
 local_copy_retirement = "After cutover, reduce Sub technical catalogue writers and fallback readers to zero while leaving offer/price/contract ownership in the product commercial domain."
 next_action = "Compose the exact package in Sub and implement the versioned technical-catalogue backfill and shadow comparison."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/plan_family_catalogue.py", "app/models/catalog.py", "app/services/catalog/plan_family_catalogues.py", "app/services/catalog/validation.py"]

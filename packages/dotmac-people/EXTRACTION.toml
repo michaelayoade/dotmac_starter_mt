@@ -6,6 +6,11 @@ source_mode = "product-first"
 owner = "Tenant employment directory, positions, temporal assignments, and date-aware reporting resolution"
 contract = "Link a kernel Party person to one tenant employment relationship; own employee code and lifecycle state/dates, departments, designations, employment types, positions, temporal occupancy, and derived manager/direct-report/approval resolution. NOT personal identity, authentication, RBAC, attendance, leave, scheduling, discipline, performance, training, compensation, payroll, banking, tax, GL dimensions, physical locations, files, notifications, or external provisioning."
 source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_starter_mt"]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_erp:app/models/people/hr/employee.py",
   "dotmac_erp:app/models/people/hr/department.py",
@@ -37,3 +42,22 @@ first_cutover = "dotmac-erp is the first exact-pin consumer and replacement auth
 shadow_and_drift = "Backfill kernel Party identities first, then module catalogues, employees, positions and assignments from a narrow versioned ERP read projection. Reconcile missing, extra, conflicting and stale rows plus employee codes, lifecycle state/dates, hierarchy, active assignments, vacancy routing and explicit-date manager results. Shadow is read-only; it cannot write either owner."
 local_copy_retirement = "A two-directional ERP writer ratchet reaches zero for employee identity, code, lifecycle state/dates, organization catalogues, positions and assignments at cutover. ERP's compatibility projection has a separate writer/fallback ratchet and cannot originate decisions. Delete the legacy hr.employee and related tables only after all 131 foreign-key dependants have moved or been retired; zero ledger rows without zero authority is not success."
 next_action = "Kernel a71 and dotmac-people a1 are registry-verified releases. Compose those exact versions in dotmac-erp, then build the narrow ERP projection/backfill/shadow contract before requesting the irreversible sole-writer cutover."
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/person.py", "app/services/dotmac_erp/agent_sync.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/people/hr/employee.py", "app/services/people/hr/employees.py", "app/services/people/hr/organization.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
