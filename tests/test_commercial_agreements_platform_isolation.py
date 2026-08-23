@@ -4,7 +4,7 @@ Like `tests/test_application_directory_isolation.py`, this provisions its OWN
 scratch database and composes the module's lineage explicitly, because the
 reference assembly deliberately does not compose `dotmac-commercial-agreements`:
 the starter is a target application, and only a vendor control plane holds a
-vendor↔operator agreement (ADR-0033 § 7). Adding it to `app/assembly.py` or the
+vendor↔operator agreement (ADR-0057 § 7). Adding it to `app/assembly.py` or the
 shipped `alembic.ini` would put `mod_agreements` into every starter deployment.
 
 **On the platform plane the REVOKE is the isolation**, and it is checked as

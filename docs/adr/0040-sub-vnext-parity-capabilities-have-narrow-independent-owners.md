@@ -4,7 +4,7 @@
 **Date:** 2026-08-20
 **Decision owner:** Michael
 **Scope:** Dotmac applications and independently released Starter modules
-**Amends:** ADR-0029 and ADR-0033 as described below
+**Amends:** ADR-0029 and ADR-0057 as described below
 **Relates to:** ADR-0006 (product-first extraction), ADR-0010 (thin adapters),
 ADR-0014 (one idempotency owner), ADR-0024 (applications synchronize data),
 ADR-0026 (approvals decide approval only), and ADR-0031 (sealed cutover)
@@ -62,7 +62,7 @@ application; and contain no provider or product mode branch.
   backfilled, shadowed, reconciled and sealed its writer; this ADR does not
   pretend deletion has already happened.
 
-## Dated amendment to ADR-0029 and ADR-0033
+## Dated amendment to ADR-0029 and ADR-0057
 
 ADR-0029 remains correct for **standing cross-application access**:
 `dotmac-application-access` owns desired grant-set issuance and drift. The
@@ -72,7 +72,7 @@ that temporary request/grant lifecycle and hands an admitted grant to kernel
 enforcement. It owns no Workspace application-role catalogue and issues no
 standing cross-application grant set.
 
-ADR-0033 section 4 recorded that Support Access was not built because the then-
+ADR-0057 section 4 recorded that Support Access was not built because the then-
 proposed unit overlapped Application Access and no complete source existed. The
 second fact still informs provenance; the first is superseded by Michael's
 2026-08-20 explicit boundary above. This is an amendment, not rewritten

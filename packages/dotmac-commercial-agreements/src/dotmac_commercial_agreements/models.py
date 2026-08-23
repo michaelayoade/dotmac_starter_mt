@@ -2,7 +2,7 @@
 
 Platform catalog tables: no `tenant_id`, no RLS, `app_user` REVOKEd. A
 vendor↔operator commercial agreement is a control-plane fact about the fleet;
-no product data plane holds one, and ADR-0033 § 7 declares the plane from that
+no product data plane holds one, and ADR-0057 § 7 declares the plane from that
 consumer rather than discovering it from a missing column.
 
 ## Three tables, because three things have different lifetimes
@@ -104,7 +104,7 @@ class AgreementStatus(StrEnum):
     is not two constants that drift.
 
     `PROPOSED` is the source implementation's `pending_approval`, renamed to the
-    vocabulary ADR-0033 records. The rename is safe precisely because this is a
+    vocabulary ADR-0057 records. The rename is safe precisely because this is a
     greenfield lineage with no rows to migrate: no deployment has ever stored
     `pending_approval` under `mod_agreements`.
 

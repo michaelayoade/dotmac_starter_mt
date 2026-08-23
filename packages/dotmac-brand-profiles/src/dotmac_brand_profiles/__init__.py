@@ -8,7 +8,7 @@ It is what lets the same released LMS artifact appear as Dotmac Academy and as
 NDIC Academy through approved profiles.
 
 Extracted product-first from `dotmac_sub`'s `BrandProfile` (897 LOC across seven
-modules, in production) under ADR-0033 § 2.
+modules, in production) under ADR-0057 § 2.
 
 ## What it is NOT, and where each of those lives
 
