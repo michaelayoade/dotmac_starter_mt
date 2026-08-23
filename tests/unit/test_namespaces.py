@@ -346,6 +346,12 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "payments",
         "service_changes",
         "operational_escalations",
+        # The two Cloud service-lifecycle owners (ADR-0030 amendment
+        # 2026-08-23). `domains` takes `dn`, NOT the `do` its candidate tree
+        # carried: `documents` holds `do` permanently and an allocation is
+        # never repointed. Allocation only — neither package is on `main`.
+        "domains",
+        "hosting",
     }
 
     allocations = {
@@ -369,6 +375,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
             "payments",
             "service_changes",
             "operational_escalations",
+            "domains",
+            "hosting",
         )
     } == {
         "customers": ("mod_customers", "cu", "customers"),
@@ -389,7 +397,41 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "payments": ("mod_payments", "pm", "payments"),
         "service_changes": ("mod_servicechanges", "sch", "service_changes"),
         "operational_escalations": ("mod_escalations", "oe", "operational_escalations"),
+        "domains": ("mod_domains", "dn", "domains"),
+        "hosting": ("mod_hosting", "hs", "hosting"),
     }
+
+
+def test_domains_did_not_inherit_the_documents_prefix() -> None:
+    """`do` belongs to `documents`, permanently — and `domains` must not take it.
+
+    The `dotmac-domains` candidate tree was written before `documents` was
+    allocated and carries `prefix="do"` in its own manifest. Merging that
+    unchanged would have collided with a shipped, published owner. The ledger
+    is the arbiter, so the collision is asserted here rather than trusted to a
+    reviewer noticing two similar words.
+
+    The sensitivity proof (ADR-0018): repointing `domains` to `do` below must
+    make `NamespaceRegistry.from_manifests` raise, so this guard is known to
+    bite rather than passing because nothing was checked.
+    """
+    by_owner = {owner.owner: owner for owner in MIGRATION_OWNER_LEDGER}
+    assert by_owner["documents"].prefix == "do"
+    assert by_owner["domains"].prefix == "dn"
+    assert by_owner["domains"].db_schema != by_owner["documents"].db_schema
+
+    collided = MigrationOwner(
+        owner="domains",
+        prefix="do",
+        branch_label="domains",
+        db_schema=module_schema("domains"),
+    )
+    ledger = tuple(
+        collided if owner.owner == "domains" else owner
+        for owner in MIGRATION_OWNER_LEDGER
+    )
+    with pytest.raises(DuplicateMigrationPrefixError):
+        NamespaceRegistry.from_manifests([], ledger=ledger)
 
 
 def test_the_shipped_ledger_itself_composes() -> None:
