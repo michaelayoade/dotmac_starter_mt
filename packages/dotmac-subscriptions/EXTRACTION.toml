@@ -64,7 +64,7 @@ shadow_and_drift = "Vendor characterizes every offer/version/price/currency/capa
 
 local_copy_retirement = "Vendor removes vendor_cp.offers writers/models/routes and the local offer_versions table after zero drift. Sub removes generic offer/price writes, billing-contract/version/line writers, nine parallel cadence owners, monthly-only prepaid and separate postpaid recurrence, and legacy invoice-line dedupe. Every retirement uses a two-directional ratchet with sensitivity proof; no permanent parallel writer or fallback remains."
 
-next_action = "Commit the coordinated Subscriptions/Billing/Collections candidate, obtain exact-revision Observer unit/integration/migration evidence, and release only when authorized. Then wire the real Cloud assembly and execute Vendor CP followed by Sub shadow/cutover retirement. Do not count a contract consumer until a real adopter has pinned the released package, composed the selected lineage plane, cut over its writer, and removed its local owner."
+next_action = "Commit the coordinated Subscriptions/Billing/Collections candidate, obtain exact-revision CI unit/integration/migration evidence, and release only when authorized. Then wire the real Cloud assembly and execute Vendor CP followed by Sub shadow/cutover retirement. Do not count a contract consumer until a real adopter has pinned the released package, composed the selected lineage plane, cut over its writer, and removed its local owner."
 
 [[product_writers]]
 product = "dotmac_sub"

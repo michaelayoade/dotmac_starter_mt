@@ -508,6 +508,36 @@ def test_ci_runs_the_gate_with_full_history_and_an_immutable_base() -> None:
     assert "${{" not in step["run"], "never interpolate an expression into the command"
 
 
+def test_manual_ci_requires_an_immutable_allocation_base() -> None:
+    """A direct CI run must exercise the same serialized-allocation proof.
+
+    Unlike a pull request, workflow dispatch has no server-supplied base SHA,
+    so the caller must provide one explicitly and it must reach the gate only
+    through a quoted environment variable.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
+    )
+    triggers = workflow.get("on", workflow.get(True))
+    dispatch = triggers["workflow_dispatch"]
+    allocation_input = dispatch["inputs"]["allocation_base_sha"]
+    assert allocation_input["required"] is True
+    assert allocation_input["type"] == "string"
+
+    job = workflow["jobs"]["allocation-gate"]
+    assert "github.event_name == 'workflow_dispatch'" in job["if"]
+    step = next(
+        step
+        for step in job["steps"]
+        if step.get("if") == "github.event_name == 'workflow_dispatch'"
+    )
+    assert step["env"]["BASE_SHA"] == "${{ inputs.allocation_base_sha }}"
+    assert '--base "$BASE_SHA"' in step["run"]
+    assert "${{" not in step["run"]
+
+
 def test_the_gate_is_not_in_the_quality_matrix_or_make_check() -> None:
     """It needs the network and full history; `make check` must stay offline.
 

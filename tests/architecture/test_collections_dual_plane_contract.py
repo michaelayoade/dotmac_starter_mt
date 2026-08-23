@@ -12,7 +12,7 @@ EXPECTED_PLATFORM_TABLES = tuple(f"platform_{table}" for table in models.TENANT_
 EXPECTED_PLANE_SETS = {
     (ModulePlane.TENANT,),
     (ModulePlane.PLATFORM,),
-    (ModulePlane.TENANT, ModulePlane.PLATFORM),
+    (ModulePlane.PLATFORM, ModulePlane.TENANT),
 }
 
 

@@ -483,6 +483,10 @@ def accept_rated_obligation(
             )
         )
         session.add(row)
+        # The snapshot mappers intentionally expose only scalar foreign-key
+        # facts, not ORM relationships.  Flush the obligation explicitly so
+        # PostgreSQL never receives an applied-tax/FX child before its parent.
+        session.flush()
         for snapshot in command.tax_snapshots:
             _require_same_money(snapshot.taxable_basis, snapshot.tax_amount)
             session.add(
