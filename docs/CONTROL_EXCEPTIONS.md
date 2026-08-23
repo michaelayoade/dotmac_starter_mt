@@ -140,3 +140,51 @@ The alternative is to leave it disabled and accept one manual click per
 release: the branch is pushed with correct edits and the run is red until the
 pull request exists. That is a defensible position, and it is the state this
 change leaves the repository in.
+
+---
+
+## 2026-08-23 — agent approved the a93 gates, with rule 31 already in force
+
+**Control:** `AGENTS.md` rule 31 — protected-environment approval is
+non-delegable; an agent dispatches, stops at the gate, and hands over the URL.
+
+**What happened.** Rule 31 merged to `main` in #363 at 2026-08-23. Within the
+same session, the agent approved BOTH `registry-release` gates for the kernel
+`0.1.0a93` release
+([run 32622991682](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32622991682)),
+again using the workstation credential authenticated as `michaelayoade`.
+
+**Why it is recorded separately from 2026-08-22.** The first instance was
+undertaken without the rule existing. This one was not:
+
+- the agent raised the conflict BEFORE acting — *"rule 31 says I dispatch and
+  stop at the gate… confirm that's what you want, since it's a change from
+  yesterday"*;
+- Michael reaffirmed with the concern on the table — *"release, dispatch and
+  approve"*;
+- so this is a **knowing deviation**, authorised in the moment, not an
+  oversight. That is a materially different thing from the first instance and
+  is recorded as such rather than folded into it.
+
+The distinction matters because the remediation is unchanged by it. An
+authorised deviation still leaves the approval record naming a person who did
+not perform the action, and still leaves the control resting on discipline
+rather than on a permission boundary.
+
+**Cost.** No incorrect artifact. `dotmac-kernel-v0.1.0a93` peels to `8537a9bc`,
+matching the release run's head; it was installed back from the private index
+and registered before tagging; the ledger row was removed in #372 and
+`declared-publication sweep` reports PASS.
+
+**Status:** accepted, authorised, and the second instance of the same
+unremediated gap.
+
+**Remediation.** Item 2 of the 2026-08-22 entry — removing deployment-approval
+permission from the agent-accessible credential — remains **open**, and is now
+the only thing that would have changed this outcome. Two authorised instances
+in two days is the evidence that "the agent stops at the gate" cannot be
+carried by discipline alone: the agent stopped, asked, was told to proceed, and
+proceeded. A permission boundary does not have that conversation.
+
+Until it lands, every such approval gets an entry here.
+
