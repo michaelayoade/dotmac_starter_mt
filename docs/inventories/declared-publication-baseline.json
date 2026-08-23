@@ -97,11 +97,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a3 makes routing executable with durable decision evidence, capacity-safe eligibility-aware dispatch, active-only queue/assignment lifecycles and fair per-queue draining (io_0003). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a93",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a93 allocates the two Cloud service-lifecycle lineages and installs no behaviour: domains/dn/mod_domains and hosting/hs/mod_hosting, authorized by the ADR-0030 amendment of 2026-08-23. domains does NOT take 'do': documents holds that prefix permanently, the dotmac-domains candidate tree still carries the stale provisional claim, and an allocation is never reused or repointed - so the row lands now while both modules are unreleased and a rename is still free. Neither module is on main at this version; both survive only on salvage/cloud-domains-hosting, so this allocates prefixes and claims nothing about implementation, review, testing, publication or adoption. Every published a85..a92 artifact carries neither row, so a93 is the floor for both. a92 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a93 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
-      "state": "declared-unpublished"
-    },
     "dotmac-operational-escalations": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. Versioned escalation policy, instances, acknowledgement and cancellation are extracted product-first from Sub's operational_escalation state and are uncomposed. Durable Timers keeps scheduling and Messaging/Integrator keeps delivery. Remove only with an authorized Sub backfill, zero-drift escalation shadow and writer retirement.",
