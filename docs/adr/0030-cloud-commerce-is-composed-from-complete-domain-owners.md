@@ -132,8 +132,9 @@ working-tree files until 2026-08-23; they are now on pushed
 PostgreSQL, allocated, merged or released.
 
 **To be built:** `dotmac-storefront` (§F), the NiRA EPP connector, the
-Openprovider connector, the PowerDNS connector, the DirectAdmin connector, an
-outbound-delivery connector, and PSP checkout-initialization egress (§C).
+Openprovider connector, the PowerDNS connector, at least one panel connector
+(cPanel and/or DirectAdmin — §E.2), an outbound-delivery connector, and PSP
+checkout-initialization egress (§C).
 
 `dotmac-integration` is deployed only through Dotmac Integrator; Cloud never
 composes it.
@@ -193,11 +194,57 @@ migration.
 | Registrar — `.ng`/`.com.ng` | **NiRA, direct EPP** | Accreditation already held, so `.ng` is sold at registrar margin rather than through a reseller. RFC 5730/5731/5732, plus 5910 if DNSSEC is offered. Open sub-question: whether NiRA operations run over EPP today or the web portal — that sizes the connector. |
 | Registrar — gTLDs | **Openprovider** | ~1,900–2,000 TLDs on one REST API with a full OT&E sandbox. Flat annual membership + cost-price beats volume tiers at launch volume, and it accepts wire transfer and multiple currencies, which matters paying from Nigeria. CentralNic Reseller was the runner-up on API rigour (OpenAPI 3.0) but is priced for larger resellers. |
 | Authoritative DNS | **Self-hosted PowerDNS Authoritative** | Hidden primary + branded public secondaries, AXFR/IXFR with TSIG, DNSSEC live-signing on the primary, across at least two ASNs (on-prem AS328160 for in-country latency, Contabo for off-net diversity). Reached through an Integrator connector, never imported. |
-| Hosting panel | **DirectAdmin** | Flat per-server licence, so margin does not erode as accounts grow; full API in standard pricing; real multi-tenant account isolation. |
+| Hosting panel | **No single panel is selected, by decision** | Ruled 2026-08-23: cPanel and DirectAdmin are both admissible, concurrently, through the Integrator panel capability. DirectAdmin's flat per-server licence and cPanel's per-account pricing are a PROCUREMENT comparison per deployment, not an architecture choice — see §E.2. |
 | Outbound email | **No provider is selected, by decision** | Ruled 2026-08-23: outbound email reaches its provider ONLY through an Integrator connector capability. Cloud names no email provider anywhere — see §E.1. |
 
 Every name above is an installation binding. None may reach a schema column, a
 lifecycle enum, or a business decision.
+
+#### E.2 The provider-slot rule — every slot admits more than one provider
+
+Michael's rulings on the PSP (2026-08-23), on outbound email, and on the
+hosting panel are the same rule three times. It is recorded once, here, and it
+governs EVERY provider slot in this decision — present and future.
+
+**A provider slot is a capability, never a vendor.** For each slot:
+
+1. The consuming Dotmac owner declares a versioned, provider-neutral
+   **capability contract** plus a fake and a conformance kit.
+2. One **or more** independently released Integrator connector distributions
+   implement that capability. Several may be installed and offered at once.
+3. Which connectors a deployment installs is **installation binding**. Which one
+   a given subject uses is **data** — an opaque binding reference on the row.
+4. No module, and not Cloud, may name a vendor in a schema column, an enum, a
+   setting key, a class name, a conditional, or a typed identifier. A
+   provider-issued identifier is opaque transport evidence.
+5. **The test that the boundary is real:** adding, removing or swapping a
+   provider must change no Cloud or module code — only bindings and data.
+
+Applied to the slots in the table above:
+
+- **PSP** — Paystack and Flutterwave are offered side by side today, and a third
+  is additive. `dotmac-payments` holds an opaque provider-binding reference.
+- **Outbound email** — no vendor is named at all (§E.1).
+- **Hosting panel** — cPanel and DirectAdmin are both admissible, and a
+  deployment may run both: acquiring a book of cPanel accounts must not require
+  a code change or a migration. `dotmac-hosting` records an OPAQUE panel binding
+  reference per account and expresses desired and observed state in
+  provider-neutral terms. Where panels genuinely differ in what they can do,
+  that is a **declared capability feature on the binding** which the owner reads
+  as data — never `if panel == "cpanel"`. A panel that cannot pass the
+  conformance kit is not offered.
+- **Registrar** — already two connectors for one capability: NiRA EPP for `.ng`
+  and Openprovider for gTLDs. Which one serves a given TLD is routing DATA, not
+  a branch, and a third registrar is additive.
+- **Authoritative DNS** — PowerDNS is self-hosted, which changes who operates it
+  and changes nothing about the boundary: it is reached through a connector and
+  is replaceable.
+
+Panel and PSP economics (DirectAdmin's flat per-server licence versus cPanel's
+per-account pricing; each PSP's fees) are real and they matter — but they are a
+per-deployment PROCUREMENT comparison, re-made whenever prices move. Encoding
+today's answer in code converts a reversible commercial decision into an
+irreversible technical one. That is the mistake this rule exists to prevent.
 
 #### E.1 Outbound email is a capability, not a vendor
 
