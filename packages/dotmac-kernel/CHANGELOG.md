@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a76 — Unreleased
+
+Allocates the independent tenant-only domain-service lifecycle required by the
+Dotmac Cloud composition profile. This is a namespace allocation only; domain
+business behaviour remains in the separately released `dotmac-domains` module.
+
+### Added
+
+- `DOMAINS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_domains`, revision prefix `do`, branch label `domains`.
+
 ## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration

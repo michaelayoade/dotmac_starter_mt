@@ -1,0 +1,1 @@
+"""dotmac-domains Alembic revisions."""

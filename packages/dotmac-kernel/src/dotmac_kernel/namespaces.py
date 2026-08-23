@@ -624,6 +624,16 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-domains` — the first Cloud-only lifecycle owner in ADR-0030. The
+# schema stays readable in the live catalog; `do` is the immutable Alembic
+# revision namespace and identifies no provider or product installation.
+DOMAINS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="domains",
+    prefix="do",
+    branch_label="domains",
+    db_schema=module_schema("domains"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +649,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    DOMAINS_MIGRATION_OWNER,
 )
 
 
@@ -994,6 +1005,7 @@ __all__ = [
     "DuplicateMigrationPrefixError",
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
+    "DOMAINS_MIGRATION_OWNER",
     "DURABLE_TIMERS_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",

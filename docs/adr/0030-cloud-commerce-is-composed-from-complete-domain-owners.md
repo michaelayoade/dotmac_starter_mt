@@ -64,6 +64,36 @@ ruled on both on 2026-08-15.
    Fulfillment. Its contract contradictions must be resolved before any
    behaviour code — see §5e.
 
+## Amendment 2026-08-19 — the programme target is Cloud, with one Cloud-only lane
+
+Michael clarified that the execution goal is a working Dotmac Cloud application,
+not an indefinitely growing platform-foundation train. The composition matrix
+therefore drives three explicit work classes:
+
+1. **Reuse released owners:** kernel facilities, Integration, Files, Numbering,
+   Durable Timers and other already-complete shared packages are consumed; Cloud
+   does not rebuild them.
+2. **Coordinate shared business owners:** Billing, Orders, Subscriptions,
+   Collections, Fulfillment and Document Rendering remain reusable ecosystem
+   packages. Their assigned workstreams may proceed independently and Cloud
+   consumes their released contracts; the Cloud lane does not create local
+   substitutes while those owners are in flight.
+3. **Build Cloud-only owners and composition:** Domains and Hosting are the two
+   lifecycle modules whose first and only adopter is Cloud. The Cloud application
+   then owns only assembly concerns: checkout/portal adapters, one-way
+   source-labelled customer correlation, contract translation, orchestration
+   wiring and the end-to-end journey. Product catalogue, invoice/payment,
+   recurrence/renewal, dunning, included mailbox and DNS responsibilities stay
+   with the named owners in §§1 and 7 rather than becoming Cloud feature modules.
+
+The first paragraph of §5 is narrowed accordingly. The numbered order is a
+**contract dependency, merge/release and adoption order**, not a prohibition on
+isolated parallel implementation after each package's inventory and contract are
+complete. Parallel work is admissible only when it guesses no unfinished upstream
+contract, imports no sibling, uses a separate branch/worktree and does not claim
+completion or adoption early. Cloud composition and authority cutover still wait
+for every consumed exact release.
+
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It
@@ -236,8 +266,11 @@ adjectives.
 
 ### 5. Build order
 
-Work completes one owner before opening the next package, except that adopter
-integration may run after a package reaches its independent completion gate.
+The order below controls contract dependency, merge/release and adoption. After
+the 2026-08-19 amendment, independently inventoried packages may be implemented
+in isolated parallel workstreams, but a downstream package cannot guess an
+unfinished upstream contract, merge ahead of its required authority, or claim
+completion/adoption before the exact consumed releases exist.
 
 Two steps are product defect repairs rather than module work. They are listed
 because the evidence found active authority bypasses that must not wait for a
