@@ -92,11 +92,6 @@
       "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a2 adds Sub's durable FIFO admission and round-robin rotation state (io_0002). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a92",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a92 relaxes ONE validation bound: PrerequisiteBinding no longer applies the module revision-id cap to provider_revision, which names the HOST assembly's own revision in the HOST's own alembic_version table. namespaces.MAX_REVISION_ID_LENGTH still caps a MODULE's own ids at 32 and a test now pins that, so the two limits cannot be re-merged later. Found composing dotmac-service-orders into Dotmac Sub, whose version_num is VARCHAR(255) and whose two prerequisite-supplying revisions are 37 and 38 characters - the cap made a correct binding unexpressible, and every adopter workaround was worse. a91 is published and immutable, so the loosened bound needs a new version. Remove this row after release-kernel registry verification writes the a92 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
-      "state": "declared-unpublished"
-    },
     "dotmac-operational-escalations": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. Versioned escalation policy, instances, acknowledgement and cancellation are extracted product-first from Sub's operational_escalation state and are uncomposed. Durable Timers keeps scheduling and Messaging/Integrator keeps delivery. Remove only with an authorized Sub backfill, zero-drift escalation shadow and writer retirement.",
