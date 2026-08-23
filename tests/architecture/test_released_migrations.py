@@ -188,9 +188,7 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "src/dotmac_subscriptions/migrations/versions"
     ),
     "dotmac-billing": (
-        REPO_ROOT
-        / "packages/dotmac-billing"
-        / "src/dotmac_billing/migrations/versions"
+        REPO_ROOT / "packages/dotmac-billing" / "src/dotmac_billing/migrations/versions"
     ),
 }
 
