@@ -69,12 +69,12 @@
     },
     "dotmac-billing": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. The audited dual-plane Billing tree has been rebased onto the published a89+ allocation floor and now owns the sole ReceivablePositionV1, kernel Money, financial state and immutable reversal movements. Source presence is not CI, registry or adoption evidence. Keep the package unallowlisted and unpublished until the exact revision passes the direct Git-hosted PostgreSQL, wheel and composition gates and Michael separately authorizes release; do not edit the version down.",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. The audited dual-plane Billing owner landed through PR 381; direct CI run 32659107095 and pull-request CI run 32660183336 passed for head revision 3b9c122940e162d0bf918d42d98c7a1288be483b. It owns the sole ReceivablePositionV1, kernel Money, financial state and immutable reversal movements, and a89 remains its honest kernel minimum. CI and source presence are not registry or adoption evidence. Keep the package unallowlisted and unpublished until the real Cloud adapter/composition gate is complete and Michael separately authorizes release; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-collections": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. Collections declares its distinct ReceivableObservationV1, one lifecycle over selectable tenant/platform persistence planes, and no Billing-owned financial position, money lanes or reversed steady state. It still has no production adopter or authority cutover. Keep it unallowlisted and unpublished until exact-revision direct CI, the real composition adapter and the Sub/Vendor shadow, isolation and writer-retirement gates are complete; do not edit the version down.",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. Collections declares its distinct ReceivableObservationV1, one lifecycle over selectable tenant/platform persistence planes, and no Billing-owned financial position, money lanes or reversed steady state. The implementation landed through PR 381; direct CI run 32659107095 and pull-request CI run 32660183336 passed for head revision 3b9c122940e162d0bf918d42d98c7a1288be483b. It still has no production adopter or authority cutover. Keep it unallowlisted and unpublished until the real composition adapter and the Sub/Vendor shadow, isolation and writer-retirement gates are complete and release is separately authorized; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-customers": {
@@ -124,7 +124,7 @@
     },
     "dotmac-subscriptions": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED COORDINATED-COMMERCE CANDIDATE. The product-first dual-plane offer, contract, cadence and recurring-occurrence owner exists in source, but exact-revision CI, a real Cloud composition, product shadow/adoption and release authorization are not complete. Keep it unallowlisted and unpublished until those gates pass and remove this row only in the authorized release record; do not edit the version down.",
+      "reason": "INTENDED UNRELEASED COORDINATED-COMMERCE CANDIDATE. The product-first dual-plane offer, contract, cadence and recurring-occurrence owner landed through PR 381; direct CI run 32659107095 and pull-request CI run 32660183336 passed for head revision 3b9c122940e162d0bf918d42d98c7a1288be483b. Its honest kernel minimum is a94 because guarded writes consume the manifest-owned charge_models and obligation_sources declarations. A real Cloud composition, product shadow/adoption and release authorization are not complete. Keep it unallowlisted and unpublished until those gates pass and remove this row only in the authorized release record; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

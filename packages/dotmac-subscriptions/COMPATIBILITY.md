@@ -24,6 +24,13 @@ series. Callers supply an explicit `TenantScope` or `PlatformScope`, exact
 decimals, currency, timezone, cadence, provenance, and product link; no product
 or deployment default is part of the contract.
 
+The runtime floor is `dotmac-kernel>=0.1.0a94`. Although `a89` allocated the
+subscriptions lineage, `a94` is the first kernel contract on which product
+manifests can declare the open `charge_models` and `obligation_sources`
+vocabularies consumed by `SubscriptionVocabularyRegistry`. An older floor could
+import much of the package but could not configure its guarded write paths
+through the supported manifest surface.
+
 Persistence compatibility is owned by the `subscriptions` Alembic lineage.
 Assemblies select tenant, platform, or both declared planes and bind the
 manifest prerequisites. They may not create a parallel migration or repoint the

@@ -165,6 +165,10 @@ def test_package_identity_and_dossier_exist() -> None:
 
     assert pyproject["tool"]["poetry"]["name"] == "dotmac-subscriptions"
     assert pyproject["tool"]["poetry"]["version"] == dotmac_subscriptions.__version__
+    assert (
+        pyproject["tool"]["poetry"]["dependencies"]["dotmac-kernel"]
+        == ">=0.1.0a94"
+    )
     assert module.version == dotmac_subscriptions.__version__
     assert dossier["package"] == "dotmac-subscriptions"
     assert dossier["source_mode"] == "product-first"

@@ -32,5 +32,7 @@ evidence remain in `docs/inventories/subscriptions-sources.md` and
 `docs/inventories/subscriptions-extraction-dossier.md`.
 
 The first release candidate is `0.1.0a1` and requires
-`dotmac-kernel>=0.1.0a89` plus `alembic>=1.13` for its dual-plane migration and
-linking surface.
+`dotmac-kernel>=0.1.0a94` plus `alembic>=1.13`. Kernel `a89` supplies the
+subscriptions lineage allocation; `a94` is the actual minimum because it adds
+the manifest-owned `charge_models` and `obligation_sources` declarations that
+the package validates before offer, contract, and occurrence writes.
