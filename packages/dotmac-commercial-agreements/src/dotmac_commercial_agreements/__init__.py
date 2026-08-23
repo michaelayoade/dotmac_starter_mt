@@ -6,7 +6,7 @@ its lifecycle, and the append-only evidence for every transition.
 
 Extracted product-first from `dotmac_vendor_control_plane:src/vendor_cp/
 contracts/` (658-line service, two tables, migration `v004_contracts`) under
-ADR-0033 § 1. See `docs/inventories/vendor-cp-gap-sources.md` § 1 for the source
+ADR-0057 § 1. See `docs/inventories/vendor-cp-gap-sources.md` § 1 for the source
 inventory and `EXTRACTION.toml` for the ownership record.
 
 ## The one rule to know
@@ -43,7 +43,7 @@ or allocations (`dotmac-entitlement-allocation`); licences (`dotmac-licensing`);
 deployment state (`dotmac-deployment-control`); invoices, settlements or
 collections decisions (`dotmac-billing`, `dotmac-collections`); approval workflow
 internals (`dotmac-approvals`); counterparty master data (nobody in this
-programme — ADR-0033 § 6); documents or stored bytes (`dotmac-files`, ADR-0022).
+programme — ADR-0057 § 6); documents or stored bytes (`dotmac-files`, ADR-0022).
 
 ## It imports no sibling module
 

@@ -212,7 +212,7 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
     """An allowlist row means the workflow MAY publish; it is not proof that it
     did. Any distribution in both states at once must be in the ledger.
 
-    NO LONGER VACUOUS, as of the ADR-0033 cohort (2026-08-20). It was, and the
+    NO LONGER VACUOUS, as of the ADR-0057 cohort (2026-08-20). It was, and the
     docstring said so rather than the test being deleted: the one module in both
     states, `dotmac-imports`, had its ALLOWLIST ROW removed (see the test below),
     emptying the intersection. Four modules now occupy it deliberately —

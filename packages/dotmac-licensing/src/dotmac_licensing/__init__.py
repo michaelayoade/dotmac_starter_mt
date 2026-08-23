@@ -5,7 +5,7 @@ into a signed document a deployment can verify entirely offline, and it owns tha
 document's lifecycle, its acknowledgements, and its revocation.
 
 Extracted product-first from `dotmac_vendor_control_plane:src/vendor_cp/
-licensing/` (3,689 LOC, migrations `v006` to `v011`) under ADR-0033 § 2. Source
+licensing/` (3,689 LOC, migrations `v006` to `v011`) under ADR-0057 § 2. Source
 inventory: `docs/inventories/vendor-cp-gap-sources.md` § 2. Ownership record:
 `EXTRACTION.toml`.
 

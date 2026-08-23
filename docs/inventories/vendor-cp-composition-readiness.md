@@ -1,9 +1,9 @@
 # Vendor CP composition readiness — one owner per decision, end to end
 
 **As of:** 2026-08-19
-**Starter:** the ADR-0033 module stack, off `origin/main` `fb9aea0`
+**Starter:** the ADR-0057 module stack, off `origin/main` `fb9aea0`
 **Vendor CP:** `main` `2c4d88a`
-**Decision record:** [ADR-0033](../adr/0033-the-vendor-control-plane-composes-existing-owners.md)
+**Decision record:** [ADR-0057](../adr/0057-the-vendor-control-plane-composes-existing-owners.md)
 **Source evidence:** [`vendor-cp-gap-sources.md`](vendor-cp-gap-sources.md)
 
 The completion artifact for the programme that recomposes the vendor control
@@ -116,7 +116,7 @@ Seven typed seams the Vendor assembly must implement:
    RESOLVED identity, never the report's own claim — the module raises if a
    caller passes `signature_status="valid"` with no authenticated ref.
 7. **`BrandOverride`** ← brand profiles, mapped through the module's published
-   `BRAND_OVERRIDE_INPUTS` allowlist. ADR-0033 § 2a assigns this mapping to the
+   `BRAND_OVERRIDE_INPUTS` allowlist. ADR-0057 § 2a assigns this mapping to the
    assembly explicitly: `dotmac-ui` owns the vocabulary, projection and contrast;
    the module owns the values, provenance, precedence and locks; the assembly
    joins them. Driving the mapping through the allowlist rather than hard-coded
@@ -178,7 +178,7 @@ here because they are easy to discover too late:
    `render_brand_css` does not seed, so a per-profile override would be a second
    authority over a published token. Every affected value is reported by
    `translate_legacy_brand_values()` with
-   `Disposition.OWNED_BY_PUBLISHED_TOKEN`. ADR-0033 § 2a records the amended
+   `Disposition.OWNED_BY_PUBLISHED_TOKEN`. ADR-0057 § 2a records the amended
    presentation boundary.
 2. **The two abandoned Vendor V6 branches must be deleted** once deployment
    control is composed — `feat/v6-slice1-deployment-credentials` and

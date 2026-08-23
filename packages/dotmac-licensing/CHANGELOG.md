@@ -8,7 +8,7 @@ called out here.
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of the vendor control plane's issuer-side
-`licensing/` service (ADR-0033 § 2).
+`licensing/` service (ADR-0057 § 2).
 
 ### Added
 
@@ -39,7 +39,7 @@ First release. Product-first extraction of the vendor control plane's issuer-sid
   connection refs, attempt counters, retry outcomes and error codes are the
   Integrator's (ADR-0024, hard rule 28).
 - **The deployment-credential/admission half** (`credentials.py`,
-  `admission.py`). That went to `dotmac-deployment-control` (ADR-0033 § 3): a
+  `admission.py`). That went to `dotmac-deployment-control` (ADR-0057 § 3): a
   licence *names* a deployment, it does not *enrol* one.
 
 ### Changed from the source implementation

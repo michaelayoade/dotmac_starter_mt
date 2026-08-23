@@ -385,7 +385,7 @@
     },
     "dotmac-brand-profiles": {
       "$comment": [
-        "Scoped brand values, provenance, precedence and locks (ADR-0033 s2a).",
+        "Scoped brand values, provenance, precedence and locks (ADR-0057 s2a).",
         "See dotmac-commercial-agreements above for the cohort-wide",
         "wheel-content reasoning. Unlike its three siblings this module's",
         "0.1.0a77 floor IS its own allocation release, so it sits in",
@@ -481,7 +481,7 @@
     },
     "dotmac-commercial-agreements": {
       "$comment": [
-        "The ADR-0033 vendor module cohort. All four are listed together because",
+        "The ADR-0057 vendor module cohort. All four are listed together because",
         "they are released together: the modules floor on kernel 0.1.0a77 and",
         "0.1.0a77 exists to carry their four MIGRATION_OWNER_LEDGER rows, so a",
         "kernel release with no module beside it satisfies nothing and a module",
@@ -518,7 +518,7 @@
         "row for each of the four. An allowlist row makes a module PUBLISHABLE; it",
         "does not assert that it has been published or adopted.",
         "",
-        "The cohort's first module (ADR-0033 s1), extracted product-first from",
+        "The cohort's first module (ADR-0057 s1), extracted product-first from",
         "the vendor control plane's own running `vendor_cp.contracts`. Its",
         "`agreement_events` table is append-only through a",
         "`refuse_history_rewrite` trigger, which is why `cg_0001` is required",
@@ -621,7 +621,7 @@
     },
     "dotmac-deployment-control": {
       "$comment": [
-        "Deployment intent, delivery and observed applied state (ADR-0033 s3).",
+        "Deployment intent, delivery and observed applied state (ADR-0057 s3).",
         "See dotmac-commercial-agreements above for the cohort-wide floor and",
         "wheel-content reasoning.",
         "",
@@ -1183,7 +1183,7 @@
     },
     "dotmac-licensing": {
       "$comment": [
-        "The ISSUER half of licensing (ADR-0033 s2), extracted product-first.",
+        "The ISSUER half of licensing (ADR-0057 s2), extracted product-first.",
         "See dotmac-commercial-agreements above for the cohort-wide floor and",
         "wheel-content reasoning; only what is specific to this module is",
         "repeated here.",

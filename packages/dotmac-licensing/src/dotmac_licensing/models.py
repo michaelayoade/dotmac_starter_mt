@@ -4,7 +4,7 @@ Platform catalog tables: no `tenant_id`, no RLS, `app_user` REVOKEd. Issuance is
 a control-plane act; a tenant data plane RECEIVES a signed envelope and verifies
 it offline through `dotmac_kernel.licensing` — it never reads the issuer's tables
 to learn what it may do. That asymmetry is the whole point of a signed licence,
-and ADR-0033 § 7 declares the plane from it.
+and ADR-0057 § 7 declares the plane from it.
 
 ## There is no private-key column, and that is structural
 

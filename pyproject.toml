@@ -45,17 +45,17 @@ dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
 # The fourth installable module (ADR-0006 M4), and the second vendor-side one.
 dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
-# The durable vendor<->operator commercial agreement (ADR-0033 § 1). Like the
+# The durable vendor<->operator commercial agreement (ADR-0057 § 1). Like the
 # two above it is vendor-side: `app/assembly.py` does not compose it, and the
 # "assembly must not install vendor-only modules" contract below is what keeps
 # that true rather than merely current.
 dotmac-commercial-agreements = { path = "packages/dotmac-commercial-agreements", develop = true }
-# The ISSUER half of WS8 (ADR-0033 § 2). Vendor-side, and the most strongly
+# The ISSUER half of WS8 (ADR-0057 § 2). Vendor-side, and the most strongly
 # so of the three: it names the signing material that must never be reachable
 # from a data plane, which is what the vendor-only contract below enforces.
 dotmac-licensing = { path = "packages/dotmac-licensing", develop = true }
 # Desired deployment intent, rollout, acknowledgement and reconciliation
-# (ADR-0033 § 3). Vendor-side: it decides what a FLEET should run, which is
+# (ADR-0057 § 3). Vendor-side: it decides what a FLEET should run, which is
 # not a thing any one deployment may hold.
 dotmac-deployment-control = { path = "packages/dotmac-deployment-control", develop = true }
 # ADR-0040 vendor-operations cohort. Both are platform-only and remain absent
@@ -68,7 +68,7 @@ dotmac-support-access = { path = "packages/dotmac-support-access", develop = tru
 # path fails the build instead of checking it.
 dotmac-forms = { path = "packages/dotmac-forms", develop = true }
 dotmac-workflow-runtime = { path = "packages/dotmac-workflow-runtime", develop = true }
-# Brand profile DATA (ADR-0033 § 2). Genuinely dual-plane, and the one module
+# Brand profile DATA (ADR-0057 § 2). Genuinely dual-plane, and the one module
 # in the vendor programme that a tenant data plane legitimately installs —
 # which is why it is deliberately NOT on the vendor-only forbidden list below.
 dotmac-brand-profiles = { path = "packages/dotmac-brand-profiles", develop = true }
@@ -626,7 +626,7 @@ forbidden_modules = ["app"]
 # `dotmac-brand-profiles` is genuinely dual-plane and a tenant data plane is
 # one of its two real consumers, so forbidding installation here would
 # contradict the manifest. `dotmac-support-access` will never join it either:
-# ADR-0033 § 4 records that the decision already has three owners and the
+# ADR-0057 § 4 records that the decision already has three owners and the
 # module is not built.
 [[tool.importlinter.contracts]]
 name = "The assembly must not install vendor-only modules"

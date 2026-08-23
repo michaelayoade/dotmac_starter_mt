@@ -10,7 +10,7 @@
 Characterization for the programme that recomposes the vendor control plane as a
 thin assembly over Starter-owned modules. **Facts, not a mandate** — the
 dispositions this inventory supports are recorded in
-[ADR-0033](../adr/0033-the-vendor-control-plane-composes-existing-owners.md).
+[ADR-0057](../adr/0057-the-vendor-control-plane-composes-existing-owners.md).
 
 This is step 2 of the extraction procedure in
 [`module-extraction-sources.md`](module-extraction-sources.md), taken for six

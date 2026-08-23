@@ -107,7 +107,7 @@ class TestTheManifestMatchesTheLedger:
 class TestThePlaneIsDeclaredNotDiscovered:
     def test_the_tenant_plane_is_empty_and_the_platform_plane_is_not(self) -> None:
         """ADR-0023 rejects inferring a plane from a missing `tenant_id`, and
-        ADR-0033 § 7 derives this one from the single consumer that exists."""
+        ADR-0057 § 7 derives this one from the single consumer that exists."""
         assert module.tables == ()
         assert set(module.platform_tables) == {
             "agreements",

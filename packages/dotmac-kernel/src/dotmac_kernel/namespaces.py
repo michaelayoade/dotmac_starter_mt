@@ -625,13 +625,13 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-commercial-agreements` — the durable commercial agreement between the
-# platform operator and a counterparty (ADR-0033 § 1). `agreements` is plain in a
+# platform operator and a counterparty (ADR-0057 § 1). `agreements` is plain in a
 # catalog dump for the same reason `files`, `imports` and `approvals` are — a
 # reader of `mod_agreements.agreements` needs no glossary — and the distinct `cg`
 # prefix keeps its independently released lineage inside the revision-id budget.
 # `ca` is the campaign lineage's and `a` alone is the host assembly's.
 #
-# PLATFORM PLANE ONLY, and declared rather than discovered. ADR-0033 § 7 derives
+# PLATFORM PLANE ONLY, and declared rather than discovered. ADR-0057 § 7 derives
 # every plane in this programme from a consumer that exists TODAY: the vendor
 # control plane owns vendor↔operator agreements, and no tenant data plane holds
 # one. Sub sells ISP service to subscribers, which is a different subject with a
@@ -649,7 +649,7 @@ COMMERCIAL_AGREEMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("agreements"),
 )
 
-# `dotmac-licensing` — the ISSUER half of WS8 (ADR-0033 § 2). `licensing` is plain
+# `dotmac-licensing` — the ISSUER half of WS8 (ADR-0057 § 2). `licensing` is plain
 # in a catalog dump for the same reason `files`, `imports` and `approvals` are; the
 # distinct `li` prefix keeps its independently released lineage inside the
 # revision-id budget.
@@ -673,7 +673,7 @@ LICENSING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-deployment-control` — desired deployment intent, rollout, acknowledgement
-# and reconciliation (ADR-0033 § 3). `deploy` rather than `deployment_control`
+# and reconciliation (ADR-0057 § 3). `deploy` rather than `deployment_control`
 # because the short code is the permanent physical identity and every qualified
 # name pays for its length; `dc` leaves the revision-id budget for a readable slug.
 #
@@ -683,7 +683,7 @@ LICENSING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 # through the Integrator and report back through a signed envelope the kernel
 # verifies (ADR-0007) — never by reading this schema (ADR-0024).
 #
-# This is the one module in the ADR-0033 programme with a SPLIT provenance: the
+# This is the one module in the ADR-0057 programme with a SPLIT provenance: the
 # receipt half ports the never-merged Vendor V6 admission design, and the
 # plan/rollout half is greenfield with the absence evidenced across every branch,
 # stash, dangling object and reflog of the Vendor repository plus seven others.
@@ -697,7 +697,7 @@ DEPLOYMENT_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-brand-profiles` — the data that makes one released artifact appear as
-# Dotmac Academy at one host and NDIC Academy at another (ADR-0033 § 2). `brand`
+# Dotmac Academy at one host and NDIC Academy at another (ADR-0057 § 2). `brand`
 # reads correctly in a catalog dump; `bp` leaves the revision-id budget for a
 # readable slug.
 #

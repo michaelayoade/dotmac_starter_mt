@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "dotmac-brand-profiles"
 version = "0.1.0a1"
-description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0033 § 2)"
+description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0057 § 2)"
 authors = ["DotMac"]
 readme = "README.md"
 packages = [{ include = "dotmac_brand_profiles", from = "src" }]

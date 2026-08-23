@@ -11,7 +11,7 @@ creating.
 
 `tables=()` is a DECLARATION that this module has no tenant plane, not an
 oversight. ADR-0023 rejects inferring a plane from a missing `tenant_id`, and
-ADR-0033 § 7 derives the plane from a consumer that exists today: the vendor
+ADR-0057 § 7 derives the plane from a consumer that exists today: the vendor
 control plane owns vendor↔operator agreements, and no tenant data plane holds
 one. Sub sells ISP service to subscribers, which is a different subject with a
 different owner (`dotmac-subscriptions`, ruling A2(a)).

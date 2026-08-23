@@ -1,7 +1,7 @@
 """Issuing, transitioning and revoking licences — the issuer half of WS8.
 
 Ported product-first from `dotmac_vendor_control_plane:src/vendor_cp/licensing/`
-(3,689 LOC across thirteen modules, migrations `v006` to `v011`) under ADR-0033 § 2,
+(3,689 LOC across thirteen modules, migrations `v006` to `v011`) under ADR-0057 § 2,
 with the delivery half deliberately left behind and three couplings cut at the
 ports in `ports.py`.
 
@@ -28,7 +28,7 @@ Integrator owns transport evidence. This module ends at a signed envelope and
 resumes at an acknowledgement; the wire between them is not its concern.
 
 The `credentials.py`/`admission.py` deployment-identity half went to
-`dotmac-deployment-control` (ADR-0033 § 3), not here. A licence names a
+`dotmac-deployment-control` (ADR-0057 § 3), not here. A licence names a
 deployment; it does not enrol one.
 
 ## Transaction authority (hard rule 8)
