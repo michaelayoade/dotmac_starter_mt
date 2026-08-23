@@ -1174,6 +1174,32 @@ SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("subscriptions"),
 )
 
+# The two Cloud service-lifecycle owners (ADR-0030, amended 2026-08-23).
+#
+# `domains` does NOT get `do`. Its candidate tree carried `prefix="do"` from
+# before `documents` was allocated, and `documents` holds `do` permanently —
+# an allocation is never reused or repointed, so the candidate's provisional
+# claim is simply invalid and `dn` is allocated instead. This row exists to
+# settle that BEFORE any Domains source is ported, because a schema that moves
+# after data exists is a data-loss event, not a rename.
+#
+# Allocation only. Neither package is committed to `main` at the time of this
+# row: both survive solely on `salvage/cloud-domains-hosting`. Nothing here
+# claims either module is implemented, reviewed, tested, published or adopted.
+DOMAINS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="domains",
+    prefix="dn",
+    branch_label="domains",
+    db_schema=module_schema("domains"),
+)
+
+HOSTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="hosting",
+    prefix="hs",
+    branch_label="hosting",
+    db_schema=module_schema("hosting"),
+)
+
 # ISP essential-domain cohort (ADR-0055). Ten tenant owners share the current
 # unpublished a85 allocation release while retaining independent schemas and
 # lineages. Services uses `se`: current main had already allocated `sv`
@@ -1367,6 +1393,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     COLLECTIONS_MIGRATION_OWNER,
     ORDERS_MIGRATION_OWNER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
+    DOMAINS_MIGRATION_OWNER,
+    HOSTING_MIGRATION_OWNER,
     CUSTOMERS_MIGRATION_OWNER,
     SERVICE_CATALOG_MIGRATION_OWNER,
     QUALIFICATION_MIGRATION_OWNER,
@@ -1745,6 +1773,8 @@ __all__ = [
     "COLLECTIONS_MIGRATION_OWNER",
     "ORDERS_MIGRATION_OWNER",
     "SUBSCRIPTIONS_MIGRATION_OWNER",
+    "DOMAINS_MIGRATION_OWNER",
+    "HOSTING_MIGRATION_OWNER",
     "SERVICE_CATALOG_MIGRATION_OWNER",
     "SERVICES_MIGRATION_OWNER",
     "SERVICE_ORDERS_MIGRATION_OWNER",
