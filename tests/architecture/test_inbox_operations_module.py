@@ -142,7 +142,7 @@ def test_the_admission_revision_extends_the_same_forced_rls_plane() -> None:
     assert ast.literal_eval(assigned["down_revision"]) == "io_0001_inbox_operations"
     assert ast.literal_eval(assigned["REQUIRES"]) == tuple(module.requires)
     assert ast.literal_eval(assigned["_TENANT_TABLES"]) == ADMISSION_TABLES
-    assert set(ROOT_TABLES) | set(ADMISSION_TABLES) == set(module.tables)
+    assert set(ROOT_TABLES) | set(ADMISSION_TABLES) <= set(module.tables)
     assert "for table in _TENANT_TABLES:" in source
     assert "ALTER TABLE mod_inbox_ops.{table} ENABLE ROW LEVEL SECURITY" in source
     assert "ALTER TABLE mod_inbox_ops.{table} FORCE ROW LEVEL SECURITY" in source

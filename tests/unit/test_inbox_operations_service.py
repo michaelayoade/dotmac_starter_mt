@@ -156,7 +156,10 @@ def test_stale_presence_observation_cannot_overwrite_newer_state(db: Session) ->
     )
     assert row.state is PresenceState.AWAY
     assert row.assignment_capacity == 2
-    assert row.observed_at == newer
+    observed_at = row.observed_at
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    assert observed_at == newer
 
 
 def test_admission_is_idempotent_and_keeps_a_stored_position(db: Session) -> None:
