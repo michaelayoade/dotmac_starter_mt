@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from dotmac_kernel.cache import Scope, TenantScope, scope_segment
-from sqlalchemy import Select, select
+from dotmac_kernel.query import apply_pagination, escape_like
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -158,6 +159,45 @@ class OfferVersionSnapshot:
     source_id: UUID
     source_version: int
     prices: tuple[tuple[str, str, ExactAmount, Decimal], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogPrice:
+    """One exact price row on an immutable effective offer version."""
+
+    price_key: str
+    charge_model_code: str
+    unit_price: ExactAmount
+    quantity: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogItem:
+    """One effective recurring offer with its immutable price snapshot."""
+
+    offer_id: UUID
+    code: str
+    name: str
+    description: str | None
+    offer_version_id: UUID
+    version: int
+    effective_from: datetime
+    effective_until: datetime | None
+    source_code: str
+    source_id: UUID
+    source_version: int
+    prices: tuple[OfferCatalogPrice, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCatalogPage:
+    """A bounded, deterministic page of effective recurring offers."""
+
+    items: tuple[OfferCatalogItem, ...]
+    total: int
+    limit: int
+    offset: int
+    effective_at: datetime
 
 
 def _models(scope: Scope) -> _PlaneModels:
@@ -1233,6 +1273,172 @@ def offer_version_snapshot(
     )
 
 
+def _catalog_search_pattern(search: str | None) -> str | None:
+    if search is None:
+        return None
+    normalized = search.strip()
+    if len(normalized) > 200:
+        raise SubscriptionDataError(
+            "offers.search_too_long",
+            "Offer catalog search is limited to 200 characters.",
+        )
+    if not normalized:
+        return None
+    escaped = escape_like(normalized.lower())
+    return f"%{escaped}%"
+
+
+def list_effective_offers(
+    db: Session,
+    *,
+    scope: Scope,
+    effective_at: datetime,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> OfferCatalogPage:
+    """List one current immutable version per stable recurring offer.
+
+    This is an owner read, not a presentation decision. It returns exact money
+    and source provenance; a product adapter decides formatting, grouping,
+    eligibility, availability, and actions before handing display-only values
+    to a UI component.
+    """
+    _require_aware(effective_at, "effective_at")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise SubscriptionDataError(
+            "offers.invalid_limit", "Offer catalog limit must be between 1 and 100."
+        )
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise SubscriptionDataError(
+            "offers.invalid_offset", "Offer catalog offset cannot be negative."
+        )
+    pattern = _catalog_search_pattern(search)
+    plane = _models(scope)
+
+    ranked_versions = _scoped(
+        select(
+            plane.offer_version.id.label("offer_version_id"),
+            func.row_number()
+            .over(
+                partition_by=plane.offer_version.offer_id,
+                order_by=(
+                    plane.offer_version.effective_from.desc(),
+                    plane.offer_version.version.desc(),
+                    plane.offer_version.id.desc(),
+                ),
+            )
+            .label("effective_rank"),
+        ).where(
+            plane.offer_version.state == "published",
+            plane.offer_version.effective_from <= effective_at,
+            (
+                plane.offer_version.effective_until.is_(None)
+                | (plane.offer_version.effective_until > effective_at)
+            ),
+        ),
+        scope,
+        plane.offer_version,
+    ).subquery()
+
+    statement = (
+        select(plane.offer, plane.offer_version)
+        .join(
+            plane.offer_version,
+            plane.offer_version.offer_id == plane.offer.id,
+        )
+        .join(
+            ranked_versions,
+            (ranked_versions.c.offer_version_id == plane.offer_version.id)
+            & (ranked_versions.c.effective_rank == 1),
+        )
+        .where(plane.offer.status == "published")
+    )
+    statement = _scoped(statement, scope, plane.offer)
+    statement = _scoped(statement, scope, plane.offer_version)
+    if pattern is not None:
+        statement = statement.where(
+            or_(
+                func.lower(plane.offer.code).like(pattern, escape="\\"),
+                func.lower(plane.offer.name).like(pattern, escape="\\"),
+                func.lower(plane.offer.description).like(pattern, escape="\\"),
+            )
+        )
+
+    identities = statement.with_only_columns(plane.offer.id).order_by(None).subquery()
+    total = int(
+        db.execute(select(func.count()).select_from(identities)).scalar_one()
+    )
+    rows = db.execute(
+        apply_pagination(
+            statement.order_by(
+                func.lower(plane.offer.name),
+                func.lower(plane.offer.code),
+                plane.offer.id,
+            ),
+            limit=limit,
+            offset=offset,
+        )
+    ).all()
+
+    version_ids = [row[1].id for row in rows]
+    prices_by_version: dict[UUID, list[OfferCatalogPrice]] = {
+        version_id: [] for version_id in version_ids
+    }
+    if version_ids:
+        price_statement = select(plane.price).where(
+            plane.price.offer_version_id.in_(version_ids)
+        )
+        price_statement = _scoped(price_statement, scope, plane.price)
+        prices = cast(
+            Iterable[PriceRow],
+            db.execute(
+                price_statement.order_by(
+                    plane.price.offer_version_id,
+                    plane.price.price_key,
+                )
+            ).scalars(),
+        )
+        for price in prices:
+            prices_by_version[price.offer_version_id].append(
+                OfferCatalogPrice(
+                    price_key=price.price_key,
+                    charge_model_code=price.charge_model_code,
+                    unit_price=ExactAmount(price.amount, price.currency, price.scale),
+                    quantity=price.quantity,
+                )
+            )
+
+    items = tuple(
+        OfferCatalogItem(
+            offer_id=offer.id,
+            code=offer.code,
+            name=offer.name,
+            description=offer.description,
+            offer_version_id=version.id,
+            version=version.version,
+            effective_from=_stored_utc(version.effective_from),
+            effective_until=(
+                _stored_utc(version.effective_until)
+                if version.effective_until is not None
+                else None
+            ),
+            source_code=version.source_code,
+            source_id=version.source_id,
+            source_version=version.source_version,
+            prices=tuple(prices_by_version[version.id]),
+        )
+        for offer, version in rows
+    )
+    return OfferCatalogPage(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        effective_at=effective_at.astimezone(UTC),
+    )
+
+
 def _load_rating_rows(
     db: Session, command: GenerateRecurringChargeCommand
 ) -> tuple[ContractVersionRow, LineRow, _PlaneModels]:
@@ -1590,6 +1796,9 @@ def acknowledge_output(
 
 
 __all__ = [
+    "OfferCatalogItem",
+    "OfferCatalogPage",
+    "OfferCatalogPrice",
     "OfferVersionSnapshot",
     "acknowledge_output",
     "cadence_of",
@@ -1597,6 +1806,7 @@ __all__ = [
     "end_contract_version",
     "entitlement_projections_for_version",
     "generate_recurring_charge",
+    "list_effective_offers",
     "occurrences_for_contract",
     "offer_version_snapshot",
     "publish_offer_version",

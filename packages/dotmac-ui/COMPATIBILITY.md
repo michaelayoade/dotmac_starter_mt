@@ -60,7 +60,7 @@ deprecation cycle**.
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
-| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `component_classes` |
+| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `CatalogItem`, `COMPONENTS`, `EMPTY_STATE`, `CATALOG_GRID`, `component_classes` |
 
 The whole of that surface is also re-exported at the top level, and there is no
 DB-touching subset to keep out of it: `import dotmac_ui` has no side effect
@@ -312,6 +312,7 @@ with none of the kernel's globals or filters installed.
 | Template | Macro | Parameters | Classes |
 |---|---|---|---|
 | `dotmac_ui/components/empty_state.html` | `empty_state` | `title`, `message`, `action_label`, `action_url` | `dmui-empty-state`, `dmui-empty-state__visual`, `dmui-empty-state__icon`, `dmui-empty-state__title`, `dmui-empty-state__message`, `dmui-empty-state__action`, `dmui-empty-state__action-icon` |
+| `dotmac_ui/components/catalog_grid.html` | `catalog_grid` | `items`, `empty_title`, `empty_message`, `empty_action_label`, `empty_action_url` | `dmui-catalog-grid`, `dmui-catalog-grid__item`, `dmui-catalog-grid__media`, `dmui-catalog-grid__body`, `dmui-catalog-grid__title`, `dmui-catalog-grid__meta`, `dmui-catalog-grid__description`, `dmui-catalog-grid__notice`, `dmui-catalog-grid__action`, `dmui-catalog-grid__action-icon` |
 
 `empty_state` renders the "nothing to show here" panel for a list, table body or
 card. In a table the **caller** owns the row and the `colspan`; the component
@@ -331,6 +332,19 @@ prevents attribute breakout, but this presentation component does not decide a
 product's allowed URL schemes or authorization policy; callers must not pass an
 untrusted URL.
 
+`catalog_grid` renders a responsive discovery collection from a sequence of
+`CatalogItem` values. The item contract contains only display strings: title,
+metadata, description, optional media URL/alt text, optional notice, and an
+optional paired action. Workspace application tiles and Academy course cards
+are the product-first sources. The component does not search, filter, sort,
+page, determine catalog membership, authorize, format money, infer status,
+check stock/eligibility, or implement selection. Those decisions remain in the
+calling product service, which maps its result into `CatalogItem`.
+
+The catalog slice is additive but still `audit-complete`: neither source product
+has cut over. Their existing markup and CSS remain authoritative until a later
+coordinated release, adoption proof and local-owner retirement.
+
 ## Accessibility contract
 
 **Target: WCAG 2.2 Level AA** for the critical journeys of any product assembled
@@ -344,14 +358,15 @@ claim about that.
 
 **What is machine-checked today** (`tests/unit/test_dotmac_ui_a11y.py`):
 
-- **Colour contrast**, on 70 requirements — every colour pair the vocabulary
+- **Colour contrast**, on 74 requirements — every colour pair the vocabulary
   claims will be used together, in **both** modes, against the threshold that
   applies to it: **4.5:1** for text (SC 1.4.3) and **3:1** for non-text UI
   components, graphical objects, and the focus indicator (SC 1.4.11, SC 2.4.11).
   Covered: every text role on `surface-primary`; `text-primary` on every surface;
   each action intent's label against its resting, hover, and pressed fill; each
   semantic intent's status text and status dot against its own tinted surface;
-  `border-strong` and `focus-ring-color` against the surfaces they land on.
+  `border-strong` and `focus-ring-color` against the surfaces they land on;
+  and catalog metadata/description text against its elevated card surface.
 - **The requirement list itself**, because a contrast suite's real failure mode
   is that deleting a failing requirement is easier than fixing the colour. Guards
   assert every text role has a requirement, every action intent is checked in all

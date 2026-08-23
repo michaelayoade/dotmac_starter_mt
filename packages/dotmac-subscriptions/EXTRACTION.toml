@@ -6,7 +6,7 @@ source_mode = "product-first"
 
 owner = "The reusable recurring-commercial core on explicit tenant and platform planes: stable offers, immutable offer and price versions, stable subscription contracts with immutable effective-dated versions and lines, composable cadence and calendar arithmetic, declared proration, and unique replayable recurring charge occurrences with pre-tax rating provenance."
 
-contract = "Publish immutable offer versions and price children beneath a stable offer identity; record immutable effective-dated subscription contract versions and stable line lineage; resolve half-open periods, declared proration and rate units from BillingCadence; and emit exact pre-tax RatedObligationOutputV1 and money-free CommercialEntitlementProjectionV1 facts. NOT invoices, receivables, payments, settlement, allocation, tax, FX, collections policy, product access, licences, providers, usage metering, documents, or the general ledger."
+contract = "Publish immutable offer versions and price children beneath a stable offer identity; list one effective immutable version per stable offer with exact price provenance; record immutable effective-dated subscription contract versions and stable line lineage; resolve half-open periods, declared proration and rate units from BillingCadence; and emit exact pre-tax RatedObligationOutputV1 and money-free CommercialEntitlementProjectionV1 facts. NOT invoices, receivables, payments, settlement, allocation, tax, FX, collections policy, product access, licences, providers, usage metering, documents, stock, assets, or the general ledger."
 
 source_repositories = [
   "dotmac_sub",

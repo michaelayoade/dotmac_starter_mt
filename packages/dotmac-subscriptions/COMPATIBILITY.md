@@ -24,6 +24,14 @@ series. Callers supply an explicit `TenantScope` or `PlatformScope`, exact
 decimals, currency, timezone, cadence, provenance, and product link; no product
 or deployment default is part of the contract.
 
+`list_effective_offers` returns `OfferCatalogPage`, `OfferCatalogItem` and typed
+`OfferCatalogPrice` rows. The read is half-open at `effective_at`, chooses one
+latest effective published version per stable published offer, sorts by
+normalized name/code/id, and caps each page at 100 rows. Search treats `%` and
+`_` as literal input through the kernel query helper. Exact prices are owner
+facts, never localized display strings; product adapters remain responsible for
+facets, eligibility, availability and actions.
+
 Persistence compatibility is owned by the `subscriptions` Alembic lineage.
 Assemblies select tenant, platform, or both declared planes and bind the
 manifest prerequisites. They may not create a parallel migration or repoint the

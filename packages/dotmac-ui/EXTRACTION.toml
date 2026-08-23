@@ -1,11 +1,11 @@
 schema_version = 2
 package = "dotmac-ui"
 classification = "presentation-foundation"
-status = "reuse-proven"
+status = "audit-complete"
 source_mode = "product-first"
 owner = "Dotmac design system"
-contract = "Two published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) inert Jinja component templates with their declared contracts and token-native CSS. The headline status is the weaker of the two."
-source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_starter_mt", "dotmac_erp"]
+contract = "Three published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the adopted empty-state Jinja contract and token-native CSS; (catalog-grid) a display-only catalog card/grid contract. The headline status is the weakest of the three."
+source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_starter_mt", "dotmac_erp", "dotmac_workspace", "dotmac_academy_app"]
 source_paths = [
   "dotmac_sub:static/css/design-system.css",
   "dotmac_starter_mt:packages/dotmac-ui/src/dotmac_ui/tokens.py",
@@ -13,6 +13,10 @@ source_paths = [
   "dotmac_erp:templates/components/macros.html",
   "dotmac_sub:templates/components/data/empty_state.html",
   "dotmac_crm:templates/components/data/empty_state.html",
+  "dotmac_workspace:src/dotmac_workspace/launcher/web.py",
+  "dotmac_workspace:src/dotmac_workspace/static/css/workspace.css",
+  "dotmac_academy_app:templates/public/courses.html",
+  "dotmac_academy_app:static/public.css",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
@@ -30,21 +34,22 @@ preserved_tests = [
 # (ADR-0006 section 5).
 contract_consumers = ["dotmac_sub", "dotmac_academy_app", "dotmac_erp"]
 reference_consumers = ["dotmac_starter_mt"]
-candidate_consumers = ["dotmac_crm"]
+candidate_consumers = ["dotmac_crm", "dotmac_workspace"]
 inventory_evidence = [
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/sub-surfaces.md",
   "docs/inventories/erp-vendor-surfaces.md",
   "docs/inventories/branding-settings.md",
   "docs/inventories/ui-surface-inventory.md",
+  "docs/inventories/catalog-card-sources.md",
 ]
-first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. The starter remains reference proof rather than an independent cutover."
-shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared core; ERP and Sub each pin the release, assert the declared empty_state contract, resolve it through the product loader, and reject a vendored package template. Their local compatibility adapters contain no component markup, so the package remains the one renderer."
-local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are a deliberate outcome rather than debt. components: ERP replaced its former empty_state body with a thin legacy-call-shape adapter over the package macro, and Sub replaced its byte-identical renderer with a thin include-context adapter; neither retains a second markup owner. The starter's table macro copy is already retired. CRM's local template remains an optional future cleanup and is not required for the ERP + Sub reuse proof."
-next_action = "The active dotmac-ui foundation programme is complete: both tokens and components are reuse-proven. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet; add components only when two live consumers share semantics and local owners can be retired; create a theme package only on proven non-token structural demand. CRM is an eligible but unscheduled candidate. The list surface remains behind ADR-0017. See docs/superpowers/plans/2026-08-13-presentation-system-programme.md."
+first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. catalog-grid: pending -- this branch publishes no release and changes neither Workspace nor Academy. The starter remains reference proof rather than an independent cutover."
+shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared empty-state core; ERP and Sub each pin the release and reject a vendored package template. catalog-grid: clean-host, escaping, display-only-field, optional-action, empty-state, token-native CSS, responsive and contrast proofs exist here; Workspace and Academy must add product-loader parity tests before either local renderer can retire."
+local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are deliberate. components: ERP and Sub retain only thin empty-state adapters, not markup owners; CRM remains optional. catalog-grid: no retirement is claimed -- Workspace still owns dmws-tile markup/CSS and Academy still owns its course-card markup/CSS until coordinated product cutovers prove parity and delete the overlaps."
+next_action = "Keep this catalog-grid slice on the integration train without composing or releasing it. Next, map Workspace and Academy product-owned listing results to CatalogItem, cut over one product at a time with exact loader/escaping/responsive parity tests, and retire each overlapping local card renderer/CSS. Do not add commercial eligibility, stock, selection or money decisions to dotmac-ui."
 
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
-# This package publishes TWO contracts whose evidence differs. A single
+# This package publishes THREE contracts whose evidence differs. A single
 # package-level state cannot describe that honestly: report the stronger and the
 # weaker contract is overstated; report the weaker and the stronger is
 # understated. The gate validates each slice independently and DERIVES the
@@ -97,3 +102,23 @@ reference_consumers = ["dotmac_starter_mt"]
 # technically eligible but unscheduled; Academy has no local renderer to retire.
 candidate_consumers = ["dotmac_crm", "dotmac_academy_app"]
 local_copy_retirement = "ERP's production macro supplied the product-first semantics; its former renderer is now a thin argument adapter over the package macro, protected by direct macro and architecture tests. Sub's byte-identical renderer is now a thin include-context adapter, protected by its architecture test and six live callers. Neither adapter owns markup. The starter's table macro copy is retired; CRM's copy is optional future cleanup, not part of the active programme."
+
+[[slices]]
+name = "catalog-grid"
+contract = "Display-only responsive catalog card/grid values, inert Jinja markup and token-native CSS"
+status = "audit-complete"
+source_paths = [
+  "dotmac_workspace:src/dotmac_workspace/launcher/web.py",
+  "dotmac_workspace:src/dotmac_workspace/static/css/workspace.css",
+  "dotmac_academy_app:templates/public/courses.html",
+  "dotmac_academy_app:static/public.css",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
+  "dotmac_workspace:tests/test_launcher_is_not_authorization.py",
+  "dotmac_academy_app:tests/web/test_public_catalog.py",
+]
+contract_consumers = []
+reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_workspace", "dotmac_academy_app"]
+local_copy_retirement = "Pending. Workspace's _tile plus dmws-tile* rules and Academy's public course-card markup plus overlapping card/grid rules remain authoritative. A later cutover must replace each with a thin CatalogItem mapping and delete the overlapping local renderer/CSS; this implementation branch does neither."

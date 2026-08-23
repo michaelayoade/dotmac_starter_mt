@@ -1,7 +1,7 @@
 /*!
  * dotmac-ui — the DotMac shared UI design system.
  * UI contract version: 1
- * Package version:     0.1.0a7
+ * Package version:     0.1.0a8
  * Accessibility:       WCAG 2.2 Level AA
  *
  * GENERATED FILE — do not edit by hand. The source of truth is
@@ -658,5 +658,122 @@
 }
 
 .dmui-empty-state__action:active {
+  background: var(--dmui-action-primary-pressed);
+}
+
+.dmui-catalog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--dmui-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .dmui-catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .dmui-catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.dmui-catalog-grid__item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--dmui-border-default);
+  border-radius: var(--dmui-radius-xl);
+  background: var(--dmui-surface-elevated);
+  box-shadow: var(--dmui-shadow-sm);
+}
+
+.dmui-catalog-grid__media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid var(--dmui-border-subtle);
+  background: var(--dmui-surface-secondary);
+  object-fit: cover;
+}
+
+.dmui-catalog-grid__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--dmui-space-xs);
+  padding: var(--dmui-space-md);
+}
+
+.dmui-catalog-grid__title {
+  margin: 0;
+  color: var(--dmui-text-primary);
+  font-family: var(--dmui-font-display);
+  font-size: var(--dmui-font-size-lg);
+  font-weight: var(--dmui-font-weight-semibold);
+  line-height: var(--dmui-line-height-snug);
+}
+
+.dmui-catalog-grid__meta {
+  margin: 0;
+  color: var(--dmui-text-tertiary);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  font-weight: var(--dmui-font-weight-medium);
+  line-height: var(--dmui-line-height-normal);
+}
+
+.dmui-catalog-grid__description {
+  margin: 0;
+  color: var(--dmui-text-secondary);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  line-height: var(--dmui-line-height-normal);
+}
+
+.dmui-catalog-grid__notice {
+  margin: var(--dmui-space-2xs) 0 0;
+  padding: var(--dmui-space-xs) var(--dmui-space-sm);
+  border-left: var(--dmui-focus-ring-width) solid var(--dmui-status-warning-indicator);
+  border-radius: var(--dmui-radius-sm);
+  background: var(--dmui-status-warning-surface);
+  color: var(--dmui-status-warning-foreground);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  line-height: var(--dmui-line-height-normal);
+}
+
+.dmui-catalog-grid__action {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: var(--dmui-space-2xs);
+  margin-top: auto;
+  padding: var(--dmui-space-xs) var(--dmui-space-sm);
+  border-radius: var(--dmui-radius-lg);
+  background: var(--dmui-action-primary-default);
+  color: var(--dmui-action-primary-on);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  font-weight: var(--dmui-font-weight-medium);
+  text-decoration: none;
+  transition: background var(--dmui-duration-fast) var(--dmui-easing-standard);
+}
+
+.dmui-catalog-grid__action-icon {
+  width: var(--dmui-space-md);
+  height: var(--dmui-space-md);
+}
+
+.dmui-catalog-grid__action:hover {
+  background: var(--dmui-action-primary-hover);
+}
+
+.dmui-catalog-grid__action:active {
   background: var(--dmui-action-primary-pressed);
 }

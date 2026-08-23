@@ -73,14 +73,19 @@
       "state": "declared-unpublished"
     },
     "dotmac-subscriptions": {
-      "declared": "0.1.0a1",
-      "reason": "OUTSTANDING first-release proof: the product-first subscriptions extraction now has a declared package version, dual-plane lineage and public contracts, but no clean-host wheel smoke or published tag yet. Keep it out of the release allowlist until the coordinated subscriptions, billing, durable-timers, orders and collections landing is green on Observer and the dedicated release workflow can publish these exact bytes.",
+      "declared": "0.1.0a2",
+      "reason": "OUTSTANDING first-release proof: the product-first subscriptions extraction now includes its effective-offer listing contract, dual-plane lineage and public contracts, but no clean-host wheel smoke or published tag yet. Michael directed that this candidate be prepared without cutover for later addition to the integration branch. Keep it out of the release allowlist until the coordinated commercial landing is green on Observer and a dedicated release workflow can publish these exact bytes.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
+    },
+    "dotmac-ui": {
+      "declared": "0.1.0a8",
+      "reason": "INTENDED integration candidate: a8 adds the audit-complete, display-only catalog grid extracted from the Workspace launcher and Academy course-card patterns. Michael explicitly directed implementation without cutover so the work can be added to the integration branch later. Do not dispatch the dedicated UI release or migrate a consumer until Observer validation, integration review and an explicit cutover decision cover these exact bytes.",
+      "state": "declared-unpublished"
     }
   }
 }

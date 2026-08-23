@@ -10,6 +10,11 @@ charge occurrence per natural identity. It emits exact pre-tax rated facts and
 commercial-intent projections. The consuming assembly maps those outputs to
 the independently owned Billing or entitlement/access services.
 
+`list_effective_offers` is the owner read for discovery: it returns one
+effective immutable version per stable offer with exact price and provenance
+facts. It does not decide product family, search facets, stock availability,
+eligibility, locale formatting or which action a viewer may take.
+
 It does not own invoices, tax, FX, receivables, payments, collections policy,
 service state, licences, provider integrations, documents, or the general
 ledger. It imports no sibling module.

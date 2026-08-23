@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0a2
+
+- Add the bounded `list_effective_offers` owner read for recurring-offer
+  discovery. It returns one deterministic effective version per stable offer,
+  immutable exact price snapshots, source provenance, total count and explicit
+  pagination for tenant or platform scope.
+- Keep product/service grouping, availability, eligibility, formatting and UI
+  actions outside the recurring-commercial owner.
+
 ## 0.1.0a1
 
 - Extract Sub's cadence, contract-version, proration, rating-provenance, and

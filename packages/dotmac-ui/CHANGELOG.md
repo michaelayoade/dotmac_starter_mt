@@ -9,6 +9,26 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a8 — 2026-08-18
+
+An additive, unadopted catalog presentation candidate;
+`UI_CONTRACT_VERSION` stays **1**.
+
+### Added
+
+- `catalog_grid` and its display-only `CatalogItem` contract, extracted from
+  Workspace application discovery and Academy course discovery. It renders a
+  responsive token-native grid, optional media and notices, a paired action,
+  and the published empty state without depending on host filters or globals.
+- Accessibility requirements for secondary and tertiary text on elevated card
+  surfaces.
+
+### Adoption state
+
+- This slice is `audit-complete`, not adopted. Workspace and Academy remain the
+  local markup/CSS owners until a later coordinated cutover; this package
+  change does not alter either product or any assembly composition.
+
 ## 0.1.0a7 — 2026-08-13
 
 One additive token and a pre-release component-contract repair;
