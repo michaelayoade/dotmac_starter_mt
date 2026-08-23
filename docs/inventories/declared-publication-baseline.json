@@ -107,11 +107,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
-    "dotmac-service-changes": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. The durable plan-change/relocation/vacation request, its evidence and its cross-domain checkpoints are extracted product-first from Sub's subscription_change state and are uncomposed; it additionally requires cohorts 2-5 to be composable before a cutover is meaningful. Remove only with an authorized Sub backfill, zero-drift checkpoint shadow and writer retirement.",
-      "state": "never-published"
-    },
     "dotmac-services": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
