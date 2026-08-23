@@ -16,6 +16,37 @@ and of the interpretation of panel observations (§1), authorizes it as the fift
 business owner in the build order (§5c, §6), and scopes it Cloud-only at first
 (§7).
 
+**Correction — 2026-08-19.** The original defect wording assigned delivery
+attempt count and `next_retry_at` to Hosting. ADR-0030 §8.1 now makes the
+opposite fleet rule explicit: `dotmac-integration` owns connector delivery,
+leasing, retry, backoff and dead-letter state. Hosting owns immutable business
+commands/outcomes and durable business attention only. The same implementation
+boundary defers mailbox identity and lifecycle; V1 may record only aggregate
+mailbox-count observations until a separate accepted ownership composition
+exists.
+
+The frozen V1 contract also makes four implications explicit. Provider delivery
+is a self-contained closed snapshot because Integrator cannot read Hosting or
+Cloud customer rows; it carries a semantic package code and account contact
+facts, never local row references or secrets. Specification versions are
+module-assigned under a serialization guard and form a database-enforced
+previous-version/digest chain. Enqueuing suspension/restoration is `deferred`,
+not `applied`; only an independently identified observation lets reconciliation
+append the final applied outcome. An immutable observation may be stored before
+service correlation and later resolved through its operation/account reference
+without rewriting the fact.
+
+The implementation review further freezes the persistence boundary. The online
+tenant role receives no direct aggregate `UPDATE` or `DELETE`: a single
+module-owned fixed-search-path function enforces tenant context, expected row
+version, the lifecycle graph and exact desired/observation evidence. Deferred
+package and suspension consequences end only through appended applied,
+superseded or failed outcomes. Termination approval ingress stores the trusted
+source-event delivery identity alongside the exact released approval payload;
+the approval request identity alone is not transport provenance. Domain
+refusals—including a hold-blocked termination and a missing/wrong-source hold
+clear—are immutable command outcomes and audits, not unreceipted exceptions.
+
 This audit settles one question: whether ADR-0030 §5c's `greenfield-after-inventory`
 ruling survives a search that was actually performed rather than assumed.
 
@@ -305,7 +336,9 @@ plausible mistake.
    states as a design rule that "[c]apture never breaks the mutation it guards"
    and "swallows its own errors and returns `None` on failure". A hosting
    consequence that could not be applied is a recorded refusal or a recorded
-   durable failure with an attempt count, never a success with a note.
+   durable business attention condition, never a success with a note. Delivery
+   attempt count, lease, backoff, retry eligibility and dead-letter state belong
+   exclusively to `dotmac-integration`; Hosting must not mirror them.
 8. **Host coupling.** `organization_id`, FastAPI `HTTPException` (Sub's
    `app/services/enforcement.py` imports it directly), service-level `commit()`,
    product schemas, and settings lookups performed from inside the lifecycle owner.
@@ -327,8 +360,13 @@ implementation must not reproduce.
    (`collections.consequence_requested`) have no consumer. Invariant 2 has no
    existing proof and must be proven fresh.
 2. **A failed consequence is swallowed, not recorded.** Collections
-   non-conformance #6: "no attempt count, no `next_retry_at`, no failed status".
-   Hosting's outcome record carries all three or the outbox cannot converge.
+   non-conformance #6 identifies missing durable failure evidence, but its
+   transport-shaped remedy does not cross into Hosting. Hosting records an
+   immutable business command outcome and, where operator action or
+   reconciliation is required, a durable business attention condition.
+   `dotmac-integration` alone records delivery attempt count, `next_retry_at`,
+   leasing, backoff and dead-letter state. The kernel outbox is the atomic
+   handoff; Hosting never grows a second transport ledger.
 3. **`OntObservation` is a mutable 1:1 upsert, not an immutable observation
    stream.** Each reconcile pass overwrites the previous last-seen row, so there
    is no dedupe identity, no ordering evidence and no history to replay. ADR-0030
@@ -378,7 +416,10 @@ Version one **owns**:
   block termination;
 - **manually approved termination** — the transition, gated on an approval this
   module does not itself decide;
-- **usage and resource observations** attached to a hosting service;
+- **usage and resource observations**, including an aggregate mailbox count as
+  a panel fact. Service correlation is derived: an immutable observation may be
+  stored uncorrelated and later selected by operation/account reference without
+  updating the evidence row;
 - **reconciliation** that rebuilds derived state from observations and repairs
   missed delivery, and the **operator repair** path over it.
 
@@ -407,11 +448,20 @@ It does **not** own:
   "decide[s] approval, never the transition that follows" — hosting declares the
   termination subject type, performs its own guarded transition on an approved
   decision, and remains free to refuse afterwards if a retention hold has landed
-  in the meantime;
+  in the meantime. Hosting consumes only the final `approval.approved` event and
+  mirrors its released fields (`event_type`,
+  `subject_type`, `subject_id`, `request_id`, `policy_code`, `policy_version`,
+  `content_digest`, `state`) without importing Approvals; tenant comes from the
+  inbox envelope and `received_at` is local evidence time. The approval request
+  id never enters the panel payload;
 - **domain lifecycle** — registration, transfer, renewal, nameservers and DNS
   zones are `dotmac-domains`. A hosting service may reference a domain by opaque
   reference;
 - **any website-design or site-builder workflow**;
+- **mailbox identity, address, quota or lifecycle.** Version one may observe an
+  aggregate mailbox count only. Creating, suspending, restoring or deleting
+  mailboxes requires a separate accepted ownership composition and is not
+  silently folded into the hosting-account lifecycle;
 - **invoicing, receivables, settlement, orders, or the fulfillment saga.**
 
 ## Kernel floor
@@ -427,26 +477,28 @@ the starter's working tree unless marked):
 | Planes | `dotmac_kernel.planes.ModulePlane` | declares TENANT, and only TENANT (ADR-0023 / rule 27) |
 | Prerequisites | `tenant_scope_catalog.v1`, `module_database_roles.v1` (`dotmac_kernel.prerequisites`) | tenant catalogue and the `app_user`/`app_admin` roles the RLS canaries assert against |
 | Namespace + lineage | `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER` (rule 14) | one `mod_<short_code>` schema and one lineage, allocated in the same change that creates the stateful package — not before |
-| Audit | `dotmac_kernel.audit.write_audit_event` + declared `audit_actions` (rule 12) | operator repair, manual suspension, approved termination |
-| Settings | `dotmac_kernel.settings_resolver` + a declared `SettingDomain` (ADR-0008/0011/0012) | reconcile cadence, drift tolerance, retention window defaults |
+| Audit | `dotmac_kernel.audit.write_audit_event` + declared `audit_actions` (rule 12) | package decisions, suspension/restoration (including refusal), retention hold/refusal, approved termination and operator repair |
+| Settings | None in V1 | Commands carry explicit instants; an assembly/timer owner chooses reconcile cadence. Hosting must not publish unused setting declarations. |
 | Declaration registries | `ModuleManifest` permissions/capabilities/audit_actions/setting_domains | suspension reasons, consequence kinds and observation kinds are registered strings, never enums |
 | Money | `dotmac_kernel.money.Money` | **only if** a resource observation ever carries an amount; hosting holds no price, so this is expected to stay unused — if it is unused, it must not be declared |
 
-Two floor gaps are real and must be named now so the "sufficient and necessary"
-proof is possible later:
+One future floor candidate and one adoption gap must be named so the "sufficient
+and necessary" proof remains honest:
 
-- **`dotmac_kernel.durable_timers` does not exist yet.** It is authorized by
-  ADR-0017 P3 and ADR-0030 §4 and is a prerequisite of the build order (step 6).
-  Hosting needs generation-safe wake-ups for retention-window expiry, reconcile
-  scheduling and consequence retry. It must not invent a second scheduler ledger,
-  and it must not schedule inside its own schema.
+- **Durable timers are not a Hosting V1 prerequisite.** V1 accepts explicit
+  owner commands and exposes reconciliation without owning its cadence. A future
+  accepted retention-expiry or scheduled re-evaluation policy may consume the
+  kernel timer facility; until a real caller exists, Hosting must not predeclare
+  it, invent a second scheduler or store delivery retry state.
 - **No panel connector SPI has a consumer.** `dotmac-integration` exists and the
   Integrator assembly runs it, but no connector distribution exists. Hosting's port
   must therefore be published with a fake, and "the fake passes" is not evidence
   that a real panel does.
 
-Hosting consumes all of the above; it restates none of them. Restating kernel
-idempotency, outbox, audit or settings inside this module is a review failure.
+Hosting consumes only the declared V1 capabilities above; it restates none of
+them and does not predeclare a setting or timer dependency without a real caller.
+Restating kernel idempotency, outbox, audit or settings inside this module is a
+review failure.
 
 ## Fresh proof required
 

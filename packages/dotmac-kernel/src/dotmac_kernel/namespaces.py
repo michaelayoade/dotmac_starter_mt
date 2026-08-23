@@ -741,6 +741,27 @@ ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("analytics"),
 )
 
+# `dotmac-domains` — the tenant-only registered-domain lifecycle owner for
+# Dotmac Cloud. Registrar and DNS provider identity remain in independently
+# released Integrator plugins; this allocation owns only provider-neutral
+# lifecycle state and immutable command/observation evidence.
+DOMAINS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="domains",
+    prefix="do",
+    branch_label="domains",
+    db_schema=module_schema("domains"),
+)
+
+# `dotmac-hosting` — the tenant-only hosting-account lifecycle owner for
+# Dotmac Cloud. Panel identity, credentials and delivery remain in Integrator;
+# this allocation owns only provider-neutral desired state and business evidence.
+HOSTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="hosting",
+    prefix="ho",
+    branch_label="hosting",
+    db_schema=module_schema("hosting"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -768,6 +789,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     POSITIONING_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
     ANALYTICS_MIGRATION_OWNER,
+    DOMAINS_MIGRATION_OWNER,
+    HOSTING_MIGRATION_OWNER,
 )
 
 
@@ -1103,6 +1126,8 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "BILLING_MIGRATION_OWNER",
     "COLLECTIONS_MIGRATION_OWNER",
+    "DOMAINS_MIGRATION_OWNER",
+    "HOSTING_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",

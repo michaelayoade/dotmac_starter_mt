@@ -596,6 +596,86 @@
           "python"
         ]
       }
+    },
+    "dotmac-domains": {
+      "$comment": [
+        "Tenant-only registered-domain lifecycle for the Dotmac Cloud profile.",
+        "Provider identity and wire I/O stay in Integrator connector plugins;",
+        "registrar callbacks are immutable observations and never lifecycle",
+        "writes. The module is greenfield-after-inventory and Cloud-only first.",
+        "",
+        "kernel_floor is a76, the release allocating mod_domains / do / domains."
+      ],
+      "package_dir": "packages/dotmac-domains",
+      "import_name": "dotmac_domains",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a76",
+      "db_schema": "mod_domains",
+      "tag_prefix": "dotmac-domains-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_domains/py.typed",
+          "dotmac_domains/manifest.py",
+          "dotmac_domains/contracts.py",
+          "dotmac_domains/engine.py",
+          "dotmac_domains/models.py",
+          "dotmac_domains/service.py",
+          "dotmac_domains/testing.py",
+          "dotmac_domains/migrations/__init__.py",
+          "dotmac_domains/migrations/versions/do_0001_domains.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-hosting": {
+      "$comment": [
+        "Tenant-only hosting-account lifecycle for the Dotmac Cloud profile.",
+        "Panel identity, credentials, wire I/O and transport retry remain in",
+        "Integrator connector plugins. Hosting owns provider-neutral desired",
+        "state, immutable business evidence and observation reconciliation.",
+        "",
+        "kernel_floor is a77, the release allocating mod_hosting / ho / hosting."
+      ],
+      "package_dir": "packages/dotmac-hosting",
+      "import_name": "dotmac_hosting",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a77",
+      "db_schema": "mod_hosting",
+      "tag_prefix": "dotmac-hosting-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_hosting/py.typed",
+          "dotmac_hosting/manifest.py",
+          "dotmac_hosting/contracts.py",
+          "dotmac_hosting/engine.py",
+          "dotmac_hosting/models.py",
+          "dotmac_hosting/service.py",
+          "dotmac_hosting/testing.py",
+          "dotmac_hosting/migrations/__init__.py",
+          "dotmac_hosting/migrations/versions/ho_0001_hosting.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

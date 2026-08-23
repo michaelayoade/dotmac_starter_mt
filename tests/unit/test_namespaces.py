@@ -198,8 +198,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # operational-receivables owner; Collections and Orders are tenant-only;
     # Subscriptions is dual-plane. Sales, Inbox, Surveys, Projects, Work Orders,
     # Positioning, Web Analytics and aggregate Analytics complete a75 without
-    # composing any of them into this assembly. No allocation installs domain
-    # behaviour in the kernel.
+    # composing any of them into this assembly. Domains follows as Cloud's first
+    # unique lifecycle owner; Hosting follows as the second. Neither allocation
+    # installs Cloud business behaviour in kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -226,6 +227,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "positioning",
         "web_analytics",
         "analytics",
+        "domains",
+        "hosting",
     }
 
 

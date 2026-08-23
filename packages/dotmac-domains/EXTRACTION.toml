@@ -1,0 +1,48 @@
+schema_version = 1
+package = "dotmac-domains"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "Dotmac registered-domain lifecycle, desired registrar/DNS state, observation interpretation, reconciliation, holds and guarded transfer-out"
+contract = "Tenant-only registered-domain lifecycle: registration/transfer/renewal intent and confirmation, immutable registrar observations, desired contact/nameserver/DNS state, reconciliation, holds and guarded transfer-out. Generic release/allow-lapse is refused in V1; provider deletion is observational after expiry/redemption. NOT pricing, billing, collections policy, hosting, provider transport, credentials, TenantDomain, TLS or ingress."
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_erp",
+  "dotmac_crm",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+source_revisions = [
+  "dotmac_starter_mt:e6ba2022f3d7",
+  "dotmac_sub:27c76aaeebb7",
+  "dotmac_erp:0f4b1698ddbf",
+  "dotmac_crm:c64b5aa0f790",
+  "dotmac_vendor_control_plane:f9ca367c1161",
+  "dotmac_integrator:d014116e63ad",
+]
+source_paths = [
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/models.py",
+  "dotmac_starter_mt:packages/dotmac-integration/src/dotmac_integration/spi.py",
+  "dotmac_starter_mt:packages/dotmac-domains/src/dotmac_domains",
+  "dotmac_sub:app/services/sot_registry/registry.py",
+  "dotmac_crm:app/models/subscriber.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_domains_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_domains_engine.py",
+  "dotmac_starter_mt:tests/architecture/test_domains_module.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_cloud"]
+composition_boundary = "ADR-0030: Dotmac Cloud installs this tenant-only module in its own database. The Cloud assembly translates immutable offer/order/coverage facts into domain commands and domain outputs into Fulfillment inputs. Integrator owns registrar/DNS transport, credentials, wire payloads, delivery retries, checkpoints and health; connector observations never write domain tables. The kernel TenantDomain routing catalogue is a separate platform-plane owner and app_user cannot write it."
+inventory_evidence = [
+  "docs/inventories/domains-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/inventories/cloud-commerce-owner-sources.md",
+  "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
+]
+first_cutover = "Dotmac Cloud registration request -> registrar sandbox acknowledgement -> independently identified registrar observation -> domain reconciliation for one paid order line. The exact released module must be pinned, and provider-success/callback-loss must converge through a poll before authority is claimed."
+shadow_and_drift = "There is no local lifecycle writer to shadow. Before external customers, run the provider-free conformance kit and a registrar sandbox: compare callback and poll observations, drop a callback deliberately, prove the same reconciled terminal state, and surface expiry/contact/nameserver drift without repairing either source fact."
+local_copy_retirement = "None: the fleet inventory found no domain lifecycle implementation. TenantDomain remains the platform routing owner and is not retirement scope. Any temporary Cloud-side domain state created before cutover must be deleted rather than retained as a parallel writer."
+next_action = "Restack onto the final shared-commerce train after its Orders defects are fixed; rerun the full Dotmac Observer suite and wheel smoke; release only with separate authorization after the required kernel floor is published. Then prove the first Cloud sandbox cutover."

@@ -1,0 +1,1 @@
+"""dotmac-hosting Alembic revisions."""

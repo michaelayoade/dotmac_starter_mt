@@ -28,6 +28,75 @@ sold as a product.
 
 `dotmac-domains` is **greenfield-after-inventory**, confirmed.
 
+### Correction 2026-08-19 — release is not a ninth registrar operation
+
+The first implementation pass exposed an internal contradiction in this dossier:
+§ 7 described a generic guarded release command, while the accepted
+`domains.registrar.v1` family deliberately contains exactly eight operations and
+no release/delete delivery operation. A command that changed local state and
+emitted a ninth operation would have no conforming connector and would stick.
+
+For V1, intentional relinquishment is only a guarded transfer-out through
+`transfer(direction=approve_out)`. Provider deletion is an immutable observation
+that can confirm `released` only after expiry or redemption. `release` and
+`allow_lapse` remain typed consequence requests that Domains refuses; approving
+lapse is deferred until Domains owns an explicit renewal-disposition contract
+and cancellation/scheduling semantics. This correction supersedes the generic
+release-command wording below wherever the two disagree.
+
+### Correction 2026-08-19 — registrar delivery is self-contained
+
+The first implementation also exposed a cross-application boundary error in
+the original registration shape: `contact_set_ref` and `nameserver_set_ref`
+could only identify rows in Domains' own database. The independently deployed
+Integrator is forbidden to read those rows, so a conforming connector could not
+turn either reference into a provider request.
+
+Registration and contact delivery now carry closed, versioned contact snapshots
+(`postal address -> contact role -> contact set`) with source authority,
+source reference and source version. Domains computes the content digest from
+that canonical snapshot; callers cannot supply it. Registration additionally
+carries the actual ordered nameservers. No provider-bound registrar command may
+carry a Domains intent/service row reference. Transfer-in itself is deferred
+from V1 until the shared per-operation secret channel exists. Domains therefore
+exposes no auth-code literal or arbitrary secret reference in local evidence or
+provider delivery; `approve_out` and `cancel` remain the only V1 directions.
+
+The same independence rule applies to desired nameserver, DNS-zone and
+DNS-recordset delivery: each event is the exact typed provider request with the
+actual desired values, not a generic envelope containing an `intent_id` or
+`domain_service_id`.
+
+No Fulfillment `participant_code` is declared in this slice. Fulfillment has
+not yet published the participant contract or capability-id registry that would
+give that value meaning, and a zero-consumer local vocabulary would violate the
+same composition rules this correction is enforcing.
+
+This necessary snapshot includes contact personal data. Domains currently keeps
+it in immutable command/intent evidence and its kernel outbox, while
+Integrator's retention sweep redacts inbound `InboxReceipt` content but not
+outbound `DeliveryAttempt.payload_json`. Cloud adoption is therefore blocked
+until an approved retention/redaction design covers Domains' local evidence and
+outbox plus completed Integrator deliveries. An owner API or cross-database
+lookup is not an acceptable workaround.
+
+### Correction 2026-08-19 — observations and terminal provider outcomes
+
+The original scope remains authoritative for DNS, but the first implementation
+did not persist DNS observations. V1 now stores immutable, binding-scoped actual
+nameservers and canonical recordsets, refuses future facts and evidence-key
+content conflicts, and derives DNS drift only from the active binding. Renewal
+must name the latest recent registrar POLL observation from that same binding;
+the safety window authorizes re-verification, not a commercial grace policy.
+
+Terminal registration failure moves the aggregate to `registration_failed` so
+a fresh aggregate may safely retry the name; terminal transfer-out failure
+returns to `active`; terminal cancel failure leaves the transfer pending. Each
+writes typed failure/attention evidence. Service identity is immutable, desired
+intent advances `row_version`, and an active hold is identified by hold code,
+source owner and source reference. The earlier transfer-in scope and pilot row
+are superseded until the shared operation-secret channel is accepted.
+
 No qualifying production implementation of domain registration, transfer,
 renewal, expiry/redemption, contact/nameserver desired state, or DNS-record
 intent exists anywhere in the inspected fleet. There is no registrar client, no
@@ -302,8 +371,9 @@ Version one **owns**:
   as an opaque secret reference and the transfer-out release decision;
 - **renewal request, confirmation and failure** as three distinct outcomes;
 - **expiry and redemption observations** — typed, deduplicated, immutable;
-- **desired contacts and nameservers**, as desired state reconciled toward,
-  never as a write-through to a provider;
+- **desired contacts and nameservers**, captured as immutable, source-versioned
+  snapshots and reconciled toward, never as a live foreign-row lookup or a
+  write-through to a provider;
 - **DNS intent where applicable** — desired records for the registered name's
   own zone, expressed as desired state with drift detection;
 - the **registrar observation mirror** — a rebuildable projection of registry
@@ -311,8 +381,8 @@ Version one **owns**:
   event id) on every row;
 - the **drift resolver and reconciliation** — derived at read time from desired
   state plus the observation mirror, able to rebuild after missed delivery;
-- **guarded release/termination policy** — the refusal is Domains' own, and it
-  refuses by default;
+- **guarded transfer-out policy** — the refusal is Domains' own, and it refuses
+  by default; generic release/allow-lapse requests remain refused in V1;
 - typed **commands, facts, observations, outcomes and stable error classes**,
   emitted as outbox events; and
 - a **provider-free fake/conformance kit** for the registrar port it consumes.
@@ -367,29 +437,29 @@ Each is stated as the test it becomes. None may be satisfied by documentation.
    collector's write path has no access to the lifecycle column. The canary
    delivers a callback claiming `expired` on an `active` domain and asserts the
    Dotmac state is unchanged while a typed observation exists.
-6. **Termination/release is guarded.** `dotmac-approvals` is the **right
+6. **Intentional transfer-out is guarded.** `dotmac-approvals` is the **right
    collaborator, with two conditions.**
    - It is right because ADR-0026 § 1 scopes it to exactly the question a
-     destructive release needs — "has the required set of eligible actors
+     destructive transfer-out needs — "has the required set of eligible actors
      approved *this exact content* under *this exact policy revision*" — and
      its content-digest binding (§ 2) is what stops an approval of
-     "release `a.example` on 2026-09-01" from authorising a different name or a
+     "transfer out `a.example` on 2026-09-01" from authorising a different name or a
      changed date. Its policy revisions are immutable and fail closed (§ 3), and
      it is dual-plane with a named tenant surface (§ 5).
    - **Condition one: Domains does not import it.** ADR-0026 § 6 delivers
      approval state as an outbox event that the consuming product turns into a
      call on its own authoritative service. So `dotmac-domains` publishes a
-     release *request* and accepts a typed approval receipt
+     transfer-out *request* and accepts a typed approval receipt
      (`policy_code`, `policy_version`, `content_digest`, decision, decided-at)
-     as an input to the release command, verifying the digest against the
-     release it is about to perform. The assembly is the wire. Domains has no
+     as an input to the transfer command, verifying the digest against the
+     transfer-out it is about to perform. The assembly is the wire. Domains has no
      Python dependency on `dotmac_approvals` and declares its own subject type
      on its own manifest (ADR-0026 § 4).
    - **Condition two: the refusal is Domains' own and survives approvals being
      absent.** ADR-0026's scope line makes the module optional. If the guard
-     were "release unless approvals refused", an uninstalled approvals module
+     were "transfer unless approvals refused", an uninstalled approvals module
      would fail open. The canary: with no approval receipt supplied at all, the
-     release command refuses.
+     transfer-out command refuses.
    - The digest must also be re-verified at apply time, not only at request
      time: an approval of a stale desired state is stale, not transferable.
 
@@ -405,7 +475,7 @@ sufficient and necessary. Kernel head at the revisions read is `0.1.0a63`
 | Idempotency | `dotmac_kernel.idempotency` (`execute_once`) | every domain command is replay-safe by `(tenant_id, scope, key)` with a fingerprint column; nothing reserved before the registrar effect (ADR-0014) |
 | Inbox | `dotmac_kernel.messaging.inbox.process_once` | registrar callbacks and assembly-relayed commands arrive with a transport `command_id`; the adapter, not a second ledger |
 | Outbox | `dotmac_kernel.messaging.outbox.enqueue_event` | every non-transactional effect — a registrar command, an alert, a lifecycle fact for the assembly — leaves this way |
-| Audit | `dotmac_kernel.audit.write_audit_event` + declared `audit_actions` | release, transfer-out and manual drift resolution are operator-visible; hard rule 12 fails the write for an undeclared action |
+| Audit | `dotmac_kernel.audit.write_audit_event` + declared `audit_actions` | transfer-out and manual drift resolution are operator-visible; hard rule 12 fails the write for an undeclared action |
 | Planes | `dotmac_kernel.planes` / ADR-0023, ADR-0028 | declares **tenant only**; the assembly's plane selection must say so explicitly, and omission must fail |
 | Namespaces | `dotmac_kernel.namespaces` (D1) | one immutable `mod_<short>` schema, one migration prefix, one branch label — allocated in the package-creation change, not here |
 | Prerequisites | `dotmac_kernel.prerequisites` + `app/migration_bindings.py` | declares the database effects it needs; the assembly binds effect→revision (hard rule 14) |
@@ -480,8 +550,8 @@ greenfield ruling and it cuts both ways: the cutover carries no data migration
 and no shadow comparison, because there is nothing to shadow. That removes the
 usual safety net. Cloud's first domain is the first domain, so the cutover
 evidence must be operational — a real registration, a real renewal, a real
-failed renewal and a real refused release against a registrar sandbox connector
-— rather than a diff against a prior implementation.
+failed renewal and a real refused generic release/allow-lapse consequence against
+a registrar sandbox connector — rather than a diff against a prior implementation.
 
 **How the cutover is sliced.** One command family at a time, each ending at its
 own gate:
@@ -494,8 +564,8 @@ own gate:
    commercial renewal date (invariant 4);
 4. contacts, nameservers and DNS intent as desired state;
 5. transfer-in;
-6. transfer-out and guarded release, gated on the approval-receipt seam in
-   invariant 6.
+6. guarded transfer-out, plus refused generic release/allow-lapse consequences,
+   gated on the approval-receipt seam in invariant 6.
 
 The command surface must stabilize before `dotmac-fulfillment` is allowed to
 depend on it (ADR-0030 § 5c); a saga wired against a moving surface hardcodes

@@ -75,6 +75,12 @@ dotmac-billing = { path = "packages/dotmac-billing", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
+# Tenant-only registered-domain lifecycle for Dotmac Cloud. Provider plugins
+# remain independently released through the Integrator control plane.
+dotmac-domains = { path = "packages/dotmac-domains", develop = true }
+# Tenant-only hosting-account lifecycle for Dotmac Cloud. Panel plugins remain
+# independently released through the Integrator control plane.
+dotmac-hosting = { path = "packages/dotmac-hosting", develop = true }
 # Tenant-only delinquency-policy and case owner. Billing money, Timer mechanics,
 # product consequences, and delivery remain separate typed dependencies/ports.
 dotmac-collections = { path = "packages/dotmac-collections", develop = true }
@@ -186,6 +192,8 @@ module = [
     "dotmac_numbering.*",
     "dotmac_billing.*",
     "dotmac_durable_timers.*",
+    "dotmac_domains.*",
+    "dotmac_hosting.*",
     "dotmac_collections.*",
     "dotmac_orders.*",
     "dotmac_subscriptions.*",
@@ -254,6 +262,8 @@ root_packages = [
     "dotmac_numbering",
     "dotmac_billing",
     "dotmac_durable_timers",
+    "dotmac_domains",
+    "dotmac_hosting",
     "dotmac_collections",
     "dotmac_orders",
     "dotmac_subscriptions",
@@ -330,6 +340,8 @@ source_modules = [
     "dotmac_numbering",
     "dotmac_billing",
     "dotmac_durable_timers",
+    "dotmac_domains",
+    "dotmac_hosting",
     "dotmac_collections",
     "dotmac_orders",
     "dotmac_subscriptions",
@@ -386,6 +398,8 @@ modules = [
     "dotmac_numbering",
     "dotmac_billing",
     "dotmac_durable_timers",
+    "dotmac_domains",
+    "dotmac_hosting",
     "dotmac_collections",
     "dotmac_orders",
     "dotmac_subscriptions",
@@ -442,6 +456,8 @@ forbidden_modules = [
     "dotmac_numbering",
     "dotmac_billing",
     "dotmac_durable_timers",
+    "dotmac_domains",
+    "dotmac_hosting",
     "dotmac_collections",
     "dotmac_orders",
     "dotmac_subscriptions",

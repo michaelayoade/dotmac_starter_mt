@@ -1,0 +1,48 @@
+schema_version = 1
+package = "dotmac-hosting"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "Dotmac technical hosting specifications, hosting-account lifecycle, desired state, business outcomes, observation interpretation, suspension/restoration, retention holds, guarded termination and reconciliation"
+contract = "Tenant-only hosting-account lifecycle behind provider-neutral hosting.account.v1. Immutable specifications publish package rank and closed change rules; Hosting derives package direction and refuses review-required/incomparable changes. Deliveries are closed self-contained secret-free snapshots; enqueued package/suspension/restoration/termination work remains deferred until an independent immutable observation appends applied or superseded completion evidence. First correlation uses a command operation; later correlation uses the frozen binding/account pair. The final approval.approved event and trusted source-event delivery identity are mirrored as immutable local evidence and never leave in provider payloads. The tenant role cannot update/delete the aggregate directly; one database-owned mutation function enforces tenant, version, evidence and legal transitions. Uncorrelated observations are resolved without mutation. NOT price, subscriptions, orders, collections policy, approval decisions, provider transport/retry, credentials, DNS/domain lifecycle, mailbox lifecycle, website workflow or compute. V1 observes aggregate mailbox count only."
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_erp",
+  "dotmac_crm",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+source_revisions = [
+  "dotmac_starter_mt:e6ba2022f3d7",
+  "dotmac_sub:27c76aaeebb7",
+  "dotmac_erp:0f4b1698ddbf",
+  "dotmac_crm:c64b5aa0f790",
+  "dotmac_vendor_control_plane:89848017d6b8",
+  "dotmac_integrator:d014116e63ad",
+]
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/hosting-sources.md",
+  "dotmac_sub:app/models/enforcement_lock.py",
+  "dotmac_sub:app/services/account_lifecycle.py",
+  "dotmac_sub:app/models/ont_observation.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_hosting_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_hosting_engine.py",
+  "dotmac_starter_mt:tests/architecture/test_hosting_module.py",
+  "dotmac_starter_mt:tests/test_hosting_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_cloud"]
+composition_boundary = "ADR-0030: Cloud installs this tenant-only owner. Subscriptions owns price/saleability; Orders owns immutable purchase; Collections requests delinquency consequences; Approvals decides exact-content approval; Hosting revalidates and decides its own transition. Integrator owns panel identity, credentials, wire I/O, delivery retry, checkpoints and health and never writes Hosting tables."
+inventory_evidence = [
+  "docs/inventories/hosting-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/inventories/cloud-commerce-owner-sources.md",
+  "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
+]
+first_cutover = "Dotmac Cloud paid hosting line -> released Hosting command -> Integrator panel sandbox acknowledgement -> independently identified observation -> Hosting reconciliation. Deliberately drop a callback and prove a poll converges without issuing a second termination."
+shadow_and_drift = "There is no local hosting lifecycle writer to shadow. Compare desired package/account state with callback and poll observations through one real panel connector, prove out-of-order and duplicate facts are harmless, and surface drift as durable Hosting attention without copying connector retry state."
+local_copy_retirement = "None: the fleet inventory found no hosting lifecycle implementation. Sub's ISP access locks and Vendor CP's agreement suspension remain different owners and are not retirement scope. Delete any temporary Cloud-side hosting state before cutover rather than preserve a parallel writer."
+next_action = "Restack with Domains onto the final shared-commerce train, rerun the full Dotmac Observer suite and wheel smoke, and release only with separate authorization after kernel a77 is published. Then prove the Cloud panel-sandbox cutover."

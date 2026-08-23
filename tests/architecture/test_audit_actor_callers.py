@@ -48,7 +48,7 @@ def _actor_problem(call: ast.Call) -> str | None:
 
 def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     calls = _writer_calls()
-    assert len(calls) == 24, "the ratchet must change when the caller set changes"
+    assert len(calls) == 32, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

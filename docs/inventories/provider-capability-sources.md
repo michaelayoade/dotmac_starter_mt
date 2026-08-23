@@ -480,6 +480,23 @@ them is how an invoice is marked paid on a pending checkout.
 
 ### 8.2 Registrar
 
+**Correction 2026-08-19 — no owner-local references in delivery.** The
+registration row below originally named `contact_set_ref` and
+`nameserver_set_ref`. Those are not provider-neutral: the independently deployed
+Integrator cannot read Domains' database, and ADR-0024 forbids giving it that
+access. Registration and contact commands instead carry a closed immutable
+contact snapshot with source provenance; Domains computes its digest. The
+registration command also carries the actual ordered nameservers. A connector
+therefore receives every non-secret value needed for the provider request and
+never resolves a Domains row id. Transfer-in is deferred from V1 until the
+per-operation secret channel below exists; V1 carries neither an auth-code
+literal nor an arbitrary secret reference. Because the contact snapshot is
+personal data, external adoption is additionally blocked until Domains'
+immutable local evidence and kernel outbox plus completed outbound
+`DeliveryAttempt` payloads have an
+approved retention/redaction path; the current Integrator retention owner only
+redacts inbound receipts.
+
 **Capability: `domains.registrar.v1`** — one lifecycle boundary, eight declared
 operations. A registrar that cannot serve one of them declares that operation
 unsupported; the binding still covers the family, because a domain whose
@@ -493,13 +510,17 @@ is gone, and both are visible to the customer within hours.
 | Operation | Modes | Command / fact | Must never |
 |---|---|---|---|
 | `availability` | DELIVERY (read) | in: labels + TLD. out: `DomainAvailabilityFactV1{name, available: yes\|no\|unknown, provider_status verbatim, premium indicator, provider_quote: Money\|None, observed_at}` | reserve anything; decide a price; decide the customer may have it. `unknown` is a first-class answer — a registrar timeout is not "available" |
-| `registration` | DELIVERY | in: `operation_reference`, name, term, `contact_set_ref`, `nameserver_set_ref`, privacy flag. out: acknowledgement + `provider_order_ref` + `provider_charge: Money` verbatim | report the domain as registered. Registration is confirmed by an observation, not by an acknowledgement |
-| `renewal` | DELIVERY | in: `operation_reference`, name, term, the **currently observed expiry** the owner is renewing from | renew on its own initiative, or on a schedule of its own. Renewal is a decision the lifecycle owner makes against its own facts |
-| `transfer` | DELIVERY | in: `operation_reference`, name, direction (`in`/`approve_out`/`cancel`), `auth_code_ref` — a **secret reference, never a literal** | approve a transfer-out. Only the lifecycle owner decides that, and only after checking non-financial holds |
-| `contacts` | DELIVERY | in: `operation_reference`, name, desired contact set (opaque to the connector). out: acknowledgement | interpret a contact; store one; decide a jurisdiction |
+| `registration` | DELIVERY | in: `operation_reference`, name, term, closed source-versioned contact snapshot, actual ordered nameservers, privacy flag. out: acknowledgement + `provider_order_ref` + `provider_charge: Money` verbatim | resolve an owner-local intent reference; report the domain as registered. Registration is confirmed by an observation, not by an acknowledgement |
+| `renewal` | DELIVERY | in: `operation_reference`, name, term, the **currently observed expiry** selected from a named recent POLL fact on the active binding | renew on its own initiative, accept caller-supplied expiry truth, or renew on a schedule of its own. Renewal is a decision the lifecycle owner makes against stored provider facts |
+| `transfer` | DELIVERY | in V1: `operation_reference`, name, direction (`approve_out`/`cancel`). Transfer-in is deferred until the shared per-operation secret channel exists | approve a transfer-out. Only the lifecycle owner decides that, and only after checking non-financial holds; carry an auth code or arbitrary secret reference in ordinary evidence/delivery |
+| `contacts` | DELIVERY | in: `operation_reference`, name, closed desired contact snapshot with provenance. out: acknowledgement | resolve a live customer/domain row; interpret a contact; decide a jurisdiction |
 | `nameservers` | DELIVERY | in: `operation_reference`, name, desired ordered nameserver set. out: acknowledgement | derive nameservers from a DNS provider it happens to also implement. § 8.3 |
 | `observation` | INGRESS, POLL | `DomainObservationV1` — name; the registrar's own status tokens verbatim and unmapped (`clientTransferProhibited`, `pendingDelete`, …); `expires_at`; nameservers as seen; a digest of the contact set as seen; and an `observation_kind` from an open registry seeded with `registered`, `renewed`, `expiry_observed`, `transfer_requested`, `transfer_completed`, `transfer_rejected`, `redemption_observed`, `deleted`, `provider_correction` | map a status token to a Dotmac state; say the domain "is" anything |
 | `reconcile` | POLL, DELIVERY | one name, or a paged portfolio window from a checkpoint | decide that a discrepancy is drift, or repair one |
+
+There is deliberately no release/delete delivery operation in this family.
+Intentional relinquishment uses guarded `transfer(approve_out)`; deletion is a
+provider observation after expiry/redemption, never a connector command.
 
 **Two obligations specific to this surface.**
 
@@ -510,6 +531,7 @@ is gone, and both are visible to the customer within hours.
   real gap in the base (§ 10, defect 4), not something a connector may work
   around by putting the code in `payload_json` — which is persisted on
   `delivery_attempts` and ends up in every backup.
+  Until that channel exists, transfer-in is not a callable V1 operation.
 - **Registrars with no webhook are the norm, not the exception.** EPP's poll
   message queue maps exactly onto `polling_checkpoints` keyed
   `(capability_binding_id, job_key)` with its optimistic `version`. A connector
@@ -531,22 +553,33 @@ move to a dedicated provider with **no change in any business module**.
 
 DNS is the one surface that is genuinely **desired-state**, not command/event.
 
+**Correction 2026-08-19 — V1 does not expose a second provisioning
+framework.** An earlier draft below projected the kernel provisioning port's
+`plan`, `plan_hash`, `PARTIAL` and `outstanding_steps` vocabulary onto the DNS
+connector contract. The implemented owner port is deliberately smaller:
+Domains emits a complete desired zone or closed recordset snapshot; the
+connector applies it and returns an acknowledgement; an independent ingress or
+poll supplies the actual nameservers and closed recordsets. Domains persists
+that binding-scoped fact, derives drift, and requests another complete apply
+when repair is required. Partial provider effects therefore appear as observed
+recordset drift, not as a connector-authored business state. Integrator retains
+transport attempts, retries and delivery evidence. The kernel provisioning
+port remains a useful behavioural reference, but its orchestration vocabulary
+is not part of `dns.authoritative.v1` V1.
+
 | Operation | Modes | Shape |
 |---|---|---|
-| `zone` | DELIVERY | create/delete a zone. out: `provider_zone_ref` + the nameservers the provider assigned, as a fact |
-| `recordset` | DELIVERY | apply a desired record set for one zone. **plan / apply / observe**, with a stable `plan_hash` over the canonicalised desired state, an `operation_reference` that is the resume token, and a `PARTIAL` result naming exactly the outstanding records |
-| `observation` | INGRESS, POLL | the zone and records as the provider currently holds them, so a resolver can derive drift |
+| `zone` | DELIVERY | apply the complete desired zone configuration; acknowledgement is transport evidence, while assigned or actual nameservers arrive through `observation` |
+| `recordset` | DELIVERY | apply one complete closed desired recordset snapshot for a zone, identified by an idempotent `operation_reference`; acknowledgement is transport evidence, not observed DNS state |
+| `observation` | INGRESS, POLL | the actual nameservers and closed recordsets as the provider currently holds them; the owner canonicalises and digests the values, persists immutable binding-scoped evidence, and derives drift |
 
-**Reuse the shape, not the seam.** `dotmac_kernel.providers.provisioning`
-already encodes precisely this contract —
-`plan → apply → observe → cancel`, `plan_hash` stability, `operation_id`
-idempotency with terminal results frozen and `PARTIAL` resumable,
-`outstanding_steps`, and a `retryable`/terminal error hierarchy. Its semantics
-are the product-first source for `dns.recordset.v1`'s **semantics**. Its
-`Protocol` is **not** the seam: a connector's contract is the Integrator SPI,
-and a plugin implementing a second in-process provider protocol at the same
-boundary is exactly the parallel framework this dossier refuses. Copy the state
-machine; keep one transport.
+**Reuse the safety properties, not the protocol.**
+`dotmac_kernel.providers.provisioning` remains a reference for operation-id
+idempotency and retryable-versus-terminal failure classification. Its
+`plan/apply/observe/cancel` protocol and resumable `PARTIAL` state are not the
+DNS owner seam. A connector's contract is the Integrator SPI, and a plugin
+implementing a second in-process orchestration protocol at that boundary is
+exactly the parallel framework this dossier refuses.
 
 A DNS record set contains customer-visible routing. A connector never decides
 that a record should exist, never merges its own view with the desired one, and
@@ -569,11 +602,11 @@ changes is its unit — the family, not the verb.
 
 | Operation | Modes | Shape | Note |
 |---|---|---|---|
-| `provision` | DELIVERY | in: `operation_reference`, opaque `package_ref`, primary domain, opaque owner contact. out: acknowledgement + `provider_account_ref` | never chooses a package; never generates or returns a password in a fact — a credential handoff is a secret channel, not an observation field |
+| `provision` | DELIVERY | in: `operation_reference`, semantic `package_ref`, primary domain, and a closed immutable account snapshot (`account_label`, administrative email, ISO alpha-2 country). out: acknowledgement + `provider_account_ref` | the delivery is self-contained because Integrator cannot read the Hosting or customer database. It never carries a local row reference, owner reference, password or secret; the connector maps the semantic package code and never chooses a package |
 | `package` | DELIVERY | in: `operation_reference`, account ref, target `package_ref` | never decides that an upgrade is warranted or affordable |
 | `suspension` | DELIVERY | in: `operation_reference`, account ref, action (`suspend`/`restore`), opaque `reason_ref` | never suspends on its own signal — usage, non-payment and abuse are all owner decisions. ADR-0030 § 1: Collections may only *request*; the lifecycle owner locks, revalidates and decides |
 | `termination` | DELIVERY | in: `operation_reference`, account ref, opaque `approval_ref` | **the one irreversible operation.** It must never be auto-retried, must never be enqueued without an approval reference the owner minted, and a lost acknowledgement resolves through `reconcile`, never through a second attempt |
-| `observation` | INGRESS, POLL | account state as the panel holds it, plus resource usage: disk, bandwidth, mailbox and database counts, each with its unit and the provider's own period boundary verbatim | never converts a usage number into an overage, a charge or a threshold breach |
+| `observation` | INGRESS, POLL | poll in: `operation_reference`, account ref. fact out: account state as the panel holds it, plus resource usage: disk, bandwidth, aggregate mailbox and database counts, each with its unit and the provider's own period boundary verbatim | never converts a usage number into an overage, a charge or a threshold breach; mailbox identity, address, quota and lifecycle are deliberately outside Hosting V1 |
 | `reconcile` | POLL, DELIVERY | one account, or a paged account list from a checkpoint | never repairs |
 
 **Usage observations are facts with a period, not meters.** Metering, rating and

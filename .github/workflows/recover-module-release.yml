@@ -40,6 +40,8 @@ on:
           - dotmac-numbering
           - dotmac-billing
           - dotmac-durable-timers
+          - dotmac-domains
+          - dotmac-hosting
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory

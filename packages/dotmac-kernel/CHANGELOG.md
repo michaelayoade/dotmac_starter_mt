@@ -6,6 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a77 — UNRELEASED
+
+Allocates the tenant-only hosting-account lifecycle owner for Dotmac Cloud;
+panel identity, credentials and delivery remain outside Kernel in Integrator.
+
+### Added
+
+- `HOSTING_MIGRATION_OWNER`: schema `mod_hosting`, revision prefix `ho`, and
+  branch label `hosting`. The allocation carries no hosting behaviour into
+  Kernel.
+
+## 0.1.0a76 — UNRELEASED
+
+Allocates the tenant-only registered-domain lifecycle owner for Dotmac Cloud;
+provider identity and wire I/O remain outside Kernel in Integrator plugins.
+
+### Added
+
+- `DOMAINS_MIGRATION_OWNER`: schema `mod_domains`, revision prefix `do`, and
+  branch label `domains`. The allocation carries no domain behaviour into
+  Kernel.
+
 ## 0.1.0a75 — UNRELEASED
 
 Allocates the remaining independent reusable owners in the coordinated module

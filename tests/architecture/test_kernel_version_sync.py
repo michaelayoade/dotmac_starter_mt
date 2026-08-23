@@ -85,6 +85,8 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # prerequisite land together without moving domain behaviour into Kernel.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-campaigns": "0.1.0a71",
+    "dotmac-domains": "0.1.0a76",
+    "dotmac-hosting": "0.1.0a77",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in

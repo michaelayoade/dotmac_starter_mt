@@ -649,6 +649,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-domains"
+version = "0.1.0a1"
+description = "Provider-neutral Dotmac domain-service lifecycle owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a76"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-domains"
+
+[[package]]
 name = "dotmac-durable-timers"
 version = "0.1.0a1"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
@@ -759,7 +777,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a75"
+version = "0.1.0a76"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -3199,4 +3217,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "3f494e194e746b989d46153d4872070a54180c9eb5981208fb66db658d38d678"
+content-hash = "818a1f4781bb6ecf1e70a09a6a1dafbfbd7aa20b0ccad657926336f400981975"

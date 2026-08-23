@@ -143,6 +143,8 @@ from dotmac_kernel.namespaces import (
     ANALYTICS_MIGRATION_OWNER,
     BILLING_MIGRATION_OWNER,
     COLLECTIONS_MIGRATION_OWNER,
+    DOMAINS_MIGRATION_OWNER,
+    HOSTING_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
     HOST_SCHEMA,
     INBOX_MIGRATION_OWNER,
@@ -219,7 +221,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a75"
+__version__ = "0.1.0a77"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -385,6 +387,8 @@ __all__ = [
     "UnknownModuleError",
     # database namespaces + migration lineage identity (ADR-0006 D1)
     "ANALYTICS_MIGRATION_OWNER",
+    "DOMAINS_MIGRATION_OWNER",
+    "HOSTING_MIGRATION_OWNER",
     "HOST_SCHEMA",
     "DURABLE_TIMERS_MIGRATION_OWNER",
     "MAX_REVISION_ID_LENGTH",

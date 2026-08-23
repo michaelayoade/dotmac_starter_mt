@@ -82,6 +82,16 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-domains": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING first-release proof, not permission to create a second domain owner. a1 is the first provider-neutral registered-domain lifecycle for the Dotmac Cloud candidate and is release-allowlisted so the named Cloud sandbox cutover can eventually pin it. It must remain unpublished until the shared a75 commerce train has landed and become installable, this exact Domains change passes the full Observer PostgreSQL and wheel gates, and a separate release authorization is given. A candidate consumer is not an authority switch. Remove this row only when the exact dotmac-domains-v0.1.0a1 tag has been produced by the verified module release workflow; never edit the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-hosting": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING first-release proof, not permission to create a second hosting owner. a1 is the first provider-neutral hosting-account lifecycle for the Dotmac Cloud candidate and is release-allowlisted so the named Cloud panel-sandbox cutover can eventually pin it. It must remain unpublished until the shared a75 commerce train and the preceding kernel a76/Domains stack have landed and become installable, this exact Hosting change passes the full Observer PostgreSQL and wheel gates, and a separate release authorization is given. A candidate consumer is not an authority switch. Remove this row only when the exact dotmac-hosting-v0.1.0a1 tag has been produced by the verified module release workflow; never edit the declared version down.",
+      "state": "never-published"
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
@@ -143,8 +153,8 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a75",
-      "reason": "AWAITING RELEASE AUTHORIZATION. Published a72 is the Durable Timers allocation predecessor. The coordinated a75 allocates the remaining independent reusable owners, adds the tenant_audit_log.v1 prerequisite and the open Subscriptions vocabularies without moving domain behavior into Kernel. Delete this row only when the exact dotmac-kernel-v0.1.0a75 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a73/a74.",
+      "declared": "0.1.0a77",
+      "reason": "MERGE-ORDERED AFTER THE SHARED a75 RELEASE AND KERNEL a76. The stacked Hosting change advances Kernel to a77 only to allocate mod_hosting / ho / hosting; it carries no hosting behaviour into Kernel. The coordinated a75 commerce train and preceding a76 Domains allocation must land and become installable first so every module floor remains real rather than naming a skipped artifact. Delete this row only when the exact dotmac-kernel-v0.1.0a77 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or publish a77 as a substitute for either prerequisite release.",
       "state": "declared-unpublished"
     }
   }

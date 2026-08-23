@@ -64,6 +64,97 @@ ruled on both on 2026-08-15.
    Fulfillment. Its contract contradictions must be resolved before any
    behaviour code — see §5e.
 
+## Amendment 2026-08-19 — the programme target is Cloud, with one Cloud-only lane
+
+Michael clarified that the execution goal is a working Dotmac Cloud application,
+not an indefinitely growing platform-foundation train. The composition matrix
+therefore drives three explicit work classes:
+
+1. **Reuse released owners:** kernel facilities, Integration, Files, Numbering,
+   Durable Timers and other already-complete shared packages are consumed; Cloud
+   does not rebuild them.
+2. **Coordinate shared business owners:** Billing, Orders, Subscriptions,
+   Collections, Fulfillment and Document Rendering remain reusable ecosystem
+   packages. Their assigned workstreams may proceed independently and Cloud
+   consumes their released contracts; the Cloud lane does not create local
+   substitutes while those owners are in flight.
+3. **Build Cloud-only owners and composition:** Domains and Hosting are the two
+   lifecycle modules whose first and only adopter is Cloud. The Cloud application
+   then owns only assembly concerns: checkout/portal adapters, one-way
+   source-labelled customer correlation, contract translation, orchestration
+   wiring and the end-to-end journey. Product catalogue, invoice/payment,
+   recurrence/renewal and dunning stay with the named owners in §§1 and 7 rather
+   than becoming Cloud feature modules. Domains owns desired DNS state while
+   Integrator owns DNS transport. Hosting V1 may observe aggregate mailbox count,
+   but mailbox lifecycle requires a separate accepted ownership composition and
+   is not silently folded into Hosting.
+
+The resulting build-once map is:
+
+| Work class | Composable units | Cloud disposition |
+|---|---|---|
+| Released shared foundations | Kernel, Integration, Files, Numbering, Durable Timers, Approvals and other accepted platform packages | Pin and consume; never fork inside Cloud. |
+| Shared commerce owners | Subscriptions, Orders, Billing, Collections, Fulfillment and Document Rendering | Finish and release in their owning workstreams; Cloud installs exact versions. |
+| Cloud-only lifecycle owners | Domains and Hosting | Build as provider-neutral installable modules, with Cloud as the first adopter. |
+| External delivery | PSP, registrar, authoritative-DNS and hosting-panel connector plugins | Independently authorize and release through Integrator; never import into a business owner. |
+| Cloud application | Portal/checkout adapters, source-labelled customer correlation, peer-contract translation, module composition and end-to-end acceptance | Thin assembly only; it owns no duplicate business lifecycle. |
+
+Cloud assembly code must not begin by filling contract gaps with local state.
+Before the paid domain-plus-hosting pilot, the shared owners must make these
+translations mechanical:
+
+- one named owner publishes the finite coverage decision that permits Orders to
+  hand a line to Fulfillment; a settlement or zero balance is not that decision;
+- an accepted order line carries enough immutable commercial provenance to create
+  the exact Subscription contract without rereading a mutable offer or inventing
+  cadence, charge-model or entitlement data in Cloud;
+- Subscriptions' rated obligation and Billing's acceptance contract agree on the
+  owner of tax and total snapshots;
+- Billing's receivable position supplies the subject, service, period, due and
+  resolution facts Collections requires, under one versioned contract;
+- Fulfillment's participant registry and async outcome port land before Domains
+  or Hosting declares a participant; neither module invents an unused string;
+- every Integrator-bound command is self-contained semantic content, except for a
+  reference explicitly supported by the per-operation secret channel. A connector
+  never reads a product database or dereferences a product-local intent row.
+
+Fulfillment is mandatory for a pilot that claims automated multi-line
+domain-plus-hosting provisioning, partial recovery or callback-loss convergence.
+Document Rendering may follow that pilot only while Dotmac promises no official
+downloadable or emailed invoice/receipt bytes; Cloud must not ship a temporary
+saga or renderer.
+
+The first paragraph of §5 is narrowed accordingly. The numbered order is a
+**contract dependency, merge/release and adoption order**, not a prohibition on
+isolated parallel implementation after each package's inventory and contract are
+complete. Parallel work is admissible only when it guesses no unfinished upstream
+contract, imports no sibling, uses a separate branch/worktree and does not claim
+completion or adoption early. Cloud composition and authority cutover still wait
+for every consumed exact release.
+
+The Domains contract is also narrowed to the eight-operation registrar family:
+guarded `transfer(approve_out)` is the only intentional relinquishment in V1;
+there is no generic release/delete provider command. Natural deletion is an
+observation after expiry/redemption, and an `allow_lapse` request remains refused
+until a domain-owned renewal-disposition contract is accepted.
+
+### Amendment — 2026-08-19 (Domains observation and secret boundaries)
+
+DNS remains in Domains V1 and therefore includes immutable, binding-scoped
+observation persistence of actual nameservers and canonical recordsets, plus
+owner-derived drift. Registrar renewal consumes a named, recent POLL observation
+from the active binding; caller-supplied expiry is not authority. Future facts,
+unmatched domains/bindings and reused evidence identities with changed content
+fail closed.
+
+Transfer-in is deferred until Integrator publishes the shared per-operation
+secret channel. Ordinary Domains command evidence and outbox payloads carry
+neither an auth-code literal nor an arbitrary secret reference. This does not
+remove guarded transfer-out approval or cancellation from V1. Terminal provider
+failures are owner inputs: registration moves to a retry-safe failed aggregate,
+transfer-out returns to active, and a failed cancellation leaves the transfer
+pending, with typed failure and attention evidence in every case.
+
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It
@@ -236,8 +327,11 @@ adjectives.
 
 ### 5. Build order
 
-Work completes one owner before opening the next package, except that adopter
-integration may run after a package reaches its independent completion gate.
+The order below controls contract dependency, merge/release and adoption. After
+the 2026-08-19 amendment, independently inventoried packages may be implemented
+in isolated parallel workstreams, but a downstream package cannot guess an
+unfinished upstream contract, merge ahead of its required authority, or claim
+completion/adoption before the exact consumed releases exist.
 
 Two steps are product defect repairs rather than module work. They are listed
 because the evidence found active authority bypasses that must not wait for a
