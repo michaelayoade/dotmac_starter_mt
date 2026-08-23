@@ -6,6 +6,37 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a92 — 2026-08-23
+
+**A binding may name a long host revision.** `PrerequisiteBinding` validated
+`provider_revision` against a 32-character bound. That bound belongs to a
+different rule, and applying it here refused bindings a host can satisfy.
+
+### Fixed — `provider_revision` no longer carries the module-id cap
+
+`namespaces.MAX_REVISION_ID_LENGTH` caps a MODULE's own revision ids at 32
+because a module must install into *anyone's* assembly, including one using
+Alembic's default `alembic_version` — `alembic/ddl/impl.py` declares
+`Column("version_num", String(32))`, so a module overrunning it is
+uninstallable rather than merely untidy. **That rule is unchanged**, and a test
+now pins it so this fix cannot be widened into it later.
+
+`provider_revision` is a different thing: it names the HOST assembly's own
+revision, in the HOST's own `alembic_version` table, whose width the host
+controls. `_REVISION_RE` now bounds it at 255 rather than 32; shape is
+unchanged.
+
+Found composing `dotmac-service-orders` into Dotmac Sub. Sub creates
+`version_num` as `VARCHAR(255)` and ALTERs pre-existing tables to match, and
+carries dozens of ids over 32 characters (longest 44). The two revisions Sub
+wrote specifically to supply module prerequisites are 37 and 38 characters, so
+the cap made the correct binding unexpressible — and the workarounds available
+to an adopter were all worse: rewrite applied migration history, or bind to some
+shorter revision that does not actually supply the effect.
+
+This is a pure loosening. No previously valid binding becomes invalid, and no
+consumer needs to change anything.
+
 ## 0.1.0a91 — 2026-08-22
 
 **Fourteen lineage allocations, no behaviour.** This release adds rows to
