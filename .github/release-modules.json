@@ -393,6 +393,56 @@
         ]
       }
     },
+    "dotmac-billing": {
+      "$comment": [
+        "Operational receivables: the sole ReceivablePositionV1, kernel Money,",
+        "financial state and immutable reversal movements. ERP keeps GL and",
+        "statutory accounting; Collections requests consequences and owns none",
+        "of this module's financial facts.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-23. The prior row withheld release",
+        "until 'the real Cloud adapter/composition gate is complete'. That gate",
+        "cannot be reached while this package is unreleased: Dotmac Cloud's",
+        "composition gate refuses to import any owner it has not exact-pinned,",
+        "and it can only pin a released artifact. Publication is therefore a",
+        "PREREQUISITE of the composition it was made conditional on.",
+        "Publication is not adoption; no product installs this by being told it",
+        "exists."
+      ],
+      "package_dir": "packages/dotmac-billing",
+      "import_name": "dotmac_billing",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a89",
+      "db_schema": "mod_billing",
+      "tag_prefix": "dotmac-billing-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_billing/authority.py",
+          "dotmac_billing/commands.py",
+          "dotmac_billing/contracts.py",
+          "dotmac_billing/engine.py",
+          "dotmac_billing/errors.py",
+          "dotmac_billing/linking.py",
+          "dotmac_billing/manifest.py",
+          "dotmac_billing/migrations/__init__.py",
+          "dotmac_billing/migrations/versions/bi_0001_billing.py",
+          "dotmac_billing/models.py",
+          "dotmac_billing/py.typed",
+          "dotmac_billing/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-brand-profiles": {
       "$comment": [
         "Scoped brand values, provenance, precedence and locks (ADR-0057 s2a).",
@@ -475,6 +525,55 @@
           "dotmac_campaigns/migrations/versions/ca_0001_campaigns.py",
           "dotmac_campaigns/models.py",
           "dotmac_campaigns/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-collections": {
+      "$comment": [
+        "Dunning cases, versioned grace/escalation policy and delinquency-driven",
+        "consequence REQUESTS over selectable tenant/platform planes. It declares",
+        "its own ReceivableObservationV1 and holds no Billing-owned position,",
+        "money lane or reversal state.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-23, on the same circularity as",
+        "dotmac-billing. The Sub/Vendor shadow, isolation and writer-retirement",
+        "gates its prior row named are ADOPTION gates and remain unmet and",
+        "unclaimed; they gate a cutover, not a wheel."
+      ],
+      "package_dir": "packages/dotmac-collections",
+      "import_name": "dotmac_collections",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a89",
+      "db_schema": "mod_coll",
+      "tag_prefix": "dotmac-collections-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_collections/_validation.py",
+          "dotmac_collections/actions.py",
+          "dotmac_collections/arrangements.py",
+          "dotmac_collections/contracts.py",
+          "dotmac_collections/grace.py",
+          "dotmac_collections/manifest.py",
+          "dotmac_collections/migrations/__init__.py",
+          "dotmac_collections/migrations/versions/cl_0001_collections.py",
+          "dotmac_collections/models.py",
+          "dotmac_collections/notices.py",
+          "dotmac_collections/policies.py",
+          "dotmac_collections/py.typed",
+          "dotmac_collections/receivables.py",
+          "dotmac_collections/service.py",
+          "dotmac_collections/timers.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -967,6 +1066,50 @@
           "dotmac_forms/manifest.py",
           "dotmac_forms/migrations/__init__.py",
           "dotmac_forms/migrations/versions/fm_0001_forms.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-fulfillment": {
+      "$comment": [
+        "The tenant-only fulfillment saga: runs, ordered steps, append-only",
+        "participant attempts, outcome receipts, compensation and convergence,",
+        "with FORCEd RLS. It owns no connector retry, lease, backoff or",
+        "dead-letter state -- those belong to dotmac-integration.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-23. Floor is kernel 0.1.0a89: a86",
+        "minted the mod_fulfillment lineage, but this package also consumes the",
+        "typed provisioning participant, scoped request, asynchronous outcome",
+        "envelope and participant-decided compensation contract that land in a89.",
+        "The first Cloud participant adapter its prior row required is an",
+        "ADOPTION milestone that cannot be built against an unreleased wheel."
+      ],
+      "package_dir": "packages/dotmac-fulfillment",
+      "import_name": "dotmac_fulfillment",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a89",
+      "db_schema": "mod_fulfillment",
+      "tag_prefix": "dotmac-fulfillment-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_fulfillment/contracts.py",
+          "dotmac_fulfillment/manifest.py",
+          "dotmac_fulfillment/migrations/__init__.py",
+          "dotmac_fulfillment/migrations/versions/fu_0001_fulfillment.py",
+          "dotmac_fulfillment/models.py",
+          "dotmac_fulfillment/participants.py",
+          "dotmac_fulfillment/py.typed",
+          "dotmac_fulfillment/service.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2290,6 +2433,54 @@
           "dotmac_sites/service.py",
           "dotmac_sites/migrations/__init__.py",
           "dotmac_sites/migrations/versions/si_0001_sites.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-subscriptions": {
+      "$comment": [
+        "Stable offers, structurally immutable published offer/price versions,",
+        "subscription contracts, cadence, proration and one replayable recurring",
+        "charge occurrence per line/version/source/period/currency.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-23. Floor is kernel 0.1.0a94, which",
+        "is published and tagged, because guarded writes consume the",
+        "manifest-owned charge_models and obligation_sources declarations that",
+        "land there and the highest consumed capability wins."
+      ],
+      "package_dir": "packages/dotmac-subscriptions",
+      "import_name": "dotmac_subscriptions",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a94",
+      "db_schema": "mod_subscriptions",
+      "tag_prefix": "dotmac-subscriptions-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_subscriptions/cadence.py",
+          "dotmac_subscriptions/commands.py",
+          "dotmac_subscriptions/contracts.py",
+          "dotmac_subscriptions/engine.py",
+          "dotmac_subscriptions/errors.py",
+          "dotmac_subscriptions/lifecycle.py",
+          "dotmac_subscriptions/linking.py",
+          "dotmac_subscriptions/manifest.py",
+          "dotmac_subscriptions/migrations/__init__.py",
+          "dotmac_subscriptions/migrations/versions/su_0001_subscriptions.py",
+          "dotmac_subscriptions/models.py",
+          "dotmac_subscriptions/py.typed",
+          "dotmac_subscriptions/service.py",
+          "dotmac_subscriptions/values.py",
+          "dotmac_subscriptions/vocabulary.py"
         ],
         "forbidden_prefixes": [
           "app/",
