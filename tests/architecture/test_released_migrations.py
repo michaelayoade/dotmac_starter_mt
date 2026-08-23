@@ -177,6 +177,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-operational-escalations"
         / "src/dotmac_operational_escalations/migrations/versions"
     ),
+    "dotmac-service-changes": (
+        REPO_ROOT
+        / "packages/dotmac-service-changes"
+        / "src/dotmac_service_changes/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -198,6 +203,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-imports": "im_*.py",
     "dotmac-inbox-operations": "io_*.py",
     "dotmac-operational-escalations": "oe_*.py",
+    "dotmac-service-changes": "sch_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -216,6 +222,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-imports": "dotmac-imports-v",
     "dotmac-inbox-operations": "dotmac-inbox-operations-v",
     "dotmac-operational-escalations": "dotmac-operational-escalations-v",
+    "dotmac-service-changes": "dotmac-service-changes-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -883,6 +890,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-service-changes ──
+    "dotmac-service-changes-v0.1.0a1": (
+        "dotmac-service-changes",
+        "c7571b9c",
+        {
+            "sch_0001_service_changes.py": (
+                "a01c0e1056246ab39a7420e1364b644c7c2d56a4959fe5ac76298fd612cda20a"
+            ),
+        },
+    ),
 }
 
 
@@ -960,6 +977,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-imports": frozenset(),
     "dotmac-inbox-operations": frozenset(),
     "dotmac-operational-escalations": frozenset(),
+    "dotmac-service-changes": frozenset(),
 }
 
 
