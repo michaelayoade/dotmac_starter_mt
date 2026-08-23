@@ -6,6 +6,39 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a93 — 2026-08-23
+
+**Allocate the two Cloud service-lifecycle lineages.** Allocation-only: this
+adds two rows to `MIGRATION_OWNER_LEDGER` and installs no behaviour. No module
+package, no migration, no kernel function.
+
+### Added — `domains` and `hosting` lineages
+
+| Owner | Schema | Prefix | Branch label |
+|---|---|---|---|
+| `domains` | `mod_domains` | `dn` | `domains` |
+| `hosting` | `mod_hosting` | `hs` | `hosting` |
+
+`domains` does **not** get `do`. Its candidate tree carries `prefix="do"` from
+before `documents` was allocated, and `documents` holds `do` permanently — an
+allocation is never reused or repointed, so the candidate's provisional claim
+is invalid rather than merely inconvenient. Landing the row now settles it
+while both modules are unreleased and a rename is still free; after data
+exists, a moved schema is a data-loss event, not a rename.
+
+`scripts/check_allocation_serialized.py` requires exactly this shape: a branch
+that allocates a lineage AND lands its module source fails, because at its own
+merge base the row does not yet exist. So the rows land here, alone, where a
+duplicate is a visible conflict in one file.
+
+Neither module is on `main` at the time of this release — both survive only on
+`salvage/cloud-domains-hosting`. This release makes their prefixes real for the
+whole fleet and claims nothing about either module being implemented,
+reviewed, tested, published or adopted. a93 is their kernel floor: no published
+a85..a92 artifact carries either row.
+
+Authorized by ADR-0030's 2026-08-23 amendment.
+
 ## 0.1.0a92 — 2026-08-23
 
 **A binding may name a long host revision.** `PrerequisiteBinding` validated
