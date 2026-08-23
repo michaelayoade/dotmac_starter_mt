@@ -63,3 +63,30 @@ rule versions, reports and return evidence.
 **Make the tax module a government-portal client.** Transport credentials and
 wire formats belong to connector plugins; combining them with the decision
 owner prevents independent composition.
+
+## Amendment — 2026-08-23: one fact may produce multiple taxes
+
+The original singular determination shape was too narrow. VAT is one tax code,
+not the tax abstraction, and a taxable event may also attract independent or
+compound levies. One source fact therefore owns one immutable determination
+set containing one selected component per applicable tax code. Components are
+ordered by governed calculation sequence; a component may use the source
+amount or the source amount plus previously calculated tax. Duplicate
+sequences, equal-ranked rules and unsupported inclusive combinations fail
+closed. Once a tax code declares candidate rules for a fact signature, a fact
+whose effective party, supply and place classifications match none of them also
+fails closed; an intended non-charge must be an explicit `exempt` or
+`out_of_scope` rule rather than a missing custom-tax component.
+
+Party, supply and place category decisions are effective-dated,
+tax-code-specific policy evidence owned by `dotmac-tax`, with basis, approval,
+evidence and source-version provenance. A caller may still provide direct
+categories for the published a1 compatibility contract, but disagreement with
+an owned classification is a conflict. `standard_rated`, `zero_rated`,
+`exempt` and `out_of_scope` are distinct treatments; a zero amount never
+substitutes for legal identity.
+
+Product catalogues contain no tax flag or statutory percentage. ERP remains
+the first statutory-policy/reporting cutover under this ADR. Sub may contain
+its existing exemption, inclusive-label and bulk-plan-change defects before
+that cutover, but does not become a parallel tax decision owner.
