@@ -85,6 +85,12 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
 # consolidated ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    # The commerce cohort: kernel a89 added BILLING/COLLECTIONS/ORDERS/
+    # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER, and Billing and Collections
+    # consume nothing newer, so their allocation IS their floor. Subscriptions
+    # shares the allocation but not the floor -- see CAPABILITY_RAISED_FLOORS.
+    "dotmac-billing": "0.1.0a89",
+    "dotmac-collections": "0.1.0a89",
     "dotmac-forms": "0.1.0a88",
     "dotmac-platform-health": "0.1.0a88",
     "dotmac-support-access": "0.1.0a88",
@@ -170,6 +176,17 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Allocated with the rest of the commerce cohort in a89, but guarded writes
+    # consume the manifest-owned `charge_models` and `obligation_sources`
+    # declarations that land in a94. The highest consumed capability wins, so
+    # a94 is the honest floor even though the namespace is three releases older.
+    "dotmac-subscriptions": ("0.1.0a94", "0.1.0a89"),
+    # a87 minted the mod_fulfillment lineage. The saga also consumes the typed
+    # provisioning participant, scoped request, asynchronous outcome envelope
+    # and participant-decided compensation contract, all of which arrive in a89
+    # -- a kernel below that cannot satisfy the participant port the module is
+    # written against.
+    "dotmac-fulfillment": ("0.1.0a89", "0.1.0a87"),
     # Immutable tag inspection is the evidence here: a71's changelog described
     # the campaign allocation early, but CAMPAIGNS_MIGRATION_OWNER first exists
     # in published tag a72. a73 is the operative floor because Sub-first
