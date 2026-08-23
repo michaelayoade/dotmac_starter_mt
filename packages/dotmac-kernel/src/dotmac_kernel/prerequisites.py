@@ -85,11 +85,29 @@ _PREREQUISITE_RE: Final[re.Pattern[str]] = re.compile(
     r"^[a-z][a-z0-9_]{2,47}\.v[1-9][0-9]{0,2}$"
 )
 
-# Alembic revision ids, as constrained by `alembic_version.version_num`. Kept
-# deliberately permissive about *shape* — a binding may legitimately name a
-# legacy host revision (`0001_initial_tenant_schema`) or a strict D1 module
-# revision (`fi_0001_stored_files`).
-_REVISION_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_]{0,31}$")
+# Alembic revision ids. Kept deliberately permissive about *shape* — a binding
+# may legitimately name a legacy host revision (`0001_initial_tenant_schema`) or
+# a strict D1 module revision (`fi_0001_stored_files`).
+#
+# LENGTH is deliberately NOT capped at 32 here, and the distinction matters.
+# `namespaces.MAX_REVISION_ID_LENGTH` caps a MODULE's own revision ids at 32,
+# because a module must install into *anyone's* assembly, including one using
+# Alembic's default `alembic_version` table — `alembic/ddl/impl.py` declares
+# `Column("version_num", String(32))`, and a module that overran it would be
+# uninstallable rather than merely inconvenient. That rule is right and stays.
+#
+# `provider_revision` is a different thing: it names the HOST assembly's own
+# revision, recorded in the HOST's own `alembic_version` table, whose width the
+# host controls. Applying the module-portability cap to it refuses a binding
+# the host can satisfy perfectly well. Dotmac Sub is the case in point — it
+# creates `version_num` as `VARCHAR(255)` and ALTERs pre-existing tables to
+# match, and carries dozens of revision ids over 32 characters (longest 44).
+# Both of the revisions it wrote specifically to supply module prerequisites
+# are 37 and 38 characters, so the cap made a correct binding unexpressible.
+#
+# The 32-char bound is therefore enforced where a foreign table's width is
+# genuinely at stake, and not where it is not.
+_REVISION_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_]{0,254}$")
 
 
 # ── Errors ──────────────────────────────────────────────────────────────────
