@@ -97,6 +97,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a94",
+      "reason": "OUTSTANDING RELEASE CANDIDATE - NOT to be repaired by editing the version down. a94 adds the optional manifest-owned charge_models and obligation_sources declaration seams consumed by the checked-in dotmac-subscriptions candidate. It owns no vocabulary members, composes no module and performs no adopter cutover. a93 is published and immutable, so this additive public surface requires a new version. Publication still requires Michael's separate authorization. Remove this row only after the dedicated release-kernel workflow publishes, installs back, verifies and tags a94, in the same release-record change.",
+      "state": "declared-unpublished"
+    },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",

@@ -63,11 +63,15 @@ def test_manifest_normalizes_sequences_to_tuples() -> None:
         api_routers=[APIRouter()],
         nav=[NavItem("Inventory", "/admin/inventory")],
         capabilities=["inventory.use"],
+        charge_models=["inventory.recurring"],
+        obligation_sources=["inventory.accepted_order"],
     )
     assert manifest.dependencies == ("parties",)
     assert isinstance(manifest.api_routers, tuple)
     assert isinstance(manifest.nav, tuple)
     assert manifest.capabilities == ("inventory.use",)
+    assert manifest.charge_models == ("inventory.recurring",)
+    assert manifest.obligation_sources == ("inventory.accepted_order",)
     assert manifest.contract_version == KERNEL_MODULE_CONTRACT_VERSION
 
 

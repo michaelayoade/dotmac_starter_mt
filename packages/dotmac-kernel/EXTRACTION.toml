@@ -17,6 +17,12 @@ source_paths = [
   "dotmac_sub:app/services/communication_eligibility.py",
   "dotmac_sub:app/services/notification.py",
   "dotmac_sub:app/tasks/notifications.py",
+  # Recurring-commerce vocabulary declarations (2026-08-23). The generic
+  # manifest seam follows the kernel's existing registry pattern; business
+  # members and behavior remain product-first in dotmac-subscriptions.
+  "dotmac_sub:app/services/billing/contracts.py",
+  "dotmac_sub:app/services/billing/obligations.py",
+  "dotmac_sub:app/services/catalog/offers.py",
   # Machine credentials (2026-08-22). Two independent X-Api-Key
   # implementations that DISAGREE about what an empty scope list means;
   # see inventory_evidence below.
@@ -47,6 +53,8 @@ preserved_tests = [
   "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
   "dotmac_sub:tests/architecture/test_composition.py",
   "dotmac_starter_mt:tests/unit/test_product_manifest.py",
+  "dotmac_starter_mt:tests/unit/test_modules.py",
+  "dotmac_starter_mt:tests/unit/test_subscriptions_contracts.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -69,6 +77,8 @@ inventory_evidence = [
   "docs/inventories/delivery-outbox-sources.md",
   "docs/inventories/channel-policy-sources.md",
   "docs/inventories/product-manifest-sources.md",
+  "docs/inventories/subscriptions-sources.md",
+  "docs/inventories/subscriptions-extraction-dossier.md",
 ]
 first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan. MACHINE CREDENTIALS (2026-08-22): not started. dotmac_sub is the first cutover and the licence destination, so its descriptor route (Vendor ADR-0010 gate 2b) is the first caller. It did not PULL the facility: the demand came from a separate ISP assembly that needed an authenticated descriptor route and had no kernel guard that fitted, and ADR 0012's conversion amendment then ended that assembly. The distinction is worth keeping — a facility attributed to whoever adopts it first loses the reason it exists, and the reason is what a later reader checks the design against. CORRECTED the same day: this said dotmac-isp composes the released kernel greenfield and \"has no legacy verifier to retire, so its cutover proves the facility rather than a migration\". Governance ADR 0012's conversion amendment ended the separate ISP assembly — Sub is not retired, it becomes the thin assembly in place — and Sub DOES hold a legacy verifier. So this is a migration, not a greenfield proof, and it inherits the Sub reissuance gate recorded in local_copy_retirement below: Sub's verification key is derived from the connector-credential encryption key, so every credential must be reissued before app/services/auth.py's hash_api_key, hash_api_key_candidates, _maybe_upgrade_api_key_hash and _touch_api_key_last_used can retire."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
