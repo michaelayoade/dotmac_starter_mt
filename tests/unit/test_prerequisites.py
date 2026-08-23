@@ -209,10 +209,49 @@ def test_binding_an_unregistered_effect_is_refused() -> None:
         )
 
 
-@pytest.mark.parametrize("revision", ["", "Not A Revision", "x" * 33, "-leading"])
+@pytest.mark.parametrize("revision", ["", "Not A Revision", "x" * 256, "-leading"])
 def test_a_binding_must_name_a_usable_revision_id(revision: str) -> None:
     with pytest.raises(InvalidRevisionReferenceError):
         PrerequisiteBinding(TENANT_SCOPE_CATALOG_V1.name, revision, "kernel")
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        # Both are real Dotmac Sub revisions, written specifically to supply
+        # module prerequisites from Sub's own lineage. At 37 and 38 characters
+        # they were refused while `provider_revision` carried the module-id cap.
+        "545_tenant_scope_catalog_prerequisite",
+        "546_module_database_roles_prerequisite",
+        # Sub's longest applied id, at 44.
+        "515_project_template_vendor_assignment_scope",
+    ],
+)
+def test_a_binding_may_name_a_long_host_revision(revision: str) -> None:
+    """The host's `alembic_version` width is the host's business.
+
+    `namespaces.MAX_REVISION_ID_LENGTH` caps a MODULE's own ids at 32 so it
+    installs into anyone's default table, and that stays. `provider_revision`
+    names the HOST's revision in the HOST's table — Sub creates `version_num`
+    as VARCHAR(255) and ALTERs existing tables to match. Capping this at 32 made
+    a binding Sub can satisfy perfectly well unexpressible.
+    """
+
+    binding = PrerequisiteBinding(TENANT_SCOPE_CATALOG_V1.name, revision, "sub")
+    assert binding.provider_revision == revision
+
+
+def test_the_module_revision_id_cap_is_unchanged() -> None:
+    """Relaxing the binding must not have relaxed the module-portability rule.
+
+    These are two different limits that were briefly one. If this ever fails,
+    the fix above went too far: a module whose own ids overrun 32 characters is
+    uninstallable in an assembly using Alembic's default `alembic_version`.
+    """
+
+    from dotmac_kernel.namespaces import MAX_REVISION_ID_LENGTH
+
+    assert MAX_REVISION_ID_LENGTH == 32
 
 
 def test_a_binding_must_name_its_lineage_owner() -> None:
