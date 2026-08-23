@@ -386,7 +386,7 @@ def test_platform_scope_uses_the_platform_models_and_idempotency_ledger(
         position_fingerprint=position.state_fingerprint,
         subject_ref=position.subject_ref,
         service_ref=position.service_ref,
-        purpose_code="arrears_initial_notice",
+        purpose_code="platform_arrears_initial_notice",
         decision_evidence=position,
         requested_at=NOW,
     )
@@ -416,7 +416,7 @@ def test_platform_scope_uses_the_platform_models_and_idempotency_ledger(
         "position_fingerprint": position.state_fingerprint,
         "subject_ref": position.subject_ref,
         "service_ref": position.service_ref,
-        "purpose_code": "arrears_initial_notice",
+        "purpose_code": "platform_arrears_initial_notice",
         "decision_evidence": {
             "source_owner": position.source_owner,
             "exposure_ref": position.exposure_ref,

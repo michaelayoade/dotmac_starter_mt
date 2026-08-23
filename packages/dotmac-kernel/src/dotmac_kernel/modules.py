@@ -169,6 +169,11 @@ class ModuleManifest:
     # Product-neutral provisioning participants implemented by this module.
     # The codes are an open manifest-owned vocabulary consumed by Fulfillment.
     provisioning_participants: Sequence[str] = field(default_factory=tuple)
+    # Product-owned recurring charge-model and obligation-source codes. They
+    # are open manifest vocabularies consumed by dotmac-subscriptions; the
+    # kernel carries declarations but does not enumerate their members.
+    charge_models: Sequence[str] = field(default_factory=tuple)
+    obligation_sources: Sequence[str] = field(default_factory=tuple)
     # Setting domains this module declares and owns. Enforced when a spec is
     # registered and at the write; see `dotmac_kernel.setting_domains`.
     setting_domains: Sequence[str] = field(default_factory=tuple)
@@ -254,6 +259,8 @@ class ModuleManifest:
             "audit_actions",
             "outbox_event_types",
             "provisioning_participants",
+            "charge_models",
+            "obligation_sources",
             "setting_domains",
             "setting_value_types",
             "scope_kinds",
@@ -481,6 +488,8 @@ class ModuleManifest:
             audit_actions=manifest.audit_actions,
             outbox_event_types=manifest.outbox_event_types,
             provisioning_participants=manifest.provisioning_participants,
+            charge_models=manifest.charge_models,
+            obligation_sources=manifest.obligation_sources,
             setting_domains=manifest.setting_domains,
             setting_value_types=manifest.setting_value_types,
             scope_kinds=manifest.scope_kinds,

@@ -69,12 +69,12 @@
     },
     "dotmac-billing": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. The audited dual-plane Billing tree has been rebased onto the published a89+ allocation floor and now owns the sole ReceivablePositionV1, kernel Money, financial state and immutable reversal movements. This repository-local state is not Observer, CI, registry or adoption evidence. Keep the package unallowlisted and unpublished until the exact revision passes the PostgreSQL, wheel and composition gates and Michael separately authorizes release; do not edit the version down.",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. The audited dual-plane Billing tree has been rebased onto the published a89+ allocation floor and now owns the sole ReceivablePositionV1, kernel Money, financial state and immutable reversal movements. Source presence is not CI, registry or adoption evidence. Keep the package unallowlisted and unpublished until the exact revision passes the direct Git-hosted PostgreSQL, wheel and composition gates and Michael separately authorizes release; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-collections": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. Collections now declares a distinct ReceivableObservationV1 and no longer claims Billing's financial position, money lanes or reversed steady state. Its tenant persistence candidate still has no production adopter or authority cutover, and the accepted ADR-0020 platform-plane requirement remains unresolved in implementation. Keep it unallowlisted and unpublished until that plane conflict, Observer PostgreSQL proofs, composition adapter and Sub shadow/retirement gates are complete.",
+      "reason": "INTENDED UNRELEASED CONTRACT-REPAIR CANDIDATE. Collections declares its distinct ReceivableObservationV1, one lifecycle over selectable tenant/platform persistence planes, and no Billing-owned financial position, money lanes or reversed steady state. It still has no production adopter or authority cutover. Keep it unallowlisted and unpublished until exact-revision direct CI, the real composition adapter and the Sub/Vendor shadow, isolation and writer-retirement gates are complete; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-customers": {
@@ -120,6 +120,11 @@
     "dotmac-services": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNRELEASED COORDINATED-COMMERCE CANDIDATE. The product-first dual-plane offer, contract, cadence and recurring-occurrence owner exists in source, but exact-revision CI, a real Cloud composition, product shadow/adoption and release authorization are not complete. Keep it unallowlisted and unpublished until those gates pass and remove this row only in the authorized release record; do not edit the version down.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

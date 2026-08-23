@@ -152,7 +152,9 @@ def _scope_shape_violations(source: str) -> set[str]:
                 violations.add("nullable_tenant_id")
         if isinstance(node, ast.Name) and node.id == "scope_kind":
             violations.add("scope_kind")
-        if isinstance(node, ast.Name | ast.arg) and "sentinel_tenant" in node.id:
+        if isinstance(node, ast.Name) and "sentinel_tenant" in node.id:
+            violations.add("sentinel_tenant")
+        if isinstance(node, ast.arg) and "sentinel_tenant" in node.arg:
             violations.add("sentinel_tenant")
     return violations
 
@@ -186,7 +188,7 @@ def test_manifest_declares_one_dual_plane_owner() -> None:
     assert module.supported_plane_sets == (
         (ModulePlane.TENANT,),
         (ModulePlane.PLATFORM,),
-        (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        (ModulePlane.PLATFORM, ModulePlane.TENANT),
     )
     assert SUBSCRIPTIONS_MIGRATION_OWNER in MIGRATION_OWNER_LEDGER
     assert module.migration_owner() == SUBSCRIPTIONS_MIGRATION_OWNER
@@ -401,8 +403,8 @@ def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
         "dotmac_vendor_control_plane",
     ]
     assert dossier["source_revisions"] == [
-        "dotmac_sub:27c76aaeebb7",
-        "dotmac_vendor_control_plane:89848017d6b8",
+        "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
+        "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
     ]
     assert len(dossier["source_paths"]) >= 11
     assert len(dossier["preserved_tests"]) >= 14

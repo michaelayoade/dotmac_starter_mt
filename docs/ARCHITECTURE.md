@@ -2003,7 +2003,7 @@ inert fields would be exactly that. Its `settings` field is present only as
 
 ## Manifest declaration catalogues
 
-Six vocabularies now work this way, and **ADR-0008 makes the shape the standard**:
+The catalogue entries below work this way, and **ADR-0008 makes the shape the standard**:
 a kernel-level vocabulary whose members belong to modules is DECLARED on module
 manifests and validated by a registry — never enumerated by the kernel as an enum
 or a fixed list, and never pinned by a CHECK constraint on the backing column.
@@ -2016,6 +2016,7 @@ consumer" rule.
 | `...capabilities` (`CapabilitySpec`) | `dotmac_kernel.capabilities.CapabilityCatalogue` | `dotmac_kernel.deps.require_capability` | at the request (`UndeclaredCapabilityError`) |
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
 | `...outbox_event_types` (bare codes) | `dotmac_kernel.outbox_event_types.OutboxEventTypeRegistry` | `dotmac_durable_timers.schedule_timer` | before scheduling takes a lock or writes a timer/outbox row (`UndeclaredOutboxEventTypeError`) |
+| `...charge_models` / `...obligation_sources` (bare codes) | `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry` | `dotmac_subscriptions.publish_offer_version`, `record_contract_version` and `generate_recurring_charge` | at command validation, before offer, contract or occurrence rows are written (`SubscriptionDataError` with a `vocabulary.*` reason code) |
 | `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
 | `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
 
