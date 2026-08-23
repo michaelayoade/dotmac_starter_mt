@@ -167,6 +167,11 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-imports": (
         REPO_ROOT / "packages/dotmac-imports/src/dotmac_imports/migrations/versions"
     ),
+    "dotmac-inbox-operations": (
+        REPO_ROOT
+        / "packages/dotmac-inbox-operations"
+        / "src/dotmac_inbox_operations/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -186,6 +191,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-ai-operations": "ao_*.py",
     "dotmac-payments": "pm_*.py",
     "dotmac-imports": "im_*.py",
+    "dotmac-inbox-operations": "io_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -202,6 +208,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-ai-operations": "dotmac-ai-operations-v",
     "dotmac-payments": "dotmac-payments-v",
     "dotmac-imports": "dotmac-imports-v",
+    "dotmac-inbox-operations": "dotmac-inbox-operations-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -843,6 +850,22 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-inbox-operations ──
+    "dotmac-inbox-operations-v0.1.0a3": (
+        "dotmac-inbox-operations",
+        "5b2798b8",
+        {
+            "io_0001_inbox_operations.py": (
+                "180e422c920b43cadbd05a52ac2c72b423a952a9f70094f5372ff29f1b932aa0"
+            ),
+            "io_0002_queue_admission.py": (
+                "0ff834e0cf7082c211e685d5e5ae292283a90e2d83da796e4dc2944a32948a32"
+            ),
+            "io_0003_operational_safety.py": (
+                "26607110cf3001f0134ec9942a85ef0eb96866968b0502f978c8529352394ac3"
+            ),
+        },
+    ),
 }
 
 
@@ -918,6 +941,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ai-operations": frozenset(),
     "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
+    "dotmac-inbox-operations": frozenset(),
 }
 
 
