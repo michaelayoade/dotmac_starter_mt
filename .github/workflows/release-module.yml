@@ -66,6 +66,7 @@ on:
           - dotmac-files
           - dotmac-finance
           - dotmac-forms
+          - dotmac-imports
           - dotmac-inbox
           - dotmac-inbox-operations
           - dotmac-integration
