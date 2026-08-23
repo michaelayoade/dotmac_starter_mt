@@ -573,7 +573,22 @@ def test_money_storage_is_exact_and_never_float() -> None:
     )
 
 
-def test_runtime_version_and_unreleased_kernel_floor_agree() -> None:
+def test_runtime_version_and_authorized_kernel_floor_agree() -> None:
+    """Authorized for release, not yet published — and those differ.
+
+    This asserted `"dotmac-billing" not in release_modules` until 2026-08-23,
+    encoding the withholding decision as a test. That decision was retired
+    because it was circular: it withheld publication until Dotmac Cloud
+    composed the module, while Cloud's composition gate imports only owners it
+    has exact-pinned, which needs a published artifact.
+
+    So the assertion is inverted rather than deleted. The allowlist entry must
+    now AGREE with the package it names — a floor, schema or requires-policy
+    that drifts from pyproject would otherwise surface at release time, against
+    bytes CI had already accepted. The publication row must still read
+    `never-published`, because allowlisting is permission to publish and never
+    evidence that anything was.
+    """
     package = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
     declared = package["tool"]["poetry"]["version"]
     assert dotmac_billing.__version__ == module.version == declared
@@ -583,7 +598,15 @@ def test_runtime_version_and_unreleased_kernel_floor_agree() -> None:
     release_modules = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]
-    assert "dotmac-billing" not in release_modules
+    entry = release_modules["dotmac-billing"]
+    assert entry["kernel_floor"] == "0.1.0a89"
+    assert entry["db_schema"] == models.SCHEMA
+    assert entry["import_name"] == "dotmac_billing"
+    assert entry["tag_prefix"] == "dotmac-billing-v"
+    assert set(entry["wheel_contents"]["allowed_requires"]) == set(
+        package["tool"]["poetry"]["dependencies"]
+    )
+
     publication = json.loads(
         (REPO_ROOT / "docs/inventories/declared-publication-baseline.json").read_text(
             encoding="utf-8"

@@ -437,6 +437,7 @@
           "scripts/"
         ],
         "allowed_requires": [
+          "alembic",
           "dotmac-kernel",
           "sqlalchemy",
           "python"
