@@ -521,7 +521,7 @@ facility, and nothing consumes it but the module it names.
 ### Added
 
 - `COMMERCIAL_AGREEMENTS_MIGRATION_OWNER` — `mod_agreements`, prefix `cg`,
-  branch label `commercial_agreements`. Platform plane only; ADR-0033 § 7
+  branch label `commercial_agreements`. Platform plane only; ADR-0057 § 7
   derives it from the vendor control plane as the one consumer that exists
   today. `dotmac-commercial-agreements` 0.1.0a1 declares the matching manifest
   in the same change, so the row is never a reservation without code behind it

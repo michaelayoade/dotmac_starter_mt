@@ -1,7 +1,7 @@
 """Brand profile data, per-field precedence, and resolution that reports itself.
 
 Extracted product-first from `dotmac_sub`'s `BrandProfile` (897 LOC across seven
-modules, in production) under ADR-0033 § 2.
+modules, in production) under ADR-0057 § 2.
 
 ## Every resolved field reports its source
 

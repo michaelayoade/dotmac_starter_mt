@@ -1,4 +1,4 @@
-"""Structural canaries for the reusable projects module (ADR-0033)."""
+"""Structural canaries for the reusable projects module (ADR-0051)."""
 
 from __future__ import annotations
 

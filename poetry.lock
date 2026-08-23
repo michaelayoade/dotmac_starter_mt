@@ -668,7 +668,7 @@ url = "packages/dotmac-banking"
 [[package]]
 name = "dotmac-brand-profiles"
 version = "0.1.0a1"
-description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0033 § 2)"
+description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0057 § 2)"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]
@@ -705,7 +705,7 @@ url = "packages/dotmac-campaigns"
 [[package]]
 name = "dotmac-commercial-agreements"
 version = "0.1.0a1"
-description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0057 § 1)"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]
@@ -900,7 +900,7 @@ url = "packages/dotmac-customers"
 [[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a2"
-description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
+description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0057 § 3)"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]
@@ -1251,7 +1251,7 @@ url = "packages/dotmac-kernel"
 [[package]]
 name = "dotmac-licensing"
 version = "0.1.0a1"
-description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0033 § 2)"
+description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0057 § 2)"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]

@@ -141,7 +141,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # MIGRATION_OWNER` and this module landed in the same a77 change, and every
     # capability it consumes — `platform_tables` (a53), the prerequisite
     # contract (a56), `supported_plane_sets` (a61) — predates that allocation.
-    # Its three siblings from the same ADR-0033 cohort do NOT sit here; see
+    # Its three siblings from the same ADR-0057 cohort do NOT sit here; see
     # UNPUBLISHED_ALLOCATION_FLOORS below for why an allocation can fail to be
     # a floor.
     "dotmac-brand-profiles": "0.1.0a77",
@@ -289,7 +289,7 @@ CAPABILITY_RAISED_FLOORS = {
 # versions no installer can resolve. So they get a map that says the true
 # reason, which is this file's standing preference over a stretched one.
 #
-# The ADR-0033 cohort was built as four stacked pull requests, each bumping the
+# The ADR-0057 cohort was built as four stacked pull requests, each bumping the
 # kernel to carry its own ledger row: a74 (`cg`), a75 (`li`), a76 (`dc`), a77
 # (`bp`). Only the tip was releasable — a kernel release publishes ONE version,
 # and a74..a76 exist as changelog history rather than as artifacts, exactly as

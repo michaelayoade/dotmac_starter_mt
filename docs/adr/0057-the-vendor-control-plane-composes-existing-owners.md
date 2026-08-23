@@ -1,4 +1,11 @@
-# ADR-0033: The vendor control plane composes existing owners, and gains three new ones
+# ADR-0057: The vendor control plane composes existing owners, and gains three new ones
+
+> **Renumbered 2026-08-23.** This record was accepted as ADR-0033 on
+> 2026-08-19 and collided with ADR-0033 *Sales authority stops at an
+> accepted quote*, accepted 2026-08-17. Resolved chronologically — the same
+> rule applied to the ADR-0010/0011 collision on 2026-08-15 — so the earlier
+> record keeps the number. Every citation that meant THIS decision moved in
+> the same change; the sales record's citations were left untouched.
 
 **Status:** Accepted
 **Date:** 2026-08-19

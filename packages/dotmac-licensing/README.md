@@ -4,7 +4,7 @@ The **issuer** half of WS8: signed, versioned, revocable software-use authority
 derived from an active agreement's allocated entitlement.
 
 Extracted product-first from the vendor control plane's `licensing/` service
-under [ADR-0033](../../docs/adr/0033-the-vendor-control-plane-composes-existing-owners.md) § 2.
+under [ADR-0057](../../docs/adr/0057-the-vendor-control-plane-composes-existing-owners.md) § 2.
 Source inventory: [`vendor-cp-gap-sources.md`](../../docs/inventories/vendor-cp-gap-sources.md) § 2.
 Ownership record: [`EXTRACTION.toml`](EXTRACTION.toml).
 
