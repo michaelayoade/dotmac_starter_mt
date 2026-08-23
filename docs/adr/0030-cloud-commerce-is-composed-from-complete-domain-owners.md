@@ -376,6 +376,96 @@ registrant payload is sent:**
 This section is a PROPOSAL. It is not approved, and no registrant payload may
 leave Cloud until it is.
 
+## Amendment 2026-08-23 — one receivable owner and a distinct Collections input
+
+Michael accepted the implementation ruling that resolves §5e gaps G1/G2 and
+the duplicate money defect. It does not declare either module released or
+adopted, and it does not resolve the separate obligation-output or artifact-key
+questions.
+
+1. **Billing is the sole owner of `ReceivablePositionV1`.** Its identity carries
+   the explicit `Scope`, source owner/exposure/version, Billing account, opaque
+   subject and optional service. It publishes the already-derived
+   `collectible_receivable`, while retaining `available_credit` and
+   `prepaid_funding` as separate facts. It also carries service-period and
+   due-date provenance, completeness, source authority and projection mode.
+2. **Every public amount is `dotmac_kernel.money.Money`.** The candidate
+   `dotmac_billing.contracts.MoneyV1` is deleted. Persistence may retain exact
+   amount/currency/minor-unit columns, but those columns do not create another
+   value contract.
+3. **Billing owns financial state:** `open | partially_resolved | resolved |
+   cancelled`. `reversed` is not a steady state. Reversal, refund and chargeback
+   are immutable causal movements; their new version may reopen the position.
+   Collections owns its case lifecycle and closure reason, not this state.
+4. **Collections owns `ReceivableObservationV1`, not another position.** The
+   consuming assembly translates the Billing fact into this narrow peer input.
+   It contains the already-funded collectible amount and decision provenance,
+   never `available_credit`, `prepaid_funding` or the old
+   `funding_available` synonym. Neither module imports the other.
+5. **Authority dimensions stay separate.** `internal | provider_owned |
+   external_finance` says who owns the financial fact;
+   `authoritative | shadow` says whether this projection may drive a decision.
+   A field is never translated into the other.
+6. **Unknown or unverified due-date evidence fails closed.** The assembly must
+   preserve that status, and Collections cannot open/advance an automated case
+   from it. The same applies to incomplete or shadow observations and to an
+   advance exposure whose verified service period has not started.
+
+The producer→assembly→consumer conformance canary must prove this mapping while
+the import-independence gate proves that the mapping did not move into either
+module. ADR-0020 A2's separate requirement that Collections ship a platform
+plane is not decided by this amendment; a tenant-only package remains an
+explicit implementation conflict, not a reason to weaken this contract.
+
+**Implementation follow-up — 2026-08-23.** The unreleased
+`dotmac-collections` candidate now resolves that conflict: its first lineage
+contains explicit tenant and `platform_*` table sets, supports tenant-only,
+platform-only and combined selections, and dispatches the same typed service
+behavior from `TenantScope` or `PlatformScope` to the matching persistence and
+kernel idempotency plane. Tenant rows retain FORCE RLS; platform rows have no
+tenant column or RLS, are reachable by `platform_api`, are revoked from
+`app_user`, and have no cross-plane foreign keys. This completes the module
+shape only; it does not claim Sub, Vendor CP, Cloud or any production cutover.
+
+**Contract-completion follow-up — 2026-08-23.** Implementation exposed three
+ambiguities that the earlier amendment could not safely leave implicit. Michael's
+direction to complete the production Cloud track settles them as follows; this
+note amends the operative contract without rewriting the historical proposals.
+
+1. `ReceivablePositionV1` keeps the identity already specified by Billing:
+   `(scope, billing_account_id, currency)` at a posting-group source version. It
+   is the account aggregate and carries the three exact financial lanes. It
+   does **not** borrow `exposure_ref`, subject, service period or due-date
+   evidence from whichever invoice happened to sort first.
+2. Billing separately publishes `ReceivableExposureV1`, one immutable version
+   per affected issued invoice. It carries the stable document exposure,
+   subject/service, collection timing, service period, due-date evidence,
+   Billing-owned financial state and only the already-derived collectible
+   amount. The Cloud assembly translates this fact to Collections'
+   `ReceivableObservationV1`; the account position is not a Collections input.
+   Credit notes remain explicitly related to the invoice they credit, and
+   allocation, deallocation, credit, void and reversal paths republish every
+   affected exposure.
+3. The Subscriptions producer contract is named
+   `RatedObligationOutputV1`. `RecurringObligationDueV1` and
+   `subscriptions.recurring_obligation_due.v1` retire; they are not aliases.
+   Subscriptions owns that output, Billing owns `AcceptRatedObligationV1`, and
+   only an assembly may translate between them while supplying product-owned
+   account/subject/service links and frozen tax evidence.
+4. Official artifact creation and physical repair have different identities.
+   `RecordDocumentArtifactV1` is the one-time structural record for
+   `(scope, fact_id, fact_version, media_type)`; an identical payload replays
+   and a different payload conflicts. `RepairDocumentArtifactV1` must name the
+   exact current artifact, a replacement opaque file id and byte evidence, the
+   unchanged presentation-model digest and a declared reason. Repair appends a
+   new current relation and supersedes the former row in the same transaction.
+   A stale, withdrawn or semantically different repair is refused. This
+   replaces both contradictory draft key compositions: checksum-in-the-record
+   key could not repair identical bytes at a new file id, while an in-place
+   pointer update would erase the physical history.
+
+These rulings complete the three contract gates recorded in §5e. They do not
+release either package and do not establish a product adoption or deployment.
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It
@@ -783,7 +873,12 @@ three cannot be:
   compositions cannot both ship").
 - not to be published at all yet: `allocation` and `coverage` have no agreed
   shape, and §5's sentence listing them among the contracts to freeze is
-  amended accordingly.
+amended accordingly.
+
+The historical blocker is resolved by the two 2026-08-23 amendments above: one
+account/currency Billing position, one exposure-grained Collections input,
+kernel Money, preserved service/due evidence, Billing-owned financial state,
+one Subscriptions output name, and separate artifact-record and repair keys.
 
 `InvoiceArtifactReconciler` still has no module owner, and `cadence.py` must be
 struck from Billing's `source_paths` — it is recurrence, which §1 assigns to

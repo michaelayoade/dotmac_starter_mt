@@ -666,6 +666,25 @@ type = "directory"
 url = "packages/dotmac-banking"
 
 [[package]]
+name = "dotmac-billing"
+version = "0.1.0a1"
+description = "DotMac dual-plane operational receivables owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+alembic = ">=1.13"
+dotmac-kernel = ">=0.1.0a89"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-billing"
+
+[[package]]
 name = "dotmac-brand-profiles"
 version = "0.1.0a1"
 description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0057 § 2)"
@@ -701,6 +720,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-campaigns"
+
+[[package]]
+name = "dotmac-collections"
+version = "0.1.0a1"
+description = "DotMac dual-plane collections policy and case owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a89"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-collections"
 
 [[package]]
 name = "dotmac-commercial-agreements"
@@ -1859,6 +1896,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-sites"
+
+[[package]]
+name = "dotmac-subscriptions"
+version = "0.1.0a1"
+description = "DotMac dual-plane recurring commercial contracts and occurrences"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a89"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-subscriptions"
 
 [[package]]
 name = "dotmac-support-access"
@@ -4238,4 +4293,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b859707bea2e599d36959600fc138d6db4dd43de4f8a78082c254c50d26c34db"
+content-hash = "e022b0981d627ff75bbda6d61c15bf094129e3954e768d7558a1ea496e3ddd73"

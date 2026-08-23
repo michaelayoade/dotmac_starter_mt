@@ -1,0 +1,572 @@
+"""One service behavior on the platform plane; PostgreSQL proves both planes."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from dataclasses import replace
+from datetime import UTC, datetime
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+import pytest
+from dotmac_kernel.cache import PlatformScope, Scope
+from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
+from dotmac_kernel.modules import ModuleManifest
+from dotmac_subscriptions import (
+    BillingCadence,
+    CadenceAlignment,
+    CollectionTiming,
+    ContractLineInput,
+    EndContractVersionCommand,
+    EndOfMonthRule,
+    ExactAmount,
+    GenerateRecurringChargeCommand,
+    IntervalUnit,
+    OfferPriceInput,
+    ProrationPolicy,
+    PublishOfferVersionCommand,
+    RateBasis,
+    RecordSubscriptionContractVersionCommand,
+    SubscriptionConflictError,
+    SubscriptionDataError,
+    SubscriptionVocabularyRegistry,
+    TimerCancelResult,
+    TimerScheduleResult,
+    cadence_of,
+    effective_version_at,
+    end_contract_version,
+    generate_recurring_charge,
+    publish_offer_version,
+    record_contract_version,
+    unacknowledged_outputs,
+)
+from dotmac_subscriptions.models import (
+    PlatformOffer,
+    PlatformOfferVersion,
+    PlatformOfferVersionPrice,
+    PlatformRecurringChargeOccurrence,
+    PlatformSubscriptionContract,
+    PlatformSubscriptionContractLine,
+    PlatformSubscriptionContractVersion,
+)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+NOW = datetime(2026, 8, 18, tzinfo=UTC)
+
+
+@pytest.fixture
+def db() -> Iterator[Session]:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        execution_options={"schema_translate_map": {"mod_subscriptions": None}},
+    )
+    PlatformIdempotencyRecord.__table__.create(engine)
+    for model in (
+        PlatformOffer,
+        PlatformOfferVersion,
+        PlatformOfferVersionPrice,
+        PlatformSubscriptionContract,
+        PlatformSubscriptionContractVersion,
+        PlatformSubscriptionContractLine,
+        PlatformRecurringChargeOccurrence,
+    ):
+        model.__table__.create(engine)
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
+
+
+@pytest.fixture
+def registry() -> SubscriptionVocabularyRegistry:
+    return SubscriptionVocabularyRegistry.from_manifests(
+        (
+            ModuleManifest(
+                code="product",
+                version="1.0.0",
+                charge_models=("recurring_access",),
+                obligation_sources=("accepted_order_line",),
+            ),
+        )
+    )
+
+
+class FakeTimer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[UUID, datetime]] = []
+        self.cancel_calls: list[UUID] = []
+
+    def schedule(
+        self,
+        db: Session,
+        *,
+        scope: Scope,
+        contract_line_key: UUID,
+        due_at: datetime,
+        recorded_at: datetime,
+    ) -> TimerScheduleResult:
+        del db, scope, recorded_at
+        self.calls.append((contract_line_key, due_at))
+        return TimerScheduleResult(generation=1, due_at=due_at)
+
+    def cancel(
+        self,
+        db: Session,
+        *,
+        scope: Scope,
+        contract_line_key: UUID,
+        recorded_at: datetime,
+    ) -> TimerCancelResult:
+        del db, scope, recorded_at
+        self.cancel_calls.append(contract_line_key)
+        return TimerCancelResult(canceled=True)
+
+
+def _cadence(timing: CollectionTiming = CollectionTiming.advance) -> BillingCadence:
+    return BillingCadence(
+        rate_basis=RateBasis.fixed_per_service_period,
+        rate_unit=IntervalUnit.month,
+        rate_quantity=Decimal("1"),
+        service_interval_unit=IntervalUnit.month,
+        service_interval_count=1,
+        invoice_interval_unit=IntervalUnit.month,
+        invoice_interval_count=1,
+        collection_timing=timing,
+        alignment=CadenceAlignment.contract_anniversary,
+        timezone_name="Africa/Lagos",
+        end_of_month_rule=EndOfMonthRule.clamp_to_month_end,
+        proration_policy=ProrationPolicy.none,
+    )
+
+
+def _publish(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> tuple[UUID, PublishOfferVersionCommand]:
+    command = PublishOfferVersionCommand(
+        scope=PlatformScope(),
+        offer_id=None,
+        offer_code="access.standard",
+        offer_name="Standard access",
+        version=1,
+        prices=(
+            OfferPriceInput(
+                price_key="access",
+                charge_model_code="recurring_access",
+                unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
+                quantity=Decimal("1"),
+            ),
+        ),
+        effective_from=NOW,
+        effective_until=None,
+        source_code="accepted_order_line",
+        source_id=uuid4(),
+        source_version=1,
+        command_id=uuid4(),
+    )
+    result = publish_offer_version(db, command, registry=registry)
+    return result.offer_version_id, command
+
+
+def _contract_command(
+    offer_version_id: UUID,
+    *,
+    contract_id: UUID | None = None,
+    source_id: UUID | None = None,
+    line_key: UUID | None = None,
+    starts_at: datetime = NOW,
+    recorded_at: datetime = NOW,
+    idempotency_key: str = "contract:test:1",
+) -> RecordSubscriptionContractVersionCommand:
+    source_id = source_id or uuid4()
+    return RecordSubscriptionContractVersionCommand(
+        scope=PlatformScope(),
+        contract_id=contract_id,
+        source_code="accepted_order_line",
+        source_id=source_id,
+        source_version=1,
+        starts_at=starts_at,
+        ends_at=None,
+        currency="EUR",
+        cadence=_cadence(),
+        lines=(
+            ContractLineInput(
+                contract_line_key=line_key or uuid4(),
+                charge_model_code="recurring_access",
+                source_code="accepted_order_line",
+                source_id=source_id,
+                source_version=1,
+                description="Access",
+                product_link_ref="product:access:standard",
+                quantity=Decimal("1"),
+                unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
+                offer_version_id=offer_version_id,
+                offer_version=1,
+                entitlement_codes=("service.standard",),
+            ),
+        ),
+        actor="order-owner",
+        reason="accepted order",
+        recorded_at=recorded_at,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key=idempotency_key,
+    )
+
+
+def test_publish_contract_rate_and_replay_share_one_transactional_path(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, publish_command = _publish(db, registry)
+    assert (
+        publish_offer_version(db, publish_command, registry=registry).was_duplicate
+        is True
+    )
+
+    line_key = uuid4()
+    source_id = uuid4()
+    command = RecordSubscriptionContractVersionCommand(
+        scope=PlatformScope(),
+        contract_id=None,
+        source_code="accepted_order_line",
+        source_id=source_id,
+        source_version=1,
+        starts_at=NOW,
+        ends_at=None,
+        currency="EUR",
+        cadence=_cadence(),
+        lines=(
+            ContractLineInput(
+                contract_line_key=line_key,
+                charge_model_code="recurring_access",
+                source_code="accepted_order_line",
+                source_id=source_id,
+                source_version=1,
+                description="Access",
+                product_link_ref="product:access:standard",
+                quantity=Decimal("1"),
+                unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
+                offer_version_id=offer_version_id,
+                offer_version=1,
+                entitlement_codes=("service.standard",),
+            ),
+        ),
+        actor="order-owner",
+        reason="accepted order",
+        recorded_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key="contract:accepted-order:1",
+    )
+    timer = FakeTimer()
+    first = record_contract_version(db, command, registry=registry, timer=timer)
+    replay = record_contract_version(db, command, registry=registry, timer=timer)
+
+    assert replay == first.__class__(
+        contract_id=first.contract_id,
+        version_id=first.version_id,
+        version=1,
+        line_keys=(line_key,),
+        staged_entitlement_outputs=first.staged_entitlement_outputs,
+        replayed=True,
+    )
+    assert len(first.staged_entitlement_outputs) == 1
+    assert first.staged_entitlement_outputs[0].entitlement_codes == (
+        "service.standard",
+    )
+    assert len(timer.calls) == 1
+    assert (
+        effective_version_at(
+            db, scope=PlatformScope(), contract_id=first.contract_id, moment=NOW
+        )
+        == first.version_id
+    )
+
+    generate = GenerateRecurringChargeCommand(
+        scope=PlatformScope(),
+        contract_version_id=first.version_id,
+        contract_line_key=line_key,
+        period_index=0,
+        generation=1,
+        emitted_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+    )
+    occurrence = generate_recurring_charge(db, generate, registry=registry, timer=timer)
+    duplicate = generate_recurring_charge(db, generate, registry=registry, timer=timer)
+
+    assert occurrence.replayed is False
+    assert occurrence.staged_output.pre_tax_amount == ExactAmount(
+        Decimal("100.00"), "EUR", 2
+    )
+    assert duplicate.occurrence_id == occurrence.occurrence_id
+    assert duplicate.replayed is True
+    assert len(timer.calls) == 2
+    assert unacknowledged_outputs(db, scope=PlatformScope()) == (
+        occurrence.staged_output,
+    )
+
+    ended_at = datetime(2026, 9, 1, tzinfo=UTC)
+    ended = end_contract_version(
+        db,
+        EndContractVersionCommand(
+            scope=PlatformScope(),
+            contract_version_id=first.version_id,
+            ended_at=ended_at,
+            actor="contract-owner",
+            reason="commercial term ended",
+            command_id=uuid4(),
+        ),
+        timer=timer,
+    )
+    assert ended.replayed is False
+    assert ended.staged_entitlement_outputs[0].effective_from == ended_at
+    assert (
+        ended.staged_entitlement_outputs[0].supersedes_projection_id
+        == first.staged_entitlement_outputs[0].projection_id
+    )
+    assert timer.cancel_calls == [line_key]
+
+
+def test_same_offer_version_with_a_different_command_is_a_conflict(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, command = _publish(db, registry)
+
+    with pytest.raises(SubscriptionConflictError, match="already published"):
+        publish_offer_version(
+            db,
+            replace(command, command_id=uuid4()),
+            registry=registry,
+        )
+
+
+def test_contract_refuses_duplicate_charge_component_and_product_link(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    command = _contract_command(offer_version_id)
+    repeated = replace(command.lines[0], contract_line_key=uuid4())
+
+    with pytest.raises(SubscriptionDataError, match="cannot repeat"):
+        record_contract_version(
+            db,
+            replace(command, lines=(command.lines[0], repeated)),
+            registry=registry,
+            timer=FakeTimer(),
+        )
+
+
+@pytest.mark.parametrize("invalid_key", ["", "x" * 201])
+def test_contract_requires_a_bounded_idempotency_key(
+    db: Session,
+    registry: SubscriptionVocabularyRegistry,
+    invalid_key: str,
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+
+    with pytest.raises(SubscriptionDataError, match="Idempotency key"):
+        record_contract_version(
+            db,
+            _contract_command(offer_version_id, idempotency_key=invalid_key),
+            registry=registry,
+            timer=FakeTimer(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("actor", ""), ("actor", "   "), ("reason", ""), ("reason", "   ")],
+)
+def test_contract_requires_actor_and_reason_provenance(
+    db: Session,
+    registry: SubscriptionVocabularyRegistry,
+    field: str,
+    value: str,
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    command = _contract_command(offer_version_id)
+
+    with pytest.raises(SubscriptionDataError, match="actor"):
+        record_contract_version(
+            db,
+            replace(command, **{field: value}),
+            registry=registry,
+            timer=FakeTimer(),
+        )
+
+
+def test_contract_refuses_mixed_currency_lines(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    command = _contract_command(offer_version_id)
+
+    with pytest.raises(SubscriptionDataError, match="contract currency"):
+        record_contract_version(
+            db,
+            replace(
+                command,
+                lines=(
+                    replace(
+                        command.lines[0],
+                        unit_price=ExactAmount(Decimal("100.00"), "GBP", 2),
+                    ),
+                ),
+            ),
+            registry=registry,
+            timer=FakeTimer(),
+        )
+
+
+def test_contract_supersession_is_contiguous_and_preserves_line_lineage(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    line_key = uuid4()
+    source_id = uuid4()
+    first_command = _contract_command(
+        offer_version_id,
+        source_id=source_id,
+        line_key=line_key,
+    )
+    timer = FakeTimer()
+    first = record_contract_version(
+        db,
+        first_command,
+        registry=registry,
+        timer=timer,
+    )
+    boundary = datetime(2026, 9, 1, tzinfo=UTC)
+    second_command = replace(
+        _contract_command(
+            offer_version_id,
+            contract_id=first.contract_id,
+            source_id=source_id,
+            line_key=line_key,
+            starts_at=boundary,
+            recorded_at=boundary,
+            idempotency_key="contract:test:2",
+        ),
+        lines=(replace(first_command.lines[0], quantity=Decimal("2")),),
+    )
+    second = record_contract_version(
+        db,
+        second_command,
+        registry=registry,
+        timer=timer,
+    )
+
+    stored_first = db.get(PlatformSubscriptionContractVersion, first.version_id)
+    assert stored_first is not None
+    assert stored_first.state == "superseded"
+    assert stored_first.ends_at == boundary.replace(tzinfo=None)
+    assert second.version == 2
+    assert second.line_keys == (line_key,)
+    assert (
+        cadence_of(
+            db,
+            scope=PlatformScope(),
+            contract_version_id=second.version_id,
+        )
+        == _cadence()
+    )
+    assert (
+        effective_version_at(
+            db,
+            scope=PlatformScope(),
+            contract_id=first.contract_id,
+            moment=boundary,
+        )
+        == second.version_id
+    )
+
+
+def test_same_occurrence_identity_with_different_coverage_is_a_conflict(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    command = _contract_command(offer_version_id)
+    timer = FakeTimer()
+    contract = record_contract_version(
+        db,
+        command,
+        registry=registry,
+        timer=timer,
+    )
+    generate = GenerateRecurringChargeCommand(
+        scope=PlatformScope(),
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        period_index=0,
+        generation=1,
+        emitted_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+    )
+    generate_recurring_charge(db, generate, registry=registry, timer=timer)
+
+    with pytest.raises(SubscriptionConflictError, match="different"):
+        generate_recurring_charge(
+            db,
+            replace(
+                generate,
+                coverage=(NOW, datetime(2026, 8, 20, tzinfo=UTC)),
+                generation=2,
+                command_id=uuid4(),
+                correlation_id=uuid4(),
+            ),
+            registry=registry,
+            timer=timer,
+        )
+
+
+def test_corrupt_recorded_rating_fingerprint_fails_replay(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    timer = FakeTimer()
+    contract = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=timer,
+    )
+    generate = GenerateRecurringChargeCommand(
+        scope=PlatformScope(),
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        period_index=0,
+        generation=1,
+        emitted_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+    )
+    first = generate_recurring_charge(db, generate, registry=registry, timer=timer)
+    stored = db.get(PlatformRecurringChargeOccurrence, first.occurrence_id)
+    assert stored is not None
+    stored.request_fingerprint = "0" * 64
+    db.flush()
+
+    with pytest.raises(SubscriptionConflictError, match="fingerprint"):
+        generate_recurring_charge(db, generate, registry=registry, timer=timer)
+
+
+def test_occurrence_generation_requires_an_existing_contract_version(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    with pytest.raises(SubscriptionDataError, match="not found"):
+        generate_recurring_charge(
+            db,
+            GenerateRecurringChargeCommand(
+                scope=PlatformScope(),
+                contract_version_id=uuid4(),
+                contract_line_key=uuid4(),
+                period_index=0,
+                generation=1,
+                emitted_at=NOW,
+                command_id=uuid4(),
+                correlation_id=uuid4(),
+            ),
+            registry=registry,
+            timer=FakeTimer(),
+        )
