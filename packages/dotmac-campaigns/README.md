@@ -15,7 +15,7 @@ idempotency and outbox remain the corresponding universal owners.
 The complete source and retirement evidence is in
 [`EXTRACTION.toml`](EXTRACTION.toml) and
 [`docs/inventories/campaigns-sources.md`](../../docs/inventories/campaigns-sources.md).
-ADR-0032 owns the boundary and the Sub-first/Backoffice-second sequence.
+ADR-0056 owns the boundary and the Sub-first/Backoffice-second sequence.
 
 ## Public shape
 
