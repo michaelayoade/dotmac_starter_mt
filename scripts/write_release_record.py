@@ -28,9 +28,12 @@ mechanical rather than remembered.
 ## What it does NOT do
 
 It does not decide anything. It removes a row that a tag has already made
-false, and records digests read from that tag. It refuses when the tag does not
-exist, when the ledger row is missing (already recorded — that is a no-op, not
-an error), or when the declared version and the tag disagree.
+false, and records digests read from that tag. On a distribution's first
+release it also enrols that lineage in every migration-history map, using only
+the package identity and migration prefix carried by the reviewed release
+inputs. It refuses when the tag does not exist or when the declared version and
+the tag disagree. A missing ledger row is a no-op so a partial repair can
+converge.
 
 It is deliberately runnable BY HAND for repair: the same command that the
 workflow runs closes an older gap, which is how the a11 and a12 records were
@@ -146,19 +149,142 @@ def _rendered_entry(tag: str, distribution: str, commit: str, digests: dict) -> 
     return "\n".join(lines) + "\n"
 
 
+def _mapping_end(text: str, name: str) -> int:
+    """Index of one top-level mapping's closing brace.
+
+    The release-history module deliberately keeps these registries as literal
+    dictionaries so reviewers can inspect the complete claim. A column-zero
+    closing brace is therefore a load-bearing, narrow text seam rather than a
+    generic Python rewriter.
+    """
+    header = re.search(
+        rf"^{re.escape(name)}: [^\n=]+ = \{{\n", text, flags=re.MULTILINE
+    )
+    if header is None:
+        raise ReleaseRecordError(f"cannot find the {name} literal mapping")
+    closing = re.search(r"^}", text[header.end() :], flags=re.MULTILINE)
+    if closing is None:
+        raise ReleaseRecordError(f"cannot find the end of the {name} literal mapping")
+    return header.end() + closing.start()
+
+
+def _mapping_text(text: str, name: str) -> str:
+    header = re.search(
+        rf"^{re.escape(name)}: [^\n=]+ = \{{\n", text, flags=re.MULTILINE
+    )
+    if header is None:
+        raise ReleaseRecordError(f"cannot find the {name} literal mapping")
+    return text[header.start() : _mapping_end(text, name) + 1]
+
+
+def _insert_mapping_entry(text: str, name: str, entry: str) -> str:
+    if not entry.startswith("    ") or not entry.endswith("\n"):
+        raise ReleaseRecordError(f"invalid rendered entry for {name}")
+    at = _mapping_end(text, name)
+    return text[:at] + entry + text[at:]
+
+
+def _migration_prefix(digests: dict[str, str]) -> str:
+    prefixes: set[str] = set()
+    for filename, digest in digests.items():
+        match = re.fullmatch(r"([a-z][a-z0-9]*)_\d{4}_[a-z0-9_]+\.py", filename)
+        if match is None:
+            raise ReleaseRecordError(
+                f"cannot derive a migration prefix from released file {filename!r}"
+            )
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ReleaseRecordError(
+                f"released migration {filename!r} has a non-sha256 digest"
+            )
+        prefixes.add(match.group(1))
+    if len(prefixes) != 1:
+        raise ReleaseRecordError(
+            "first-release enrolment requires exactly one migration prefix; "
+            f"found {sorted(prefixes)}"
+        )
+    return next(iter(prefixes))
+
+
+def _first_release_entries(
+    *,
+    distribution: str,
+    tag: str,
+    commit: str,
+    digests: dict[str, str],
+    package_dir: str | None,
+    import_name: str | None,
+) -> dict[str, str]:
+    """Render deterministic enrolment rows for a distribution's first tag."""
+    if package_dir is None or import_name is None:
+        raise ReleaseRecordError(
+            f"{distribution} has no RELEASED_TAGS anchor; package_dir and "
+            "import_name are required for first-release enrolment"
+        )
+    expected_package_dir = f"packages/{distribution}"
+    expected_import_name = distribution.replace("-", "_")
+    if package_dir != expected_package_dir or import_name != expected_import_name:
+        raise ReleaseRecordError(
+            f"first-release identity mismatch for {distribution}: expected "
+            f"{expected_package_dir} / {expected_import_name}, got "
+            f"{package_dir} / {import_name}"
+        )
+    prefix = _migration_prefix(digests)
+    versions_path = f"{package_dir}/src/{import_name}/migrations/versions"
+    compact_path = f'    "{distribution}": (REPO_ROOT / "{versions_path}"),\n'
+    if len(compact_path.rstrip("\n")) <= 88:
+        distribution_entry = compact_path
+    else:
+        distribution_entry = (
+            f'    "{distribution}": (\n'
+            "        REPO_ROOT\n"
+            f'        / "{package_dir}"\n'
+            f'        / "src/{import_name}/migrations/versions"\n'
+            "    ),\n"
+        )
+    return {
+        "DISTRIBUTIONS": distribution_entry,
+        "LINEAGE_GLOBS": f'    "{distribution}": "{prefix}_*.py",\n',
+        "TAG_PREFIXES": f'    "{distribution}": "{distribution}-v",\n',
+        "RELEASED_TAGS": (
+            f"    # ── {distribution} ──\n"
+            + _rendered_entry(tag, distribution, commit, digests)
+        ),
+        "UNRELEASED": f'    "{distribution}": frozenset(),\n',
+    }
+
+
 def add_released_tag(
-    text: str, tag: str, distribution: str, commit: str, digests: dict[str, str]
+    text: str,
+    tag: str,
+    distribution: str,
+    commit: str,
+    digests: dict[str, str],
+    *,
+    package_dir: str | None = None,
+    import_name: str | None = None,
 ) -> tuple[str, bool]:
-    """Insert one `RELEASED_TAGS` entry, or report it is already present."""
+    """Insert one release entry, enrolling a first distribution when needed."""
     if f'"{tag}":' in text:
         return text, False
     name = re.escape(distribution)
     anchor = re.search(rf'\n    "{name}-v[^"]+": \(', text)
     if anchor is None:
-        raise ReleaseRecordError(
-            f"no existing {distribution} entry to anchor to in RELEASED_TAGS; "
-            "add the first one by hand so the file's ordering stays deliberate"
+        entries = _first_release_entries(
+            distribution=distribution,
+            tag=tag,
+            commit=commit,
+            digests=digests,
+            package_dir=package_dir,
+            import_name=import_name,
         )
+        for mapping, entry in entries.items():
+            if f'"{distribution}":' in _mapping_text(text, mapping):
+                raise ReleaseRecordError(
+                    f"{distribution} already appears in {mapping} but has no "
+                    "RELEASED_TAGS anchor; the migration guard is inconsistent"
+                )
+            text = _insert_mapping_entry(text, mapping, entry)
+        return text, True
     at = anchor.start() + 1
     entry = _rendered_entry(tag, distribution, commit, digests)
     return text[:at] + entry + text[at:], True
@@ -181,9 +307,12 @@ def write_record(
             f"written before the tag it describes ({failure})"
         ) from failure
 
+    ledger_text = LEDGER.read_text(encoding="utf-8")
+    new_ledger = ledger_text
+    module_text = RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    new_module = module_text
     changed: list[str] = []
 
-    ledger_text = LEDGER.read_text(encoding="utf-8")
     row = json.loads(ledger_text)["unpublished"].get(distribution)
     if row is not None:
         declared = row.get("declared")
@@ -193,25 +322,35 @@ def write_record(
                 f"{version!r} was published; the row describes a different "
                 "version and removing it would erase a live exemption"
             )
-        new_text, removed = remove_ledger_row(ledger_text, distribution)
+        new_ledger, removed = remove_ledger_row(ledger_text, distribution)
         if removed:
-            json.loads(new_text)  # never leave the ledger unparseable
-            LEDGER.write_text(new_text, encoding="utf-8")
+            json.loads(new_ledger)  # never leave the ledger unparseable
             changed.append(f"removed the {distribution} publication-ledger row")
 
     if package_dir and import_name:
         digests = migration_digests(tag, package_dir, import_name)
         if digests:
-            module_text = RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
             new_module, added = add_released_tag(
-                module_text, tag, distribution, commit, digests
+                module_text,
+                tag,
+                distribution,
+                commit,
+                digests,
+                package_dir=package_dir,
+                import_name=import_name,
             )
             if added:
-                RELEASED_TAGS_MODULE.write_text(new_module, encoding="utf-8")
                 changed.append(
                     f"recorded {tag} in RELEASED_TAGS "
                     f"({len(digests)} migration digest(s) read from the tag)"
                 )
+
+    # Validate every premise before either file changes. A refused first
+    # enrolment must not leave a half-repair that hides the stale ledger row.
+    if new_ledger != ledger_text:
+        LEDGER.write_text(new_ledger, encoding="utf-8")
+    if new_module != module_text:
+        RELEASED_TAGS_MODULE.write_text(new_module, encoding="utf-8")
 
     return changed
 

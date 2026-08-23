@@ -14,6 +14,8 @@ release workflow immediately after tagging:
 - it never removes a row describing a DIFFERENT version;
 - it is idempotent, so a re-run after a partial repair converges;
 - it edits the JSON as text, so the ledger's prose survives untouched.
+- it enrols every migration-history map on a distribution's first release;
+- it validates both record files before writing either one.
 
 The digest half is proven against a real published tag rather than a fixture:
 a hand-built record already in `RELEASED_TAGS` is the oracle, and the writer
@@ -72,11 +74,7 @@ def _mapping_keys(source: str, name: str) -> set[str]:
         and node.target.id == name
     )
     assert isinstance(assignment.value, ast.Dict)
-    return {
-        ast.literal_eval(key)
-        for key in assignment.value.keys
-        if key is not None
-    }
+    return {ast.literal_eval(key) for key in assignment.value.keys if key is not None}
 
 
 # ── The digest path, against a real tag ─────────────────────────────────────
@@ -331,7 +329,8 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
     assert tag in _mapping_keys(updated, "RELEASED_TAGS")
     assert '"dotmac-nonesuch": "ns_*.py"' in updated
     assert '"dotmac-nonesuch": "dotmac-nonesuch-v"' in updated
-    assert 'packages/dotmac-nonesuch/src/dotmac_nonesuch/migrations/versions' in updated
+    assert "packages/dotmac-nonesuch" in updated
+    assert "dotmac_nonesuch/migrations/versions" in updated
 
     unchanged, added_again = writer.add_released_tag(
         updated,
@@ -342,6 +341,18 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
     )
     assert not added_again
     assert unchanged == updated
+
+    long_entry = writer._first_release_entries(
+        distribution="dotmac-operational-escalations",
+        tag="dotmac-operational-escalations-v0.1.0a1",
+        commit="abcdef12",
+        digests={"oe_0001_escalation_policy.py": "b" * 64},
+        package_dir="packages/dotmac-operational-escalations",
+        import_name="dotmac_operational_escalations",
+    )["DISTRIBUTIONS"]
+    assert max(map(len, long_entry.splitlines())) <= 88
+    assert '/ "packages/dotmac-operational-escalations"' in long_entry
+    assert '/ "src/dotmac_operational_escalations/migrations/versions"' in long_entry
 
 
 def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
@@ -365,18 +376,18 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
         writer,
         "migration_digests",
         lambda *_args: {
-            "pm_0001_payment_intents.py": "a" * 64,
+            "oe_0001_escalation_policy.py": "a" * 64,
             "wrong_0002_second_lineage.py": "b" * 64,
         },
     )
 
     with pytest.raises(writer.ReleaseRecordError) as refusal:
         writer.write_record(
-            distribution="dotmac-payments",
+            distribution="dotmac-operational-escalations",
             version="0.1.0a1",
-            tag="dotmac-payments-v0.1.0a1",
-            package_dir="packages/dotmac-payments",
-            import_name="dotmac_payments",
+            tag="dotmac-operational-escalations-v0.1.0a1",
+            package_dir="packages/dotmac-operational-escalations",
+            import_name="dotmac_operational_escalations",
         )
 
     assert "one migration prefix" in str(refusal.value)
