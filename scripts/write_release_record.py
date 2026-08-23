@@ -230,9 +230,19 @@ def _first_release_entries(
         )
     prefix = _migration_prefix(digests)
     versions_path = f"{package_dir}/src/{import_name}/migrations/versions"
+    # Three tiers, because the generated file is format-checked in CI and a
+    # record PR that fails `ruff format --check` blocks a release that has
+    # ALREADY published its wheel. Ruff joins whatever fits, so emitting the
+    # widest split unconditionally is not "safe" — it is wrong for any name
+    # short enough to fit the middle form, which is what `dotmac-billing` hit.
+    split_operand = (
+        f'        REPO_ROOT / "{package_dir}" / "src/{import_name}/migrations/versions"'
+    )
     compact_path = f'    "{distribution}": (REPO_ROOT / "{versions_path}"),\n'
     if len(compact_path.rstrip("\n")) <= 88:
         distribution_entry = compact_path
+    elif len(split_operand) <= 88:
+        distribution_entry = f'    "{distribution}": (\n{split_operand}\n    ),\n'
     else:
         distribution_entry = (
             f'    "{distribution}": (\n'

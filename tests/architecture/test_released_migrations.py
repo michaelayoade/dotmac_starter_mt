@@ -187,6 +187,9 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-subscriptions"
         / "src/dotmac_subscriptions/migrations/versions"
     ),
+    "dotmac-billing": (
+        REPO_ROOT / "packages/dotmac-billing" / "src/dotmac_billing/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -210,6 +213,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-operational-escalations": "oe_*.py",
     "dotmac-service-changes": "sch_*.py",
     "dotmac-subscriptions": "su_*.py",
+    "dotmac-billing": "bi_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -230,6 +234,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-operational-escalations": "dotmac-operational-escalations-v",
     "dotmac-service-changes": "dotmac-service-changes-v",
     "dotmac-subscriptions": "dotmac-subscriptions-v",
+    "dotmac-billing": "dotmac-billing-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -956,6 +961,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-billing ──
+    "dotmac-billing-v0.1.0a1": (
+        "dotmac-billing",
+        "92a1626b",
+        {
+            "bi_0001_billing.py": (
+                "f82a962e7c0745cf11e2c8187042a5af412dd80a254be5b2e0975d0c7aa36373"
+            ),
+        },
+    ),
 }
 
 
@@ -1035,6 +1050,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
+    "dotmac-billing": frozenset(),
 }
 
 

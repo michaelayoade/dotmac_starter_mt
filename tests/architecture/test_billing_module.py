@@ -27,6 +27,7 @@ from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import ForeignKeyConstraint
 
 from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+from tests.architecture import test_released_migrations as released_migrations
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-billing"
@@ -607,11 +608,21 @@ def test_runtime_version_and_authorized_kernel_floor_agree() -> None:
         package["tool"]["poetry"]["dependencies"]
     )
 
-    publication = json.loads(
+    assert re.fullmatch(r"0\.1\.0a\d+", declared)
+
+    # Published on 2026-08-23, so the excusing row is GONE rather than saying
+    # `never-published`. Absence alone would also be true of a distribution
+    # nobody ever declared, so the positive evidence is the released-tag entry:
+    # a row and a tag are mutually exclusive, and this asserts which side it is
+    # on rather than merely that one side is empty.
+    unpublished = json.loads(
         (REPO_ROOT / "docs/inventories/declared-publication-baseline.json").read_text(
             encoding="utf-8"
         )
-    )["unpublished"]["dotmac-billing"]
-    assert publication["declared"] == declared
-    assert publication["state"] == "never-published"
-    assert re.fullmatch(r"0\.1\.0a\d+", declared)
+    )["unpublished"]
+    assert "dotmac-billing" not in unpublished
+    released = {
+        tag: distribution
+        for tag, (distribution, *_rest) in released_migrations.RELEASED_TAGS.items()
+    }
+    assert released.get(f"dotmac-billing-v{declared}") == "dotmac-billing"
