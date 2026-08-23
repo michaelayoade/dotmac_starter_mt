@@ -444,6 +444,19 @@ packages/dotmac-people/          optional tenant employment directory
                  BUILT AND TESTED HERE, NOT COMPOSED by this reference
                  assembly. No ERP identity, payroll, attendance, finance,
                  integration, notification or persisted vacancy cache ports.
+packages/dotmac-party/           optional tenant Party business context
+  pyproject.toml                 distribution dotmac-party; audit-complete,
+  EXTRACTION.toml                Sub is the qualifying source and first cutover;
+                                 Backoffice is a candidate second consumer
+  src/dotmac_party/              concurrent PartyRole rows, role-to-role
+                 relationships, person-to-organization memberships, contact
+                 points, external-reference provenance, open vocabulary
+                 registry, typed services, manifest, and independent `pa`
+                 lineage in `mod_party`. Tenant plane only, forced RLS, linked
+                 to kernel Party through `party_person_catalog.v1`. BUILT AND
+                 TESTED HERE, NOT COMPOSED or released. Owns no Party identity,
+                 customer/contact table, Account, auth, RBAC, conversation,
+                 delivery, or product lifecycle.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1261,6 +1274,11 @@ made concrete — every model has exactly one declared owner.
 | `Party` | `parties` | core | native (spec amendment 2026-07-17; supersedes the earlier bare `Person`, which was `dotmac_starter`-derived) |
 | `PartyPerson` | `party_persons` | core | native (spec amendment 2026-07-17) |
 | `PartyOrganization` | `party_organizations` | core | native (spec amendment 2026-07-17) |
+| `PartyRole` | `mod_party.party_roles` | `dotmac-party` optional module | Product-first from Sub's temporal business-capacity owner, corrected to direct tenancy/RLS and an open product-declared `role_type`. A customer, subscriber, reseller, vendor, staff member or contact is a capacity row, never another identity table or RBAC grant (ADR-0019). |
+| `PartyRelationship` | `mod_party.party_relationships` | `dotmac-party` optional module | Directional PartyRole-to-PartyRole fact. This resolves Sub's bare Party-to-Party deviation so the target capacity is exact; it carries no access scope and never grants permission. |
+| `PartyMembership` | `mod_party.party_memberships` | `dotmac-party` optional module | Person-Party to Organization-Party context with declared type, lifecycle, validity and bounded `access_scope`. The authorization owner may consume that fact; the row itself is not a grant. |
+| `PartyContactPoint` | `mod_party.party_contact_points` | `dotmac-party` optional module | Reachability evidence with product-declared channel normalization, provider/account/immutable-subject scope for social identity, primary designation, and separate verification/consent facts. Values are unique only per Party/channel/scope and never identity proof. |
+| `PartyExternalReference` | `mod_party.party_external_references` | `dotmac-party` optional module | Tenant-scoped, source-labelled import/reconciliation provenance. The same upstream identifier may occur in different tenants; no credential, secret, fallback lookup authority or identity decision belongs here. |
 | `Role` | `roles` | core | dotmac_sub (`app/models/rbac.py`, tenant-adapted) |
 | `PartyRoleGrant` | `party_role_grants` | core | dotmac_sub (`app/models/rbac.py::PersonRole`, tenant-adapted + renamed for Party) |
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |

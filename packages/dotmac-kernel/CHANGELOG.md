@@ -6,6 +6,19 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a73 — 2026-08-19
+
+Allocates the independent tenant Party-context lineage. Kernel Party remains
+the identity, authentication, session, and RBAC root; the optional module owns
+only business context attached to that identity.
+
+### Added
+
+- `PARTY_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_party`,
+  revision prefix `pa`, branch label `party`. The allocation supports the
+  product-first `dotmac-party` candidate without moving `parties`, credentials,
+  sessions, or role grants out of the kernel.
+
 ## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration

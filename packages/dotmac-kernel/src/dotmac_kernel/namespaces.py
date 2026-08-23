@@ -624,6 +624,18 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-party` — the optional tenant Party-context owner. Kernel Party stays
+# the identity root; this lineage owns only business capacities, exact
+# role-to-role relationships, organization memberships, contact-point evidence,
+# and external-reference provenance. `pa` is permanently reserved to this
+# lineage and `mod_party` keeps the owner legible in a catalog dump.
+PARTY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="party",
+    prefix="pa",
+    branch_label="party",
+    db_schema=module_schema("party"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +651,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    PARTY_MIGRATION_OWNER,
 )
 
 
@@ -983,6 +996,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "PARTY_MIGRATION_OWNER",
     "PEOPLE_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
