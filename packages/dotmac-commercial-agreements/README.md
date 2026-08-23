@@ -5,7 +5,7 @@ operator and a counterparty: its identity, its immutable accepted snapshot, its
 evidence-bound lifecycle, and the append-only record of every transition.
 
 Extracted product-first from the vendor control plane's `contracts/` service
-under [ADR-0033](../../docs/adr/0033-the-vendor-control-plane-composes-existing-owners.md) § 1.
+under [ADR-0057](../../docs/adr/0057-the-vendor-control-plane-composes-existing-owners.md) § 1.
 Source inventory: [`vendor-cp-gap-sources.md`](../../docs/inventories/vendor-cp-gap-sources.md) § 1.
 Ownership record: [`EXTRACTION.toml`](EXTRACTION.toml).
 
@@ -91,7 +91,7 @@ view = approve(db, ApproveCommand("cmd-3", view.id, ApprovalEvidence(
 ## Composition
 
 - **Platform plane only.** `tables=()`; the vendor control plane is the one
-  consumer that exists today (ADR-0023, ADR-0033 § 7). No tenant plane is
+  consumer that exists today (ADR-0023, ADR-0057 § 7). No tenant plane is
   declared for later use.
 - **Imports no sibling module.** `dotmac-approvals` and
   `dotmac-entitlement-allocation` are consumed and produced as *values* through

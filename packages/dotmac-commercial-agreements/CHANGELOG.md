@@ -8,7 +8,7 @@ changes, each called out here.
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of the vendor control plane's
-`contracts/` service (ADR-0033 § 1).
+`contracts/` service (ADR-0057 § 1).
 
 ### Added
 
@@ -28,7 +28,7 @@ First release. Product-first extraction of the vendor control plane's
 
 ### Changed from the source implementation
 
-- `pending_approval` is renamed `proposed` (ADR-0033's vocabulary). Safe here
+- `pending_approval` is renamed `proposed` (ADR-0057's vocabulary). Safe here
   because this is a greenfield lineage: no deployment has stored the old value
   under `mod_agreements`.
 - Approval is EVIDENCE, not a sibling import. The source called

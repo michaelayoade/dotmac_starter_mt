@@ -4,7 +4,7 @@ The reusable owner of **brand profile data** — what lets the same released
 artifact appear as Dotmac Academy and as NDIC Academy through approved profiles.
 
 Extracted product-first from `dotmac_sub`'s `BrandProfile` (897 LOC, production)
-under [ADR-0033](../../docs/adr/0033-the-vendor-control-plane-composes-existing-owners.md) § 2.
+under [ADR-0057](../../docs/adr/0057-the-vendor-control-plane-composes-existing-owners.md) § 2.
 Ownership record: [`EXTRACTION.toml`](EXTRACTION.toml).
 
 ## What it is not

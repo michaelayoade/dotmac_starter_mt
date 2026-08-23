@@ -4,7 +4,7 @@ Provisions its own scratch database and composes the module's lineage explicitly
 because the reference assembly deliberately does not compose `dotmac-licensing`.
 For this module that omission is stronger than the usual "no consumer here": a
 data plane installing licence ISSUANCE would put the thing that decides what a
-deployment may do inside the deployment it decides about (ADR-0033 § 7).
+deployment may do inside the deployment it decides about (ADR-0057 § 7).
 
 **On the platform plane the REVOKE is the isolation**, checked as strictly as a
 policy is on the tenant side (hard rule 27), in both directions:

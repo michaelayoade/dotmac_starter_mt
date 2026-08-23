@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "dotmac-commercial-agreements"
 version = "0.1.0a1"
-description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0057 § 1)"
 authors = ["DotMac"]
 readme = "README.md"
 packages = [{ include = "dotmac_commercial_agreements", from = "src" }]
