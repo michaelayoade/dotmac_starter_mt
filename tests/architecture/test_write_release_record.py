@@ -362,7 +362,22 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
     writer = _writer()
     ledger = tmp_path / "declared-publication-baseline.json"
     released = tmp_path / "test_released_migrations.py"
-    ledger.write_text(_ledger_text(writer), encoding="utf-8")
+    ledger.write_text(
+        json.dumps(
+            {
+                "unpublished": {
+                    "dotmac-nonesuch": {
+                        "declared": "1.0.0",
+                        "reason": "synthetic first-release atomicity fixture",
+                        "state": "never-published",
+                    }
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     released.write_text(
         writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8"), encoding="utf-8"
     )
@@ -376,18 +391,18 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
         writer,
         "migration_digests",
         lambda *_args: {
-            "oe_0001_escalation_policy.py": "a" * 64,
+            "ns_0001_nonesuch.py": "a" * 64,
             "wrong_0002_second_lineage.py": "b" * 64,
         },
     )
 
     with pytest.raises(writer.ReleaseRecordError) as refusal:
         writer.write_record(
-            distribution="dotmac-operational-escalations",
-            version="0.1.0a1",
-            tag="dotmac-operational-escalations-v0.1.0a1",
-            package_dir="packages/dotmac-operational-escalations",
-            import_name="dotmac_operational_escalations",
+            distribution="dotmac-nonesuch",
+            version="1.0.0",
+            tag="dotmac-nonesuch-v1.0.0",
+            package_dir="packages/dotmac-nonesuch",
+            import_name="dotmac_nonesuch",
         )
 
     assert "one migration prefix" in str(refusal.value)
