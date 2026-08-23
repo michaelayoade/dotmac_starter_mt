@@ -27,9 +27,30 @@
 # indistinguishable, at a glance, from a green run with one.
 #
 # So the run goes RED. The failure message states plainly that the artifact IS
-# published and tagged — nobody should re-run the publish — and names the
-# command that closes the gap. "Tag exists, record missing" is now visible in
-# the place people already look.
+# published and tagged — nobody should re-run the publish — names the command
+# that closes the gap, and links the ready-made pull-request page for the branch
+# it has already pushed. "Tag exists, record missing" is now visible in the
+# place people already look.
+#
+# PROVEN, not hypothetical. The first real end-to-end run was the kernel 0.1.0a92
+# release (run 32617583628, 2026-08-23). This script ran, removed the ledger row
+# correctly, pushed `chore/record-dotmac-kernel-0.1.0a92` — and could not open the
+# pull request:
+#
+#   pull request create failed: GraphQL: GitHub Actions is not permitted to
+#   create or approve pull requests (createPullRequest)
+#
+# It then exited 0. The step reported success, the job was green, the run was
+# green, and the record reached `main` only because a human noticed and wrote it
+# by hand. That is the whole failure class, reproduced by the automation built to
+# end it.
+#
+# NOTE the root cause is a REPOSITORY SETTING, not a token scope: Settings →
+# Actions → General → Workflow permissions → "Allow GitHub Actions to create and
+# approve pull requests". Until that is enabled this script will always reach
+# `give_up`, which is now loud and leaves a pushed branch one click from a pull
+# request. Enabling it also lets Actions approve pull-request REVIEWS, which is a
+# separate decision worth making deliberately — see docs/CONTROL_EXCEPTIONS.md.
 set -uo pipefail
 
 DISTRIBUTION=""
@@ -64,6 +85,10 @@ fi
 give_up() {
   echo "::error::the ${TAG} release record was NOT opened: $1"
   echo "::error::"
+  echo "::error::The branch may already carry the correct edits. Check, and if"
+  echo "::error::so open it directly:"
+  echo "::error::  ${COMPARE_URL}"
+  echo "::error::"
   echo "::error::DO NOT RE-RUN THE PUBLISH. ${DISTRIBUTION} ${VERSION} is already"
   echo "::error::published and tagged; the artifact is fine and this failure is"
   echo "::error::bookkeeping only. main is RED until the record lands."
@@ -76,6 +101,7 @@ give_up() {
 }
 
 BRANCH="chore/record-${DISTRIBUTION}-${VERSION}"
+COMPARE_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-michaelayoade/dotmac_starter_mt}/pull/new/${BRANCH}"
 
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"

@@ -223,6 +223,12 @@ def test_an_unopened_record_fails_the_run_rather_than_warning() -> None:
     # ...and name the manual repair, since that is what the reader must do.
     assert "${MANUAL}" in handler
 
+    # ...and link the pull-request page for the branch it already pushed. The
+    # proven instance (kernel a92, run 32617583628) failed at exactly this
+    # step: the edits were correct and the branch was pushed, so the gap was
+    # one click wide and nothing said where to click.
+    assert "${COMPARE_URL}" in handler
+
 
 def test_the_only_successful_exits_are_a_record_opened_or_already_complete() -> None:
     """Two success paths, both meaning the record EXISTS. Any third would be a

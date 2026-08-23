@@ -77,3 +77,66 @@ gh api repos/<owner>/<repo>/actions/runs/<run_id>/pending_deployments \
 
 must report `false`. That check is the acceptance test; today it reports
 `true`.
+
+---
+
+## 2026-08-23 — the release-record automation failed silently on its first run
+
+**Control:** every publication writes its record in the same change
+(`AGENTS.md` § Process; the five gates in `test_declared_publication.py` and
+`test_released_migrations.py`).
+
+**What happened.** The kernel `0.1.0a92` release
+([run 32617583628](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32617583628))
+was the first end-to-end use of `scripts/open_release_record_pr.sh` (#357). It
+ran, removed the ledger row correctly, pushed
+`chore/record-dotmac-kernel-0.1.0a92` — and could not open the pull request:
+
+```
+pull request create failed: GraphQL: GitHub Actions is not permitted to
+create or approve pull requests (createPullRequest)
+```
+
+It then **exited 0**. The step reported success, the job was green, the run was
+green. The record reached `main` only because a human noticed and hand-wrote a
+replacement.
+
+**Why it happened.** Two independent defects, and both had to be fixed:
+
+1. **The wrapper treated "could not open the record" as a warning.** That was a
+   deliberate choice, argued at the time on the grounds that the artifact is
+   already published so the run should not report a successful publication as
+   failed. It was wrong: it put correctness back on somebody reading a warning
+   inside a green run, which is the failure class the script exists to end.
+   Michael identified this before the instance occurred; the instance is the
+   proof. Fixed: `give_up` exits 1.
+2. **A repository setting blocks Actions from creating pull requests.**
+   *Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
+   to create and approve pull requests".* This is not a token scope and cannot
+   be granted from the workflow file. Until it is enabled, every release will
+   reach `give_up` — now loudly, with the pushed branch one click from a pull
+   request.
+
+**Cost.** No incorrect artifact. `main` was red for roughly two hours between
+the a92 tag and the hand-written record, and every open branch inherited the
+five failures during that window — each presenting as that branch being broken.
+
+**Status:** partially remediated.
+
+| # | Action | Owner | State |
+|---|---|---|---|
+| 1 | `give_up` fails the run, links the ready-made pull-request page | this change | done |
+| 2 | Guard pinning that no third success path can appear | this change | done |
+| 3 | Enable "Allow GitHub Actions to create and approve pull requests" | Michael | **open** |
+
+Item 3 carries a real trade-off and should be decided rather than defaulted:
+the same setting that permits *creating* a pull request also permits Actions to
+*approve* pull-request reviews. That is a different control from
+protected-environment approval (2026-08-22 above), but it points the same way —
+so if it is enabled, branch protection should require an approving review from
+someone other than the workflow actor.
+
+The alternative is to leave it disabled and accept one manual click per
+release: the branch is pushed with correct edits and the run is red until the
+pull request exists. That is a defensible position, and it is the state this
+change leaves the repository in.
