@@ -114,6 +114,47 @@ shadow_and_drift = "Vendor CP has no old financial writer: preview one real cont
 local_copy_retirement = "Vendor CP has no local financial owner to retire and may add none. Sub carries two-directional ratchets over invoice/credit-note lifecycle and numbering callers; obligation/rating/tax writers; settlement/allocation/refund/reversal writers; posting groups; mutable/direct balance paths; credit/deposit/adjustment writers; tax/FX decision paths; provider-event money consequences (retire to Integrator); and the invoice artifact relation. Counts fail on rise or unreviewed fall and reach zero before deletion. Historical rows remain labelled read-only evidence, never a fallback writer. ERP and Integrator are read-only integration evidence in this programme and retire nothing to Billing."
 next_action = "Validate this receivable-contract repair on Observer and in Git-hosted CI at one exact committed revision. The module now floors at the published a89 allocation release and uses kernel Money; it remains unallowlisted and never-published. After separate release authorization, publish and registry-verify dotmac-billing 0.1.0a1, then refresh adopter locks and repeat clean-install gates. Production deployment, authority switching, legacy deletion and destructive retirement remain separately authorized and out of scope."
 
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "a9da920926a9d9212a8cf03a4744b48a1d4e14f2"
+evidence_paths = [
+  "app/services/billing/invoices.py",
+  "app/services/billing/credit_notes.py",
+  "app/services/billing/payments.py",
+  "app/services/billing/customer_subledger.py",
+]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "2749ec5396cbbd7a1132b394e85855a1d133a7cd"
+evidence_paths = [
+  "app/services/finance/coverage.py",
+  "app/models/finance/tax/tax_transaction.py",
+  "app/models/finance/core_fx/exchange_rate.py",
+]
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+evidence_paths = [
+  "src/vendor_cp/offers/models.py",
+  "src/vendor_cp/contracts/models.py",
+  "src/vendor_cp/accounts/models.py",
+]
+
+[[product_writers]]
+product = "dotmac_integrator"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "35167813c83ab0ec29c683259ad31479503d812f"
+evidence_paths = []
+
 [[source_dispositions]]
 path = "dotmac_sub:app/services/billing/cadence.py"
 disposition = "excluded"
