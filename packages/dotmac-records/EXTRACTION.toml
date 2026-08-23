@@ -29,7 +29,6 @@ source_paths = [
   "dotmac_erp:app/models/people/hr/handbook.py",
   "dotmac_sub:app/models/legal.py",
   "dotmac_sub:app/services/account_deletion.py",
-  "dotmac_sub:app/services/web_system_restore_tool.py",
   "dotmac_crm:app/models/legal.py",
   "dotmac_vendor_control_plane:docs/design/domain-foundation.md",
   "dotmac_starter_mt:docs/adr/0022-files-own-stored-bytes-not-domain-meaning.md",
@@ -47,11 +46,10 @@ contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/documents-records-sources.md",
-  "docs/inventories/subscriber-account-disposition-sources.md",
   "docs/adr/0049-documents-own-controlled-versions-records-own-declared-evidence.md",
 ]
 composition_boundary = "ADR-0024/0033: each product installs its own tenant-only re lineage. Records imports the kernel but no Documents/Files/Approvals/Timers/product package. Sources arrive as typed opaque snapshots and versioned observations; outputs are timer requests, disposition decisions and exact Files authorizations. No cross-application database, module FK or fallback writer."
 first_cutover = "ERP is the first declaration candidate because its HR and finance attachment surfaces create the clearest compliance demand, but only after a checked-in writer inventory identifies every current retention/deletion/hold path. Sub follows as independent reuse proof. No existing product is credited as a qualifying implementation source."
 shadow_and_drift = "ERP replays exact declarations and domain trigger events into a consequence-free shadow; compare source/file/schedule snapshots, calculated dates, active-hold sets and eligibility fingerprints. Destructive execution stays disabled. The last full-column comparison, ADR-0031 authority switch and locks over every legacy retention writer occur together; after cutover, drift repair replays authoritative observations into Records rather than writing parallel state."
 local_copy_retirement = "For each adopted ERP domain, remove local retention/hold/disposition columns, jobs and deletion decisions after the sealed switch and rollback window; the domain keeps attachment/business meaning and a Records deletion gate. A two-directional caller/table ratchet reaches zero. Sub repeats per domain. Files never gains a retention fallback and Records never writes source-domain lifecycle."
-next_action = "Sub's account-disposition inventory is DONE (docs/inventories/subscriber-account-disposition-sources.md, measured at dotmac_sub@883a0ff1a): retention is one unversioned integer setting with no record series, schedule version, trigger observation, legal hold, approval or disposition evidence, and `purge_expired_from_recovery_queue` DESTROYS NOTHING \u2014 it stamps a flag whose only effect is that restore then refuses, while the code's own docstring and comment claim a personal-data purge that exists nowhere. Adoption therefore implements destruction rather than replacing it, and needs characterization tests first because no test exercises the deletion, restore or purge paths at all. Complete exact-commit Observer validation, then write ERP's retention/deletion writer inventory and cutover plan. Keep kernel a84 and Records a1 unpublished until package, lineage and adopter gates are green; keep destructive execution disabled until one sealed product cutover."
+next_action = "Complete exact-commit Observer validation, then write ERP's retention/deletion writer inventory and cutover plan. Keep kernel a84 and Records a1 unpublished until package, lineage and adopter gates are green; keep destructive execution disabled until one sealed product cutover."

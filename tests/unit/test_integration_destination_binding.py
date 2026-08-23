@@ -52,14 +52,12 @@ from dotmac_integration import (
     ProductPortDescriptorInvalid,
     ProductPortDescriptorSnapshot,
     UntrustedDestination,
-    capability_bindings_for,
     corroborate,
     destination_client,
     establish_destination,
     install_destination_profiles,
     product_port_descriptor_digest,
     reconcile_product_port_descriptor,
-    reconcile_product_port_descriptor_for_capability,
     require_corroborated,
     require_profile,
     resolve_destination,
@@ -153,8 +151,6 @@ def _bound(
     scope_json: dict[str, object] | None = None,
     capability: str = CAPABILITY,
     contract_version: int = 1,
-    installation_state: str = "enabled",
-    binding_state: str = "enabled",
 ) -> CapabilityBinding:
     """An installation + config revision + binding + established destination.
 
@@ -172,7 +168,7 @@ def _bound(
         manifest_digest="d" * 64,
         name=f"primary-{uuid.uuid4().hex[:8]}",
         environment="production",
-        state=installation_state,
+        state="enabled",
     )
     db.add(installation)
     db.flush()
@@ -200,7 +196,7 @@ def _bound(
         id=uuid.uuid4(),
         installation_id=installation.id,
         capability_id=capability,
-        state=binding_state,
+        state="enabled",
         scope_json=scope_json,
     )
     db.add(binding)
@@ -270,76 +266,6 @@ def test_product_descriptor_reconciler_is_idempotent_and_resolvable(
         ).product_port
         == descriptor
     )
-
-
-def test_capability_wide_reconciliation_projects_every_matching_binding(
-    db: Session,
-) -> None:
-    """One product declaration reaches every connector serving its capability.
-
-    Two independently installed connectors may implement the same capability.
-    A one-binding projection makes the second connector accept provider traffic
-    and then accumulate receipts with no destination.
-    """
-    first = _bound(db, destination=None)
-    second = _bound(
-        db,
-        destination=None,
-        installation_state="disabled",
-        binding_state="disabled",
-    )
-    unrelated = _bound(
-        db,
-        destination=None,
-        capability="beta_domain.receive.v1",
-    )
-    descriptor = _descriptor()
-
-    projected = reconcile_product_port_descriptor_for_capability(
-        db,
-        descriptor=descriptor,
-        registry=REGISTRY,
-        reconciled_by="platform_admin:test",
-    )
-
-    assert {item.capability_binding_id for item in projected} == {
-        first.id,
-        second.id,
-    }
-    assert unrelated.id not in {item.capability_binding_id for item in projected}
-    assert db.query(CapabilityDestinationRevision).count() == 2
-    assert tuple(
-        binding.id for binding in capability_bindings_for(db, capability_id=CAPABILITY)
-    ) == tuple(sorted((first.id, second.id)))
-
-
-def test_capability_wide_reconciliation_is_idempotent_for_the_whole_set(
-    db: Session,
-) -> None:
-    _bound(db, destination=None)
-    _bound(db, destination=None)
-    descriptor = _descriptor()
-
-    first = reconcile_product_port_descriptor_for_capability(
-        db, descriptor=descriptor, registry=REGISTRY
-    )
-    second = reconcile_product_port_descriptor_for_capability(
-        db, descriptor=descriptor, registry=REGISTRY
-    )
-
-    assert first == second
-    assert db.query(CapabilityDestinationRevision).count() == 2
-
-
-def test_capability_wide_reconciliation_refuses_a_descriptor_with_no_binding(
-    db: Session,
-) -> None:
-    with pytest.raises(DestinationNotBound, match="no capability binding"):
-        reconcile_product_port_descriptor_for_capability(
-            db, descriptor=_descriptor(), registry=REGISTRY
-        )
-
-    assert db.query(CapabilityDestinationRevision).count() == 0
 
 
 def test_descriptor_drift_appends_a_new_route_revision(db: Session) -> None:

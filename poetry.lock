@@ -1077,24 +1077,6 @@ type = "directory"
 url = "packages/dotmac-forms"
 
 [[package]]
-name = "dotmac-fulfillment"
-version = "0.1.0a1"
-description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
-optional = false
-python-versions = ">=3.11,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-dotmac-kernel = ">=0.1.0a89"
-sqlalchemy = "^2.0"
-
-[package.source]
-type = "directory"
-url = "packages/dotmac-fulfillment"
-
-[[package]]
 name = "dotmac-fx-policy"
 version = "0.1.0a1"
 description = "Effective FX observations, selection policy, and determination evidence"
@@ -1168,7 +1150,7 @@ url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a12"
+version = "0.1.0a11"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1733,24 +1715,6 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-reseller-management"
-
-[[package]]
-name = "dotmac-sales"
-version = "0.1.0a1"
-description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
-optional = false
-python-versions = ">=3.11,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-dotmac-kernel = ">=0.1.0a88"
-sqlalchemy = "^2.0"
-
-[package.source]
-type = "directory"
-url = "packages/dotmac-sales"
 
 [[package]]
 name = "dotmac-service-access-policy"
@@ -4238,4 +4202,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b859707bea2e599d36959600fc138d6db4dd43de4f8a78082c254c50d26c34db"
+content-hash = "917e529a7c9a557242927d52523d8625f9ebed2f89fa6d878cd58e1d56987f20"

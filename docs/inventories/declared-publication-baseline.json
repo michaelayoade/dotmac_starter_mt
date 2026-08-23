@@ -74,7 +74,7 @@
     },
     "dotmac-document-rendering": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless package is built and gate-proven here but deliberately NOT release-allowlisted. Its kernel floor was corrected from an unpublished a87 to the published a88 in the #337 follow-up, so the floor resolves and the kernel is not what holds this row open; its EXTRACTION.toml withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence for the package itself; never by editing the declared version or floor down.",
+      "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless package is built and gate-proven here but deliberately NOT release-allowlisted. Its kernel >=0.1.0a87 floor is still unpublished, and its EXTRACTION.toml withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence after the a87 artifact is registry-verified; never by editing the declared version or floor down.",
       "state": "never-published"
     },
     "dotmac-fx-policy": {
@@ -94,8 +94,7 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a91",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
-      "state": "never-published"
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything."
     },
     "dotmac-operational-escalations": {
       "declared": "0.1.0a1",
@@ -110,11 +109,6 @@
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
-      "state": "never-published"
-    },
-    "dotmac-sales": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE FIRST SUB ADOPTION. The accepted-quote owner is audit-complete and uncomposed: the assembly does not install it, and it is deliberately absent from the release allowlist. Its kernel floor is 0.1.0a88 — `sales` won the three-way `sa` arbitration in #321 and the row entered kernel source at a87, which was never dispatched, so a88 is the first installable kernel that can register the lineage. THE KERNEL IS NOT WHAT HOLDS THIS ROW OPEN; adoption is. Publishing before Sub's backfill and shadow would put an installable sales owner beside a product still writing its own quotes. Remove this row in the release change that adds the allowlist entry and records the Sub adoption; never by editing the declared version or the floor down.",
       "state": "never-published"
     },
     "dotmac-service-access-policy": {
@@ -145,11 +139,6 @@
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
-      "state": "never-published"
-    },
-    "dotmac-fulfillment": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE FIRST PARTICIPANT ADAPTER. This package owns the fulfillment saga \u2014 runs, steps, participant attempts, outcome receipts, compensation and convergence \u2014 as a tenant-only module with FORCEd RLS and append-only evidence, built and gate-proven here. Its floor is kernel 0.1.0a89: a86 minted the mod_fulfillment lineage, but the package also consumes the typed provisioning participant, scoped request, asynchronous outcome envelope and participant-decided compensation contract that land in a89, and the highest consumed capability wins. a89 is published, registry-verified and tagged, so unlike the earlier a86 reading this floor is one an installer can resolve. THE KERNEL IS THEREFORE NO LONGER WHAT HOLDS THIS ROW OPEN. What holds it open is adoption: it is deliberately NOT release-allowlisted until the released dotmac-durable-timers dependency is composed and the first Dotmac Cloud participant adapter exists. Package supply alone is not adoption, and publishing before a named participant would put an installable saga owner beside products that still drive their own \u2014 the failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records that first participant; never by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-usage": {

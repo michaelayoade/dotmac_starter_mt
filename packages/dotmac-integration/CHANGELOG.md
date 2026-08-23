@@ -2,12 +2,14 @@
 
 ## Release state — read this before pinning
 
-**Eleven versions have been released. Pin `0.1.0a11`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a11`; a11 was published, installed
-back from the private index and tagged from `f25df1ad`.
+**Ten versions have been released. Pin `0.1.0a10`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a10`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24`, `4b1e867` and
+`92ae7a6`, then `7a59864`.
 
-`0.1.0a11` is the latest published version. It keeps SPI 1.3 and makes the
-declared POLL mode executable through a three-phase engine.
+`0.1.0a10` is the latest published version. It raises the additive SPI to 1.3
+and makes named secret bindings plus exact provider egress hosts part of the
+connector manifest contract.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -41,9 +43,6 @@ tagged on 2026-08-18 from `92ae7a6` by release run `32102257979`.
 `0.1.0a10` was published, installed back from the private index, registered and
 tagged on 2026-08-19 from `7a59864` by release run `32230755284`.
 
-`0.1.0a11` was published, installed back from the private index and tagged on
-2026-08-22 from `f25df1ad`.
-
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
@@ -59,21 +58,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a12 — unreleased
-
-### Capability-wide product-port reconciliation
-
-- Adds a module-owned query for every durable binding carrying one capability;
-  it deliberately includes configured and disabled bindings because routing is
-  a prerequisite for activation, not a consequence of it.
-- Projects one authenticated product-port descriptor onto that complete set in
-  the caller's transaction, so independently installed connectors implementing
-  the same capability cannot leave one binding addressable and another
-  accumulating undeliverable receipts.
-- Refuses an empty binding set instead of reporting a vacuous successful
-  reconciliation. The operation remains digest-idempotent for the whole set.
-
-## 0.1.0a11 — released 2026-08-22
+## 0.1.0a11 — unreleased
 
 ### Executable polling engine
 

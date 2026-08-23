@@ -346,12 +346,6 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
     "dotmac-content": ("0.1.0a81", "0.1.0a79"),
     "dotmac-publishing": ("0.1.0a81", "0.1.0a80"),
-    # `sales` won the three-way `sa` arbitration (#321) and its ledger row
-    # entered kernel SOURCE at a87 — which was never dispatched and carries
-    # no tag, so the published sequence runs a86 -> a88. a88 is the first
-    # installable kernel that can register the module; a87 would name a
-    # release no resolver can satisfy.
-    "dotmac-sales": ("0.1.0a88", "0.1.0a87"),
 }
 
 

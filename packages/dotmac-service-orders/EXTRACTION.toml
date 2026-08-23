@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Service-delivery orders and the activation-readiness decision"
 contract = "Own the service-delivery order lifecycle and the append-only readiness decision made from normalized delivery observations. Commercial identifiers, customer identity, specification and service references are opaque. NOT commercial order capture, fulfillment saga mechanics, field work execution, realized service lifecycle, provisioning transport, addressing or network enforcement."
-source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+source_repositories = ["dotmac_sub", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/provisioning.py",
   "dotmac_sub:app/services/provisioning_lifecycle.py",

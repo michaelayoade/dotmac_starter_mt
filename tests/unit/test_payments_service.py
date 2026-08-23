@@ -36,12 +36,7 @@ from sqlalchemy.orm import Session
 
 TENANT_A = uuid.uuid4()
 TENANT_B = uuid.uuid4()
-# Anchored to the real clock, not a fixed date. `open_payment_intent` compares
-# `expires_at` against `datetime.now(UTC)` — the one function in this module
-# that reads the wall clock rather than taking the caller's timestamp — so a
-# hardcoded NOW makes `test_a_confirmation_observed_after_expiry_is_refused`
-# pass only until wall-clock time overtakes NOW + 1h, and fail every run after.
-NOW = datetime.now(UTC).replace(microsecond=0)
+NOW = datetime(2026, 8, 22, tzinfo=UTC)
 NGN = currency("NGN")
 USD = currency("USD")
 
