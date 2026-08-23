@@ -1,0 +1,412 @@
+{
+  "schema_version": 1,
+  "source_repository": "dotmac_sub",
+  "source_revision": "d1a1a913e287ffadaf21b7da7be448f2c28b5483",
+  "scenarios": [
+    {
+      "id": "arrears_partial_position",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_postpaid_policy_counts_partial_settlement"
+      ],
+      "input": {
+        "position": {
+          "collection_timing": "arrears",
+          "collectible_receivable_amount": "15000.00",
+          "available_credit_amount": "0.00",
+          "funding_available_amount": "0.00",
+          "currency": "NGN",
+          "due_at": "2026-03-07T12:00:00Z",
+          "resolution": "partially_resolved",
+          "source_version": 2
+        },
+        "as_of": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "decision": "collectible",
+        "admitted_amount": "15000.00"
+      }
+    },
+    {
+      "id": "arrears_resolved_position",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_postpaid_policy_ignores_settled_and_not_yet_due"
+      ],
+      "input": {
+        "position": {
+          "collection_timing": "arrears",
+          "collectible_receivable_amount": "0.00",
+          "available_credit_amount": "0.00",
+          "funding_available_amount": "0.00",
+          "currency": "NGN",
+          "due_at": "2026-03-07T12:00:00Z",
+          "resolution": "resolved",
+          "source_version": 3
+        },
+        "as_of": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "decision": "resolve_case",
+        "close_reason_code": "exposure_resolved"
+      }
+    },
+    {
+      "id": "advance_underfunded_position",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_prepaid_policy_proposes_only_when_underfunded"
+      ],
+      "input": {
+        "position": {
+          "collection_timing": "advance",
+          "collectible_receivable_amount": "0.00",
+          "available_credit_amount": "0.00",
+          "funding_available_amount": "0.00",
+          "currency": "NGN",
+          "coverage_start_at": "2026-03-01T00:00:00Z",
+          "resolution": "open",
+          "source_version": 1
+        },
+        "as_of": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "decision": "collectible",
+        "reason_code": "coverage_underfunded"
+      }
+    },
+    {
+      "id": "advance_future_coverage",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_prepaid_policy_waits_for_the_service_period"
+      ],
+      "input": {
+        "position": {
+          "collection_timing": "advance",
+          "collectible_receivable_amount": "0.00",
+          "available_credit_amount": "0.00",
+          "funding_available_amount": "0.00",
+          "currency": "NGN",
+          "coverage_start_at": "2026-03-15T12:00:00Z",
+          "resolution": "open",
+          "source_version": 1
+        },
+        "as_of": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "decision": "wait_for_anchor",
+        "next_action_at": "2026-03-15T12:00:00Z"
+      }
+    },
+    {
+      "id": "advance_incomplete_source",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_prepaid_policy_fails_closed_for_cutover_quarantine"
+      ],
+      "input": {
+        "reader_outcome": "unavailable",
+        "reason_code": "opening_source_incomplete",
+        "retry_at": null,
+        "as_of": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "decision": "blocked",
+        "case_advanced": false,
+        "request_emitted": false,
+        "retryable": true
+      }
+    },
+    {
+      "id": "case_step_delivery_and_terminal_replay",
+      "preservation": "corrected_boundary",
+      "correction": "Preserve one step per delivery and terminal replay, but replace the source four-state chain with policy-row steps and a small active lifecycle.",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_the_case_ladder_escalates_one_step_per_proposal",
+        "tests/test_collections_target_lifecycle.py::test_the_consequence_request_is_a_reason_scoped_owner_output"
+      ],
+      "input": {
+        "case_lifecycle": "active",
+        "policy_step_codes": [
+          "notice_initial",
+          "notice_follow_up",
+          "review",
+          "restrict_service"
+        ],
+        "deliveries": 5
+      },
+      "expected": {
+        "attempted_step_codes": [
+          "notice_initial",
+          "notice_follow_up",
+          "review",
+          "restrict_service"
+        ],
+        "action_request_count": 1,
+        "terminal_replay_count": 1,
+        "case_lifecycle": "active"
+      }
+    },
+    {
+      "id": "case_close_and_fresh_reopen",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_close_cancels_timers_and_stages_restore_evidence",
+        "tests/test_collections_target_lifecycle.py::test_closing_without_a_live_case_is_idempotent",
+        "tests/test_collections_target_lifecycle.py::test_reopening_after_close_starts_a_fresh_case"
+      ],
+      "input": {
+        "original_case_ref": "case:1",
+        "close_reason_code": "exposure_resolved",
+        "closed_at": "2026-03-20T12:00:00Z",
+        "reassessment_at": "2026-03-21T12:00:00Z"
+      },
+      "expected": {
+        "original_lifecycle": "resolved",
+        "second_close_replayed": true,
+        "reopened_case_ref": "case:2",
+        "reopened_lifecycle": "active",
+        "timer_canceled": true
+      }
+    },
+    {
+      "id": "timer_reschedule_generation",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_collections_target_lifecycle.py::test_each_step_replaces_the_exact_next_action_timer"
+      ],
+      "input": {
+        "timer_identity": "collections.case/case:1/next_action",
+        "first_due_at": "2026-03-13T12:00:00Z",
+        "replacement_due_at": "2026-03-16T12:00:00Z"
+      },
+      "expected": {
+        "first_generation": 1,
+        "current_generation": 2,
+        "scheduled_count": 1,
+        "superseded_count": 1
+      }
+    },
+    {
+      "id": "arrangement_rounding_exact_total",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_payment_arrangements.py::TestPaymentArrangements::test_create_arrangement_rounding"
+      ],
+      "input": {
+        "exposures": [
+          {
+            "source_owner": "billing.receivables",
+            "exposure_ref": "billing_obligation:1",
+            "source_version": 1,
+            "admitted_amount": "100.00",
+            "currency": "NGN"
+          }
+        ],
+        "installments": [
+          {
+            "ordinal": 1,
+            "amount": "33.33",
+            "due_at": "2026-06-01T00:00:00Z"
+          },
+          {
+            "ordinal": 2,
+            "amount": "33.33",
+            "due_at": "2026-07-01T00:00:00Z"
+          },
+          {
+            "ordinal": 3,
+            "amount": "33.34",
+            "due_at": "2026-08-01T00:00:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "schedule_total_amount": "100.00",
+        "currency": "NGN"
+      }
+    },
+    {
+      "id": "arrangement_explicit_month_end_schedule",
+      "preservation": "corrected_boundary",
+      "correction": "Preserve the source's month-end dates as explicit supplied instants; do not port its frequency enum or date arithmetic into Collections.",
+      "source_tests": [
+        "tests/test_payment_arrangements.py::TestPaymentArrangementHelpers::test_calculate_end_date_monthly_clamps_short_month_and_recovers_anchor"
+      ],
+      "input": {
+        "exposures": [
+          {
+            "source_owner": "billing.receivables",
+            "exposure_ref": "billing_obligation:2",
+            "source_version": 1,
+            "admitted_amount": "300.00",
+            "currency": "NGN"
+          }
+        ],
+        "installments": [
+          {
+            "ordinal": 1,
+            "amount": "100.00",
+            "due_at": "2025-01-31T00:00:00Z"
+          },
+          {
+            "ordinal": 2,
+            "amount": "100.00",
+            "due_at": "2025-02-28T00:00:00Z"
+          },
+          {
+            "ordinal": 3,
+            "amount": "100.00",
+            "due_at": "2025-03-31T00:00:00Z"
+          }
+        ]
+      },
+      "expected": {
+        "schedule_total_amount": "300.00",
+        "currency": "NGN"
+      }
+    },
+    {
+      "id": "arrangement_exact_exposure_membership",
+      "preservation": "corrected_boundary",
+      "correction": "Convert the source invoice link into opaque exposure membership and remove account-wide shielding.",
+      "source_tests": [
+        "tests/test_payment_arrangements.py::TestPaymentArrangements::test_create_within_invoice_balance_succeeds"
+      ],
+      "input": {
+        "protected_exposures": [
+          {
+            "source_owner": "billing.receivables",
+            "exposure_ref": "billing_obligation:3",
+            "source_version": 4,
+            "admitted_amount": "300.00",
+            "currency": "NGN"
+          }
+        ],
+        "same_subject_new_exposure_ref": "billing_obligation:4"
+      },
+      "expected": {
+        "billing_obligation:3": "protected",
+        "billing_obligation:4": "collectible"
+      }
+    },
+    {
+      "id": "settlement_observation_not_staff_payment",
+      "preservation": "corrected_boundary",
+      "correction": "Preserve preview/fingerprint targeting while replacing staff financial payment mutation with a deduplicated billing settlement observation.",
+      "source_tests": [
+        "tests/test_payment_arrangement_safe_actions.py::test_record_payment_targets_previewed_installment_without_ledger_claim",
+        "tests/test_payment_arrangement_safe_actions.py::test_changed_state_rejects_stale_preview"
+      ],
+      "input": {
+        "arrangement_ref": "arrangement:1",
+        "installment_ordinal": 1,
+        "settlement_receipt_ref": "billing_settlement:1",
+        "settled_amount": "75.00",
+        "currency": "NGN",
+        "preview_fingerprint": "sha256:arrangement-v1"
+      },
+      "expected": {
+        "matching_fingerprint": "applied_once",
+        "stale_fingerprint": "refused",
+        "financial_writer": "billing.receivables"
+      }
+    },
+    {
+      "id": "grace_inclusive_last_day",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_grace_policy_sot.py::test_dunning_offsets_begin_after_grace_end"
+      ],
+      "input": {
+        "anchor_kind": "exposure_at",
+        "anchor_at": "2026-07-01T12:00:00Z",
+        "duration_days": 7,
+        "last_grace_observation_at": "2026-07-08T23:59:00Z",
+        "first_action_observation_at": "2026-07-09T00:01:00Z"
+      },
+      "expected": {
+        "ends_at": "2026-07-09T00:00:00Z",
+        "last_grace_phase": "active",
+        "first_action_phase": "expired"
+      }
+    },
+    {
+      "id": "grace_zero_is_immediately_actionable",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_grace_policy_sot.py::test_configured_zero_grace_is_immediately_actionable"
+      ],
+      "input": {
+        "anchor_kind": "exposure_at",
+        "anchor_at": "2026-07-01T12:00:00Z",
+        "duration_days": 0,
+        "as_of": "2026-07-01T12:00:00Z"
+      },
+      "expected": {
+        "ends_at": "2026-07-01T12:00:00Z",
+        "phase": "expired"
+      }
+    },
+    {
+      "id": "action_stale_preview_is_refused",
+      "preservation": "preserved",
+      "source_tests": [
+        "tests/test_dunning_staff_safe_actions.py::test_changed_case_state_rejects_stale_preview",
+        "tests/test_financial_access_consequence_evidence.py::test_suspend_confirmation_rejects_stale_preview"
+      ],
+      "input": {
+        "request_id": "request:1",
+        "decision_fingerprint": "sha256:position-v7",
+        "owner_observed_fingerprint": "sha256:position-v8",
+        "observed_at": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "receipt_kind": "refused",
+        "reason_code": "stale_decision_evidence",
+        "product_effect_count": 0
+      }
+    },
+    {
+      "id": "action_receipt_is_product_owner_evidence",
+      "preservation": "corrected_boundary",
+      "correction": "Preserve exact consequence linkage, but record only the product owner's typed receipt rather than treating a transport acknowledgement as application evidence.",
+      "source_tests": [
+        "tests/test_financial_access_consequence_evidence.py::test_suspend_confirmation_links_exact_lock_and_dunning_action"
+      ],
+      "input": {
+        "request_id": "request:2",
+        "owner_code": "subscriptions.access",
+        "owner_receipt_id": "access_receipt:1",
+        "action_ref": "restriction:1",
+        "applied_at": "2026-03-10T12:00:00Z",
+        "owner_state_fingerprint": "sha256:restricted"
+      },
+      "expected": {
+        "receipt_kind": "applied",
+        "recorded_as_evidence": true,
+        "collections_mutated_product_state": false
+      }
+    },
+    {
+      "id": "notice_suppression_is_not_grace_or_action_authority",
+      "preservation": "corrected_boundary",
+      "correction": "Preserve fail-closed delivery suppression while keeping the communication outcome distinct from grace and product-action authorization.",
+      "source_tests": [
+        "tests/test_notification_queue_suppression.py::test_a_hard_bounce_stops_even_the_invoice"
+      ],
+      "input": {
+        "notice_request_id": "notice:1",
+        "owner_receipt_id": "notice_receipt:1",
+        "reason_code": "address_hard_bounced",
+        "observed_at": "2026-03-10T12:00:00Z"
+      },
+      "expected": {
+        "notice_outcome": "suppressed",
+        "grace_granted": false,
+        "action_authorized": false
+      }
+    }
+  ]
+}

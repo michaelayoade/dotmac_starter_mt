@@ -551,6 +551,15 @@ with the rows it blocks.
 | `billing.InvoiceDocumentFactV1 → rendering` and the artifact relation back | **Two incompatible relation designs.** Billing Part 5: partial unique `… WHERE superseded_at IS NULL`, repair by **appending** a row with a `supersession_reason` from an open registry, idempotency key **includes the checksum**, digest `presentation_model_digest`, plus `withdrawn_at`. Rendering § 6.4: composite unique `(scope, invoice_id, fact_version, media_type)`, *"the unique constraint refuses a second row"*, repair updates only `file_id`/`checksum`/`byte_length`, key **excludes** the checksum, digest `projection_digest`, no withdrawal column. Both are PROPOSED; both defer to Michael; **the key compositions cannot both ship.** | **G3** |
 | every arrow | **Name collisions.** `document_profile_code` vs `template_profile_code` (identical substance). ~~`external_finance` vs `manual_erp`~~ as the third `source_authority` member — **RESOLVED 2026-08-14 by ADR-0020 § A7: `external_finance`; `manual_erp` retires** (recorded here as history, not as a live collision). `RatedObligationOutputV1` vs `RecurringObligationDueV1` vs `subscriptions.recurring_obligation_due.v1` — **three names for one output**, still open. `ConsequenceRequestV1` vs `CollectionActionRequested` — still open; the collections spec itself says *"One name must win before any code."* | **G5** |
 
+**G1/G2 resolved 2026-08-23.** ADR-0030 now names Billing's
+`ReceivablePositionV1` as the sole financial fact and Collections'
+`ReceivableObservationV1` as the distinct peer input. Both use kernel Money;
+the assembly preserves subject/service, service-period, due-date,
+financial-authority, projection-mode, completeness and financial-state
+semantics while dropping Billing-only credit/funding lanes from the Collections
+input. `reversed` is a movement, not a state. The two historical rows above are
+retained as evidence of the defect; they no longer block on contract shape.
+
 **`InvoiceArtifactReconciler` has no module owner.** Both teams place it on the
 assembly; rendering § 6.6 then rejects the assembly as a resting place — *"An
 assembly-owned relation table is assembly-local state with no module owning its

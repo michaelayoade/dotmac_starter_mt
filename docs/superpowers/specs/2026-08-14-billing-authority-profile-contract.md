@@ -1,5 +1,21 @@
 # `dotmac-billing` — the authority profile and the published contracts
 
+> **Receivable amendment — 2026-08-23.** For the receivable seam only,
+> ADR-0030's accepted amendment supersedes this proposal: Billing alone owns
+> `ReceivablePositionV1`, every amount is kernel `Money`, financial state is
+> `open | partially_resolved | resolved | cancelled`, and the fact includes
+> subject/service plus service-period and due-date provenance. Collections
+> consumes its own narrower `ReceivableObservationV1` through an assembly
+> mapping. The field list in §2.3 remains historical evidence where it differs.
+
+> **Ownership and artifact-identity amendment — 2026-08-23.** ADR-0030 also
+> supersedes the corresponding proposals below: Subscriptions alone owns
+> `RatedObligationOutputV1`; Billing owns only `AcceptRatedObligationV1` at that
+> seam. Official artifact creation has one structural key per
+> `(scope, fact_id, fact_version, media_type)`, while repair is a separate
+> current-artifact-bound append operation. The checksum-in-record-key and
+> in-place-repair alternatives remain historical evidence, not current rules.
+
 > **Review status: PROPOSED — not reviewed, not frozen.** Appearing in the tree
 > does not freeze a contract. Every inter-module contract below is a proposal
 > until the integration owner's contract matrix accepts it, and
