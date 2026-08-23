@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "integrator-adoption-migration-rehearsal",
+  "source": {
+    "application": "dotmac_academy_app",
+    "environment": "staging",
+    "server_name": "seabone",
+    "captured_at": "2026-08-19T06:31:28.101916Z",
+    "staging_database_name": "dotmac_academy_app-db-1-stopped-volume",
+    "candidate_base_revision": "a5e25e4e829350e503e66a03d73739529ba7da7f",
+    "candidate_patch_sha256": "2bad1b0f388015fee7f2be5e85eabf635e680cc731b6515d6efcf26633ca9ab6",
+    "candidate_image_digest": "sha256:9ed6badc4d6d571a0c32a1693107863b39d3aa8c807da76b1033776e1f793f88",
+    "clone_database_name": "academy_staging_clone",
+    "capture_method": "Stopped Seabone Academy PostgreSQL volume copied read-only into an isolated volume; exact candidate image migrated and read the clone only"
+  },
+  "migration": {
+    "before_heads": [
+      "0049_enrollment_audience"
+    ],
+    "after_heads": [
+      "0053_entrance_defaults"
+    ],
+    "repaired_preconditions": []
+  },
+  "survivor_counts": {
+    "financial_before": {
+      "academy-financial-surfaces": 0
+    },
+    "financial_after": {
+      "academy-financial-surfaces": 0
+    },
+    "nonfinancial_before": {
+      "applicants": 0,
+      "course_completions": 0,
+      "email_outbox": 0,
+      "lab_instances": 0,
+      "platform_settings": 2,
+      "tenants": 0
+    },
+    "nonfinancial_after": {
+      "applicants": 0,
+      "course_completions": 0,
+      "email_outbox": 0,
+      "lab_instances": 0,
+      "platform_settings": 2,
+      "tenants": 0
+    },
+    "legacy_marker_row_total_before": 0,
+    "legacy_marker_row_total_after": 0,
+    "legacy_marker_counts_sha256_before": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "legacy_marker_counts_sha256_after": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  "safety_observations": {
+    "source_snapshot_read_only": true,
+    "clone_migrations_only": true,
+    "exact_candidate_image_proven": true,
+    "financial_counts_preserved": true,
+    "billing_non_interference_proven": true,
+    "untouched_integration_counts_preserved": true,
+    "temporary_secret_and_snapshot_files_removed": true,
+    "shared_staging_database_modified": false,
+    "payment_execution_changed": false,
+    "financial_cutover_authorized": false,
+    "production_evidence": false,
+    "interpretation": "The stopped Seabone Academy database contains zero tenants and zero business rows. This proves exact-artifact migration and complete explicit absence in staging, not production usage or cutover readiness."
+  }
+}

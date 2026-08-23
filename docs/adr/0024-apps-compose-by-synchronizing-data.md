@@ -284,3 +284,43 @@ it.
 
 **Last-write-wins status synchronization.** It hides ownership conflicts and
 makes ordering or retry determine business state.
+
+## Decision amendment — 2026-08-18 (capability cutover versus plane retirement)
+
+**Capability cutover is not control-plane retirement.** A provider callback or
+delivery binding moves independently. Its old receiver, provider-only secret,
+retry/checkpoint path and ratchet entry retire after that binding's mirror and
+rollback gates. The shared product integration registry, tables, scheduler and
+other bindings do not move merely because one capability did.
+
+Before any product-local integration control plane is removed, a
+production-derived inventory classifies every live capability as `migrate`,
+`retire`, or `retain-temporarily`. A continuing capability has a complete packet:
+connector distribution, typed product port, product descriptor, named
+reconciler, secret mapping, mirror evidence, rollback plan and local retirement
+gate. A retiring capability proves zero traffic and its deletion gate. Temporary
+retention names an owner and an explicit exit gate; it is a blocker, never a
+fourth terminal disposition.
+
+Teams may build independent packets in parallel. Capabilities **cut over
+sequentially**, one binding and rollback boundary at a time. Every staging and
+production change carries survivor canaries proving untouched bindings,
+configuration digests, financial state, workers and provider paths remain
+unchanged. Payment and billing capabilities require their own financial gates
+and cannot be absorbed into a messaging or platform tidy-up.
+
+The product-local shared plane reaches **fleet-zero** only when every observed
+live capability is migrated or retired, old-path traffic is zero, rollback
+windows are closed and the external-connector ratchet has been lowered with a
+sensitivity proof. Only then may its shared tables and generic runtime be
+removed. A missing or partial production inventory is `unmeasured`, never zero.
+
+Production evidence is complete only when it is bound to the exact deployed
+application revision and accounts for the whole committed source surface. A
+source-mapped application records one observation for every mapped surface; a
+capability-catalogued application records every declared capability, including
+explicit zero/absent rows. The product capture must also prove its database
+transaction was read-only; a report that merely intends not to write is not
+authoritative evidence. An omitted row never means absent. Staging evidence is
+selected by the target cohort's owning application, never by file order or by
+whichever staging snapshot happens to be listed first.

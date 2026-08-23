@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "source": {
+    "application": "dotmac_crm",
+    "environment": "staging",
+    "server_name": "dotmac-crm-staging",
+    "host_alias": "seabone",
+    "database_name": "dotmac_crm",
+    "captured_at": "2026-08-18T10:06:00Z",
+    "source_revision": "1a72fb2cb8018c2b288e74aebf583866e3f82619",
+    "image_digest": "sha256:c36f2e4c637a58569b8f471a4e54b8f056f2831cbbc96d2239f3d39b403c66c1",
+    "capture_method": "read-only aggregate SQL; only provider/connector type, active state, status and counts were selected, never configuration, payload, customer, credential, secret-reference, or secret values"
+  },
+  "coverage": {
+    "integration_tables": true,
+    "provider_clients": false,
+    "provider_credentials": false,
+    "webhook_verification": false,
+    "connector_scheduling": false,
+    "checkpoints": true,
+    "delivery_retries": false
+  },
+  "bindings": [],
+  "shared_table_counts": {},
+  "legacy_surfaces": [
+    {
+      "surface_id": "crm-meta-communications",
+      "observation": "active",
+      "count": 5,
+      "evidence_kind": "active facebook/instagram/whatsapp connector rows plus active Meta OAuth rows"
+    },
+    {
+      "surface_id": "crm-zabbix-monitoring",
+      "observation": "active",
+      "count": 1,
+      "evidence_kind": "active zabbix connector rows"
+    },
+    {
+      "surface_id": "crm-email-delivery",
+      "observation": "active",
+      "count": 4,
+      "evidence_kind": "active email connector rows plus active campaign SMTP profiles"
+    },
+    {
+      "surface_id": "crm-generic-webhook-runtime",
+      "observation": "active",
+      "count": 17588,
+      "evidence_kind": "webhook endpoint rows plus aggregate delivered/failed delivery rows"
+    },
+    {
+      "surface_id": "crm-legacy-sync-markers",
+      "observation": "active",
+      "count": 819688,
+      "evidence_kind": "aggregate integration_runs rows across success and failed states"
+    },
+    {
+      "surface_id": "crm-nextcloud-talk",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present enabled Nextcloud setting-name rows; values not selected"
+    },
+    {
+      "surface_id": "crm-selfcare-sub-sync",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present enabled selfcare setting-name rows; values not selected"
+    },
+    {
+      "surface_id": "crm-erp-sync",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present enabled dotmac_erp setting-name rows; values not selected"
+    },
+    {
+      "surface_id": "crm-ai-runtime",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present vLLM base-url setting-name row; value not selected"
+    },
+    {
+      "surface_id": "crm-chatwoot-sync",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present enabled Chatwoot setting-name rows; values not selected"
+    },
+    {
+      "surface_id": "crm-serpapi-targeting",
+      "observation": "configured",
+      "count": 1,
+      "evidence_kind": "present enabled SerpAPI setting-name row; value not selected"
+    }
+  ],
+  "safety_observations": {
+    "crm_retirement_zero_proven": false,
+    "billing_non_interference_proven": false,
+    "interpretation": "CRM is not a zero-use retirement candidate in staging: provider connectors, OAuth identities, SMTP, webhooks and integration runs are populated. Each continuing capability needs a replacement before CRM shutdown."
+  }
+}

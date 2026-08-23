@@ -16,6 +16,14 @@
       "sync_checkpoint": 0,
       "webhook_surface": 0
     },
+    "dotmac_backoffice": {
+      "connector_task": 0,
+      "delivery_retry": 0,
+      "http_client": 0,
+      "provider_credential": 0,
+      "sync_checkpoint": 0,
+      "webhook_surface": 0
+    },
     "dotmac_crm": {
       "connector_task": 10,
       "delivery_retry": 9,
@@ -51,6 +59,7 @@
   },
   "repos_measured": [
     "dotmac_academy_app",
+    "dotmac_backoffice",
     "dotmac_crm",
     "dotmac_erp",
     "dotmac_sub",

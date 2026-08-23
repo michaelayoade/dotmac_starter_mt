@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "integrator-adoption-migration-rehearsal",
+  "source": {
+    "application": "dotmac_erp",
+    "environment": "staging",
+    "server_name": "seabone",
+    "captured_at": "2026-08-19T05:23:45Z",
+    "staging_database_name": "dotmac_erp",
+    "staging_source_revision": "990e17f9a45c2f4089e6e3467118dcbc02254ad9",
+    "staging_image_digest": "sha256:c0aca05beb6370fa5508fb62c4e5200fab9c064b6669d6467ce9f2f1a179f89b",
+    "candidate_base_revision": "4aab5681e52377830a26de464944454559b3d746",
+    "candidate_patch_sha256": "265d72423275fbc84ef9b2361efe54e1f6281c0ff5404739ea893b57dcb0d9d6",
+    "candidate_image_digest": "sha256:32231dda51a5d8df414f44f69571479c5dc751646c2c87c38d8ad9d16b7df68c",
+    "clone_database_name": "dotmac_erp_inventory_staging_clone",
+    "capture_method": "serializable-deferrable read-only logical snapshot restored into an isolated PostgreSQL 16 container; the exact current candidate applied every remaining migration and reran aggregate-only comparisons on the clone"
+  },
+  "migration": {
+    "before_heads": [
+      "20260808_open_setting_domain"
+    ],
+    "after_heads": [
+      "20260815_academy_course_projection",
+      "20260815_academy_learning_sync",
+      "20260816_platform_owned_webhook_ssrf_policy",
+      "20260818_dotmac_sub_customer_metrics",
+      "fi_0001_stored_files"
+    ],
+    "repaired_preconditions": [
+      {
+        "table": "hr.employee_certification",
+        "column": "certification_id",
+        "row_count": 0,
+        "non_null_count": 0,
+        "distinct_count": 0,
+        "before_primary_key": false,
+        "after_primary_key": "employee_certification_pkey"
+      },
+      {
+        "table": "pm.task",
+        "column": "task_id",
+        "row_count": 3732,
+        "non_null_count": 3732,
+        "distinct_count": 3732,
+        "before_primary_key": false,
+        "after_primary_key": "task_pkey"
+      },
+      {
+        "table": "support.ticket",
+        "column": "ticket_id",
+        "row_count": 18984,
+        "non_null_count": 18984,
+        "distinct_count": 18984,
+        "before_primary_key": false,
+        "after_primary_key": "ticket_pkey"
+      }
+    ]
+  },
+  "survivor_counts": {
+    "financial_before": {
+      "erp-exchange-rate-observation": 150,
+      "erp-finance-configured-webhooks": 0,
+      "erp-mono-banking": 0,
+      "erp-paystack-payments": 825,
+      "erp-remita-payments": 0,
+      "erp-sub-financial-sync": 0
+    },
+    "financial_after": {
+      "erp-exchange-rate-observation": 150,
+      "erp-finance-configured-webhooks": 0,
+      "erp-mono-banking": 0,
+      "erp-paystack-payments": 825,
+      "erp-remita-payments": 0,
+      "erp-sub-financial-sync": 0
+    },
+    "nonfinancial_before": {
+      "erp-crm-sync": 10760,
+      "erp-fcm-push": 0,
+      "erp-generic-service-hooks": 0,
+      "erp-llm-insights": 0,
+      "erp-nextcloud-talk": 0,
+      "erp-smtp-email": 4,
+      "erp-sub-operational-sync": 0
+    },
+    "nonfinancial_after": {
+      "erp-crm-sync": 10760,
+      "erp-fcm-push": 0,
+      "erp-generic-service-hooks": 0,
+      "erp-llm-insights": 0,
+      "erp-nextcloud-talk": 0,
+      "erp-smtp-email": 4,
+      "erp-sub-operational-sync": 0
+    },
+    "legacy_marker_identity_count": 73,
+    "legacy_marker_row_total_before": 97774,
+    "legacy_marker_row_total_after": 97774,
+    "legacy_marker_counts_sha256_before": "46caaeb9682beafc3ccdd3690876242347e9ad45164dc42c7af2f34d4f289547",
+    "legacy_marker_counts_sha256_after": "46caaeb9682beafc3ccdd3690876242347e9ad45164dc42c7af2f34d4f289547"
+  },
+  "safety_observations": {
+    "source_snapshot_read_only": true,
+    "clone_migrations_only": true,
+    "shared_staging_database_modified": false,
+    "exact_candidate_image_proven": true,
+    "financial_counts_preserved": true,
+    "billing_non_interference_proven": true,
+    "untouched_integration_counts_preserved": true,
+    "payment_execution_changed": false,
+    "financial_cutover_authorized": false,
+    "temporary_secret_and_snapshot_files_removed": true,
+    "candidate_is_uncommitted": true,
+    "production_evidence": false
+  }
+}

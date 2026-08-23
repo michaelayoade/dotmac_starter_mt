@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "source": {
+    "application": "dotmac_sub",
+    "repository": "michaelayoade/dotmac_sub",
+    "revision": "0d27ab91181fbc2717731bef28e21578f3442cc4",
+    "path": "app/services/integrations/registry.py",
+    "captured_at": "2026-08-18T14:30:19Z",
+    "method": "connector_definitions() projected without configuration or secret values"
+  },
+  "connectors": [
+    {
+      "key": "fiber.inquiry.http",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "communications.fiber_inquiry.receive.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "lead.capture.http",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "sales.lead_capture.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "dotmac.integrator.http",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "messaging.receive.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "webhook.http",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "events.deliver.v1",
+          "modes": [
+            "event",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "dotmac.crm",
+      "version": "1.1.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "crm.subscriber_observation.v1",
+          "modes": [
+            "scheduled",
+            "manual",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "crm.ticket_observation.v1",
+          "modes": [
+            "scheduled",
+            "manual",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "crm.operational_observation.v1",
+          "modes": [
+            "scheduled",
+            "interactive",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "crm.portal_session.v1",
+          "modes": [
+            "interactive"
+          ]
+        },
+        {
+          "id": "crm.chat_session.v1",
+          "modes": [
+            "interactive"
+          ]
+        },
+        {
+          "id": "crm.quote_command.v1",
+          "modes": [
+            "interactive"
+          ]
+        },
+        {
+          "id": "crm.events.receive.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "whatsapp",
+      "version": "1.1.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "messaging.send.v1",
+          "modes": [
+            "interactive",
+            "event"
+          ]
+        },
+        {
+          "id": "messaging.receive.v1",
+          "modes": [
+            "inbound"
+          ]
+        },
+        {
+          "id": "messaging.templates.read.v1",
+          "modes": [
+            "interactive",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "nextcloud.talk",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "collaboration.message.send.v1",
+          "modes": [
+            "event",
+            "interactive"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "meta.social",
+      "version": "1.1.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "messaging.send.v1",
+          "modes": [
+            "interactive",
+            "event"
+          ]
+        },
+        {
+          "id": "messaging.receive.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "dotmac.erp",
+      "version": "1.2.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "erp.outbox.deliver.v1",
+          "modes": [
+            "scheduled",
+            "event"
+          ]
+        },
+        {
+          "id": "erp.status.read.v1",
+          "modes": [
+            "scheduled",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "erp.inventory.read.v1",
+          "modes": [
+            "interactive",
+            "manual"
+          ]
+        },
+        {
+          "id": "erp.operational_context.sync.v1",
+          "modes": [
+            "scheduled"
+          ]
+        },
+        {
+          "id": "erp.regulatory.read.v1",
+          "modes": [
+            "interactive",
+            "manual"
+          ]
+        },
+        {
+          "id": "workforce.attendance.read.v1",
+          "modes": [
+            "interactive"
+          ]
+        },
+        {
+          "id": "workforce.attendance.punch.v1",
+          "modes": [
+            "interactive"
+          ]
+        },
+        {
+          "id": "erp.material_status.webhook.v1",
+          "modes": [
+            "inbound"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "paystack",
+      "version": "1.0.1",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "payments.intent.v1",
+          "modes": [
+            "interactive",
+            "event"
+          ]
+        },
+        {
+          "id": "payments.webhook.v1",
+          "modes": [
+            "inbound"
+          ]
+        },
+        {
+          "id": "payments.reconcile.v1",
+          "modes": [
+            "scheduled",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "payments.refund.v1",
+          "modes": [
+            "event",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "flutterwave",
+      "version": "1.0.0",
+      "runtime": "builtin_worker",
+      "capabilities": [
+        {
+          "id": "payments.intent.v1",
+          "modes": [
+            "interactive",
+            "event"
+          ]
+        },
+        {
+          "id": "payments.webhook.v1",
+          "modes": [
+            "inbound"
+          ]
+        },
+        {
+          "id": "payments.reconcile.v1",
+          "modes": [
+            "scheduled",
+            "reconcile"
+          ]
+        },
+        {
+          "id": "payments.refund.v1",
+          "modes": [
+            "event",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "3cx",
+      "version": "1.0.0",
+      "runtime": "catalogue_only",
+      "capabilities": []
+    },
+    {
+      "key": "freepbx",
+      "version": "1.0.0",
+      "runtime": "catalogue_only",
+      "capabilities": []
+    }
+  ]
+}

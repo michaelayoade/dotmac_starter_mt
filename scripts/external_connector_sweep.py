@@ -36,7 +36,7 @@ is verified, not a connector.
 ## No silent caps
 
 Every run prints a COVERAGE block, because a bounded measurement that does not
-state its bounds reads as "covered everything". Four bounds exist and all four
+state its bounds reads as "covered everything". Five bounds exist and all five
 are now said out loud rather than inferred:
 
 1. **The measured subtree.** Only `app/` (or the repo's equivalent) is read, so
@@ -50,12 +50,16 @@ are now said out loud rather than inferred:
    defending.
 3. **Absent enumerated repos.** Already handled — named, and the ratchet
    abstains rather than scoring them zero.
-4. **Fleet repositories nobody classified.** `RUNTIME_ROOTS` measures five
+4. **Fleet repositories nobody classified.** `RUNTIME_ROOTS` measures six
    repositories; the fleet has more. A repository that is neither measured nor
    listed in `OUT_OF_SCOPE` with a premise is reported as UNCLASSIFIED. It does
    not fail by default — a developer's second clone of an already-measured repo
    is not a governance defect — but `--strict-coverage` turns it into one, which
    is how CI runs it.
+5. **Fleet-root entries that cannot be inspected.** An inaccessible sibling
+   cannot be scored as a non-repository. It is named as UNINSPECTABLE and makes
+   strict coverage fail, while non-strict local runs can still disclose and
+   continue.
 
 ADR-0018 governs (4): an exemption states an ENFORCEABLE premise, or the region
 is unmonitored rather than exempt. Each `OUT_OF_SCOPE` entry therefore says
@@ -89,6 +93,7 @@ RUNTIME_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dotmac_crm", ("app",)),
     ("dotmac_sub", ("app",)),
     ("dotmac_academy_app", ("app",)),
+    ("dotmac_backoffice", ("src", "dotmac_backoffice")),
     ("dotmac_vendor_control_plane", ("src", "vendor_cp")),
 )
 
@@ -474,7 +479,9 @@ def _classify_source(tree: ast.AST, source: str) -> set[str]:
     return found
 
 
-def _unclassified_repositories(fleet_root: pathlib.Path) -> list[str]:
+def _unclassified_repositories(
+    fleet_root: pathlib.Path,
+) -> tuple[list[str], list[str]]:
     """Fleet directories that are neither measured nor exempted with a premise.
 
     A Python distribution — something with a `pyproject.toml` or a `setup.py` —
@@ -484,15 +491,28 @@ def _unclassified_repositories(fleet_root: pathlib.Path) -> list[str]:
     this block exists to prevent.
     """
     if not fleet_root.is_dir():
-        return []
+        return [], []
     known = set(REPOS) | set(OUT_OF_SCOPE_REASONS)
     found: list[str] = []
+    uninspectable: list[str] = []
     for entry in sorted(fleet_root.iterdir()):
-        if not entry.is_dir() or entry.name in known or entry.name.startswith("."):
+        try:
+            is_directory = entry.is_dir()
+        except OSError as exc:
+            uninspectable.append(f"{entry.name}: {type(exc).__name__}")
             continue
-        if (entry / "pyproject.toml").is_file() or (entry / "setup.py").is_file():
+        if not is_directory or entry.name in known or entry.name.startswith("."):
+            continue
+        try:
+            is_distribution = (entry / "pyproject.toml").is_file() or (
+                entry / "setup.py"
+            ).is_file()
+        except OSError as exc:
+            uninspectable.append(f"{entry.name}: {type(exc).__name__}")
+            continue
+        if is_distribution:
             found.append(entry.name)
-    return found
+    return found, uninspectable
 
 
 def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
@@ -503,6 +523,7 @@ def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
     outside: dict[str, int] = {}
     unmeasurable: dict[str, list[str]] = {}
     nested: dict[str, list[str]] = {}
+    unclassified, uninspectable = _unclassified_repositories(fleet_root)
 
     for repo, parts in RUNTIME_ROOTS:
         repo_root = fleet_root / repo
@@ -558,7 +579,8 @@ def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
                 "nested_checkouts_pruned": nested,
                 "repos_absent": sorted(absent),
                 "repos_out_of_scope": dict(sorted(OUT_OF_SCOPE_REASONS.items())),
-                "repos_unclassified": _unclassified_repositories(fleet_root),
+                "repos_unclassified": unclassified,
+                "repos_uninspectable": uninspectable,
             },
         },
         absent,
@@ -597,6 +619,11 @@ def coverage_report(measured: dict) -> str:
             "  UNCLASSIFIED fleet distributions (neither measured nor exempted "
             "with a premise in OUT_OF_SCOPE): "
             + ", ".join(coverage["repos_unclassified"])
+        )
+    if coverage["repos_uninspectable"]:
+        lines.append(
+            "  UNINSPECTABLE fleet-root entries (not treated as clean or "
+            "non-repositories): " + ", ".join(coverage["repos_uninspectable"])
         )
     lines.append(
         f"  out of scope by declared premise: "
@@ -703,7 +730,10 @@ def main() -> int:
         )
         return 2
 
-    if args.strict_coverage and measured["coverage"]["repos_unclassified"]:
+    if args.strict_coverage and (
+        measured["coverage"]["repos_unclassified"]
+        or measured["coverage"]["repos_uninspectable"]
+    ):
         print(
             "\nRefusing (--strict-coverage): classify each distribution above in "
             "RUNTIME_ROOTS or in OUT_OF_SCOPE with a premise a reader can check."

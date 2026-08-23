@@ -1,0 +1,78 @@
+{
+  "bindings": [],
+  "coverage": {
+    "checkpoints": true,
+    "connector_scheduling": true,
+    "delivery_retries": true,
+    "integration_tables": true,
+    "provider_clients": true,
+    "provider_credentials": true,
+    "webhook_verification": true
+  },
+  "legacy_surfaces": [
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "academy-erp-course-completion"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "academy-erp-assessment-registration"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "academy-erp-assessment-result"
+    },
+    {
+      "count": 1,
+      "evidence_kind": "aggregate-configured-count",
+      "observation": "configured",
+      "surface_id": "academy-smtp-delivery"
+    },
+    {
+      "count": 1,
+      "evidence_kind": "aggregate-configured-count",
+      "observation": "configured",
+      "surface_id": "academy-lab-console-proxy"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "academy-glitchtip-error-tracking"
+    },
+    {
+      "count": 0,
+      "evidence_kind": "aggregate-absence-count",
+      "observation": "absent",
+      "surface_id": "academy-prometheus-metrics"
+    }
+  ],
+  "safety_observations": {
+    "billing_non_interference_proven": false,
+    "database_isolation_level": "repeatable read",
+    "database_read_only_proven": true,
+    "database_session_count": 1,
+    "financial_cutover_authorized": false,
+    "financial_surface_counts": {},
+    "financial_surface_fingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "tenant_count": 0
+  },
+  "schema_version": 1,
+  "shared_table_counts": {},
+  "source": {
+    "application": "dotmac_academy_app",
+    "capture_method": "product-owned app_admin repeatable-read/read-only snapshot; aggregate counts and configuration presence only",
+    "captured_at": "2026-08-19T06:31:28.101916Z",
+    "database_name": "academy_staging_clone",
+    "environment": "staging",
+    "image_digest": "sha256:9ed6badc4d6d571a0c32a1693107863b39d3aa8c807da76b1033776e1f793f88",
+    "server_name": "seabone",
+    "source_revision": "a5e25e4e829350e503e66a03d73739529ba7da7f"
+  }
+}
