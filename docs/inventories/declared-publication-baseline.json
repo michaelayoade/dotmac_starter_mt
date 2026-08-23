@@ -122,11 +122,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
-    "dotmac-subscriptions": {
-      "declared": "0.1.0a1",
-      "reason": "ALLOWLISTED AND AUTHORIZED FOR RELEASE 2026-08-23 by Michael; NOT YET PUBLISHED. Product-first dual-plane offer, contract, cadence and recurring-occurrence owner. Its honest kernel minimum is a94 because guarded writes consume the manifest-owned charge_models and obligation_sources declarations; a94 is published and tagged, so the floor is one an installer can resolve. The prior row withheld release until a real Dotmac Cloud adapter or composition gate existed. That condition cannot be met while this package is unreleased: Cloud's composition gate refuses to import any owner it has not exact-pinned (test_source_imports_only_activated_dotmac_components), and it can only pin a released artifact. Publication was therefore made conditional on the very composition that publication is a prerequisite of. The gate was wrong, not merely unmet. Publication is not adoption: a released wheel nobody installs creates no parallel writer, and every adoption gate this row previously named survives unchanged and unclaimed. Remove this row only in the release change that records the tag, peeled commit, release run and registry install-back.",
-      "state": "never-published"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
