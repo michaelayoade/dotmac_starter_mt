@@ -11,6 +11,8 @@ modules and three enabling owners named in this decision. It does not declare
 P11 met and does not authorize any other gap-list candidate.
 **Extends:** [ADR-0020](0020-billing-owns-operational-receivables.md) and
 [ADR-0024](0024-apps-compose-by-synchronizing-data.md).
+**Amended:** 2026-08-23 — production bill of materials, provider selections
+and the Domains/Hosting allocation (see the amendment below).
 **Evidence:**
 [`cloud-commerce-owner-sources.md`](../inventories/cloud-commerce-owner-sources.md),
 [`numbering-sources.md`](../inventories/numbering-sources.md),
@@ -64,6 +66,238 @@ ruled on both on 2026-08-15.
    Fulfillment. Its contract contradictions must be resolved before any
    behaviour code — see §5e.
 
+## Amendment 2026-08-23 — the production bill of materials
+
+Michael directed a production Dotmac Cloud V1 on 2026-08-22 and answered eight
+composition questions on 2026-08-23. This amendment freezes the bill of
+materials before any behaviour change, and reconciles this decision against
+owners that landed on `main` AFTER it was accepted. Repository facts below were
+measured at `origin/main` `90916442`, `dotmac-kernel 0.1.0a91`,
+`dotmac-integration 0.1.0a12`.
+
+### A. Owners that landed after this ADR was accepted
+
+Seven distributions now exist on `main` that §1 never considered. Two of them
+own capabilities Cloud V1 requires, so §1's matrix is incomplete as written.
+
+| Distribution | On `main` | Published | Disposition for Cloud V1 |
+|---|---|---|---|
+| `dotmac-payments` | yes, `0.1.0a1` | no | **ADOPT — new §1 row.** Owns the payment-intent lifecycle and the append-only intent↔settlement correlation. |
+| `dotmac-tax` | yes, `0.1.0a1` | yes | **ADOPT — new §1 row.** Owns effective-dated tax determination. |
+| `dotmac-party` | yes, `0.1.0a1` | yes | **ADOPT.** Customer identity beyond the kernel Party. |
+| `dotmac-brand-profiles` | yes, `0.1.0a1` | yes | ADOPT for storefront presentation. Holds no CSS, bytes or keys. |
+| `dotmac-fx-policy` | yes, `0.1.0a1` | no | **EXCLUDE from V1** — see §D, NGN-only. |
+| `dotmac-service-orders` | yes, `0.1.0a1` | no | **EXCLUDE from V1.** Service-delivery orders and activation readiness are ISP-shaped; Cloud's activation path is Fulfillment → Domains/Hosting. |
+| `dotmac-template-studio` | yes, `0.2.0a3` | no | Defer to the notification slice; not launch-blocking. |
+
+**`dotmac-payments` is the material correction.** §1 assigns "PSP credentials,
+provider webhook verification, wire mapping and delivery transport" to a
+connector plugin, and settlement acceptance/allocation to Billing. Between those
+two rows sat an unowned fact: *the intent to be paid, and its correlation to an
+external settlement*. Billing must not grow it — that would make Billing both
+the payment-intent owner and the receivable owner, and the journey's step 4
+("a PSP creates and confirms payment") would have no owner at all. §1 gains:
+
+| Fact or decision | Sole owner |
+|---|---|
+| Payment intent lifecycle, transfer proof, and the append-only intent↔settlement correlation | `dotmac-payments` |
+| Effective-dated tax determination from typed source facts | `dotmac-tax` |
+
+Billing consumes a determination and FREEZES it into the immutable invoice
+snapshot; it never recomputes a rate. ERP retains statutory returns and GL.
+Tax determining and Billing freezing are two decisions, not one — a rate that
+changes after issuance must not silently restate an issued invoice.
+
+### B. The frozen production bill of materials
+
+Pinned exactly by the Cloud assembly. "Published" is a claim about an
+authoritative external oracle (rule 30), not about presence on `main`.
+
+**Published today — pinnable now:** `dotmac-kernel` (`0.1.0a91`),
+`dotmac-ui`, `dotmac-auth-oidc`, `dotmac-numbering`, `dotmac-durable-timers`,
+`dotmac-files`, `dotmac-integration` (`0.1.0a12`), `dotmac-party`, `dotmac-tax`,
+`dotmac-brand-profiles`, `dotmac-connector-paystack` (`0.1.0a2`),
+`dotmac-connector-flutterwave` (`0.1.0a2`).
+
+**On `main`, complete-but-unpublished — must be released before Cloud pins:**
+`dotmac-fulfillment`, `dotmac-document-rendering`, `dotmac-payments`.
+
+**Not on `main` — candidates on branches only:** `dotmac-billing`,
+`dotmac-orders`, `dotmac-subscriptions`, `dotmac-collections`.
+
+**Not committed anywhere — preserved only on a salvage branch:**
+`dotmac-domains` and `dotmac-hosting`. Both existed solely as uncommitted
+working-tree files until 2026-08-23; they are now on pushed
+`salvage/cloud-domains-hosting`. Neither has ever been reviewed, tested on
+PostgreSQL, allocated, merged or released.
+
+**To be built:** `dotmac-storefront` (§F), the NiRA EPP connector, the
+Openprovider connector, the PowerDNS connector, the DirectAdmin connector, an
+outbound-delivery connector, and PSP checkout-initialization egress (§C).
+
+`dotmac-integration` is deployed only through Dotmac Integrator; Cloud never
+composes it.
+
+### C. PSP — both providers are selectable options, and neither can yet charge
+
+Michael's ruling: **Paystack and Flutterwave are both offered to the customer**,
+as alternatives at checkout — not primary-and-failover.
+
+This is an installation binding plus a per-checkout selection recorded as data.
+It is NOT a branch. Concretely, and enforced by architecture test:
+
+- `dotmac-payments` carries an OPAQUE provider-binding reference on the intent.
+  No provider enum, no `if provider ==`, no `paystack_*`/`flutterwave_*` column
+  in any module — the recorded fleet anti-pattern is
+  `dotmac_crm:app/models/subscriber.py:210`.
+- Which providers a tenant may offer is Integrator binding configuration.
+- Both connectors certify against the SAME conformance kit. A provider that
+  cannot pass it is not offered.
+
+**The gap this exposes.** Both published connectors implement
+`payments.settlement.observation.v1` in INGRESS and POLL modes only. Neither can
+*initiate* a charge. Journey step 4 therefore has no transport today. V1
+requires a new egress capability — provisionally
+`payments.checkout.initialization.v1` — implemented by both distributions, with
+the hosted-checkout redirect/reference returned as opaque evidence. This is new
+connector work on two already-published distributions and is launch-blocking.
+
+Renewal (journey step 10) additionally needs a stored-instrument charge.
+Paystack exposes a first-class Subscriptions/Plans and card-authorization API;
+Flutterwave offers tokenization whose tokens expire after one year. That
+asymmetry is a CONNECTOR concern: the capability contract must express
+"charge a stored instrument" and let each connector meet it, including
+re-tokenization, without Cloud learning either provider's model.
+
+### D. Money: NGN-only V1, multi-currency-shaped rows
+
+Michael's ruling: ship NGN-only, but design money so multi-currency needs no
+migration.
+
+- Every monetary column carries an EXPLICIT currency alongside an exact decimal
+  amount. Never a float, never an implied currency.
+- `dotmac-fx-policy` is EXCLUDED from the V1 profile. No rate sourcing,
+  selection policy or determination evidence ships in V1.
+- Registrar and panel costs are USD. That is procurement and margin, not a
+  customer-facing FX decision: NGN sell prices are set as immutable published
+  price versions by `dotmac-subscriptions`.
+- Adding a second sell currency later adds `dotmac-fx-policy` plus immutable FX
+  snapshots on order lines and invoices. It must not require altering a money
+  column.
+
+### E. Provider selections
+
+| Slot | Selected | Notes |
+|---|---|---|
+| PSP | **Paystack AND Flutterwave**, both customer-selectable | §C |
+| Registrar — `.ng`/`.com.ng` | **NiRA, direct EPP** | Accreditation already held, so `.ng` is sold at registrar margin rather than through a reseller. RFC 5730/5731/5732, plus 5910 if DNSSEC is offered. Open sub-question: whether NiRA operations run over EPP today or the web portal — that sizes the connector. |
+| Registrar — gTLDs | **Openprovider** | ~1,900–2,000 TLDs on one REST API with a full OT&E sandbox. Flat annual membership + cost-price beats volume tiers at launch volume, and it accepts wire transfer and multiple currencies, which matters paying from Nigeria. CentralNic Reseller was the runner-up on API rigour (OpenAPI 3.0) but is priced for larger resellers. |
+| Authoritative DNS | **Self-hosted PowerDNS Authoritative** | Hidden primary + branded public secondaries, AXFR/IXFR with TSIG, DNSSEC live-signing on the primary, across at least two ASNs (on-prem AS328160 for in-country latency, Contabo for off-net diversity). Reached through an Integrator connector, never imported. |
+| Hosting panel | **DirectAdmin** | Flat per-server licence, so margin does not erode as accounts grow; full API in standard pricing; real multi-tenant account isolation. |
+| Outbound email | **Postmark — RECOMMENDED, NOT YET APPROVED** | Deliverability-first with enforced separation of transactional and marketing streams, which matters given the fleet's recorded SPF/DMARC/PTR risk. No connector code until Michael approves the exact distribution (§6). |
+
+Every name above is an installation binding. None may reach a schema column, a
+lifecycle enum, or a business decision.
+
+### F. Storefront is a shared stateless module
+
+Michael's ruling: build `dotmac-storefront` as a shared, stateless module rather
+than Cloud-local presentation code.
+
+Consequence, and it is a gate not a formality: hard rule 22 (ADR-0006
+product-first extraction) applies. A product-first inventory across Sub, ERP,
+CRM and Vendor CP, plus a checked-in ownership decision, MUST land before any
+storefront behaviour code — with Cloud as first named adopter. Similarity
+between existing checkout screens is explicitly NOT grounds for extraction.
+
+Boundary: Storefront owns buyer-facing discovery, cart/checkout interaction,
+purchase-progress presentation and provider-neutral ports. It owns NO offer,
+price, order, invoice, receivable, collections, fulfillment or service fact, and
+imports no sibling module. Prefer stateless: a persistent cart stays assembly
+state unless the inventory proves a separate cart lifecycle and owner.
+
+### G. Adoption order is unchanged — and does not block Cloud
+
+Michael's ruling: KEEP the recorded product-first cutover order. Vendor CP
+remains first cutover for Billing and Subscriptions; Sub remains first cutover
+for Orders and Collections.
+
+This does not delay Cloud, because the two claims are different. "First cutover"
+names the application that migrates authority away from an EXISTING local writer
+and retires it. Cloud is greenfield and displaces no writer, so installing a
+published module is an adoption, never a cutover. §7 already lists both
+dispositions; §2 already separates "complete package" from "adopted owner".
+
+The residual risk is real and is accepted explicitly: a contract can move during
+its first genuine cutover in Sub or Vendor CP, invalidating a Cloud pin. The
+mitigation is that Cloud pins EXACT immutable versions and re-pins deliberately;
+it never tracks a range.
+
+### H. Domains and Hosting need fresh allocations
+
+`dotmac-domains`'s provisional prefix `do` is INVALID: `do` is permanently
+allocated to `documents` in `MIGRATION_OWNER_LEDGER`. An allocation is never
+reused or repointed.
+
+Allocated here, from prefixes free at `0.1.0a91`:
+
+| Owner | short_code | schema | prefix | branch_label |
+|---|---|---|---|---|
+| `domains` | `domains` | `mod_domains` | `dn` | `domains` |
+| `hosting` | `hosting` | `mod_hosting` | `hs` | `hosting` |
+
+Billing (`bi`), Orders (`or`), Subscriptions (`su`) and Collections (`cl`) are
+ALREADY allocated at `0.1.0a91`; they need no new ledger row.
+
+Per the allocation rule, the ledger rows for Domains and Hosting merge against
+current `main` BEFORE any Domains or Hosting source code is ported, as their own
+kernel change.
+
+### I. Every a75/a76/a77 kernel floor is obsolete
+
+The commerce and Cloud candidates were written against `a74`–`a77`. The kernel
+is now `0.1.0a91`, and Domains/Hosting cannot float on any floor that predates
+their own allocation. Every provisional floor is reassigned to the first
+published kernel that actually contains the required allocation and
+capabilities — for Domains and Hosting that is the kernel release carrying §H,
+which does not exist yet. No module may declare a floor naming an unpublished
+kernel.
+
+### J. Customer secrets and registrar-contact PII
+
+**Domain transfer-in is OUT of V1 scope.** An EPP auth code is a per-operation
+customer secret. `dotmac-integration`'s `SecretResolver` materializes references
+held on a connector configuration revision — correct for a provider credential
+that is stable per installation, wrong for a one-off code supplied by a customer
+for a single transfer. V1 sells registration, renewal and DNS only. Transfer-in
+returns when Integrator offers a per-operation secret channel, and it must be
+approved separately.
+
+Until then, and permanently thereafter: an auth code is **never** persisted as a
+literal in Cloud, in Domains, in Fulfillment step or attempt evidence, in
+Collections, in outbox payloads, or in delivery-attempt evidence. It is a
+reference, or material loaded explicitly for one operation and never written
+down. A saga that retries must re-resolve it, never replay a stored copy.
+
+**Registrar-contact PII — proposed, requires Michael's approval before any
+registrant payload is sent:**
+
+- `dotmac-domains` stores the registry-required registrant/admin/tech/billing
+  contact fields and the registrar's opaque contact handle. It is the only owner
+  that holds them.
+- Fulfillment carries an opaque contact reference in step payloads, never
+  contact values. The saga is a coordinator, not a PII store.
+- Integration payload retention redacts CONTENT while preserving IDENTITY, so a
+  delivery can still be proven, deduplicated and repaired after redaction.
+- A registrar-mandated proxy/privacy service, where the TLD permits one, is a
+  per-order option and an immutable line-snapshot fact — not a mutable profile
+  toggle that silently changes what a past order bought.
+- Retention runs to the registry-mandated minimum plus a named margin, and a
+  legal hold suspends redaction. Both values are settings, not constants.
+
+This section is a PROPOSAL. It is not approved, and no registrant payload may
+leave Cloud until it is.
+
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It
@@ -91,7 +325,9 @@ ownership matrix, and sequences the work without creating parallel owners.
 | Subscription contract, cadence, proration and recurring charge occurrence | `dotmac-subscriptions` |
 | Customer order and immutable line snapshots | `dotmac-orders` |
 | Rated-obligation acceptance, invoice, operational receivable, settlement acceptance and allocation | `dotmac-billing` |
+| Payment intent lifecycle, transfer proof, and the append-only intent-to-settlement correlation | `dotmac-payments` (added 2026-08-23) |
 | PSP credentials, provider webhook verification, wire mapping and delivery transport | a PSP connector plugin run by the Integrator |
+| Effective-dated tax determination from typed source facts | `dotmac-tax` (added 2026-08-23; Billing freezes the determination into the immutable invoice snapshot) |
 | Dunning case, versioned grace/escalation policy and delinquency-driven consequence request | `dotmac-collections` |
 | Whether a requested service transition is permitted, and the actual transition | the service lifecycle owner — initially `dotmac-domains` or `dotmac-hosting` |
 | Cross-owner fulfillment saga, step attempts, compensation and convergence | `dotmac-fulfillment` |
