@@ -69,6 +69,12 @@ MANIFEST_RELPATH: Final[str] = f"{ASSET_NAMESPACE}/manifest.json"
 #: cache-busting digest would only make the import path churn.
 TAILWIND_PRESET_RELPATH: Final[str] = f"{ASSET_NAMESPACE}/tailwind-preset.js"
 
+#: Optional browser behaviours. Like the stylesheet, the UI contract version
+#: is in the filename and the URL carries a content digest.
+BEHAVIOR_SCRIPT_RELPATH: Final[str] = (
+    f"{ASSET_NAMESPACE}/dotmac-ui-behaviors-{UI_CONTRACT_VERSION}.js"
+)
+
 #: Length of the truncated sha256 used as the cache-busting token.
 DIGEST_LENGTH: Final[int] = 12
 
@@ -85,6 +91,11 @@ def static_dir() -> Path:
 def stylesheet_path() -> Path:
     """Absolute path to the compiled stylesheet."""
     return _STATIC_DIR / STYLESHEET_RELPATH
+
+
+def behavior_script_path() -> Path:
+    """Absolute path to the published generic browser-behaviour asset."""
+    return _STATIC_DIR / BEHAVIOR_SCRIPT_RELPATH
 
 
 def tailwind_preset_path() -> Path:
@@ -114,6 +125,11 @@ def asset_digest(relpath: str = STYLESHEET_RELPATH) -> str:
     return sha256((_STATIC_DIR / relpath).read_bytes()).hexdigest()[:DIGEST_LENGTH]
 
 
+def _asset_url(relpath: str, mount: str) -> str:
+    prefix = "/" + mount.strip("/") if mount.strip("/") else ""
+    return f"{prefix}/{relpath}?v={asset_digest(relpath)}"
+
+
 def stylesheet_url(mount: str = "/static") -> str:
     """The `<link href>` for the compiled stylesheet, with a cache-busting
     `?v=`.
@@ -121,8 +137,12 @@ def stylesheet_url(mount: str = "/static") -> str:
     `mount` is wherever the consumer mounted `static_dir()`; it defaults to the
     conventional `/static`.
     """
-    prefix = "/" + mount.strip("/") if mount.strip("/") else ""
-    return f"{prefix}/{STYLESHEET_RELPATH}?v={asset_digest()}"
+    return _asset_url(STYLESHEET_RELPATH, mount)
+
+
+def behavior_script_url(mount: str = "/static") -> str:
+    """The optional `<script src>` URL for the generic browser behaviours."""
+    return _asset_url(BEHAVIOR_SCRIPT_RELPATH, mount)
 
 
 def asset_manifest() -> dict[str, object]:
@@ -133,12 +153,15 @@ def asset_manifest() -> dict[str, object]:
 
 __all__ = [
     "ASSET_NAMESPACE",
+    "BEHAVIOR_SCRIPT_RELPATH",
     "DIGEST_LENGTH",
     "MANIFEST_RELPATH",
     "STYLESHEET_RELPATH",
     "TAILWIND_PRESET_RELPATH",
     "asset_digest",
     "asset_manifest",
+    "behavior_script_path",
+    "behavior_script_url",
     "manifest_path",
     "static_dir",
     "stylesheet_path",

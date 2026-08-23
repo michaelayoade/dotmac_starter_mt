@@ -100,6 +100,96 @@ class CatalogItem:
     action_url: str | None = None
 
 
+LIST_CELL_TONES: Final[frozenset[str]] = frozenset(
+    {"positive", "info", "warning", "negative", "neutral"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ListColumn:
+    """One display column; query capability remains with the backend owner."""
+
+    key: str
+    label: str
+    sortable: bool = False
+    mobile_visible: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.key.strip() or not self.label.strip():
+            raise ValueError("List column key and label are required")
+
+
+@dataclass(frozen=True, slots=True)
+class ListCell:
+    """Already-formatted cell content, optionally carrying a semantic tone."""
+
+    text: str
+    secondary: str | None = None
+    href: str | None = None
+    tone: str | None = None
+
+    def __post_init__(self) -> None:
+        normalized = str(self.tone) if self.tone is not None else None
+        if normalized is not None and normalized not in LIST_CELL_TONES:
+            raise ValueError(f"Unsupported list-cell tone: {normalized}")
+        object.__setattr__(self, "tone", normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class ListRow:
+    """One projected row with at most one already-eligible visible action."""
+
+    cells: tuple[ListCell, ...]
+    action_label: str | None = None
+    action_url: str | None = None
+
+    def __post_init__(self) -> None:
+        if bool(self.action_label) != bool(self.action_url):
+            raise ValueError("List row action label and URL must be declared together")
+
+
+@dataclass(frozen=True, slots=True)
+class ListFilterOption:
+    """One product-supplied filter value and human label."""
+
+    value: str
+    label: str
+
+    def __post_init__(self) -> None:
+        if not self.label.strip():
+            raise ValueError("List filter option label is required")
+
+
+@dataclass(frozen=True, slots=True)
+class ListFilter:
+    """One visible filter whose key was declared by the list owner."""
+
+    key: str
+    label: str
+    options: tuple[ListFilterOption, ...]
+
+    def __post_init__(self) -> None:
+        if not self.key.strip() or not self.label.strip():
+            raise ValueError("List filter key and label are required")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityItem:
+    """Display-only official-timeline projection supplied by its product owner."""
+
+    message: str
+    detail: str | None = None
+    time_label: str | None = None
+    time_iso: str | None = None
+    url: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.message.strip():
+            raise ValueError("Activity message is required")
+        if self.time_iso and not self.time_label:
+            raise ValueError("Activity time ISO value requires a display label")
+
+
 EMPTY_STATE: Final[ComponentContract] = ComponentContract(
     template="dotmac_ui/components/empty_state.html",
     macro="empty_state",
@@ -171,11 +261,106 @@ CATALOG_GRID: Final[ComponentContract] = ComponentContract(
     ),
 )
 
+LIST_SURFACE: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/list_surface.html",
+    macro="list_surface",
+    parameters=(
+        "title",
+        "columns",
+        "rows",
+        "query",
+        "page_meta",
+        "base_url",
+        "filters",
+        "search_label",
+        "search_placeholder",
+        "empty_title",
+        "empty_message",
+        "empty_action_label",
+        "empty_action_url",
+    ),
+    classes=frozenset(
+        {
+            "dmui-list-surface",
+            "dmui-list-surface__title",
+            "dmui-list-surface__controls",
+            "dmui-list-surface__search",
+            "dmui-list-surface__search-label",
+            "dmui-list-surface__search-input",
+            "dmui-list-surface__filters",
+            "dmui-list-surface__filter",
+            "dmui-list-surface__filter-label",
+            "dmui-list-surface__select",
+            "dmui-list-surface__apply",
+            "dmui-list-surface__table-wrap",
+            "dmui-list-surface__table",
+            "dmui-list-surface__head",
+            "dmui-list-surface__heading",
+            "dmui-list-surface__heading--desktop",
+            "dmui-list-surface__sort",
+            "dmui-list-surface__sort-indicator",
+            "dmui-list-surface__row",
+            "dmui-list-surface__cell",
+            "dmui-list-surface__cell--desktop",
+            "dmui-list-surface__cell-link",
+            "dmui-list-surface__cell-text",
+            "dmui-list-surface__cell-secondary",
+            "dmui-list-surface__state",
+            "dmui-list-surface__actions",
+            "dmui-list-surface__row-action",
+            "dmui-list-surface__footer",
+            "dmui-list-surface__summary",
+            "dmui-list-surface__pagination",
+            "dmui-list-surface__page",
+            "dmui-list-surface__page--current",
+            "dmui-list-surface__page--disabled",
+            "dmui-list-surface__ellipsis",
+        }
+    ),
+)
+
+RECENT_ACTIVITY: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/recent_activity.html",
+    macro="recent_activity",
+    parameters=(
+        "activities",
+        "title",
+        "link_label",
+        "link_url",
+        "empty_title",
+        "empty_message",
+    ),
+    classes=frozenset(
+        {
+            "dmui-recent-activity",
+            "dmui-recent-activity__header",
+            "dmui-recent-activity__heading",
+            "dmui-recent-activity__heading-icon",
+            "dmui-recent-activity__title",
+            "dmui-recent-activity__all-link",
+            "dmui-recent-activity__list",
+            "dmui-recent-activity__item",
+            "dmui-recent-activity__item-link",
+            "dmui-recent-activity__marker",
+            "dmui-recent-activity__body",
+            "dmui-recent-activity__message",
+            "dmui-recent-activity__detail",
+            "dmui-recent-activity__time",
+            "dmui-recent-activity__empty",
+            "dmui-recent-activity__empty-icon",
+            "dmui-recent-activity__empty-title",
+            "dmui-recent-activity__empty-message",
+        }
+    ),
+)
+
 #: Every component this contract version publishes.
 COMPONENTS: Final[tuple[ComponentContract, ...]] = (
     EMPTY_STATE,
     MAP_FRAME,
     CATALOG_GRID,
+    LIST_SURFACE,
+    RECENT_ACTIVITY,
 )
 
 
@@ -196,13 +381,22 @@ def component_classes() -> frozenset[str]:
 
 
 __all__ = [
+    "ActivityItem",
     "CATALOG_GRID",
     "COMPONENTS",
     "EMPTY_STATE",
+    "LIST_CELL_TONES",
+    "LIST_SURFACE",
     "MAP_FRAME",
+    "RECENT_ACTIVITY",
     "TEMPLATE_NAMESPACE",
     "CatalogItem",
     "ComponentContract",
+    "ListCell",
+    "ListColumn",
+    "ListFilter",
+    "ListFilterOption",
+    "ListRow",
     "component_classes",
     "template_dir",
 ]

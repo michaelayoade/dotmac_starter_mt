@@ -99,6 +99,14 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.listing import (
+    ListDefinition,
+    ListFieldDefinition,
+    ListQuery,
+    PageMeta,
+    SortDirection,
+    request_needs_canonicalization,
+)
 from dotmac_kernel.models import (
     AuthSession,
     Base,
@@ -218,6 +226,15 @@ from dotmac_kernel.settings_resolver import (
     register_specs,
     resolve_value,
 )
+from dotmac_kernel.ui_projection import (
+    Action,
+    Kpi,
+    StateKind,
+    StateValue,
+    StatusIcon,
+    StatusPresentation,
+    StatusTone,
+)
 
 __version__ = "0.1.0a75"
 
@@ -251,6 +268,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.idempotency_models",
         "dotmac_kernel.identity",
         "dotmac_kernel.licensing",
+        "dotmac_kernel.listing",
         "dotmac_kernel.logging",
         "dotmac_kernel.messaging",
         "dotmac_kernel.messaging.envelope",
@@ -306,6 +324,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.ui_projection",
         "dotmac_kernel.web_deps",
     }
 )
@@ -503,6 +522,20 @@ __all__ = [
     # query
     "apply_pagination",
     "escape_like",
+    "ListDefinition",
+    "ListFieldDefinition",
+    "ListQuery",
+    "PageMeta",
+    "SortDirection",
+    "request_needs_canonicalization",
+    # transport-neutral UI projections
+    "Action",
+    "Kpi",
+    "StateKind",
+    "StateValue",
+    "StatusIcon",
+    "StatusPresentation",
+    "StatusTone",
     # security
     "hash_password",
     "verify_password",

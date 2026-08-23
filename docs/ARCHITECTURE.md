@@ -882,6 +882,7 @@ static/
 
 (served under the same /static mount, from the dotmac-ui package:)
   dotmac-ui/dotmac-ui-1.css   design-system tokens — COMMITTED, npm-free
+  dotmac-ui/dotmac-ui-behaviors-1.js  optional form behaviours — COMMITTED
   dotmac-ui/manifest.json     asset digests for non-Python consumers
 ```
 
@@ -946,8 +947,11 @@ because Tailwind v4's `@theme` emits unprefixed `--color-*`/`--font-*` into the
 same `:root`. Dark values are emitted under both `.dark` (what this portal's
 Alpine store already toggles) and `[data-dmui-theme="dark"]`. The published
 component surface contains the reuse-proven `empty_state` plus the
-audit-complete, deliberately unadopted `map_frame` and `catalog_grid`; every
-emitted `.dmui-*` class is derived from its typed component contract.
+audit-complete, deliberately unadopted `map_frame`, `catalog_grid`,
+`list_surface` and `recent_activity`; every emitted `.dmui-*` class is derived
+from its typed component contract. The optional generated browser asset
+publishes prefixed validated-input, submit, generic repeatable-field and
+unsaved-change mechanics.
 `map_frame` owns only an accessible canvas frame and generic
 ready/loading/empty/error presentation; provider runtime, tiles, viewport,
 endpoints, polling, layers, fallback lists and domain vocabulary remain
@@ -959,6 +963,23 @@ actions remain caller decisions. ADR-0006 § 5 still forbids adding a component
 because markup merely looks similar, and a guard fails the build if a selector
 appears without a declaration. Full contract:
 `packages/dotmac-ui/COMPATIBILITY.md`.
+
+`dotmac_kernel.listing` is the server-side pair for `list_surface`: it owns only
+declared request capabilities, normalization, canonical URLs and page metadata.
+The product service owns storage queries, tenant/permission checks, counts, row
+projection, bulk effects and export delivery. `dotmac_kernel.ui_projection`
+provides transport-neutral shapes for status, unknown/stale/unavailable values,
+KPI cohorts and backend-decided action eligibility; each domain service remains
+the owner of the actual meaning. `dotmac-ui` imports neither kernel module and
+renders only the supplied public behavior/value shape.
+
+`recent_activity` is not an official-timeline owner. The caller selects and
+orders official events, filters authorized URLs, and supplies already-formatted
+labels/ISO values. The browser behaviours likewise own interaction mechanics
+only: no invoice/tax/money, contact-role, business eligibility or CSV/import
+decision enters the presentation package, and server validation remains
+authoritative. Product-first evidence and retirement gates are recorded in
+`docs/inventories/ui-components-2026-08-19.md`.
 
 The first product-facing cutover is the shared document canvas, tenant login,
 admin layout, sidebar, topbar and toast/status layer. Those five templates use
@@ -1447,7 +1468,12 @@ write:
 | Notification channel-policy setting | Same canonical `DomainSetting` writers as above; `dotmac_kernel.channel_policy.resolve_channels` is the typed reader and the legacy per-event shadow setting is not supported |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
 | Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
+| List request normalization and canonical page state | `dotmac_kernel.listing` owns the framework-neutral `ListDefinition`/`ListQuery`/`PageMeta` contract. A product feature service owns the actual storage query, authorization, count, row projection, bulk effects and export delivery; routes pass raw values to the contract and templates/JavaScript do not rebuild its policy. |
+| Backend UI projection shapes | `dotmac_kernel.ui_projection` owns the transport-neutral status, state/freshness, KPI-cohort and action-value invariants. The relevant product read/transition service remains the owner of every actual label, status meaning, cohort and eligibility decision. |
 | Reusable map-frame presentation | `dotmac_ui.components.MAP_FRAME` owns only the inert canvas/state markup, token-native CSS and accessibility contract. A composing product owns the state transition and every provider, tile, viewport, endpoint, poll, location datum, layer, popup, control, fallback and domain decision. The contract is audit-complete with zero product adopters; no product-local owner is retired yet. |
+| List/queue presentation | `dotmac_ui.components.LIST_SURFACE` owns inert token-native filter/sort/table/pagination markup over canonical owner-supplied values. It executes no query, computes no total, decides no status or eligibility, and exposes at most one pre-eligible row action. Sub/ERP remain candidate adopters; no local renderer is retired here. |
+| Recent-activity presentation | `dotmac_ui.components.RECENT_ACTIVITY` owns only inert panel/list/empty markup. The composing product owns official event selection/order, wording, permission-filtered URLs and time formatting; Sub and CRM remain local renderer owners until separate cutovers. |
+| Generic form interaction mechanics | `dotmac_ui.behaviors` and the generated browser asset own prefixed validated-input feedback, double-submit/error handling, generic repeatable add/remove/reorder/serialization, and unsaved-change warning/teardown. Server/domain owners retain validation truth, money/tax, contact-role, action eligibility and CSV/import policy. |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |

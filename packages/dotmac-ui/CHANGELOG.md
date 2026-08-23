@@ -9,8 +9,9 @@ called out here.
 
 ## 0.1.0a8 — UNRELEASED
 
-Two additive, unadopted presentation candidates—the provider-neutral map frame
-and display-only catalog grid; `UI_CONTRACT_VERSION` stays **1**.
+Five additive, unadopted presentation candidates: provider-neutral map frame,
+display-only catalog grid, list surface, recent activity and generic form
+behaviours; `UI_CONTRACT_VERSION` stays **1**.
 
 ### Added
 
@@ -20,6 +21,17 @@ and display-only catalog grid; `UI_CONTRACT_VERSION` stays **1**.
   and the published empty state without depending on host filters or globals.
 - Accessibility requirements for secondary and tertiary text on elevated card
   surfaces.
+- `list_surface`, a token-native inert renderer over the public kernel
+  `ListQuery`/`PageMeta` behavior with display-only columns, cells, filters and
+  pre-eligible row actions. Query execution and action eligibility stay in the
+  product owner.
+- `recent_activity`, a token-native display panel whose caller supplies the
+  official ordered timeline, wording, authorized URLs and formatted times.
+- `dotmac_ui.behaviors` plus the generated, manifested
+  `dotmac-ui-behaviors-1.js`: prefixed validated-input, submit, generic
+  repeatable-field and unsaved-change factories. Invoice/tax/money,
+  contact-role and CSV/import logic are explicitly excluded.
+- `control-min-block-size`, the shared 44 CSS px minimum for packaged controls.
 
 ### Evidence
 

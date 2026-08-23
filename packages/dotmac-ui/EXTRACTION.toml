@@ -4,7 +4,7 @@ classification = "presentation-foundation"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Dotmac design system"
-contract = "Four published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation; (catalog-grid) an audit-complete display-only catalog card/grid contract. The headline status is the weakest of the four."
+contract = "Seven published contracts, tracked as slices below: tokens/compiled assets; the reuse-proven empty-state component; provider-neutral map frame; display-only catalog grid; a token-native list/queue renderer paired with the kernel request-state contract; display-only recent activity; and generic validated-input, submit, repeatable-field and unsaved-change browser behaviours. The headline status is the weakest slice."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_starter_mt", "dotmac_erp", "dotmac_workspace", "dotmac_academy_app"]
 source_paths = [
   "dotmac_sub:static/css/design-system.css",
@@ -22,6 +22,16 @@ source_paths = [
   "dotmac_workspace:src/dotmac_workspace/static/css/workspace.css",
   "dotmac_academy_app:templates/public/courses.html",
   "dotmac_academy_app:static/public.css",
+  "dotmac_sub:app/services/list_query.py",
+  "dotmac_sub:templates/components/data/data_grid.html",
+  "dotmac_sub:templates/components/data/recent_activity_panel.html",
+  "dotmac_crm:templates/components/data/recent_activity_panel.html",
+  "dotmac_sub:static/js/form-validation.js",
+  "dotmac_sub:static/js/repeatable-fields.js",
+  "dotmac_sub:static/js/unsaved-changes.js",
+  "dotmac_crm:static/js/form-validation.js",
+  "dotmac_crm:static/js/repeatable-fields.js",
+  "dotmac_crm:static/js/unsaved-changes.js",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
@@ -38,6 +48,11 @@ preserved_tests = [
   "dotmac_crm:tests/test_field_recent_tracks.py",
   "dotmac_workspace:tests/test_launcher_is_not_authorization.py",
   "dotmac_academy_app:tests/web/test_public_catalog.py",
+  "dotmac_sub:tests/test_list_query_contract.py",
+  "dotmac_sub:tests/test_ui_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_listing.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_ui_projection.py",
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_behaviors.py",
 ]
 # INDEPENDENT consumers only. The starter is the assembly that owns this
 # package: its consumption proves the wiring works, not that anyone independent
@@ -54,14 +69,15 @@ inventory_evidence = [
   "docs/inventories/ui-surface-inventory.md",
   "docs/inventories/map-ui-sources.md",
   "docs/inventories/catalog-card-sources.md",
+  "docs/inventories/ui-components-2026-08-19.md",
 ]
-first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. map-frame: not begun by owner direction; the audited candidates are dotmac_sub dispatch live-map/playback and dotmac_erp geofence editing, and neither is changed or counted by this slice. catalog-grid: pending -- this branch publishes no release and changes neither Workspace nor Academy. The starter remains reference proof rather than an independent cutover."
-shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared empty-state core; ERP and Sub each pin the release and reject a vendored package template. map-frame: clean-host rendering, exact state/signature checks, provider/product-policy sensitivity proof, token-native sizing and state contrast protect the candidate; no cross-product drift claim is made before adoption. catalog-grid: clean-host, escaping, display-only-field, optional-action, empty-state, token-native CSS, responsive and contrast proofs exist here; Workspace and Academy must add product-loader parity tests before either local renderer can retire."
-local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are deliberate. components: ERP and Sub retain only thin empty-state adapters, not markup owners; CRM remains optional. map-frame: no product copy retires in this change; an authorized adoption must replace only the local outer frame and sizing rule while leaving provider and domain behavior local. catalog-grid: no retirement is claimed -- Workspace still owns dmws-tile markup/CSS and Academy still owns its course-card markup/CSS until coordinated product cutovers prove parity and delete the overlaps."
-next_action = "Keep both audit-complete slices on the integration train without composing or releasing them. Map-frame adoption may replace only a local outer frame and sizing rule; provider runtime, viewport, data and domain policy remain product-owned. Catalog adoption maps product-owned listing results to CatalogItem without moving commercial eligibility, stock, selection or money decisions into dotmac-ui. Each adopter must prove loader and behavior parity and retire only the displaced local renderer/CSS. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet."
+first_cutover = "Per slice. tokens and empty-state are already reuse-proven. Map-frame and catalog-grid remain pending candidates. List-surface first cuts over one Sub ListDefinition caller to the kernel request contract plus the package renderer, then characterizes one ERP list. Recent-activity first replaces one Sub panel while the Sub service keeps official-timeline ordering, URLs and formatted times. Generic-form-behaviors first replaces one exercised Sub form per factory; no product-local file retires until DOM/event/failure parity is proven. This branch publishes no release and changes no product."
+shadow_and_drift = "Per slice. Existing token/empty-state/map/catalog proofs remain. List-surface adds kernel normalization/canonical-URL tests plus clean-host rendering, escaping, owner-projected rows, visible status text, responsive-column and pagination proofs. Recent activity adds clean-host, escaping and display-only-shape proofs. Generic form behaviours are generated/manifested, execute under a dependency-free Node event probe, prove repeatable limits/order/serialization and stable listener teardown, and carry a source deny-list for invoice/tax/money/contact policy. Product parity remains mandatory before retirement."
+local_copy_retirement = "Existing retirement statements remain unchanged. No map, catalog, list, activity or JavaScript product copy retires here. List adoption must remove the displaced product renderer and reconcile Sub's six older data-grid callers. Recent activity retirement must leave official timeline selection and formatting in its product owner. Generic behaviour retirement may replace only validated-input feedback, submit guarding, generic add/remove/reorder and unsaved-change mechanics; invoice calculations, contact-role policy and CSV/import behaviour remain with their domain owners."
+next_action = "Release only after the full package contract and asset proofs are green, then adopt slice by slice. First: one Sub list on dotmac-kernel.listing plus LIST_SURFACE and reconcile all legacy data-grid callers. Second: recent activity in Sub and CRM. Third: each generic form factory on an exercised product form with DOM/a11y/failure parity. Keep map/catalog adoption separate, delete only displaced local renderers, and preserve the palette ratchet."
 
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
-# This package publishes FOUR contracts whose evidence differs. A single
+# This package publishes SEVEN contracts whose evidence differs. A single
 # package-level state cannot describe that honestly: report the stronger and the
 # weaker contract is overstated; report the weaker and the stronger is
 # understated. The gate validates each slice independently and DERIVES the
@@ -159,3 +175,58 @@ contract_consumers = []
 reference_consumers = ["dotmac_starter_mt"]
 candidate_consumers = ["dotmac_workspace", "dotmac_academy_app"]
 local_copy_retirement = "Pending. Workspace's _tile plus dmws-tile* rules and Academy's public course-card markup plus overlapping card/grid rules remain authoritative. A later cutover must replace each with a thin CatalogItem mapping and delete the overlapping local renderer/CSS; this implementation branch does neither."
+
+[[slices]]
+name = "list-surface"
+contract = "Token-native inert list/filter/sort/pagination renderer over dotmac-kernel's canonical ListQuery/PageMeta, with display-only columns, cells, filters and pre-eligible row actions"
+status = "audit-complete"
+source_paths = [
+  "dotmac_sub:app/services/list_query.py",
+  "dotmac_sub:templates/components/data/data_grid.html",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/listing.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_list_query_contract.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_listing.py",
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
+]
+contract_consumers = []
+reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_sub", "dotmac_erp"]
+local_copy_retirement = "Pending. Sub's product-local ListDefinition implementation and six older data-grid callers remain in place; ERP has no equivalent typed contract yet. The first Sub cutover must pin the released kernel/UI contracts, replace one complete list path, prove canonical URL and product-query parity, and then reconcile every older caller before claiming retirement."
+
+[[slices]]
+name = "recent-activity"
+contract = "Display-only inert recent-activity panel; the caller supplies ordered messages, details, already-formatted time labels/ISO values and authorized URLs"
+status = "audit-complete"
+source_paths = [
+  "dotmac_sub:templates/components/data/recent_activity_panel.html",
+  "dotmac_crm:templates/components/data/recent_activity_panel.html",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
+]
+contract_consumers = []
+reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_sub", "dotmac_crm"]
+local_copy_retirement = "Pending. The byte-identical Sub and CRM panels remain live. A product cutover may retire only its markup/CSS after loader and output parity; the product's official-timeline service continues to own event inclusion, ordering, wording, URLs, permissions and time formatting."
+
+[[slices]]
+name = "generic-form-behaviors"
+contract = "Generated optional browser asset publishing validated-input feedback, double-submit/error handling, generic repeatable add/remove/reorder/serialization and unsaved-change warning/teardown factories"
+status = "audit-complete"
+source_paths = [
+  "dotmac_sub:static/js/form-validation.js",
+  "dotmac_sub:static/js/repeatable-fields.js",
+  "dotmac_sub:static/js/unsaved-changes.js",
+  "dotmac_crm:static/js/form-validation.js",
+  "dotmac_crm:static/js/repeatable-fields.js",
+  "dotmac_crm:static/js/unsaved-changes.js",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_behaviors.py",
+]
+contract_consumers = []
+reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_sub", "dotmac_crm"]
+local_copy_retirement = "Pending. Both products retain their three local files until each factory is exercised through product DOM/a11y/failure tests. The shared source deliberately omits invoice money/tax calculations, contact-role/primary policy, phone/currency formatting and CSV parsing; those local/domain paths cannot be retired through this slice."

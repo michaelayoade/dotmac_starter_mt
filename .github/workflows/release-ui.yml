@@ -99,9 +99,14 @@ jobs:
           CONTENTS="$(python -m zipfile -l "${WHEEL}")"
           for required in \
             "dotmac_ui/static/dotmac-ui/dotmac-ui-1.css" \
+            "dotmac_ui/static/dotmac-ui/dotmac-ui-behaviors-1.js" \
             "dotmac_ui/static/dotmac-ui/tailwind-preset.js" \
             "dotmac_ui/static/dotmac-ui/manifest.json" \
             "dotmac_ui/templates/dotmac_ui/components/empty_state.html" \
+            "dotmac_ui/templates/dotmac_ui/components/map_frame.html" \
+            "dotmac_ui/templates/dotmac_ui/components/catalog_grid.html" \
+            "dotmac_ui/templates/dotmac_ui/components/list_surface.html" \
+            "dotmac_ui/templates/dotmac_ui/components/recent_activity.html" \
             "dotmac_ui/py.typed" ; do
             echo "${CONTENTS}" | grep -q "${required}" \
               || { echo "::error::wheel is missing ${required}"; exit 1; }
@@ -125,10 +130,11 @@ jobs:
           /tmp/uismoke/bin/pip install --quiet "jinja2==3.1.6"
           /tmp/uismoke/bin/python - <<'PY'
           import dotmac_ui
-          from dotmac_ui.assets import stylesheet_path, tailwind_preset_path
+          from dotmac_ui.assets import behavior_script_path, stylesheet_path, tailwind_preset_path
           from dotmac_ui.theme import bootstrap_script
           from jinja2 import Environment, FileSystemLoader, StrictUndefined
           assert stylesheet_path().is_file(), "stylesheet missing from the installed wheel"
+          assert behavior_script_path().is_file(), "behavior script missing from the installed wheel"
           assert tailwind_preset_path().is_file(), "preset missing from the installed wheel"
           assert bootstrap_script(), "theme bootstrap is empty"
           env = Environment(
@@ -145,11 +151,16 @@ jobs:
           )
           assert 'class="dmui-empty-state__title"' in rendered
           assert 'href="/invoices/new"' in rendered
+          for contract in dotmac_ui.COMPONENTS:
+              packaged = getattr(env.get_template(contract.template).module, contract.macro)
+              assert str(packaged()).strip(), f"{contract.macro} did not render"
           print("installed dotmac-ui", dotmac_ui.__version__)
           print("preset:", tailwind_preset_path())
           PY
           PRESET="$(/tmp/uismoke/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
+          BEHAVIORS="$(/tmp/uismoke/bin/python -c 'from dotmac_ui.assets import behavior_script_path; print(behavior_script_path())')"
           node -e "const p=require('${PRESET}'); if(!p.theme||!p.theme.extend||!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('preset loads as CommonJS')"
+          node -e "const b=require('${BEHAVIORS}'); const r=b.createRepeatableFields({min:0,max:2,initialData:[{name:'first'}]}); r.init(); r.addItem({name:'second'}); if(r.items.length!==2||!b.createValidatedInput||!b.createUnsavedChanges){throw new Error('generic behavior contract missing')} console.log('generic behaviors load as CommonJS')"
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -243,10 +254,11 @@ jobs:
           /tmp/uiverify/bin/pip install --quiet "jinja2==3.1.6"
           /tmp/uiverify/bin/python - <<'PY'
           import dotmac_ui
-          from dotmac_ui.assets import asset_manifest, stylesheet_path, tailwind_preset_path
+          from dotmac_ui.assets import asset_manifest, behavior_script_path, stylesheet_path, tailwind_preset_path
           from dotmac_ui.theme import bootstrap_script
           from jinja2 import Environment, FileSystemLoader, StrictUndefined
           assert stylesheet_path().is_file()
+          assert behavior_script_path().is_file()
           assert tailwind_preset_path().is_file()
           assert bootstrap_script()
           env = Environment(
@@ -263,10 +275,15 @@ jobs:
           )
           assert 'class="dmui-empty-state__title"' in rendered
           assert 'href="/invoices/new"' in rendered
+          for contract in dotmac_ui.COMPONENTS:
+              packaged = getattr(env.get_template(contract.template).module, contract.macro)
+              assert str(packaged()).strip(), f"{contract.macro} did not render"
           print("verified dotmac-ui", dotmac_ui.__version__, asset_manifest()["ui_contract_version"])
           PY
           PRESET="$(/tmp/uiverify/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
+          BEHAVIORS="$(/tmp/uiverify/bin/python -c 'from dotmac_ui.assets import behavior_script_path; print(behavior_script_path())')"
           node -e "const p=require('${PRESET}'); if(!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('published preset loads as CommonJS')"
+          node -e "const b=require('${BEHAVIORS}'); const r=b.createRepeatableFields({min:0,max:2,initialData:[{name:'first'}]}); r.init(); r.addItem({name:'second'}); if(r.items.length!==2||!b.createValidatedInput||!b.createUnsavedChanges){throw new Error('generic behavior contract missing')} console.log('published generic behaviors load as CommonJS')"
 
       # Only AFTER registry verification: tag the published SHA.
       - name: Tag the verified release

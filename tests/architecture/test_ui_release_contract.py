@@ -17,12 +17,21 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO / ".github" / "workflows" / "release-ui.yml"
 TEMPLATE_ARCHIVE_PATH = "dotmac_ui/templates/dotmac_ui/components/empty_state.html"
+REQUIRED_ARCHIVE_PATHS = (
+    TEMPLATE_ARCHIVE_PATH,
+    "dotmac_ui/templates/dotmac_ui/components/map_frame.html",
+    "dotmac_ui/templates/dotmac_ui/components/catalog_grid.html",
+    "dotmac_ui/templates/dotmac_ui/components/list_surface.html",
+    "dotmac_ui/templates/dotmac_ui/components/recent_activity.html",
+    "dotmac_ui/static/dotmac-ui/dotmac-ui-behaviors-1.js",
+)
 
 
 def _assert_component_release_proof(workflow: str) -> None:
-    assert (
-        TEMPLATE_ARCHIVE_PATH in workflow
-    ), "release artifact inspection does not require the published template"
+    for archive_path in REQUIRED_ARCHIVE_PATHS:
+        assert (
+            archive_path in workflow
+        ), f"release artifact inspection does not require {archive_path}"
     assert (
         workflow.count('pip install --quiet "jinja2==3.1.6"') == 2
     ), "both clean hosts must install Jinja independently of dotmac-ui"
@@ -33,6 +42,9 @@ def _assert_component_release_proof(workflow: str) -> None:
         "from jinja2 import Environment, FileSystemLoader, StrictUndefined",
         "dotmac_ui.template_dir()",
         "dotmac_ui.EMPTY_STATE",
+        "dotmac_ui.COMPONENTS",
+        "behavior_script_path()",
+        "createRepeatableFields",
         '"No invoices"',
     ):
         assert (

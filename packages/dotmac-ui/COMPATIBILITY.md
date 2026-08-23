@@ -58,9 +58,10 @@ deprecation cycle**.
 | `dotmac_ui.contract` | `UI_CONTRACT_VERSION`, `SUPPORTED_UI_CONTRACT_VERSIONS`, `TOKEN_PREFIX`, `CLASS_PREFIX`, `DATA_ATTRIBUTE_PREFIX`, `PUBLISHED_COMPONENT_CLASSES`, `THEME_ATTRIBUTE`, `DARK_THEME_SELECTORS`, `ACCESSIBILITY_TARGET` |
 | `dotmac_ui.tokens` | `DesignToken`, `TOKENS`, `TOKENS_BY_NAME`, `CATEGORIES`, `MODES`, `RAMP_STEPS`, `SEMANTIC_INTENTS`, `ACTION_INTENTS`, `ACTION_STATES`, `REDUCED_MOTION_DURATION`, `token`, `tokens_in`, `token_names`, `variable_names`, `css_variable`, `resolve_color`, `reference_target`, `declarations`, `iter_categories`, `COLOUR_CATEGORIES`, `CHANNEL_SUFFIX`, `colour_tokens`, `channel_variable` |
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
-| `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
+| `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `behavior_script_path`, `behavior_script_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `BEHAVIOR_SCRIPT_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
+| `dotmac_ui.behaviors` | `BehaviorContract`, `BEHAVIORS`, `VALIDATED_INPUT`, `FORM_SUBMIT`, `REPEATABLE_FIELDS`, `UNSAVED_CHANGES` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
-| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `CatalogItem`, `COMPONENTS`, `EMPTY_STATE`, `MAP_FRAME`, `CATALOG_GRID`, `component_classes` |
+| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `CatalogItem`, `ListColumn`, `ListCell`, `ListRow`, `ListFilter`, `ListFilterOption`, `ActivityItem`, `LIST_CELL_TONES`, `COMPONENTS`, `EMPTY_STATE`, `MAP_FRAME`, `CATALOG_GRID`, `LIST_SURFACE`, `RECENT_ACTIVITY`, `component_classes` |
 
 The whole of that surface is also re-exported at the top level, and there is no
 DB-touching subset to keep out of it: `import dotmac_ui` has no side effect
@@ -104,6 +105,7 @@ component boundary" below). Consequences that consumers can rely on:
 | `static_dir()/dotmac-ui/dotmac-ui-1.css` | the compiled stylesheet for UI contract 1 |
 | `static_dir()/dotmac-ui/manifest.json` | contract version, package version, token count, and each asset's full sha256 + byte size |
 | `static_dir()/dotmac-ui/tailwind-preset.js` | the generated preset, for consumers that compile their own utilities |
+| `static_dir()/dotmac-ui/dotmac-ui-behaviors-1.js` | optional generated generic form behaviours; use `behavior_script_url()` |
 | `template_dir()/dotmac_ui/components/*.html` | the published component templates — inert package data, rendered by the HOST's Jinja |
 
 `manifest.json` exists for consumers that integrate **outside Python** — a JS
@@ -319,6 +321,8 @@ with none of the kernel's globals or filters installed.
 | `dotmac_ui/components/empty_state.html` | `empty_state` | `title`, `message`, `action_label`, `action_url` | `dmui-empty-state`, `dmui-empty-state__visual`, `dmui-empty-state__icon`, `dmui-empty-state__title`, `dmui-empty-state__message`, `dmui-empty-state__action`, `dmui-empty-state__action-icon` |
 | `dotmac_ui/components/map_frame.html` | `map_frame` | `canvas_id`, `label`, `state`, `status_title`, `status_message` | `dmui-map-frame`, `dmui-map-frame--ready`, `dmui-map-frame--loading`, `dmui-map-frame--empty`, `dmui-map-frame--error`, `dmui-map-frame__canvas`, `dmui-map-frame__state`, `dmui-map-frame__state-panel`, `dmui-map-frame__state-indicator`, `dmui-map-frame__state-title`, `dmui-map-frame__state-message`, `dmui-map-frame__live` |
 | `dotmac_ui/components/catalog_grid.html` | `catalog_grid` | `items`, `empty_title`, `empty_message`, `empty_action_label`, `empty_action_url` | `dmui-catalog-grid`, `dmui-catalog-grid__item`, `dmui-catalog-grid__media`, `dmui-catalog-grid__body`, `dmui-catalog-grid__title`, `dmui-catalog-grid__meta`, `dmui-catalog-grid__description`, `dmui-catalog-grid__notice`, `dmui-catalog-grid__action`, `dmui-catalog-grid__action-icon` |
+| `dotmac_ui/components/list_surface.html` | `list_surface` | `title`, `columns`, `rows`, `query`, `page_meta`, `base_url`, `filters`, `search_label`, `search_placeholder`, `empty_title`, `empty_message`, `empty_action_label`, `empty_action_url` | `dmui-list-surface*` classes declared by `LIST_SURFACE` |
+| `dotmac_ui/components/recent_activity.html` | `recent_activity` | `activities`, `title`, `link_label`, `link_url`, `empty_title`, `empty_message` | `dmui-recent-activity*` classes declared by `RECENT_ACTIVITY` |
 
 `empty_state` renders the "nothing to show here" panel for a list, table body or
 card. In a table the **caller** owns the row and the `colspan`; the component
@@ -369,6 +373,34 @@ calling product service, which maps its result into `CatalogItem`.
 The catalog slice is additive but still `audit-complete`: neither source product
 has cut over. Their existing markup and CSS remain authoritative until a later
 coordinated release, adoption proof and local-owner retirement.
+
+`list_surface` renders, but does not own, the public behavior of a canonical
+`ListQuery` and `PageMeta`. It calls only `filter_value()` and `url()` and reads
+normalized fields; `dotmac-ui` imports no kernel. The product owns the query,
+count, authorization, row projection and action eligibility, and supplies at
+most one already-eligible visible row action. `ListCell.tone` accepts only the
+five semantic tones and always renders its visible text, so status never depends
+on colour alone. Mobile visibility is caller-declared per display column.
+
+`recent_activity` accepts only `ActivityItem` display values. Its caller owns
+which official events appear, their order, wording, permission-filtered URLs and
+formatted time label/ISO value. The component is not an audit log, timeline
+resolver or event owner.
+
+## Generic browser behaviours
+
+The optional `dotmac-ui-behaviors-1.js` asset registers the prefixed Alpine
+factories in `BEHAVIORS` when Alpine is present and exports pure factories for
+direct integration. It is generated and content-digested like the stylesheet;
+consumers link `behavior_script_url()` only when they use these interactions.
+
+The asset owns interaction mechanics only: client feedback plus optional server
+validation, double-submit/error handling, generic repeatable add/remove/reorder
+and serialization, and unsaved-change navigation/teardown. Server validation is
+authoritative. Money/tax calculations, currency/phone formatting, contact roles
+or primary-contact rules, business eligibility and CSV/import parsing are not
+part of the contract. Neutral `dmui:*` events let a host attach its own toast or
+telemetry without the package importing product code.
 
 ## Accessibility contract
 

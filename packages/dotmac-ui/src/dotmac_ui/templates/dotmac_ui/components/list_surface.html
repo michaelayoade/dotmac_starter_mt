@@ -1,0 +1,98 @@
+{% from "dotmac_ui/components/empty_state.html" import empty_state %}
+
+{% macro list_surface(title="Records", columns=(), rows=(), query=none, page_meta=none, base_url="", filters=(), search_label="Search", search_placeholder="Search records", empty_title="No records found", empty_message=none, empty_action_label=none, empty_action_url=none) -%}
+<section class="dmui-list-surface" aria-label="{{ title }}">
+    <h2 class="dmui-list-surface__title">{{ title }}</h2>
+    {% if query %}
+    <form class="dmui-list-surface__controls" action="{{ base_url }}" method="get" role="search">
+        <div class="dmui-list-surface__search">
+            <label class="dmui-list-surface__search-label" for="dmui-list-search-{{ query.definition.key }}">{{ search_label }}</label>
+            <input class="dmui-list-surface__search-input" id="dmui-list-search-{{ query.definition.key }}" type="search" name="search" value="{{ query.search or '' }}" placeholder="{{ search_placeholder }}">
+        </div>
+        {% if filters %}
+        <div class="dmui-list-surface__filters">
+            {% for filter in filters %}
+            <div class="dmui-list-surface__filter">
+                <label class="dmui-list-surface__filter-label" for="dmui-list-filter-{{ query.definition.key }}-{{ filter.key }}">{{ filter.label }}</label>
+                <select class="dmui-list-surface__select" id="dmui-list-filter-{{ query.definition.key }}-{{ filter.key }}" name="{{ filter.key }}">
+                    {% for option in filter.options %}
+                    <option value="{{ option.value }}"{% if query.filter_value(filter.key) == option.value or (not query.filter_value(filter.key) and not option.value) %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <input type="hidden" name="sort" value="{{ query.sort_by }}">
+        <input type="hidden" name="dir" value="{{ query.sort_dir }}">
+        <input type="hidden" name="per_page" value="{{ query.per_page }}">
+        <button class="dmui-list-surface__apply" type="submit">Apply</button>
+    </form>
+    {% endif %}
+
+    {% if rows %}
+    <div class="dmui-list-surface__table-wrap">
+        <table class="dmui-list-surface__table">
+            <thead class="dmui-list-surface__head">
+                <tr>
+                    {% for column in columns %}
+                    <th class="dmui-list-surface__heading{% if not column.mobile_visible %} dmui-list-surface__heading--desktop{% endif %}" scope="col">
+                        {% if query and column.sortable %}
+                        {% set next_direction = "desc" if query.sort_by == column.key and query.sort_dir == "asc" else "asc" %}
+                        <a class="dmui-list-surface__sort" href="{{ query.url(base_url, sort_by=column.key, sort_dir=next_direction) }}">
+                            {{ column.label }}
+                            {% if query.sort_by == column.key %}
+                            <span class="dmui-list-surface__sort-indicator" aria-label="Sorted {{ query.sort_dir }}ending">{{ "↑" if query.sort_dir == "asc" else "↓" }}</span>
+                            {% endif %}
+                        </a>
+                        {% else %}
+                        {{ column.label }}
+                        {% endif %}
+                    </th>
+                    {% endfor %}
+                    <th class="dmui-list-surface__heading dmui-list-surface__actions" scope="col"><span class="dmui-list-surface__search-label">Action</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr class="dmui-list-surface__row">
+                    {% for cell in row.cells %}
+                    {% set column = columns[loop.index0] if loop.index0 < columns|length else none %}
+                    <td class="dmui-list-surface__cell{% if column and not column.mobile_visible %} dmui-list-surface__cell--desktop{% endif %}">
+                        {% if cell.href %}<a class="dmui-list-surface__cell-link" href="{{ cell.href }}">{% endif %}
+                        {% if cell.tone %}
+                        <span class="dmui-list-surface__state" data-dmui-tone="{{ cell.tone }}">{{ cell.text }}</span>
+                        {% else %}
+                        <span class="dmui-list-surface__cell-text">{{ cell.text }}</span>
+                        {% endif %}
+                        {% if cell.secondary %}<span class="dmui-list-surface__cell-secondary">{{ cell.secondary }}</span>{% endif %}
+                        {% if cell.href %}</a>{% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="dmui-list-surface__cell dmui-list-surface__actions">
+                        {% if row.action_label and row.action_url %}<a class="dmui-list-surface__row-action" href="{{ row.action_url }}">{{ row.action_label }}</a>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if page_meta and query %}
+    <footer class="dmui-list-surface__footer">
+        <p class="dmui-list-surface__summary">Showing {{ page_meta.start_item }}–{{ page_meta.end_item }} of {{ page_meta.total_items }}</p>
+        <nav class="dmui-list-surface__pagination" aria-label="{{ title }} pages">
+            {% if page_meta.has_previous %}<a class="dmui-list-surface__page" href="{{ query.url(base_url, page=page_meta.page - 1) }}">Previous</a>{% else %}<span class="dmui-list-surface__page dmui-list-surface__page--disabled" aria-disabled="true">Previous</span>{% endif %}
+            {% for page_number in page_meta.navigation %}
+                {% if page_number is none %}<span class="dmui-list-surface__ellipsis" aria-hidden="true">…</span>
+                {% elif page_number == page_meta.page %}<span class="dmui-list-surface__page dmui-list-surface__page--current" aria-current="page">{{ page_number }}</span>
+                {% else %}<a class="dmui-list-surface__page" href="{{ query.url(base_url, page=page_number) }}">{{ page_number }}</a>{% endif %}
+            {% endfor %}
+            {% if page_meta.has_next %}<a class="dmui-list-surface__page" href="{{ query.url(base_url, page=page_meta.page + 1) }}">Next</a>{% else %}<span class="dmui-list-surface__page dmui-list-surface__page--disabled" aria-disabled="true">Next</span>{% endif %}
+        </nav>
+    </footer>
+    {% endif %}
+    {% else %}
+    {{ empty_state(title=empty_title, message=empty_message, action_label=empty_action_label, action_url=empty_action_url) }}
+    {% endif %}
+</section>
+{%- endmacro %}

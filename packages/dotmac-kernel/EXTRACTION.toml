@@ -17,6 +17,9 @@ source_paths = [
   "dotmac_sub:app/services/communication_eligibility.py",
   "dotmac_sub:app/services/notification.py",
   "dotmac_sub:app/tasks/notifications.py",
+  "dotmac_sub:app/services/list_query.py",
+  "dotmac_sub:app/services/ui_contracts.py",
+  "dotmac_sub:app/schemas/status_presentation.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
@@ -38,6 +41,10 @@ preserved_tests = [
   "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
   "dotmac_sub:tests/architecture/test_composition.py",
   "dotmac_starter_mt:tests/unit/test_product_manifest.py",
+  "dotmac_sub:tests/test_list_query_contract.py",
+  "dotmac_sub:tests/test_ui_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_listing.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_ui_projection.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -54,8 +61,9 @@ inventory_evidence = [
   "docs/inventories/delivery-outbox-sources.md",
   "docs/inventories/channel-policy-sources.md",
   "docs/inventories/product-manifest-sources.md",
+  "docs/inventories/ui-components-2026-08-19.md",
 ]
-first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
-shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
-local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
-next_action = "Publish the demand-pulled product-manifest contract, make Sub's release path emit it from SUB_ASSEMBLY, and replace Vendor's configured capability lists and duplicate catalogue protocol with digest-verified snapshots before the Entitlement Allocation writer cutover. The broader adoption sequence remains Sub settings first, then ERP."
+first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan. The listing/UI-projection candidates are proven here but have no product cutover: Sub is first after a release, one complete list and projection path at a time."
+shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation. Listing adoption additionally proves canonical URL/page/count parity; UI projections prove unknown/stale distinctions, KPI cohort parity and owner-supplied action eligibility."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, channel-policy, list-query and UI-projection paths retire only after their kernel adapters pass the preserved behavior proofs."
+next_action = "Publish the additive kernel contract only after its full gates pass. Then cut over one complete Sub list to dotmac_kernel.listing together with dotmac-ui LIST_SURFACE, prove canonical URL/page/count parity, and replace local UI projection types one owner path at a time. ERP characterization follows; no product-local owner retires before its released-pin parity gate."

@@ -809,6 +809,13 @@ def _build_tokens() -> tuple[DesignToken, ...]:
         "Minimum map-frame block size. Consumers may override it for the "
         "surface that composes the frame.",
     )
+    add(
+        "control-min-block-size",
+        "component",
+        "2.75rem",
+        "Minimum interactive control block size (44 CSS px at the default "
+        "root size), shared by packaged form and pagination controls.",
+    )
 
     return tuple(tokens)
 

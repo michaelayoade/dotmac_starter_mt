@@ -13,6 +13,15 @@ landing; no domain behavior moves into Kernel and none is composed into Starter.
 
 ### Added
 
+- `dotmac_kernel.listing`: product-first `ListFieldDefinition`,
+  `ListDefinition`, `ListQuery`, `PageMeta` and canonicalization helpers from
+  Sub's production list contract. The kernel owns request-state normalization;
+  products still own queries, counts, authorization, row projections, bulk
+  effects and exports.
+- `dotmac_kernel.ui_projection`: transport-neutral status, value-state, KPI
+  cohort and backend-decided action projections. Unknown, stale, unavailable
+  and not-applicable values stay distinct, and action eligibility never moves
+  into templates or JavaScript.
 - Product-owned `charge_models` and `obligation_sources` manifest declarations,
   consumed by `dotmac-subscriptions` as open ADR-0008 registries rather than
   fixed kernel enums.

@@ -175,6 +175,12 @@ def _required_slice_names(directory_name: str) -> set[str]:
     # folding it into `components` would falsely inherit ERP/Sub adoption.
     if dotmac_ui.CATALOG_GRID in dotmac_ui.COMPONENTS:
         required.add("catalog-grid")
+    if dotmac_ui.LIST_SURFACE in dotmac_ui.COMPONENTS:
+        required.add("list-surface")
+    if dotmac_ui.RECENT_ACTIVITY in dotmac_ui.COMPONENTS:
+        required.add("recent-activity")
+    if dotmac_ui.BEHAVIORS:
+        required.add("generic-form-behaviors")
     return required
 
 
@@ -939,6 +945,23 @@ def test_catalog_grid_cannot_inherit_empty_state_adoption() -> None:
     dossier["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="catalog-grid"):
+        _validate_ui(dossier)
+
+
+@pytest.mark.parametrize(
+    "slice_name",
+    ["list-surface", "recent-activity", "generic-form-behaviors"],
+)
+def test_new_ui_contracts_cannot_inherit_an_older_slices_adoption(
+    slice_name: str,
+) -> None:
+    """Each newly published contract carries its own evidence and candidates."""
+    dossier = _ui_dossier()
+    dossier["slices"] = [
+        entry for entry in dossier["slices"] if entry["name"] != slice_name
+    ]
+
+    with pytest.raises(ExtractionDossierError, match=slice_name):
         _validate_ui(dossier)
 
 

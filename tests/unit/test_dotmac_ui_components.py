@@ -26,6 +26,7 @@ from pathlib import Path
 
 import dotmac_ui
 import pytest
+from dotmac_kernel.listing import ListDefinition, ListFieldDefinition, PageMeta
 from dotmac_ui.a11y import (
     NON_TEXT_CONTRAST_MINIMUM,
     TEXT_CONTRAST_MINIMUM,
@@ -34,8 +35,16 @@ from dotmac_ui.a11y import (
 from dotmac_ui.components import (
     CATALOG_GRID,
     COMPONENTS,
+    LIST_SURFACE,
+    RECENT_ACTIVITY,
+    ActivityItem,
     CatalogItem,
     ComponentContract,
+    ListCell,
+    ListColumn,
+    ListFilter,
+    ListFilterOption,
+    ListRow,
 )
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -155,6 +164,182 @@ def test_catalog_grid_publishes_only_the_display_contract() -> None:
     assert not forbidden_business_inputs & {
         field.name for field in dataclasses.fields(CatalogItem)
     }
+
+
+def test_list_surface_publishes_display_values_not_query_or_action_policy() -> None:
+    assert LIST_SURFACE.parameters == (
+        "title",
+        "columns",
+        "rows",
+        "query",
+        "page_meta",
+        "base_url",
+        "filters",
+        "search_label",
+        "search_placeholder",
+        "empty_title",
+        "empty_message",
+        "empty_action_label",
+        "empty_action_url",
+    )
+    assert {field.name for field in dataclasses.fields(ListColumn)} == {
+        "key",
+        "label",
+        "sortable",
+        "mobile_visible",
+    }
+    assert {field.name for field in dataclasses.fields(ListCell)} == {
+        "text",
+        "secondary",
+        "href",
+        "tone",
+    }
+    assert {field.name for field in dataclasses.fields(ListRow)} == {
+        "cells",
+        "action_label",
+        "action_url",
+    }
+    forbidden_policy = {
+        "allowed",
+        "eligible",
+        "permission",
+        "price",
+        "quantity",
+        "transition",
+    }
+    for value_type in (ListColumn, ListCell, ListRow, ListFilter, ListFilterOption):
+        assert not forbidden_policy & {
+            field.name for field in dataclasses.fields(value_type)
+        }
+
+
+def test_list_surface_renders_canonical_kernel_state_and_owner_projection() -> None:
+    definition = ListDefinition(
+        key="customers",
+        fields=(
+            ListFieldDefinition("name", "Name", searchable=True, sortable=True),
+            ListFieldDefinition("status", "Status", filterable=True, sortable=True),
+            ListFieldDefinition("created_at", "Created", sortable=True),
+        ),
+        default_sort="created_at",
+    )
+    query = definition.build_query(
+        search="Acme & Sons",
+        filters={"status": "active"},
+        sort_by="name",
+        sort_dir="asc",
+        page=2,
+        per_page=25,
+    )
+    page_meta = PageMeta.from_query(query, total_items=60)
+
+    rendered = _render(
+        LIST_SURFACE,
+        title="Customers",
+        columns=(
+            ListColumn("name", "Name", sortable=True),
+            ListColumn("status", "Status", sortable=True),
+            ListColumn("created_at", "Created", sortable=True, mobile_visible=False),
+        ),
+        rows=(
+            ListRow(
+                cells=(
+                    ListCell("Acme <North>", href='/customers/1?next="unsafe'),
+                    ListCell("Active", tone="positive"),
+                    ListCell("19 Aug 2026", secondary="09:45 WAT"),
+                ),
+                action_label="Open",
+                action_url="/customers/1",
+            ),
+        ),
+        query=query,
+        page_meta=page_meta,
+        base_url="/customers",
+        filters=(
+            ListFilter(
+                key="status",
+                label="Status",
+                options=(
+                    ListFilterOption("", "All statuses"),
+                    ListFilterOption("active", "Active"),
+                ),
+            ),
+        ),
+    )
+
+    assert "Acme &lt;North&gt;" in rendered
+    assert "&#34;unsafe" in rendered
+    assert 'data-dmui-tone="positive"' in rendered
+    assert '<option value="active" selected>' in rendered
+    assert "sort=status" in rendered
+    assert "dir=desc" in rendered
+    assert "page=1" in rendered
+    assert "Showing 26\u201350 of 60" in rendered
+    assert 'aria-current="page"' in rendered
+    assert 'class="dmui-list-surface__row-action"' in rendered
+
+
+def test_list_rows_require_complete_action_pairs_and_known_tones() -> None:
+    with pytest.raises(ValueError, match="declared together"):
+        ListRow(cells=(), action_label="Open")
+    with pytest.raises(ValueError, match="Unsupported list-cell tone"):
+        ListCell("Invented", tone="urgent")
+
+
+def test_recent_activity_is_display_only_and_escapes_owner_supplied_values() -> None:
+    assert RECENT_ACTIVITY.parameters == (
+        "activities",
+        "title",
+        "link_label",
+        "link_url",
+        "empty_title",
+        "empty_message",
+    )
+    assert {field.name for field in dataclasses.fields(ActivityItem)} == {
+        "message",
+        "detail",
+        "time_label",
+        "time_iso",
+        "url",
+    }
+    assert not {
+        "created_at",
+        "event_type",
+        "official",
+        "permission",
+        "status",
+    } & {field.name for field in dataclasses.fields(ActivityItem)}
+
+    rendered = _render(
+        RECENT_ACTIVITY,
+        activities=(
+            ActivityItem(
+                message="Order <accepted>",
+                detail="Sales handoff recorded",
+                time_label="2 minutes ago",
+                time_iso="2026-08-19T09:43:00+01:00",
+                url='/orders/1?next="unsafe',
+            ),
+        ),
+        link_url="/activity",
+    )
+
+    assert "Order &lt;accepted&gt;" in rendered
+    assert "Sales handoff recorded" in rendered
+    assert 'datetime="2026-08-19T09:43:00+01:00"' in rendered
+    assert "&#34;unsafe" in rendered
+    assert 'href="/activity"' in rendered
+
+
+def test_recent_activity_has_an_explicit_empty_state() -> None:
+    rendered = _render(
+        RECENT_ACTIVITY,
+        empty_title="Nothing recorded",
+        empty_message="Owner events will appear here.",
+    )
+
+    assert "Nothing recorded" in rendered
+    assert "Owner events will appear here." in rendered
 
 
 def test_catalog_grid_renders_the_workspace_and_academy_call_shapes() -> None:

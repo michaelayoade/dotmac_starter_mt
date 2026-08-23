@@ -291,7 +291,7 @@ and the next gate.
 ### [`dotmac-ui`](../packages/dotmac-ui/README.md)
 
 - **Owner:** Dotmac design system
-- **Contract:** Four published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation; (catalog-grid) an audit-complete display-only catalog card/grid contract. The headline status is the weakest of the four.
+- **Contract:** Seven published contracts, tracked as slices below: tokens/compiled assets; the reuse-proven empty-state component; provider-neutral map frame; display-only catalog grid; a token-native list/queue renderer paired with the kernel request-state contract; display-only recent activity; and generic validated-input, submit, repeatable-field and unsaved-change browser behaviours. The headline status is the weakest slice.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 - **Candidate consumers:** `dotmac_crm`, `dotmac_workspace`.

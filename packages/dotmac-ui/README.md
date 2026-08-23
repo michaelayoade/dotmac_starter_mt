@@ -2,8 +2,8 @@
 
 The DotMac shared UI design system: **semantic design tokens**, **compiled
 self-hosted assets**, an **accessibility contract**, and a deliberately small
-Jinja component library shipped as inert package data. Later adoption-led
-slices add layouts and navigation primitives that ADR-0006 § 2 assigns here.
+Jinja component library shipped as inert package data, plus optional generated
+generic form behaviours. Product decisions remain outside the package.
 
 - **Public API + stability policy:** `COMPATIBILITY.md` (authoritative manifest:
   `dotmac_ui.__init__`).
@@ -15,7 +15,7 @@ slices add layouts and navigation primitives that ADR-0006 § 2 assigns here.
 
 ## What it is, in one paragraph
 
-A vocabulary of 192 role-named CSS custom properties (`--dmui-surface-primary`,
+A vocabulary of 193 role-named CSS custom properties (`--dmui-surface-primary`,
 `--dmui-action-destructive-hover`, `--dmui-status-warning-foreground`), compiled
 into one plain stylesheet that any product can link. Each colour also publishes a
 channel form (`--dmui-color-brand-500-rgb: 59 130 246`) so opacity modifiers like
@@ -30,6 +30,7 @@ import dotmac_ui
 
 dotmac_ui.static_dir()      # serve this directory from your static mount
 dotmac_ui.stylesheet_url()  # -> "/static/dotmac-ui/dotmac-ui-1.css?v=<digest>"
+dotmac_ui.behavior_script_url()  # optional generic form behaviours
 ```
 
 Then one `<link rel="stylesheet">` at that URL, after your own stylesheet, and
@@ -81,6 +82,17 @@ render the catalog grid:
 owns membership, authorization, eligibility, availability, price formatting
 and actions. Workspace and Academy are the audited sources, but neither has cut
 over to this candidate yet.
+
+The list renderer pairs with `dotmac_kernel.listing` without importing it: the
+product builds the canonical query/page values and display-only rows, then the
+inert macro renders filters, sort links, pagination and one pre-eligible row
+action. Recent Activity follows the same boundary: the product supplies the
+official ordered events, URLs and formatted time labels.
+
+The optional browser asset publishes `dmuiValidatedInput`, `dmuiFormSubmit`,
+`dmuiRepeatableFields` and `dmuiUnsavedChanges`. It contains no invoice,
+tax/money, contact-role or CSV/import policy; server validation remains
+authoritative.
 
 **There is no build step for consumers.** No Tailwind, no PostCSS, no bundler,
 no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the

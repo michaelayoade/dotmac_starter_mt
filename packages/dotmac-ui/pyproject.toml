@@ -14,6 +14,9 @@ include = [
     # built CSS, it does NOT run this package through its own Tailwind (or any
     # other) compiler. Shipped as package data and resolved by package path.
     { path = "src/dotmac_ui/static/**/*", format = ["sdist", "wheel"] },
+    # Reviewed source for the generated browser-behaviour asset. The wheel does
+    # not execute it; build.py copies it deterministically into static/.
+    { path = "src/dotmac_ui/_behavior_source.js", format = ["sdist", "wheel"] },
     # THE COMPONENT LIBRARY (ADR-0006 s2). Inert Jinja templates shipped as
     # package data: this package never imports Jinja, the HOST supplies the
     # environment and adds `dotmac_ui.template_dir()` to its search path.

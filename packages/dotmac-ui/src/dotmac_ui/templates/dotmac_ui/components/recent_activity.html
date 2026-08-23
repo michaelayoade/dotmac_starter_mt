@@ -1,0 +1,33 @@
+{% macro recent_activity(activities=(), title="Recent activity", link_label="View all", link_url=none, empty_title="No recent activity", empty_message="Activity will appear here") -%}
+<section class="dmui-recent-activity" aria-label="{{ title }}">
+    <header class="dmui-recent-activity__header">
+        <div class="dmui-recent-activity__heading">
+            <span class="dmui-recent-activity__heading-icon" aria-hidden="true">◷</span>
+            <h2 class="dmui-recent-activity__title">{{ title }}</h2>
+        </div>
+        {% if link_url %}<a class="dmui-recent-activity__all-link" href="{{ link_url }}">{{ link_label }}</a>{% endif %}
+    </header>
+    {% if activities %}
+    <ol class="dmui-recent-activity__list">
+        {% for activity in activities %}
+        <li class="dmui-recent-activity__item">
+            {% if activity.url %}<a class="dmui-recent-activity__item-link" href="{{ activity.url }}">{% else %}<div class="dmui-recent-activity__item-link">{% endif %}
+            <span class="dmui-recent-activity__marker" aria-hidden="true">i</span>
+            <span class="dmui-recent-activity__body">
+                <span class="dmui-recent-activity__message">{{ activity.message }}</span>
+                {% if activity.detail %}<span class="dmui-recent-activity__detail">{{ activity.detail }}</span>{% endif %}
+            </span>
+            {% if activity.time_label %}<time class="dmui-recent-activity__time"{% if activity.time_iso %} datetime="{{ activity.time_iso }}"{% endif %}>{{ activity.time_label }}</time>{% endif %}
+            {% if activity.url %}</a>{% else %}</div>{% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
+    <div class="dmui-recent-activity__empty">
+        <span class="dmui-recent-activity__empty-icon" aria-hidden="true">◷</span>
+        <p class="dmui-recent-activity__empty-title">{{ empty_title }}</p>
+        {% if empty_message %}<p class="dmui-recent-activity__empty-message">{{ empty_message }}</p>{% endif %}
+    </div>
+    {% endif %}
+</section>
+{%- endmacro %}

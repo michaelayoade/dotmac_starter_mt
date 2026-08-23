@@ -1,0 +1,400 @@
+(function (root) {
+  "use strict";
+
+  function runtimeWindow() {
+    return root.window || root;
+  }
+
+  function runtimeDocument() {
+    return root.document || null;
+  }
+
+  function emit(type, detail) {
+    const target = runtimeWindow();
+    if (typeof target.dispatchEvent === "function" && typeof root.CustomEvent === "function") {
+      target.dispatchEvent(new root.CustomEvent(type, { detail }));
+    }
+  }
+
+  function announce(message, priority = "polite") {
+    const documentObject = runtimeDocument();
+    const region = documentObject && documentObject.getElementById("aria-live-region");
+    if (!region) return;
+    region.setAttribute("aria-live", priority);
+    region.textContent = message;
+    (runtimeWindow().setTimeout || root.setTimeout)(() => {
+      region.textContent = "";
+    }, 1000);
+  }
+
+  function createValidatedInput(config = {}) {
+    return {
+      name: config.name || "",
+      value: config.initialValue || "",
+      validationUrl: config.validationUrl || "",
+      rules: config.rules || "",
+      parsedRules: [],
+      touched: false,
+      validating: false,
+      hasError: false,
+      isValid: false,
+      validationUnavailable: false,
+      errorMessage: "",
+      abortController: null,
+
+      init() {
+        this.parsedRules = this.rules.split("|").filter(Boolean);
+      },
+
+      async validate() {
+        this.touched = true;
+        const clientError = this.validateClient();
+        if (clientError) {
+          this.setError(clientError);
+          return;
+        }
+        if (this.validationUrl && this.value) {
+          await this.validateServer();
+        } else {
+          this.setValid();
+        }
+      },
+
+      validateClient() {
+        const value = String(this.value || "").trim();
+        for (const rule of this.parsedRules) {
+          const separator = rule.indexOf(":");
+          const ruleName = separator === -1 ? rule : rule.slice(0, separator);
+          const ruleParameter = separator === -1 ? "" : rule.slice(separator + 1);
+          if (ruleName === "required" && !value) return "This field is required";
+          if (ruleName === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            return "Please enter a valid email address";
+          }
+          if (ruleName === "url" && value) {
+            try {
+              new URL(value);
+            } catch (_error) {
+              return "Please enter a valid URL";
+            }
+          }
+          if (ruleName === "min" && value.length < Number.parseInt(ruleParameter, 10)) {
+            return `Must be at least ${ruleParameter} characters`;
+          }
+          if (ruleName === "max" && value.length > Number.parseInt(ruleParameter, 10)) {
+            return `Must be no more than ${ruleParameter} characters`;
+          }
+          if (ruleName === "numeric" && value && !Number.isFinite(Number(value))) {
+            return "Must be a number";
+          }
+          if (ruleName === "date" && value && Number.isNaN(Date.parse(value))) {
+            return "Please enter a valid date";
+          }
+          if (ruleName === "regex" && value) {
+            try {
+              if (!new RegExp(ruleParameter).test(value)) return "Invalid format";
+            } catch (_error) {
+              return "Validation rule is unavailable";
+            }
+          }
+        }
+        return null;
+      },
+
+      async validateServer() {
+        if (this.abortController) this.abortController.abort();
+        this.abortController = new root.AbortController();
+        this.validating = true;
+        this.validationUnavailable = false;
+        try {
+          const documentObject = runtimeDocument();
+          const csrf = documentObject && documentObject.querySelector('meta[name="csrf-token"]');
+          const response = await root.fetch(this.validationUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrf ? csrf.content : "",
+            },
+            body: JSON.stringify({ field: this.name, value: this.value }),
+            signal: this.abortController.signal,
+          });
+          if (!response.ok) throw new Error(`validation response ${response.status}`);
+          const data = await response.json();
+          if (data.valid) this.setValid();
+          else this.setError(data.message || "Invalid value");
+        } catch (error) {
+          if (error && error.name === "AbortError") return;
+          this.hasError = false;
+          this.isValid = false;
+          this.validationUnavailable = true;
+          emit("dmui:validation-unavailable", { field: this.name });
+        } finally {
+          this.validating = false;
+        }
+      },
+
+      setError(message) {
+        this.hasError = true;
+        this.isValid = false;
+        this.validationUnavailable = false;
+        this.errorMessage = message;
+        this.validating = false;
+        announce(`${this.name}: ${message}`, "assertive");
+      },
+
+      setValid() {
+        this.hasError = false;
+        this.isValid = true;
+        this.validationUnavailable = false;
+        this.errorMessage = "";
+        this.validating = false;
+      },
+    };
+  }
+
+  function createFormSubmit(config = {}) {
+    return {
+      submitting: false,
+      errors: {},
+      invalidMessage: config.invalidMessage || "Please fix the errors before submitting",
+      _responseErrorHandler: null,
+      _afterRequestHandler: null,
+
+      init() {
+        this._responseErrorHandler = () => { this.submitting = false; };
+        this._afterRequestHandler = (event) => {
+          this.submitting = false;
+          if (event.detail && event.detail.successful) {
+            this.errors = {};
+            return;
+          }
+          try {
+            const data = JSON.parse(event.detail.xhr.responseText);
+            if (data.errors && typeof data.errors === "object") this.errors = data.errors;
+          } catch (_error) {
+            return;
+          }
+        };
+        this.$el.addEventListener("htmx:responseError", this._responseErrorHandler);
+        this.$el.addEventListener("htmx:afterRequest", this._afterRequestHandler);
+      },
+
+      destroy() {
+        if (this._responseErrorHandler) this.$el.removeEventListener("htmx:responseError", this._responseErrorHandler);
+        if (this._afterRequestHandler) this.$el.removeEventListener("htmx:afterRequest", this._afterRequestHandler);
+      },
+
+      handleSubmit(event) {
+        if (this.submitting) {
+          event.preventDefault();
+          return false;
+        }
+        const invalid = this.$el.querySelectorAll('[aria-invalid="true"]');
+        if (invalid.length > 0) {
+          event.preventDefault();
+          invalid[0].focus();
+          emit("dmui:invalid-submit", { message: this.invalidMessage });
+          announce(this.invalidMessage, "assertive");
+          return false;
+        }
+        this.submitting = true;
+        return true;
+      },
+
+      getFieldError(fieldName) { return this.errors[fieldName] || null; },
+      hasFieldError(fieldName) { return Boolean(this.errors[fieldName]); },
+      clearFieldError(fieldName) { delete this.errors[fieldName]; },
+    };
+  }
+
+  function createRepeatableFields(config = {}) {
+    return {
+      items: [],
+      min: config.min ?? 0,
+      max: config.max ?? 100,
+      initialData: Array.isArray(config.initialData) ? config.initialData : [],
+      defaultValues: config.defaultValues || {},
+      nextId: 1,
+      fieldPrefix: config.fieldPrefix || "item",
+
+      init() {
+        const initial = this.initialData.length > 0
+          ? this.initialData
+          : Array.from({ length: Math.max(this.min, 1) }, () => ({}));
+        this.items = initial.slice(0, this.max).map((data) => this.createItem(data));
+      },
+
+      defaultItemValues() {
+        const values = typeof this.defaultValues === "function"
+          ? this.defaultValues()
+          : this.defaultValues;
+        return { ...values };
+      },
+
+      createItem(data = {}) {
+        return { id: this.nextId++, ...this.defaultItemValues(), ...data };
+      },
+
+      addItem(data = {}) {
+        if (this.items.length >= this.max) {
+          emit("dmui:repeatable-limit", { kind: "maximum", limit: this.max });
+          announce(`Maximum of ${this.max} items allowed`);
+          return false;
+        }
+        this.items.push(this.createItem(data));
+        return true;
+      },
+
+      removeItem(index) {
+        if (this.items.length <= this.min) {
+          emit("dmui:repeatable-limit", { kind: "minimum", limit: this.min });
+          announce(`Minimum of ${this.min} items required`);
+          return false;
+        }
+        this.items.splice(index, 1);
+        return true;
+      },
+
+      moveItem(fromIndex, toIndex) {
+        if (fromIndex < 0 || fromIndex >= this.items.length || toIndex < 0 || toIndex >= this.items.length) return false;
+        const [item] = this.items.splice(fromIndex, 1);
+        this.items.splice(toIndex, 0, item);
+        return true;
+      },
+
+      moveUp(index) { return this.moveItem(index, index - 1); },
+      moveDown(index) { return this.moveItem(index, index + 1); },
+      canAdd() { return this.items.length < this.max; },
+      canRemove() { return this.items.length > this.min; },
+
+      toJSON() {
+        return JSON.stringify(this.items.map(({ id: _id, ...values }) => values));
+      },
+
+      getFormData() {
+        return this.items.map((item, index) => Object.fromEntries(
+          Object.entries(item)
+            .filter(([key]) => key !== "id")
+            .map(([key, value]) => [`${this.fieldPrefix}[${index}][${key}]`, value]),
+        ));
+      },
+    };
+  }
+
+  function createUnsavedChanges(config = {}) {
+    return {
+      isDirty: false,
+      initialState: null,
+      enabled: config.enabled !== false,
+      warningMessage: config.message || "You have unsaved changes. Are you sure you want to leave?",
+      excludeFields: config.excludeFields || ["_csrf_token"],
+      captureDelay: config.captureDelay ?? 100,
+      warningSuspended: false,
+      _beforeUnloadHandler: null,
+      _linkClickHandler: null,
+      _submitHandler: null,
+      _afterRequestHandler: null,
+
+      init() {
+        if (!this.enabled) return;
+        this.$nextTick(() => {
+          (runtimeWindow().setTimeout || root.setTimeout)(() => { this.initialState = this.getFormState(); }, this.captureDelay);
+        });
+        this._beforeUnloadHandler = (event) => this.handleBeforeUnload(event);
+        this._linkClickHandler = (event) => this.handleLinkClick(event);
+        this._submitHandler = () => { this.warningSuspended = true; };
+        this._afterRequestHandler = (event) => {
+          this.warningSuspended = false;
+          if (event.detail && event.detail.successful) this.markAsSaved();
+        };
+        runtimeWindow().addEventListener("beforeunload", this._beforeUnloadHandler);
+        runtimeDocument().addEventListener("click", this._linkClickHandler);
+        this.$el.addEventListener("submit", this._submitHandler);
+        this.$el.addEventListener("htmx:afterRequest", this._afterRequestHandler);
+      },
+
+      destroy() {
+        if (!this.enabled) return;
+        runtimeWindow().removeEventListener("beforeunload", this._beforeUnloadHandler);
+        runtimeDocument().removeEventListener("click", this._linkClickHandler);
+        this.$el.removeEventListener("submit", this._submitHandler);
+        this.$el.removeEventListener("htmx:afterRequest", this._afterRequestHandler);
+      },
+
+      getFormState() {
+        const state = [];
+        this.$el.querySelectorAll("input, select, textarea").forEach((input) => {
+          if (!input.name || this.excludeFields.includes(input.name)) return;
+          const entry = { name: input.name, type: input.type || input.tagName, value: input.value };
+          if (input.type === "checkbox" || input.type === "radio") entry.checked = input.checked;
+          if (input.type === "file") {
+            entry.value = Array.from(input.files || []).map((file) => [file.name, file.size, file.lastModified]);
+          }
+          state.push(entry);
+        });
+        return JSON.stringify(state);
+      },
+
+      checkForChanges() {
+        if (!this.enabled || this.initialState === null) return;
+        this.isDirty = this.getFormState() !== this.initialState;
+      },
+
+      markAsSaved() {
+        this.isDirty = false;
+        this.warningSuspended = false;
+        this.initialState = this.getFormState();
+      },
+      markAsDirty() { this.isDirty = true; },
+      reset() { this.markAsSaved(); },
+      discardChanges() { this.isDirty = false; this.warningSuspended = true; },
+
+      handleBeforeUnload(event) {
+        if (!this.isDirty || this.warningSuspended) return undefined;
+        event.preventDefault();
+        event.returnValue = this.warningMessage;
+        return this.warningMessage;
+      },
+
+      handleLinkClick(event) {
+        if (!this.isDirty || this.warningSuspended) return;
+        const link = event.target && typeof event.target.closest === "function"
+          ? event.target.closest("a")
+          : null;
+        if (!link) return;
+        const href = link.getAttribute("href");
+        if (!href || href.startsWith("#") || link.hasAttribute("download") || link.getAttribute("target") === "_blank" || link.hasAttribute("data-no-unsaved-check")) return;
+        if (!runtimeWindow().confirm(this.warningMessage)) {
+          event.preventDefault();
+          event.stopPropagation();
+        } else {
+          this.discardChanges();
+        }
+      },
+
+      canNavigate() {
+        return !this.isDirty || runtimeWindow().confirm(this.warningMessage);
+      },
+    };
+  }
+
+  const api = {
+    announce,
+    createFormSubmit,
+    createRepeatableFields,
+    createUnsavedChanges,
+    createValidatedInput,
+    register(Alpine) {
+      Alpine.data("dmuiValidatedInput", (config) => createValidatedInput(config));
+      Alpine.data("dmuiFormSubmit", (config) => createFormSubmit(config));
+      Alpine.data("dmuiRepeatableFields", (config) => createRepeatableFields(config));
+      Alpine.data("dmuiUnsavedChanges", (config) => createUnsavedChanges(config));
+    },
+  };
+
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  root.DotmacUIBehaviors = api;
+  const documentObject = runtimeDocument();
+  if (documentObject && typeof documentObject.addEventListener === "function") {
+    documentObject.addEventListener("alpine:init", () => api.register(root.Alpine));
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this);
