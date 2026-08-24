@@ -168,7 +168,55 @@ binding_multiplicity = "Unique on (installation_id, capability_id). Many install
 # discovery, startup and activation. Storing it is what lets a later MODULE
 # upgrade refuse a previously activated binding — the case that bites, where
 # the plugin did not change but the host did.
-open_questions = []
+#
+# REOPENED 2026-08-24 by the outbound leg, and it is one question rather than a
+# list: A CAPABILITY ID IS NOT YET A CONTRACT. `spi.CapabilityDeclaration`
+# carries `capability_id`, `config_schema` and `modes`; `DispatchRequest.payload`
+# is an unvalidated `dict[str, object]`. Configuration has a declared schema and
+# COMMANDS DO NOT, so each connector settled its command shape locally and two
+# shipped ids grew two dialects each — `payments.*` (Paystack's
+# `{"action","params"}` envelope, derived provider reference and connector-owned
+# wire scale, against Flutterwave's and Remita's flat payload, product-minted
+# reference and required `currency_minor_units`) and `messaging.send.v1`
+# (`meta_whatsapp`'s `send_text|send_template|send_media` with `recipient`,
+# against `meta_social`'s `send_direct_message|reply_to_comment` with
+# `recipient_id`+`channel`). ADR-0024 § 8.1 forbids exactly that, and ADR-0061
+# § 3 cannot be satisfied while it holds: ERP cannot move payout traffic between
+# bindings if the payload changes with the binding.
+#
+# This module owns the closure, because the missing thing is a declaration
+# surface, not a connector fix: a command payload schema on
+# `CapabilityDeclaration`, validated by the engine BEFORE dispatch rather than
+# by each connector after. It is an SPI minor version and a coordinated
+# connector release wave. See ADR-0061 § 5 for the ordered sequence.
+open_questions = [
+  "CapabilityDeclaration declares a config schema but no COMMAND PAYLOAD schema, so a capability id is a name rather than a contract on the DELIVERY leg (ADR-0024 § 8.4, ADR-0061 § 4 D3/D5).",
+]
+
+# ── ADR-0062 (2026-08-24): this module names its runtime metrics; the assembly
+# exports them ──────────────────────────────────────────────────────────────
+#
+# `operations.METRIC_NAMES` is the published naming contract — thirteen stable,
+# `integration_`-prefixed, unit-suffixed identifiers returned verbatim by
+# `DispatchMetrics.as_metrics()` and pinned as literals in
+# `tests/unit/test_integration_runtime_safety.py`. There is no metrics client,
+# counter registry or `/metrics` route in this package and there must not be
+# one: several assemblies compose this module, and an exporter here would pick
+# their monitoring stack for them and create a second observability path beside
+# the one each deployment already runs. `dotmac_integrator` owns the exporter.
+#
+# Metric names are therefore part of what COMPATIBILITY.md promises: removing or
+# renaming a declared name is a breaking change to the published surface.
+#
+# DIVERGENCE (ADR-0062 § 5 D2): `HealthReport.as_dict()` — same module, same
+# file, same read-time derivation — returns bare dataclass field names
+# (`dead_letter`, `checkpoints_stale`, `receipts_unprocessed`, …) with no
+# declared tuple and no `integration_` prefix. An assembly exporting the health
+# signals, which is the obvious thing to do with an object whose purpose is "is
+# anything silently stuck?", exports six unprefixed, undeclared names. Closing
+# it is a minor version here: give HealthReport its own declared, prefixed name
+# tuple beside METRIC_NAMES, pinned by a literal test the way METRIC_NAMES
+# already is.
 
 # PAYLOAD RETENTION IS NEW BEHAVIOUR, NOT A PORT — recorded so the product-first
 # rule is answered rather than skipped. Sub keeps every `integration_inbox_event`

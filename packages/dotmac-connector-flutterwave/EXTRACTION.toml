@@ -69,8 +69,36 @@ provider_idempotency = "Flutterwave v4 publishes an X-Idempotency-Key request he
 # HELD BACK, deliberately: v4 transfers/payouts. No product consumer exists.
 # `tests/unit/test_flutterwave_outbound.py::test_no_transfer_or_payout_command
 # _ships_in_this_release` makes adding one a visible decision rather than a
-# quiet capability.
-withheld_capabilities = ["payments.transfer.v1", "payments.payout.batch.v1"]
+# quiet capability. That withholding is CORRECT and stays — ADR-0024 § 9
+# (2026-08-24) makes it the recorded example of capability parity: completeness
+# is measured against Dotmac's contracts and their substitutability, never
+# against the endpoints Flutterwave happens to publish. A provider having a
+# transfer endpoint is not a requirement.
+#
+# CORRECTED 2026-08-24, and the previous value is kept here rather than quietly
+# replaced. This key read:
+#
+#   withheld_capabilities = ["payments.transfer.v1", "payments.payout.batch.v1"]
+#
+# Both ids were minted in this dossier from Flutterwave's vocabulary. Neither
+# exists in the fleet. The business act ERP would command is a PAYOUT, its one
+# contract is `payments.payout.v1` (already served by
+# dotmac-connector-paystack), and "transfer" is this provider's wire word for
+# it — ADR-0024 § 8.1 forbids a provider-shaped sibling id for an act that
+# already has a contract, and ADR-0061 § 2 makes payout specifically one
+# contract with no per-provider variant. A batch payout may earn its own
+# contract later, but only when ERP decides batches as a unit; it is not
+# created because a provider ships a batch endpoint.
+#
+# WHEN THIS IS IMPLEMENTED it must be `payments.payout.v1`, taking the SAME
+# command payload Paystack takes — see ADR-0061 § 4 D3 for the divergence that
+# has to close first (this connector requires a product-minted
+# `intent_reference` and a `currency_minor_units` exponent; Paystack derives its
+# reference from the engine idempotency key and refuses an exponent because its
+# wire scale is fixed at 100 for every currency including zero-exponent XOF).
+# Implementing payout against today's two shapes would make ERP branch on
+# provider, which is the whole thing the binding exists to prevent.
+withheld_capabilities = ["payments.payout.v1"]
 
 contract_consumers = []
 candidate_consumers = ["dotmac_integrator", "dotmac_sub"]

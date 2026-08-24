@@ -1,14 +1,20 @@
 # ADR-0024: Applications compose by synchronizing data
 
-**Status:** Accepted
+**Status:** Accepted. Amended 2026-08-13 (§ 6, the Integrator is the sole
+external connector control plane), 2026-08-19 (Context, caller-owned runtime)
+and 2026-08-24 (§§ 8–9 below, outbound provider neutrality and connector
+completeness). Every amendment is a dated addition; no earlier text is
+rewritten.
 **Date:** 2026-08-13
 **Decision owner:** Michael
 **Scope:** FLEET-WIDE. Applies to every Dotmac application and installable
 module.
 **Relates to:** ADR-0006 (independently released modules), ADR-0008
 (declaration registries), ADR-0010 (thin adapters), ADR-0014 (idempotency),
-ADR-0021 (independent application planes), ADR-0023 (dual-plane module
-persistence)
+ADR-0017 (adoption is the scarce resource), ADR-0021 (independent application
+planes), ADR-0023 (dual-plane module persistence), ADR-0061 (a payout is ERP's
+decision and its provider is a binding), ADR-0062 (modules own metric
+definitions; assemblies own exporters)
 
 ## Context
 
@@ -226,6 +232,122 @@ It remains behind its owning module's published seam, carries no product-domain
 payload or cross-application authority, and is still forbidden from appearing
 as a hardcoded conditional in shared execution paths.
 
+## Decision amendment — 2026-08-24 (outbound: what a provider branch actually is, and what a complete connector ecosystem means)
+
+The nine outbound commits (kernel machine credentials through the Flutterwave
+v4 and Remita command legs) turned §§ 4, 6 and 7 from a receiving-side rule
+into a two-way one: products now *send* through the Integrator, not only
+receive from it. Two things that were adequate as principles stopped being
+adequate as review instructions. This amendment states both concretely. It adds
+nothing to §§ 1–7 and contradicts nothing in them.
+
+Two rulings needed their own records rather than a paragraph here:
+[ADR-0061](0061-a-payout-is-erps-decision-and-its-provider-is-a-binding.md)
+(who decides a payout, and that `payments.payout.v1` is one contract with
+interchangeable bindings behind it) and
+[ADR-0062](0062-modules-own-metric-definitions-assemblies-own-exporters.md)
+(a module declares metric names; the deployed assembly exports them). Both
+extend this decision; neither replaces any part of it.
+
+### 8. A capability contract is one contract, and a provider branch is one of six concrete things
+
+**8.1 One capability, one contract, one payload.** A capability id such as
+`payments.payout.v1` or `messaging.send.v1` names a business act, not a
+provider's endpoint. There is exactly one of each in the fleet. Forbidden: a
+provider-named id (`payments.payout.paystack.v1`); a provider-shaped sibling id
+meaning the same act in another provider's vocabulary
+(`payments.transfer.v1`); and a per-connector command payload dialect behind a
+shared id — which is the same violation with the branch pushed into whichever
+product has to build the payload. A `vN` bump records a change in what the
+product means, never a change in what a provider exposes.
+
+**8.2 What "products contain no provider branch, credential or client" forbids,
+concretely.** § 4 said this as a principle and a reviewer still had to
+interpret it. In a product repository — ERP, Sub, Academy, the vendor control
+plane — each of the following is a defect, by name:
+
+| Forbidden in a product | Lives instead in |
+|---|---|
+| `if provider == "paystack"`, `match provider:`, a `Provider` enum, or a provider-keyed dict of behaviours | the connector distribution; selection is a capability binding in the Integrator |
+| importing a provider SDK, or writing a provider HTTP client (`paystack`, `flutterwave`, `remita`, `mono`, a Meta Graph call) | the connector distribution, the only artifact that performs provider I/O |
+| a provider API key, webhook signing secret or OAuth credential in product config, env, settings rows, or a secret path the product dereferences | the Integrator's manifest-declared secret bindings, materialized only at the dispatch boundary (ADR-0009, § 7) |
+| a provider-named route (`/webhooks/paystack`), task, queue, column, setting key, feature flag or table | Integrator ingress at `/ingress/{connector_key}/{capability_id}`; the product receives a typed, provider-neutral observation |
+| a provider-named string inside a business decision — status mapping, error-code translation, currency scale, retry eligibility | the connector, which translates its wire vocabulary into the contract's vocabulary before the product sees it |
+| a "which provider is configured?" read anywhere on a request path | nowhere. A product that can ask is a product that will branch |
+
+A product legitimately holds the *contract* vocabulary — capability ids,
+command payload fields, outcome statuses — plus an opaque Integrator
+correlation reference. It never holds the provider's.
+
+**8.3 Configuration selects the adapter; an ADR selects the owner.** Restating
+§ 4's last paragraph, because the outbound direction makes it easy to lose:
+moving payout traffic between two connectors is a binding change and is
+legitimate. Moving *who decides a payout* is not configurable at all, and needs
+an accepted ADR — ADR-0061 § 1 is that ADR for payouts.
+
+**8.4 Known divergence at amendment.** The SPI has nowhere to declare a command
+payload. `dotmac_integration.spi.CapabilityDeclaration` carries
+`capability_id`, `config_schema` and `modes`; `DispatchRequest.payload` is an
+unvalidated `dict[str, object]`. Configuration has a declared schema and
+commands do not — which is precisely why 8.1 was breached without any gate
+noticing. Two shipped capability families have each grown two dialects:
+
+- **payments** — Paystack's `{"action", "params"}` envelope, with a provider
+  reference DERIVED from the engine idempotency key and a connector-owned wire
+  scale that refuses `currency_minor_units`, against Flutterwave's and Remita's
+  flat per-capability payload with a PRODUCT-minted reference and a REQUIRED
+  `currency_minor_units`;
+- **`messaging.send.v1`** — `meta_whatsapp`'s
+  `send_text | send_template | send_media` with a `recipient` param, against
+  `meta_social`'s `send_direct_message | reply_to_comment` with `recipient_id`
+  plus `channel`.
+
+ADR-0061 § 4 records the payments case in full and its § 5 names the closure
+sequence. Until a declared command payload exists, 8.1 is a rule the gates
+cannot see.
+
+### 9. Connector completeness is Dotmac capability parity, never provider surface parity
+
+**9.1 The definition.** The connector ecosystem is complete when **every
+capability the Dotmac ecosystem needs has an implementation, and every
+capability that matters has more than one interchangeable provider behind it.**
+Completeness is measured against Dotmac's capability contracts, in the
+direction of substitutability.
+
+**9.2 What it explicitly is not.** It is not wrapping every endpoint a provider
+happens to expose. A provider's catalogue is that provider's product strategy;
+importing it wholesale builds unreviewed surface, invents capability ids nobody
+asked for (8.1), and — where the surface moves money or publishes on someone's
+behalf — ships code whose first execution is also its first review. "The
+provider has an endpoint for it" is not a requirement. This is ADR-0017's
+scarce-resource rule applied to connectors: the constraint is a consumer, not
+an endpoint.
+
+**9.3 The corollary, already in force.** Three outbound surfaces are
+deliberately withheld because no product consumer exists. This amendment
+records that as compliance, not backlog:
+
+| Withheld | Connector | Present declared surface |
+|---|---|---|
+| LinkedIn outbound (publish, message, lead write-back) | `dotmac-connector-linkedin` | INGRESS-only: `social.activity.observation.v1`, `marketing.lead.observation.v1`; declares deny-all provider egress |
+| Mono writes (payment initiation, account actions) | `dotmac-connector-mono` | POLL-only: `banking.transaction.observation.v1` |
+| Flutterwave v4 transfers/payouts | `dotmac-connector-flutterwave` | DELIVERY on `payments.intent.v1` and `payments.refund.v1` only |
+
+Adding any of them is a capability-parity decision under 9.1, taken when a
+named product owner asks — and, per 8.1, implemented as the EXISTING contract
+(`payments.payout.v1` for the Flutterwave case) rather than a new
+provider-shaped id.
+
+**9.4 A withheld capability is declared, not merely absent.** ADR-0032's rule
+applies: unobserved is unknown, never absent. A connector that withholds a
+surface records it in its `EXTRACTION.toml` — the capability id it would
+implement, and the fact that no consumer has asked — so "not built" is a
+reviewable statement rather than a silence indistinguishable from an oversight.
+`dotmac-connector-flutterwave`'s `withheld_capabilities` is the shape. It named
+two invented provider-shaped ids and is corrected to `payments.payout.v1` in
+the same change as this amendment, with the previous entry preserved in a
+comment beside it.
+
 ## Enforcement and evidence
 
 - Import-linter contracts `Modules must not import the assembly` and `Modules
@@ -252,6 +374,35 @@ as a hardcoded conditional in shared execution paths.
   SPI versions, and prove the core contains no provider catalogue. Every
   connector has replay, retry/idempotency, secret-redaction and sensitivity
   canaries against the shared SPI.
+
+**Added 2026-08-24, and stated as gaps rather than as guards.** ADR-0018
+forbids claiming an exemption or a control that has no enforceable premise, so
+the amendment's §§ 8–9 are today **review discipline, not automation**, and the
+missing machinery is named:
+
+- **8.1 has no gate.** Nothing compares two connectors' payload handling for a
+  shared capability id, because there is no declared payload to compare against
+  (8.4). A gate becomes possible only once
+  `CapabilityDeclaration` can carry a command schema; at that point the natural
+  check is that every connector declaring a capability validates against the
+  same schema object, driven with a deliberately divergent fake connector as
+  its sensitivity proof.
+- **8.2's product-side list is partly ratcheted, partly not.**
+  `docs/inventories/external-connector-sources.md` and its ratchet already
+  count `http_client`, `webhook_surface`, `provider_credential`,
+  `connector_task`, `sync_checkpoint` and `delivery_retry` per repository —
+  rows 2, 3 and 4 of the table. Rows 1, 5 and 6 (a provider conditional, a
+  provider string inside a decision, a "which provider?" read) are **not**
+  measured anywhere, and this amendment does not pretend otherwise.
+- **9.4 is enforced only where a connector already declares it.**
+  `dotmac-connector-flutterwave`'s boundary test asserts
+  `withheld_capabilities` is non-empty; no gate requires the key of any other
+  connector, so a silently withheld surface stays silent. The dossiers for
+  `dotmac-connector-linkedin` and `dotmac-connector-mono` record their withheld
+  surfaces in prose in the same change; making that a required field is a
+  separate, reviewable ratchet.
+- **ADR-0062 § 5 D1 applies here too:** no check stops a module shipping a
+  metrics exporter.
 
 ## Consequences
 

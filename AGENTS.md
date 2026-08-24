@@ -381,6 +381,42 @@ specifics) points here and must never fork these rules.
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
 
+    **Outbound clauses added 2026-08-24 — REVIEW DISCIPLINE, not guards.**
+    Stated here because rule 25 forbids implying enforcement that does not
+    exist: no check in this repository catches any of the following today, and
+    the missing machinery is named in ADR-0024's "Enforcement and evidence"
+    additions.
+    *(a)* **One capability, one contract, one payload.**
+    `payments.payout.v1`, `messaging.send.v1` and every other id name a
+    BUSINESS ACT, not a provider endpoint. No provider-named id
+    (`payments.payout.paystack.v1`), no provider-shaped sibling for an act that
+    already has a contract (`payments.transfer.v1`), and no per-connector
+    command dialect behind a shared id — that last one is the branch relocated
+    into whichever product builds the payload.
+    *(b)* **A provider branch in a product is one of six concrete things:** an
+    `if provider == …`/provider enum/provider-keyed behaviour dict; a provider
+    SDK import or hand-written provider HTTP client; a provider credential in
+    product config, env, settings rows or a path the product dereferences; a
+    provider-named route/task/queue/column/setting/flag/table; a provider
+    string inside a business decision (status mapping, currency scale, retry
+    eligibility); or a "which provider is configured?" read on a request path.
+    Each belongs in the connector distribution or the Integrator binding.
+    *(c)* **Connector completeness is Dotmac capability parity** — every
+    capability the ecosystem needs, with interchangeable providers behind the
+    ones that matter — never coverage of a provider's published surface. A
+    withheld surface is DECLARED in the connector's `EXTRACTION.toml`, not
+    merely absent (LinkedIn outbound, Mono writes and Flutterwave transfers are
+    the three in force).
+    *(d)* **A payout is ERP's decision.** Whether it happens, to whom, for how
+    much, and whether an ambiguous attempt may be retried are ERP's Treasury
+    owner's calls; no connector, engine path, configuration or operator gesture
+    decides them.
+    *(e)* **Modules own metric DEFINITIONS; assemblies own EXPORTERS.** A shared
+    module declares stable, namespaced metric names and derives values from its
+    own facts at read time; it ships no metrics client, counter registry or
+    `/metrics` route, and no second observability path.
+    (ADR-0061; ADR-0062; ADR-0024 §§ 8–9)
+
 29. **Poetry is an exact build input, not a workstation preference.**
     `[tool.poetry].requires-poetry` is the ONE version source; CI's hash-locked
     bootstrap, the lockfile generator stamp and the production Docker build

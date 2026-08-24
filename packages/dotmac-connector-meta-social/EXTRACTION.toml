@@ -42,6 +42,32 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_meta_social_connector_boundary.py",
 ]
 
+# ── ADR-0024 § 8 (2026-08-24): `messaging.send.v1` is ONE contract, and the two
+# connectors behind it do not yet take the same command ─────────────────────
+#
+# Declaring the shared id rather than minting a per-connector one is CORRECT and
+# is the shape ADR-0061 § 3 points at for payments: `meta_whatsapp` and
+# `meta_social` both serve `messaging.send.v1`, so a product declares one
+# outbound messaging port and the Integrator binds a provider to it.
+#
+# DIVERGENCE, recorded because the id alone does not make them interchangeable:
+#
+#   meta_whatsapp   action `send_text | send_template | send_media`,
+#                   recipient param `recipient`
+#   meta_social     action `send_direct_message | reply_to_comment`,
+#                   recipient param `recipient_id` plus a required `channel`
+#
+# A product bound to one cannot be re-bound to the other without changing the
+# command it builds — which is a provider branch relocated into the product,
+# forbidden by ADR-0024 § 8.1/8.2. `reply_to_comment` is a genuinely different
+# act and may well deserve its own contract; a direct message is not.
+#
+# The root cause is not either connector: `spi.CapabilityDeclaration` declares a
+# CONFIG schema and no COMMAND schema, so nothing could have caught the drift
+# (ADR-0024 § 8.4). Closure is a declared command payload for
+# `messaging.send.v1` on the SPI, then both connectors accepting it — tracked as
+# the reopened open question in packages/dotmac-integration/EXTRACTION.toml.
+
 contract_consumers = []
 candidate_consumers = ["dotmac_integrator", "dotmac_sub"]
 
