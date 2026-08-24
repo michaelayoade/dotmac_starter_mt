@@ -422,6 +422,18 @@ def test_offer_pricing_evolves_in_an_additive_composable_revision() -> None:
     assert 'version_table.c.pricing_mode == "contract_price"' in source
 
 
+def test_offer_pricing_revision_loads_through_alembics_module_loader() -> None:
+    from alembic.util.pyfiles import load_python_file
+
+    migration = load_python_file(
+        str(PRICING_MIGRATION.parent),
+        PRICING_MIGRATION.name,
+    )
+
+    assert migration.revision == "su_0002_offer_pricing"
+    assert migration.down_revision == "su_0001_subscriptions"
+
+
 def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
 
