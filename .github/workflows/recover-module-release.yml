@@ -176,7 +176,11 @@ jobs:
           python-version: "3.12"
 
       - name: Gate on the release allowlist
-        run: python scripts/release_module.py resolve "${{ inputs.module }}" --version "${{ inputs.version }}"
+        id: target
+        run: |
+          python scripts/release_module.py resolve \
+            "${{ inputs.module }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
 
       - name: Download the original run's build artifacts
         env:
@@ -242,3 +246,25 @@ jobs:
             "${{ steps.origin.outputs.sha }}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${{ steps.origin.outputs.sha }}"
+
+      # Recovery writes the same irreversible tag as an ordinary release and
+      # therefore owes the same record. Without this step a successful recovery
+      # repairs the artifact while deliberately leaving checked-in truth red.
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        if: always()
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution "${{ inputs.module }}" \
+            --version "${{ inputs.version }}" \
+            --tag "${{ steps.target.outputs.tag }}" \
+            --package-dir "${{ steps.target.outputs.package_dir }}"

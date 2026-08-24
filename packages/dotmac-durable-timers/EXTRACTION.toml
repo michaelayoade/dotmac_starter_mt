@@ -16,6 +16,10 @@ source_revisions = [
   "dotmac_starter_mt:7e0543004864845f0035c9ec325e3f5064c281cc",
   "dotmac-kernel-v0.1.0a67:ed3ac864b350d4556808a69496f999f764682442",
 ]
+revalidation_revisions = [
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_erp:app/models/scheduler.py",
   "dotmac_sub:app/models/durable_timer.py",
@@ -47,3 +51,15 @@ first_cutover = "dotmac_sub tenant plane, financial.walled_account_healing first
 shadow_and_drift = "For each Sub timer family, schedule through the module in shadow with the same explicit identity, due instant and source version while leaving the legacy owner authoritative. Compare generation, supersession, cancellation and emitted output for every transition; record divergence without allowing the shadow to cause the consumer effect. Exercise relay lease recovery and poison isolation against PostgreSQL. Cut over only after no divergence remains, then make the module acceptance verdict the gate immediately before the local consumer effect. A two-directional caller and import ratchet prevents either copy returning."
 local_copy_retirement = "dotmac_sub retires direct DurableTimer imports and queries, current_timer, schedule_timer, cancel_timer, fire_due_timers, the durable_timers table, app/tasks/durable_timers.py and the durable_timer_dispatch_runner after both named first families cut over. Product business vocabulary, command dispatch and source-state validation stay in Sub; only timing mechanics leave. The collections.case_action_due output moves with its collections owner or is removed. The lifecycle schedule command ledger remains a separate decision: only its duplicated timing claim/lease/retry behavior is eligible, not its commands. ERP has no qualifying durable timer implementation and gains no parallel local copy."
 next_action = "The exact dotmac-kernel 0.1.0a72 and dotmac-durable-timers 0.1.0a1 artifacts are registry-verified and tagged on protected-main commit f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685. Pin both exact artifacts in Sub, compose the tenant plane, and begin financial.walled_account_healing shadow adoption."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/scheduler.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/durable_timer.py", "app/services/runtime_durable_timers.py", "app/tasks/durable_timers.py", "app/models/subscription_lifecycle_schedule.py"]
