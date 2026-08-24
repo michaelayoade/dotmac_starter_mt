@@ -125,6 +125,27 @@ def test_a_second_write_of_the_same_tag_changes_nothing() -> None:
     assert unchanged == text
 
 
+_TAG_ROW = re.compile(r'^    "([^"]+)": \(\n        "([^"]+)",', re.MULTILINE)
+
+
+def _sibling_tags(text: str, distribution: str, *, keep: str) -> list[str]:
+    """Every recorded tag of one distribution except the one under test."""
+    return [
+        m.group(1)
+        for m in _TAG_ROW.finditer(text)
+        if m.group(2) == distribution and m.group(1) != keep
+    ]
+
+
+def _without_tag_row(text: str, tag: str) -> str:
+    """Drop one ``"tag": (...)`` row from RELEASED_TAGS."""
+    start = re.search(rf'^    "{re.escape(tag)}": \(\n', text, re.MULTILINE)
+    assert start is not None, f"no row for {tag}"
+    end = re.compile(r"^    \),\n", re.MULTILINE).search(text, start.end())
+    assert end is not None, f"unterminated row for {tag}"
+    return text[: start.start()] + text[end.end() :]
+
+
 def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     """The a14 failure: adding the digest without clearing UNRELEASED is not a
     record, because the same file then reads as immutable and editable at once.
@@ -136,7 +157,19 @@ def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     writer = _writer()
     tag = "dotmac-integration-v0.1.0a14"
     distribution, commit, digests = _recorded_entry(writer, tag)
-    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8").replace(
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+
+    # Reconstruct the state as it was AT a14: later tags did not exist yet.
+    # This matters because each tag records the lineage CUMULATIVELY, so a
+    # later release re-lists ig_0012 and `add_released_tag` then correctly
+    # computes it as released-elsewhere with nothing left to retire. Mining
+    # the live record for that scenario made this fixture fail the first time
+    # a subsequent integration release was recorded -- a15 broke it -- which
+    # is a property of the fixture, not of the writer.
+    for sibling in _sibling_tags(text, distribution, keep=tag):
+        text = _without_tag_row(text, sibling)
+
+    text = text.replace(
         '"dotmac-integration": frozenset()',
         '"dotmac-integration": frozenset({"ig_0012_delivery_evidence.py"})',
     )
