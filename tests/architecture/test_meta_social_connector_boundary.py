@@ -38,17 +38,68 @@ def test_connector_imports_only_the_spi_among_dotmac_packages() -> None:
     assert internal - {"dotmac_connector_meta_social"} == {"dotmac_integration"}
 
 
-def test_ingress_slice_has_no_network_or_persistence_dependency() -> None:
+def test_connector_has_no_persistence_or_execution_dependency() -> None:
+    """`httpx` left this set when the DELIVERY slice landed, and only `httpx`.
+
+    The delivery half exists to make one provider call, so a network client is
+    the point rather than a violation. What must stay absent is anything that
+    would let this package keep state or schedule itself — the engine owns the
+    outbox, the retry loop and every row.
+    """
     forbidden = {
         "alembic",
         "asyncpg",
-        "httpx",
+        "celery",
         "psycopg",
         "requests",
         "sqlalchemy",
+        "tenacity",
         "urllib3",
     }
     assert not (_imports() & forbidden)
+
+
+def test_ingress_handler_performs_no_network_io() -> None:
+    """The two halves share a file; they must not share a network posture.
+
+    Verification and normalization run on the provider's callback thread with
+    the request open. A Graph call from inside either one would put provider
+    latency between a signed request and its acknowledgement, which is how a
+    verified batch turns into a provider redelivery storm.
+    """
+    tree = ast.parse((SOURCE / "plugin.py").read_text(encoding="utf-8"))
+    ingress = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MetaSocialIngressHandler"
+    )
+    rendered = ast.unparse(ingress)
+    assert "httpx" not in rendered
+    assert ".post(" not in rendered
+
+
+def test_the_delivery_half_never_decides_whether_a_reply_is_allowed() -> None:
+    """The boundary this slice is most likely to be walked across.
+
+    Sub owns the messaging-window rule and the permission to respond. If that
+    arithmetic were ever copied in here, the connector would start refusing
+    sends the product had already authorized — two authorities, one of them
+    stale. The absence of any clock arithmetic and of a window vocabulary is
+    what makes "the connector performs the wire operation only" checkable.
+    """
+    source = (SOURCE / "plugin.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    delivery = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MetaSocialDeliveryHandler"
+    )
+    rendered = ast.unparse(delivery)
+    for forbidden in ("timedelta", "now(", "utcnow", "hours", "window"):
+        assert forbidden not in rendered, forbidden
+    # `timedelta` must not reach the module at all: a window rule needs a
+    # duration, and there is no other reason for this package to hold one.
+    assert "timedelta" not in source
 
 
 def test_connector_has_no_product_decision_vocabulary() -> None:

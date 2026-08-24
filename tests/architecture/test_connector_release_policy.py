@@ -700,8 +700,10 @@ def test_the_meta_social_entry_resolves_through_the_release_command(
     import argparse
 
     gate = _gate()
+    # The delivery slice raised this connector's floor to the SPI 1.4 release,
+    # so the oracle it resolves against is that tag rather than the a10 one.
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
         argparse.Namespace(
