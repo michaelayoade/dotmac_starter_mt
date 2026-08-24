@@ -891,9 +891,10 @@ def test_billing_arrangement_approves_replays_and_resolves_one_owner(
     db: Session, registry: SubscriptionVocabularyRegistry
 ) -> None:
     offer_version_id, _ = _publish(db, registry)
+    contract_command = _contract_command(offer_version_id)
     contract = record_contract_version(
         db,
-        _contract_command(offer_version_id),
+        contract_command,
         registry=registry,
         timer=FakeTimer(),
     )
@@ -932,6 +933,38 @@ def test_billing_arrangement_approves_replays_and_resolves_one_owner(
     assert decision.treatment is SubscriptionBillingTreatment.complimentary
     assert decision.suppress_customer_billing is True
     assert decision.grantable is True
+
+    revoke_billing_arrangement(
+        db,
+        RevokeBillingArrangementCommand(
+            scope=PlatformScope(),
+            arrangement_id=approved.arrangement_id,
+            revoked_by="finance-approver",
+            revoked_at=datetime(2026, 8, 25, tzinfo=UTC),
+            reason="approved commercial change",
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:approve-replay:revoke",
+        ),
+    )
+    record_contract_version(
+        db,
+        replace(
+            contract_command,
+            contract_id=contract.contract_id,
+            starts_at=datetime(2026, 9, 1, tzinfo=UTC),
+            recorded_at=datetime(2026, 9, 1, tzinfo=UTC),
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="contract:after-arrangement:1",
+        ),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+
+    late_replay = approve_billing_arrangement(db, command)
+    assert late_replay.arrangement_id == approved.arrangement_id
+    assert late_replay.replayed is True
 
 
 def test_billing_arrangement_requires_sponsor_evidence_and_no_overlap(
@@ -1028,6 +1061,23 @@ def test_non_cash_grant_preserves_positive_rated_value_and_replays(
     assert grant.replayed is False
     assert replay.output.grant_id == grant.output.grant_id
     assert replay.replayed is True
+
+    revoke_billing_arrangement(
+        db,
+        RevokeBillingArrangementCommand(
+            scope=PlatformScope(),
+            arrangement_id=arrangement_id,
+            revoked_by="finance-approver",
+            revoked_at=NOW,
+            reason="restore customer billing at the service-period boundary",
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:grant-replay:revoke",
+        ),
+    )
+    late_replay = record_non_cash_grant(db, grant_command)
+    assert late_replay.output.grant_id == grant.output.grant_id
+    assert late_replay.replayed is True
 
 
 def test_protected_drift_suppresses_billing_but_cannot_create_a_grant(
