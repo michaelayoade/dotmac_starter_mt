@@ -1090,15 +1090,9 @@ def approve_billing_arrangement(
             "billing_arrangements.invalid_approval_evidence",
             "Approver and a bounded idempotency key are required.",
         )
-    preview = _preview_billing_arrangement(db, command.preview, check_overlap=False)
-    if preview.fingerprint != command.preview_fingerprint:
-        raise SubscriptionConflictError(
-            "billing_arrangements.stale_preview",
-            "Contract or approval evidence changed; preview the arrangement again.",
-        )
     approval_fingerprint = _fingerprint(
         {
-            "preview_fingerprint": preview.fingerprint,
+            "preview_fingerprint": command.preview_fingerprint,
             "approved_by": command.approved_by.strip(),
             "approved_at": command.approved_at.astimezone(UTC).isoformat(),
             "command_id": str(command.command_id),
@@ -1108,6 +1102,14 @@ def approve_billing_arrangement(
     arrangement_id = uuid4()
 
     def operation(session: Session) -> dict[str, object]:
+        preview = _preview_billing_arrangement(
+            session, command.preview, check_overlap=False
+        )
+        if preview.fingerprint != command.preview_fingerprint:
+            raise SubscriptionConflictError(
+                "billing_arrangements.stale_preview",
+                "Contract or approval evidence changed; preview the arrangement again.",
+            )
         if _arrangement_overlap_exists(
             session,
             scope=command.preview.scope,
@@ -1180,10 +1182,10 @@ def approve_billing_arrangement(
     decision = resolve_billing_arrangement(
         db,
         scope=command.preview.scope,
-        subscription_contract_id=preview.subscription_contract_id,
-        contract_version_id=preview.contract_version_id,
-        contract_line_key=preview.contract_line_key,
-        effective_at=preview.starts_at,
+        subscription_contract_id=command.preview.subscription_contract_id,
+        contract_version_id=command.preview.contract_version_id,
+        contract_line_key=command.preview.contract_line_key,
+        effective_at=command.preview.starts_at,
     )
     return BillingArrangementResult(stored_id, decision, outcome.replayed)
 
@@ -1321,79 +1323,9 @@ def record_non_cash_grant(
             "billing_grants.invalid_evidence",
             "A positive exact period, actor, reason, and idempotency key are required.",
         )
-    decision = resolve_billing_arrangement(
-        db,
-        scope=command.scope,
-        subscription_contract_id=command.subscription_contract_id,
-        contract_version_id=command.contract_version_id,
-        contract_line_key=command.contract_line_key,
-        effective_at=command.starts_at,
-    )
-    if not decision.grantable or decision.arrangement_id != command.arrangement_id:
-        raise SubscriptionConflictError(
-            "billing_grants.protected_drift",
-            "Billing-treatment drift blocks grant creation.",
-        )
-    plane = _models(command.scope)
-    occurrence = cast(
-        OccurrenceRow | None,
-        db.execute(
-            _scoped(
-                select(plane.occurrence).where(
-                    plane.occurrence.id == command.occurrence_id,
-                    plane.occurrence.contract_id == command.subscription_contract_id,
-                    plane.occurrence.contract_version_id == command.contract_version_id,
-                    plane.occurrence.contract_line_key == command.contract_line_key,
-                ),
-                command.scope,
-                plane.occurrence,
-            )
-        ).scalar_one_or_none(),
-    )
-    if occurrence is None:
-        raise SubscriptionDataError(
-            "billing_grants.occurrence_not_found",
-            "The exact recurring charge occurrence was not found.",
-        )
     start = command.starts_at.astimezone(UTC)
     end = command.ends_at.astimezone(UTC)
-    occurrence_amount = ExactAmount(
-        occurrence.pre_tax_amount,
-        occurrence.currency,
-        occurrence.amount_scale,
-    )
-    if (
-        _stored_utc(occurrence.period_start) != start
-        or _stored_utc(occurrence.period_end) != end
-        or occurrence_amount != command.reference_amount
-    ):
-        raise SubscriptionConflictError(
-            "billing_grants.occurrence_mismatch",
-            "Grant evidence must exactly match the positive rated occurrence.",
-        )
-    arrangement = cast(
-        ArrangementRow,
-        db.execute(
-            _scoped(
-                select(plane.arrangement).where(
-                    plane.arrangement.id == command.arrangement_id
-                ),
-                command.scope,
-                plane.arrangement,
-            )
-        ).scalar_one(),
-    )
-    if (
-        start < _stored_utc(arrangement.starts_at)
-        or end > _stored_utc(arrangement.ends_at)
-        or command.reference_amount.currency != arrangement.currency
-        or command.reference_amount.scale != arrangement.scale
-        or command.reference_amount.amount > arrangement.maximum_recurring_amount
-    ):
-        raise SubscriptionConflictError(
-            "billing_grants.approval_exceeded",
-            "The rated occurrence exceeds the approved treatment boundary.",
-        )
+    plane = _models(command.scope)
     fingerprint = _fingerprint(
         {
             "scope": scope_segment(command.scope),
@@ -1415,6 +1347,78 @@ def record_non_cash_grant(
     grant_id = uuid4()
 
     def operation(session: Session) -> dict[str, object]:
+        decision = resolve_billing_arrangement(
+            session,
+            scope=command.scope,
+            subscription_contract_id=command.subscription_contract_id,
+            contract_version_id=command.contract_version_id,
+            contract_line_key=command.contract_line_key,
+            effective_at=command.starts_at,
+        )
+        if not decision.grantable or decision.arrangement_id != command.arrangement_id:
+            raise SubscriptionConflictError(
+                "billing_grants.protected_drift",
+                "Billing-treatment drift blocks grant creation.",
+            )
+        occurrence = cast(
+            OccurrenceRow | None,
+            session.execute(
+                _scoped(
+                    select(plane.occurrence).where(
+                        plane.occurrence.id == command.occurrence_id,
+                        plane.occurrence.contract_id
+                        == command.subscription_contract_id,
+                        plane.occurrence.contract_version_id
+                        == command.contract_version_id,
+                        plane.occurrence.contract_line_key == command.contract_line_key,
+                    ),
+                    command.scope,
+                    plane.occurrence,
+                )
+            ).scalar_one_or_none(),
+        )
+        if occurrence is None:
+            raise SubscriptionDataError(
+                "billing_grants.occurrence_not_found",
+                "The exact recurring charge occurrence was not found.",
+            )
+        occurrence_amount = ExactAmount(
+            occurrence.pre_tax_amount,
+            occurrence.currency,
+            occurrence.amount_scale,
+        )
+        if (
+            _stored_utc(occurrence.period_start) != start
+            or _stored_utc(occurrence.period_end) != end
+            or occurrence_amount != command.reference_amount
+        ):
+            raise SubscriptionConflictError(
+                "billing_grants.occurrence_mismatch",
+                "Grant evidence must exactly match the positive rated occurrence.",
+            )
+        arrangement = cast(
+            ArrangementRow,
+            session.execute(
+                _scoped(
+                    select(plane.arrangement).where(
+                        plane.arrangement.id == command.arrangement_id
+                    ),
+                    command.scope,
+                    plane.arrangement,
+                )
+            ).scalar_one(),
+        )
+        if (
+            start < _stored_utc(arrangement.starts_at)
+            or end > _stored_utc(arrangement.ends_at)
+            or command.reference_amount.currency != arrangement.currency
+            or command.reference_amount.scale != arrangement.scale
+            or command.reference_amount.amount > arrangement.maximum_recurring_amount
+        ):
+            raise SubscriptionConflictError(
+                "billing_grants.approval_exceeded",
+                "The rated occurrence exceeds the approved treatment boundary.",
+            )
         session.add(
             plane.grant(
                 **_scope_values(command.scope),
