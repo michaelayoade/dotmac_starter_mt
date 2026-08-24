@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
@@ -18,6 +19,7 @@ from dotmac_tax.contracts import (
     TaxFact,
     TaxJurisdictionInput,
     TaxRuleInput,
+    TaxSubjectClassificationInput,
 )
 from dotmac_tax.models import (
     StatutoryReport,
@@ -28,12 +30,14 @@ from dotmac_tax.models import (
     TaxCode,
     TaxDetermination,
     TaxDeterminationLine,
+    TaxDeterminationSet,
     TaxFilingObligation,
     TaxJurisdiction,
     TaxReturn,
     TaxReturnEvent,
     TaxRule,
     TaxRuleBand,
+    TaxSubjectClassification,
 )
 
 
@@ -47,6 +51,18 @@ class TaxConflict(ValueError):
 
 class TaxRuleViolation(ValueError):
     """A tax policy, determination or filing transition is invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ApplicableTaxRule:
+    rule: TaxRule
+    party_category: str | None
+    supply_category: str | None
+    place_code: str | None
+    party_classification: TaxSubjectClassification | None
+    supply_classification: TaxSubjectClassification | None
+    place_classification: TaxSubjectClassification | None
+    tax_code: str
 
 
 def _clean(value: str, label: str) -> str:
@@ -122,6 +138,62 @@ def _fact_fingerprint(fact: TaxFact, *, source_ref: str, source_version: str) ->
         "supply_category": fact.supply_category,
         "place_code": fact.place_code,
         "counterparty_ref": fact.counterparty_ref,
+        "supply_ref": fact.supply_ref,
+        "place_ref": fact.place_ref,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _a1_fact_fingerprint(fact: TaxFact, *, source_ref: str, source_version: str) -> str:
+    """Reproduce the published a1 fingerprint for standalone replay only."""
+    payload = {
+        "jurisdiction_id": str(fact.jurisdiction_id),
+        "occurred_on": fact.occurred_on.isoformat(),
+        "fact_kind": fact.fact_kind,
+        "recognition_basis_code": fact.recognition_basis_code,
+        "transaction_side": fact.transaction_side,
+        "amount": str(fact.base_amount.amount),
+        "currency_code": fact.base_amount.currency.code,
+        "minor_units": fact.base_amount.currency.minor_units,
+        "source_ref": source_ref,
+        "source_version": source_version,
+        "evidence_ref": fact.evidence_ref.strip(),
+        "party_category": fact.party_category,
+        "supply_category": fact.supply_category,
+        "place_code": fact.place_code,
+        "counterparty_ref": fact.counterparty_ref,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _classification_fingerprint(
+    command: TaxSubjectClassificationInput,
+    *,
+    subject_ref: str,
+    category_code: str,
+    basis_code: str,
+    evidence_ref: str,
+    published_by_ref: str,
+    source_ref: str,
+    source_version: str,
+) -> str:
+    payload = {
+        "tax_code_id": str(command.tax_code_id),
+        "subject_kind": command.subject_kind,
+        "subject_ref": subject_ref,
+        "category_code": category_code,
+        "version": command.version,
+        "effective_from": command.effective_from.isoformat(),
+        "effective_to": (
+            command.effective_to.isoformat() if command.effective_to else None
+        ),
+        "basis_code": basis_code,
+        "evidence_ref": evidence_ref,
+        "published_by_ref": published_by_ref,
+        "source_ref": source_ref,
+        "source_version": source_version,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -267,6 +339,8 @@ def publish_tax_rule(
 ) -> TaxRule:
     code = _code(db, tenant_id, command.tax_code_id)
     jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
+    if code.status != "active" or jurisdiction.status != "active":
+        raise TaxConflict("tax rule cannot be published for retired policy")
     if command.version <= 0:
         raise TaxRuleViolation("tax rule version must be positive")
     if (
@@ -278,6 +352,20 @@ def publish_tax_rule(
         raise TaxRuleViolation("unknown tax transaction side")
     if command.calculation_method not in {"percentage", "fixed", "progressive"}:
         raise TaxRuleViolation("unknown tax calculation method")
+    if command.treatment_code not in {
+        "standard_rated",
+        "zero_rated",
+        "exempt",
+        "out_of_scope",
+    }:
+        raise TaxRuleViolation("unknown tax treatment")
+    if command.calculation_sequence <= 0:
+        raise TaxRuleViolation("tax calculation sequence must be positive")
+    if command.calculation_base_code not in {
+        "source_amount",
+        "source_plus_prior_tax",
+    }:
+        raise TaxRuleViolation("unknown tax calculation base")
     if not 0 <= command.recoverable_rate <= 1:
         raise TaxRuleViolation("recoverable rate must be between zero and one")
     if command.calculation_method == "percentage":
@@ -305,6 +393,22 @@ def publish_tax_rule(
             )
     if command.calculation_method != "progressive" and command.bands:
         raise TaxRuleViolation("only progressive rules may declare bands")
+    if command.inclusive and (
+        command.calculation_method != "percentage"
+        or command.calculation_base_code != "source_amount"
+    ):
+        raise TaxRuleViolation(
+            "inclusive tax must be percentage-based on the source amount"
+        )
+    if command.treatment_code != "standard_rated" and (
+        command.calculation_method != "percentage"
+        or command.rate != 0
+        or command.inclusive
+        or command.recoverable_rate != 0
+    ):
+        raise TaxRuleViolation(
+            "zero-rated, exempt and out-of-scope rules must explicitly calculate zero"
+        )
     ordered = sorted(command.bands, key=lambda item: item.sequence)
     previous_upper: Decimal | None = None
     for expected, band in enumerate(ordered, start=1):
@@ -350,6 +454,9 @@ def publish_tax_rule(
             command.supply_category.strip() if command.supply_category else None
         ),
         place_code=command.place_code.strip() if command.place_code else None,
+        treatment_code=command.treatment_code,
+        calculation_sequence=command.calculation_sequence,
+        calculation_base_code=command.calculation_base_code,
         published_at=published_at or datetime.now(UTC),
     )
     row.bands.extend(
@@ -367,11 +474,135 @@ def publish_tax_rule(
     return row
 
 
+def publish_tax_subject_classification(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    command: TaxSubjectClassificationInput,
+    published_at: datetime | None = None,
+) -> TaxSubjectClassification:
+    code = _code(db, tenant_id, command.tax_code_id)
+    if code.status != "active":
+        raise TaxConflict("tax classification cannot be published for retired code")
+    if command.subject_kind not in {"party", "supply", "place"}:
+        raise TaxRuleViolation("unknown tax subject kind")
+    if command.version <= 0:
+        raise TaxRuleViolation("tax subject classification version must be positive")
+    if (
+        command.effective_to is not None
+        and command.effective_to < command.effective_from
+    ):
+        raise TaxRuleViolation(
+            "tax subject classification effective end precedes its start"
+        )
+    subject_ref = _clean(command.subject_ref, "tax subject reference")
+    category_code = _clean(command.category_code, "tax subject category")
+    basis_code = _clean(command.basis_code, "classification basis")
+    evidence_ref = _clean(command.evidence_ref, "classification evidence reference")
+    published_by_ref = _clean(
+        command.published_by_ref, "classification publisher reference"
+    )
+    source_ref = _clean(command.source_ref, "classification source reference")
+    source_version = _clean(command.source_version, "classification source version")
+    fingerprint = _classification_fingerprint(
+        command,
+        subject_ref=subject_ref,
+        category_code=category_code,
+        basis_code=basis_code,
+        evidence_ref=evidence_ref,
+        published_by_ref=published_by_ref,
+        source_ref=source_ref,
+        source_version=source_version,
+    )
+    existing = db.scalar(
+        select(TaxSubjectClassification).where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.source_ref == source_ref,
+            TaxSubjectClassification.source_version == source_version,
+        )
+    )
+    if existing is not None:
+        if existing.source_fingerprint != fingerprint:
+            raise TaxConflict(
+                "tax classification source version was reused with different facts"
+            )
+        return existing
+    current_version = db.scalar(
+        select(func.max(TaxSubjectClassification.version)).where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.tax_code_id == command.tax_code_id,
+            TaxSubjectClassification.subject_kind == command.subject_kind,
+            TaxSubjectClassification.subject_ref == subject_ref,
+        )
+    )
+    expected_version = int(current_version or 0) + 1
+    if command.version != expected_version:
+        raise TaxConflict(f"next tax classification version must be {expected_version}")
+    row = TaxSubjectClassification(
+        tenant_id=tenant_id,
+        tax_code_id=command.tax_code_id,
+        subject_kind=command.subject_kind,
+        subject_ref=subject_ref,
+        category_code=category_code,
+        version=command.version,
+        effective_from=command.effective_from,
+        effective_to=command.effective_to,
+        basis_code=basis_code,
+        evidence_ref=evidence_ref,
+        published_by_ref=published_by_ref,
+        source_ref=source_ref,
+        source_version=source_version,
+        source_fingerprint=fingerprint,
+        published_at=published_at or datetime.now(UTC),
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 def _optional_match(configured: str | None, observed: str | None) -> bool:
     return configured is None or configured == observed
 
 
-def _applicable_rule(db: Session, tenant_id: UUID, fact: TaxFact) -> TaxRule:
+def _subject_classification(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    tax_code_id: UUID,
+    subject_kind: str,
+    subject_ref: str | None,
+    direct_category: str | None,
+    occurred_on: date,
+) -> tuple[str | None, TaxSubjectClassification | None]:
+    if subject_ref is None:
+        return direct_category, None
+    cleaned_ref = _clean(subject_ref, f"{subject_kind} reference")
+    rows = db.scalars(
+        select(TaxSubjectClassification)
+        .where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.tax_code_id == tax_code_id,
+            TaxSubjectClassification.subject_kind == subject_kind,
+            TaxSubjectClassification.subject_ref == cleaned_ref,
+            TaxSubjectClassification.effective_from <= occurred_on,
+            (TaxSubjectClassification.effective_to.is_(None))
+            | (TaxSubjectClassification.effective_to >= occurred_on),
+        )
+        .order_by(TaxSubjectClassification.version.desc())
+    ).all()
+    if not rows:
+        return direct_category, None
+    selected = rows[0]
+    if direct_category is not None and direct_category != selected.category_code:
+        raise TaxConflict(
+            f"{subject_kind} tax category conflicts with owned classification"
+        )
+    return selected.category_code, selected
+
+
+def _applicable_rules(
+    db: Session, tenant_id: UUID, fact: TaxFact
+) -> list[_ApplicableTaxRule]:
     rows = db.scalars(
         select(TaxRule)
         .join(
@@ -391,37 +622,150 @@ def _applicable_rule(db: Session, tenant_id: UUID, fact: TaxFact) -> TaxRule:
             | (TaxRule.effective_to >= fact.occurred_on),
         )
     ).all()
-    ranked = [
-        (
-            row.priority,
-            sum(
-                value is not None
-                for value in (row.party_category, row.supply_category, row.place_code)
-            ),
-            row.version,
-            row,
-        )
-        for row in rows
-        if _optional_match(row.party_category, fact.party_category)
-        and _optional_match(row.supply_category, fact.supply_category)
-        and _optional_match(row.place_code, fact.place_code)
-    ]
-    if not ranked:
+    if not rows:
         raise TaxRuleViolation("no applicable tax rule")
-    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-    top = ranked[0]
-    if len(ranked) > 1 and ranked[1][:2] == top[:2]:
-        raise TaxRuleViolation("tax determination is ambiguous at the highest priority")
-    return top[3]
+
+    codes = {
+        row.id: row.code
+        for row in db.scalars(
+            select(TaxCode).where(
+                TaxCode.tenant_id == tenant_id,
+                TaxCode.id.in_({rule.tax_code_id for rule in rows}),
+            )
+        ).all()
+    }
+    grouped: dict[UUID, list[TaxRule]] = {}
+    for row in rows:
+        grouped.setdefault(row.tax_code_id, []).append(row)
+
+    selected_rules: list[_ApplicableTaxRule] = []
+    for tax_code_id, candidates in grouped.items():
+        party_category, party_classification = _subject_classification(
+            db,
+            tenant_id=tenant_id,
+            tax_code_id=tax_code_id,
+            subject_kind="party",
+            subject_ref=fact.counterparty_ref,
+            direct_category=fact.party_category,
+            occurred_on=fact.occurred_on,
+        )
+        supply_category, supply_classification = _subject_classification(
+            db,
+            tenant_id=tenant_id,
+            tax_code_id=tax_code_id,
+            subject_kind="supply",
+            subject_ref=fact.supply_ref,
+            direct_category=fact.supply_category,
+            occurred_on=fact.occurred_on,
+        )
+        place_code, place_classification = _subject_classification(
+            db,
+            tenant_id=tenant_id,
+            tax_code_id=tax_code_id,
+            subject_kind="place",
+            subject_ref=fact.place_ref,
+            direct_category=fact.place_code,
+            occurred_on=fact.occurred_on,
+        )
+        ranked = [
+            (
+                row.priority,
+                sum(
+                    value is not None
+                    for value in (
+                        row.party_category,
+                        row.supply_category,
+                        row.place_code,
+                    )
+                ),
+                row.version,
+                row,
+            )
+            for row in candidates
+            if _optional_match(row.party_category, party_category)
+            and _optional_match(row.supply_category, supply_category)
+            and _optional_match(row.place_code, place_code)
+        ]
+        if not ranked:
+            raise TaxRuleViolation(f"no applicable tax rule for {codes[tax_code_id]}")
+        ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        top = ranked[0]
+        if len(ranked) > 1 and ranked[1][:2] == top[:2]:
+            raise TaxRuleViolation(
+                f"tax determination for {codes[tax_code_id]} is ambiguous at "
+                "the highest priority"
+            )
+        selected_rules.append(
+            _ApplicableTaxRule(
+                rule=top[3],
+                party_category=party_category,
+                supply_category=supply_category,
+                place_code=place_code,
+                party_classification=party_classification,
+                supply_classification=supply_classification,
+                place_classification=place_classification,
+                tax_code=codes[tax_code_id],
+            )
+        )
+    if not selected_rules:
+        raise TaxRuleViolation("no applicable tax rule")
+    selected_rules.sort(
+        key=lambda item: (item.rule.calculation_sequence, item.tax_code)
+    )
+    sequences = [item.rule.calculation_sequence for item in selected_rules]
+    if len(sequences) != len(set(sequences)):
+        raise TaxRuleViolation("tax calculation sequence is ambiguous")
+    if any(item.rule.inclusive for item in selected_rules) and len(selected_rules) > 1:
+        raise TaxRuleViolation(
+            "inclusive tax cannot be combined with another tax component"
+        )
+    return selected_rules
 
 
-def determine_tax(
-    db: Session,
+def _calculate_rule(
+    rule: TaxRule,
     *,
-    tenant_id: UUID,
-    fact: TaxFact,
-    determined_at: datetime,
-) -> TaxDetermination:
+    calculation_base: Decimal,
+    minor_units: int,
+) -> tuple[Decimal, Decimal, list[tuple[Decimal, Decimal | None, Decimal]]]:
+    base = calculation_base
+    line_values: list[tuple[Decimal, Decimal | None, Decimal]] = []
+    if rule.calculation_method == "percentage":
+        if rule.rate is None:
+            raise TaxRuleViolation("percentage tax rule has no rate")
+        if rule.inclusive:
+            taxable = base / (Decimal(1) + rule.rate)
+            tax_amount = base - taxable
+            base = taxable
+        else:
+            tax_amount = base * rule.rate
+        tax_amount = _round(tax_amount, minor_units)
+        base = _round(base, minor_units)
+        line_values.append((base, rule.rate, tax_amount))
+    elif rule.calculation_method == "fixed":
+        if rule.fixed_amount is None:
+            raise TaxRuleViolation("fixed tax rule has no amount")
+        tax_amount = _round(rule.fixed_amount, minor_units)
+        base = _round(base, minor_units)
+        line_values.append((base, None, tax_amount))
+    else:
+        tax_amount = Decimal(0)
+        if not rule.bands:
+            raise TaxRuleViolation("progressive tax rule has no bands")
+        for band in rule.bands:
+            upper = base if band.upper_bound is None else min(base, band.upper_bound)
+            taxable = max(Decimal(0), upper - band.lower_bound)
+            amount = _round(taxable * band.rate, minor_units)
+            line_values.append((taxable, band.rate, amount))
+            tax_amount += amount
+        tax_amount = _round(tax_amount, minor_units)
+        base = _round(base, minor_units)
+    return base, tax_amount, line_values
+
+
+def _validate_tax_fact(
+    db: Session, *, tenant_id: UUID, fact: TaxFact
+) -> tuple[TaxJurisdiction, str, str, str]:
     jurisdiction = _jurisdiction(db, tenant_id, fact.jurisdiction_id)
     if not _currency_matches(
         fact.base_amount.currency,
@@ -436,64 +780,152 @@ def determine_tax(
     fingerprint = _fact_fingerprint(
         fact, source_ref=source_ref, source_version=source_version
     )
-    existing = db.scalar(
+    return jurisdiction, source_ref, source_version, fingerprint
+
+
+def determine_tax_set(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    fact: TaxFact,
+    determined_at: datetime,
+) -> TaxDeterminationSet:
+    jurisdiction, source_ref, source_version, fingerprint = _validate_tax_fact(
+        db, tenant_id=tenant_id, fact=fact
+    )
+    legacy = db.scalar(
         select(TaxDetermination).where(
             TaxDetermination.tenant_id == tenant_id,
             TaxDetermination.source_ref == source_ref,
             TaxDetermination.source_version == source_version,
+            TaxDetermination.determination_set_id.is_(None),
         )
     )
+    existing = db.scalar(
+        select(TaxDeterminationSet).where(
+            TaxDeterminationSet.tenant_id == tenant_id,
+            TaxDeterminationSet.source_ref == source_ref,
+            TaxDeterminationSet.source_version == source_version,
+        )
+    )
+    if legacy is not None and existing is not None:
+        raise TaxConflict("tax source version has conflicting determination owners")
+    if legacy is not None:
+        a1_fingerprint = _a1_fact_fingerprint(
+            fact, source_ref=source_ref, source_version=source_version
+        )
+        if (
+            fact.supply_ref is not None
+            or fact.place_ref is not None
+            or legacy.source_fingerprint != a1_fingerprint
+        ):
+            raise TaxConflict("tax source version was reused with different facts")
+        raise TaxConflict(
+            "tax source version was already determined through the legacy "
+            "single-component API"
+        )
     if existing is not None:
         if existing.source_fingerprint != fingerprint:
             raise TaxConflict("tax source version was reused with different facts")
         return existing
-    rule = _applicable_rule(db, tenant_id, fact)
-    base = fact.base_amount.amount
-    line_values: list[tuple[Decimal, Decimal | None, Decimal]] = []
-    if rule.calculation_method == "percentage":
-        if rule.rate is None:
-            raise TaxRuleViolation("percentage tax rule has no rate")
+    if jurisdiction.status != "active":
+        raise TaxConflict("tax determination cannot use a retired jurisdiction")
+
+    selected_rules = _applicable_rules(db, tenant_id, fact)
+    source_amount = _round(fact.base_amount.amount, jurisdiction.minor_units)
+    prior_tax = Decimal(0)
+    inclusive_tax = Decimal(0)
+    components: list[TaxDetermination] = []
+    for applicable in selected_rules:
+        rule = applicable.rule
+        calculation_base = source_amount
+        if rule.calculation_base_code == "source_plus_prior_tax":
+            calculation_base += prior_tax
+        base, tax_amount, line_values = _calculate_rule(
+            rule,
+            calculation_base=calculation_base,
+            minor_units=jurisdiction.minor_units,
+        )
+        recoverable = _round(
+            tax_amount * rule.recoverable_rate, jurisdiction.minor_units
+        )
+        non_recoverable = tax_amount - recoverable
+        component = TaxDetermination(
+            tenant_id=tenant_id,
+            component_sequence=rule.calculation_sequence,
+            jurisdiction_id=jurisdiction.id,
+            tax_code_id=rule.tax_code_id,
+            rule_id=rule.id,
+            rule_version=rule.version,
+            occurred_on=fact.occurred_on,
+            fact_kind=fact.fact_kind,
+            recognition_basis_code=fact.recognition_basis_code,
+            transaction_side=fact.transaction_side,
+            treatment_code=rule.treatment_code,
+            calculation_base_code=rule.calculation_base_code,
+            inclusive=rule.inclusive,
+            party_category=applicable.party_category,
+            supply_category=applicable.supply_category,
+            place_code=applicable.place_code,
+            party_classification_id=(
+                applicable.party_classification.id
+                if applicable.party_classification
+                else None
+            ),
+            supply_classification_id=(
+                applicable.supply_classification.id
+                if applicable.supply_classification
+                else None
+            ),
+            place_classification_id=(
+                applicable.place_classification.id
+                if applicable.place_classification
+                else None
+            ),
+            base_amount=base,
+            tax_amount=tax_amount,
+            recoverable_amount=recoverable,
+            non_recoverable_amount=non_recoverable,
+            currency_code=jurisdiction.currency_code,
+            minor_units=jurisdiction.minor_units,
+            source_ref=source_ref,
+            source_version=source_version,
+            source_fingerprint=fingerprint,
+            evidence_ref=_clean(fact.evidence_ref, "evidence reference"),
+            counterparty_ref=(
+                fact.counterparty_ref.strip() if fact.counterparty_ref else None
+            ),
+            determined_at=determined_at,
+        )
+        component.lines.extend(
+            TaxDeterminationLine(
+                tenant_id=tenant_id,
+                sequence=sequence,
+                taxable_amount=taxable,
+                rate=rate,
+                tax_amount=amount,
+            )
+            for sequence, (taxable, rate, amount) in enumerate(line_values, start=1)
+        )
+        components.append(component)
+        prior_tax += tax_amount
         if rule.inclusive:
-            taxable = base / (Decimal(1) + rule.rate)
-            tax_amount = base - taxable
-            base = taxable
-        else:
-            tax_amount = base * rule.rate
-        tax_amount = _round(tax_amount, jurisdiction.minor_units)
-        base = _round(base, jurisdiction.minor_units)
-        line_values.append((base, rule.rate, tax_amount))
-    elif rule.calculation_method == "fixed":
-        if rule.fixed_amount is None:
-            raise TaxRuleViolation("fixed tax rule has no amount")
-        tax_amount = _round(rule.fixed_amount, jurisdiction.minor_units)
-        line_values.append((base, None, tax_amount))
-    else:
-        tax_amount = Decimal(0)
-        if not rule.bands:
-            raise TaxRuleViolation("progressive tax rule has no bands")
-        for band in rule.bands:
-            upper = base if band.upper_bound is None else min(base, band.upper_bound)
-            taxable = max(Decimal(0), upper - band.lower_bound)
-            amount = _round(taxable * band.rate, jurisdiction.minor_units)
-            line_values.append((taxable, band.rate, amount))
-            tax_amount += amount
-        tax_amount = _round(tax_amount, jurisdiction.minor_units)
-    recoverable = _round(tax_amount * rule.recoverable_rate, jurisdiction.minor_units)
-    non_recoverable = tax_amount - recoverable
-    row = TaxDetermination(
+            inclusive_tax += tax_amount
+
+    tax_amount = _round(prior_tax, jurisdiction.minor_units)
+    net_amount = _round(source_amount - inclusive_tax, jurisdiction.minor_units)
+    gross_amount = _round(net_amount + tax_amount, jurisdiction.minor_units)
+    row = TaxDeterminationSet(
         tenant_id=tenant_id,
         jurisdiction_id=jurisdiction.id,
-        tax_code_id=rule.tax_code_id,
-        rule_id=rule.id,
-        rule_version=rule.version,
         occurred_on=fact.occurred_on,
         fact_kind=fact.fact_kind,
         recognition_basis_code=fact.recognition_basis_code,
         transaction_side=fact.transaction_side,
-        base_amount=base,
+        source_amount=source_amount,
+        net_amount=net_amount,
         tax_amount=tax_amount,
-        recoverable_amount=recoverable,
-        non_recoverable_amount=non_recoverable,
+        gross_amount=gross_amount,
         currency_code=jurisdiction.currency_code,
         minor_units=jurisdiction.minor_units,
         source_ref=source_ref,
@@ -503,21 +935,77 @@ def determine_tax(
         counterparty_ref=(
             fact.counterparty_ref.strip() if fact.counterparty_ref else None
         ),
+        supply_ref=fact.supply_ref.strip() if fact.supply_ref else None,
+        place_ref=fact.place_ref.strip() if fact.place_ref else None,
         determined_at=determined_at,
     )
-    row.lines.extend(
-        TaxDeterminationLine(
-            tenant_id=tenant_id,
-            sequence=sequence,
-            taxable_amount=taxable,
-            rate=rate,
-            tax_amount=amount,
-        )
-        for sequence, (taxable, rate, amount) in enumerate(line_values, start=1)
-    )
+    row.components.extend(components)
     db.add(row)
     db.flush()
     return row
+
+
+def determine_tax(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    fact: TaxFact,
+    determined_at: datetime,
+) -> TaxDetermination:
+    jurisdiction, source_ref, source_version, fingerprint = _validate_tax_fact(
+        db, tenant_id=tenant_id, fact=fact
+    )
+    legacy = db.scalar(
+        select(TaxDetermination).where(
+            TaxDetermination.tenant_id == tenant_id,
+            TaxDetermination.source_ref == source_ref,
+            TaxDetermination.source_version == source_version,
+            TaxDetermination.determination_set_id.is_(None),
+        )
+    )
+    if legacy is not None:
+        a1_fingerprint = _a1_fact_fingerprint(
+            fact, source_ref=source_ref, source_version=source_version
+        )
+        if (
+            fact.supply_ref is not None
+            or fact.place_ref is not None
+            or legacy.source_fingerprint != a1_fingerprint
+        ):
+            raise TaxConflict("tax source version was reused with different facts")
+        return legacy
+    existing_set = db.scalar(
+        select(TaxDeterminationSet).where(
+            TaxDeterminationSet.tenant_id == tenant_id,
+            TaxDeterminationSet.source_ref == source_ref,
+            TaxDeterminationSet.source_version == source_version,
+        )
+    )
+    if existing_set is not None:
+        if existing_set.source_fingerprint != fingerprint:
+            raise TaxConflict("tax source version was reused with different facts")
+        if len(existing_set.components) != 1:
+            raise TaxRuleViolation(
+                "multiple tax components require the determine_tax_set API"
+            )
+        return existing_set.components[0]
+    if jurisdiction.status != "active":
+        raise TaxConflict("tax determination cannot use a retired jurisdiction")
+    if len(_applicable_rules(db, tenant_id, fact)) != 1:
+        raise TaxRuleViolation(
+            "multiple tax components require the determine_tax_set API"
+        )
+    determination_set = determine_tax_set(
+        db,
+        tenant_id=tenant_id,
+        fact=fact,
+        determined_at=determined_at,
+    )
+    if len(determination_set.components) != 1:
+        raise TaxRuleViolation(
+            "multiple tax components require the determine_tax_set API"
+        )
+    return determination_set.components[0]
 
 
 def create_statutory_report_definition(

@@ -34,6 +34,25 @@ already the kernel's own shape, two are byte-identical, and one is a near-match.
 Grouping them that way is most of the value here — "ten collisions" reads as a
 wall; the actual work is five tables that share one pattern.
 
+## Amendment — 2026-08-24: an eleventh collision, created deliberately
+
+`machine_credentials` now collides. Unlike the ten measured here, it was not
+discovered — Sub's migration `551` created it, transcribed from
+`dotmac_kernel.machine_models.MachineCredential`, so that Sub can adopt the
+kernel's `machine_auth` facility.
+
+The counts above are left at their measured baseline on purpose. They record
+what an audit found on a date; folding a later, deliberate addition into them
+would make the historical measurement unreadable and is exactly the drift the
+"nine at head, ten at baseline" note below exists to prevent. The new entry is
+in Group A, where it belongs, and this amendment is how the total moves.
+
+Its disposition is STAMP for the same reason `tenants` and `tenant_domains` are:
+Sub is already running the kernel's model against its own table, so there is
+nothing to migrate when the lineages compose. It differs from those two only in
+being newer, and in having no pre-kernel history at all — the table has never
+held a row written by anything but the kernel's ORM.
+
 ## Method, and the four ways it was wrong first
 
 Kernel columns come from imported SQLAlchemy metadata (exact). Sub columns are
@@ -148,12 +167,13 @@ analysis into failing assertions that get fixed one at a time.
 
 ## The ten, grouped by what they actually need
 
-### Group A — already the kernel's shape: STAMP (2)
+### Group A — already the kernel's shape: STAMP (2, plus one added 2026-08-24)
 
 | table | why |
 |---|---|
 | `tenants` | Sub's migration 508 created it *from the kernel's shape*, and Sub imports `dotmac_kernel.models.Tenant` to use it |
 | `tenant_domains` | same migration, same story |
+| `machine_credentials` | Sub's migration `551` (2026-08-24) created it from `dotmac_kernel.machine_models.MachineCredential`, for the `machine_auth` adoption. Identical by construction: the constraints, the composite uniques, the `hmac-sha256:` CHECK and the FORCEd RLS policy are the kernel's, transcribed |
 
 Sub is already running the kernel's model against its own table. The disposition
 is to stamp the revision, not to migrate anything. **These are not really
