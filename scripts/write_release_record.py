@@ -13,7 +13,8 @@ lands:
 2. ``RELEASED_TAGS`` in ``tests/architecture/test_released_migrations.py`` —
    ``tag -> (distribution, commit, {migration: sha256})``, which holds released
    migration bytes immutable. Publishing a module with a lineage means ADDING
-   that entry.
+   that entry and removing each newly immutable filename from ``UNRELEASED`` in
+   the same file. A migration cannot remain both released and editable.
 
 Miss either and five gates fail, so ``main`` is red from the instant of the tag
 until a human remembers. Between 2026-08-21 and 2026-08-22 that happened FOUR
@@ -50,12 +51,14 @@ paragraphs the change has no business touching.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LEDGER = REPO_ROOT / "docs" / "inventories" / "declared-publication-baseline.json"
@@ -184,6 +187,89 @@ def _insert_mapping_entry(text: str, name: str, entry: str) -> str:
     return text[:at] + entry + text[at:]
 
 
+def _released_tags(text: str) -> dict[str, tuple[str, str, dict[str, str]]]:
+    """Parse the literal release map whose values contain only immutable data."""
+    tree = ast.parse(_mapping_text(text, "RELEASED_TAGS"))
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "RELEASED_TAGS"
+    )
+    if assignment.value is None:  # pragma: no cover - annotated assignment invariant
+        raise ReleaseRecordError("RELEASED_TAGS has no literal value")
+    parsed = ast.literal_eval(assignment.value)
+    if not isinstance(parsed, dict):  # pragma: no cover - literal-map invariant
+        raise ReleaseRecordError("RELEASED_TAGS is not a literal dictionary")
+    return cast(dict[str, tuple[str, str, dict[str, str]]], parsed)
+
+
+def _retire_unreleased(
+    text: str,
+    distribution: str,
+    migrations: set[str],
+    *,
+    require_all: bool,
+) -> tuple[str, bool]:
+    """Move newly immutable filenames out of one lineage's editable set.
+
+    ``require_all`` is true before a new tag row is added: every newly released
+    migration must have been declared editable, or the release record is hiding
+    a guard failure.  It is false when repairing a partial record that already
+    contains the tag row; in that state an empty editable set is already the
+    desired result, while any surviving intersection still needs removal.
+    """
+    if not migrations:
+        return text, False
+
+    name = re.escape(distribution)
+    mapping = _mapping_text(text, "UNRELEASED")
+    row = re.search(
+        rf'^    "{name}": frozenset\(([^\n]*)\),$',
+        mapping,
+        flags=re.MULTILINE,
+    )
+    if row is None:
+        raise ReleaseRecordError(
+            f"{distribution} has released migrations but no UNRELEASED row"
+        )
+
+    payload = row.group(1).strip()
+    current: set[str]
+    if not payload:
+        current = set()
+    else:
+        parsed = ast.literal_eval(payload)
+        if not isinstance(parsed, set) or not all(
+            isinstance(item, str) for item in parsed
+        ):
+            raise ReleaseRecordError(
+                f"{distribution}: UNRELEASED must be a literal set of filenames"
+            )
+        current = parsed
+
+    missing = migrations - current
+    if missing and require_all:
+        raise ReleaseRecordError(
+            f"{distribution}: newly released migration(s) were not declared in "
+            f"UNRELEASED: {sorted(missing)}"
+        )
+
+    remaining = current - migrations
+    if remaining == current:
+        return text, False
+    if remaining:
+        values = ", ".join(repr(item) for item in sorted(remaining))
+        replacement = f'    "{distribution}": frozenset({{{values}}}),'
+    else:
+        replacement = f'    "{distribution}": frozenset(),'
+
+    absolute_start = text.index(mapping) + row.start()
+    absolute_end = text.index(mapping) + row.end()
+    return text[:absolute_start] + replacement + text[absolute_end:], True
+
+
 def _migration_prefix(digests: dict[str, str]) -> str:
     prefixes: set[str] = set()
     for filename, digest in digests.items():
@@ -274,8 +360,12 @@ def add_released_tag(
     import_name: str | None = None,
 ) -> tuple[str, bool]:
     """Insert one release entry, enrolling a first distribution when needed."""
-    if f'"{tag}":' in text:
-        return text, False
+    releases = _released_tags(text)
+    existing = releases.get(tag)
+    if existing is not None and existing != (distribution, commit, digests):
+        raise ReleaseRecordError(
+            f"{tag} is already recorded with different coordinates or digests"
+        )
     name = re.escape(distribution)
     anchor = re.search(rf'\n    "{name}-v[^"]+": \(', text)
     if anchor is None:
@@ -295,6 +385,28 @@ def add_released_tag(
                 )
             text = _insert_mapping_entry(text, mapping, entry)
         return text, True
+
+    previously_released = {
+        filename
+        for recorded_tag, (owner, _, files) in releases.items()
+        if recorded_tag != tag and owner == distribution
+        for filename in files
+    }
+    newly_released = set(digests) - previously_released
+    text, retired = _retire_unreleased(
+        text,
+        distribution,
+        newly_released,
+        # Once the tag row exists this may be a repair after the editable set
+        # was already cleared. Idempotence must accept that completed half.
+        require_all=existing is None,
+    )
+    if existing is not None:
+        return text, retired
+
+    anchor = re.search(rf'\n    "{name}-v[^"]+": \(', text)
+    if anchor is None:  # pragma: no cover - the mapping edit cannot remove it
+        raise ReleaseRecordError(f"lost the RELEASED_TAGS anchor for {distribution}")
     at = anchor.start() + 1
     entry = _rendered_entry(tag, distribution, commit, digests)
     return text[:at] + entry + text[at:], True
