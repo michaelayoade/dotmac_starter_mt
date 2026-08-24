@@ -166,6 +166,16 @@ of it.**
 > below feeds — is REMOVED from the public capability manifest by ADR-0061 A5:
 > it has no independent Dotmac business lifecycle, and a provider-side customer
 > is a connector internal or a normalized result of `payments.intent.v1`.
+>
+> **`payments.refund.v1` is RETAINED** (ADR-0061 A8), which is the opposite
+> outcome to `payments.customer.v1` from the same test: a refund is a business
+> act with its own lifecycle and its own receivable consequence, while a
+> provider-side customer record is a by-product of a charge. Recorded here so
+> the two rows above are not read as heading the same way. Its surface becomes
+> one `request_refund` command; the provider handles in the refund-shaping row
+> above become connector internals, and refund STATUS reads stay reconciliation
+> internals. The refund OWNER is not named and is not Treasury by default
+> (ADR-0061 A9; ADR-0063 § 6's surface is closed and a refund is not on it).
 
 ### 2.3 Stays product code, and retires
 

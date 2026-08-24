@@ -5,7 +5,13 @@
 > branch. This record takes `0063` under the same rule ADR-0061 recorded: the
 > earlier record keeps the number.
 
-- Status: Accepted
+- Status: Accepted. Amended 2026-08-24 (A1–A3) — see "Amendment — 2026-08-24"
+  at the end of this record. A1 rules that ERP's `PROCESSING` state is SPLIT
+  before extraction and that an unprobed row migrates to `ambiguous`, never
+  `submitted`. A2 names payroll as a producer of `PaymentInstruction` rows and
+  records the salary-component privacy boundary. A3 fixes the ordered
+  dependency and makes ERP's payout authorization defect a hard RELEASE gate
+  alongside § 7's construction gate. No earlier text is rewritten.
 - Date: 2026-08-24
 - Deciders: Michael
 - Supersedes: none
@@ -85,6 +91,13 @@ REVERSED`), which was evidence-side shorthand: `INSTRUCTED` and `SUBMITTED`
 collapse into the authorization plus the `submitting` window, and `ambiguous`
 is a sibling of `submitted` rather than a stage after it — an ambiguous
 submission is precisely one we cannot say was submitted.
+
+> **Extended 2026-08-24 — see Amendment A1.** This lifecycle is the
+> DESTINATION. A1 rules what ERP must do to its own `PaymentIntent.status`
+> BEFORE anything ports into it: `PROCESSING` conflates a durable intent with
+> an attempted submission and is SPLIT first, worker claim/lease state moves
+> off the domain status, and every existing `PROCESSING` row is PROBED — an
+> unprobed row becomes `ambiguous`, never `submitted`.
 
 `ambiguous` is a first-class state and not an error code, for the reason
 ADR-0061 § 1 already fixed in the Integrator: *a retry of a money-moving
@@ -303,6 +316,13 @@ Consequences, stated so they cannot be argued away later:
 The scope is closed. Anything not on this list is another owner's, and adding
 to the list is an ADR, not an implementation detail:
 
+> **First application of the closed-list rule, 2026-08-24 — see ADR-0061
+> Amendment A9.** `payments.refund.v1` is KEPT as a capability (ADR-0061 A8)
+> and a refund is NOT on this list. Treasury is therefore not automatically the
+> refund owner: a refund reverses a receivable rather than discharging a
+> payable, its consequence lands in Billing/AR and Accounting, and extending
+> this list requires its own record with its own evidence.
+
 1. `PaymentInstruction` and its lifecycle (§ 1).
 2. `PaymentRun` grouping of individually authorized instructions (§ 3).
 3. The manual bank-file rail (§ 2).
@@ -317,6 +337,13 @@ to the list is an ADR, not an implementation detail:
 12. No provider switching after an ambiguous submission (§ 4).
 
 ### 7. The gate — nothing is built until ERP's three-writer defect is fixed
+
+> **A SECOND gate added 2026-08-24 — see Amendment A3.** This section gates
+> CONSTRUCTION on the three-writer fix. A3 adds a gate on RELEASE and
+> ENABLEMENT: an ERP READ permission (`payments:read`) currently satisfies the
+> guard on `POST /transfers/{intent_id}/initiate`, which executes a real
+> transfer. No payout release or enablement passes that blocker, whatever else
+> is finished.
 
 **None of the above may be constructed before ERP's `PaymentIntent.status`
 three-writer violation is fixed in the ERP repository.**
@@ -424,3 +451,214 @@ of authorized money. § 5.
 part that is safe to make now, and making it now is what stops the ERP fix from
 being designed around a shape nobody has agreed to. The GATE stops construction;
 it does not stop deciding.
+
+
+## Amendment — 2026-08-24 (accepted corrections A1–A3)
+
+Three corrections accepted the same day this record was. Each names the section
+it extends or corrects; nothing above is rewritten, and each superseded or
+extended spot carries a short pointer.
+
+### A1. ERP's `PROCESSING` is SPLIT before extraction, and an unprobed row is `ambiguous`
+
+§ 1 gives the destination lifecycle and § 7 gates construction on
+`PaymentIntent.status` having one writer. Neither says what that one writer's
+STATE VOCABULARY must be, and there is a defect in it that would survive the
+fix: **`PROCESSING` is ambiguous, and carrying it into the new module under a
+better-sounding name would launder the ambiguity into a contract.**
+
+The rule: **do not carry an ambiguous state into the new module under a
+misleading name.** `PROCESSING` today answers "something is happening" and is
+written by three writers who mean different things by it — the owning service
+means "the provider call is running", and `poll_stuck_expense_transfers` means
+"I have picked this row up" (`app/tasks/expense.py:900`, written directly and
+then followed three lines later by `svc.poll_transfer_status(...)`). A state
+that means both is a state that means neither.
+
+ERP must distinguish, before anything is extracted:
+
+| State | Means, precisely |
+|---|---|
+| `submission_requested` | a DURABLE INTENT exists and the provider outcome **has not been attempted yet** |
+| `submitted` | the provider **conclusively accepted** it |
+| `ambiguous` | the request **may have landed**; reconciliation is required |
+| `settled` | the money conclusively moved, with settlement evidence |
+| `failed` | terminal, provider-confirmed non-execution |
+| `reversed` | a confirmed reversal of an executed movement |
+
+**Worker claim/lease state belongs to the EXECUTION ENGINE, not to
+`PaymentIntent`.** "A worker has picked this row up", "the lease expires at",
+"this is attempt three" are properties of an execution attempt, and putting
+them in a domain status column is how the third writer got there in the first
+place: the task needed somewhere to record a claim and used the only column it
+could see. They move onto the execution/idempotency record (`AGENTS.md` rule
+21 / ADR-0014 — at-most-once execution has ONE owner), and no worker writes a
+business state to announce that it has started work. This is not a separate
+piece of work from § 7's one-writer fix; it is most of why the third writer
+exists.
+
+**Correspondence with § 1, stated rather than assumed.** These are ERP's state
+names and § 1's are Treasury's; they are not renamed into each other.
+`submission_requested` corresponds to the OPENING of § 1's `submitting` window;
+`submitted`, `ambiguous`, `settled`, `failed` and `reversed` correspond
+one-to-one. § 1's `authorized` has **no ERP counterpart today**, because ERP has
+no separate authorization step in the payout path at all — that is the same gap
+§ 3 records from the Approvals side, and it is a capability gain rather than a
+migration.
+
+**The migration rule, and it is the important part.** Existing `PROCESSING`
+rows must be **PROBED** against the provider, one row at a time:
+
+| Probe result | Maps to |
+|---|---|
+| the provider conclusively holds an accepted transfer | `submitted`, with the provider evidence recorded |
+| the provider conclusively holds none, and the intent is intact | `failed` — **not** back to `submission_requested`. Re-submission is a new authorized decision, not a migration handing the row back to a worker as though nothing happened |
+| anything else — provider unreachable, no conclusive answer, a row too old to probe, an inconclusive record | **`ambiguous`** |
+
+**Without conclusive provider evidence a row maps to `ambiguous`, never
+`submitted`.** `ambiguous` is the DEFAULT, and it is the default in the
+direction that costs a human a reconciliation rather than the direction that
+costs a beneficiary. Assuming success on migration is how a **double payment**
+or a **silently lost disbursement** enters the new module — a row wrongly
+marked `submitted` is never looked at again, and neither the person who was
+paid twice nor the person who was not paid at all appears in any queue.
+
+Two constraints on performing it:
+
+- **The probe is READ-ONLY.** A probe reads the provider's own record for the
+  reference. A probe that initiates, re-sends or "repairs" is not a probe, and
+  it is § 4's failover hazard wearing a migration's clothes.
+- **QUIESCE the worker during the migration.** `poll_stuck_expense_transfers`
+  writes the very column being migrated. Probing while it mutates rows means
+  the probe answers about a state that has already changed. Stop the schedule,
+  drain what is in flight, migrate and probe, then restart the worker against
+  the new vocabulary — with its claim/lease state on the execution record, per
+  the paragraph above.
+
+*Extends: § 1 (the destination lifecycle) and § 7 (the one-writer gate, whose
+scope now includes the state vocabulary the one writer writes). Corrects
+nothing; it names a precondition § 7 left implicit. Related: ADR-0061 A1
+(`PaymentService` as sole interim owner), ADR-0014, `AGENTS.md` rule 21.*
+
+### A2. Payroll produces `PaymentInstruction` rows, and Treasury never sees a salary component
+
+§ 2 establishes the manual bank-file rail and observes that ERP's payroll money
+moves through a spreadsheet, a human and a bank. § 3 establishes `PaymentRun`.
+Neither says how a payroll run and Treasury actually meet, and ADR-0046 says
+only that *"payment execution and GL posting are downstream adapters over
+finalized liabilities"*. This makes that seam concrete.
+
+**Payroll owns calculation, approval and the net-pay obligation. Treasury owns
+disbursement.** Therefore:
+
+1. **One authorized net-pay obligation produces ONE `PaymentInstruction`.** Not
+   one per component, not one per run, not one per bank file. The obligation
+   Payroll finalizes is the unit that gets paid, and it is the unit Treasury
+   can reconcile, fail and retry on its own.
+2. **A payroll run MAY group those instructions into a `PaymentRun`.** Grouping
+   is convenience and evidence; it confers no authorization (§ 3), so a run
+   that is approved does not thereby authorize an instruction that was not.
+3. **Treasury's manual rail produces the bank-upload artifact.** The file
+   format is Treasury's, not Payroll's — today ERP's payroll run calls the
+   shared generator itself (`app/services/people/payroll/web/run_web.py:1102`
+   over `app/services/finance/banking/bank_upload.py:58`), which is one domain
+   owning another's rail.
+4. **Exporting the file does NOT mark payroll paid.** § 2's invariant, applied
+   where it matters most. ERP's payroll export writes no status at all today;
+   that behaviour is correct and must survive the port intact.
+5. **Settlement evidence returns to Payroll through a TYPED OBSERVATION.**
+   Treasury does not write a Payroll status; Payroll's own owner consumes the
+   observation and advances its coverage, exactly as ADR-0046 already requires
+   (*"settlement observations advance coverage but do not execute payment"*)
+   and ADR-0024 requires of every importer.
+
+**The privacy boundary, and it is a privacy boundary as much as an ownership
+one.** Treasury receives ONLY:
+
+- the **net amount**,
+- the **currency**,
+- the **payee / destination reference**, and
+- the **payroll obligation reference**.
+
+**Never salary components.** Not gross pay, basic, allowances, overtime,
+bonuses, deductions, tax, pension, loan repayments, garnishments, grade or
+band — and nothing from which any of them can be derived. Two consequences that
+are easy to violate by accident:
+
+- **The instruction's narration/memo field must not carry a breakdown.** The
+  obligation reference is the pointer; resolving it is Payroll's authorization
+  decision, made by Payroll, for a reader Payroll has decided may see it.
+- **The bank-file rail means a spreadsheet leaves the building.** A payments
+  operator, a bank portal and an email attachment are a payments-operations
+  audience, not an HR one. A column headed "pension deduction" in an exported
+  file is a payroll disclosure to everyone who touches that file, and the file
+  is the artifact § 2 requires Treasury to retain immutably — so a component
+  that reaches Treasury is a component that is retained, digested and archived
+  where HR cannot reach it to correct or redact it.
+
+**The silent skip is refused with particular force here.** § 3 already forbids
+inheriting it; on the payroll path it is an unpaid employee. ERP drops a payee
+with no account number from the export with a log line
+(`app/services/people/payroll/web/run_web.py:1066`), so nobody is told and no
+queue shows it. An instruction that cannot be submitted is a STATE — under A1's
+vocabulary it never leaves `submission_requested` and is visibly blocked — never
+an omission from a spreadsheet.
+
+*Extends: §§ 2 and 3, and makes concrete ADR-0046's "payment execution … are
+downstream adapters over finalized liabilities". Related: ADR-0046 Amendment A1
+(the same seam recorded on the Payroll side), ADR-0044 (Banking supplies the
+settlement observation), ADR-0026 (approval is not the transition).*
+
+### A3. The ordered dependency, and the authorization blocker is a HARD gate
+
+§ 7 gates construction on one defect. It does not say what order the rest
+happens in, and the order is not free: three of the steps reduce blast radius
+and none of them depends on a design decision, so they come first.
+
+**The dependency order:**
+
+| # | Step | Where | Why here |
+|---|---|---|---|
+| 1 | ERP execute-permission containment | ERP | An ERP READ permission executes a real transfer today. Nothing else matters more, and it depends on nothing |
+| 2 | ERP authorization-log audit on a named target | ERP | Once containment lands, find out what the old guard actually admitted. An audit against a NAMED target, under `AGENTS.md` rule 30 |
+| 3 | Delete dead `BatchTransferService` | ERP | Security-sensitive dead code with a live `initiate_transfer` path (ADR-0061 A7, § 3). Deleting it also removes writer 2 of step 4 |
+| 4 | Reduce `PaymentIntent.status` to ONE writer | ERP | § 7's construction gate |
+| 5 | Split `PROCESSING` from `ambiguous` | ERP | A1. After 4, because one writer is what makes the split reviewable |
+| 6 | Add capability request/result schemas | `dotmac-integration` + connectors | ADR-0061 A2, ADR-0024 § 10. Before 7, because the API rail speaks through the contract |
+| 7 | Build Treasury `PaymentInstruction` and `PaymentRun` | new module | §§ 1–3. Gated on 4 and 5 |
+| 8 | Add expense, AP and payroll producers | ERP → Treasury | A2. After 7, because a producer needs something to produce into |
+| 9 | Complete Paystack and Flutterwave payout bindings | connectors | ADR-0061 §§ 2–3 |
+| 10 | Build refund through its NAMED owner | Billing / the named owner | ADR-0061 A8 keeps the capability; A9 refuses to assume Treasury owns it. The owner is named before the build, not during it |
+| 11 | Provider sandbox proof, CI and cutover | all | ADR-0061 § 5 step 5 — the binding swap exercised in shadow, with evidence |
+
+**The hard gate.** Step 4's digest/version work may continue in parallel — it
+is internal to ERP and touches no rail. But:
+
+> **No payout release and no payout enablement passes the authorization
+> blocker.**
+
+The blocker, stated so it can be checked: **an ERP read permission
+(`payments:read`) currently satisfies the guard on
+`POST /transfers/{intent_id}/initiate`, which executes a real transfer.** A
+permission whose name says "read" authorizes moving money to a beneficiary.
+That is not a hardening opportunity; it is the containment failure that makes
+every other control on the path decorative, because the weakest admitted
+credential is the one that defines the path's real authorization. A dedicated
+ERP security change is in progress on
+`fix/payout-execute-permission-containment`.
+
+Until that lands: no payout capability is enabled in any environment, no payout
+release is cut, and no claim of payout readiness is made — irrespective of how
+much of steps 4–11 is finished. This gate is about RELEASE and ENABLEMENT and
+sits alongside § 7's gate on CONSTRUCTION; they are independent, and satisfying
+either does not satisfy the other.
+
+Consistent with ADR-0061 A7, this changes no evidentiary claim in either
+direction: *"Implemented and tested; production enablement unconfirmed"* remains
+the required wording, and the blocker is a reason enablement must not be sought,
+not evidence about whether it has happened.
+
+*Extends: § 7, which gated construction and was silent on release. Related:
+ADR-0061 A7 and § 5, `AGENTS.md` rules 28 (m)–(o) and 30,
+`docs/inventories/treasury-payment-execution-sources.md` § 5 (the seven-way RBAC
+dependency that admits `payments:read`).*

@@ -109,6 +109,26 @@ provider_idempotency = "Flutterwave v4 publishes an X-Idempotency-Key request he
 # contract's exact money and stable reference, inside the connector. It does not
 # ask a product to supply a provider-shaped field, and it does not refuse a
 # command for carrying a field another provider needs.
+#
+# REFUND, DECIDED 2026-08-24 (ADR-0061 Amendment A8). `payments.refund.v1` is
+# KEPT — it passes the same test `payments.customer.v1` failed, because a refund
+# is a business act a Dotmac owner DECIDES with its own lifecycle and its own
+# receivable consequence, while a provider-side customer record is a by-product
+# of a charge. Its surface converges on ONE command, `request_refund`, and two
+# things in `outbound.py` are the connector-side work when it does:
+#   * `_refund_body` requires `provider_transaction_id` — a PROVIDER-minted
+#     charge id supplied BY THE PRODUCT. That is the provider-shaped field A3
+#     forbids from the other side. This connector derives the charge id, and the
+#     `currency_minor_units` exponent it needs, from the contract's
+#     original-payment correlation and exact money, INSIDE the connector — and
+#     refuses no command for carrying a field another provider needs.
+#   * a missing `amount` currently MEANS a full refund at the provider.
+#     Absence-as-meaning is how a dropped key becomes "refund everything"; the
+#     contract carries an explicit full-versus-partial discriminator and this
+#     connector reads that instead of an absent field.
+# Refund STATUS reads stay reconciliation internals, never product-visible
+# actions. The refund OWNER is not Treasury by default (ADR-0061 A9).
+
 withheld_capabilities = ["payments.payout.v1"]
 
 contract_consumers = []
