@@ -72,11 +72,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
-    "dotmac-document-rendering": {
-      "declared": "0.1.0a1",
-      "reason": "OUTSTANDING AUTHORIZED RELEASE: dotmac-document-rendering-v0.1.0a1. The first release attempt exposed a real lane defect: this package is an optional module with a ModuleManifest and kernel floor, but deliberately has no schema or lineage. The module lane now represents that third shape with mandatory db_schema=null, proves the absence against the manifest before build and after clean installation, and refuses migrations in the wheel; the stateful and protocol-adapter checks stay strict. Publication only makes the exact pin possible. Vendor Control Plane and Sub remain candidate consumers, no authority has moved, and no old writer is retired. Remove this row only in the automatic post-release record after the verified tag exists; never by editing the declared version or floor down.",
-      "state": "never-published"
-    },
     "dotmac-fx-policy": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",

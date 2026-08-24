@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -171,6 +172,35 @@ def test_document_rendering_is_allowlisted_as_an_explicitly_stateless_module() -
     assert emitted["release_shape"] == "stateless"
     assert "db_schema" not in emitted
     assert emitted["tag"] == "dotmac-document-rendering-v0.1.0a1"
+
+
+def test_release_smoke_executes_against_a_real_stateless_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR-time canary for the embedded script the release runs in a clean venv.
+
+    The first real Document Rendering dispatch reached this script and failed
+    because it read ``manifest.stateful`` while ModuleManifest exposes
+    ``is_stateful``. Importing ``release_module.py`` cannot catch an attribute
+    lookup inside a string, so execute that exact string against a real kernel
+    manifest and a synthetic installed-package path.
+    """
+    from dotmac_kernel.modules import ModuleManifest
+
+    release = _release_module_script()
+    probe = ModuleType("release_smoke_probe")
+    probe.__file__ = str(
+        PROJECT_ROOT / "site-packages-fixture" / "release_smoke_probe" / "__init__.py"
+    )
+    probe.module = ModuleManifest(
+        code="release_smoke_probe",
+        version="1.0.0",
+        core=False,
+    )
+    monkeypatch.setitem(sys.modules, probe.__name__, probe)
+
+    script = release._REGISTER.format(names=[("release_smoke_probe", "module", None)])
+    exec(script, {})  # noqa: S102  # nosec B102 - the checked-in release script
 
 
 def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
