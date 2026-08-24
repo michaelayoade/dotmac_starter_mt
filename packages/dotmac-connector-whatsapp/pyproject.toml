@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-connector-whatsapp"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Meta WhatsApp Cloud API ingress and delivery connector for Dotmac Integrator"
 authors = ["DotMac"]
 readme = "README.md"
