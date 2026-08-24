@@ -23,7 +23,7 @@ Create Date: 2026-08-24
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from dotmac_kernel.planes import ModulePlane, selected_module_planes
@@ -39,8 +39,7 @@ MODULE_CODE = "subscriptions"
 _SCHEMA = "mod_subscriptions"
 
 
-@dataclass(frozen=True, slots=True)
-class _PlaneTables:
+class _PlaneTables(NamedTuple):
     versions: str
     prices: str
     lines: str
