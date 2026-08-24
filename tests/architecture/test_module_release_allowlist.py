@@ -172,6 +172,21 @@ def test_service_catalog_is_release_allowlisted_for_the_sub_shadow() -> None:
     assert emitted["tag"] == "dotmac-service-catalog-v0.1.0a1"
 
 
+def test_service_catalog_is_release_allowlisted_for_the_sub_shadow() -> None:
+    """Sub needs one immutable package coordinate before it can prove parity.
+
+    Publication opens that adoption lane without moving technical-catalogue
+    authority: Sub remains the writer until its backfill, full-cohort shadow
+    comparison and local-writer retirement gates pass.
+    """
+    result = _resolve("dotmac-service-catalog", version="0.1.0a1")
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    assert emitted["kernel_floor"] == "0.1.0a91"
+    assert emitted["db_schema"] == "mod_svc_cat"
+    assert emitted["tag"] == "dotmac-service-catalog-v0.1.0a1"
+
+
 def test_document_rendering_is_allowlisted_as_an_explicitly_stateless_module() -> None:
     """A stateless module is not a protocol adapter and owns no fake schema.
 
