@@ -63,6 +63,12 @@ def _credential(db: Session, **over: object) -> MachineCredential:
     fields: dict[str, object] = {
         "tenant_id": TENANT,
         "label": "integrator",
+        # Every credential says which application it belongs to. An
+        # un-attributed one does not authenticate at all — proven in
+        # `test_machine_attribution.py`, which is why it is safe for this file
+        # to treat attribution as background and keep asserting the refusals it
+        # was written for.
+        "source_application": "dotmac_sub",
         "key_hash": hash_machine_key(RAW),
         "scopes": ["licence.descriptor.read"],
         "is_active": True,

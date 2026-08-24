@@ -34,12 +34,50 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
 )
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 
 import pytest
+from dotmac_kernel.source_applications import (
+    SourceApplicationRegistry,
+    clear_host_application,
+    install_host_application,
+    install_source_applications,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+
+#: What the test fleet is allowed to attribute things to. Named here rather
+#: than per-test because attribution is now a precondition of writing an audit
+#: row at all, exactly as an installed audit-action registry is, and the ~30
+#: existing `write_audit_event` callers are not about attribution.
+#:
+#: Scoped to the ROOT conftest, not `tests/unit/`, because the architecture and
+#: integration lanes write audit events too.
+TEST_HOST_APPLICATION = "dotmac_starter_mt"
+TEST_PEER_APPLICATIONS = ("dotmac_sub", "dotmac_erp")
+
+
+@pytest.fixture(autouse=True)
+def _default_attribution() -> Iterator[None]:
+    """Install the accepted-peer registry and the host identity for every test.
+
+    Same shape and same reason as `tests/unit/conftest.py`'s
+    `_default_declaration_catalogues`: `create_app` installs both, and a test
+    that mounts a router on a bare `FastAPI()` never calls it.
+
+    Torn down after each test — NOT merely re-installed before the next one.
+    The difference matters for the tests that prove an unattributed write is
+    refused: they clear the host identity deliberately, and a fixture that only
+    re-installed would let a leaked identity from one of them silently satisfy
+    a later assertion that was supposed to fail.
+    """
+    install_source_applications(
+        SourceApplicationRegistry({TEST_HOST_APPLICATION, *TEST_PEER_APPLICATIONS})
+    )
+    install_host_application(TEST_HOST_APPLICATION)
+    yield
+    clear_host_application()
 
 
 @pytest.fixture(scope="session")

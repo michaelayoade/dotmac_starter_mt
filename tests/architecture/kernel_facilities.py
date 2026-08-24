@@ -270,6 +270,18 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
         "kernel-owned machine identity seam; modules receive a "
         "MachinePrincipal, never the credential row"
     ),
+    # The WRITE half of the same kernel-owned table, split out of `machine_auth`
+    # so that module can keep its one-SELECT contract. Out of scope for the same
+    # reason and by the same premise: `machine_credentials` is the kernel's own
+    # (migrations 0027/0028), no module may issue, rotate or revoke another
+    # application's credential, and no module sees the row at all. The premise
+    # is enforceable — a module calling any of these would have to import
+    # `dotmac_kernel.machine_rotation`, which is not in the assembly-facing
+    # SUPPORTED_MODULES set that `test_kernel_public_surface.py` polices.
+    "machine_rotation": (
+        "kernel-owned machine identity seam, write side; credential issuance "
+        "and rotation are operator/assembly operations, never a module's"
+    ),
     "entitlements": "kernel-owned grants; modules read decisions, not tables",
     "consent": "kernel-owned suppression; delivery reads decisions",
     "delivery": "kernel-owned receipts",

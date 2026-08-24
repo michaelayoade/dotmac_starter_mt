@@ -109,6 +109,14 @@ from dotmac_kernel.machine_auth import (
     require_machine_scope,
 )
 from dotmac_kernel.machine_models import MachineCredential
+from dotmac_kernel.machine_rotation import (
+    RotationStateError,
+    begin_rotation,
+    cancel_rotation,
+    complete_rotation,
+    issue_credential,
+    revoke_credential,
+)
 from dotmac_kernel.models import (
     AuthSession,
     Base,
@@ -217,6 +225,18 @@ from dotmac_kernel.settings_resolver import (
     SettingSpec,
     register_specs,
     resolve_value,
+)
+from dotmac_kernel.source_applications import (
+    HostApplicationNotInstalledError,
+    InvalidSourceApplicationError,
+    SourceApplicationRegistry,
+    SourceApplicationsNotInstalledError,
+    UndeclaredSourceApplicationError,
+    active_host_application,
+    active_source_applications,
+    install_host_application,
+    install_source_applications,
+    validate_source_application,
 )
 
 __version__ = "0.1.0a95"
@@ -491,6 +511,22 @@ __all__ = [
     "MachineCredential",
     "MACHINE_KEY_SECRET_NAME",
     "API_KEY_HEADER",
+    "issue_credential",
+    "begin_rotation",
+    "complete_rotation",
+    "cancel_rotation",
+    "revoke_credential",
+    "RotationStateError",
+    "SourceApplicationRegistry",
+    "SourceApplicationsNotInstalledError",
+    "HostApplicationNotInstalledError",
+    "InvalidSourceApplicationError",
+    "UndeclaredSourceApplicationError",
+    "install_source_applications",
+    "active_source_applications",
+    "install_host_application",
+    "active_host_application",
+    "validate_source_application",
     "UserCredential",
     "PlatformAdmin",
     "PlatformSession",
