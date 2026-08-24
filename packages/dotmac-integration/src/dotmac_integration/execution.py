@@ -18,13 +18,19 @@ like one. It is not. That column deduplicates ENQUEUE — the same logical effec
 queued twice is one row. Whether the effect RUNS at most once is a different
 question, answered by the kernel.
 
-## The dedup/collision distinction
+## The two dedup/collision distinctions
 
 `receive_verified` treats a repeated `provider_event_id` as a duplicate **only
 when the payload digest matches**. A repeat with different content is a provider
 identity collision and raises, because silently deduping it discards real data
 on the assumption the provider is well behaved. Ported deliberately from Sub,
 which got this right.
+
+`enqueue_delivery` applies the same rule to a product's idempotency key. A
+replay is the same event type, capability binding and payload digest; changing
+any of those is a different effect and raises. The unique insert is savepoint-
+contained so the expected concurrent loser never leaks a driver's bound
+parameters or poisons the caller's transaction.
 
 ## Leases, not optimism, for delivery
 
@@ -54,6 +60,8 @@ from dotmac_integration.retry import Outcome, next_state, retry_delay_seconds
 
 __all__ = [
     "CheckpointConflict",
+    "DeliveryEnqueueRaced",
+    "DeliveryIdempotencyConflict",
     "ExecutionError",
     "LostClaim",
     "ProviderEventIdentityCollision",
@@ -78,6 +86,14 @@ class ProviderEventIdentityCollision(ExecutionError):
     Not a duplicate. A provider reusing an event id for different content is a
     provider defect, and deduping it would discard the second payload silently.
     """
+
+
+class DeliveryIdempotencyConflict(ExecutionError):
+    """One delivery key was reused for a different logical effect."""
+
+
+class DeliveryEnqueueRaced(ExecutionError):
+    """A concurrent enqueue won but is not visible in this transaction."""
 
 
 class CheckpointConflict(ExecutionError):
@@ -223,14 +239,28 @@ def enqueue_delivery(
 ) -> tuple[DeliveryAttempt, bool]:
     """Queue an outbound delivery. Returns `(delivery, is_new)`.
 
-    Enqueue-time deduplication only. Whether the effect RUNS at most once is the
-    kernel's question — see this module's docstring.
+    Enqueue-time deduplication only. A replay must carry the same event,
+    binding and payload identity; a key is not permission to discard changed
+    content. Whether the effect RUNS at most once is the kernel's question —
+    see this module's docstring.
     """
     from sqlalchemy import select
 
     key = idempotency_key.strip()
     if not key:
         raise ExecutionError("idempotency_key is required to deduplicate enqueue")
+    digest = payload_digest(payload)
+
+    def replay(existing: DeliveryAttempt) -> tuple[DeliveryAttempt, bool]:
+        if (
+            existing.event_type != event_type
+            or existing.payload_digest != digest
+            or existing.capability_binding_id != capability_binding_id
+        ):
+            raise DeliveryIdempotencyConflict(
+                "delivery idempotency key already names a different effect"
+            )
+        return existing, False
 
     existing = db.execute(
         select(DeliveryAttempt).where(
@@ -239,20 +269,44 @@ def enqueue_delivery(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        return existing, False
+        return replay(existing)
 
     delivery = DeliveryAttempt(
         installation_id=installation_id,
         capability_binding_id=capability_binding_id,
         event_type=event_type,
         idempotency_key=key,
-        payload_digest=payload_digest(payload),
+        payload_digest=digest,
         payload_json=payload if isinstance(payload, dict) else {"value": payload},
         state="pending",
         next_attempt_at=datetime.now(UTC),
     )
-    db.add(delivery)
-    db.flush()
+    from dotmac_kernel.db import conflict_savepoint
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        with conflict_savepoint(db):
+            db.add(delivery)
+            db.flush()
+    except IntegrityError as exc:
+        constraint = "uq_delivery_attempts_installation_key"
+        if constraint not in str(getattr(exc, "orig", exc)):
+            raise
+        winner = db.execute(
+            select(DeliveryAttempt).where(
+                DeliveryAttempt.installation_id == installation_id,
+                DeliveryAttempt.idempotency_key == key,
+            )
+        ).scalar_one_or_none()
+        if winner is None:
+            # REPEATABLE READ may retain the pre-race snapshot after the
+            # savepoint rolls back. The caller must retry in a fresh unit of
+            # work; importantly, no driver exception containing payload-bound
+            # parameters crosses the module boundary.
+            raise DeliveryEnqueueRaced(
+                "a concurrent delivery enqueue won; retry the same command"
+            ) from None
+        return replay(winner)
     return delivery, True
 
 

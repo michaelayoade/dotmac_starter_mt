@@ -2,18 +2,18 @@
 
 ## Release state — read this before pinning
 
-**Thirteen versions have been released. Pin `0.1.0a13`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a13`; a13 was published, installed
-back from the private index, registered and tagged from `1b1d62b` by release
-run `32665771169`.
+**Fourteen versions have been released. Pin `0.1.0a14`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a14`; a14 was published, installed
+back from the private index, registered and tagged from `70459efd` by release
+run `32693378851`.
 
-`0.1.0a13` is the latest published version. It adds the provider-neutral
-ProductObservation v1 document and accepts product-port descriptor v2 without
-changing connector SPI 1.3.
+`0.1.0a14` is the latest published version. It adds typed outbound provider
+evidence, delivered-payload retention and additive SPI 1.4 capability-to-mode
+declarations.
 
-`0.1.0a14` is declared and unreleased. It adds bounded provider evidence to the
-outbound delivery ledger and legal-hold-aware retention for delivered payload
-content and capability-to-mode declarations in additive connector SPI 1.4.
+`0.1.0a15` is declared and unreleased. It makes outbound idempotency collisions
+and enqueue races typed: a reused key with a changed event, binding or payload
+is refused, and a uniqueness loser never exposes driver-bound parameters.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -75,7 +75,20 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a14 — unreleased
+## 0.1.0a15 — unreleased
+
+### Outbound enqueue identity and race safety
+
+- Refuses an idempotency key reused for a different event type, capability
+  binding or payload digest instead of silently replaying the first row.
+- Contains the expected uniqueness race inside a savepoint. A READ COMMITTED
+  caller replays the winning row; a stale snapshot receives a typed retry
+  instruction whose message cannot carry payload-bound driver parameters.
+
+## 0.1.0a14 — released 2026-08-24
+
+Published, installed back from the private index, registered and tagged from
+exact protected-main revision `70459efd` by release run `32693378851`.
 
 ### Outbound delivery evidence and content retention
 
