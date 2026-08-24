@@ -10,6 +10,11 @@ contract = "Implement dotmac-integration SPI >=1.3,<2.0 for connector key paysta
 
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
+
 source_paths = [
   "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:app/services/integrations/payment_capability.py",
   "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:app/services/payment_webhook_commands.py",
@@ -45,3 +50,15 @@ shadow_and_drift = "Mirror the exact raw body and signature header into Integrat
 local_copy_retirement = "Retire only provider transport. Sub keeps payment_provider_events.py, payment_reconciliation.py, every intent service, allocation, coverage and lifecycle decision. ERP keeps GL posting, expense-claim and payment allocation policy. This release can retire direct paged reconciliation clients and their private checkpoints after shadow proof; money-moving intent/refund clients remain until their product-owned command contracts exist. Flutterwave is a separate distribution and cutover."
 
 next_action = "Publish 0.1.0a2 after dotmac-integration 0.1.0a11, exact-pin it in dotmac_integrator, reconcile the authenticated payments.settlement.observation.v1 ProductPort descriptor, and run ingress plus paged-poll shadow cutover. Money-moving intent and refund commands remain blocked on their product-owned command contracts."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/services/finance/payments/paystack_client.py", "app/services/finance/payments/webhook_service.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/services/integrations/payment_capability.py", "app/services/integrations/connectors/payment_gateway.py", "app/services/payment_webhook_commands.py"]

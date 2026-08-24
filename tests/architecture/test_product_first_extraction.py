@@ -121,7 +121,6 @@ PRE_RULE_DEBT = {
     # scope at deletion time: the evidence covered tokens and compiled assets.
     # The component slice later reached reuse-proven independently through ERP
     # and Sub; that strengthens the dossier and does not revive this exemption.
-    "dotmac-template-studio": "audit-required",
 }
 
 REQUIRED_TEXT_FIELDS = {
@@ -407,6 +406,15 @@ def _product_writer_problems(dossier: dict[str, Any]) -> list[str]:
     if not isinstance(entries, list) or not entries:
         return ["product_writers must be a non-empty array of tables when present"]
 
+    pin_sets: dict[str, dict[str, list[str]]] = {}
+    for field in ("source_revisions", "revalidation_revisions"):
+        pins: dict[str, list[str]] = {}
+        for coordinate in dossier.get(field) or []:
+            if isinstance(coordinate, str) and ":" in coordinate:
+                source, revision = coordinate.split(":", 1)
+                pins.setdefault(source, []).append(revision)
+        pin_sets[field] = pins
+
     seen: set[str] = set()
     for index, entry in enumerate(entries):
         where = f"product_writers[{index}]"
@@ -458,6 +466,15 @@ def _product_writer_problems(dossier: dict[str, Any]) -> list[str]:
                 f"{where}.revision must be an immutable 40-character commit — the "
                 "claim is only true of the tree it was measured against"
             )
+        elif isinstance(product, str):
+            product_pins = pin_sets["revalidation_revisions"].get(
+                product, pin_sets["source_revisions"].get(product, [])
+            )
+            if product_pins != [revision]:
+                problems.append(
+                    f"{where}.revision must equal {product!r}'s one effective "
+                    f"audit pin; found {product_pins!r}"
+                )
 
         evidence = entry.get("evidence_paths")
         if not isinstance(evidence, list) or not all(
@@ -811,6 +828,7 @@ def _writers(**overrides: Any) -> dict[str, Any]:
     entry.update(overrides)
     return {
         "source_repositories": ["dotmac_sub", "dotmac_erp"],
+        "source_revisions": ["dotmac_sub:883a0ff1aff89e3ea5e241897a4b965527e9bce1"],
         "product_writers": [entry],
     }
 
@@ -911,6 +929,32 @@ def test_a_moving_revision_is_refused() -> None:
     ), problems
 
 
+def test_a_writer_revision_that_differs_from_its_source_pin_is_refused() -> None:
+    """The typed row and dossier inventory cannot describe different trees."""
+
+    dossier = _writers()
+    dossier["source_revisions"] = [
+        "dotmac_sub:1111111111111111111111111111111111111111"
+    ]
+    problems = _product_writer_problems(dossier)
+    assert any("must equal" in problem for problem in problems), problems
+
+
+def test_a_revalidated_writer_revision_uses_the_later_exact_pin() -> None:
+    """Revalidation advances the claim without rewriting original provenance."""
+    dossier = _writers()
+    dossier["revalidation_revisions"] = [
+        "dotmac_sub:3333333333333333333333333333333333333333"
+    ]
+    problems = _product_writer_problems(dossier)
+    assert any("effective audit pin" in problem for problem in problems), problems
+
+    dossier["product_writers"][0]["revision"] = (
+        "3333333333333333333333333333333333333333"
+    )
+    assert _product_writer_problems(dossier) == []
+
+
 def test_an_untyped_writer_state_is_refused_rather_than_ignored() -> None:
     problems = _product_writer_problems(_writers(writer_state="probably fine"))
     assert any(
@@ -968,6 +1012,8 @@ def test_a_new_package_cannot_hide_behind_audit_required() -> None:
     """Sensitivity proof: unresolved status is closed debt, not an entry mode."""
     dossier = _load_toml(PACKAGES_DIR / "dotmac-template-studio/EXTRACTION.toml")
     dossier["package"] = "dotmac-new-module"
+    dossier["status"] = "audit-required"
+    dossier["source_mode"] = "unresolved"
 
     with pytest.raises(ExtractionDossierError, match="PRE_RULE_DEBT"):
         _validate_dossier(

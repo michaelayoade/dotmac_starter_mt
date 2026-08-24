@@ -36,3 +36,15 @@ first_cutover = "Sub remains catalogue writer through backfill and read-only sha
 shadow_and_drift = "Compare stable specification/family identity, effective version, source evidence, characteristic type/value/requiredness, and eligibility-input declarations. Commercial fields are excluded rather than shadowed."
 local_copy_retirement = "After cutover, reduce Sub technical catalogue writers and fallback readers to zero while leaving offer/price/contract ownership in the product commercial domain."
 next_action = "Complete the first-release Observer proof, publish the exact package, then compose it in Sub for versioned technical-catalogue backfill and shadow comparison."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "943bc59f8e4ca0849c7de578bc9dbc17c57b116f"
+evidence_paths = ["app/models/plan_family_catalogue.py", "app/models/catalog.py", "app/services/catalog/plan_family_catalogues.py", "app/services/catalog/validation.py"]

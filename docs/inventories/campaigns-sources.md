@@ -6,14 +6,15 @@
 - **Sub:** `510b80ca7fab4f54a57f261872f94b5e972c8eb6`
 - **Sub adoption head recheck:** `0d27ab91181fbc2717731bef28e21578f3442cc4`
 - **CRM:** `60daaa2dd305696636632f48505ab784110a55d2`
-- **dotmac_mkt:** `1a185b9f9d3ee102255bd57ce4bc62a587c08552`
+- **dotmac_mkt:** `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`
 - **Backoffice:** `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d`
 - **ERP:** `0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf`
 - **Method:** fresh detached audit checkouts at the commits above, followed by
-  model/service/task/migration/test call-graph inspection. The dotmac_mkt remote
-  was refreshed successfully; its current default-branch commit is the pin
-  above. ERP was inspected from its pinned Git tree because its checkout had
-  unrelated local changes; no working-tree content was used as evidence.
+  model/service/task/migration/test call-graph inspection. The Mkt pin was
+  re-read through the GitHub API on 2026-08-23; it supersedes a mistyped,
+  nonexistent `1a185b9f...` coordinate in this document. ERP was inspected from
+  its pinned Git tree because its checkout had unrelated local changes; no
+  working-tree content was used as evidence.
 - **Adoption recheck:** the current Sub `origin/dev` campaign model, service,
   task and parity-test paths have no changes from the qualifying Sub pin above.
   Its current `docs/PLATFORM_ADOPTION_LEDGER.md`, executable owner registry and

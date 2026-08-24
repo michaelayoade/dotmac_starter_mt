@@ -97,16 +97,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
       "state": "never-published"
     },
-    "dotmac-service-catalog": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
-      "state": "never-published"
-    },
-    "dotmac-subscriptions": {
-      "declared": "0.1.0a2",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Published a1 is registry-verified at tag dotmac-subscriptions-v0.1.0a1. The a2 release adds explicit provider-neutral offer pricing modes, one declared charge model per offer version, negotiated contract-line prices and the bounded effective-offer reader through the additive su_0002 migration; it does not rewrite the released a1 lineage. Publication makes the exact package coordinate available but does not compose the module or move product authority: Vendor Control Plane and Sub remain candidate adopters until each completes its own backfill, zero-drift shadow and local-writer retirement. Remove this row in the automatic release record after registry verification writes dotmac-subscriptions-v0.1.0a2.",
-      "state": "declared-unpublished"
-    },
     "dotmac-services": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",

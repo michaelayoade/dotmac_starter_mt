@@ -45,12 +45,22 @@
 # by hand. That is the whole failure class, reproduced by the automation built to
 # end it.
 #
-# NOTE the root cause is a REPOSITORY SETTING, not a token scope: Settings →
-# Actions → General → Workflow permissions → "Allow GitHub Actions to create and
-# approve pull requests". Until that is enabled this script will always reach
-# `give_up`, which is now loud and leaves a pushed branch one click from a pull
-# request. Enabling it also lets Actions approve pull-request REVIEWS, which is a
-# separate decision worth making deliberately — see docs/CONTROL_EXCEPTIONS.md.
+# The repaired failure path is proven by kernel 0.1.0a93 (run 32622991682): the
+# script pushed the correct record branch, failed RED when the workflow token
+# could not open the pull request, and Michael opened #372 from that branch.
+# The broad repository switch that lets GitHub Actions both CREATE and APPROVE
+# pull requests remains disabled deliberately. More importantly, the tagging
+# job's ordinary workflow token has contents:write ONLY — even a later settings
+# change cannot silently make the publisher the PR writer. The target automatic
+# path is a dedicated recorder GitHub App with contents:write and
+# pull_requests:write, and no Actions, deployment, environment or administration
+# authority. GitHub does not split PR creation from its review API, so the hard
+# separation is that the App authors and last-pushes the PR while protected main
+# requires a fresh approval from another actor with no bypass. The release
+# workflows prefer that App's short-lived token for BOTH the branch push and PR,
+# and fall back to `GITHUB_TOKEN` only to push the correct branch before PR
+# creation fails loudly. Until the App identity is installed, that red run plus
+# the one-click URL is the fail-closed bridge.
 set -uo pipefail
 
 DISTRIBUTION=""
@@ -79,7 +89,10 @@ done
 
 MANUAL="python scripts/write_release_record.py --distribution ${DISTRIBUTION} --version ${VERSION} --tag ${TAG}"
 if [ -n "${PACKAGE_DIR}" ]; then
-  MANUAL="${MANUAL} --package-dir ${PACKAGE_DIR} --import-name ${IMPORT_NAME}"
+  MANUAL="${MANUAL} --package-dir ${PACKAGE_DIR}"
+  if [ -n "${IMPORT_NAME}" ]; then
+    MANUAL="${MANUAL} --import-name ${IMPORT_NAME}"
+  fi
 fi
 
 give_up() {
@@ -111,7 +124,10 @@ git checkout -B "${BRANCH}" origin/main --quiet || give_up "could not branch fro
 
 ARGS=(--distribution "${DISTRIBUTION}" --version "${VERSION}" --tag "${TAG}")
 if [ -n "${PACKAGE_DIR}" ]; then
-  ARGS+=(--package-dir "${PACKAGE_DIR}" --import-name "${IMPORT_NAME}")
+  ARGS+=(--package-dir "${PACKAGE_DIR}")
+  if [ -n "${IMPORT_NAME}" ]; then
+    ARGS+=(--import-name "${IMPORT_NAME}")
+  fi
 fi
 
 if ! OUTPUT="$(python scripts/write_release_record.py "${ARGS[@]}" 2>&1)"; then

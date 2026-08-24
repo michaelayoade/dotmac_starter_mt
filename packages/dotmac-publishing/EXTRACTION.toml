@@ -15,6 +15,11 @@ source_repositories = [
 source_revisions = [
   "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d",
 ]
+revalidation_revisions = [
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_mkt:app/models/post.py",
   "dotmac_mkt:app/models/post_delivery.py",
@@ -47,3 +52,35 @@ first_cutover = "The Dotmac ERP product is cutover 1. It must pin a released dot
 shadow_and_drift = "For every classified Mkt Post and PostDelivery, compare snapshot digest, requested delivery time, distinct target selection, content-variant disposition, attempt order, normalized outcome, bounded error, opaque remote reference and derived aggregate state. Preserve partial and all-failed evidence instead of collapsing it. Classify provider credentials/adapters into Integrator and editable title/body/assets into content with no default bucket. Reconcile for a complete scheduled-publication cycle and require zero unexplained mismatch before any writer switch."
 local_copy_retirement = "Apply the ten-row two-directional ledger in docs/inventories/publishing-writer-retirement.toml. Retire Mkt publishing fields, PostDelivery writers, replacement/reschedule service, direct publish/update/delete calls and the 60-second SessionLocal poller only after their named module behavior is authoritative. Move Channel credentials/provider clients into Integrator and replace direct-query/commit web paths with thin Backoffice adapters. A runtime flag leaving both writers callable is not retirement."
 next_action = "Michael authorized release on 2026-08-20 without authorizing adoption, and the release is complete: kernel a81 and publishing 0.1.0a1 are registry-verified and tagged from the exact protected-main commit. Publication moved neither adoption nor the transport boundary. Backoffice remains cutover 1, has not composed the module, every PUB-R row remains not-started, and Integrator still owns provider transport; do not claim adoption until the total classifier, shadow cycle, writer switches and retirement gates pass."
+
+[[product_writers]]
+product = "dotmac_mkt"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
+evidence_paths = [
+  "app/models/post.py",
+  "app/models/post_delivery.py",
+  "app/services/post_service.py",
+  "app/services/publishing_service.py",
+  "app/tasks/publish_scheduled.py",
+]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/crm/campaign.py", "app/tasks/campaigns.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
