@@ -34,6 +34,7 @@ from dotmac_integration.spi import (
     InvalidManifestError,
     SecretBindingDeclaration,
     VerificationResult,
+    accepts_manifest_digest,
 )
 from jsonschema import Draft202012Validator
 
@@ -67,7 +68,7 @@ def _delivery_request(relative: str, key: str = "primary") -> IngressRequest:
 
 
 def test_the_distribution_and_plugin_satisfy_the_released_spi() -> None:
-    assert __version__ == "0.1.0a3"
+    assert __version__ == "0.1.0a4"
     assert MANIFEST.version == __version__
     assert str(MANIFEST.spi_range) == ">=1.4,<2.0"
     assert_plugin_conforms(PLUGIN)
@@ -157,8 +158,51 @@ def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
     )
 
 
+def test_a_published_manifest_is_never_edited_in_place() -> None:
+    """The one thing a version number is for.
+
+    a3 is published — peeled tag `dotmac-connector-whatsapp-v0.1.0a3` points at
+    commit `70459efd468dd2dcc9e31693b9910b04fec21447`. The catalogue slice
+    changes what `messaging.send.v1` accepts, so it had to become a4: an
+    installation pinned to the a3 digest must still resolve to the contract it
+    was pinned against, and one version naming two digests is exactly the
+    ambiguity a version removes.
+
+    The digest below is the published artifact's, computed from the tagged
+    source. It is the guard that was missing when this was noticed by reading
+    the tag list rather than by CI.
+    """
+    published = {manifest.version: manifest for manifest in PLUGIN.historical_manifests}
+    assert set(published) == {"0.1.0a1", "0.1.0a2", "0.1.0a3"}
+    assert (
+        published["0.1.0a3"].digest
+        == "9ee242f63e204c7d1c80caa725dc8a5b738bb8ddd7e30873678af008c281f290"
+    )
+    assert MANIFEST.version == "0.1.0a4"
+    assert MANIFEST.digest != published["0.1.0a3"].digest
+    # An a3 installation is still adoptable rather than an unknown digest.
+    assert accepts_manifest_digest(PLUGIN, published["0.1.0a3"].digest)
+    assert published["0.1.0a3"].capability_ids == {
+        "messaging.receive.v1",
+        "messaging.send.v1",
+    }
+    assert published["0.1.0a3"].capabilities[1].config_schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["phone_number_id", "graph_api_version", "timeout_seconds"],
+        "properties": {
+            "phone_number_id": {"type": "string", "pattern": "^[0-9]{1,40}$"},
+            "graph_api_version": {
+                "type": "string",
+                "pattern": "^v[0-9]{1,2}\\.[0-9]+$",
+            },
+            "timeout_seconds": {"type": "number", "minimum": 1, "maximum": 60},
+        },
+    }
+
+
 def test_the_published_ingress_contracts_remain_historical_manifests() -> None:
-    assert len(PLUGIN.historical_manifests) == 2
+    assert len(PLUGIN.historical_manifests) == 3
     historical = PLUGIN.historical_manifests[0]
     assert historical.connector_key == "meta_whatsapp"
     assert historical.version == "0.1.0a1"

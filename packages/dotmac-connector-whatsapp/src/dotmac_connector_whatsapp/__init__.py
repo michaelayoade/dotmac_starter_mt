@@ -6,6 +6,6 @@ database, retry loop, checkpoint, destination decision, or product state.
 
 from dotmac_connector_whatsapp.plugin import MANIFEST, PLUGIN, WhatsAppConnector
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = ["MANIFEST", "PLUGIN", "WhatsAppConnector", "__version__"]

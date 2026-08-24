@@ -77,6 +77,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
+    "dotmac-connector-whatsapp": {
+      "declared": "0.1.0a4",
+      "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-integration": {
       "declared": "0.1.0a15",
       "reason": "OUTSTANDING IN THE WHATSAPP OUTBOUND DEPENDENCY ORDER. This release makes the module-owned delivery outbox refuse changed-effect idempotency reuse and contain concurrent enqueue uniqueness failures before the Integrator product command surface is enabled. It is NOT to be repaired by editing the version: remove this row only when the module release workflow installs, verifies and tags 0.1.0a15, and never merge a consumer pin before that tag exists.",
