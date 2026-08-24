@@ -6,12 +6,15 @@
 > applied there, the earlier record keeps the number, so a colliding new record
 > would have had to move anyway.
 
-- Status: Accepted. Amended 2026-08-24 — see "Amendment — 2026-08-24"
-  at the end of this record. The amendment names the interim payout owner
-  exactly, rules that `dotmac-treasury` is not created yet, moves the
-  command schema onto the domain-owned `CapabilityContract`, and replaces
-  § 4 D3's "both refusals are locally correct" conclusion. No earlier text
-  is rewritten.
+- Status: Accepted. Amended 2026-08-24 (A1–A4) and again 2026-08-24 (A5–A7) —
+  see "Amendment — 2026-08-24" and "Second amendment — 2026-08-24" at the end
+  of this record. A1–A4 name the interim payout owner exactly, rule that
+  `dotmac-treasury` is not created yet, move the command schema onto the
+  domain-owned `CapabilityContract`, and replace § 4 D3's "both refusals are
+  locally correct" conclusion. A5–A7 remove `payments.customer.v1` from the
+  public capability manifest, record ADR-0042 as the controlling record for
+  disbursement ownership, and fix the evidentiary wording for every ERP payout
+  claim. No earlier text is rewritten.
 - Date: 2026-08-24
 - Deciders: Michael
 - Supersedes: none
@@ -19,7 +22,11 @@
   switch), § 6 (the Integrator is the sole external connector control plane),
   § 7 (the connector-plugin SPI), and its 2026-08-24 amendment
 - Related: ADR-0042 § 3 (payment obligations are not payment instructions —
-  this record names the Treasury/payment owner that ADR-0042 left unnamed),
+  this record names the Treasury/payment owner that ADR-0042 left unnamed, and
+  ADR-0042 is the CONTROLLING record on disbursement ownership, see A6),
+  ADR-0047 + its Amendment A1 (Expenses own eligibility, not payment — A1 holds
+  the authoritative six-owner disbursement split), ADR-0063 (Treasury owns the
+  payment instruction, not the provider batch — the gated scope A1 deferred),
   ADR-0014 (at-most-once execution has one owner), ADR-0016 (payment coverage
   is derived, not a status), ADR-0017 (adoption is the scarce resource),
   ADR-0062 (modules own metric definitions; assemblies own exporters),
@@ -307,7 +314,20 @@ concrete form of "whether an ambiguous attempt may be tried again is ERP's
 call".
 
 **`dotmac-treasury` is NOT to be created yet.** No package, no distribution, no
-namespace allocation, no `mod_*` short code. The `Alternatives rejected` entry
+namespace allocation, no `mod_*` short code.
+
+> **Superseded in its PRECONDITION 2026-08-24 — see ADR-0063.** The dossier
+> this paragraph demands now exists
+> (`docs/inventories/treasury-payment-execution-sources.md`, on the sibling
+> branch `docs/treasury-product-first-dossier`), and ADR-0063 answers it — its
+> § 12.3 **G5** asks in terms for exactly such a record. A narrow Treasury owner
+> of `PaymentInstruction` is authorized in
+> SCOPE, and CONSTRUCTION is gated on ERP's `PaymentIntent.status` three-writer
+> defect being fixed first. The prohibition below stands in full today —
+> nothing may be allocated — but its release condition is now ADR-0063 § 7
+> rather than "a dossier exists".
+
+The `Alternatives rejected` entry
 above already called it premature; this makes the precondition explicit rather
 than leaving it to judgement. A mandatory product-first dossier (ADR-0006's
 extraction amendment, `AGENTS.md` rule 22) must first cover, as one inventory:
@@ -407,6 +427,10 @@ capability id minted around a provider's customer object, and it either earns
 an argued independent lifecycle or it collapses into the intent contract's
 normalized result. Recorded as an open item, not decided here.
 
+> **Decided 2026-08-24 — see Amendment A5.** The open item is closed AGAINST
+> `payments.customer.v1`: it has no independent Dotmac business lifecycle, so
+> it is REMOVED from the public capability manifest rather than left on notice.
+
 *Supersedes: § 4 D3's conclusion, and § 5 step 2's framing of the closure as
 each connector meeting the other halfway.*
 
@@ -434,3 +458,193 @@ Known gap, stated rather than implied: `spi.ConnectorMode` is a closed union of
 connector side.
 
 *Corrects: § 4 D4.*
+
+
+## Second amendment — 2026-08-24 (accepted corrections A5–A7)
+
+Three further corrections accepted the same day. Same convention as A1–A4: each
+names the section it corrects, nothing above is rewritten, and the superseded
+spot carries a short pointer.
+
+### A5. `payments.customer.v1` is REMOVED from the public capability manifest
+
+A3 left this on notice — *"it either earns an argued independent lifecycle or
+it collapses into the intent contract's normalized result"*. It does not earn
+it. **`payments.customer.v1` has no independent Dotmac business lifecycle. It
+is Paystack workflow exposed as a capability**, and it is removed.
+
+The test A3 set is the right one and it fails cleanly. A capability id must name
+a business act that a Dotmac product DECIDES. Nothing in the fleet decides
+"create a customer at a payment provider" as an act of its own: the decision is
+always *take this payment* or *pay this beneficiary*, and the provider-side
+customer record is a by-product of that. `create_customer | update_customer |
+read_customer` is a mirror of `POST/PUT/GET /customer` — the provider's REST
+surface with a Dotmac id painted on it. A5 of ADR-0024's 2026-08-24 amendment
+§ 9.2 says the same thing from the other side: a provider publishing an endpoint
+is not an argument that a capability exists.
+
+What replaces it — five statements, all of which are the existing architecture
+rather than new machinery:
+
+1. **The product Customer owner keeps customer identity.** Who the customer is,
+   what they are called, how to reach them, and every consequence of that is
+   owned where it already is. A payment provider never held it and must not
+   start.
+2. **`payments.intent.v1` carries the required customer EVIDENCE.** The contract
+   already carries what a provider needs to attribute a charge; the evidence
+   travels with the act that needs it, in the command that was decided.
+3. **The connector creates or resolves any provider-side customer INTERNALLY**,
+   behind the intent command — exactly as A3 already ruled for Paystack's
+   recipient creation behind `submit_payout`. Paystack's `/transaction/initialize`
+   resolves or creates its own customer from the evidence on the command; that
+   is provider protocol performed inside the connector.
+4. **The result returns an OPAQUE Integrator correlation** where one is needed
+   at all — under the contract's `result_schema` (A2), normalized, not a
+   provider's customer object.
+5. **Saved-instrument charging consumes an opaque PAYMENT-METHOD correlation,
+   never a Paystack customer code.** This is already true in the shipped
+   connector and the amendment fixes it in place: `charge_authorization` takes
+   an `authorization_code`, which is an instrument handle. A future
+   provider-neutral saved-instrument surface normalizes THAT, and a customer
+   code is not an acceptable substitute for it — a customer code identifies a
+   person at a provider, an instrument handle identifies a thing that can be
+   charged, and conflating them is how one customer's stored card gets charged
+   for another's invoice.
+
+**Customer read, create and update disappear from the public manifest.** Not
+deprecated with a compatibility window: they have no consumer to migrate (no
+product binds this capability today), so there is nothing to succeed and A4's
+succession rule is not engaged.
+
+**A future need is welcome, but it arrives fully formed.** If a product later
+requires genuine, independent synchronization of provider-side customer records,
+it comes with its own OWNER, its own CONSUMER, its own LIFECYCLE and its own
+SCHEMA, argued in an accepted record. **Today's Paystack synchronization is not
+preserved merely because it exists** — "we already wrote it" is the argument
+ADR-0017 exists to refuse, and preserving an unbound capability id costs a
+permanent contract obligation to buy nothing.
+
+**The code removal happens LATER**, as part of the payout refactor, gated behind
+the capability-schema seam (A2) and the result seam (A3). This amendment is the
+ruling; the diff follows it. Recorded exactly so nobody has to re-derive it:
+
+| Artifact | What must change |
+|---|---|
+| `packages/dotmac-connector-paystack/src/dotmac_connector_paystack/delivery.py` | delete `PAYMENT_CUSTOMER_CAPABILITY` (`:59`) and its `ACTIONS_BY_CAPABILITY` entry (`:72–74`). `OUTBOUND_CAPABILITY_IDS` is derived from that mapping and shrinks on its own |
+| `…/operations.py` — `OPERATIONS` | delete the three `_Operation` rows and their comment block: `create_customer` (`:390`, AMBIGUOUS), `update_customer` (`:393`), `read_customer` (`:394`) |
+| `…/operations.py` — request builders | delete the `create_customer` (`:689`), `update_customer` (`:698`) and `read_customer` (`:710`) branches of `_request` |
+| `…/operations.py` — `_REPLY_EVIDENCE` | delete the three `customer_code` entries (`:933–935`) |
+| `…/operations.py` — `_classify` | delete the `status == 404 and sent.operation.name == "read_customer"` branch (`:1034`) |
+| `…/operations.py` — `_correlation` | drop `"customer"` from `("transaction", "customer", "recipient")` (`:1180`). After the removal NO remaining Paystack command takes a `customer` param — `refund` takes `transaction`, `initiate_transfer` takes `recipient` — so the key is dead, and leaving it would let a stray payload key become stored evidence |
+| **ordering constraint** | `delivery._MISALLOCATED` is an IMPORT-TIME guard requiring exact bijection between `OPERATIONS` and `ACTIONS_BY_CAPABILITY`. The two deletions above must land in the SAME change or the module refuses to import — which is the guard working, not a problem to route around |
+| `packages/dotmac-connector-paystack/COMPATIBILITY.md` (`:16`), `README.md` (`:28`), `CHANGELOG.md` (`:9–15`) | remove the capability row / command row, and record the removal as a change rather than silently dropping it |
+| `packages/dotmac-connector-paystack/EXTRACTION.toml` | the `contract` string (`:9`) names `payments.customer.v1` — narrow it; and the A3 OPEN-ITEM block (`:86–92`) becomes the recorded decision, not a question |
+| `tests/unit/test_paystack_outbound_operations.py` | the `CUSTOMER` constant (`:56`), the action-allocation assertions (`:163–165`, `:668–688`) and the two `read_customer` dispatch cases (`:867`, `:884`) go with it. The totality and misallocation proofs STAY and must still bite on the smaller table |
+
+*Corrects: A3's closing "recorded as an open item, not decided here". Related:
+ADR-0024 § 9.2, ADR-0017.*
+
+### A6. Disbursement ownership — ADR-0042 controls, and the split is six owners
+
+ADR-0047 § Context (accepted 2026-08-18) says *"Finance/Payables owns
+obligations, journals, disbursement and settlement."* ADR-0042 (accepted
+2026-08-19, one day later, and devoted specifically to separating liabilities
+from payment execution) says a **Treasury/payment owner performs disbursement**.
+
+**ADR-0042 controls.** ADR-0047's statement is too broad, it was written to say
+"not Expenses" rather than to locate disbursement, and it is narrowed by
+ADR-0047's own dated Amendment A1 in the same change as this one. Two records
+now cross-link to it: this one, and ADR-0063.
+
+The authoritative split — canonical text in ADR-0047 Amendment A1, restated here
+because this is the record a reader arrives at from the connector side:
+
+| Owner | Decision |
+|---|---|
+| Expenses | whether a claim is eligible for reimbursement |
+| Payables | what is owed, to whom, in what currency and when |
+| **Treasury** | the authorized payment instruction, rail submission and resolution |
+| **Integrator** | provider authentication, transport and evidence |
+| Banking | statement/cash observations and reconciliation evidence |
+| Accounting | journal and ledger consequences |
+
+The two bold rows are this record's subject matter, and § 1's whole point is the
+line between them: Treasury decides, the Integrator carries. Everything § 1
+forbids an Integrator artifact from doing is a restatement of that row boundary.
+
+Treasury's scope as a shared owner is ADR-0063 — `PaymentInstruction` and
+`PaymentRun`, two rails, gated on ERP's `PaymentIntent.status` three-writer fix.
+
+*Corrects: nothing in this record; it records which of two accepted records
+controls, and cross-links both. Related: ADR-0041, ADR-0044, ADR-0047 A1,
+ADR-0063.*
+
+### A7. Every ERP payout claim reads "Implemented and tested; production enablement unconfirmed"
+
+A1 and § 4 rest on a measured reading of ERP's payout code. That reading
+supports exactly one evidentiary claim, and it is narrower than the words used
+around it.
+
+**The required wording, verbatim, wherever an ERP payout claim is made:**
+
+> **Implemented and tested; production enablement unconfirmed.**
+
+Why it is unconfirmed rather than merely unstated: ERP's payout path is gated by
+`paystack_transfers_enabled`, which is a **row** in `domain_settings` —
+per-organization overridable, declared with `default=False`
+(`app/services/settings_spec.py:557-563`), seeded ONCE from
+`PAYSTACK_TRANSFERS_ENABLED` (`app/services/settings_seed.py:500-505`) and never
+read from the environment again. It is **runtime data**, not a repository fact.
+ERP's `.env.example` carries no `PAYSTACK*` key at all, and the name appears
+zero times in `docker-compose.yml`, `deploy/`, `config/`, `docs/`, `reports/` or
+`proposals/`. The product-first dossier
+(`docs/inventories/treasury-payment-execution-sources.md` § 5, § 12.4, § 14 Q1)
+records the same measurement and the same conclusion — *"today the claim is
+'implemented and tested', not 'production-used'"*.
+
+Confirming its value therefore requires an explicitly named deployment target
+and, under `AGENTS.md` rule 30, a `deployment_run` oracle carrying immutable
+coordinates. **Nobody has named a target.** Reading a default out of a settings
+spec answers what the code does when no row exists; it does not answer what any
+deployment does, and a default is not an oracle. The dossier's § 12.4 states
+what each answer would buy: a true value gives the extraction its production-use
+leg, and a false-everywhere value WEAKENS it to `greenfield-after-inventory` —
+so the absence cuts in both directions and neither may be assumed.
+
+What the wording does and does not block:
+
+- It does **NOT** block building the gated Treasury module (ADR-0063) or the
+  connectors. Implementation quality is a repository-local fact and the code is
+  there to be read.
+- It **DOES** block any claim of production PARITY, ADOPTION or RETIREMENT.
+  A retirement decision that assumes a path is live in production, or that
+  assumes it is not, is unfounded in both directions — which is the honest
+  position, and rule 30's point about an ABSENCE being a moment rather than a
+  permanent fact.
+
+Applied in the same change as this amendment wherever a dossier or an ADR
+implied more — `docs/inventories/payment-connector-sources.md` § 1, whose "live"
+column is a repository-local reading rather than a deployment observation, and
+`docs/inventories/payment-connector-extraction-dossier.md` § 2.2.
+
+**And one disposal, now that the dossier preserves its disposition:
+`BatchTransferService` is to be DELETED.** A1 recorded it as dead code holding a
+live `initiate_transfer` with no separation of duties and no permission check on
+`approve_batch`. The dossier tightens that to what is actually there (§ 1.3):
+there is NO method of that name on the class — what it holds is a live CALL PATH
+to `client.initiate_transfer` (`batch_transfer_service.py:409`), reached from
+`process_batch` → `_process_batch_item`, behind an `approve_batch` with neither
+separation of duties nor a permission gate. It is welded to one document type at
+the schema level, and it reads a settings value without passing
+`organization_id=`, unlike the equivalent call in `PaymentService`. A1's
+conclusion is unaffected and was, if anything, understated. Dead code that can move money is security-sensitive dead code:
+it is a working money path one import away from being reachable, and it is
+exempt from review attention precisely because nothing calls it. The only reason
+to keep it was that it was the sole written record of how batch payment was
+imagined in ERP — and that record now exists, measured, in the dossier. The
+disposition is preserved; the class is not. ADR-0063 § 3 also rules it out as a
+port source, so nothing downstream needs it either.
+
+*Corrects: the evidentiary framing of A1 and § 4, and the retention of
+`BatchTransferService` implied by "recorded as a disposal question". Related:
+`AGENTS.md` rule 30, ADR-0063 §§ 3, 7.*

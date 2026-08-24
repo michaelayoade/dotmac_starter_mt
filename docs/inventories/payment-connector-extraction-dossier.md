@@ -145,6 +145,28 @@ of it.**
 | ERP `paystack_client.py`'s transfers/batch surface | `dotmac-connector-paystack`'s `payments.intent.v1` egress leg |
 | ERP `paystack_sync.py`'s paged transaction listing | `dotmac-connector-paystack`'s `payments.reconcile.v1` polling job over a `polling_checkpoints` cursor |
 
+> **Corrected 2026-08-24 (ADR-0061 Amendments A5/A7, ADR-0063).** Three things
+> about the transfers/batch row:
+> 1. The destination for a transfer is `payments.payout.v1`, not
+>    `payments.intent.v1` — a payout and an intent are different business acts
+>    (ADR-0061 § 2), and the row above predates that id existing.
+> 2. **`batch_transfer_service.py` is not a port source.** It is dead code with
+>    a live, ungated, SoD-free path to `PaystackClient.initiate_transfer`, and
+>    it is a DELETION (ADR-0061 A7). Its measured disposition — the condition
+>    attached to deleting it — is
+>    `docs/inventories/treasury-payment-execution-sources.md` § 1.3. The
+>    provider-batch shape it embodies is explicitly rejected as an owner:
+>    provider calls are not atomic, so a batch-level response is not an answer
+>    about any individual transfer (ADR-0063 § 3).
+> 3. Every claim in this dossier about ERP payout reads **"Implemented and
+>    tested; production enablement unconfirmed."** Neither retirement nor
+>    adoption may be asserted from it (A7; `AGENTS.md` rule 30).
+>
+> Separately, `payments.customer.v1` — which `sync_customers_to_paystack`
+> below feeds — is REMOVED from the public capability manifest by ADR-0061 A5:
+> it has no independent Dotmac business lifecycle, and a provider-side customer
+> is a connector internal or a normalized result of `payments.intent.v1`.
+
 ### 2.3 Stays product code, and retires
 
 Everything that decides what money **means**. Named here so nobody ports it by

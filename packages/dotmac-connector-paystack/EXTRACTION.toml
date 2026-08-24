@@ -82,14 +82,40 @@ contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paysta
 #     outside the bound capability are CORRECT and stay — the correction is to
 #     what the product may name, not to the connector's own allow-list.
 #
-# OPEN ITEM, recorded rather than decided (ADR-0061 A3): this connector also
-# declares `payments.customer.v1` (`create_customer | update_customer |
-# read_customer`). That is a capability id shaped around a provider's customer
-# object. Under A3 provider customer creation is a normalized result or a
-# connector internal unless a genuinely INDEPENDENT lifecycle is argued — so
-# `payments.customer.v1` either earns that argument in an accepted record, or it
-# collapses into `payments.intent.v1`'s normalized result. The same test applies
-# to `payments.refund.v1`'s surface.
+# DECIDED 2026-08-24 (ADR-0061 Amendment A5) — supersedes the OPEN ITEM this
+# block previously carried, which read: "this connector also declares
+# `payments.customer.v1` ... it either earns that argument in an accepted
+# record, or it collapses into `payments.intent.v1`'s normalized result."
+# It did not earn it. **`payments.customer.v1` is REMOVED from the public
+# capability manifest.** It has no independent Dotmac business lifecycle: it is
+# Paystack's `POST/PUT/GET /customer` surface with a Dotmac id painted on it,
+# and no product decides "create a customer at a payment provider" as an act of
+# its own. Instead: the product Customer owner keeps customer identity;
+# `payments.intent.v1` carries the required customer EVIDENCE;
+# THIS CONNECTOR creates or resolves any provider-side customer INTERNALLY
+# behind the intent command (`/transaction/initialize` already does exactly
+# that from the evidence on the command); the result returns an OPAQUE
+# Integrator correlation where one is needed at all; and saved-instrument
+# charging consumes an opaque PAYMENT-METHOD correlation — the
+# `authorization_code` this connector already takes on `charge_authorization` —
+# never a Paystack customer code. Customer read/create/update disappear from
+# the public manifest. There is no compatibility window because no product
+# binds the capability, so nothing is succeeded (A4's succession rule is not
+# engaged). A future product needing genuine, independent provider-customer
+# synchronization arrives with its own owner, consumer, lifecycle and schema in
+# an accepted record; today's Paystack synchronization is NOT preserved merely
+# because it exists.
+#
+# STILL AS BUILT: the code below has not changed yet, and the `contract` field
+# above still names `payments.customer.v1` because it describes what this
+# distribution ships TODAY. The removal is part of the payout refactor, gated
+# behind the capability-schema seam (A2) and the result seam (A3). ADR-0061 A5
+# holds the exact artifact-by-artifact removal list, including the ordering
+# constraint that `delivery._MISALLOCATED`'s import-time bijection check forces
+# the `OPERATIONS` and `ACTIONS_BY_CAPABILITY` deletions into ONE change.
+#
+# The same A3 test still applies to `payments.refund.v1`'s surface, and remains
+# an open item there.
 
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 

@@ -79,6 +79,23 @@ one owner and it is not either product.
 
 ## 1. Which providers are actually in production use
 
+> **Wording corrected 2026-08-24 (ADR-0061 Amendment A7).** This section's
+> heading and its "live" column say more than the evidence supports for **ERP
+> payout**. "Live" here means *the code exists, is wired to a route and has
+> tests* — it is a repository-local reading, not a deployment observation.
+> ERP's transfer path is gated by `paystack_transfers_enabled`, a
+> `domain_settings` ROW with `default=False` seeded once from the environment,
+> and this repository holds no evidence of its value anywhere
+> (`docs/inventories/treasury-payment-execution-sources.md` §§ 5, 12.4, 14).
+> The required
+> claim for ERP payout, verbatim, is **"Implemented and tested; production
+> enablement unconfirmed."** Under `AGENTS.md` rule 30, confirming it needs an
+> explicitly named deployment target and a `deployment_run` oracle, and no
+> target has been named — so the absence is an as-of-2026-08-24 observation in
+> both directions, not proof that the path is dark. Nothing here blocks
+> building the gated Treasury module (ADR-0063) or the connectors; it blocks
+> claims of production parity, adoption and retirement.
+
 | Provider | Sub | ERP | Vendor CP | CRM |
 |---|---|---|---|---|
 | **Paystack** | **live** — client, webhook route, saved-card charging, autopay, reconciliation sweep, three one-off cutover scripts | **live** — a second, independent client (1,164 LOC), its own webhook route, transfers, sync poller | — | — |
