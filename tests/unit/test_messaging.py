@@ -24,11 +24,16 @@ from dotmac_kernel.models import Tenant
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from tests.conftest import TEST_HOST_APPLICATION
+
 
 # ── command envelope ─────────────────────────────────────────────────────────
 def test_command_envelope_is_frozen(tenant_row: Tenant) -> None:
     env = CommandEnvelope(
-        command_id="c1", command_type="do.thing", tenant_id=tenant_row.id
+        command_id="c1",
+        command_type="do.thing",
+        tenant_id=tenant_row.id,
+        source_application=TEST_HOST_APPLICATION,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         env.command_id = "c2"  # type: ignore[misc]
@@ -82,6 +87,7 @@ def test_process_once_runs_handler_and_records_result(
         command_id="cmd-1",
         command_type="do.thing",
         tenant_id=tenant_row.id,
+        source_application=TEST_HOST_APPLICATION,
         payload={"a": 1},
         correlation_id="corr-9",
     )
@@ -110,7 +116,10 @@ def test_process_once_is_idempotent_and_replays_result(
         return {"n": len(calls)}
 
     env = CommandEnvelope(
-        command_id="cmd-dup", command_type="do.thing", tenant_id=tenant_row.id
+        command_id="cmd-dup",
+        command_type="do.thing",
+        tenant_id=tenant_row.id,
+        source_application=TEST_HOST_APPLICATION,
     )
     first = process_once(db, env, handler)
     assert first.status == "processed"
@@ -141,7 +150,12 @@ def test_process_once_distinct_command_ids_each_run(
     for cid in ("a", "b", "c"):
         process_once(
             db,
-            CommandEnvelope(command_id=cid, command_type="t", tenant_id=tenant_row.id),
+            CommandEnvelope(
+                command_id=cid,
+                command_type="t",
+                tenant_id=tenant_row.id,
+                source_application=TEST_HOST_APPLICATION,
+            ),
             handler,
         )
     assert calls == ["a", "b", "c"]

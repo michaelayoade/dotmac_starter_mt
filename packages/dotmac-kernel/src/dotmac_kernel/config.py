@@ -59,6 +59,22 @@ class Settings(BaseSettings):
     content_security_policy: str = ""
     trust_inbound_request_id: bool = False
     disabled_features: str = ""  # comma-separated feature names
+    # WHICH APPLICATION this deployment is, for attribution on commands and
+    # audit rows (`dotmac_kernel.source_applications`). Empty means "derive it
+    # from the assembly spec's own name", which is right for every assembly
+    # whose name is already a well-formed code — the reference one is
+    # `dotmac_starter_mt`. There is deliberately NO literal fallback such as
+    # "app" or "system": a default identity that every deployment shares is an
+    # anonymous principal with a name on it, and the whole point of the column
+    # is to stop those existing. When neither the env nor the spec name yields
+    # a usable code, no host identity is installed and anything this process
+    # originates fails loudly at the audit write rather than recording a guess.
+    source_application: str = ""
+    # Comma-separated peer applications this deployment accepts attribution
+    # from — the OTHER apps whose machine credentials and commands it will
+    # honour. The host's own code is always accepted and does not need listing.
+    # Empty is a real answer: "no peer application may call this deployment".
+    accepted_source_applications: str = ""
     seed_on_startup: bool = True  # seed platform setting defaults in lifespan
     # Surface switch (F1): False mounts NO feature's web_routers (zero
     # /admin routes, no /static mount) — pure JSON API. Independent of
@@ -73,6 +89,14 @@ class Settings(BaseSettings):
     @property
     def disabled_feature_set(self) -> set[str]:
         return {f.strip() for f in self.disabled_features.split(",") if f.strip()}
+
+    @property
+    def accepted_source_application_set(self) -> set[str]:
+        return {
+            code.strip()
+            for code in self.accepted_source_applications.split(",")
+            if code.strip()
+        }
 
 
 settings = Settings()
