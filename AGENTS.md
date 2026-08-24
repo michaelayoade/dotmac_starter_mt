@@ -416,9 +416,9 @@ specifics) points here and must never fork these rules.
     owner" is a role, not an owner, so the owner is named as the services that
     hold the decision today: `PaymentService`
     (`dotmac_erp:app/services/finance/payments/payment_service.py`) owns the
-    payout decision and the transfer lifecycle, and `BatchTransferService`
-    (`dotmac_erp:app/services/finance/payments/batch_transfer_service.py`)
-    composes batches of expense-reimbursement transfers over it. A shared
+    payout decision and the transfer lifecycle, and is the SOLE interim owner.
+    `BatchTransferService` is dead code — zero callers, not exported, zero
+    tests — and is NOT an owner. A shared
     `dotmac-treasury` distribution or namespace is NOT to be created yet: rule
     22's product-first dossier must first cover both services, `dotmac-payments`,
     `dotmac-banking`, `dotmac-accounting` and the approvals/payment-authorization
