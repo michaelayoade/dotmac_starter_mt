@@ -2,6 +2,11 @@
 
 ## 0.1.0a2
 
+- Flush the contract version before adding its lines, so recording a contract
+  version no longer depends on the host assembly's `autoflush` setting. With
+  `autoflush=False` the line insert reached PostgreSQL before the version it
+  references and failed on `fk_contract_lines_version`; the module now orders
+  its own writes, as `dotmac-billing` already does for its obligation.
 - Add the bounded `list_effective_offers` owner read for recurring-offer
   discovery. It returns one deterministic effective version per stable offer,
   immutable exact price snapshots, source provenance, total count and explicit
