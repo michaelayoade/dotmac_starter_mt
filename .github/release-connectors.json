@@ -171,19 +171,26 @@
         "publication alone does not move financial authority.",
         "",
         "This release accepts only v4 authentication and exact declared v4",
-        "hosts. It has no v3 fallback and does not invent a provider fee."
+        "hosts. It has no v3 fallback and does not invent a provider fee.",
+        "",
+        "It also carries payments.intent.v1 and payments.refund.v1 outbound,",
+        "over the SAME declared v4 hosts. Transfers and payouts are",
+        "deliberately absent: no product consumer exists, and an outbound",
+        "money-movement command whose first execution is also its first",
+        "review does not ship."
       ],
       "package_dir": "packages/dotmac-connector-flutterwave",
       "import_name": "dotmac_connector_flutterwave",
       "plugin_attr": "PLUGIN",
       "connector_key": "flutterwave",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
+      "spi_range": ">=1.4,<2.0",
+      "integration_floor": "0.1.0a14",
       "tag_prefix": "dotmac-connector-flutterwave-v",
       "wheel_contents": {
         "required": [
           "dotmac_connector_flutterwave/__init__.py",
           "dotmac_connector_flutterwave/plugin.py",
+          "dotmac_connector_flutterwave/outbound.py",
           "dotmac_connector_flutterwave/polling.py",
           "dotmac_connector_flutterwave/py.typed"
         ],
@@ -362,21 +369,25 @@
         "target; publication alone does not move RRR or accounting authority.",
         "",
         "The connector carries provider status tokens verbatim and declares",
-        "only the provider's fixed demo/live hosts. RRR issuance is not",
-        "pretended to be fire-and-forget delivery: it remains outside this",
-        "release until a durable command-response seam can preserve its reply."
+        "only the provider's fixed demo/live hosts. RRR issuance ships as",
+        "payments.reference.issuance.v1 now that dotmac-integration carries a",
+        "durable command-response seam: Outcome.provider_reference and",
+        "provider_status_code are persisted on delivery_attempts by",
+        "ig_0012_delivery_evidence, so the minted RRR survives the call rather",
+        "than being discarded by a fire-and-forget dispatch."
       ],
       "package_dir": "packages/dotmac-connector-remita",
       "import_name": "dotmac_connector_remita",
       "plugin_attr": "PLUGIN",
       "connector_key": "remita",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
+      "spi_range": ">=1.4,<2.0",
+      "integration_floor": "0.1.0a14",
       "tag_prefix": "dotmac-connector-remita-v",
       "wheel_contents": {
         "required": [
           "dotmac_connector_remita/__init__.py",
           "dotmac_connector_remita/plugin.py",
+          "dotmac_connector_remita/outbound.py",
           "dotmac_connector_remita/py.typed"
         ],
         "forbidden_prefixes": [
