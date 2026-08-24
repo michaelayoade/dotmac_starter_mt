@@ -67,11 +67,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-connector-whatsapp": {
-      "declared": "0.1.0a3",
-      "reason": "OUTSTANDING IN THIS DEPENDENCY-ORDERED RELEASE. The reviewed connector adds messaging.send.v1 only after dotmac-integration 0.1.0a14 publishes SPI 1.4 and the delivery evidence migration. Remove this row when the connector release workflow verifies and tags 0.1.0a3; never edit the declared version down or publish it before its module floor resolves.",
-      "state": "declared-unpublished"
-    },
     "dotmac-customers": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
