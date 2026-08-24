@@ -12,10 +12,17 @@ name: Release module
 # SAME bytes -> install the published release from the index and verify ->
 # tag only then.
 #
+# The lane accepts both persistence shapes declared by ModuleManifest. Every
+# allowlist row still carries `db_schema`: a `mod_*` string for stateful code or
+# explicit null for stateless code. The resolver compares that fact to the
+# manifest before build, and the installed-wheel smoke checks it again through
+# ModuleRegistry. Stateless does not mean adapter: it still has a manifest and a
+# kernel floor, but its wheel must contain no migration lineage.
+#
 # A release may also run the COMPOSITION check (level 2) when it completes a
 # set: `compose_with` lists already-published siblings, `compose_kernel` pins the
 # exact published kernel, and the check installs all of them from the index and
-# registers every manifest in one NamespaceRegistry before the tag is written.
+# registers every manifest in one ModuleRegistry before the tag is written.
 # The standalone `verify-module-composition.yml` remains, for re-checking a set
 # without cutting a release.
 #
@@ -60,6 +67,7 @@ on:
           - dotmac-compliance-reporting
           - dotmac-content
           - dotmac-deployment-control
+          - dotmac-document-rendering
           - dotmac-documents
           - dotmac-durable-timers
           - dotmac-entitlement-allocation
@@ -175,7 +183,8 @@ jobs:
 
       # Wheel-content policy: py.typed and the migration lineage present, no
       # assembly/test/tooling content, dependency closure limited to the
-      # per-module reviewed set, no secret-shaped files.
+      # per-module reviewed set, no secret-shaped files. A stateless module is
+      # additionally refused if any migration lineage appears in its wheel.
       - name: Inspect artifacts
         run: |
           python scripts/release_module.py inspect "${{ inputs.module }}" \
@@ -203,9 +212,9 @@ jobs:
             --output "${GITHUB_WORKSPACE}/dependency-dist"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
-      # venv and register its manifest through NamespaceRegistry. Proves the
-      # bytes about to be published are installable and registrable, not merely
-      # well-formed.
+      # venv and register its manifest through ModuleRegistry (which includes
+      # NamespaceRegistry for stateful members). Proves the bytes about to be
+      # published are installable and registrable, not merely well-formed.
       - name: Release wheel smoke
         run: |
           python scripts/release_module.py verify-wheel "${{ inputs.module }}" \
@@ -310,10 +319,10 @@ jobs:
       #
       # Level 1 above proves this module installs and registers ALONE. That is
       # not the question a consuming assembly asks: it installs every module
-      # beside ONE kernel and registers them together, and construction of a
-      # NamespaceRegistry IS the validation — distinct schemas, distinct
-      # migration prefixes, distinct branch labels, no contested table. Two
-      # modules that each pass alone can still collide.
+      # beside ONE kernel and registers them together. ModuleRegistry validates
+      # identities, dependencies and contracts, and delegates the stateful set
+      # to NamespaceRegistry for distinct schemas, prefixes, branch labels and
+      # tables. Two modules that each pass alone can still collide.
       #
       # Runs BEFORE the tag, deliberately. The module is already published by
       # this point and a composition failure cannot unpublish it — but the tag

@@ -468,7 +468,7 @@ def test_the_tag_message_states_what_was_verified() -> None:
 
 
 @pytest.mark.parametrize("field", ["db_schema", "manifest_attr", "kernel_floor"])
-def test_the_module_lane_kept_its_stateful_facts_mandatory(field: str) -> None:
+def test_the_module_lane_kept_its_shape_facts_mandatory(field: str) -> None:
     """The other option was to make these OPTIONAL in `release-module.yml` when
     the classification is a stateless adapter. It was rejected because
     optionality is not scoped to the package that needs it: a stateful module
@@ -476,8 +476,10 @@ def test_the_module_lane_kept_its_stateful_facts_mandatory(field: str) -> None:
     start being treated as an adapter, its namespace assertion silently skipped
     rather than failed.
 
-    This is the ratchet. A future change that reintroduces the optional field
-    fails here rather than being discovered by a wheel with no schema.
+    This is the ratchet. ``db_schema`` may now be explicit JSON null for a
+    stateless *module*, but the KEY remains mandatory and the module resolver
+    compares null to the real manifest. A stateful row that merely drops the
+    field still fails here and in ``resolve``.
     """
     modules = _modules()
     assert modules, "the module allowlist is empty — the check would be vacuous"

@@ -11,6 +11,16 @@
     "compiled CSS; a module must not). One workflow pretending to cover both",
     "would have to weaken whichever check the other cannot satisfy.",
     "",
+    "This lane covers two installable ModuleManifest shapes without making the",
+    "stateful contract optional. Every row MUST carry db_schema: a mod_* string",
+    "for a stateful module, or JSON null for a stateless module. resolve reads",
+    "short_code and migration_prefix from the manifest and requires both or",
+    "neither, then compares the derived schema to the row. A stateful module",
+    "whose db_schema key was dropped is still refused; a stateful manifest put",
+    "behind null is also refused. The installed-wheel smoke checks the same",
+    "shape again through ModuleRegistry, and a stateless wheel is refused if it",
+    "contains a migration lineage.",
+    "",
     "kernel_floor is the EARLIEST kernel that can actually load and register",
     "the module — the highest of everything the module needs, not one fixed",
     "rule. Two things set it:",
@@ -775,6 +785,53 @@
         "allowed_requires": [
           "dotmac-kernel",
           "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-document-rendering": {
+      "$comment": [
+        "Deterministic semantic projection and byte rendering from one complete",
+        "immutable Billing fact. Billing owns meaning and the official-artifact",
+        "relation; dotmac-files owns bytes at rest; assemblies own orchestration.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-24. Publication is a prerequisite",
+        "for the Vendor Control Plane and later Sub cutover slices; it does not",
+        "claim either product as a consumer, move authority, or retire a writer.",
+        "",
+        "This is the first STATELESS optional-module in the release lane. It has",
+        "a real ModuleManifest and kernel capability floor, so the protocol-adapter",
+        "lane is wrong; it owns no rows or lineage, so a synthetic db_schema is",
+        "also wrong. JSON null is an asserted release shape, not an omitted fact:",
+        "resolve compares it to the manifest's absent short_code/migration_prefix,",
+        "the wheel policy forbids migrations, and the clean install registers the",
+        "manifest through ModuleRegistry."
+      ],
+      "package_dir": "packages/dotmac-document-rendering",
+      "import_name": "dotmac_document_rendering",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a88",
+      "db_schema": null,
+      "tag_prefix": "dotmac-document-rendering-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_document_rendering/py.typed",
+          "dotmac_document_rendering/manifest.py",
+          "dotmac_document_rendering/conformance.py",
+          "dotmac_document_rendering/contracts.py",
+          "dotmac_document_rendering/projection.py",
+          "dotmac_document_rendering/renderers.py",
+          "dotmac_document_rendering/service.py",
+          "dotmac_document_rendering/templates.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
           "python"
         ]
       }
