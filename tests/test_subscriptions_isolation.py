@@ -748,3 +748,181 @@ def test_effective_contract_and_emitted_occurrence_are_structurally_immutable(
             {"id": occurrence_id},
         )
     engine.dispose()
+
+
+def test_recording_a_contract_version_does_not_depend_on_autoflush(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    """A module must not depend on its host assembly's session settings.
+
+    `record_contract_version` adds the contract version and its lines and then
+    flushes once. Ordering the version's INSERT before the lines' was, until
+    this guard, left to whatever else happened to flush first — and with
+    `autoflush=True` something always did, because the per-line loop issues a
+    SELECT for the offer version.
+
+    An assembly that sets `autoflush=False` gets no such flush, the line INSERT
+    reaches PostgreSQL first, and it dies on `fk_contract_lines_version` — which
+    the module reports as a conflict, so it reads like a real conflict and is
+    not one. Dotmac Cloud found this composing the module for the first time;
+    its `DatabaseRuntime` sets `autoflush=False` deliberately, so services add
+    and flush while the request boundary owns the transaction.
+
+    `dotmac-billing` already flushes its obligation explicitly for exactly this
+    reason. This asserts the same rule in the FAILING configuration rather than
+    the passing one — a canary that only ever runs with autoflush on cannot see
+    this defect, which is why no existing subscription test caught it.
+    """
+    from decimal import Decimal
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_subscriptions import (
+        BillingCadence,
+        CadenceAlignment,
+        CollectionTiming,
+        ContractLineInput,
+        EndOfMonthRule,
+        ExactAmount,
+        IntervalUnit,
+        OfferPriceInput,
+        ProrationPolicy,
+        RateBasis,
+        SubscriptionVocabularyRegistry,
+        TimerCancelResult,
+        TimerScheduleResult,
+    )
+    from dotmac_subscriptions.commands import (
+        PublishOfferVersionCommand,
+        RecordSubscriptionContractVersionCommand,
+    )
+    from dotmac_subscriptions.service import (
+        publish_offer_version,
+        record_contract_version,
+    )
+    from sqlalchemy.orm import sessionmaker
+
+    admin_url, _app_url, _platform_url = subscriptions_scratch
+    tenant_id, _other = _make_tenants(admin_url)
+    scope = TenantScope(tenant_id=tenant_id)
+    now = datetime(2026, 8, 24, 9, 0, tzinfo=UTC)
+    starts = datetime(2026, 9, 1, tzinfo=UTC)
+
+    registry = SubscriptionVocabularyRegistry(
+        charge_models={"recurring.flat": "A flat recurring charge"},
+        obligation_sources={"service": "A provisioned service"},
+    )
+
+    class _Timer:
+        def schedule(self, db, *, scope, contract_line_key, due_at, recorded_at):
+            return TimerScheduleResult(generation=1, due_at=due_at)
+
+        def cancel(self, db, *, scope, contract_line_key, recorded_at):
+            return TimerCancelResult(canceled=True)
+
+    engine = create_engine(admin_url)
+    # autoflush=False is the whole point of this canary.
+    sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    price = ExactAmount(amount=Decimal("10000.00"), currency="NGN", scale=2)
+    source_id = uuid.uuid4()
+    line_key = uuid.uuid4()
+    try:
+        with sessions() as db:
+            db.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_id)},
+            )
+            offer = publish_offer_version(
+                db,
+                PublishOfferVersionCommand(
+                    scope=scope,
+                    offer_id=None,
+                    offer_code="autoflush.guard",
+                    offer_name="Autoflush Guard",
+                    version=1,
+                    prices=(
+                        OfferPriceInput(
+                            price_key="monthly",
+                            charge_model_code="recurring.flat",
+                            unit_price=price,
+                            quantity=Decimal("1"),
+                        ),
+                    ),
+                    effective_from=starts,
+                    effective_until=None,
+                    source_code="service",
+                    source_id=source_id,
+                    source_version=1,
+                    command_id=uuid.uuid4(),
+                ),
+                registry=registry,
+            )
+            result = record_contract_version(
+                db,
+                RecordSubscriptionContractVersionCommand(
+                    scope=scope,
+                    contract_id=None,
+                    source_code="service",
+                    source_id=source_id,
+                    source_version=1,
+                    starts_at=starts,
+                    ends_at=None,
+                    currency="NGN",
+                    cadence=BillingCadence(
+                        rate_basis=RateBasis.per_rate_unit,
+                        rate_unit=IntervalUnit.month,
+                        rate_quantity=Decimal("1"),
+                        service_interval_unit=IntervalUnit.month,
+                        service_interval_count=1,
+                        invoice_interval_unit=IntervalUnit.month,
+                        invoice_interval_count=1,
+                        collection_timing=CollectionTiming.advance,
+                        alignment=CadenceAlignment.contract_anniversary,
+                        timezone_name="Africa/Lagos",
+                        end_of_month_rule=EndOfMonthRule.clamp_to_month_end,
+                        proration_policy=ProrationPolicy.actual_calendar_days,
+                        anchor_day=None,
+                    ),
+                    lines=(
+                        ContractLineInput(
+                            contract_line_key=line_key,
+                            charge_model_code="recurring.flat",
+                            source_code="service",
+                            source_id=source_id,
+                            source_version=1,
+                            description="Autoflush guard",
+                            product_link_ref="offer:autoflush.guard",
+                            quantity=Decimal("1"),
+                            unit_price=price,
+                            offer_version_id=offer.offer_version_id,
+                            offer_version=1,
+                            entitlement_codes=(),
+                        ),
+                    ),
+                    actor="autoflush-guard",
+                    reason="guard",
+                    recorded_at=now,
+                    command_id=uuid.uuid4(),
+                    correlation_id=uuid.uuid4(),
+                    idempotency_key=f"autoflush-guard-{line_key}",
+                ),
+                registry=registry,
+                timer=_Timer(),
+            )
+            db.commit()
+
+        assert result.line_keys == (line_key,)
+        with engine.connect() as conn:
+            conn.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_id)},
+            )
+            stored = conn.execute(
+                text(
+                    "SELECT count(*) FROM mod_subscriptions.subscription_contract_lines"
+                    " WHERE contract_version_id = :version"
+                ),
+                {"version": result.version_id},
+            ).scalar_one()
+        assert stored == 1
+    finally:
+        engine.dispose()
