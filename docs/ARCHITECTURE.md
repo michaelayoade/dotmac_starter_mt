@@ -71,7 +71,7 @@ The first concrete plugin follows that split exactly:
 | Whether a stored outbound command may become a live effect again — replay by product idempotency key, dead-letter inspection and operator repair, and resolution of an INDETERMINATE attempt from provider evidence | `dotmac-integration.outbound_repair` | One decision (`classify_repair`) behind every entry point, so inspection and repair cannot disagree; re-dispatches only the row's own stored request checked against its enqueue digest, never a rebuilt payload; returns the recorded outcome for a landed effect instead of re-sending it; refuses to replay an ambiguous attempt; and owns no queue reset (`operations.replay_delivery`), no at-most-once ledger (`dotmac_kernel.idempotency`), no audit ledger (`dotmac_kernel.audit`), no outcome vocabulary (`retry.OutcomeStatus`) and no table of its own |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
-| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **ERP's Treasury/payment owner** (ADR-0061 § 1; the owner ADR-0042 § 3 left unnamed) | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
+| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **`PaymentService`** (`dotmac_erp:app/services/finance/payments/payment_service.py` — `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal`), with **`BatchTransferService`** (`dotmac_erp:app/services/finance/payments/batch_transfer_service.py`) composing batches of expense-reimbursement transfers over it. ADR-0061 § 1 + Amendment A1 — the owner ADR-0042 § 3 left unnamed, named as services rather than as a role. No `dotmac-treasury` package or namespace exists or may be allocated before the product-first dossier A1 requires | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
 
 External advertising and social-media observations use the same application
 boundary with a separate domain owner. The tenant-only
@@ -149,7 +149,7 @@ shape locally, and two shipped ids have two dialects each:
 | minor units | product sends an exact MAJOR-unit decimal string plus `currency`; the connector applies `PAYSTACK_WIRE_SCALE = 2` itself and accepts no `currency_minor_units` | product MUST send `currency_minor_units`; absence is `currency_minor_units_required` |
 | provider idempotency | the derived value in the provider's own `reference` field, which the provider refuses on reuse | Flutterwave: engine key on `X-Idempotency-Key`. Remita: none exists; `orderId` is the only natural key |
 
-Both refusals are locally correct. Paystack's wire multiplies by 100 for every
+Each refusal is locally explicable. Paystack's wire multiplies by 100 for every
 supported currency **including zero-exponent XOF**, so a product-supplied
 exponent would be a second, contradictory authority on that provider's scale;
 and deriving the reference from the engine key is what makes every attempt of
@@ -157,12 +157,57 @@ one delivery present an identical, provider-refusable key. Flutterwave and
 Remita cannot derive, because their natural key is the product's own and their
 exponent is genuinely currency-dependent.
 
+That is where this section originally stopped, and stopping there was the
+mistake: "both are locally correct" is a description of a stand-off, not a
+resolution, and it quietly licenses the divergence to continue. ADR-0061
+Amendment A3 supersedes it. The payload question is answered **once**, by the
+capability's owning domain, and each connector adapts to that answer
+**internally** — Paystack keeps deriving its provider reference and applying
+its own wire scale, from the contract's stable reference and exact money,
+because those are provider protocol performed inside the connector, and it
+ignores a field it cannot use instead of refusing the command that carries it.
+Neither connector is asked to look like the other.
+
+The declaration surface that makes this possible is the DOMAIN's, not the
+connector's. As built, `dotmac_integration.capability_registry
+.CapabilityContract` — the business owner's declaration, one per capability id,
+which the Integrator validates and never mints — carries `capability_id`,
+`owner` and `summary`, and no schema of any kind. ADR-0024 § 10 extends it with
+`command_schema`, `result_schema`, `observation_schema`, a canonical contract
+digest, and deprecation/replacement metadata; `CapabilityDeclaration` keeps
+config and modes and may only CLAIM that digest. Putting the schema on the
+connector declaration instead would make drift machine-readable rather than
+prevent it — two connectors would publish two individually valid schemas for
+one id and nothing could prefer either.
+
+None of that gate exists today. It comprises command validation before
+`execution.enqueue_delivery`, digest agreement in
+`capability_registry.require_implements_only_declared` (composition) and
+`require_declared_for_binding` (binding), result validation before
+`dispatch.settle`, observation validation before `ingress.record_batch`, and a
+schema change taking a new `.vN` id rather than redefining a published one —
+with planted sensitivity failures for digest mismatch, missing schema, invalid
+payload and invalid result (ADR-0024 §§ 10.4–10.5).
+
 `messaging.send.v1` has the same shape of divergence: `meta_whatsapp` accepts
 `send_text | send_template | send_media` with a `recipient` param, while
 `meta_social` accepts `send_direct_message | reply_to_comment` with
 `recipient_id` plus `channel`. Both declare the same id deliberately — the
 outbound name is not minted per connector — and a product bound to one still
 cannot be re-bound to the other without changing its command.
+
+`messaging.send.v1` is published, so it is repaired by SUCCESSION rather than
+redefined in place (ADR-0024 § 11, ADR-0061 Amendment A4). The canonical
+successors are `messaging.direct.send.v2` (provider-neutral direct delivery
+with a discriminated text/template/media content shape, replacing both
+vocabularies at once), `social.comment.reply.v1` (public Facebook/Instagram
+comment consequences — a different business act) and `social.profile.read.v1`
+(caller-initiated profile observation through a REQUEST mode). Sub migrates to
+them; v1 is kept for a bounded compatibility window and then retired. As built,
+none of the three exists, and `spi.ConnectorMode` is still the closed union
+`INGRESS | POLL | DELIVERY` with no REQUEST member — which is the same gap
+`dotmac-connector-meta-social`'s dossier records for its withheld contact
+profile lookup.
 
 Consequence, stated plainly: **payout traffic cannot be switched between
 providers by changing a binding today.** `payments.payout.v1` has exactly one

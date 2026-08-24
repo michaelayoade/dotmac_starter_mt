@@ -49,12 +49,47 @@ contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paysta
 # may be dropped to reach parity.
 #
 # The closure is therefore NOT "make Paystack look like Flutterwave". It is a
-# declared, provider-neutral command payload for `payments.payout.v1` (the SPI
-# has nowhere to put one today — CapabilityDeclaration carries a config schema
-# and DispatchRequest.payload is an unvalidated dict, ADR-0024 § 8.4), after
+# declared, provider-neutral command payload for `payments.payout.v1`, after
 # which this connector keeps deriving its provider reference but derives it from
 # the contract's stable reference plus the engine key, and IGNORES an exponent
 # it cannot use rather than refusing the command that carries it.
+#
+# CORRECTED 2026-08-24 (ADR-0024 § 10, ADR-0061 A2/A3). The paragraph above
+# originally located the missing declaration surface on the SPI's
+# `CapabilityDeclaration` ("the SPI has nowhere to put one today —
+# CapabilityDeclaration carries a config schema and DispatchRequest.payload is
+# an unvalidated dict, ADR-0024 § 8.4"). That is the wrong owner: a schema
+# published per connector makes drift machine-readable instead of preventing
+# it. The canonical schema belongs to the business-owned
+# `capability_registry.CapabilityContract`; this connector's declaration may
+# only CLAIM that contract's digest.
+#
+# AND THE COMMAND SURFACE SHRINKS. ADR-0061 A3 fixes what `payments.payout.v1`
+# exposes to a product: `submit_payout`, a PRODUCT payout reference, exact money
+# (exact decimal amount plus explicit currency), a provider-neutral destination,
+# and idempotency/correlation identifiers. That is all of it.
+#
+#   * `resolve_bank_account` and `create_transfer_recipient` — today two of the
+#     three actions this connector accepts under PAYMENT_PAYOUT_CAPABILITY in
+#     `delivery.ACTIONS_BY_CAPABILITY` — stop being product-visible actions and
+#     become INTERNAL steps performed behind `submit_payout`. ERP must never
+#     orchestrate "create the Paystack recipient, then initiate the Paystack
+#     transfer" against "send the Flutterwave transfer": a product that does
+#     still needs a code release to change a binding, which defeats ADR-0061 § 3
+#     entirely. A recipient code is a normalized RESULT or a connector internal,
+#     never a separate provider action the product sequences.
+#   * `ACTIONS_BY_CAPABILITY`'s totality check and its refusal of an action
+#     outside the bound capability are CORRECT and stay — the correction is to
+#     what the product may name, not to the connector's own allow-list.
+#
+# OPEN ITEM, recorded rather than decided (ADR-0061 A3): this connector also
+# declares `payments.customer.v1` (`create_customer | update_customer |
+# read_customer`). That is a capability id shaped around a provider's customer
+# object. Under A3 provider customer creation is a normalized result or a
+# connector internal unless a genuinely INDEPENDENT lifecycle is argued — so
+# `payments.customer.v1` either earns that argument in an accepted record, or it
+# collapses into `payments.intent.v1`'s normalized result. The same test applies
+# to `payments.refund.v1`'s surface.
 
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 

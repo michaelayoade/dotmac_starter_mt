@@ -381,11 +381,13 @@ specifics) points here and must never fork these rules.
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
 
-    **Outbound clauses added 2026-08-24 — REVIEW DISCIPLINE, not guards.**
-    Stated here because rule 25 forbids implying enforcement that does not
-    exist: no check in this repository catches any of the following today, and
-    the missing machinery is named in ADR-0024's "Enforcement and evidence"
-    additions.
+    **Outbound clauses added 2026-08-24 and corrected the same day — REVIEW
+    DISCIPLINE, not guards.** Stated here because rule 25 forbids implying
+    enforcement that does not exist: no check in this repository catches any of
+    the following today. Clause *(f)* names the gate that has to be built
+    before most of them can be checked at all; until it exists these are read
+    by reviewers, not by CI, and ADR-0024's "Enforcement and evidence"
+    additions name the missing machinery.
     *(a)* **One capability, one contract, one payload.**
     `payments.payout.v1`, `messaging.send.v1` and every other id name a
     BUSINESS ACT, not a provider endpoint. No provider-named id
@@ -407,15 +409,59 @@ specifics) points here and must never fork these rules.
     withheld surface is DECLARED in the connector's `EXTRACTION.toml`, not
     merely absent (LinkedIn outbound, Mono writes and Flutterwave transfers are
     the three in force).
-    *(d)* **A payout is ERP's decision.** Whether it happens, to whom, for how
-    much, and whether an ambiguous attempt may be retried are ERP's Treasury
-    owner's calls; no connector, engine path, configuration or operator gesture
-    decides them.
+    *(d)* **A payout is ERP's decision, and the deciding service is NAMED.**
+    Whether a payout happens, to whom, for how much, and whether an ambiguous
+    attempt may be retried are ERP's calls; no connector, engine path,
+    configuration or operator gesture decides them. "ERP's Treasury/payment
+    owner" is a role, not an owner, so the owner is named as the services that
+    hold the decision today: `PaymentService`
+    (`dotmac_erp:app/services/finance/payments/payment_service.py`) owns the
+    payout decision and the transfer lifecycle, and `BatchTransferService`
+    (`dotmac_erp:app/services/finance/payments/batch_transfer_service.py`)
+    composes batches of expense-reimbursement transfers over it. A shared
+    `dotmac-treasury` distribution or namespace is NOT to be created yet: rule
+    22's product-first dossier must first cover both services, `dotmac-payments`,
+    `dotmac-banking`, `dotmac-accounting` and the approvals/payment-authorization
+    paths, and establish the lifecycle a reusable owner would hold.
     *(e)* **Modules own metric DEFINITIONS; assemblies own EXPORTERS.** A shared
     module declares stable, namespaced metric names and derives values from its
     own facts at read time; it ships no metrics client, counter registry or
     `/metrics` route, and no second observability path.
-    (ADR-0061; ADR-0062; ADR-0024 §§ 8–9)
+    *(f)* **The canonical schema belongs to the DOMAIN, not the connector.**
+    The business owner's `CapabilityContract` carries `command_schema`,
+    `result_schema`, `observation_schema`, a canonical contract digest, and
+    deprecation/replacement metadata. A connector's `CapabilityDeclaration`
+    keeps configuration and modes and may only CLAIM the domain contract's
+    digest — it never publishes a competing schema, because a schema published
+    per connector does not prevent drift, it only makes drift machine-readable.
+    The required gate, which is one unit of work and not five: command
+    validation before enqueue; connector digest agreement at composition AND
+    again at binding; result validation before settlement; observation
+    validation before inbox recording; and a schema change taking a new `.vN`
+    capability id rather than redefining a published one. Sensitivity tests are
+    planted for digest mismatch, missing schema, invalid payload and invalid
+    result. None of it exists today.
+    *(g)* **A published contract version is never redefined — it is
+    SUCCEEDED.** `messaging.send.v1` is repaired by succession, not by
+    rewriting: `messaging.direct.send.v2` (provider-neutral direct delivery
+    with a DISCRIMINATED text/template/media content shape),
+    `social.comment.reply.v1` (public Facebook/Instagram comment consequences)
+    and `social.profile.read.v1` (caller-initiated profile observation through
+    REQUEST mode). Sub migrates to the successors; v1 is retained only for a
+    bounded compatibility window and then retired, and both the migration and
+    the retirement are recorded obligations.
+    *(h)* **A capability exposes product MEANING, not provider workflow.**
+    `payments.payout.v1` exposes `submit_payout`, a product payout reference,
+    exact money, a provider-neutral destination, idempotency and correlation.
+    Paystack's recipient creation and Flutterwave's direct-transfer details are
+    internal connector steps: a product that orchestrates "create recipient"
+    then "send transfer" still needs a code release to change a binding, which
+    is the whole thing the binding exists to prevent. The same applies to
+    `payments.intent.v1` and `payments.refund.v1` — provider customer creation,
+    recipient codes and transfer references are normalized RESULTS or connector
+    internals, never separate product-visible provider actions, unless a
+    genuinely independent lifecycle is argued rather than assumed.
+    (ADR-0061 + its 2026-08-24 amendment; ADR-0062; ADR-0024 §§ 8–12)
 
 29. **Poetry is an exact build input, not a workstation preference.**
     `[tool.poetry].requires-poetry` is the ONE version source; CI's hash-locked
