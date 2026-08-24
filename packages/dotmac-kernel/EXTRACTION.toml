@@ -6,6 +6,11 @@ source_mode = "historical-mixed"
 owner = "Dotmac platform foundation"
 contract = "Universal assembly facilities and versioned cross-product contracts"
 source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
+
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
 source_paths = [
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel",
   "dotmac_sub:app/composition.py",
@@ -84,3 +89,15 @@ first_cutover = "The starter reference assembly consumes the extracted settings,
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
 local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs. MACHINE CREDENTIALS: adoption is credential REISSUANCE, never a hash migration — a stored digest holds neither the raw key nor material to re-key from, so no conversion or backfill exists. Sub: scope semantics already match, but its verification key is derived from the connector-credential encryption key, so every credential must be reissued before app/services/auth.py's hash_api_key, hash_api_key_candidates, _maybe_upgrade_api_key_hash and _touch_api_key_last_used retire. ERP: gated on resolving every active null/empty-scoped key — inventory by IDENTIFIER only, assign an owner and explicit minimum scopes, revoke unused and reissue retained, and treat every unresolved active key as a CUTOVER BLOCKER. An empty scope list may never be translated into a wildcard or all-current-permissions. ERP runs a bounded old/new verification transition with a checked retirement deadline; that legacy verifier stays in ERP and never enters the kernel, which has one scheme and no fallback."
 next_action = "Publish the demand-pulled product-manifest contract, make Sub's release path emit it from SUB_ASSEMBLY, and replace Vendor's configured capability lists and duplicate catalogue protocol with digest-verified snapshots before the Entitlement Allocation writer cutover. The broader adoption sequence remains Sub settings first, then ERP. MACHINE CREDENTIALS: release the hardened facility (tenant-scoped RLS-protected credential, X-Api-Key against a dedicated held key, exact scopes with empty authorizing nothing, active/expiry/revocation, typed MachinePrincipal, require_machine_scope inside an established tenant scope, and no admin access, wildcard, human-user requirement, commit, rollback or authentication-time telemetry write), then pin it in dotmac_sub under the reissuance gate above; ERP adopts separately under its own. There is no separate ISP assembly to pin it in."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/domain_settings.py", "app/services/domain_settings.py", "app/services/auth.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/composition.py", "app/models/domain_settings.py", "app/services/domain_settings.py", "app/models/notification.py"]

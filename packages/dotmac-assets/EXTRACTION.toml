@@ -13,6 +13,12 @@ source_repositories = [
   "dotmac_vendor_control_plane",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 
 source_paths = [
   # Qualifying source: individual fixed-asset identity and lifecycle.
@@ -67,3 +73,29 @@ shadow_and_drift = "For every in-scope ERP asset, compare stable code, kind, ser
 local_copy_retirement = "After ERP cutover, delete or migration-seal the generic writers in app/services/fixed_assets/asset.py, app/services/fixed_assets/disposal.py, app/services/people/assets/{assignment_service,maintenance_service,lifecycle_event_service}.py and the overlapping identity/lifecycle branches in app/services/fleet/{vehicle_service,assignment_service,maintenance_service}.py. Retire or transform the displaced asset, assignment, maintenance, disposal and lifecycle tables only after backfill verification and rollback-window closure. Preserve finance tables/services and product-owned vehicle, inventory, files and positioning extensions, rekeyed to the module asset id. Two-directional caller/model/table ratchets reach zero before local ownership is declared retired."
 
 next_action = "Validate the canary-first package on a fresh isolated Observer worktree. When the ERP adoption slice is ready, release the compatible kernel namespace allocation and dotmac-assets together, exact-pin them in ERP, write the ERP backfill/shadow/one-writer cutover and retirement ratchets, and keep the reference Starter assembly a non-consumer. Do not publish or call the module adopted before that cutover."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["README.md", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/inventory.py", "docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/fixed_assets/asset.py", "app/services/fixed_assets/asset.py", "app/services/people/assets/assignment_service.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

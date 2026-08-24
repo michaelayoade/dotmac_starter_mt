@@ -87,6 +87,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a95",
+      "reason": "ALLOCATION RELEASE PENDING THE PROTECTED WORKFLOW. a95 adds one MIGRATION_OWNER_LEDGER row (response_obligations / ro / mod_sla) and changes no behaviour for any existing consumer. dotmac-response-obligations declares it as a floor and is itself unreleasable until this ships. Remove this row in the a95 release-record change; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
@@ -101,16 +106,6 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
       "state": "never-published"
-    },
-    "dotmac-service-catalog": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
-      "state": "never-published"
-    },
-    "dotmac-subscriptions": {
-      "declared": "0.1.0a2",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Published a1 is registry-verified at tag dotmac-subscriptions-v0.1.0a1. The a2 release adds explicit provider-neutral offer pricing modes, one declared charge model per offer version, negotiated contract-line prices and the bounded effective-offer reader through the additive su_0002 migration; it does not rewrite the released a1 lineage. Publication makes the exact package coordinate available but does not compose the module or move product authority: Vendor Control Plane and Sub remain candidate adopters until each completes its own backfill, zero-drift shadow and local-writer retirement. Remove this row in the automatic release record after registry verification writes dotmac-subscriptions-v0.1.0a2.",
-      "state": "declared-unpublished"
     },
     "dotmac-services": {
       "declared": "0.1.0a1",

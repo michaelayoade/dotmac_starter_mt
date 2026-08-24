@@ -9,6 +9,10 @@ source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_sub:9493ee4eef737f18b4813899a2d8f0537ed6d5c7",
 ]
+revalidation_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0e40d7996abf2da68e866b156a56fa1fde1fd56b",
+]
 source_paths = [
   "dotmac_sub:app/models/subscription_change.py",
   "dotmac_sub:app/services/subscription_change_execution.py",
@@ -39,9 +43,16 @@ next_action = "Compose in Sub after cohorts 2-5, then implement the request/chec
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "9493ee4eef737f18b4813899a2d8f0537ed6d5c7"
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = [
   "app/models/subscription_change.py",
   "app/services/subscription_change_execution.py",
   "app/services/events/handlers/subscription_change_execution.py",
 ]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "no_writer"
+retirement_required = false
+revision = "0e40d7996abf2da68e866b156a56fa1fde1fd56b"
+evidence_paths = []

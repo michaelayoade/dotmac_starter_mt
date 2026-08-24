@@ -109,6 +109,7 @@ on:
           - dotmac-release-catalog
           - dotmac-remote-access
           - dotmac-reseller-management
+          - dotmac-service-catalog
           - dotmac-service-changes
           - dotmac-service-orders
           - dotmac-sites
@@ -280,7 +281,6 @@ jobs:
     environment: registry-release
     permissions:
       contents: write                # create the post-verification tag
-      pull-requests: write           # open the post-release record (below)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -378,10 +378,18 @@ jobs:
       # opened HERE rather than remembered. `if: always()` is deliberate: the
       # tag is pushed by the step above, so a later failure must not leave a
       # tag with no record — the exact state this exists to prevent.
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        if: always()
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+
       - name: Open the post-release record
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/open_release_record_pr.sh \
             --distribution "${{ inputs.module }}" \

@@ -450,22 +450,41 @@ specifics) points here and must never fork these rules.
     credential must lack the permission to approve deployments; until that is
     in place this rule is discipline, and discipline is the weaker half.
 
-    Exception on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22,
-    kernel `0.1.0a91`.
+    Exceptions on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22 kernel
+    `0.1.0a91` and 2026-08-23 kernel `0.1.0a93`.
 
 32. **A release holds a short, named freeze.** `publish` re-asserts that the
     run's SHA is still the tip of protected `main`, and that check runs AFTER
     the approval wait — so any merge between dispatch and verification voids
-    the run. One release captain holds merges from dispatch through
-    verification and tagging, and announces the window opening and closing.
+    the run. One release captain holds every merge except the generated release
+    record from dispatch through verification, tagging, the record pull
+    request's green merge, and verification that protected `main` contains the
+    truthful record and is green. The captain announces both ends of the
+    window. A tag is not the closing event: it is the instant the checked-in
+    publication baseline becomes false.
 
     This is a real control, not ceremony: the first a91 attempt was voided
     mid-flight by a merge landing during the approval wait, and it stopped
     BEFORE publication. Keep the check; the freeze is what stops it from
-    costing a wasted build every time.
+    costing a wasted build every time. If record automation fails after the
+    tag, the freeze stays open while the already-pushed branch is opened,
+    reviewed and merged; publication is never re-run to repair bookkeeping.
+
+    The record branch push and pull request use one dedicated recorder App,
+    not the publisher's persisted checkout credential. GitHub's required
+    pull-request-write permission also reaches the review API, so do not claim
+    the token is review-incapable. Enforce the real separation instead: the App
+    authors and last-pushes its PR; protected `main` requires one fresh approval
+    from another actor, dismisses stale approvals, requires approval of the most
+    recent reviewable push and permits no bypass. The App receives contents and
+    pull-request write only — never Actions, deployment, environment or
+    administration authority. The tagging job's ordinary workflow token has
+    exactly `contents: write`, never pull-request write; the loud fallback can
+    push the truthful record branch but cannot become a second automatic PR
+    identity if a repository setting changes.
     (`scripts/assert_current_main.sh`)
 
-33. **A writer claim is TYPED, and the prose channel only shrinks.**
+33. **A writer claim is TYPED and COMPLETE.**
     `[[product_writers]]` in a dossier states, per product, whether it is the
     `qualifying_source`, a `legacy_writer` that must stop, a `no_writer`, or
     `inventory_only` — with an immutable revision and evidence paths. Governance
@@ -473,22 +492,26 @@ specifics) points here and must never fork these rules.
     contradicted by the dossiers they described because the cited claim was
     prose.
 
-    The block may be ABSENT, deliberately: silence must stay distinguishable
-    from a claim of absence, so a consumer that cannot find its row fails as
-    UNKNOWN. That makes #354 migration support, not enforcement — which is what
-    this rule adds. `product-writer-baseline.json` freezes the prose-only
-    dossier/product pairs (303 across 86 dossiers at the freeze; one dossier
-    fully typed) as a TWO-DIRECTIONAL ratchet: it may not grow, and it may not
-    shrink without being regenerated in the same change. A dossier absent from
-    the baseline must be complete, which is what stops the debt growing with
-    the package count.
+    Silence still means UNKNOWN rather than `no_writer`, but UNKNOWN is no
+    longer admissible in a checked-in dossier: every product named by
+    `source_repositories` except this Starter repository has exactly one typed
+    row. The row's immutable `revision` equals that product's exactly one
+    effective audit coordinate — `revalidation_revisions` when the dossier has
+    re-audited that product, otherwise `source_revisions` — so prose cannot be
+    refreshed while the typed claim silently continues to describe another
+    tree. `source_revisions` is historical provenance and is never rewritten to
+    a later tree; a later verified coordinate is added under
+    `revalidation_revisions`. The transitional
+    prose-only baseline was deleted when every dossier reached complete typed
+    coverage on 2026-08-23; recreating a baseline would weaken the absolute
+    rule back into an exemption.
 
     Retire a pair by READING the source product and recording what you found.
     Never by inferring a state from the prose already there — a scanner
     guessing `no_writer` from a sentence manufactures the false confidence this
     exists to remove.
-    (`scripts/product_writer_sweep.py`; `make product-writer-check`;
-    `tests/architecture/test_product_writer_ratchet.py`)
+    (`scripts/product_writer_check.py`; `make product-writer-check`;
+    `tests/architecture/test_product_writer_completeness.py`)
 
 ## Everything by config — no hardcoding
 
@@ -541,5 +564,7 @@ CI remains the merge acceptance owner.
   workflows now open that record themselves
   (`scripts/open_release_record_pr.sh` calling
   `scripts/write_release_record.py`, straight after tagging) — merge that pull
-  request as soon as it is green. Run the writer by hand only to repair an
-  older gap; never edit a declared version down to make the gates agree.
+  request as soon as it is green, then verify the resulting protected `main`
+  revision is truthful and green before the release captain ends the freeze.
+  Run the writer by hand only to repair an older gap; never edit a declared
+  version down to make the gates agree.
