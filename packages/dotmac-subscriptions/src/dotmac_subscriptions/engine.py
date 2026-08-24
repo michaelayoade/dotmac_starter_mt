@@ -40,6 +40,11 @@ class RatingInput:
                 "rating.invalid_quantity",
                 "Rating quantity must be positive.",
             )
+        if self.unit_price.amount <= 0:
+            raise SubscriptionDataError(
+                "rating.non_positive_contract_price",
+                "Rating requires a strictly positive contract-line price.",
+            )
         if not self.rating_policy_version or not self.offer_version_ref:
             raise SubscriptionDataError(
                 "rating.missing_provenance",

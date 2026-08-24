@@ -171,6 +171,14 @@ def test_rated_output_rejects_mixed_currency() -> None:
         )
 
 
+def test_rated_output_refuses_zero_contract_line_price() -> None:
+    with pytest.raises(SubscriptionDataError, match="strictly positive"):
+        replace(
+            _output(),
+            unit_price=ExactAmount(Decimal("0.00"), "EUR", 2),
+        )
+
+
 def test_rated_output_is_pre_tax_and_contains_no_financial_resolution() -> None:
     names = set(RatedObligationOutputV1.__dataclass_fields__)
 
