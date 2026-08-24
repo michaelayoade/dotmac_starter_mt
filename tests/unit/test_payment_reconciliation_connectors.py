@@ -34,7 +34,9 @@ def test_paystack_adds_poll_without_invalidating_the_published_manifest() -> Non
         "type": "object",
         "additionalProperties": False,
     }
-    assert plugin.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    assert plugin.modes == frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
+    )
     assert plugin.manifest.egress is not None
     assert plugin.manifest.egress.hosts == ("api.paystack.co",)
     assert_plugin_conforms(plugin)

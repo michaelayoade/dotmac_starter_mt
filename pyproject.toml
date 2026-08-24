@@ -766,7 +766,13 @@ forbidden_modules = ["dotmac_kernel", "app"]
 [[tool.importlinter.contracts]]
 name = "Connector plugins depend only on the integration SPI"
 type = "forbidden"
-source_modules = ["dotmac_connector_whatsapp"]
+# The contract is named for connector PLUGINS, so its source list is the
+# defect whenever it names fewer than it claims (AGENTS.md rule 25: where a
+# guard's stated scope is broader than its configuration, the configuration is
+# what is wrong). `dotmac_connector_paystack` joins it with the outbound
+# command slice, where the cost of importing a product is no longer a wrong
+# fact but somebody's money.
+source_modules = ["dotmac_connector_whatsapp", "dotmac_connector_paystack"]
 forbidden_modules = [
     "app",
     "dotmac_kernel",

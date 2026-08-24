@@ -1,4 +1,13 @@
-"""Stateless authenticated ingress translation for Paystack webhooks."""
+"""Stateless authenticated Paystack translation: ingress, polling, outbound.
+
+One distribution, three modes. INGRESS and POLL observe what the provider
+says happened; DELIVERY performs the commands a product tells it to perform.
+The outbound half lives in `dotmac_connector_paystack.operations` (wire
+translation, exact money and outcome classification) and
+`dotmac_connector_paystack.delivery` (the SPI adapter); this module owns
+webhook authentication, event normalization and the versioned manifest that
+binds all of it together.
+"""
 
 from __future__ import annotations
 
@@ -8,13 +17,13 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import Final
 
 import httpx
 from dotmac_integration.spi import (
     Acknowledgement,
     CapabilityDeclaration,
+    CapabilityHandler,
     ConnectorManifest,
     ConnectorMode,
     Diagnostic,
@@ -29,6 +38,14 @@ from dotmac_integration.spi import (
     VerificationResult,
 )
 
+from dotmac_connector_paystack.delivery import (
+    OUTBOUND_CAPABILITY_IDS,
+    OUTBOUND_CONFIG_SCHEMA,
+    PaystackDeliveryHandler,
+)
+from dotmac_connector_paystack.operations import (
+    exact_amount,
+)
 from dotmac_connector_paystack.polling import PaystackPollHandler
 
 CONNECTOR_KEY: Final = "paystack"
@@ -41,12 +58,6 @@ WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
 API_SECRET_KEY: Final = "api_secret_key"
 SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{128}")
-
-# Paystack's wire contract represents every supported currency by multiplying
-# the base-unit amount by 100. This remains true for XOF even though XOF has no
-# ordinary fractional subunit. The constant is therefore provider protocol,
-# not a product currency default or an ISO-4217 policy decision.
-PAYSTACK_WIRE_SCALE: Final = 2
 
 ACKNOWLEDGEMENT: Final = Acknowledgement(body=b"")
 
@@ -87,11 +98,30 @@ LEGACY_MANIFEST: Final = ConnectorManifest(
     egress=EgressDeclaration(),
 )
 
+# Observation and command are declared as SEPARATE capabilities mapped to
+# SEPARATE modes, which SPI 1.4's per-capability `modes` is what makes
+# expressible. Conflating them would let a binding that only wanted to watch
+# settlements arrive with the authority to move money — and would have
+# conformance call the ingress factory for a delivery-only contract.
 MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=CURRENT_VERSION,
-    spi_range=SpiRange.parse(">=1.3,<2.0"),
-    capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
+    spi_range=SpiRange.parse(">=1.4,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            capability_id=CAPABILITY_ID,
+            config_schema=CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL}),
+        ),
+        *(
+            CapabilityDeclaration(
+                capability_id=capability_id,
+                config_schema=OUTBOUND_CONFIG_SCHEMA,
+                modes=frozenset({ConnectorMode.DELIVERY}),
+            )
+            for capability_id in OUTBOUND_CAPABILITY_IDS
+        ),
+    ),
     secret_bindings=(
         SecretBindingDeclaration(
             name=WEBHOOK_SIGNING_SECRET,
@@ -105,7 +135,11 @@ MANIFEST: Final = ConnectorManifest(
         SecretBindingDeclaration(
             name=API_SECRET_KEY,
             required=False,
-            description="Paystack server secret for authenticated reconciliation I/O.",
+            description=(
+                "Paystack server secret for authenticated reconciliation and "
+                "outbound command I/O; required when a poll or delivery "
+                "capability is bound."
+            ),
         ),
     ),
     egress=EgressDeclaration(hosts=("api.paystack.co",)),
@@ -218,15 +252,6 @@ def _record_only(
     )
 
 
-def _minor_amount(value: object, *, allow_zero: bool) -> str | None:
-    if not isinstance(value, int) or isinstance(value, bool):
-        return None
-    if value < 0 or (value == 0 and not allow_zero):
-        return None
-    amount = Decimal(value).scaleb(-PAYSTACK_WIRE_SCALE)
-    return format(amount, f".{PAYSTACK_WIRE_SCALE}f")
-
-
 def _currency(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -243,8 +268,8 @@ def _settlement_event(
 ) -> InboundEvent:
     status = _provider_status(data)
     currency = _currency(data.get("currency"))
-    amount = _minor_amount(data.get("amount"), allow_zero=False)
-    fee = _minor_amount(data.get("fees", 0), allow_zero=True)
+    amount = exact_amount(data.get("amount"), allow_zero=False)
+    fee = exact_amount(data.get("fees", 0), allow_zero=True)
     occurred_at = (
         _text(data.get("paid_at"))
         or _text(data.get("transaction_date"))
@@ -390,7 +415,7 @@ class PaystackConnector:
     manifest: ConnectorManifest = MANIFEST
     historical_manifests: tuple[ConnectorManifest, ...] = (LEGACY_MANIFEST,)
     modes: frozenset[ConnectorMode] = frozenset(
-        {ConnectorMode.INGRESS, ConnectorMode.POLL}
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
     )
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
@@ -401,13 +426,22 @@ class PaystackConnector:
         self.manifest.require_declares(capability_id)
         return PaystackPollHandler(_poll_event, self.transport, self.timeout_seconds)
 
+    def handler_for(self, capability_id: str) -> CapabilityHandler:
+        self.manifest.require_declares(capability_id)
+        return PaystackDeliveryHandler(capability_id, self.transport)
+
     def validate_connection(
         self,
         *,
         config: dict[str, object],
         secrets: dict[str, object],
     ) -> tuple[Diagnostic, ...]:
-        if "reconcile_from" in config and _material(secrets, API_SECRET_KEY) is None:
+        # `reconcile_from` marks a poll configuration and `timeout_seconds` an
+        # outbound one; both authenticate with the server secret, so an
+        # installation configured for either without it is refused before it is
+        # ever enabled rather than at the first dispatch.
+        needs_api_secret = "reconcile_from" in config or "timeout_seconds" in config
+        if needs_api_secret and _material(secrets, API_SECRET_KEY) is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         if _material(secrets, WEBHOOK_SIGNING_SECRET) is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
