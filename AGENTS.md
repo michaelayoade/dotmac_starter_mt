@@ -382,10 +382,12 @@ specifics) points here and must never fork these rules.
     and `Modules are independent of each other`; ADR-0010/0014)
 
     **Outbound clauses added 2026-08-24, corrected the same day, and extended
-    the same day with *(i)*–*(k)* — REVIEW DISCIPLINE, not guards.** Stated here
+    the same day with *(i)*–*(k)* and then *(l)*–*(o)* — REVIEW DISCIPLINE, not
+    guards.** Stated here
     because rule 25 forbids implying enforcement that does not exist: no check
-    in this repository catches any of the following today, and clauses *(j)* and
-    *(k)* additionally concern a repository this one does not contain.
+    in this repository catches any of the following today, and clauses *(j)*,
+    *(k)*, *(m)*, *(n)* and *(o)*
+    additionally concern a repository this one does not contain.
     Clause *(f)* names the gate that has to be built
     before most of them can be checked at all; until it exists these are read
     by reviewers, not by CI, and ADR-0024's "Enforcement and evidence"
@@ -532,7 +534,94 @@ specifics) points here and must never fork these rules.
     because nothing calls it. Its design intent is preserved, measured, in
     `docs/inventories/treasury-payment-execution-sources.md`, which is the
     condition attached to the deletion.
-    (ADR-0061 + its two 2026-08-24 amendment sets; ADR-0062; ADR-0063;
+    *(l)* **A capability that names a BUSINESS ACT is KEPT — and the test is
+    the same one clause *(i)* applies.** `payments.refund.v1` survives it where
+    `payments.customer.v1` failed, and the two outcomes are the test
+    discriminating rather than an inconsistency. The discriminating question:
+    **if the provider vanished tomorrow, would the thing still exist and still
+    need an owner?** A provider-side customer record would not — it is a
+    by-product of a charge. A refund obligation would: someone with authority
+    decided money goes back, for how much, against which original payment, with
+    its own lifecycle, its own evidence and a receivable/revenue consequence.
+    **A provider-side customer record is a by-product of an act; a refund IS the
+    act.** So the capability is retained while its provider-shaped OPERATIONS
+    are removed: ONE command, `request_refund`, carrying exact money (with
+    full-versus-partial DECLARED, never signalled by an absent field), the
+    original-payment correlation, the authorization reference and idempotency
+    identity — provider handles become connector internals, and refund-status
+    reads stay reconciliation internals. **An ambiguous refund is never blindly
+    retried**, and the reason is sharper here than for a payout: Paystack's
+    `/refund` accepts no client reference, so the connector stamps a derived key
+    into `merchant_note` and an ambiguous refund becomes DECIDABLE by reading
+    the provider's refund list — but **decidable is not refused**. Nothing at
+    the provider stands between a re-request and a second refund except that
+    read, so the read is mandatory, no transport ever re-requests, and a
+    re-request is a NEW authorized decision by the refund owner. **Treasury is
+    NOT automatically the refund owner**: a refund reverses a receivable rather
+    than discharging a payable, it is not one of ADR-0063 § 6's twelve closed
+    items, and broadening that list requires separate evidence and its own
+    record. The decision belongs to Billing or another NAMED refund owner, and
+    nothing has named one — "the named refund owner" is the honest phrase until
+    something does.
+    *(m)* **An ambiguous state is SPLIT before it is extracted, and an unprobed
+    row is `ambiguous`.** ERP's `PaymentIntent.status` `PROCESSING` means both
+    "the provider call is running" and "a worker has picked this row up";
+    carrying it into a shared module under a better name would launder the
+    ambiguity into a contract. It becomes `submission_requested` (a durable
+    intent, no provider outcome attempted), `submitted` (conclusively accepted),
+    `ambiguous` (may have landed, reconciliation required), plus terminal
+    `settled` / `failed` / `reversed`. **Worker claim/lease state belongs to the
+    execution engine, not to the domain record** (rule 21 / ADR-0014) — a task
+    that needed somewhere to record a claim and used a business status column is
+    most of why that column has three writers. **The migration rule is the
+    important part:** existing `PROCESSING` rows are PROBED, the probe is
+    READ-ONLY, the worker is QUIESCED for the duration, and **without conclusive
+    provider evidence a row maps to `ambiguous`, never `submitted`.** Assuming
+    success on migration is how a double payment or a silently lost disbursement
+    enters the new module — a row wrongly marked `submitted` is never looked at
+    again, so neither the beneficiary paid twice nor the one not paid at all
+    appears in any queue.
+    *(n)* **Payroll produces `PaymentInstruction` rows, and Treasury never
+    receives a salary component.** Payroll owns calculation, approval and the
+    net-pay obligation; Treasury owns disbursement. One authorized net-pay
+    obligation produces ONE `PaymentInstruction`; a payroll run MAY group them
+    into a `PaymentRun`, which confers no authorization; Treasury's manual rail
+    produces the bank-upload artifact; **exporting the file does not mark
+    payroll paid**; and settlement evidence returns to Payroll as a TYPED
+    OBSERVATION that Payroll's own owner consumes. Treasury receives exactly
+    four things — **net amount, currency, payee/destination reference, payroll
+    obligation reference** — and **never salary components**: not gross, basic,
+    allowances, overtime, bonuses, deductions, tax, pension, loan repayments,
+    garnishments, grade or band, nor anything they can be derived from, nor a
+    breakdown smuggled into a narration field. **This is a PRIVACY boundary as
+    much as an ownership one:** the bank-file rail means the artifact leaves,
+    its audience is payments operations rather than HR, and the export is
+    retained immutably with its digest — so a component that reaches Treasury is
+    archived beyond HR's reach to correct or redact. Relatedly, a payee who
+    cannot be paid is a STATE, never an omission from a spreadsheet.
+    *(o)* **No payout release or enablement passes the authorization blocker.**
+    An ERP READ permission (`payments:read`) currently satisfies the guard on
+    `POST /transfers/{intent_id}/initiate`, which executes a real transfer. The
+    weakest admitted credential defines a path's real authorization, which makes
+    every other control on that path decorative; a dedicated ERP security change
+    is in progress on `fix/payout-execute-permission-containment`. Until it
+    lands: no payout capability is enabled in any environment, no payout release
+    is cut, and no claim of payout readiness is made — however much of the rest
+    is finished. This gates RELEASE and ENABLEMENT and is INDEPENDENT of
+    ADR-0063 § 7's gate on CONSTRUCTION; satisfying either does not satisfy the
+    other, and neither changes clause *(k)*'s evidentiary wording in either
+    direction. The ordered dependency it sits inside, canonically ADR-0063 A3:
+    (1) ERP execute-permission containment, (2) ERP authorization-log audit on a
+    NAMED target, (3) delete dead `BatchTransferService`, (4) reduce
+    `PaymentIntent.status` to one writer, (5) split `PROCESSING` from
+    `ambiguous`, (6) add capability request/result schemas, (7) build Treasury
+    `PaymentInstruction` and `PaymentRun`, (8) add expense, AP and payroll
+    producers, (9) complete Paystack and Flutterwave payout bindings, (10) build
+    refund through its named owner, (11) provider sandbox proof, CI and cutover.
+    Steps 1–3 come first because they reduce blast radius and depend on no
+    design decision; step 4's digest/version work may continue in parallel.
+    (ADR-0061 + its THREE 2026-08-24 amendment sets; ADR-0062; ADR-0063 + its
+    2026-08-24 amendment; ADR-0046 Amendment A1;
     ADR-0042 § 3 + ADR-0047 Amendment A1 — ADR-0042 CONTROLS on disbursement
     ownership, and the split is six owners: Expenses eligibility, Payables what
     is owed, Treasury the authorized instruction and its rail, the Integrator

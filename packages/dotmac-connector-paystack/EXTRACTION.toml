@@ -114,8 +114,54 @@ contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paysta
 # constraint that `delivery._MISALLOCATED`'s import-time bijection check forces
 # the `OPERATIONS` and `ACTIONS_BY_CAPABILITY` deletions into ONE change.
 #
-# The same A3 test still applies to `payments.refund.v1`'s surface, and remains
-# an open item there.
+# DECIDED 2026-08-24 (ADR-0061 Amendment A8) — supersedes the line this block
+# previously carried, which read: "the same A3 test still applies to
+# `payments.refund.v1`'s surface, and remains an open item there."
+# It is no longer open, and it closes the OPPOSITE way to `payments.customer.v1`
+# — which is the test discriminating, not an inconsistency. The discriminating
+# question is: if the provider vanished tomorrow, would the thing still exist
+# and still need an owner? A provider-side customer record would not; it is a
+# by-product of a charge. A refund obligation WOULD — someone with authority
+# decided money goes back, for how much, against which original payment, and it
+# would be paid another way. A provider-side customer record is a by-product of
+# an act; a refund IS the act. It has its own lifecycle (requested -> submitted
+# -> ambiguous -> settled/failed), its own evidence, its own reconciliation and
+# a receivable/revenue consequence.
+#
+# **`payments.refund.v1` is KEPT.** What changes is its SURFACE, under the same
+# A3 rule that moved recipient creation behind `submit_payout`: ONE command,
+# `request_refund`, carrying exact money (with full-versus-partial DECLARED,
+# never signalled by an absent field), the original-payment correlation, the
+# authorization reference and idempotency identity. `refund` is Paystack's verb
+# inside this connector's `{"action", "params"}` envelope and stops being what
+# a product names; `_request`'s `refund` branch stops reading a product-supplied
+# `params["transaction"]` and resolves the Paystack transaction handle itself;
+# `_refund_result`'s `{"refund_id": ...}` becomes a normalized value under the
+# contract's `result_schema`; and `GET /refund?transaction=...` stays a
+# reconciliation internal, never a product-visible action.
+#
+# WHAT MUST NOT CHANGE while that happens: the `refund` `_Operation` keeps
+# `OperationOutcome.AMBIGUOUS` on an unanswered send and keeps `needs_key=True`,
+# and the `merchant_note` stamping stays. Paystack's `/refund` accepts NO client
+# reference, so there is no provider-enforced duplicate protection on this
+# endpoint at all — the derived key in `merchant_note` makes an ambiguous refund
+# DECIDABLE by reading the provider's refund list, and decidable is NOT refused.
+# A duplicated payout is refusable at Paystack because the derived reference
+# rides the provider's own `reference` field; a duplicated refund is not.
+# Nothing at the provider stands between a re-request and a second refund except
+# that read, so the read is mandatory before any re-request, no transport ever
+# makes one, and a re-request is a NEW authorized decision by the refund owner.
+#
+# The refund OWNER is not named here and is not Treasury by default: a refund
+# reverses a receivable rather than discharging a payable, and it is not one of
+# ADR-0063 section 6's twelve closed surface items (ADR-0061 A9). It is Billing
+# or another named owner, and naming one needs the same product-first evidence
+# ADR-0061 A1 demanded before naming a payout owner.
+#
+# STILL AS BUILT: the code below has not changed. Like A5's removal, the refund
+# surface change is part of the payout refactor, gated behind the
+# capability-schema seam (A2) and the result seam (A3); `delivery._MISALLOCATED`
+# forces the `OPERATIONS` and `ACTIONS_BY_CAPABILITY` edits into ONE change.
 
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 

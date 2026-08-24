@@ -290,6 +290,116 @@ disposition (ADR-0061 A7). That dossier is produced on the sibling branch
 `docs/treasury-product-first-dossier` and is the evidence base for ADR-0063;
 its own § 12.3 G5 asks for that record.
 
+### The money-out leg: what is decided, in what order, and what blocks it (2026-08-24)
+
+Four accepted rulings extend the six-owner split above. None of them is as-built
+in this repository — it holds no disbursement code — so each is marked for what
+it is: a decision recorded where it can be cited, with the as-built facts it
+rests on named.
+
+**`payments.refund.v1` is KEPT, and the reason it survives is the reason
+`payments.customer.v1` did not.** ADR-0061 A5 removed the customer capability
+because it named provider workflow; A8 runs the same test on refund and it
+passes. The discriminating question:
+
+> If the provider vanished tomorrow, would the thing still exist and still need
+> an owner?
+
+A provider-side customer record would not — there was never a Dotmac object,
+only a mirror of `POST/PUT/GET /customer`. A refund obligation would: someone
+with authority decided money goes back, for how much, against which original
+payment, and it would be paid another way. **A provider-side customer record is
+a by-product of an act; a refund IS the act.** So the capability is retained
+while its provider-shaped OPERATIONS are removed: one command, `request_refund`,
+carrying exact money, the original-payment correlation, the authorization
+reference and idempotency identity — and Paystack's transaction handle and
+Flutterwave's charge id become connector internals.
+
+The as-built fact that shapes the refund rule: **Paystack's `/refund` accepts no
+client reference.** There is no field for the engine's idempotency key, so the
+connector stamps a derived key into `merchant_note`
+(`packages/dotmac-connector-paystack/src/dotmac_connector_paystack/
+operations.py:626-630`) and classifies an unanswered send as `AMBIGUOUS`
+(`:368`), resolving it by reading the provider's refund list and matching the
+note (`:68-73`). **That makes an ambiguous refund DECIDABLE; it does not make a
+second refund REFUSED.** A duplicated payout is refusable at the provider
+because its derived reference rides Paystack's own `reference` field; a
+duplicated refund is not. The reconciliation read is therefore mandatory before
+any re-request, no transport ever makes one, and a re-request is a new
+authorized decision. **Treasury is not automatically the refund owner** — a
+refund reverses a receivable rather than discharging a payable, it is not one of
+ADR-0063 § 6's twelve closed items, and extending that list needs its own record
+(ADR-0061 A8, A9).
+
+**ERP splits `PROCESSING` before anything is extracted, and an unprobed row is
+`ambiguous`.** ADR-0063 A1. `PROCESSING` today means both "the provider call is
+running" and "a worker has picked this row up" — the second meaning is why
+`poll_stuck_expense_transfers` writes the column at all — and carrying a state
+that means both into a shared module under a better name would launder the
+ambiguity into a contract. The vocabulary becomes `submission_requested` (a
+durable intent, no provider outcome attempted), `submitted` (conclusively
+accepted), `ambiguous` (may have landed, reconciliation required), and the
+terminal `settled` / `failed` / `reversed`. **Worker claim/lease state moves to
+the execution engine** (ADR-0014's at-most-once owner), which is most of why the
+third writer exists. The migration rule carries the weight: existing
+`PROCESSING` rows are **PROBED**, the probe is read-only, the **worker is
+quiesced** for the duration, and **without conclusive provider evidence a row
+maps to `ambiguous`, never `submitted`** — assuming success on migration is how
+a double payment or a silently lost disbursement enters the new module, because
+a row wrongly marked `submitted` is never looked at again.
+
+**Payroll produces `PaymentInstruction` rows, and Treasury never sees a salary
+component.** ADR-0063 A2 with ADR-0046 A1. One authorized net-pay obligation
+produces one instruction; a run may group them into a `PaymentRun` without
+conferring authorization; Treasury's manual rail produces the bank-upload
+artifact; **exporting the file does not mark payroll paid** (ERP's payroll
+export writes no status today, which is correct and must survive the port); and
+settlement evidence returns to Payroll as a typed observation. Treasury receives
+**net amount, currency, payee/destination reference and payroll obligation
+reference — and nothing else.** Never gross, allowances, deductions, tax,
+pension, garnishments or grade, including in a narration field. That is a
+privacy boundary as much as an ownership one: the bank-file rail means the
+artifact LEAVES, its audience is payments operations rather than HR, and
+ADR-0063 § 2 requires Treasury to retain it immutably — so a component that
+reaches Treasury is digested and archived beyond HR's reach to redact.
+
+**The order, and the one thing that blocks release regardless of it**
+(ADR-0063 A3):
+
+| # | Step | Where |
+|---|---|---|
+| 1 | ERP execute-permission containment | ERP |
+| 2 | ERP authorization-log audit on a named target | ERP |
+| 3 | Delete dead `BatchTransferService` | ERP |
+| 4 | Reduce `PaymentIntent.status` to one writer | ERP |
+| 5 | Split `PROCESSING` from `ambiguous` | ERP |
+| 6 | Add capability request/result schemas | `dotmac-integration` + connectors |
+| 7 | Build Treasury `PaymentInstruction` and `PaymentRun` | new module |
+| 8 | Add expense, AP and payroll producers | ERP → Treasury |
+| 9 | Complete Paystack and Flutterwave payout bindings | connectors |
+| 10 | Build refund through its named owner | Billing / the named owner |
+| 11 | Provider sandbox proof, CI and cutover | all |
+
+Steps 1–3 come first because they reduce blast radius and depend on no design
+decision. Step 4's digest/version work may continue in parallel — it is internal
+to ERP and touches no rail. But:
+
+> **No payout release and no payout enablement passes the authorization
+> blocker.**
+
+The blocker is an as-built ERP fact, not a design concern: **an ERP READ
+permission (`payments:read`) currently satisfies the guard on
+`POST /transfers/{intent_id}/initiate`, which executes a real transfer.** The
+weakest admitted credential is the one that defines a path's real authorization,
+which makes every other control on that path decorative. A dedicated ERP
+security change is in progress on `fix/payout-execute-permission-containment`.
+This is a gate on RELEASE and ENABLEMENT and is independent of ADR-0063 § 7's
+gate on CONSTRUCTION; satisfying either does not satisfy the other. It changes
+no evidentiary claim in either direction — *"Implemented and tested; production
+enablement unconfirmed"* remains the required wording (ADR-0061 A7), and the
+blocker is a reason enablement must not be sought rather than evidence about
+whether it has happened.
+
 ### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
 
 `dotmac-integration` derives two kinds of runtime number from its own ledgers,

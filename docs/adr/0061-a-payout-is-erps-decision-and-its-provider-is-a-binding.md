@@ -6,15 +6,19 @@
 > applied there, the earlier record keeps the number, so a colliding new record
 > would have had to move anyway.
 
-- Status: Accepted. Amended 2026-08-24 (A1–A4) and again 2026-08-24 (A5–A7) —
-  see "Amendment — 2026-08-24" and "Second amendment — 2026-08-24" at the end
+- Status: Accepted. Amended 2026-08-24 (A1–A4), again 2026-08-24 (A5–A7), and
+  again 2026-08-24 (A8–A9) — see "Amendment — 2026-08-24", "Second amendment
+  — 2026-08-24" and "Third amendment — 2026-08-24" at the end
   of this record. A1–A4 name the interim payout owner exactly, rule that
   `dotmac-treasury` is not created yet, move the command schema onto the
   domain-owned `CapabilityContract`, and replace § 4 D3's "both refusals are
   locally correct" conclusion. A5–A7 remove `payments.customer.v1` from the
   public capability manifest, record ADR-0042 as the controlling record for
   disbursement ownership, and fix the evidentiary wording for every ERP payout
-  claim. No earlier text is rewritten.
+  claim. A8 KEEPS `payments.refund.v1` — closing A3's remaining open item the
+  OPPOSITE way to A5, because a refund passes the same test
+  `payments.customer.v1` failed — and A9 records that Treasury is not
+  automatically the refund owner. No earlier text is rewritten.
 - Date: 2026-08-24
 - Deciders: Michael
 - Supersedes: none
@@ -421,6 +425,14 @@ that has to be ARGUED in an accepted record rather than assumed because a
 provider publishes an endpoint (§ 9.2 of ADR-0024's amendment, applied to
 command surface).
 
+> **Applied to refund 2026-08-24 — see Amendment A8.** The test in this
+> paragraph is run against `payments.refund.v1` and it PASSES, which is the
+> opposite result to A5's. A refund has the independent business lifecycle and
+> financial consequence a provider-side customer record does not, so the
+> capability is KEPT — while its provider-shaped OPERATIONS are removed under
+> this same paragraph's rule. A8 states the distinguishing test so the two
+> outcomes do not read as an inconsistency.
+
 This puts `dotmac-connector-paystack`'s `payments.customer.v1` — today
 `create_customer | update_customer | read_customer` — on notice: it is a
 capability id minted around a provider's customer object, and it either earns
@@ -648,3 +660,161 @@ port source, so nothing downstream needs it either.
 *Corrects: the evidentiary framing of A1 and § 4, and the retention of
 `BatchTransferService` implied by "recorded as a disposal question". Related:
 `AGENTS.md` rule 30, ADR-0063 §§ 3, 7.*
+
+
+## Third amendment — 2026-08-24 (accepted corrections A8–A9)
+
+Two further corrections accepted the same day. Same convention as A1–A7: each
+names the section it corrects, nothing above is rewritten, and the superseded
+spot carries a short pointer.
+
+### A8. `payments.refund.v1` is KEPT — it passes the test `payments.customer.v1` failed
+
+A3 closed with an open item on `payments.customer.v1` and left the SAME test
+standing over `payments.refund.v1` (`packages/dotmac-connector-paystack/
+EXTRACTION.toml`: *"the same A3 test still applies to `payments.refund.v1`'s
+surface, and remains an open item there"*). A5 ran the test on customer and
+removed the capability. Running it on refund returns the OPPOSITE answer, and
+that is not an inconsistency — it is the test discriminating, which is what a
+test is for.
+
+**The distinguishing test, stated so a reader arriving at the two outcomes
+together can see why they differ.** A capability id must name a business act a
+Dotmac product DECIDES, with a lifecycle and a consequence of its own. Ask the
+question that separates the two cases:
+
+> **If the provider vanished tomorrow, would the thing still exist and still
+> need an owner?**
+
+| | `payments.customer.v1` — REMOVED (A5) | `payments.refund.v1` — KEPT (A8) |
+|---|---|---|
+| Is there a Dotmac decision? | No. Nothing in the fleet decides "create a customer at a payment provider". The decision is always *take this payment* | **Yes.** Someone with authority decides money goes BACK — whether the customer is entitled to it, how much, and against which original payment |
+| Independent lifecycle? | No. The provider record is a by-product of a charge, with no state a Dotmac owner transitions | **Yes.** Requested → submitted → ambiguous → settled / failed, with its own evidence and its own reconciliation |
+| Financial consequence? | None | **Yes.** A refund reverses a receivable, changes revenue and coverage, and is a reportable movement in its own right |
+| If the provider vanished? | Nothing survives — there was never a Dotmac object, only a mirror of `POST/PUT/GET /customer` | **The refund obligation survives.** It would be paid another way. The provider was the rail, never the reason |
+| Verdict | provider WORKFLOW wearing a Dotmac id | a **business act** that happens to be executed at a provider |
+
+One line: **a provider-side customer record is a by-product of an act; a refund
+IS the act.**
+
+**The split — five rows, and the boundary lines are the same ones § 1 draws for
+a payout:**
+
+| Layer | Owns |
+|---|---|
+| **Billing, or the named refund owner** | whether the customer is ENTITLED to a refund, for how much, against which original payment, and every receivable, revenue and coverage consequence of that decision |
+| **`payments.refund.v1`** | the AUTHORIZED, provider-neutral refund request — what was decided, carried without a provider's vocabulary anywhere in it |
+| **the Integrator** | provider transport: authentication, at-most-once dispatch, retry curve, dead-letter, evidence |
+| **the connector** | provider references and provider-side reconciliation — the Paystack transaction handle, the Flutterwave charge id, the derived key, the refund-list read |
+| **nobody** | a decision to refund again. See below |
+
+The refund owner is deliberately NOT named in this record. Today's live refund
+decisions are Billing/AR ones (`dotmac_sub`'s `_stage_financial_consequences`
+stages a refund consequence; ERP's `payment_service` posts one), but naming a
+shared owner needs the same product-first evidence A1 demanded before naming a
+payout owner, and nobody has produced it. **Until it is named, "Billing or the
+named refund owner" is the honest phrase, and this record uses it rather than
+inventing a role — which is precisely the error A1 corrected in § 1.**
+
+**An ambiguous refund is NEVER blindly retried.** This is § 1's rule about
+ambiguous payouts, and the reason it bites harder for a Paystack refund is
+worth writing down because the code makes it easy to misread:
+
+- Paystack's `/refund` **accepts no client reference**. There is no field in
+  which the engine's idempotency key can ride, and so **no provider-enforced
+  duplicate protection exists on this endpoint at all.**
+- The connector's response is correct and stays: it stamps the derived key into
+  `merchant_note` (`operations.py:626-630`) and classifies an unanswered send
+  as `AMBIGUOUS` (`operations.py:368`), so an ambiguous refund is resolved by
+  READING the provider's refund list for that transaction and matching on the
+  note (`operations.py:68-73`) — Sub's production mechanism, ported verbatim.
+- **That makes an ambiguous refund DECIDABLE. It does NOT make a second refund
+  REFUSED.** The distinction is the whole point: a duplicated payout is
+  refusable at Paystack because the derived reference rides the provider's own
+  `reference` field; a duplicated refund is not, because there is no such
+  field. Nothing at the provider stands between a re-request and a second
+  refund except the read.
+- Therefore: the reconciliation read is MANDATORY before any re-request, the
+  transport may never make one on its own, and a re-request after a conclusive
+  "no refund exists" is a **new authorized decision by the refund owner** —
+  the same shape as ADR-0063 § 4's rule that rerouting is an authorization
+  event and not a retry.
+
+**The surface: one command, no provider operations.** Applying A3's rule to
+refund, `payments.refund.v1` exposes exactly one command — `request_refund` —
+carrying:
+
+- **exact money** — an exact decimal amount with an explicit currency, never a
+  float, and **full-versus-partial declared explicitly**, never signalled by an
+  absent field. Today `dotmac-connector-flutterwave`'s `_refund_body` treats a
+  missing `amount` as a FULL refund at the provider
+  (`outbound.py:333-340`); absence-as-meaning is how a dropped key becomes
+  "refund everything", and the contract settles it with a discriminator;
+- the **original-payment correlation** — the product's own handle on the
+  payment being reversed, provider-neutral;
+- the **authorization reference** — which decision by the refund owner
+  authorized this, so the Integrator carries an authorized request rather than
+  a request; and
+- **idempotency identity** — the engine key, from which each connector derives
+  whatever its own wire needs.
+
+Everything provider-shaped moves INSIDE the connector, exactly as A3 moved
+recipient creation behind `submit_payout`. Named so the diff is not
+re-derived — the code removal is LATER, gated behind A2's schema seam and A3's
+result seam, like A5's:
+
+| Artifact | What must change |
+|---|---|
+| `…/dotmac_connector_paystack/delivery.py` | `ACTIONS_BY_CAPABILITY[PAYMENT_REFUND_CAPABILITY]` is `frozenset({"refund"})` (`:68`) — `refund` is Paystack's verb inside an `{"action", "params"}` envelope. Under the contract the product sends `request_refund`'s declared payload and the connector maps it. `delivery._MISALLOCATED`'s import-time bijection forces this and the `OPERATIONS` change into ONE commit, same constraint A5 records |
+| `…/operations.py` — the `refund` `_Operation` (`:368`) | **STAYS as it is.** `AMBIGUOUS` on an unanswered send and `needs_key=True` are correct and are the reason the capability is safe to keep. Do not "simplify" either while renaming the command |
+| `…/operations.py` — `_request`'s `refund` branch (`:613-630`) | it reads `params["transaction"]` — a Paystack transaction reference supplied BY THE PRODUCT. That is the provider-shaped field A3 forbids: the connector resolves its own provider handle from the contract's original-payment correlation. The `merchant_note` stamping at `:626-630` stays — it is provider protocol executed inside the connector |
+| `…/operations.py` — `_correlation` (`:1177-1184`) | after A5 drops `"customer"` the tuple is `("transaction", "recipient")`; the refund's handle then comes from the contract's correlation field, not from a provider-named payload key. The docstring's *"without it an ambiguous refund has no handle at all"* states the requirement the contract must keep satisfying |
+| `…/operations.py` — `_refund_result` (`:895-925`) | returns `{"refund_id": …}`, a provider-shaped reply. It becomes a normalized value under the contract's `result_schema` (A2) |
+| `…/dotmac_connector_flutterwave/outbound.py` — `_refund_body` (`:326-345`) | requires `provider_transaction_id` as a PRODUCT-supplied field (`:327-331`) — the same defect from the other side. It derives the charge id, and the `currency_minor_units` exponent it needs, from the contract's correlation and exact money, INSIDE the connector, and refuses no command for carrying a field another provider needs |
+| both connectors' `EXTRACTION.toml`, `README.md`, `COMPATIBILITY.md` | the capability ROW keeps its place — this is a retention, not a removal — and the command NAME becomes the contract's rather than the provider's |
+| refund STATUS reads | `GET /refund?transaction=…` and Flutterwave's refund-status read are reconciliation internals, never product-visible actions. A3's rule, unchanged |
+
+**Nothing here weakens A5.** The two amendments apply one test and report what
+it returned. A future capability is argued on the same ground: an independent
+lifecycle and a consequence a Dotmac owner is accountable for, not the fact
+that a provider publishes an endpoint.
+
+*Corrects: A3's closing scope — its open item over `payments.refund.v1`, carried
+in `packages/dotmac-connector-paystack/EXTRACTION.toml`, is now DECIDED and
+decided in favour of retention. Nothing in A5 changes. Related: ADR-0024 § 9.2,
+ADR-0063 §§ 4, 6, `AGENTS.md` rule 28 clauses (h), (i), (l).*
+
+### A9. Treasury is NOT automatically the refund owner
+
+Stated explicitly because the inference is easy and wrong: A8 keeps a
+money-moving capability, ADR-0063 authorizes a money-moving owner, and a reader
+one step ahead of the evidence will connect them.
+
+**They are not connected, and broadening ADR-0063 to cover refunds requires
+separate evidence.** Three reasons, in order of how hard they are to argue
+around:
+
+1. **ADR-0063 § 6 is a CLOSED surface of twelve items and a refund is not one
+   of them.** That section says in terms that *"anything not on this list is
+   another owner's, and adding to the list is an ADR, not an implementation
+   detail."* This is that rule being applied to its first candidate.
+2. **A refund is not a disbursement.** The six-owner split (A6) gives Treasury
+   the authorized payment instruction for what Payables says is OWED. A refund
+   reverses a receivable — money going back along the leg it came in — and its
+   consequence lands in Billing/AR and Accounting, not in Payables. Same
+   direction of cash, different obligation, different owner, different
+   controls.
+3. **"It moves money out, so Treasury does it" is department-shaped
+   reasoning** — the exact error A6 and ADR-0047 Amendment A1 corrected when
+   they broke *"Finance/Payables owns obligations, journals, disbursement and
+   settlement"* into six named owners. A rail is not an owner.
+
+What would be required to extend Treasury over refunds: a product-first
+inventory of the live refund decisions (`dotmac_sub`'s staged refund
+consequence, ERP's refund posting, and whatever Billing holds), a named refund
+owner, the lifecycle that owner would hold, and an ADR amending ADR-0063 § 6's
+closed list. Until all four exist, `payments.refund.v1` is carried by the
+Integrator on behalf of an owner ADR-0063 does not name and does not claim.
+
+*Corrects: nothing. It forecloses an inference A8 and ADR-0063 make available
+together. Related: ADR-0063 § 6, ADR-0047 Amendment A1, ADR-0042 § 3.*
