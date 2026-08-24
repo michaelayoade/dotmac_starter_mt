@@ -7,6 +7,13 @@ declared threading and message-identity traits. Thread creation and message
 recording are conflict-safe and replay the durable winner for exact redelivery;
 reusing a message identity with different content fails closed.
 
+Adopters preserve established UUIDs through the separate typed
+`import_conversation`, `import_message` and `import_read_state` history seam.
+Those commands validate the same owner contracts, preserve source timestamps,
+and replay only exact facts; they never trigger live reopen or activity-clock
+consequences. Runtime `create_*` commands remain responsible for minting new
+identity.
+
 It is intentionally not an omni-channel transport or contact-centre suite. It
 contains no provider client, connector configuration, webhook authentication,
 delivery retries, contact resolution, queue, assignment, presence, attachment

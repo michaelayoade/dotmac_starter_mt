@@ -149,12 +149,12 @@ def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:
     release workflow refuses the distribution and Sub cannot pin immutable
     artifacts for its backfill and shadow phases.
     """
-    result = _resolve("dotmac-inbox-operations", version="0.1.0a3")
+    result = _resolve("dotmac-inbox-operations", version="0.1.0a5")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
     assert emitted["kernel_floor"] == "0.1.0a91"
     assert emitted["db_schema"] == "mod_inbox_ops"
-    assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a3"
+    assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a5"
 
 
 def test_document_rendering_is_allowlisted_as_an_explicitly_stateless_module() -> None:

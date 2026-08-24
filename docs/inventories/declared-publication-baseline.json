@@ -77,6 +77,16 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
+    "dotmac-inbox": {
+      "declared": "0.1.0a2",
+      "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION. Version a2 adds the typed history-import owner required to replace Sub's temporary direct-mapped-class backfill; source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a2 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-inbox-operations": {
+      "declared": "0.1.0a5",
+      "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
