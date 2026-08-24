@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0a4 — unreleased
 
 Approved-template catalogue and attachment validation. Both gates run BEFORE
 the wire call, because both refusals are ones the connector already holds the
@@ -58,8 +58,16 @@ into what looks like a transport fault.
 - Internal only: the Graph host, client construction, typed refusals and HTTP
   outcome classification move to `wire.py` so the send, the upload and the
   catalogue read cannot disagree about retryability.
+- The exact a3 manifest is preserved as `DELIVERY_MANIFEST`, so an installation
+  pinned to the published a3 digest resolves to a known contract instead of an
+  unknown one.
 
-## 0.1.0a3 — unreleased
+## 0.1.0a3 — released
+
+Peeled tag `dotmac-connector-whatsapp-v0.1.0a3` points at commit
+`70459efd468dd2dcc9e31693b9910b04fec21447`. The heading below read
+"unreleased" after the tag was cut; it is corrected here rather than left as a
+claim that the artifact does not exist.
 
 - Adds `messaging.send.v1` in `ConnectorMode.DELIVERY` while retaining the
   exact published a1 and a2 ingress manifests.

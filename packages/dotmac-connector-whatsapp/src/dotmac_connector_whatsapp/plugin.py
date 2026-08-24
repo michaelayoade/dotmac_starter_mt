@@ -77,7 +77,7 @@ from dotmac_connector_whatsapp.wire import (
 CONNECTOR_KEY: Final = "meta_whatsapp"
 CAPABILITY_ID: Final = "messaging.receive.v1"
 SEND_CAPABILITY_ID: Final = "messaging.send.v1"
-VERSION: Final = "0.1.0a3"
+VERSION: Final = "0.1.0a4"
 SIGNATURE_HEADER: Final = "x-hub-signature-256"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
@@ -164,6 +164,19 @@ RECEIVE_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "properties": DELIVERY_CONFIG_PROPERTIES,
 }
 
+# Exact a3 send contract, kept verbatim because a3 IS PUBLISHED (peeled tag
+# `dotmac-connector-whatsapp-v0.1.0a3` -> commit
+# 70459efd468dd2dcc9e31693b9910b04fec21447). An installation pinned to that
+# manifest's digest must stay identifiable and deliberately adoptable; editing
+# it in place would leave one version number naming two different contracts,
+# which is the ambiguity a version exists to remove.
+PUBLISHED_SEND_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["phone_number_id", "graph_api_version", "timeout_seconds"],
+    "properties": DELIVERY_CONFIG_PROPERTIES,
+}
+
 SEND_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
@@ -231,6 +244,50 @@ INGRESS_MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(),
+)
+
+# Exact a3 contract — the first published DELIVERY revision. It stays inside
+# this distribution so a still-installed a3 pin resolves to a known manifest
+# rather than an unknown digest, exactly as a1 and a2 do above.
+DELIVERY_MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version="0.1.0a3",
+    spi_range=SpiRange.parse(">=1.4,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            capability_id=CAPABILITY_ID,
+            config_schema=RECEIVE_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.INGRESS}),
+        ),
+        CapabilityDeclaration(
+            capability_id=SEND_CAPABILITY_ID,
+            config_schema=PUBLISHED_SEND_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.DELIVERY}),
+        ),
+    ),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary exact-byte webhook signature key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook signature key during a bounded rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_VERIFY_TOKEN,
+            description="Subscription challenge comparison token.",
+        ),
+        SecretBindingDeclaration(
+            name=ACCESS_TOKEN,
+            required=False,
+            description=(
+                "Graph API access token; required when messaging.send.v1 is bound."
+            ),
+        ),
+    ),
+    egress=EgressDeclaration(hosts=(GRAPH_HOST,)),
 )
 
 MANIFEST: Final = ConnectorManifest(
@@ -1247,7 +1304,7 @@ class WhatsAppConnector:
 
     @property
     def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
-        return (HISTORICAL_MANIFEST, INGRESS_MANIFEST)
+        return (HISTORICAL_MANIFEST, INGRESS_MANIFEST, DELIVERY_MANIFEST)
 
     @property
     def modes(self) -> frozenset[ConnectorMode]:
