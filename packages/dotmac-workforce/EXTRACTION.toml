@@ -6,6 +6,11 @@ source_mode = "product-first"
 owner = "Workforce teams, skills, shifts, availability, capacity and dispatch decisions"
 contract = "Own service teams, skill vocabulary, memberships, worker skill evidence, shifts, operational availability/capacity and opaque-work dispatch decisions. NOT employee identity/employment, payroll/leave/attendance consequences, Inbox agent presence, Work Order lifecycle or route execution."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_sub:app/models/service_team.py",
   "dotmac_sub:app/models/dispatch.py",
@@ -45,3 +50,22 @@ first_cutover = "Sub is the first team/capacity/dispatch cutover after history b
 shadow_and_drift = "Compare team/skill/membership identities, proficiency, shift window/capacity, availability source/window and dispatch work/team/worker/skill/time/rationale."
 local_copy_retirement = "Retire Sub team/capacity/dispatch writers, ERP skill/schedule decision writers and CRM workforce decision copies in their authorized cutovers; People and Work Orders keep their own lifecycle writers."
 next_action = "Compose first in Sub for team/dispatch shadow, then migrate ERP skills/schedules and convert CRM to a reconciled API projection."
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/workforce.py", "app/services/workforce.py", "app/services/dotmac_erp/technician_sync.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/people/attendance/shift_type.py", "app/models/people/scheduling/shift_schedule.py", "app/services/people/scheduling/schedule_generator.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/service_team.py", "app/models/dispatch.py", "app/services/service_team_lifecycle.py", "app/services/service_team_composition.py"]

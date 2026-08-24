@@ -977,6 +977,19 @@ def record_contract_version(
             content_digest=digest,
         )
         session.add(version)
+        # Flush the version explicitly so PostgreSQL never receives a contract
+        # LINE before the version it references. Without this the ordering is
+        # decided by whatever else happens to flush first — and with
+        # `autoflush=False` nothing does, so the line insert reaches the
+        # database first and dies on `fk_contract_lines_version`, surfacing as a
+        # conflict error that reads like a real conflict and is not one.
+        #
+        # A module must not depend on its host assembly's session settings.
+        # `dotmac-billing` already flushes its obligation for exactly this
+        # reason; this is the same rule, applied where it was missing. Found by
+        # Dotmac Cloud, whose `DatabaseRuntime` sets `autoflush=False`
+        # deliberately, composing this module for the first time.
+        session.flush()
         line_keys: list[UUID] = []
         first_period = invoice_period(cadence=cadence, contract_start=command.starts_at)
         due_at = (

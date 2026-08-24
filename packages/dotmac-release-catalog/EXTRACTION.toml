@@ -33,6 +33,12 @@ source_paths = [
   "dotmac_vendor_control_plane:alembic/versions/v002_offer_versions.py",
   "dotmac_starter_mt:packages/dotmac-release-catalog/src/dotmac_release_catalog",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 preserved_tests = [
   # Nothing to preserve: no source implementation means no behavioural proof to
   # port. The tests below are this module's own, written with the code.
@@ -57,3 +63,29 @@ first_cutover = "Completed 2026-08-17 in dotmac_vendor_control_plane. Vendor exa
 shadow_and_drift = "No shadow phase and no drift window: there is no existing implementation to run beside, and no rows to migrate. The parity question this package replaces is a design one — whether the deferred channel/pin half can be added without reshaping what ships here — answered by keeping selection OUT of the module entirely, so adding channels later adds tables rather than changing these two."
 local_copy_retirement = "Complete for cutover 1. The Vendor assembly has no release-artifact table or local catalogue writer: vendor_cp.release_evidence is a thin typed ingestion adapter over the module's publish/attest seams, and scripts/catalogue_product_release.py is its operator boundary. The exact runtime pin is operator-owned desired state rather than a second catalogue. The remaining inverse obligation is unchanged: licence_delivery_targets must not become artifact or deployment authority while the fleet slice is still separate."
 next_action = "Hold `adopted` until a second real vendor or OEM control plane consumes the same contract; only that independent consumer can earn `reuse-proven`, because product data planes are deliberately isolated from mod_rel. Do not manufacture a second consumer or add channels, pins or artifact selection before update authority exists. Keep the Vendor production evidence current when its first-adopter implementation changes."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/release_evidence/service.py", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/network.py", "app/services/web_network_firmware_catalog.py", "app/web/admin/network_firmware_catalog.py"]

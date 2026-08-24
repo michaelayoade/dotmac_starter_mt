@@ -37,11 +37,18 @@ contract = "The generic machinery of running a connector: installations, immutab
 planes = "platform-only"
 
 # ERP and CRM are listed because the product-first rule required inventorying
-# them, NOT because either supplied an implementation. Neither references any of
-# Sub's seven integration tables; what they have is their own direct connector
-# surface, already frozen and counted in external-connector-sources.md (ERP 21,
-# CRM 33 `http_client` files). CRM's is deletion rather than migration.
+# them, not because either is the qualifying implementation. Neither references
+# Sub's seven integration tables. CRM nevertheless has an active narrower
+# generic engine of its own -- integration_targets, integration_jobs and
+# integration_runs with mutating APIs and product call sites -- alongside the
+# direct connector surface frozen in external-connector-sources.md. Both are
+# deletion rather than a second extraction source.
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm"]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   # The seven tables — the mature part, and the reason this is product-first
   # rather than a design exercise. Leasing, idempotency keys, payload digests,
@@ -59,6 +66,9 @@ source_paths = [
   "dotmac_sub:app/services/integrations/egress_gateway.py",
   "dotmac_sub:app/services/integrations/egress_policy.py",
   "dotmac_sub:app/services/integrations/external_runner.py",
+  "dotmac_crm:app/models/integration.py",
+  "dotmac_crm:app/services/integration.py",
+  "dotmac_crm:app/api/integrations.py",
   # The product-owned comparison contract that supplies the closed verdict,
   # blocker and field-name vocabulary. Its domain reads stay in Sub; only the
   # provider-neutral aggregation/refusal shape is ported.
@@ -174,7 +184,7 @@ open_questions = []
 # same smuggled default as a dataclass field with a value in it.
 payload_retention = "NEW behaviour, not ported: Sub retains integration payloads indefinitely and has no purge, hold or retention setting to port. Inbound redaction rewrites payload/headers/consequence VALUES and preserves receipt deduplication through the longer replay window. Outbound redaction acts only on delivered attempts and preserves the installation-scoped idempotency key, payload digest, state and typed provider evidence; retryable, dead-letter and reconciliation-required payloads remain available for repair. Separate receipt and delivery hold tables keep database referential integrity exact. Neither period nor the legal-policy owner has a default in code or in this dossier."
 
-local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
+local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP retires its direct provider clients, webhooks, credentials, tasks and checkpoints through the external-connector ratchet. CRM additionally retires integration_targets, integration_jobs, integration_runs, their mutating API/service paths and every direct connector; recreating any of them as a plugin would preserve the architecture being removed. Each ratchet is lowered in the SAME change as its cutover or deletion."
 
 next_action = "Publish dotmac-integration a15, exact-pin it with dotmac-connector-whatsapp a3 in dotmac_integrator, then merge the provider-neutral command intake and delivery pump. Shadow Sub's local WhatsApp outbox against the Integrator ledger and compare request digests, classifications and provider references before retiring Sub's direct Graph client/retry path and lowering its external-connector ratchet. Settlement connectors continue their independently tracked descriptor-v2 cutovers."
 
@@ -217,3 +227,22 @@ next_action = "Publish dotmac-integration a15, exact-pin it with dotmac-connecto
 "exclude-retiring" = "Covers the legacy ConnectorConfig surface, which is being retired rather than ported. Porting it would preserve the architecture being removed."
 "exclude-superseded" = "Covers storing and masking secret VALUES. The new contract stores REFERENCES only, so the behaviour under test cannot occur — a ported test would assert a property the design forbids."
 "move-to-assembly" = "Container/runtime end-to-end verification. Belongs to the dotmac_integrator deployment, not to the module."
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/integration.py", "app/services/integration.py", "app/api/integrations.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["docs/external-connector-surface.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/integration_platform.py", "app/services/integrations/installations.py", "app/services/integrations/manifest.py", "app/services/integrations/registry.py"]

@@ -1,6 +1,6 @@
 # External identity: source audit
 
-**Date:** 2026-08-14
+**Date:** 2026-08-14; current-tree amendment 2026-08-23
 **Scope:** every Dotmac repository, for two capabilities that are usually
 confused: the OIDC/OAuth2 **protocol client**, and the **local binding** from a
 verified external subject to a local identity.
@@ -16,16 +16,21 @@ product has both halves.**
 
 | | protocol client | local subject→identity binding | provider registration |
 |---|---|---|---|
-| ERP | `app/services/sso/oidc.py` | `federated_identities` | none (one global config value) |
+| ERP | none — deleted in ERP PR #302 | retained empty `federated_identities`, with no reader or writer | none |
 | Sub | none | none | `authentication_bindings` |
 | CRM | Meta OAuth2 only (not SSO) | none | `ConnectorConfig` (integration, not auth) |
 | Vendor CP | none | none | none |
 | Academy | none | none | none |
 | starter | none | **`external_identity_bindings` (this change)** | none |
 
-That asymmetry is the whole finding. ERP knows *which external subject is which
-person* but cannot say *which provider said so*; Sub knows *which configured
-verifier proved you are a party* but has no issuer or subject column anywhere.
+That asymmetry was the original finding. The current ERP tree at
+`0dc07e4b6dd36260c9510a7115dbdc656e2a19a5` no longer accepts an external
+identity assertion: the production inspection found OIDC disabled, no provider
+configured and zero binding rows, and ERP PR #302 deleted the unshipped client.
+Sections A and D4 preserve the source audit that shaped the shared contracts;
+they are historical extraction evidence, not a claim that ERP still runs an
+OIDC protocol writer. The retained empty table is a separate binding-retirement
+concern and does not make ERP a protocol source.
 
 ## A. ERP — the external-subject half
 
@@ -153,11 +158,18 @@ without the table is the trust DIRECTION: the resolver keys on the whole
 `(tenant, provider_binding, issuer, subject)` tuple, and the trusted component is
 the one that did not arrive inside the credential being verified.
 
-### D4. The protocol client is a SEPARATE decision, and ERP does not qualify as a
+### D4. The protocol client is a SEPARATE decision, and ERP was not a qualifying
 production source
 
-ERP's `oidc.py` is the fleet's only real OIDC implementation, and every
-repository-side artifact a deployment would touch points the same way — **production adoption is UNVERIFIED, not disproven**:
+The paragraphs below record the 2026-08-14 pre-inspection decision. It has now
+resolved more strongly: ERP's implementation was never enabled, was deleted in
+PR #302, and the current exact tree has no protocol reader or writer. The
+historical finding still explains why its code was not used as trusted source.
+
+At the audit revision, ERP's `oidc.py` was the fleet's only real OIDC
+implementation, and every repository-side artifact a deployment would touch
+pointed the same way — **production adoption was then unverified, not
+disproven**:
 `.env.example` default `OIDC_ENABLED=false`, no OIDC key in `docker-compose.yml`,
 none in `deploy/systemd/`, a single commit (`bded8aa9`, 2026-07-20), and its own
 contract doc written as a future cutover gate. That is evidence of absence in

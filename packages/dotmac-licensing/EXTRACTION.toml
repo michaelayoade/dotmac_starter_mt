@@ -18,6 +18,11 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+]
 source_paths = [
   "dotmac_vendor_control_plane:src/vendor_cp/licensing/service.py",
   "dotmac_vendor_control_plane:src/vendor_cp/licensing/models.py",
@@ -56,3 +61,22 @@ first_cutover = "Completed GREENFIELD on 2026-08-21 in dotmac_vendor_control_pla
 shadow_and_drift = "No shadow phase is owed: the capability exists in exactly one product, so there is no second writer to reconcile against and no parallel evaluator to compare. What IS owed at cutover is a data-bearing migration under three constraints that have no equivalent in the other modules. (1) Every issued digest and envelope must be preserved BYTE-FOR-BYTE. An envelope is signed; re-serialising it changes the digest, which invalidates the signature and turns every deployed licence into one the receiver rejects. The migration copies bytes and never rebuilds a payload. (2) Signing keys migrate as PUBLIC material only, and the private half is re-installed through the product's secret seam at the new composition — never read, exported or copied by the migration. (3) The revocation list lineage must continue at the existing list_version, and the first list published after cutover must be a superset of the last one published before it; the cumulative rule spans the cutover, because the fleet's imported state does not reset when the issuer's code does. A populated legacy table encountered at cutover must fail the migration, not be silently skipped."
 local_copy_retirement = "Complete for cutover 1 on 2026-08-21: the issuer half of src/vendor_cp/licensing/ and the five local issuer tables (licences, licence_issuances, licence_signing_keys, licence_revocation_lists, licence_revocation_entries) are gone, verified absent on the production database. Original audit text follows. Owed by dotmac_vendor_control_plane at cutover: the ISSUER half of src/vendor_cp/licensing/ — service.py, models.py, revocation.py, revocation_models.py, signer.py, ops.py — plus the licences, licence_issuances, licence_signing_keys, licence_revocation_entries and licence_revocation_lists tables. The vendor keeps its routes, its console screens, and a thin adapter that builds a LicenceSigner from OpenBao-materialised key files. It also keeps, unchanged and NOT retired by this extraction, the DELIVERY half — transport.py, delivery_models.py and the delivery portion of projection.py — until that capability is composed onto the Integrator under ADR-0024; conflating the two retirements would strand delivery with no owner. No product may keep a compatibility licences table or a parallel issuer."
 next_action = "Hold at `adopted`; `reuse-proven` requires a second real control plane. The DELIVERY half is a separate, still-open cutover: Vendor ADR-0010 moves transport, retries, health and repair to dotmac-integration in the Integrator. Gate 2a landed 2026-08-22 (Vendor PR #72) — three authenticated source ports, a digest-pinned licence-source contract and correlated idempotent acknowledgement, with NO activation. Gate 2b (deployment-owned destination descriptor, Integrator reconciliation, a real connector, mirror mode) is outstanding. This module owns valid acknowledgements and the licence lifecycle throughout; Vendor's remaining delivery tables are the estate ADR-0010 retires, not this module's concern."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/licensing/adapter.py", "src/vendor_cp/licensing_authority.py", "src/vendor_cp/licensing/transport.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

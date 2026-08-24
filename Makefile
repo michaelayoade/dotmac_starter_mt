@@ -56,10 +56,8 @@ publication-check: ## Report every distribution declaring a version nobody can i
 	poetry run python scripts/declared_publication_sweep.py --check
 publication-baseline: ## Regenerate the declared-but-unpublished ledger (state the reason; commit the diff in the same change)
 	poetry run python scripts/declared_publication_sweep.py --write-baseline
-product-writer-check: ## Fail if a prose-only writer claim was added, or a retired one still excused
-	poetry run python scripts/product_writer_sweep.py --check
-product-writer-baseline: ## Regenerate the prose-only writer-claim ratchet (commit the diff in the same change)
-	poetry run python scripts/product_writer_sweep.py --write-baseline
+product-writer-check: ## Require one typed, exact-pinned writer claim for every inventoried product
+	poetry run python scripts/product_writer_check.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
 module-catalog-check: ## Fail if the committed module catalogue is stale
@@ -145,6 +143,6 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
 	publication-check publication-baseline module-catalog module-catalog-check \
-	product-writer-check product-writer-baseline \
+	product-writer-check \
 	docker-build docker-dev \
 	bump-version deploy
