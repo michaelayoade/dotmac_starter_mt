@@ -119,10 +119,16 @@ class RatedObligationOutputV1:
                 "contracts.invalid_rating_factor",
                 "Rate units and proration factor fall outside their valid ranges.",
             )
-        if self.pre_tax_amount.amount < 0 or self.unit_price.amount < 0:
+        if self.pre_tax_amount.amount < 0:
             raise SubscriptionDataError(
                 "contracts.negative_amount",
                 "Rated subscription facts never carry negative amounts.",
+            )
+        if self.unit_price.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_contract_price",
+                "Rated subscription facts require a strictly positive "
+                "contract-line price.",
             )
         if {
             self.currency,

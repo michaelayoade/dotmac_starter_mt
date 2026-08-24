@@ -113,3 +113,31 @@ an input assertion, not the posting decision.
 **Merge Accounting and Payables.** Payables is a document/subledger owner and
 Accounting is the statutory ledger owner. Combining them makes other producers
 second-class branches and prevents either module being adopted independently.
+
+## Amendment, 2026-08-24 — ERP adopts through governed opening state
+
+ERP's first-adopter data path changes; Accounting's ownership boundary does
+not. Dotmac ERP will be recomposed as a fresh installation and will not replay
+the legacy journal, posted-ledger or posting-batch history into
+`dotmac-accounting`.
+
+The module becomes authoritative at one approved opening instant. ERP supplies
+reviewed masters through typed module commands, Finance supplies a signed trial
+balance and the subsidiary schedules supporting its controls, and Accounting
+records one balanced opening chain through its normal journal lifecycle. Open
+operational items are admitted by their own domain owners and must reconcile to
+the relevant opening controls. Legacy ERP remains the read-only authority for
+all earlier transactions.
+
+This is not the rejected “copy ERP GL wholesale” alternative in a different
+form. No legacy transaction row is copied, no full-history equality is claimed,
+and no database restore is an admission mechanism. Behaviour parity is proved
+from versioned accepted inputs on independently migrated clean databases.
+
+ADR-0031's currently written sealing mechanism assumes the retiring and
+replacement authorities can be observed, locked and switched in one database
+transaction. A fresh ERP database cannot honestly make that claim across two
+independent databases. The final production switch is therefore blocked until
+an accepted cutover decision defines the cross-database write fence, final
+evidence instant, failure recovery and traffic switch. This amendment does not
+silently weaken that fleet invariant.
