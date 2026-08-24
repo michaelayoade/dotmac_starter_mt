@@ -792,6 +792,7 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
         TimerScheduleResult,
     )
     from dotmac_subscriptions.commands import (
+        OfferPricingMode,
         PublishOfferVersionCommand,
         RecordSubscriptionContractVersionCommand,
     )
@@ -838,6 +839,8 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
                     offer_id=None,
                     offer_code="autoflush.guard",
                     offer_name="Autoflush Guard",
+                    charge_model_code="recurring.flat",
+                    pricing_mode=OfferPricingMode.catalog_price,
                     version=1,
                     prices=(
                         OfferPriceInput(
