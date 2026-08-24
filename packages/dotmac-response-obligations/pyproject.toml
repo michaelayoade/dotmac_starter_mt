@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dotmac-response-obligations"
+version = "0.1.0a1"
+description = "Response-time targets, running clocks, paused time and breach observations"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_response_obligations", from = "src" }]
+include = [
+  { path = "src/dotmac_response_obligations/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_response_obligations/migrations/**/*", format = ["sdist", "wheel"] },
+]
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a95"
+sqlalchemy = "^2.0"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1773,6 +1773,24 @@ type = "directory"
 url = "packages/dotmac-reseller-management"
 
 [[package]]
+name = "dotmac-response-obligations"
+version = "0.1.0a1"
+description = "Response-time targets, running clocks, paused time and breach observations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a95"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-response-obligations"
+
+[[package]]
 name = "dotmac-sales"
 version = "0.1.0a1"
 description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
@@ -4294,4 +4312,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "e022b0981d627ff75bbda6d61c15bf094129e3954e768d7558a1ea496e3ddd73"
+content-hash = "7d3c6d73cec8742aaf61fb7f37518ed54727e6d68a4a7a49dd8e439f7add894e"
