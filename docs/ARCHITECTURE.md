@@ -62,7 +62,7 @@ The first concrete plugin follows that split exactly:
 | Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes; the WABA message-template catalogue read as typed provider observations; outbound text/template/media sends that refuse before the wire what the provider would reject anyway (unapproved template, variable arity the catalogue does not describe, unsupported MIME type, oversize attachment, a caption or filename the media type cannot carry) | `dotmac-connector-whatsapp` (`meta_whatsapp`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY + `messaging.templates.read.v1` POLL) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation, customer-window decision, template selection or product consequence. The template catalogue is an in-process memo under a configured freshness policy, never persisted and never a second authority on approval |
 | Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes; outbound Messenger/Instagram Direct sends and Facebook/Instagram comment replies, one Graph call per product-decided command, with Graph error codes classified into typed outcomes | `dotmac-connector-meta-social` (`meta_social`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY) | Owns no messaging-window decision, no permission to respond, no profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
 | Flutterwave API v4 exact-byte ingress authentication, OAuth-authenticated paged charge reconciliation, provider-event identity, exact amount/currency translation, and outbound payment-initialization and refund commands | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL on `payments.settlement.observation.v1`, DELIVERY on `payments.intent.v1` and `payments.refund.v1`) | Owns no v3 fallback, transfer/payout surface, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence. Outbound classifies only: a decline is terminal, a timeout after send is reconciliation-required, and the engine's idempotency key rides the provider's own header |
-| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1** |
+| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1.** It also still declares `payments.customer.v1` (`create_customer | update_customer | read_customer`) — as built, and RULED OUT: ADR-0061 Amendment A5 REMOVES that capability from the public manifest (no independent Dotmac business lifecycle; it is Paystack's `/customer` REST surface). The code removal is part of the payout refactor, gated behind the capability-schema and result seams; A5 holds the artifact-by-artifact list |
 | Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
 | Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
 | Remita authenticated RRR status polling, provider-neutral response translation, and outbound RRR issuance under the provider SHA-512 request contract | `dotmac-connector-remita` (`remita`, POLL on `payments.reference.status.observation.v1`, DELIVERY on `payments.reference.issuance.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence. Issuance carries the PRODUCT's stable `orderId` and mints none of its own, because Remita accepts no idempotency header and `orderId` is its only natural key |
@@ -71,7 +71,7 @@ The first concrete plugin follows that split exactly:
 | Whether a stored outbound command may become a live effect again — replay by product idempotency key, dead-letter inspection and operator repair, and resolution of an INDETERMINATE attempt from provider evidence | `dotmac-integration.outbound_repair` | One decision (`classify_repair`) behind every entry point, so inspection and repair cannot disagree; re-dispatches only the row's own stored request checked against its enqueue digest, never a rebuilt payload; returns the recorded outcome for a landed effect instead of re-sending it; refuses to replay an ambiguous attempt; and owns no queue reset (`operations.replay_delivery`), no at-most-once ledger (`dotmac_kernel.idempotency`), no audit ledger (`dotmac_kernel.audit`), no outcome vocabulary (`retry.OutcomeStatus`) and no table of its own |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
-| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **`PaymentService`** (`dotmac_erp:app/services/finance/payments/payment_service.py` — `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal`) — the SOLE interim owner. `BatchTransferService` is dead code (zero callers, not exported, zero tests) and is NOT an owner. ADR-0061 § 1 + Amendment A1 — the owner ADR-0042 § 3 left unnamed, named as services rather than as a role. No `dotmac-treasury` package or namespace exists or may be allocated before the product-first dossier A1 requires | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
+| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **`PaymentService`** (`dotmac_erp:app/services/finance/payments/payment_service.py` — `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal`) — the SOLE interim owner. `BatchTransferService` is dead code (zero callers, not exported, zero tests) and is NOT an owner. ADR-0061 § 1 + Amendment A1 — the owner ADR-0042 § 3 left unnamed, named as services rather than as a role. **Implemented and tested; production enablement unconfirmed** (ADR-0061 A7 — the path is gated by `paystack_transfers_enabled`, which is runtime data, and no deployment target has been named). `BatchTransferService` is to be DELETED as security-sensitive dead code (A7). No `dotmac-treasury` package or namespace exists or may be allocated: ADR-0063 scopes a narrow `PaymentInstruction` owner and gates its construction on ERP's `PaymentIntent.status` three-writer fix | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
 
 External advertising and social-media observations use the same application
 boundary with a separate domain owner. The tenant-only
@@ -215,6 +215,80 @@ implementation (Paystack), and even with a second one the command shapes
 differ. ADR-0061 § 5 is the ordered list of what must become true before
 interchangeability may be claimed; ADR-0024 § 8.4 records the same gap from the
 contract side.
+
+### Disbursement has six owners, and none of them is a department (2026-08-24)
+
+As built, this repository holds no disbursement code at all: the payout decision
+lives in ERP and the transport lives in `dotmac-integration` plus a connector.
+What it does hold is the ownership register above, and until 2026-08-24 two
+accepted records disagreed about one row of it.
+
+ADR-0047 § Context (2026-08-18) said *"Finance/Payables owns obligations,
+journals, disbursement and settlement"*. ADR-0042 (2026-08-19, one day later,
+and devoted specifically to separating liabilities from payment execution) said
+in its § 3 that Payables *"does not choose a bank account, payment rail,
+provider, batch or execution time and does not perform network I/O"* and that a
+**Treasury/payment owner performs disbursement**. **ADR-0042 controls.**
+ADR-0047's sentence was written to say "not Expenses" and is narrowed to that by
+its own dated Amendment A1; "Finance/Payables" is a department, and a department
+cannot be pointed at in a review — the same error ADR-0061 A1 corrected when it
+replaced "ERP's Treasury/payment owner" with a named service.
+
+| Owner | Decision | Record |
+|---|---|---|
+| Expenses | whether a claim is eligible for reimbursement | ADR-0047 |
+| Payables | what is owed, to whom, in what currency and when | ADR-0042 §§ 1, 3 |
+| Treasury | the authorized payment instruction, rail submission and resolution | ADR-0042 § 3's unnamed owner; named for payouts by ADR-0061 § 1 + A1; scoped by ADR-0063 |
+| Integrator | provider authentication, transport and evidence | ADR-0024 §§ 6–7, ADR-0061 § 1 |
+| Banking | statement/cash observations and reconciliation evidence | ADR-0044 |
+| Accounting | journal and ledger consequences | ADR-0041 |
+
+Six owners, six failure modes, six sets of controls — which is why the compound
+sentence had to be broken up rather than reworded.
+
+**Treasury's scope, and why nothing is being built.** ADR-0063 authorizes a
+narrow shared owner of `PaymentInstruction`
+(`authorized → submitting → ambiguous | submitted → settled | failed |
+reversed`), grouped by `PaymentRun` rather than by a provider batch, over two
+rails from the beginning: an API rail through the Integrator bindable to
+Paystack or Flutterwave v4, and a manual bank-file rail for AP and payroll.
+Three of its invariants are worth restating here because they are the ones a
+future implementer is most likely to violate by accident:
+
+- **Exporting a spreadsheet must not mark an instruction paid.** An export
+  proves a file was produced. `submitted` needs operator submission evidence;
+  `settled` needs Banking's settlement observation.
+- **Run progress is derived from instruction outcomes, never from a batch-level
+  response.** Provider calls are not atomic: ten transfers can return seven
+  successes, two failures and one ambiguous result, and a batch aggregate that
+  believes the batch response marks the unknown one paid.
+- **Rail routing is pre-submission only.** A Paystack timeout may have
+  succeeded; a router that retries it through Flutterwave pays the beneficiary
+  twice. The rail is stamped immutably at authorization, an ambiguous result
+  reconciles against the ORIGINAL provider, and rerouting needs a conclusively
+  unsubmitted or terminally failed instruction plus a new authorization.
+  Paystack ↔ Flutterwave interchangeability is safe CONFIGURATION, not
+  cross-provider retry.
+
+**The gate:** none of it is constructed before ERP's `PaymentIntent.status`
+three-writer violation is fixed in the ERP repository. Extraction copies a
+lifecycle; a lifecycle with three writers has no owner, and porting it would
+make one product's defect a shared module's contract. No `dotmac-treasury`
+distribution, namespace, `mod_*` short code or migration lineage may be
+allocated until then (ADR-0063 § 7, extending ADR-0061 A1).
+
+**Evidentiary wording for ERP payout, required verbatim:
+"Implemented and tested; production enablement unconfirmed."** The path is
+gated by `paystack_transfers_enabled`, which is runtime data; confirming it
+needs an explicitly named deployment target and a `deployment_run` oracle
+(`AGENTS.md` rule 30), and no target has been named. This blocks no
+construction — it blocks any claim of production parity, adoption or
+retirement, in both directions. `BatchTransferService` is to be DELETED as
+security-sensitive dead code now that the product-first dossier
+`docs/inventories/treasury-payment-execution-sources.md` § 1.3 preserves its
+disposition (ADR-0061 A7). That dossier is produced on the sibling branch
+`docs/treasury-product-first-dossier` and is the evidence base for ADR-0063;
+its own § 12.3 G5 asks for that record.
 
 ### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
 

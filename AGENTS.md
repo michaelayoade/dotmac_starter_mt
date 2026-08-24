@@ -381,10 +381,12 @@ specifics) points here and must never fork these rules.
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
 
-    **Outbound clauses added 2026-08-24 and corrected the same day — REVIEW
-    DISCIPLINE, not guards.** Stated here because rule 25 forbids implying
-    enforcement that does not exist: no check in this repository catches any of
-    the following today. Clause *(f)* names the gate that has to be built
+    **Outbound clauses added 2026-08-24, corrected the same day, and extended
+    the same day with *(i)*–*(k)* — REVIEW DISCIPLINE, not guards.** Stated here
+    because rule 25 forbids implying enforcement that does not exist: no check
+    in this repository catches any of the following today, and clauses *(j)* and
+    *(k)* additionally concern a repository this one does not contain.
+    Clause *(f)* names the gate that has to be built
     before most of them can be checked at all; until it exists these are read
     by reviewers, not by CI, and ADR-0024's "Enforcement and evidence"
     additions name the missing machinery.
@@ -418,11 +420,13 @@ specifics) points here and must never fork these rules.
     (`dotmac_erp:app/services/finance/payments/payment_service.py`) owns the
     payout decision and the transfer lifecycle, and is the SOLE interim owner.
     `BatchTransferService` is dead code — zero callers, not exported, zero
-    tests — and is NOT an owner. A shared
-    `dotmac-treasury` distribution or namespace is NOT to be created yet: rule
-    22's product-first dossier must first cover both services, `dotmac-payments`,
-    `dotmac-banking`, `dotmac-accounting` and the approvals/payment-authorization
-    paths, and establish the lifecycle a reusable owner would hold.
+    tests — and is NOT an owner; it is a DELETION (clause *(k)*). A shared
+    `dotmac-treasury` distribution or namespace is STILL NOT to be created:
+    rule 22's product-first dossier now exists
+    (`docs/inventories/treasury-payment-execution-sources.md`, on the sibling
+    branch `docs/treasury-product-first-dossier`; its § 12.3 G5 asks for the
+    record in terms), and its answer is ADR-0063 — clause *(j)*. The release
+    condition is no longer "a dossier exists" but "the ERP defect is fixed".
     *(e)* **Modules own metric DEFINITIONS; assemblies own EXPORTERS.** A shared
     module declares stable, namespaced metric names and derives values from its
     own facts at read time; it ships no metrics client, counter registry or
@@ -461,7 +465,79 @@ specifics) points here and must never fork these rules.
     recipient codes and transfer references are normalized RESULTS or connector
     internals, never separate product-visible provider actions, unless a
     genuinely independent lifecycle is argued rather than assumed.
-    (ADR-0061 + its 2026-08-24 amendment; ADR-0062; ADR-0024 §§ 8–12)
+    *(i)* **A capability that names provider workflow is REMOVED, not
+    deprecated.** Applying *(h)*'s test to a shipped id:
+    `payments.customer.v1` (`create_customer | update_customer |
+    read_customer`, `dotmac-connector-paystack`) has **no independent Dotmac
+    business lifecycle** — it is Paystack's `/customer` REST surface with a
+    Dotmac id painted on it, and no product decides "create a customer at a
+    payment provider" as an act of its own. It is REMOVED from the public
+    capability manifest. Instead: the product Customer owner keeps customer
+    identity; `payments.intent.v1` carries the required customer EVIDENCE; the
+    connector creates or resolves any provider-side customer INTERNALLY; the
+    result returns an OPAQUE Integrator correlation where one is needed;
+    saved-instrument charging consumes an opaque PAYMENT-METHOD correlation
+    (the `authorization_code` the connector already takes), never a provider
+    customer code; and customer read/create/update disappear from the manifest.
+    No compatibility window, because no product binds it, so *(g)*'s succession
+    rule is not engaged. A future product needing genuine, independent
+    provider-customer synchronization arrives with its own OWNER, CONSUMER,
+    LIFECYCLE and SCHEMA in an accepted record — today's Paystack
+    synchronization is not preserved merely because it exists. The code removal
+    is part of the payout refactor, gated behind *(f)*'s schema seam and *(h)*'s
+    result seam; ADR-0061 A5 holds the artifact-by-artifact list, including the
+    fact that `delivery._MISALLOCATED`'s import-time bijection check forces the
+    `OPERATIONS` and `ACTIONS_BY_CAPABILITY` deletions into ONE change.
+    *(j)* **Treasury owns the PAYMENT INSTRUCTION, and the extraction is
+    GATED.** The authorized owner is narrow: `PaymentInstruction`
+    (`authorized → submitting → ambiguous | submitted → settled | failed |
+    reversed`), grouped by `PaymentRun`, over TWO rails from the beginning — an
+    Integrator API rail bindable to Paystack or Flutterwave v4, and a manual
+    bank-file rail for AP and payroll. Four invariants carry the weight:
+    **exporting a spreadsheet must not mark an instruction paid** (`submitted`
+    needs operator submission evidence, `settled` needs Banking's settlement
+    observation); **run progress is DERIVED from instruction outcomes and never
+    from a batch-level response**, because provider calls are not atomic — ten
+    transfers can return seven successes, two failures and one ambiguous
+    result; **rail routing is PRE-SUBMISSION only** — the rail is stamped
+    immutably at authorization, an ambiguous result reconciles against the
+    ORIGINAL provider, and rerouting needs a conclusively unsubmitted or
+    terminally failed instruction plus a new authorization, so Paystack ↔
+    Flutterwave interchangeability is safe CONFIGURATION and never
+    cross-provider retry; and **a provider recipient code is never business
+    identity** — Party/People/Supplier owns the payee, Banking or the directory
+    owner owns verified bank details, Treasury records an immutable versioned
+    `PayoutDestinationSnapshot` at authorization, the Integrator holds the
+    provider correlation scoped to `(installation, destination fingerprint)`,
+    changing bank details creates a new destination version requiring
+    reauthorization, and `create_paystack_recipient` is never a product command.
+    **The gate: none of it is built before ERP's `PaymentIntent.status`
+    three-writer violation is fixed** — porting a three-writer state into a
+    shared module would preserve the defect and give every adopter a copy of
+    it. Until then, no `dotmac-treasury` distribution, namespace, `mod_*` short
+    code or migration lineage. `BatchTransferService` is not the port source;
+    `PaymentRun` derives from the live AP/payroll file process and the
+    individual expense-transfer lifecycle.
+    *(k)* **An ERP payout claim reads "Implemented and tested; production
+    enablement unconfirmed."** Verbatim, wherever such a claim is made. The path
+    is gated by `paystack_transfers_enabled`, a `domain_settings` ROW with
+    `default=False`, seeded once from the environment and never re-read;
+    confirming a deployment's value needs an explicitly named target and rule
+    30's `deployment_run` oracle, and **no target has been named**. This blocks
+    NO construction — not the gated Treasury module, not the connectors — and
+    DOES block every claim of production parity, adoption or retirement, in
+    both directions. Relatedly, **`BatchTransferService` is to be DELETED** as
+    security-sensitive dead code: an ungated, SoD-free call path to
+    `PaystackClient.initiate_transfer` that gets no review attention precisely
+    because nothing calls it. Its design intent is preserved, measured, in
+    `docs/inventories/treasury-payment-execution-sources.md`, which is the
+    condition attached to the deletion.
+    (ADR-0061 + its two 2026-08-24 amendment sets; ADR-0062; ADR-0063;
+    ADR-0042 § 3 + ADR-0047 Amendment A1 — ADR-0042 CONTROLS on disbursement
+    ownership, and the split is six owners: Expenses eligibility, Payables what
+    is owed, Treasury the authorized instruction and its rail, the Integrator
+    authentication/transport/evidence, Banking cash observation and
+    reconciliation, Accounting journal consequences; ADR-0024 §§ 8–12)
 
 29. **Poetry is an exact build input, not a workstation preference.**
     `[tool.poetry].requires-poetry` is the ONE version source; CI's hash-locked
