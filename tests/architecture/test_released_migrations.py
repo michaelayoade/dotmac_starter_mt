@@ -195,6 +195,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-collections"
         / "src/dotmac_collections/migrations/versions"
     ),
+    "dotmac-fulfillment": (
+        REPO_ROOT
+        / "packages/dotmac-fulfillment"
+        / "src/dotmac_fulfillment/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -220,6 +225,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-subscriptions": "su_*.py",
     "dotmac-billing": "bi_*.py",
     "dotmac-collections": "cl_*.py",
+    "dotmac-fulfillment": "fu_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -242,6 +248,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-subscriptions": "dotmac-subscriptions-v",
     "dotmac-billing": "dotmac-billing-v",
     "dotmac-collections": "dotmac-collections-v",
+    "dotmac-fulfillment": "dotmac-fulfillment-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -988,6 +995,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-fulfillment ──
+    "dotmac-fulfillment-v0.1.0a1": (
+        "dotmac-fulfillment",
+        "be02e28d",
+        {
+            "fu_0001_fulfillment.py": (
+                "fa41945d34a08fc7f96d529f7ccc1f103a2b90b5c7095153dcc08f4283afe254"
+            ),
+        },
+    ),
 }
 
 
@@ -1069,6 +1086,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-subscriptions": frozenset(),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
+    "dotmac-fulfillment": frozenset(),
 }
 
 
