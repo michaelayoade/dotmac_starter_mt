@@ -15,6 +15,7 @@ release workflow immediately after tagging:
 - it is idempotent, so a re-run after a partial repair converges;
 - it edits the JSON as text, so the ledger's prose survives untouched.
 - it enrols every migration-history map on a distribution's first release;
+- it moves incremental migrations from ``UNRELEASED`` into the immutable tag;
 - it validates both record files before writing either one.
 
 The digest half is proven against a real published tag rather than a fixture:
@@ -122,6 +123,58 @@ def test_a_second_write_of_the_same_tag_changes_nothing() -> None:
     )
     assert not added
     assert unchanged == text
+
+
+def test_a_partial_incremental_record_retires_the_released_migration() -> None:
+    """The a14 failure: adding the digest without clearing UNRELEASED is not a
+    record, because the same file then reads as immutable and editable at once.
+
+    Reconstruct that historical partial state from the corrected record: the
+    automatic writer had added the a14 tag row while ``ig_0012`` survived in
+    the editable set. Re-running the writer must converge by clearing it.
+    """
+    writer = _writer()
+    tag = "dotmac-integration-v0.1.0a14"
+    distribution, commit, digests = _recorded_entry(writer, tag)
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8").replace(
+        '"dotmac-integration": frozenset()',
+        '"dotmac-integration": frozenset({"ig_0012_delivery_evidence.py"})',
+    )
+    assert 'frozenset({"ig_0012_delivery_evidence.py"})' in text
+
+    updated, changed = writer.add_released_tag(text, tag, distribution, commit, digests)
+
+    assert changed
+    assert f'"{distribution}": frozenset(),' in updated
+    assert 'frozenset({"ig_0012_delivery_evidence.py"})' not in updated
+
+    unchanged, changed_again = writer.add_released_tag(
+        updated, tag, distribution, commit, digests
+    )
+    assert not changed_again
+    assert unchanged == updated
+
+
+def test_a_new_migration_absent_from_unreleased_is_refused() -> None:
+    """Sensitivity proof: the retirement check must fail closed, not merely
+    rewrite whatever happens to be present in the editable set."""
+    writer = _writer()
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    assert '"dotmac-integration": frozenset()' in text
+    _, _, prior = _recorded_entry(writer, "dotmac-integration-v0.1.0a13")
+    digests = {**prior, "ig_9999_missing_declaration.py": "a" * 64}
+
+    with pytest.raises(writer.ReleaseRecordError) as refusal:
+        writer.add_released_tag(
+            text,
+            "dotmac-integration-v0.1.0a99",
+            "dotmac-integration",
+            "abcdef12",
+            digests,
+        )
+
+    assert "not declared in UNRELEASED" in str(refusal.value)
+    assert "ig_9999_missing_declaration.py" in str(refusal.value)
 
 
 # ── The ledger path ─────────────────────────────────────────────────────────
