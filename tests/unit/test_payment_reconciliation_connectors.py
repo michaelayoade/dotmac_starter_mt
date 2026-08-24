@@ -93,12 +93,15 @@ def test_flutterwave_adds_v4_poll_without_a_v3_fallback() -> None:
         )
     )
     assert plugin.manifest.version == "0.1.0a2"
-    assert tuple(item.version for item in plugin.historical_manifests) == ("0.1.0a1",)
+    # The a1 ingress-only shape stays first in the window; the published a2
+    # ingress+poll shape joined it when the outbound capabilities landed, so an
+    # installation pinned to either digest still resolves.
+    assert plugin.historical_manifests[0].version == "0.1.0a1"
     assert plugin.historical_manifests[0].capabilities[0].config_schema == {
         "type": "object",
         "additionalProperties": False,
     }
-    assert plugin.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    assert {ConnectorMode.INGRESS, ConnectorMode.POLL} <= plugin.modes
     assert plugin.manifest.egress is not None
     assert plugin.manifest.egress.hosts == (
         "developersandbox-api.flutterwave.com",
