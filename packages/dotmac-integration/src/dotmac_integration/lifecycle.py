@@ -86,6 +86,7 @@ from dotmac_integration.spi import (
 __all__ = [
     "ENDPOINT_AUDIT_ACTIONS",
     "KEEP",
+    "QUARANTINE_AUDIT_ACTIONS",
     "AdoptionPreview",
     "LifecycleError",
     "add_binding",
@@ -97,6 +98,7 @@ __all__ = [
     "preview_adoption",
     "put_config_revision",
     "quarantine",
+    "release_quarantine",
     "retire",
     "revoke_ingress_endpoint",
     "rotate_ingress_endpoint",
@@ -539,6 +541,57 @@ ENDPOINT_AUDIT_ACTIONS: Final[tuple[str, str, str]] = (
     "ingress_endpoint.revoked",
 )
 
+#: Entering and leaving quarantine, unprefixed. Declared the same way and for
+#: the same reason as the endpoint codes above.
+#:
+#: Quarantine is a CONTAINMENT decision — it stops an installation consuming the
+#: outbound queue and answering ingress — so "who stopped trusting this, when,
+#: and why" is the first thing an incident asks and the last thing that should
+#: live only in a mutable `state_reason` column that the very next state change
+#: overwrites. Both directions are declared: a release with no trail is how a
+#: quarantine quietly stops meaning anything.
+QUARANTINE_AUDIT_ACTIONS: Final[tuple[str, str]] = (
+    "installation.quarantined",
+    "installation.quarantine_released",
+)
+
+
+def _installation_audit(
+    db: Any,
+    installation: ConnectorInstallation,
+    *,
+    action: str,
+    actor: str | None,
+    reason: str,
+    previous_state: str,
+) -> None:
+    """Record a containment decision about one installation.
+
+    Same adapter shape as `_endpoint_audit`, and the same deferred import for
+    the same reason: one platform ledger, reached only when something is
+    actually written.
+
+    `previous_state` is in the event because the column it came from is about to
+    be overwritten. Without it the trail can say an installation was quarantined
+    but not what it was doing beforehand — and "it was enabled and serving
+    traffic" reads very differently from "it was already disabled".
+    """
+    from dotmac_integration.operations import record_operation
+
+    record_operation(
+        db,
+        action=action,
+        entity_type="connector_installation",
+        entity_id=str(installation.id),
+        details={
+            "connector_key": installation.connector_key,
+            "installation_name": installation.name,
+            "previous_state": previous_state,
+            "reason": reason,
+            "actor": actor,
+        },
+    )
+
 
 def _endpoint_audit(
     db: Any,
@@ -876,11 +929,87 @@ def quarantine(
     Kept as a separate state because the two need different responses: a
     disabled installation is waiting for a person, a quarantined one is waiting
     for an explanation.
+
+    ## What quarantine does and does not do
+
+    It stops this installation consuming the outbound queue —
+    `admission.admit_installation` refuses every dispatch for it, so
+    `dispatch.prepare` never claims another of its deliveries — and it stops it
+    answering ingress (`ingress.HANDSHAKE_INSTALLATION_STATES`) and backing an
+    activatable binding (`activation`).
+
+    It DESTROYS NOTHING. Queued deliveries stay queued, leases run out normally,
+    `next_attempt_at` is untouched, the configuration history is intact, and the
+    inbox keeps every receipt. That is deliberate: an installation is
+    quarantined precisely when someone is unsure what it did, and the moment
+    containment starts deleting evidence it stops being containment.
+
+    Scope is the INSTALLATION, and the reasoning for choosing that over a
+    binding or a capability is in `admission`'s module docstring — it belongs
+    next to the check that enforces it, not next to the setter.
+
+    The exit is :func:`release_quarantine`, which is a separate, separately
+    audited decision.
     """
+    previous_state = installation.state
     installation.state = "quarantined"
     installation.state_reason = reason
     installation.updated_by = actor
     db.flush()
+    _installation_audit(
+        db,
+        installation,
+        action=QUARANTINE_AUDIT_ACTIONS[0],
+        actor=actor,
+        reason=reason,
+        previous_state=previous_state,
+    )
+    return installation
+
+
+def release_quarantine(
+    db: Any,
+    installation: ConnectorInstallation,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> ConnectorInstallation:
+    """The explicit exit from quarantine. Lands in `disabled`, never `enabled`.
+
+    A quarantine with no stated way out is not a state, it is a dead end — the
+    installation sits there until someone edits a row by hand, which is both
+    unaudited and exactly the operation you least want performed by hand on a
+    connector nobody trusts. So there is one function, it requires a reason like
+    every other repair command, and it writes its own audit event.
+
+    It stops at `disabled` on purpose. "We have finished investigating" and "we
+    trust this to talk to a provider again" are two decisions, and collapsing
+    them would let a release skip `enable`'s live connection check — so an
+    installation could come out of quarantine and start dispatching on
+    credentials nobody re-verified. The operator's next step is `enable`, which
+    proves the connection before anything is sent.
+
+    Refuses anything not actually quarantined, rather than silently disabling
+    it: a release aimed at the wrong installation should fail loudly, not turn
+    a healthy integration off.
+    """
+    if installation.state != "quarantined":
+        raise LifecycleError(
+            f"installation {installation.name!r} is {installation.state!r}, not "
+            "quarantined; there is nothing to release"
+        )
+    installation.state = "disabled"
+    installation.state_reason = reason
+    installation.updated_by = actor
+    db.flush()
+    _installation_audit(
+        db,
+        installation,
+        action=QUARANTINE_AUDIT_ACTIONS[1],
+        actor=actor,
+        reason=reason,
+        previous_state="quarantined",
+    )
     return installation
 
 
