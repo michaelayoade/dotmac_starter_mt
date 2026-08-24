@@ -75,6 +75,36 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## Unreleased
+
+### Declaring a binding no longer erases how it is selected
+
+- `add_binding` is idempotent by contract, so every activation and reconcile
+  sequence re-declares a binding that already exists. It wrote `scope_json` and
+  `policy_json` unconditionally from parameters that defaulted to `None`, so a
+  re-declaration naming only the capability reset both columns. `policy_json`
+  is what `selection` reads to choose between several bindings enabled for one
+  capability, so losing it stopped outbound dispatch with an ambiguity refusal
+  while every control-plane state column still read `enabled`.
+- Omitting `scope` or `policy` now PRESERVES the stored value; an explicit
+  value — `None` included — is still a write, because "declares no scope" and
+  "is not the selection default" have to stay expressible. The omission marker
+  is `lifecycle.KEEP`, exported so an assembly forwarding an optional field can
+  name it.
+- Adds `set_binding_selection_policy` and `set_binding_scope` as the named
+  owners of those two columns. Neither invalidates activation: selection is
+  read live per dispatch and scope is display-only, so neither was ever
+  validated by the connection check, and returning the installation to `draft`
+  to change one would make relabelling a binding an outage.
+- Enabling stays a lifecycle transition that writes no binding column. That is
+  now asserted statically rather than merely intended
+  (`tests/architecture/test_integration_lifecycle_writers.py`), including that
+  the lifecycle owner cannot name `CapabilityDestinationRevision` at all — a
+  destination is `establish_destination`'s decision and its own append-only
+  table.
+- No schema change: both columns already exist, and no migration slot is
+  consumed.
+
 ## 0.1.0a15 — unreleased
 
 ### Outbound enqueue identity and race safety
