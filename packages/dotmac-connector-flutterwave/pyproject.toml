@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-connector-flutterwave"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Flutterwave API v4 settlement ingress and reconciliation connector"
 authors = ["DotMac"]
 readme = "README.md"

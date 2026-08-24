@@ -33,7 +33,15 @@ from dotmac_connector_remita.outbound import (
 
 CONNECTOR_KEY: Final = "remita"
 CAPABILITY_ID: Final = "payments.reference.status.observation.v1"
-VERSION: Final = "0.1.0a1"
+# 0.1.0a1 IS published (peeled tag dotmac-connector-remita-v0.1.0a1 ->
+# 656ecebb05f24c11acda69a069d6fbe60d319f56). The issuance slice adds a DELIVERY
+# capability, per-capability modes and an SPI 1.4 floor, all of them inside the
+# manifest digest an installation adopts by — so the two manifests below need
+# two DIFFERENT version constants. Sharing one made the plugin carry two
+# contracts under the name `0.1.0a1`, which is worse than a plain in-place edit:
+# `accepts_manifest_digest` accepted both, so the collision was invisible.
+POLL_ONLY_VERSION: Final = "0.1.0a1"
+VERSION: Final = "0.1.0a2"
 API_KEY: Final = "api_key"
 DEMO_HOST: Final = "demo.remita.net"
 LIVE_HOST: Final = "login.remita.net"
@@ -67,7 +75,7 @@ CONFIG_SCHEMA: Final[dict[str, object]] = {
 # unknown digest.
 POLL_ONLY_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
-    version=VERSION,
+    version=POLL_ONLY_VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(
         CapabilityDeclaration(

@@ -131,7 +131,7 @@ def _resolve(ops: PaystackOperations):
 def test_outbound_commands_are_delivery_capabilities_separate_from_observation() -> (
     None
 ):
-    assert MANIFEST.version == __version__ == "0.1.0a2"
+    assert MANIFEST.version == __version__ == "0.1.0a3"
     assert MANIFEST.spi_range.minimum.minor == 4
     assert PLUGIN.modes == frozenset(
         {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}

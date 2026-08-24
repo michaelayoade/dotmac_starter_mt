@@ -51,7 +51,14 @@ from dotmac_connector_paystack.polling import PaystackPollHandler
 CONNECTOR_KEY: Final = "paystack"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
-CURRENT_VERSION: Final = "0.1.0a2"
+# 0.1.0a2 IS published (peeled tag dotmac-connector-paystack-v0.1.0a2 ->
+# 656ecebb05f24c11acda69a069d6fbe60d319f56). The outbound slice adds four
+# DELIVERY capabilities, per-capability modes and an SPI 1.4 floor — every one
+# of them inside the manifest digest an installation adopts by — so it is
+# declared as a3 rather than folded into a published contract. The exact a2
+# manifest is preserved as SETTLEMENT_MANIFEST below.
+SETTLEMENT_VERSION: Final = "0.1.0a2"
+CURRENT_VERSION: Final = "0.1.0a3"
 
 SIGNATURE_HEADER: Final = "x-paystack-signature"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
@@ -96,6 +103,41 @@ LEGACY_MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(),
+)
+
+#: The manifest 0.1.0a2 PUBLISHED, in the fields the digest is taken over: SPI
+#: >=1.3, the single settlement-observation capability with no per-capability
+#: modes, three secret bindings and the one API host. Retained so an
+#: installation enabled against digest
+#: 73ffecb65880c6b8bf5dec78ae33839f08f44bd4adcab061915727716a906c7a still
+#: resolves to a known contract.
+#:
+#: The a2 `API_SECRET_KEY` description differed from a3's; description text is
+#: documentation rather than policy and is deliberately outside the digest, so
+#: the current wording is used here. Nothing else may be modernised — the four
+#: outbound capability ids and the SPI floor are all inside it.
+SETTLEMENT_MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=SETTLEMENT_VERSION,
+    spi_range=SpiRange.parse(">=1.3,<2.0"),
+    capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary HMAC-SHA512 exact-byte webhook signing key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook signing key during bounded rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=API_SECRET_KEY,
+            required=False,
+            description="Paystack server secret for authenticated reconciliation I/O.",
+        ),
+    ),
+    egress=EgressDeclaration(hosts=("api.paystack.co",)),
 )
 
 # Observation and command are declared as SEPARATE capabilities mapped to
@@ -413,7 +455,10 @@ class PaystackConnector:
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
     timeout_seconds: float = 30.0
     manifest: ConnectorManifest = MANIFEST
-    historical_manifests: tuple[ConnectorManifest, ...] = (LEGACY_MANIFEST,)
+    historical_manifests: tuple[ConnectorManifest, ...] = (
+        LEGACY_MANIFEST,
+        SETTLEMENT_MANIFEST,
+    )
     modes: frozenset[ConnectorMode] = frozenset(
         {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
     )

@@ -13,7 +13,7 @@ from dotmac_connector_paystack.operations import (
 )
 from dotmac_connector_paystack.plugin import MANIFEST, PLUGIN, PaystackConnector
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "ACTIONS_BY_CAPABILITY",

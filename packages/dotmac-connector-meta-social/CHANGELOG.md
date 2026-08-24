@@ -1,7 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.1.0a2 — unreleased
 
+Declared as a2, not folded into a1. a1 IS published (peeled tag
+`dotmac-connector-meta-social-v0.1.0a1` points at commit
+`c1921f6c4b9360c8b0005bddbf85e04e86d29a73`), and the delivery slice below adds
+a capability id, per-capability modes, three secret bindings, two egress hosts
+and an SPI 1.4 floor — every one of them inside the manifest digest an
+installation adopts by.
+
+- The exact a1 ingress manifest is preserved as `INGRESS_MANIFEST`, so an
+  installation pinned to digest
+  `61b5ba0e929bec924af4a338408a10db1035efef1589b7abaaf3152586b734e4` resolves to
+  a known contract. `docs/inventories/released-manifest-digests.json` records
+  that digest and `make manifest-digest-check` fails if it ever moves.
 - Add `messaging.send.v1` in `ConnectorMode.DELIVERY` beside the existing
   `messaging.receive.v1` ingress capability, and map each capability to its own
   mode so an engine cannot reach the wrong factory.
@@ -30,11 +42,6 @@
   has no field to return a rendered payload), and contact profile lookup (the
   DELIVERY contract has no result body, so a lookup has nowhere to return one
   — see `EXTRACTION.toml`).
-
-**Release note:** this entry changes the manifest of a version that is already
-published. The release cutting it must bump to `0.1.0a2` and move the exact
-published a1 ingress manifest into `historical_manifests`, so an installation
-adopted against the a1 digest stays identifiable.
 
 ## 0.1.0a1 — 2026-08-20
 

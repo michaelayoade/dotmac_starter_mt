@@ -36,7 +36,9 @@ def test_manifest_keeps_status_poll_only_and_both_fixed_provider_hosts() -> None
     about the status leg not quietly acquiring a second mode."""
     plugin = _plugin(lambda request: httpx.Response(200, json={"status": "00"}))
     assert MANIFEST.connector_key == "remita"
-    assert MANIFEST.version == __version__ == "0.1.0a1"
+    # a2: the issuance slice changed the manifest of the already-tagged a1,
+    # whose exact contract is retained as POLL_ONLY_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a2"
     assert CAPABILITY_ID in MANIFEST.capability_ids
     status_capability = next(
         item for item in MANIFEST.capabilities if item.capability_id == CAPABILITY_ID

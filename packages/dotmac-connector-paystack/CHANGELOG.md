@@ -1,11 +1,20 @@
 # Changelog
 
-## 0.1.0a2 — unreleased
+## 0.1.0a3 — unreleased
 
-- Adds authenticated paged transaction reconciliation through the engine-owned
-  POLL checkpoint and the existing settlement-observation capability.
-- Keeps amount/fee subunits exact and provider status verbatim; allocation and
-  every financial consequence remain product decisions.
+Declared as a3, not folded into a2. a2 IS published (peeled tag
+`dotmac-connector-paystack-v0.1.0a2` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`), and the outbound slice below adds
+four DELIVERY capability ids, per-capability modes and an SPI 1.4 floor — every
+one of them inside the manifest digest an installation adopts by. Editing the
+a2 manifest in place would make one version name two contracts and leave every
+binding enabled against the a2 digest unidentifiable.
+
+- The exact a2 manifest is preserved as `SETTLEMENT_MANIFEST`, so an
+  installation pinned to digest
+  `73ffecb65880c6b8bf5dec78ae33839f08f44bd4adcab061915727716a906c7a` resolves to
+  a known contract. `docs/inventories/released-manifest-digests.json` records
+  that digest and `make manifest-digest-check` fails if it ever moves.
 - Adds OUTBOUND provider I/O in DELIVERY mode: nine provider-neutral commands
   (initialize payment, charge a saved authorization, refund, resolve a bank
   account, create a transfer recipient, initiate a transfer, and customer
@@ -44,6 +53,18 @@
 - Refuses a success whose echoed amount or currency differs from what was sent,
   and an unrecognised provider status token, as inconclusive rather than
   guessing. A tolerance is a policy, and policy stays with the product.
+
+## 0.1.0a2 — released
+
+Peeled tag `dotmac-connector-paystack-v0.1.0a2` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`. The heading read "unreleased" after
+the tag was cut, and the outbound work above was written under it; both are
+corrected here rather than left as a claim that the artifact does not exist.
+
+- Adds authenticated paged transaction reconciliation through the engine-owned
+  POLL checkpoint and the existing settlement-observation capability.
+- Keeps amount/fee subunits exact and provider status verbatim; allocation and
+  every financial consequence remain product decisions.
 
 ## 0.1.0a1 — 2026-08-20
 

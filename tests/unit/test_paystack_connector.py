@@ -67,7 +67,9 @@ def _charge_success(**overrides: object) -> dict[str, object]:
 
 def test_manifest_is_the_versioned_ingress_runtime_contract() -> None:
     assert MANIFEST.connector_key == "paystack"
-    assert MANIFEST.version == __version__ == "0.1.0a2"
+    # a3: the outbound slice changed the manifest of the already-tagged a2,
+    # whose exact contract is retained as SETTLEMENT_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a3"
     # The observation contract is unchanged by the outbound slice, and it is
     # still mapped to the two modes that OBSERVE. The command capabilities and
     # their DELIVERY mapping are asserted in

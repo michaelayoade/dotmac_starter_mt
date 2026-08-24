@@ -490,6 +490,42 @@ specifics) points here and must never fork these rules.
     (`scripts/product_writer_sweep.py`; `make product-writer-check`;
     `tests/architecture/test_product_writer_ratchet.py`)
 
+34. **A PUBLISHED version's manifest is its contract, and a contract does not
+    move.** An installation adopts a connector by MANIFEST DIGEST: `mod_intg`
+    stores the digest a binding was enabled against and
+    `accepts_manifest_digest` decides adoptability from it. So the manifest of a
+    version that has a tag is FROZEN. Adding a capability, a mode mapping, a
+    secret binding, an egress host or an SPI floor to an already-published
+    version is not an edit — it makes one version name two contracts, and every
+    installation adopted against the old digest becomes unidentifiable while
+    `accepts_manifest_digest` reports the pin as unknown.
+
+    The repair is a NEW version whose `historical_manifests` carries the exact
+    published manifest, never an edit of the published one and never a version
+    edited down to match. Two manifests sharing one version STRING is the worse
+    shape, not the safe one: `accepts_manifest_digest` accepts both, so nothing
+    can see the collision — `dotmac-connector-flutterwave` and
+    `dotmac-connector-remita` each shipped exactly that, green on every gate,
+    because the version-identity guard compares three version SURFACES and the
+    publication sweep compares a version to a TAG, and neither reads a manifest.
+
+    `docs/inventories/released-manifest-digests.json` records, per published
+    tag, the peeled commit, the release run where the repository can still name
+    it, and the digest that tag published. Two halves, either alone defeatable:
+    `make manifest-digest-check` compares the ledger with the tree — offline,
+    tag-free, in the cheap CI matrix — and the architecture test re-derives every
+    recorded digest from the source THAT TAG published, so doctoring the ledger
+    requires moving a tag on `origin`. Both directions fail (ADR-0018): a
+    published tag with no row, and a row whose tag does not exist or peels
+    elsewhere. Rows only GROW — a publication is a permanent positive fact
+    (rule 30), unlike the publication baseline's absences.
+
+    Scope is the connector lane. Installable modules are UNMONITORED rather than
+    exempt: `ModuleManifest` exposes no digest and nothing adopts a module by
+    one — their published bytes are held by rule 14's released-migration map
+    instead. (`scripts/released_manifest_sweep.py`;
+    `tests/architecture/test_released_manifest_digests.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
@@ -536,8 +572,10 @@ CI remains the merge acceptance owner.
   row in `docs/ARCHITECTURE.md`'s provenance/ownership tables.
 - **Publishing writes a RECORD, not just a tag.** A tag makes that
   distribution's `declared-publication-baseline.json` row false immediately,
-  and its released migrations become bytes that must not change, so five gates
-  fail from the instant of the tag until both are recorded. The release
+  its released migrations become bytes that must not change, and a connector's
+  published manifest digest becomes a row owed to
+  `released-manifest-digests.json` — so the gates fail from the instant of the
+  tag until all of them are recorded. The release
   workflows now open that record themselves
   (`scripts/open_release_record_pr.sh` calling
   `scripts/write_release_record.py`, straight after tagging) — merge that pull

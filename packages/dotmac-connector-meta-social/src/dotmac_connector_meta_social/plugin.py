@@ -54,7 +54,14 @@ CAPABILITY_ID: Final = "messaging.receive.v1"
 # the same meaning would fork the capability registry rather than extend it.
 SEND_CAPABILITY_ID: Final = "messaging.send.v1"
 PROVIDER: Final = "meta_cloud_api"
-VERSION: Final = "0.1.0a1"
+# 0.1.0a2, not a1. a1 IS published (peeled tag
+# dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73)
+# and an installation adopts a connector by MANIFEST DIGEST, so adding
+# messaging.send.v1 to the a1 manifest in place would make one version name two
+# contracts and leave every binding adopted against the a1 digest
+# unidentifiable. The exact a1 contract is preserved as INGRESS_MANIFEST below.
+VERSION: Final = "0.1.0a2"
+PUBLISHED_INGRESS_VERSION: Final = "0.1.0a1"
 SIGNATURE_HEADER: Final = "x-hub-signature-256"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
@@ -168,6 +175,45 @@ MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(hosts=(GRAPH_HOST, INSTAGRAM_GRAPH_HOST)),
+)
+
+#: The manifest 0.1.0a1 PUBLISHED, byte-for-byte in the fields the digest is
+#: taken over: SPI >=1.3, the single ingress capability with no per-capability
+#: modes, the three webhook secret bindings and explicit deny-all egress. It is
+#: retained so an installation enabled against digest
+#: 61b5ba0e929bec924af4a338408a10db1035efef1589b7abaaf3152586b734e4 still
+#: resolves to a known contract during the bounded adoption window rather than
+#: to nothing at all.
+#:
+#: Do not "tidy" this by pointing it at the current constants — the delivery
+#: half added three secret bindings and two egress hosts, and every one of them
+#: is inside the digest.
+INGRESS_MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=PUBLISHED_INGRESS_VERSION,
+    spi_range=SpiRange.parse(">=1.3,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            capability_id=CAPABILITY_ID,
+            config_schema=CONFIG_SCHEMA,
+        ),
+    ),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary exact-byte Meta app signature key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous Meta app signature key during bounded rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_VERIFY_TOKEN,
+            description="Subscription challenge comparison token.",
+        ),
+    ),
+    egress=EgressDeclaration(),
 )
 
 
@@ -1110,7 +1156,7 @@ class MetaSocialConnector:
 
     @property
     def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
-        return ()
+        return (INGRESS_MANIFEST,)
 
     @property
     def modes(self) -> frozenset[ConnectorMode]:
@@ -1151,6 +1197,7 @@ class MetaSocialConnector:
 PLUGIN: Final = MetaSocialConnector()
 
 __all__ = [
+    "INGRESS_MANIFEST",
     "MANIFEST",
     "PLUGIN",
     "MetaSocialConnector",
