@@ -85,6 +85,62 @@ Nothing in this file is a publication claim except this section.
   caller replays the winning row; a stale snapshot receives a typed retry
   instruction whose message cannot carry payload-bound driver parameters.
 
+### Connector quarantine, a dispatch kill switch and one admission owner
+
+- Adds `admission`, the single authority for "may this worker dispatch right
+  now?". It carries a closed set of reasons, and `dispatch.prepare` consults it
+  BEFORE claiming, so a refusal never strands a leased row.
+- `dispatch.DispatchNotAdmitted` is a third, distinct answer beside `None` (no
+  claim, contention) and `DispatchUnavailable` (a misconfiguration, alert).
+  A deliberate halt no longer reads as a broken configuration.
+- Quarantine is scoped to the INSTALLATION and enforced at dispatch: every
+  capability it serves stops, other installations of the same connector and the
+  same capability are untouched. It removes no queued delivery, breaks no lease
+  and rewrites no retry schedule.
+- Adds `lifecycle.release_quarantine`, the explicit exit. It lands in
+  `disabled`, never `enabled`, so leaving containment cannot skip `enable`'s
+  live connection check. Both directions write a declared platform audit event
+  recording the previous state, the reason and the actor.
+- Adds `ExecutionPolicy.dispatch_enabled`, the deployment-wide kill switch. It
+  refuses admission with no database access at all and leaves every durable row
+  exactly as it found it.
+
+### Provider rate limits and backpressure
+
+- A TERMINAL outcome carrying a configured transient HTTP status (429, 503,
+  502, 504, 500, 408, 425) is reclassified RETRYABLE. The engine branches on the
+  typed `provider_status_code` only, never on a connector's `error_code`, and
+  never promotes `RECONCILIATION_REQUIRED`. Attempt exhaustion still applies.
+- Adds `retry.parse_retry_after`, which reads both RFC 7231 forms
+  (delta-seconds and HTTP-date) so every connector does not reimplement it.
+  An unusable header falls back to the curve instead of failing the outcome.
+- An observed throttle delays that installation's other queued deliveries
+  through one bounded UPDATE in the settle transaction — it only ever moves
+  `next_attempt_at` forward, never touches in-flight or settled rows, and never
+  reaches another installation. The pause is a schedule, never a sleep, so no
+  session is held across provider I/O.
+- Adds `ExecutionPolicy.max_in_flight_per_installation`, the backpressure that
+  applies before a provider complains.
+
+### Operational metrics
+
+- Adds `operations.dispatch_metrics`: queue depth, oldest queued age, end-to-end
+  dispatch latency over a configured window, retry counts, failure counts,
+  expired leases, unprocessed receipts and quarantined installations.
+- Derived at read time beside `health_report`, for the same reason — a stored
+  gauge is a second writer over facts the ledgers already hold.
+- `operations.METRIC_NAMES` is the stable, language-neutral naming contract.
+  The module produces the numbers and introduces no metrics client: the
+  exporter stays with the composing assembly.
+
+### Configuration
+
+- Every threshold added here is a validated `ExecutionPolicy` field with a
+  documented default that reproduces the previous behaviour. Construction
+  refuses a zero concurrency ceiling and refuses a throttling status that is not
+  also retryable — which would delay the queue while dead-lettering the delivery
+  that discovered the limit.
+
 ## 0.1.0a14 — released 2026-08-24
 
 Published, installed back from the private index, registered and tagged from

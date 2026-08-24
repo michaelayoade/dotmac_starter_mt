@@ -141,6 +141,12 @@ module = ModuleManifest(
         "integration.retention.payloads.redacted",
         "integration.retention.hold.placed",
         "integration.retention.hold.released",
+        # Containment. Quarantine stops an installation consuming the outbound
+        # queue and answering ingress, so both directions are on the trail: who
+        # stopped trusting it, and who decided it could come back. See
+        # `lifecycle.QUARANTINE_AUDIT_ACTIONS`.
+        "integration.installation.quarantined",
+        "integration.installation.quarantine_released",
     ),
     # ── No capabilities or permissions YET ──────────────────────────────────
     # Both exist to gate a ROUTE, and this slice ships none. A declared code

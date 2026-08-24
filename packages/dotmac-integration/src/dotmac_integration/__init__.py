@@ -100,6 +100,14 @@ from dotmac_integration.activation import (
     check_activation,
     require_activatable,
 )
+from dotmac_integration.admission import (
+    ADMISSION_REASONS,
+    AdmissionDecision,
+    admit,
+    admit_installation,
+    admit_runtime,
+    apply_provider_cooldown,
+)
 from dotmac_integration.capability_registry import (
     EMPTY_REGISTRY,
     CapabilityContract,
@@ -151,6 +159,7 @@ from dotmac_integration.discovery import (
 )
 from dotmac_integration.dispatch import (
     DispatchError,
+    DispatchNotAdmitted,
     DispatchUnavailable,
     LostClaim,
     PreparedDispatch,
@@ -211,6 +220,7 @@ from dotmac_integration.ingress import (
 )
 from dotmac_integration.lifecycle import (
     ENDPOINT_AUDIT_ACTIONS,
+    QUARANTINE_AUDIT_ACTIONS,
     AdoptionPreview,
     LifecycleError,
     add_binding,
@@ -222,6 +232,7 @@ from dotmac_integration.lifecycle import (
     preview_adoption,
     put_config_revision,
     quarantine,
+    release_quarantine,
     retire,
     revoke_ingress_endpoint,
     rotate_ingress_endpoint,
@@ -242,8 +253,11 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.operations import (
     AUDIT_ACTION_PREFIX,
+    METRIC_NAMES,
+    DispatchMetrics,
     HealthReport,
     NotRepairable,
+    dispatch_metrics,
     health_report,
     record_operation,
     release_expired_leases,
@@ -331,8 +345,11 @@ from dotmac_integration.retention import (
 from dotmac_integration.retry import (
     Outcome,
     OutcomeStatus,
+    classify,
     next_state,
+    parse_retry_after,
     retry_delay_seconds,
+    throttle_cooldown_seconds,
 )
 from dotmac_integration.runtime_policy import (
     ConnectorRuntimePolicy,
@@ -560,6 +577,16 @@ __all__ = [
     "release_legal_hold",
     "resolve_retention_policy",
     "retention_backlog",
+    # ── Runtime safety: admission, quarantine, backpressure ─────────────────
+    "ADMISSION_REASONS",
+    "QUARANTINE_AUDIT_ACTIONS",
+    "AdmissionDecision",
+    "DispatchNotAdmitted",
+    "admit",
+    "admit_installation",
+    "admit_runtime",
+    "apply_provider_cooldown",
+    "release_quarantine",
     "DispatchUnavailable",
     "settle",
     "set_binding_enabled",
@@ -607,12 +634,18 @@ __all__ = [
     "release_expired_leases",
     "record_operation",
     "health_report",
+    "dispatch_metrics",
     "NotRepairable",
     "HealthReport",
+    "DispatchMetrics",
+    "METRIC_NAMES",
     "AUDIT_ACTION_PREFIX",
     "scope_for",
     "run_effect_once",
     "retry_delay_seconds",
+    "throttle_cooldown_seconds",
+    "parse_retry_after",
+    "classify",
     "record_receipt_outcome",
     "record_delivery_outcome",
     "receive_verified",

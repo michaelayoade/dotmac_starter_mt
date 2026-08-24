@@ -35,16 +35,56 @@ numbers now living in :class:`dotmac_integration.policy.ExecutionPolicy` rather
 than hardcoded here. A provider-supplied `retry_after_seconds` always wins: a
 provider that tells you when to come back knows better than an exponential
 curve, and ignoring it is how rate limits become outages.
+
+## Rate limits are never terminal
+
+A 429 means the request was REFUSED, not that it can never succeed — so a
+connector that reports it as `TERMINAL` is asking the engine to dead-letter work
+a provider explicitly invited us to resend. :func:`classify` corrects exactly
+that, and only that: a TERMINAL outcome carrying a status in
+`ExecutionPolicy.retryable_provider_status_codes` becomes RETRYABLE.
+
+Three limits on the correction, each load-bearing:
+
+* it reads `provider_status_code`, a TYPED field this module defines, and never
+  `error_code`, which is the connector's own vocabulary. The boundary Sub's
+  `crm_customer_name_rejected` check crossed stays uncrossed — the difference is
+  that an HTTP status means the same thing at every provider, and a
+  product-specific error string does not;
+* it never touches `RECONCILIATION_REQUIRED`. That status says the effect may
+  have half-landed, which is a stronger claim than any status code refutes;
+  promoting it to a retry is how a provider gets charged twice;
+* it never makes an outcome terminal. The correction only ever moves work back
+  into the queue, so a mistaken status set costs retries, not lost deliveries.
+
+Attempt exhaustion still applies afterwards: a rescued 429 dead-letters at
+`max_attempts` like anything else, so a provider that throttles forever does not
+become immortal.
+
+:func:`parse_retry_after` turns an HTTP `Retry-After` header — delta-seconds or
+HTTP-date — into the integer `Outcome.retry_after_seconds` this module already
+honoured, so every connector does not reimplement RFC 7231 § 7.1.3 (and get the
+date form wrong).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import email.utils
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from enum import Enum
 
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
 
-__all__ = ["Outcome", "OutcomeStatus", "next_state", "retry_delay_seconds"]
+__all__ = [
+    "Outcome",
+    "OutcomeStatus",
+    "classify",
+    "next_state",
+    "parse_retry_after",
+    "retry_delay_seconds",
+    "throttle_cooldown_seconds",
+]
 
 # The numbers live in `ExecutionPolicy`, not here. They are deployment
 # decisions — a webhook fan-out and a nightly bulk poll do not want the same
@@ -101,6 +141,104 @@ class Outcome:
         return self.status is not OutcomeStatus.RETRYABLE
 
 
+def parse_retry_after(
+    value: str | int | None, *, now: datetime | None = None
+) -> int | None:
+    """An HTTP `Retry-After` header as whole seconds, or `None` if unusable.
+
+    RFC 7231 § 7.1.3 allows two forms and providers use both: delta-seconds
+    (`Retry-After: 120`) and an HTTP-date (`Retry-After: Wed, 21 Oct 2015
+    07:28:00 GMT`). A connector that handles only the first silently treats the
+    second as absent and falls back to the exponential curve — which is not
+    wrong so much as it is ignoring an instruction the provider bothered to
+    send.
+
+    Lives here rather than in each connector because every connector needs it
+    and RFC date parsing is exactly the kind of thing that gets written once,
+    correctly, or many times, nearly.
+
+    A malformed value returns `None` (fall back to the curve) rather than
+    raising: a provider's header is untrusted input on an error path, and
+    failing the whole outcome over it would turn a recoverable rate limit into
+    a lost attempt. A past date clamps to `0` — "come back now", not "come back
+    before now".
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):  # `True` is an `int`; it is not a duration.
+        return None
+    if isinstance(value, int):
+        return max(0, value)
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return max(0, int(text))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:  # pragma: no cover - defensive, older parser contracts
+        return None
+    if when.tzinfo is None:
+        # RFC 7231 dates are GMT. A naive result means the header omitted the
+        # zone; assuming UTC matches the spec rather than the host's timezone,
+        # which would make the same header mean different things per deployment.
+        when = when.replace(tzinfo=UTC)
+    moment = now or datetime.now(UTC)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return max(0, int((when - moment).total_seconds()))
+
+
+def classify(outcome: Outcome, *, policy: ExecutionPolicy = DEFAULT_POLICY) -> Outcome:
+    """The outcome the engine acts on, after correcting a terminal rate limit.
+
+    Returns `outcome` unchanged in every case but one: a `TERMINAL` outcome
+    whose `provider_status_code` is a configured retryable status becomes
+    `RETRYABLE`, keeping every other field — including the status code and the
+    connector's `error_code` — so the evidence of what happened survives the
+    reclassification.
+
+    See this module's docstring for why this is not the boundary violation it
+    superficially resembles, and for the three limits on it.
+    """
+    if outcome.status is not OutcomeStatus.TERMINAL:
+        return outcome
+    status = outcome.provider_status_code
+    if status is None or status not in policy.retryable_provider_status_codes:
+        return outcome
+    return replace(outcome, status=OutcomeStatus.RETRYABLE)
+
+
+def throttle_cooldown_seconds(
+    outcome: Outcome, *, policy: ExecutionPolicy = DEFAULT_POLICY
+) -> int | None:
+    """How long the whole INSTALLATION should pause, or `None` if it need not.
+
+    Distinct from :func:`retry_delay_seconds`, which schedules ONE delivery.
+    A 429 is a statement about the provider account, not about the payload that
+    happened to hit the limit — so the sibling deliveries queued behind it are
+    going to be refused too, and sending them anyway is how a throttle becomes a
+    ban. `dispatch.settle` turns this number into
+    `admission.apply_provider_cooldown`.
+
+    The provider's own timing wins when it gave one; otherwise the configured
+    cooldown applies. Both are capped by `max_backoff_seconds`, so a provider
+    cannot park an installation past the ceiling an operator agreed to.
+    """
+    status = outcome.provider_status_code
+    if status is None or status not in policy.throttling_provider_status_codes:
+        return None
+    named = outcome.retry_after_seconds
+    seconds = (
+        int(named) if named is not None else policy.default_throttle_cooldown_seconds
+    )
+    return max(0, min(seconds, policy.max_backoff_seconds))
+
+
 def retry_delay_seconds(
     attempt_count: int,
     outcome: Outcome | None = None,
@@ -119,10 +257,20 @@ def retry_delay_seconds(
     exponent = max(attempt_count - 1, 0)
     # Guard the shift itself: 2 ** 10_000 is computed before min() sees it.
     if exponent > 32:
-        return int(policy.max_backoff_seconds)
-    return int(
-        min(policy.max_backoff_seconds, policy.base_delay_seconds * (2**exponent))
-    )
+        delay = int(policy.max_backoff_seconds)
+    else:
+        delay = int(
+            min(policy.max_backoff_seconds, policy.base_delay_seconds * (2**exponent))
+        )
+    if outcome is not None:
+        cooldown = throttle_cooldown_seconds(outcome, policy=policy)
+        if cooldown is not None:
+            # A throttling provider that named no `Retry-After` still told us
+            # something: coming back sooner than the configured cooldown is
+            # asking for the same refusal. The curve is a FLOOR here, never a
+            # reason to return early.
+            delay = max(delay, cooldown)
+    return delay
 
 
 def next_state(
@@ -133,9 +281,16 @@ def next_state(
 ) -> str:
     """The delivery state this outcome produces.
 
-    Attempt exhaustion turns RETRYABLE into `dead_letter` — the only place the
-    engine overrides a connector's classification.
+    Attempt exhaustion turns RETRYABLE into `dead_letter`, and a terminal rate
+    limit turns into RETRYABLE — the two places the engine overrides a
+    connector's classification, and the only two.
+
+    The `classify` call is FIRST so every caller gets the correction without
+    opting in. `execution.record_delivery_outcome` and `dispatch.settle` both
+    route through here, which is what makes "a 429 is never terminal" a property
+    of the engine rather than a rule each settle path remembers.
     """
+    outcome = classify(outcome, policy=policy)
     if outcome.status is OutcomeStatus.SUCCEEDED:
         return "delivered"
     if outcome.status is OutcomeStatus.RECONCILIATION_REQUIRED:
