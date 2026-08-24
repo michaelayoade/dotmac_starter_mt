@@ -20,6 +20,7 @@ Three layers, and all three are tested here because each fails differently:
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 import subprocess
@@ -153,6 +154,23 @@ def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:
     assert emitted["kernel_floor"] == "0.1.0a91"
     assert emitted["db_schema"] == "mod_inbox_ops"
     assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a3"
+
+
+def test_document_rendering_is_allowlisted_as_an_explicitly_stateless_module() -> None:
+    """A stateless module is not a protocol adapter and owns no fake schema.
+
+    The null schema is an asserted shape: the resolver has already compared it
+    to the manifest's absent short code and migration prefix.  Omitting the
+    output entirely keeps downstream steps from mistaking an empty string for
+    an unknown schema.
+    """
+    result = _resolve("dotmac-document-rendering", version="0.1.0a1")
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    assert emitted["kernel_floor"] == "0.1.0a88"
+    assert emitted["release_shape"] == "stateless"
+    assert "db_schema" not in emitted
+    assert emitted["tag"] == "dotmac-document-rendering-v0.1.0a1"
 
 
 def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
@@ -400,15 +418,59 @@ def test_the_declared_schema_matches_the_module_manifest(distribution: str) -> N
     and the manifest disagree, that assertion fails AFTER publication — too
     late to matter."""
     entry = _allowlist()[distribution]
-    manifest_source = (
+    manifest_path = (
         PROJECT_ROOT
         / entry["package_dir"]
         / "src"
         / entry["import_name"]
         / "manifest.py"
-    ).read_text(encoding="utf-8")
-    short_code = entry["db_schema"].removeprefix("mod_")
-    assert f'short_code="{short_code}"' in manifest_source
+    )
+    tree = ast.parse(manifest_path.read_text(encoding="utf-8"))
+    declaration = next(
+        statement.value
+        for statement in tree.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == entry["manifest_attr"]
+            for target in statement.targets
+        )
+        and isinstance(statement.value, ast.Call)
+    )
+    keywords = {
+        keyword.arg: keyword.value
+        for keyword in declaration.keywords
+        if keyword.arg is not None
+    }
+
+    if entry["db_schema"] is None:
+        for field in ("short_code", "migration_prefix"):
+            value = keywords.get(field)
+            assert value is None or (
+                isinstance(value, ast.Constant) and value.value is None
+            ), f"{distribution}: stateless release declares {field}"
+    else:
+        short_code = entry["db_schema"].removeprefix("mod_")
+        value = keywords["short_code"]
+        assert isinstance(value, ast.Constant)
+        assert value.value == short_code
+
+
+def test_a_stateless_manifest_cannot_be_given_a_schema_in_the_allowlist(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity proof for the null half of the release-shape contract."""
+    module = _release_module_script()
+    entry = {**_allowlist()["dotmac-document-rendering"], "db_schema": "mod_fake"}
+    allowlist = tmp_path / "release-modules.json"
+    allowlist.write_text(
+        json.dumps({"modules": {"dotmac-document-rendering": entry}}),
+        encoding="utf-8",
+    )
+    module.ALLOWLIST = allowlist
+    with pytest.raises(SystemExit) as refused:
+        module.resolve("dotmac-document-rendering")
+    assert "manifest schema None" in str(refused.value)
+    assert "mod_fake" in str(refused.value)
 
 
 def test_the_kernel_is_not_releasable_as_a_module() -> None:

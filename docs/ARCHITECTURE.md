@@ -337,11 +337,17 @@ view over those independent owners; it owns no facts of its own. Package
 `EXTRACTION.toml` owns contract/evidence/consumer state, `ModuleManifest` owns
 runtime persistence-plane and schema declarations, and
 `.github/release-modules.json` owns eligibility for the general module release
-workflow — with `.github/release-adapters.json` owning the same question for
-`stateless-protocol-adapter` distributions, which have no `db_schema`,
-`manifest_attr` or `kernel_floor` for the module lane to assert and so are
-gated, built and verified by `release-adapter.yml` instead (ADR-0006's
-2026-08-14 amendment; the adapter lane lists nothing today).
+workflow. It covers both persistence shapes of an installable
+`ModuleManifest`: every row carries a mandatory `db_schema`, either a `mod_*`
+string for a stateful module or explicit JSON `null` for a stateless one. The
+resolver proves that shape against the manifest's `short_code` and
+`migration_prefix` before build; the installed-wheel smoke proves it again
+through `ModuleRegistry`, and a stateless wheel containing migrations is
+refused. This keeps a missing stateful schema a failure rather than turning
+schema ownership into an optional check. `.github/release-adapters.json` owns
+the separate question for `stateless-protocol-adapter` distributions, which
+have no `ModuleManifest` or kernel floor and are gated, built and verified by
+`release-adapter.yml` instead (ADR-0006's 2026-08-14 amendment).
 The module lane's pre-publish smoke builds the target and kernel wheels plus
 every repository-local distribution named by that module's reviewed
 `wheel_contents.allowed_requires`; this is how the permitted
