@@ -12,6 +12,12 @@ source_repositories = [
   "dotmac_crm",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_erp:app/models/finance/audit/approval_workflow.py",
   "dotmac_erp:app/models/finance/audit/approval_request.py",
@@ -50,3 +56,29 @@ first_cutover = "Completed greenfield on 2026-08-17 in dotmac_vendor_control_pla
 shadow_and_drift = "Vendor resolved as a measured greenfield switch, not a data-bearing shadow. The target was observed absent before production, and v013 made the premise executable by locking and refusing any non-empty legacy table in the same authority-transfer transaction. No lossy request synthesis, historical import or parity subsystem was built for zero rows. The six safety properties remain part of the Vendor adapter/module tests. ERP's later cutover retains the original data-bearing obligations: preserve immutable policy versions and hashes, reconcile open requests against exact content, compare lifecycle/eligibility/SoD behavior, and surface changed subjects as stale rather than importing them as approved."
 local_copy_retirement = "Complete for Vendor cutover 1: src/vendor_cp/approvals/service.py and models.py, approval_policies / approval_records, shadow-overlap declarations, inventory tooling and the local sealed-cutover implementation are retired. Architecture tests ratchet local writer imports and call sites at zero. ERP still owes its independent retirement: remove the three audit.approval_* writers and direct commit() calls while retaining threshold/FX routing, document vocabulary and downstream consequences in the finance domain. No product may keep a compatibility decision table or parallel evaluator."
 next_action = "Keep the Vendor production authority and zero-local-writer ratchets green. ERP is the only remaining concrete candidate and earns `reuse-proven` only after its E8 decision, exact module pin, tenant-plane migration, data-bearing parity, one-writer switch and local-copy retirement. dotmac-automation and dotmac-forms remain separate product-first audits and are not covered by this dossier."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/approvals/adapter.py", "src/vendor_cp/approvals_authority.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/finance/audit/approval_workflow.py", "app/models/finance/audit/approval_request.py", "app/services/finance/platform/approval_workflow.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

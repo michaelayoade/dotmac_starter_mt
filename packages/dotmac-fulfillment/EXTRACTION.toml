@@ -15,6 +15,10 @@ source_revisions = [
   "dotmac_erp:0f4b1698ddbf",
   "dotmac_starter_mt:e6ba2022f3d7",
 ]
+revalidation_revisions = [
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_sub:app/services/owner_commands.py",
   "dotmac_sub:app/services/events/owner_outputs.py",
@@ -48,3 +52,15 @@ first_cutover = "Dotmac Cloud is cutover 1 after its first participant declares 
 shadow_and_drift = "For each candidate adopter, create the module run and attempts in the same transaction as the existing request while leaving the local owner authoritative. Compare command identity, correlation, per-line outcome, derived progress and re-observation verdict for every transition. Record provider-success/callback-loss, out-of-order delivery, duplicate delivery and partial success as named divergence classes. Cut over only after live PostgreSQL RLS/concurrency evidence and zero unexplained drift; then seal one writer and use the module's reconciliation reader to rebuild progress from immutable attempts and receipts."
 local_copy_retirement = "Cloud has no local saga copy to retire. Sub retires the synchronous ProvisioningRuns.run loop, reap_stale_runs, provisioning run/workflow/step tables insofar as they are engine state, the ProvisioningStepType/ProvisioningVendor/ProvisioningReadinessCheckKind database enums, and the orphaned saga_executions/provisioning_step_executions tables. It retains ISP participant models and service_order_lifecycle without the cross-owner activate_subscription write. ERP's dormant platform saga is a cleanup candidate, not an adopter. Two-directional caller/model/table ratchets reach zero before any displaced owner is called retired."
 next_action = "Kernel a89 is published, registry-verified and tagged, so the floor now names an installable release and this package no longer waits on the kernel. Remaining gates are unchanged and are about ADOPTION, not supply: compose the released dotmac-durable-timers dependency, then implement the first Dotmac Cloud participant adapter. Do not allowlist or publish before that named participant exists \u2014 an installable saga owner standing beside products that still drive their own is the failure the dotmac-imports row was ruled on."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/finance/platform/saga_execution.py", "app/services/finance/platform/saga_orchestrator.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/services/owner_commands.py", "app/services/events/owner_outputs.py", "app/services/provisioning_lifecycle.py", "app/services/provisioning_managers.py"]

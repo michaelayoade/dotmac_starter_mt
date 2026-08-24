@@ -277,3 +277,25 @@ jobs:
           git tag -a "${TAG}" -m "dotmac-ui ${{ inputs.version }} (verified on the Forgejo registry)" "${GITHUB_SHA}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${GITHUB_SHA}"
+
+      # A UI release has no migration lineage, but its tag still makes the
+      # publication-ledger row false. Every tag writer owes the same durable
+      # record; the architecture canary discovers this obligation from the
+      # `git tag` command rather than from this workflow's filename.
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        if: always()
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution dotmac-ui \
+            --version "${{ inputs.version }}" \
+            --tag "dotmac-ui-v${{ inputs.version }}"

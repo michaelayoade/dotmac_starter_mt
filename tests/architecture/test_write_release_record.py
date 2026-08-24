@@ -148,7 +148,9 @@ def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     writer = _writer()
     tag = "dotmac-integration-v0.1.0a14"
     distribution, commit, digests = _recorded_entry(writer, tag)
-    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8").replace(
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+
+    text = text.replace(
         '"dotmac-integration": frozenset()',
         '"dotmac-integration": frozenset({"ig_0012_delivery_evidence.py"})',
     )

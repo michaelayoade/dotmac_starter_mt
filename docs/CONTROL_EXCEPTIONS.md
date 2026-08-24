@@ -49,7 +49,8 @@ satisfied:
 tagging, and its ledger row was removed in #361. The cost is entirely to the
 evidentiary value of the approval record, and to the precedent.
 
-**Status:** accepted, not repeated. The a91 artifact stands; no rollback.
+**Status:** accepted; repeated by kernel a93 on 2026-08-23. The a91 artifact
+stands; no rollback.
 
 **Remediation.**
 
@@ -77,8 +78,6 @@ gh api repos/<owner>/<repo>/actions/runs/<run_id>/pending_deployments \
 
 must report `false`. That check is the acceptance test; today it reports
 `true`.
-
----
 
 ## 2026-08-23 — the release-record automation failed silently on its first run
 
@@ -110,36 +109,45 @@ replacement.
    inside a green run, which is the failure class the script exists to end.
    Michael identified this before the instance occurred; the instance is the
    proof. Fixed: `give_up` exits 1.
-2. **A repository setting blocks Actions from creating pull requests.**
-   *Settings → Actions → General → Workflow permissions → "Allow GitHub Actions
-   to create and approve pull requests".* This is not a token scope and cannot
-   be granted from the workflow file. Until it is enabled, every release will
-   reach `give_up` — now loudly, with the pushed branch one click from a pull
-   request.
+2. **The workflow used the repository `GITHUB_TOKEN`, whose broad repository
+   switch couples pull-request creation to pull-request approval.** *Settings →
+   Actions → General → Workflow permissions → "Allow GitHub Actions to
+   create and approve pull requests".* This is not a workflow token scope. It
+   remains disabled deliberately: enabling approval authority merely to obtain
+   creation authority weakens a separate review control. The tagging jobs also
+   no longer request `pull-requests: write` for that ordinary token, so a future
+   switch change cannot silently make the publisher the recorder. Automatic
+   opening needs a dedicated recorder identity instead.
 
 **Cost.** No incorrect artifact. `main` was red for roughly two hours between
 the a92 tag and the hand-written record, and every open branch inherited the
 five failures during that window — each presenting as that branch being broken.
 
-**Status:** partially remediated.
+**Status:** silent success remediated; automatic opening remains open.
 
 | # | Action | Owner | State |
 |---|---|---|---|
 | 1 | `give_up` fails the run, links the ready-made pull-request page | this change | done |
 | 2 | Guard pinning that no third success path can appear | this change | done |
-| 3 | Enable "Allow GitHub Actions to create and approve pull requests" | Michael | **open** |
+| 3 | Remove pull-request authority from every tag-writing job's ordinary workflow token and enforce exact `contents: write` | this change | done |
+| 4 | Install a dedicated recorder GitHub App with metadata read, contents write and pull-requests write, but no Actions, deployment, environment or administration authority | Michael | **open** |
+| 5 | Prove one low-risk release automatically opens its record through that App and keep the freeze until the green record merges and protected `main` is verified | Michael + release captain | **open** |
 
-Item 3 carries a real trade-off and should be decided rather than defaulted:
-the same setting that permits *creating* a pull request also permits Actions to
-*approve* pull-request reviews. That is a different control from
-protected-environment approval (2026-08-22 above), but it points the same way —
-so if it is enabled, branch protection should require an approving review from
-someone other than the workflow actor.
+The repaired loud path has now run for real. Kernel a93 run `32622991682`
+pushed `chore/record-dotmac-kernel-0.1.0a93`, failed RED when PR creation was
+refused, and printed the ready-made URL. Michael opened #372 from that branch;
+all eighteen checks were green and merge `04b97713` restored the truthful
+record. That proves failure is visible and recoverable without re-publishing.
 
-The alternative is to leave it disabled and accept one manual click per
-release: the branch is pushed with correct edits and the run is red until the
-pull request exists. That is a defensible position, and it is the state this
-change leaves the repository in.
+The chosen end state is not the broad repository switch. GitHub's
+pull-request-write permission also reaches the review API, so the App is not
+described as intrinsically review-incapable. Instead, it authors and last-pushes
+its own mechanical PR, protected `main` requires a fresh approval from another
+actor with no bypass, and the App has no Actions, deployment, environment or
+administration authority. The publisher token has contents write only. Until
+the App is installed, it can push the correct branch but cannot open the PR;
+the accepted fail-closed bridge is one manual click and a red run rather than
+silent green.
 
 ---
 
@@ -188,3 +196,16 @@ proceeded. A permission boundary does not have that conversation.
 
 Until it lands, every such approval gets an entry here.
 
+**Current accepting actions.** The historical exception remains accepted; its
+technical remediation is explicitly assigned rather than implied:
+
+| # | Action | Owner | State |
+|---|---|---|---|
+| 1 | Replace the agent-visible credential with an automation identity that is not an environment reviewer | Michael | **open** |
+| 2 | Prove `current_user_can_approve == false` on a pending release before that identity may dispatch | Michael + release captain | **open** |
+| 3 | After automation dispatch is separated, set `prevent_self_review=true` and disable administrator bypass on `registry-release` | Michael | **open** |
+
+The accepting condition is capability, not another promise: a human approval
+credential is never installed in an agent-visible session; an App or machine
+identity used for dispatch and monitoring is not an environment reviewer and
+reports `current_user_can_approve=false` at the pending gate.

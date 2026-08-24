@@ -14,6 +14,11 @@ source_repositories = [
   "dotmac_crm",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 
 source_paths = [
   "dotmac_sub@5e75e0469dadb15aee4a25921f036c4f3787dc7a:app/api/meta_inbox_webhooks.py",
@@ -44,3 +49,22 @@ shadow_and_drift = "Mirror exact raw bytes and the signature header into Integra
 local_copy_retirement = "Delete Sub's and CRM's Meta webhook signature, challenge and payload traversal surfaces after Sub cutover. Sub retains Team Inbox decisions, contact/profile enrichment, routing, threading, assignment and timeline consequences. CRM is retired and never becomes a connector consumer. Outbound Graph delivery remains outside this ingress-only slice until the product-owned messaging.send.v1 command contract is published."
 
 next_action = "dotmac-connector-meta-social 0.1.0a1 is published, installed back from the private index, conformance-checked and tagged from exact main SHA c1921f6 by release run 32361197839. Exact-pin it in dotmac_integrator and execute the Sub shadow/callback cutover. Keep status audit-complete until that cutover retires the direct transport. Build outbound Meta delivery as a separate capability slice rather than broadening this ingress-only package."
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/services/meta_webhooks.py", "app/services/meta_oauth.py", "app/api/webhooks.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/api/meta_inbox_webhooks.py", "app/services/integrations/connectors/meta_social_runtime.py", "app/services/integrations/meta_social_capability.py"]

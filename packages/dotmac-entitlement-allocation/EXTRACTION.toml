@@ -27,6 +27,12 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/entitlements.py",
   "dotmac_starter_mt:packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 preserved_tests = [
   # The source's behavioural proofs, to port with the cutover. Its idempotency
   # and activation-projection tests are the parity evidence.
@@ -53,3 +59,29 @@ first_cutover = "Completed greenfield on 2026-08-17 in dotmac_vendor_control_pla
 shadow_and_drift = "Resolved as a measured greenfield switch rather than a data-bearing shadow. Before Vendor had a production estate, the target was observed absent; v014 then made that premise executable by locking and refusing any non-empty legacy table in the same transaction as authority transfer. The four known divergences remain refusal behavior for future adopters: product identity is mandatory, capability codes must be manifest-declared, contract_ref is opaque rather than an FK, and duplicate codes are rejected rather than aggregated. No parity subsystem or synthesized history was built for zero rows."
 local_copy_retirement = "Complete for cutover 1. vendor_cp.allocations.models and .service are deleted, the public allocations/allocation_entries tables are dropped, the shadow-overlap waiver is removed, and a two-directional architecture ratchet refuses any reacquired local writer. allocations.consumer is assembly wiring over stage_allocation, not a second owner. Licence issuance no longer accepts a caller-selected product and reads allocation_product() before lineage, payload, audit and outbox construction."
 next_action = "Repin dotmac_vendor_control_plane from published a4 to published a6 and prove both DDL-free prerequisites against its migrated database before deployment. Hold `adopted` until a second real vendor or OEM control plane completes its own cutover; only then may the dossier become `reuse-proven`. Keep the Vendor authority and no-local-writer ratchets green. Do not add delivery or acknowledgement state here: licence issuance owns that lifecycle."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/allocations/adapter.py", "src/vendor_cp/allocations/consumer.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

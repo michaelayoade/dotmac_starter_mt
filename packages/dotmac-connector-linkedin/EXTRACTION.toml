@@ -14,6 +14,13 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_vendor_control_plane",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_academy_app:40423a07a4eaa6172a36997f3276cb7a79dda343",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_starter_mt@bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3:docs/inventories/external-connector-sources.md",
   "dotmac_starter_mt@bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3:docs/superpowers/plans/2026-08-21-integration-ecosystem-programme.md",
@@ -33,3 +40,36 @@ first_cutover = "Route a LinkedIn organization-social or Lead Sync subscription 
 shadow_and_drift = "Compare notification identity, action, source entity and provider timestamp between the provider delivery and the destination observation. Require complete batch traversal, stable deduplication and no decision fields in connector output."
 local_copy_retirement = "No qualifying fleet connector exists. If a product adds a direct LinkedIn runtime before cutover, delete it with the adopter change and lower its external-connector ratchet."
 next_action = "Validate on Observer and CI, publish after dotmac-integration 0.1.0a11, exact-pin in dotmac_integrator, then configure the first product-owned destination port."
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "40423a07a4eaa6172a36997f3276cb7a79dda343"
+evidence_paths = ["pyproject.toml", "app/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["README.md", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/services/connector.py", "docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]

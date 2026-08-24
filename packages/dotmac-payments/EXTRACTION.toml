@@ -10,6 +10,9 @@ source_revisions = [
   "dotmac_sub:9493ee4eef737f18b4813899a2d8f0537ed6d5c7",
   "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
 ]
+revalidation_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_sub:app/models/billing.py",
   "dotmac_sub:app/models/payment_proof.py",
@@ -40,8 +43,18 @@ inventory_evidence = ["docs/inventories/customer-journey-owner-sources.md"]
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "9493ee4eef737f18b4813899a2d8f0537ed6d5c7"
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = [
   "app/models/billing.py",
   "app/models/payment_proof.py",
+]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
+evidence_paths = [
+  "app/models/finance/payments/payment_intent.py",
+  "app/services/finance/payments/payment_service.py",
 ]

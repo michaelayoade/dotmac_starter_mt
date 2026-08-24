@@ -25,6 +25,12 @@ source_repositories = [
   "dotmac_academy_app",
   "dotmac_starter_mt",
 ]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_academy_app:40423a07a4eaa6172a36997f3276cb7a79dda343",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+]
 source_paths = [
   # Read and REJECTED as sources. Listed because the audit required inventorying
   # them, not because any supplied an implementation.
@@ -63,3 +69,29 @@ first_cutover = "COMPLETED 2026-08-16. The Tenant Workspace (`dotmac_workspace`)
 shadow_and_drift = "No shadow verification is possible or needed: there is no prior implementation to run beside, and no existing rows whose behaviour could diverge. The drift this module must detect is a different kind — between its stored descriptor copy and what the target application currently publishes — and that is a first-class feature rather than a migration concern: `reconcile_descriptor` returns UNCHANGED/UPDATED/REGRESSED/CONFLICT, refuses to adopt a descriptor whose version regressed or whose content changed under a fixed version, and records `reconciliation_status` + `descriptor_refreshed_at` so an unreachable application never looks freshly checked."
 local_copy_retirement = "No prior implementation existed to retire. The Workspace launcher is a thin consumer of the module rather than a local directory model or writer. `application-portfolio-sources.md` records the two sweeps that established the greenfield starting point. The module still must NOT absorb the neighbouring authorities in that inventory's concept-to-owner table: commercial entitlement stays with the Vendor CP's allocations/contracts, local capability evaluation stays with `dotmac_kernel.entitlements`, signed licence delivery stays with `dotmac_kernel.licensing`, Workspace authentication stays with its OIDC boundary, and who may enter an application stays with the target application."
 next_action = "Hold at `adopted` until a second REAL production consumer supplies reuse evidence; the Workspace alone does not earn `reuse-proven`. Continue adding application bindings and reconciling descriptors through this module's public service surface, with the launcher remaining a thin read adapter. Do NOT absorb access requests, approvals, delegation policy, grant sets, acknowledgement, shared sessions or cross-application sign-on: `dotmac-application-access` remains deferred by ADR-0021 §5 until a generic signed-document mechanism exists, while every target application remains its own authentication, authorization and session authority. Do NOT add a column naming a person, member, group, role, grant or permission — `test_the_directory_holds_no_authorization_column` fails the build on one, and that test is the executable half of ADR-0021 §3."
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "40423a07a4eaa6172a36997f3276cb7a79dda343"
+evidence_paths = ["app/web/applications.py", "app/models/admissions.py"]
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["src/vendor_cp/assembly.py", "src/vendor_cp/allocations/adapter.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/people/leave/leave_application.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/billing.py"]

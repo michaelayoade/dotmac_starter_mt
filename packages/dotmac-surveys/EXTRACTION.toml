@@ -17,6 +17,10 @@ source_revisions = [
   "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
   "dotmac_starter_mt:92ae7a6f9c8307797704deb615a24e59420a73c4",
 ]
+revalidation_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+]
 source_paths = [
   "dotmac_sub:app/models/comms.py",
   "dotmac_sub:app/schemas/comms.py",
@@ -60,9 +64,30 @@ next_action = "Validate the audit-complete package on Observer in a fresh worktr
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "3f8d74825bee47b98c3c532229b72f3a8a5b16aa"
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = [
   "app/models/comms.py",
   "app/services/surveys.py",
   "app/services/events/handlers/surveys.py",
+]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = [
+  "app/models/comms.py",
+  "app/services/surveys.py",
+  "app/services/crm/inbox/csat.py",
+]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
+evidence_paths = [
+  "app/models/people/hr/survey.py",
+  "app/services/people/hr/survey_service.py",
 ]

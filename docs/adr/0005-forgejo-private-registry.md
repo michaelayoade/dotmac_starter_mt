@@ -70,6 +70,58 @@ Authority split (phase 1):
 - **Availability:** the registry is now on the critical path for every Dotmac CI
   install; monitoring, backup, and a restore rehearsal are standup prerequisites.
 
+## Decision amendment — 2026-08-23 (release authority and record closure)
+
+The publisher, the human gate reviewer and the post-release recorder are three
+different authorities:
+
+1. An automation identity may dispatch and observe a release, but is not a
+   `registry-release` reviewer and must report
+   `current_user_can_approve=false` while a run is pending. A human reviewer
+   approves in the protected-environment UI; chat authorization never transfers
+   that action to an agent or API client.
+2. A dedicated recorder GitHub App may read metadata, write the mechanical
+   release-record branch and open its pull request. It has no Actions or
+   deployment-approval, environment or repository-administration permission.
+   GitHub does not offer a create-only pull-request permission: pull-request
+   write also reaches the review API. The separation therefore rests on two
+   enforced facts rather than an overclaim about the token: the App authors and
+   last-pushes its own record PR, whose author cannot approve it, and protected
+   `main` requires a fresh approval from someone other than the last pusher with
+   no bypass. The repository-wide Actions switch that couples PR creation to PR
+   approval stays disabled. Each tag-writing job mints one short-lived,
+   current-repository installation token through
+   `.github/actions/release-recorder-token`, then rebinds Git before the record
+   branch is written so both the push and PR belong to that App. It uses
+   `RELEASE_RECORDER_CLIENT_ID` and `RELEASE_RECORDER_PRIVATE_KEY` from the
+   protected environment; only contents and pull-request write are requested.
+   The tag-writing job's ordinary workflow token has exactly contents write and
+   no pull-request authority. It can provide the loud fallback branch when the
+   App is unavailable, but cannot silently become a second automatic recorder
+   if repository settings change.
+   The private key's canonical OpenBao path must be recorded when the App is
+   provisioned, and no key value enters source or logs.
+3. Protected `main` requires one approving review, approval of the most recent
+   reviewable push, dismissal of stale approvals, no bypass, and every emitted
+   acceptance check: the ten `quality (...)` matrix checks,
+   `allocation-gate`, `unit`, `integration`, `docker-build`, `consumer-boot`,
+   both `kernel-floors` checks and `Dotmac engineering standards`. Because the
+   recorder App authors and last-pushes its PR, the approval must come from a
+   different actor. A required-check subset is not release evidence merely
+   because the unrequired checks happened to be green on one PR.
+
+One release captain freezes every non-record merge from dispatch until the tag
+is verified, the generated record PR is reviewed and green, and the resulting
+protected-main revision is both truthful and green. A tag is the opening of the
+record gap, not the end of the release. If recorder automation fails after
+tagging, the release stays failed and frozen while a human opens the
+already-pushed branch; publication is never re-run to repair bookkeeping.
+
+This is the accepted end state. The loud/manual branch bridge remains the
+fail-closed operational path until the two restricted identities and ruleset
+settings are installed and verified. The a91/a93 approval exceptions and the
+a92/a93 record evidence are retained in `docs/CONTROL_EXCEPTIONS.md`.
+
 ## Follow-ups
 
 1. Stand up per `deploy/forgejo/RUNBOOK.md`; publish + verify `dotmac-kernel
