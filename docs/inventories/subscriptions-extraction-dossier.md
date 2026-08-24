@@ -1,7 +1,8 @@
 # `dotmac-subscriptions` — extraction dossier content, parity tests, planes, retirement
 
-**As of:** 2026-08-14
-**Status:** `audit-complete`. **Not** `approved`, not started, no package.
+**As of:** 2026-08-23
+**Status:** `audit-complete`; implementation candidate built, not yet released or
+adopted.
 **Source audit:** `docs/inventories/subscriptions-sources.md` (published A2b
 conclusion) and `docs/inventories/a2-commercial-offer-source-audit.md`
 (independent verification)
@@ -11,15 +12,17 @@ conclusion) and `docs/inventories/a2-commercial-offer-source-audit.md`
 
 ## What this document is
 
-The `EXTRACTION.toml` **content** for `dotmac-subscriptions`, written as a
-markdown document because **ADR-0017's P11 gate is closed**. There is no
-`packages/dotmac-subscriptions/`, no namespace, no short code, no migration
-prefix, no manifest and no lineage, and this document creates none of them. The
-TOML block in § 1 uses the exact field names of
-`packages/dotmac-files/EXTRACTION.toml` so that it becomes the real file
-verbatim in the adoption plan's M0 step 1, once G0–G2 pass.
+This is the historical source audit and detailed retirement dossier behind the
+checked-in `packages/dotmac-subscriptions/EXTRACTION.toml`. On 2026-08-23 the
+package-only work was salvaged onto current Starter main; the unrelated branch
+payload was discarded. Kernel already reserved `subscriptions` / `su` /
+`mod_subscriptions`; the candidate now has one dual-plane lineage and the
+product-first service/tests described below. It is not composed, published or
+adopted, and `contract_consumers = []` remains accurate until a product retires
+its local writer after backfill and shadow proof.
 
-It does not restate the source comparison. Read `subscriptions-sources.md` for
+Section 1 is retained as the 2026-08-14 design snapshot; the canonical live
+dossier is now the package `EXTRACTION.toml`. Read `subscriptions-sources.md` for
 the published conclusion and `a2-commercial-offer-source-audit.md` for the
 verification, its corrections, and the dispositions ledger.
 
@@ -94,15 +97,13 @@ local_copy_retirement = "Vendor CP must delete vendor_cp/offers models, service 
 next_action = "None in this repository. The three gates are external and unmet: ADR-0017 P11 requires Sub's checked-in adoption ledger to prove the kernel migration lineage is composed and running in Sub's production database; P3 requires a durable-timer owner ported product-first from Sub and paired with this real consumer, not a cron scan; and a released, provider-neutral billing input contract (AcceptRatedObligationV1, Team 2's specification) must exist and be assembly-wired before any occurrence becomes financially effective. When all three pass, M0 step 1 of the adoption plan converts this document into packages/dotmac-subscriptions/EXTRACTION.toml verbatim and allocates the short code, prefix, branch label, schema, ledger row, manifest declarations and migration root in that one change. contract_consumers stays [] until Vendor CP's local offer writer is actually deleted; it becomes reuse-proven only when both products exercise the same released contract with their local owners gone."
 ```
 
-### Why `status = "audit-complete"` and not `approved`
+### Why `status = "audit-complete"` and not `adopted`
 
-The source question is answered and the boundary is decided (ADR-0020 A4). What
-is not true is that anything may be built: § 6 of ADR-0020 is unchanged, ADR-0017
-P11 is closed, and the amendment says in terms that it "does not lift ADR-0017's
-moratorium, does not claim P11, does not create a package, namespace, lineage,
-or dossier". `audit-complete` is the honest state — the same state
-`packages/dotmac-files/EXTRACTION.toml` carries with a far more advanced
-adoption story.
+The source question is answered, the boundary is decided (ADR-0020 A4), and the
+package candidate now exists. What is not true is publication or adoption:
+kernel a94, the package's Observer proof, a registry-verified a2 release, and
+each adopter's explicit backfill/shadow/writer-retirement sequence remain open.
+`audit-complete` is therefore still the honest dossier status.
 
 `contract_consumers = []` for the same reason, and it is not a placeholder: a
 consumer counts when its local owner is **deleted**, not when it installs the
