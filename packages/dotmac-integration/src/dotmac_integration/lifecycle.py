@@ -20,6 +20,34 @@ event, by which time the operator has been told the integration is live. So
 `enable` asks the plugin to validate a live connection and refuses on a failing
 diagnostic.
 
+## One owner per column, so a re-declaration cannot erase a decision
+
+Four decisions about a binding are four operations, each the only writer of
+what it decides:
+
+======================================= ====================================
+decision                                owner
+======================================= ====================================
+does this installation implement it     `add_binding`
+is it enabled                           `set_binding_enabled`
+is it the selection default             `set_binding_selection_policy`
+what does the operator call it          `set_binding_scope`
+======================================= ====================================
+
+Where its traffic LANDS is a fifth, and it is not here at all — it is
+`destination_binding.establish_destination`, writing its own append-only table.
+
+`add_binding` is idempotent by contract, so every reconcile and activation
+sequence calls it again on a binding that already exists. While it wrote all
+four, a re-declaration that named only the capability reset the other three to
+their defaults — and `policy_json` is what `selection` reads to pick between
+several enabled bindings, so losing it stopped outbound dispatch with an
+ambiguity refusal while every state column still read `enabled`.
+
+`enable` is a LIFECYCLE TRANSITION and writes no binding column at all. That is
+asserted statically, not merely intended, by
+`tests/architecture/test_integration_lifecycle_writers.py`.
+
 ## Adoption is a preview, then an atomic idempotent apply
 
 `preview_adoption` answers "what would change?" without changing anything —
@@ -57,6 +85,7 @@ from dotmac_integration.spi import (
 
 __all__ = [
     "ENDPOINT_AUDIT_ACTIONS",
+    "KEEP",
     "AdoptionPreview",
     "LifecycleError",
     "add_binding",
@@ -72,6 +101,8 @@ __all__ = [
     "revoke_ingress_endpoint",
     "rotate_ingress_endpoint",
     "set_binding_enabled",
+    "set_binding_scope",
+    "set_binding_selection_policy",
 ]
 
 
@@ -80,6 +111,31 @@ class LifecycleError(RuntimeError):
 
 
 _TERMINAL = frozenset({"retired"})
+
+
+class _Keep:
+    """Leave this column exactly as it is — an omission marker distinct from
+    `None`.
+
+    `None` is a REAL value for both `scope_json` and `policy_json`: it means
+    "this binding declares no scope / is not the selection default". A default
+    of `None` therefore cannot mean "unspecified", because the write is then
+    indistinguishable from an operator deliberately clearing the column — which
+    is exactly how a re-declaration came to erase an established selection
+    policy. A separate sentinel makes omission and clearing two different
+    instructions, and keeps `policy=None` a usable one.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostic only
+        return "KEEP"
+
+
+#: The omission marker for :func:`add_binding`'s operator-set columns. Exported
+#: so a composing assembly can pass it explicitly when it is forwarding an
+#: optional field it may not have.
+KEEP: Final[_Keep] = _Keep()
 
 
 def _pinned_manifest(
@@ -293,8 +349,8 @@ def add_binding(
     *,
     registry: ConnectorRegistry,
     capability_id: str,
-    scope: dict[str, object] | None = None,
-    policy: dict[str, object] | None = None,
+    scope: dict[str, object] | None | _Keep = KEEP,
+    policy: dict[str, object] | None | _Keep = KEEP,
     actor: str | None = None,
 ) -> CapabilityBinding:
     """Declare that this installation implements a capability.
@@ -302,6 +358,26 @@ def add_binding(
     Created DISABLED. Binding and enabling are separate acts because the first
     is a statement of intent and the second is a live decision — collapsing them
     would enable a capability the moment someone wrote it down.
+
+    DECLARING a binding is not the same act as CONFIGURING one, and this
+    function owns only the first. It is documented and tested as idempotent —
+    "rebinding the same installation/capability updates the one existing
+    binding" (0.1.0a6) — so every activation and reconcile sequence re-asserts
+    the desired binding set through it. While omitted `scope`/`policy`
+    arguments were written through as `None`, that idempotent re-declaration
+    silently ERASED two operator-established columns:
+
+    * `policy_json` decides which binding serves a capability when several are
+      enabled (`dotmac_integration.selection`). Losing `{"default": true}`
+      turns a working outbound configuration into a fail-closed
+      `AmbiguousBindingError` at the next dispatch — activation appears to
+      succeed and outbound traffic stops.
+    * `scope_json` is the operator's displayed description of the binding.
+
+    Omission now PRESERVES both; an explicit value — `None` included — is an
+    explicit write. Changing either column on an existing binding without
+    re-declaring it belongs to :func:`set_binding_selection_policy` and
+    :func:`set_binding_scope`, which are their named owners.
     """
     from sqlalchemy import select
 
@@ -340,14 +416,70 @@ def add_binding(
             created_by=actor,
         )
         db.add(binding)
+        # A NEW binding starts with both columns unset, exactly as before: an
+        # omitted argument has nothing to preserve here.
+        binding.scope_json = None
+        binding.policy_json = None
     binding.state = "disabled"
     binding.enabled_at = None
-    binding.scope_json = scope
-    binding.policy_json = policy
+    if not isinstance(scope, _Keep):
+        binding.scope_json = scope
+    if not isinstance(policy, _Keep):
+        binding.policy_json = policy
     binding.updated_by = actor
     _invalidate_activation(
         db, installation, reason="capability_binding_changed", actor=actor
     )
+    db.flush()
+    return binding
+
+
+def set_binding_scope(
+    db: Any,
+    binding: CapabilityBinding,
+    *,
+    scope: dict[str, object] | None,
+    actor: str | None = None,
+) -> CapabilityBinding:
+    """The named owner of `CapabilityBinding.scope_json`.
+
+    Display only — `scope_json` is never read by routing, and
+    `dotmac_integration.destination_binding` proves it does not read it. Where
+    traffic LANDS is `capability_destination_revisions`, written by
+    `establish_destination`; this column is the operator's own label.
+
+    Deliberately does NOT invalidate activation. Activation is a statement
+    about the CONFIGURATION and the live connection, and neither was validated
+    against this column — returning the installation to `draft` here would make
+    editing a label an outage.
+    """
+    binding.scope_json = scope
+    binding.updated_by = actor
+    db.flush()
+    return binding
+
+
+def set_binding_selection_policy(
+    db: Any,
+    binding: CapabilityBinding,
+    *,
+    policy: dict[str, object] | None,
+    actor: str | None = None,
+) -> CapabilityBinding:
+    """The named owner of `CapabilityBinding.policy_json`.
+
+    `{"default": true}` marks the binding `dotmac_integration.selection` picks
+    when a dispatch names no `capability_binding_id` and several bindings are
+    enabled for one capability. It is a SELECTION decision, separate from
+    whether a binding is enabled (`set_binding_enabled`) and from where its
+    traffic lands (`establish_destination`).
+
+    Deliberately does NOT invalidate activation, for the same reason as
+    :func:`set_binding_scope`: selection is read live, per dispatch, and no
+    connection check ever validated against it.
+    """
+    binding.policy_json = policy
+    binding.updated_by = actor
     db.flush()
     return binding
 

@@ -211,6 +211,7 @@ from dotmac_integration.ingress import (
 )
 from dotmac_integration.lifecycle import (
     ENDPOINT_AUDIT_ACTIONS,
+    KEEP,
     AdoptionPreview,
     LifecycleError,
     add_binding,
@@ -226,6 +227,8 @@ from dotmac_integration.lifecycle import (
     revoke_ingress_endpoint,
     rotate_ingress_endpoint,
     set_binding_enabled,
+    set_binding_scope,
+    set_binding_selection_policy,
 )
 from dotmac_integration.manifest import module
 from dotmac_integration.models import (
@@ -563,6 +566,8 @@ __all__ = [
     "DispatchUnavailable",
     "settle",
     "set_binding_enabled",
+    "set_binding_scope",
+    "set_binding_selection_policy",
     "retire",
     "quarantine",
     "put_config_revision",
@@ -575,6 +580,7 @@ __all__ = [
     "adopt_manifest",
     "add_binding",
     "accepts_manifest_digest",
+    "KEEP",
     "PreparedDispatch",
     "LostClaim",
     "LifecycleError",
