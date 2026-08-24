@@ -296,10 +296,12 @@ held to the boundary § 1 draws. The owner is named:
 | Owner | Path | Owns |
 |---|---|---|
 | **`PaymentService`** | `dotmac_erp:app/services/finance/payments/payment_service.py` | the payout DECISION and the transfer lifecycle: `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal` |
-| **`BatchTransferService`** | `dotmac_erp:app/services/finance/payments/batch_transfer_service.py` | composition of BATCHES of expense-reimbursement transfers over `PaymentService` — it composes, it does not decide separately |
+| ~~`BatchTransferService`~~ | `dotmac_erp:app/services/finance/payments/batch_transfer_service.py` | **NOT an owner — dead code.** Zero callers across `app/`, `tests/`, `scripts/` and `tools/`; not exported from its package `__init__.py`; zero tests. It neither composes nor decides. Named here in the first draft of this ADR from a method-name reading, corrected by the product-first dossier before this record was ever merged. It nonetheless holds a live `initiate_transfer` with no separation of duties and no permission check on `approve_batch` — a latent hazard, recorded in `docs/inventories/treasury-payment-execution-sources.md`, not an authority |
 
-Everything § 1 forbids an Integrator artifact from doing is forbidden because
-these two services do it. In particular `_recover_transfer_initiation` and
+`PaymentService` is therefore the SOLE interim owner. Everything § 1 forbids an
+Integrator artifact from doing is forbidden because that one service does it.
+ERP's only live batch writer is `PaymentService._update_batch_item_status`,
+which can fire only for items no live code creates. In particular `_recover_transfer_initiation` and
 `poll_transfer_status` are where an ambiguous attempt is resolved, which is the
 concrete form of "whether an ambiguous attempt may be tried again is ERP's
 call".
@@ -310,7 +312,8 @@ above already called it premature; this makes the precondition explicit rather
 than leaving it to judgement. A mandatory product-first dossier (ADR-0006's
 extraction amendment, `AGENTS.md` rule 22) must first cover, as one inventory:
 
-- ERP's `PaymentService` and `BatchTransferService` above;
+- ERP's `PaymentService` above, and `BatchTransferService` as a disposal
+  question rather than an ownership one;
 - `dotmac-payments`;
 - `dotmac-banking`;
 - `dotmac-accounting`; and
