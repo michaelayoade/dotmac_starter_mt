@@ -79,6 +79,9 @@ def _timestamps() -> tuple[sa.Column[datetime], sa.Column[datetime]]:
 
 def upgrade() -> None:
     require_prerequisites(op.get_bind(), REQUIRES)
+    op.execute("CREATE SCHEMA IF NOT EXISTS mod_sla;")
+    op.execute("REVOKE ALL ON SCHEMA mod_sla FROM PUBLIC;")
+    op.execute("GRANT USAGE ON SCHEMA mod_sla TO app_user, app_admin;")
 
     op.create_table(
         "sla_policies",
@@ -353,3 +356,4 @@ def downgrade() -> None:
     for table in reversed(_TENANT_TABLES):
         op.drop_table(table, schema=_SCHEMA)
     op.execute("DROP FUNCTION mod_sla.refuse_observation_mutation();")
+    op.execute("DROP SCHEMA IF EXISTS mod_sla;")
