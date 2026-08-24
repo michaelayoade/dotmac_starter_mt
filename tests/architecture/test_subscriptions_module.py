@@ -21,7 +21,8 @@ from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
-MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
+ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
+PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -389,7 +390,7 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
 
 
 def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    source = MIGRATION.read_text()
+    source = ROOT_MIGRATION.read_text()
 
     assert 'revision = "su_0001_subscriptions"' in source
     assert 'branch_labels = ("subscriptions",)' in source
@@ -406,18 +407,33 @@ def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
         assert table in source
 
 
+def test_offer_pricing_evolves_in_an_additive_composable_revision() -> None:
+    source = PRICING_MIGRATION.read_text()
+
+    assert 'revision = "su_0002_offer_pricing"' in source
+    assert 'down_revision = "su_0001_subscriptions"' in source
+    assert "selected_module_planes" in source
+    assert "ModulePlane.TENANT" in source
+    assert "ModulePlane.PLATFORM" in source
+    assert "sa.func.count(sa.distinct(price_table.c.charge_model_code)) != 1" in source
+    assert "contains a non-positive price" in source
+    assert "contains a non-positive contract price" in source
+    assert 'pricing_mode="catalog_price"' in source
+    assert 'version_table.c.pricing_mode == "contract_price"' in source
+
+
 def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
 
     assert dossier["source_repositories"] == [
-        "dotmac_erp",
         "dotmac_sub",
+        "dotmac_erp",
         "dotmac_vendor_control_plane",
     ]
     assert dossier["source_revisions"] == [
-        "dotmac_erp:0f4b1698ddbf",
-        "dotmac_sub:943bc59f8e4ca0849c7de578bc9dbc17c57b116f",
-        "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+        "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
+        "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
+        "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
     ]
-    assert len(dossier["source_paths"]) >= 14
+    assert len(dossier["source_paths"]) >= 11
     assert len(dossier["preserved_tests"]) >= 14
