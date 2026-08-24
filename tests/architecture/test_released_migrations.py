@@ -1095,6 +1095,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-tax ──
+    "dotmac-tax-v0.1.0a2": (
+        "dotmac-tax",
+        "bd8d2262",
+        {
+            "tx_0001_tax.py": (
+                "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
+            ),
+            "tx_0002_multi_tax.py": (
+                "9b78094519fe8d0785735f3a4e3a37dacdb9901b88eda25c90cdb167474abde0"
+            ),
+        },
+    ),
     "dotmac-tax-v0.1.0a1": (
         "dotmac-tax",
         "20d2470",
@@ -1186,7 +1198,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset({"tx_0002_multi_tax.py"}),
+    "dotmac-tax": frozenset(),
 }
 
 
