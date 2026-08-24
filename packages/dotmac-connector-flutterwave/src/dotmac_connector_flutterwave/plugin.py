@@ -49,7 +49,15 @@ from dotmac_connector_flutterwave.polling import (
 CONNECTOR_KEY: Final = "flutterwave"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
-CURRENT_VERSION: Final = "0.1.0a2"
+# 0.1.0a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 ->
+# 656ecebb05f24c11acda69a069d6fbe60d319f56). The outbound slice adds two
+# DELIVERY capabilities, per-capability modes and an SPI 1.4 floor, all of them
+# inside the manifest digest an installation adopts by — so the two manifests
+# below need two DIFFERENT version constants. Sharing one made the plugin carry
+# two contracts under the name `0.1.0a2`, which is worse than a plain in-place
+# edit: `accepts_manifest_digest` accepted both, so the collision was invisible.
+INGRESS_POLL_VERSION: Final = "0.1.0a2"
+CURRENT_VERSION: Final = "0.1.0a3"
 
 HMAC_SHA256: Final = "hmac_sha256"
 SIGNATURE_HEADER: Final = "flutterwave-signature"
@@ -103,7 +111,7 @@ LEGACY_MANIFEST: Final = ConnectorManifest(
 # becoming an unknown digest.
 INGRESS_POLL_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
-    version=CURRENT_VERSION,
+    version=INGRESS_POLL_VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
     secret_bindings=(

@@ -77,7 +77,9 @@ def _charge_completed(**overrides: object) -> dict[str, object]:
 
 def test_manifest_is_the_versioned_v4_ingress_contract() -> None:
     assert MANIFEST.connector_key == "flutterwave"
-    assert MANIFEST.version == __version__ == "0.1.0a2"
+    # a3: the outbound slice changed the manifest of the already-tagged a2,
+    # whose exact contract is retained as INGRESS_POLL_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a3"
     assert CAPABILITY_ID in MANIFEST.capability_ids
     # SPI 1.4 for the per-capability mode mapping the outbound leg needs. The
     # settlement observation itself stays ingress+poll and never delivers.

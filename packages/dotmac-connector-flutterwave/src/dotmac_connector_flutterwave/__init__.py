@@ -12,7 +12,7 @@ from dotmac_connector_flutterwave.plugin import (
     FlutterwaveConnector,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "INTENT_CAPABILITY_ID",

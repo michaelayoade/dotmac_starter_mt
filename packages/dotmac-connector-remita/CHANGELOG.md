@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0a2 — unreleased
+
+Declared as a2, not folded into a1. a1 IS published (peeled tag
+`dotmac-connector-remita-v0.1.0a1` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`), and the issuance slice below adds
+a capability id, per-capability modes and an SPI 1.4 floor — every one of them
+inside the manifest digest an installation adopts by. Until this bump the
+plugin carried TWO manifests both named `0.1.0a1`, which is worse than an
+in-place edit: `accepts_manifest_digest` accepted both, so nothing could see the
+collision.
 
 - Adds one DELIVERY capability, `payments.reference.issuance.v1`: ask Remita to
   mint one RRR for one product-owned order. Payment status stays POLL; Remita
@@ -32,12 +41,16 @@
   returned one.
 - `validate_connection` performs no provider call on an issuance binding: the
   only issuance call there is mints a reference.
-- The published SPI-1.3 poll-only manifest is retained as a historical manifest
-  so an installation pinned to it still resolves. **The release lane must cut a
-  new version before publishing:** this changes the manifest of an
-  already-tagged version, and a published manifest digest must not move.
+- The published SPI-1.3 poll-only manifest is retained as `POLL_ONLY_MANIFEST`,
+  so an installation pinned to digest
+  `84e651b5d41ded929e7ef96717c17174383b6ca4f05763f9954e2c79a081e3fc` resolves to
+  a known contract. `docs/inventories/released-manifest-digests.json` records
+  that digest and `make manifest-digest-check` fails if it ever moves.
 
 ## 0.1.0a1 — released
+
+Peeled tag `dotmac-connector-remita-v0.1.0a1` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`.
 
 - Adds authenticated RRR status polling using the provider's SHA-512 request
   contract and exact declared demo/live hosts.

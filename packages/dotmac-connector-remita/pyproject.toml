@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-connector-remita"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Dotmac Integrator connector for Remita RRR status observations"
 authors = ["DotMac"]
 readme = "README.md"

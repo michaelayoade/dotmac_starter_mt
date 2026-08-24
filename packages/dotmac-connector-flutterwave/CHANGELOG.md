@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.1.0a3 — unreleased
+
+Declared as a3, not folded into a2. a2 IS published (peeled tag
+`dotmac-connector-flutterwave-v0.1.0a2` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`), and the outbound slice below adds
+two capability ids, per-capability modes and an SPI 1.4 floor — every one of
+them inside the manifest digest an installation adopts by. Until this bump the
+plugin carried TWO manifests both named `0.1.0a2`, which is worse than an
+in-place edit: `accepts_manifest_digest` accepted both, so nothing could see the
+collision.
 
 - Adds two API-v4 DELIVERY capabilities: `payments.intent.v1` (initialize one
   payment) and `payments.refund.v1` (request one refund against one v4 charge).
@@ -25,12 +34,16 @@
   RECONCILIATION_REQUIRED, never a retry; only a connect-phase failure is
   retryable. The provider reference is captured as evidence on every outcome,
   declines included.
-- The published SPI-1.3 ingress+poll manifest is retained as a historical
-  manifest so an installation pinned to it still resolves. **The release lane
-  must cut a new version before publishing:** this changes the manifest of an
-  already-tagged version, and a published manifest digest must not move.
+- The published SPI-1.3 ingress+poll manifest is retained as
+  `INGRESS_POLL_MANIFEST`, so an installation pinned to digest
+  `4933c0f1782875d625daac6f704f99ea3a4fe4d1ccffa234512c2da0bc1ea1b6` resolves to
+  a known contract. `docs/inventories/released-manifest-digests.json` records
+  that digest and `make manifest-digest-check` fails if it ever moves.
 
 ## 0.1.0a2 — released
+
+Peeled tag `dotmac-connector-flutterwave-v0.1.0a2` points at commit
+`656ecebb05f24c11acda69a069d6fbe60d319f56`.
 
 - Adds API-v4-only OAuth authentication and paged charge reconciliation.
 - Uses only the documented sandbox/live v4 hosts and retains the a1 ingress

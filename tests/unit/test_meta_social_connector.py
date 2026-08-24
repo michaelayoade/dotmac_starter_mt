@@ -77,7 +77,10 @@ def _secrets() -> dict[str, str]:
 
 def test_manifest_is_the_versioned_two_mode_runtime_contract() -> None:
     assert MANIFEST.connector_key == "meta_social"
-    assert MANIFEST.version == __version__ == "0.1.0a1"
+    # a2. The published a1 manifest declared ingress only, so adding
+    # messaging.send.v1 to it in place would have made one version name two
+    # contracts; the exact a1 contract is retained as INGRESS_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a2"
     assert MANIFEST.capability_ids == {CAPABILITY_ID, SEND_CAPABILITY_ID}
     # SPI 1.4 is the floor `CapabilityDeclaration.modes` needs. Declaring the
     # mapping under an older range would let an engine call the ingress factory
