@@ -441,8 +441,8 @@ for import_name, attr, schema in names:
     # The installed distribution, never the checkout it was built from.
     assert "site-packages" in str(here), f"{{import_name}} resolved to {{here}}"
     assert manifest.db_schema == schema, (import_name, manifest.db_schema, schema)
-    assert manifest.stateful is (schema is not None), (
-        import_name, manifest.stateful, schema
+    assert manifest.is_stateful is (schema is not None), (
+        import_name, manifest.is_stateful, schema
     )
     if schema is None:
         assert manifest.migration_owner() is None, import_name

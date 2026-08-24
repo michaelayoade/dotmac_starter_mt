@@ -54,6 +54,9 @@ class TaxRuleInput:
     supply_category: str | None = None
     place_code: str | None = None
     bands: tuple[TaxRuleBandInput, ...] = ()
+    treatment_code: str = "standard_rated"
+    calculation_sequence: int = 100
+    calculation_base_code: str = "source_amount"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +74,24 @@ class TaxFact:
     supply_category: str | None = None
     place_code: str | None = None
     counterparty_ref: str | None = None
+    supply_ref: str | None = None
+    place_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaxSubjectClassificationInput:
+    tax_code_id: UUID
+    subject_kind: str
+    subject_ref: str
+    category_code: str
+    version: int
+    effective_from: date
+    effective_to: date | None
+    basis_code: str
+    evidence_ref: str
+    published_by_ref: str
+    source_ref: str
+    source_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,4 +111,5 @@ __all__ = [
     "TaxJurisdictionInput",
     "TaxRuleBandInput",
     "TaxRuleInput",
+    "TaxSubjectClassificationInput",
 ]

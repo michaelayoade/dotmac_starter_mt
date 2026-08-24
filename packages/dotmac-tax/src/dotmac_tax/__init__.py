@@ -7,6 +7,7 @@ from dotmac_tax.contracts import (
     TaxJurisdictionInput,
     TaxRuleBandInput,
     TaxRuleInput,
+    TaxSubjectClassificationInput,
 )
 from dotmac_tax.manifest import module
 from dotmac_tax.migrations import versions_dir
@@ -24,17 +25,19 @@ from dotmac_tax.service import (
     create_tax_jurisdiction,
     create_tax_return,
     determine_tax,
+    determine_tax_set,
     file_tax_return,
     generate_statutory_report,
     prepare_tax_return,
     publish_tax_rule,
+    publish_tax_subject_classification,
     reject_tax_return,
     update_tax_authority,
     update_tax_code,
     update_tax_jurisdiction,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "StatutoryReportBoxInput",
@@ -46,6 +49,7 @@ __all__ = [
     "TaxRuleBandInput",
     "TaxRuleInput",
     "TaxRuleViolation",
+    "TaxSubjectClassificationInput",
     "__version__",
     "accept_tax_return",
     "amend_tax_return",
@@ -57,11 +61,13 @@ __all__ = [
     "create_tax_jurisdiction",
     "create_tax_return",
     "determine_tax",
+    "determine_tax_set",
     "file_tax_return",
     "generate_statutory_report",
     "module",
     "prepare_tax_return",
     "publish_tax_rule",
+    "publish_tax_subject_classification",
     "reject_tax_return",
     "update_tax_authority",
     "update_tax_code",

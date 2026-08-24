@@ -3,26 +3,35 @@ package = "dotmac-tax"
 classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-owner = "Tenant tax policy data, effective-dated determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence"
-contract = "Configure authorities, jurisdictions, tax codes, effective rules and progressive bands; determine tax from typed source facts; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport."
+owner = "Tenant tax policy and classifications, effective-dated multi-tax determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence"
+contract = "Configure authorities, jurisdictions, tax codes, effective rules, ordered/compound calculation bases and progressive bands; publish evidenced tax-specific party/supply/place classifications; determine an ordered component set from typed source facts while preserving standard/zero/exempt/out-of-scope treatment identity; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport."
 source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_starter_mt"]
 source_revisions = [
-  "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
-  "dotmac_sub:91c1ec477b3af37931424bced856a16bbc2c6d3f",
-  "dotmac_crm:c64b5aa0f7902b52e7ef73cf26f3f88687ed849d",
-  "dotmac_starter_mt:f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:943bc59f8e4ca0849c7de578bc9dbc17c57b116f",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+  "dotmac_starter_mt:5876ffd0bce17172fa2dc6ac6d09b48d877fadf8",
 ]
 source_paths = [
   "dotmac_erp:app/models/finance/tax",
   "dotmac_erp:app/services/finance/tax",
   "dotmac_erp:app/services/finance/reporting",
+  "dotmac_sub:app/models/billing.py",
+  "dotmac_sub:app/models/customer_tax_policy.py",
+  "dotmac_sub:app/models/catalog.py",
+  "dotmac_sub:app/services/billing_automation.py",
+  "dotmac_sub:app/services/prepaid_service_renewals.py",
+  "dotmac_sub:app/services/customer_tax_policies.py",
   "dotmac_sub:app/services/tax_accounting.py",
+  "dotmac_crm:app/services/revenue_service_report.py",
+  "dotmac_crm:app/services/vendor.py",
   "dotmac_starter_mt:packages/dotmac-tax/src/dotmac_tax/service.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_tax_service.py",
   "dotmac_starter_mt:tests/architecture/test_tax_module.py",
   "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
+  "dotmac_starter_mt:tests/test_tax_released_migration_upgrade.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac-erp"]
@@ -31,4 +40,43 @@ inventory_evidence = ["docs/inventories/tax-sources.md"]
 first_cutover = "ERP is the qualifying policy/reporting source and first decision owner to retire after shared accounting exists. Sub then supplies its billing tax and withholding facts through a versioned product API/outbox contract without losing its operational source-fact ownership. Backoffice is a later exact-pin consumer. No package or table creation is a cutover."
 shadow_and_drift = "Replay source facts against both engines and compare selected rule/version, bases, output/recoverable amounts, configured report boxes, payable totals, obligations and return transitions. Any rule ambiguity or source-version mismatch fails closed; shadow writes neither owner."
 local_copy_retirement = "Seal one policy/determination/reporting writer switch, then remove ERP's fixed TaxType/rate/calendar/report-format decisions and direct filing lifecycle writers. Product source-fact writers remain only for facts they own; country/provider transports remain adapters. No fallback calculator or dual return ledger survives."
-next_action = "Validate policy/accounting seams with finance and legal owners, keep statutory values in governed tenant data, and defer release/composition until the GL dependency plus ERP cutover contract exist. Rebase the provisional kernel allocation/version against concurrent alpha-train work before integration."
+next_action = "Release 0.1.0a2 after its PostgreSQL migration/RLS and package gates are green. ERP remains the first statutory-policy/reporting cutover after the accounting consequence seam is composed; Sub may first contain its billing defects, then supplies facts only after a tax-classification backfill, zero-drift shadow, and explicit writer switch."
+
+# Typed product claims refreshed from the exact revisions above. Product-owned
+# source facts survive cutover; only their local tax-policy, determination,
+# reporting and return writers are retired.
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = [
+  "app/models/finance/tax",
+  "app/services/finance/tax",
+  "app/services/finance/reporting",
+]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "943bc59f8e4ca0849c7de578bc9dbc17c57b116f"
+evidence_paths = [
+  "app/models/billing.py",
+  "app/models/customer_tax_policy.py",
+  "app/models/catalog.py",
+  "app/services/billing_automation.py",
+  "app/services/prepaid_service_renewals.py",
+  "app/services/customer_tax_policies.py",
+  "app/services/tax_accounting.py",
+]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = [
+  "app/services/revenue_service_report.py",
+  "app/services/vendor.py",
+]

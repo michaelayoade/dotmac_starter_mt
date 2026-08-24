@@ -72,11 +72,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
       "state": "never-published"
     },
-    "dotmac-document-rendering": {
-      "declared": "0.1.0a1",
-      "reason": "OUTSTANDING AUTHORIZED RELEASE: dotmac-document-rendering-v0.1.0a1. The first release attempt exposed a real lane defect: this package is an optional module with a ModuleManifest and kernel floor, but deliberately has no schema or lineage. The module lane now represents that third shape with mandatory db_schema=null, proves the absence against the manifest before build and after clean installation, and refuses migrations in the wheel; the stateful and protocol-adapter checks stay strict. Publication only makes the exact pin possible. Vendor Control Plane and Sub remain candidate consumers, no authority has moved, and no old writer is retired. Remove this row only in the automatic post-release record after the verified tag exists; never by editing the declared version or floor down.",
-      "state": "never-published"
-    },
     "dotmac-fx-policy": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
@@ -111,6 +106,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
+    },
+    "dotmac-tax": {
+      "declared": "0.1.0a2",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Published a1 is registry-verified at release run 32480725191 and tag dotmac-tax-v0.1.0a1; a2 adds the additive tx_0002 multi-component determination set and evidenced tax-specific party/supply/place classifications while retaining the a1 single-tax API. Release a2 only after its PostgreSQL migration/RLS, released-byte, unit, architecture and package gates are green. Publication does not move product authority: ERP remains the first statutory-policy/reporting cutover after its accounting consequence seam, backfill and zero-drift shadow; Sub containment may precede that cutover but Sub remains a fact producer. Remove this row in the release record change after registry verification writes dotmac-tax-v0.1.0a2.",
+      "state": "declared-unpublished"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
