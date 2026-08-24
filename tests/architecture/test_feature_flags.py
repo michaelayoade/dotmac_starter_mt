@@ -19,7 +19,7 @@ flags rot in real systems:
 from __future__ import annotations
 
 import ast
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -124,7 +124,7 @@ def test_the_expiry_check_would_actually_fail() -> None:
     stale = FeatureFlagSpec(
         code="probe.stale",
         owner="probe",
-        expires_on=date.today() - timedelta(days=1),
+        expires_on=datetime.now(UTC).date() - timedelta(days=1),
     )
     assert stale.is_expired
     assert FlagCatalogue([stale]).expired() == (stale,)
