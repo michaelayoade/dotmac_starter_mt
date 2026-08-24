@@ -359,6 +359,48 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-integration-v0.1.0a15": (
+        "dotmac-integration",
+        "bd8d2262",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+            "ig_0010_shadow_evidence.py": (
+                "eb897df97435c63ec4844753d8afa497391fa2eabfa0673312725995c231b4ed"
+            ),
+            "ig_0011_replay_retention.py": (
+                "96336372ac879518ad46f6657b8c81cf60afd133d500c4bc6310017f94c59b42"
+            ),
+            "ig_0012_delivery_evidence.py": (
+                "61ef4e096dae74b7646608257614f4497af125edda63a6c270e402a63c2cfdd3"
+            ),
+        },
+    ),
     "dotmac-integration-v0.1.0a13": (
         "dotmac-integration",
         "46926fa4",
@@ -1062,6 +1104,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-tax-v0.1.0a2": (
+        "dotmac-tax",
+        "bd8d2262",
+        {
+            "tx_0001_tax.py": (
+                "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
+            ),
+            "tx_0002_multi_tax.py": (
+                "9b78094519fe8d0785735f3a4e3a37dacdb9901b88eda25c90cdb167474abde0"
+            ),
+        },
+    ),
 }
 
 
@@ -1144,7 +1198,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset({"tx_0002_multi_tax.py"}),
+    "dotmac-tax": frozenset(),
 }
 
 
