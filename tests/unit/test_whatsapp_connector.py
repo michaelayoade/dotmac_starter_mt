@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -10,7 +11,17 @@ from pathlib import Path
 import httpx
 import pytest
 from dotmac_connector_whatsapp import MANIFEST, PLUGIN, __version__
+from dotmac_connector_whatsapp.catalogue import (
+    MAX_CATALOGUE_PAGES,
+    CatalogueReadError,
+)
+from dotmac_connector_whatsapp.media import (
+    DEFAULT_MAX_CAPTION_CHARACTERS,
+    DEFAULT_MAX_FILENAME_CHARACTERS,
+    DEFAULT_MEDIA_BYTE_LIMITS,
+)
 from dotmac_connector_whatsapp.plugin import WhatsAppConnector
+from dotmac_connector_whatsapp.wire import DeliveryContractError
 from dotmac_integration.conformance import assert_plugin_conforms
 from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.retry import OutcomeStatus
@@ -66,8 +77,11 @@ def test_the_connector_adds_delivery_without_losing_ingress() -> None:
     assert MANIFEST.capability_ids == {
         "messaging.receive.v1",
         "messaging.send.v1",
+        "messaging.templates.read.v1",
     }
-    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
+    assert PLUGIN.modes == frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
+    )
     assert MANIFEST.egress == EgressDeclaration(hosts=("graph.facebook.com",))
     assert tuple(item.name for item in MANIFEST.secret_bindings or ()) == (
         "webhook_signing_secret",
@@ -96,7 +110,8 @@ def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
             name="access_token",
             required=False,
             description=(
-                "Graph API access token; required when messaging.send.v1 is bound."
+                "Graph API access token; required when messaging.send.v1 or "
+                "messaging.templates.read.v1 is bound."
             ),
         ),
     )
@@ -200,23 +215,117 @@ def test_the_published_ingress_contracts_remain_historical_manifests() -> None:
     assert ingress_only.egress == EgressDeclaration()
 
 
-def _send_request(action: str, params: dict[str, object]) -> DispatchRequest:
+SEND_CONFIG: dict[str, object] = {
+    "phone_number_id": "123456789",
+    "graph_api_version": "v23.0",
+    "timeout_seconds": 10,
+    "waba_id": "443723705501042",
+}
+
+
+def _send_request(
+    action: str,
+    params: dict[str, object],
+    config: dict[str, object] | None = None,
+) -> DispatchRequest:
     return DispatchRequest(
         capability_id="messaging.send.v1",
         event_type="messaging.send.requested.v1",
         payload={"action": action, "params": params},
-        config={
-            "phone_number_id": "123456789",
-            "graph_api_version": "v23.0",
-            "timeout_seconds": 10,
-        },
+        config=dict(config or SEND_CONFIG),
         secrets={"access_token": "held-access-token"},
         idempotency_key="sub:message:1",
     )
 
 
-def _delivery_plugin(handler) -> WhatsAppConnector:
-    return WhatsAppConnector(transport=httpx.MockTransport(handler))
+class _Clock:
+    """A hand-driven monotonic clock.
+
+    Cache staleness is a property of elapsed time, and a test that proved it by
+    sleeping for the TTL would prove it once and then be deleted for being slow.
+    """
+
+    def __init__(self, now: float = 1_000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _delivery_plugin(handler, clock=None) -> WhatsAppConnector:
+    connector = WhatsAppConnector(transport=httpx.MockTransport(handler))
+    if clock is None:
+        return connector
+    return WhatsAppConnector(
+        transport=httpx.MockTransport(handler),
+        catalogue_cache=connector.catalogue_cache,
+        clock=clock,
+    )
+
+
+def _recording(seen: list[httpx.Request]):
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "wamid.unexpected"}]})
+
+    return respond
+
+
+def _row(
+    *,
+    name: str = "service_notice",
+    language: str = "en",
+    status: str = "APPROVED",
+    body: str = "Service restored.",
+    header: dict[str, object] | None = None,
+    buttons: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    components: list[dict[str, object]] = []
+    if header is not None:
+        components.append({"type": "HEADER", **header})
+    components.append({"type": "BODY", "text": body})
+    if buttons is not None:
+        components.append({"type": "BUTTONS", "buttons": buttons})
+    return {
+        "name": name,
+        "language": language,
+        "status": status,
+        "category": "UTILITY",
+        "components": components,
+    }
+
+
+def _catalogue_response(
+    rows: list[dict[str, object]], *, after: str | None = None
+) -> httpx.Response:
+    payload: dict[str, object] = {"data": rows}
+    if after is not None:
+        payload["paging"] = {
+            "next": "https://graph.facebook.com/next",
+            "cursors": {"after": after},
+        }
+    return httpx.Response(200, json=payload)
+
+
+def _is_catalogue(request: httpx.Request) -> bool:
+    return request.url.path.endswith("/message_templates")
+
+
+def _template_request(
+    params: dict[str, object] | None = None,
+    config: dict[str, object] | None = None,
+) -> DispatchRequest:
+    body: dict[str, object] = {
+        "recipient": "+2348000000001",
+        "template_name": "service_notice",
+        "language": "en",
+        "variables": {},
+    }
+    body.update(params or {})
+    return _send_request("send_template", body, config)
 
 
 def test_text_delivery_matches_the_qualifying_sub_wire_shape() -> None:
@@ -252,6 +361,8 @@ def test_template_parameters_keep_the_source_ordering_contract() -> None:
 
     def respond(request: httpx.Request) -> httpx.Response:
         seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row(body="{{1}} {{2}} {{3}}")])
         return httpx.Response(200, json={"messages": [{"id": "wamid.template-1"}]})
 
     outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
@@ -267,7 +378,7 @@ def test_template_parameters_keep_the_source_ordering_contract() -> None:
     )
 
     assert outcome.status is OutcomeStatus.SUCCEEDED
-    body = json.loads(seen[0].content)
+    body = json.loads(seen[-1].content)
     assert body["template"]["components"][0]["parameters"] == [
         {"type": "text", "text": "Internet"},
         {"type": "text", "text": "restored"},
@@ -280,6 +391,8 @@ def test_template_language_keeps_the_qualifying_sub_default() -> None:
 
     def respond(request: httpx.Request) -> httpx.Response:
         seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row(body="Service restored.")])
         return httpx.Response(200, json={"messages": [{"id": "wamid.template-1"}]})
 
     outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
@@ -294,7 +407,7 @@ def test_template_language_keeps_the_qualifying_sub_default() -> None:
     )
 
     assert outcome.status is OutcomeStatus.SUCCEEDED
-    assert json.loads(seen[0].content)["template"]["language"] == {"code": "en"}
+    assert json.loads(seen[-1].content)["template"]["language"] == {"code": "en"}
 
 
 def test_media_content_is_uploaded_before_the_message_is_sent() -> None:
@@ -333,7 +446,33 @@ def test_media_content_is_uploaded_before_the_message_is_sent() -> None:
     }
 
 
-def test_media_upload_keeps_the_qualifying_sub_wire_defaults() -> None:
+def test_the_sub_octet_stream_upload_default_is_refused_before_the_wire_call() -> None:
+    """Sub defaulted an upload's declared type to `application/octet-stream`.
+
+    Meta accepts that type for no media kind, so every upload it produced was
+    going to be rejected AFTER the body had been streamed. The default is
+    deliberately retired: an upload with no declared type is now a typed local
+    refusal, and nothing reaches the provider.
+    """
+    seen: list[httpx.Request] = []
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_media",
+            {
+                "recipient": "+2348000000001",
+                "media_type": "document",
+                "content_base64": "aGVsbG8=",
+            },
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "media_content_type_required"
+    assert seen == []
+
+
+def test_the_sub_upload_filename_default_still_applies() -> None:
     seen: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -349,13 +488,14 @@ def test_media_upload_keeps_the_qualifying_sub_wire_defaults() -> None:
                 "recipient": "+2348000000001",
                 "media_type": "document",
                 "content_base64": "aGVsbG8=",
+                "content_type": "text/plain",
             },
         )
     )
 
     assert outcome.status is OutcomeStatus.SUCCEEDED
     upload = seen[0].content
-    assert b'name="type"\r\n\r\napplication/octet-stream' in upload
+    assert b'name="type"\r\n\r\ntext/plain' in upload
     assert b'filename="attachment"' in upload
 
 
@@ -723,3 +863,842 @@ def test_invalid_status_timestamp_is_observed_as_malformed() -> None:
 def test_an_undeclared_capability_has_no_handler() -> None:
     with pytest.raises(InvalidManifestError):
         PLUGIN.ingress_handler_for("messaging.receive.v2")
+
+
+# --------------------------------------------------------------------------
+# Approved-template catalogue: the pre-flight gate
+#
+# Every negative below asserts BOTH the typed outcome and that no `/messages`
+# request was ever made. The second half is the point: a refusal that arrives
+# after a provider round trip is a different, worse behaviour that the first
+# half alone cannot tell apart.
+# --------------------------------------------------------------------------
+
+
+def _sent_paths(seen: list[httpx.Request]) -> list[str]:
+    return [request.url.path.rsplit("/", 1)[-1] for request in seen]
+
+
+def test_an_approved_matching_template_still_sends() -> None:
+    """The sensitivity proof for every refusal test below.
+
+    A check over a transport that never sends anything passes for the wrong
+    reason. This is the positive control: with the SAME transport and the SAME
+    assertions, an approved template with matching arity does reach
+    `/messages`. So `_sent_paths(seen) == ["message_templates"]` in the
+    negatives means the gate stopped it, not that the harness was inert.
+    """
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row(body="Hello {{1}}")])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request({"variables": {"1": "Ada"}})
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert _sent_paths(seen) == ["message_templates", "messages"]
+
+
+def test_an_unapproved_template_is_refused_before_the_wire_call() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert _is_catalogue(request)
+        return _catalogue_response([_row(status="REJECTED")])
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "template_not_approved"
+    # The provider status travels as the REASON, which Sub had nowhere to put:
+    # its refusal was a generic rejection distinguishable only by prose.
+    assert outcome.error_detail == "REJECTED"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+@pytest.mark.parametrize("status", ["PENDING", "PAUSED", "DISABLED", "IN_APPEAL"])
+def test_only_approved_may_be_sent_against(status: str) -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response([_row(status=status)])
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.error_code == "template_not_approved"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_a_template_the_catalogue_does_not_carry_is_refused() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response([])
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "template_not_found"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_a_template_approved_only_in_another_language_is_refused() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response([_row(language="fr")])
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.error_code == "template_language_unavailable"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+@pytest.mark.parametrize(
+    ("body", "variables"),
+    [
+        ("Hello {{1}} and {{2}}", {"1": "Ada"}),
+        ("Hello {{1}}", {"1": "Ada", "2": "surplus"}),
+        ("No placeholders at all", {"1": "Ada"}),
+    ],
+)
+def test_a_parameter_count_the_catalogue_does_not_describe_is_refused(
+    body: str, variables: dict[str, object]
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response([_row(body=body)])
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request({"variables": variables})
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "template_variable_arity_mismatch"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_a_media_header_template_cannot_be_filled_from_a_flat_variable_map() -> None:
+    """A flat `variables` map can only reach the BODY.
+
+    Sending the body and leaving the header parameter out would produce a
+    template with a hole in it, which Meta rejects and the recipient never sees.
+    """
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response(
+            [_row(body="Hello {{1}}", header={"format": "IMAGE"})]
+        )
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request({"variables": {"1": "Ada"}})
+    )
+
+    assert outcome.error_code == "template_variable_arity_mismatch"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_explicit_components_are_matched_component_by_component() -> None:
+    seen: list[httpx.Request] = []
+    catalogue = _row(
+        body="Hello {{1}}",
+        header={"format": "IMAGE"},
+        buttons=[{"type": "URL", "url": "https://example.invalid/{{1}}"}],
+    )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([catalogue])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t2"}]})
+
+    components: list[dict[str, object]] = [
+        {
+            "type": "header",
+            "parameters": [
+                {"type": "image", "image": {"link": "https://example.invalid/a.jpg"}}
+            ],
+        },
+        {"type": "body", "parameters": [{"type": "text", "text": "Ada"}]},
+        {
+            "type": "button",
+            "sub_type": "url",
+            "index": "0",
+            "parameters": [{"type": "text", "text": "abc"}],
+        },
+    ]
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request({"components": components})
+    )
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert _sent_paths(seen) == ["message_templates", "messages"]
+
+    seen.clear()
+    without_button = [item for item in components if item["type"] != "button"]
+    refused = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request({"components": without_button})
+    )
+    assert refused.error_code == "template_variable_arity_mismatch"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_a_send_binding_that_cannot_name_its_account_is_refused() -> None:
+    seen: list[httpx.Request] = []
+    config = {key: value for key, value in SEND_CONFIG.items() if key != "waba_id"}
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _template_request(config=config)
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "waba_id_required"
+    assert seen == []
+    # And the schema refuses the same configuration at activation, so this is a
+    # defence in depth rather than the only guard.
+    schema = Draft202012Validator(MANIFEST.capabilities[1].config_schema)
+    assert tuple(schema.iter_errors(config))
+
+
+# --------------------------------------------------------------------------
+# Cache freshness: cold, fresh, stale, and a failed refresh
+# --------------------------------------------------------------------------
+
+
+def test_a_cold_read_is_reused_while_it_is_fresh() -> None:
+    seen: list[httpx.Request] = []
+    clock = _Clock()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row()])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t3"}]})
+
+    plugin = _delivery_plugin(respond, clock)
+    assert (
+        plugin.handler_for("messaging.send.v1")(_template_request()).status
+        is OutcomeStatus.SUCCEEDED
+    )
+    clock.advance(299)
+    assert (
+        plugin.handler_for("messaging.send.v1")(_template_request()).status
+        is OutcomeStatus.SUCCEEDED
+    )
+
+    assert _sent_paths(seen) == ["message_templates", "messages", "messages"]
+
+
+def test_a_stale_entry_is_re_read_and_a_withdrawn_approval_takes_effect() -> None:
+    """The whole reason there is no stale-while-revalidate.
+
+    Meta withdraws an approval without telling the sender. If the expired entry
+    were served for even one request, this send would go out against a template
+    the account is no longer allowed to use.
+    """
+    seen: list[httpx.Request] = []
+    clock = _Clock()
+    status = ["APPROVED"]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row(status=status[0])])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t4"}]})
+
+    plugin = _delivery_plugin(respond, clock)
+    assert (
+        plugin.handler_for("messaging.send.v1")(_template_request()).status
+        is OutcomeStatus.SUCCEEDED
+    )
+
+    status[0] = "PAUSED"
+    clock.advance(300)
+    outcome = plugin.handler_for("messaging.send.v1")(_template_request())
+
+    assert outcome.error_code == "template_not_approved"
+    assert _sent_paths(seen) == ["message_templates", "messages", "message_templates"]
+
+
+def test_a_configured_ttl_of_zero_re_reads_on_every_send() -> None:
+    seen: list[httpx.Request] = []
+    clock = _Clock()
+    config = SEND_CONFIG | {"template_cache_ttl_seconds": 0}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row()])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t5"}]})
+
+    plugin = _delivery_plugin(respond, clock)
+    for _attempt in range(2):
+        assert (
+            plugin.handler_for("messaging.send.v1")(
+                _template_request(config=config)
+            ).status
+            is OutcomeStatus.SUCCEEDED
+        )
+
+    assert _sent_paths(seen) == [
+        "message_templates",
+        "messages",
+        "message_templates",
+        "messages",
+    ]
+
+
+def test_a_failed_refresh_fails_closed_and_leaves_nothing_behind() -> None:
+    """Cold-and-broken and stale-and-broken must behave identically.
+
+    Sub left the expired tuple in its dict on a failed refresh. It was
+    unreachable, but only because one branch happened not to read it. Here the
+    entry is evicted, and the proof is that the NEXT healthy read goes back to
+    the provider rather than answering from what was held.
+    """
+    seen: list[httpx.Request] = []
+    clock = _Clock()
+    healthy = [True]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            if not healthy[0]:
+                return httpx.Response(500)
+            return _catalogue_response([_row()])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t6"}]})
+
+    plugin = _delivery_plugin(respond, clock)
+    assert (
+        plugin.handler_for("messaging.send.v1")(_template_request()).status
+        is OutcomeStatus.SUCCEEDED
+    )
+
+    healthy[0] = False
+    clock.advance(300)
+    refused = plugin.handler_for("messaging.send.v1")(_template_request())
+    assert refused.status is OutcomeStatus.RETRYABLE
+    assert refused.error_code == "template_provider_retryable"
+    assert refused.provider_status_code == 500
+
+    # Time has NOT moved on; a surviving entry would still be inside its TTL.
+    healthy[0] = True
+    assert (
+        plugin.handler_for("messaging.send.v1")(_template_request()).status
+        is OutcomeStatus.SUCCEEDED
+    )
+    assert _sent_paths(seen) == [
+        "message_templates",
+        "messages",
+        "message_templates",
+        "message_templates",
+        "messages",
+    ]
+
+
+def test_a_cold_catalogue_read_that_fails_refuses_rather_than_assuming() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(503)
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.RETRYABLE
+    assert outcome.error_code == "template_provider_retryable"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_a_rate_limited_catalogue_read_carries_the_provider_instruction() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"retry-after": "42"})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.RETRYABLE
+    assert outcome.retry_after_seconds == 42
+
+
+def test_a_catalogue_read_timeout_is_retryable_not_ambiguous() -> None:
+    """A GET has no effect to duplicate.
+
+    The send path calls a read timeout RECONCILIATION_REQUIRED because the
+    message may have landed. Classifying a catalogue read the same way would
+    park a message the provider never saw.
+    """
+
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("private provider detail", request=request)
+
+    outcome = _delivery_plugin(ambiguous).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.RETRYABLE
+    assert outcome.error_code == "template_provider_unavailable"
+    assert "private" not in repr(outcome)
+
+
+def test_a_refused_catalogue_read_is_terminal() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(403, text="held-access-token private")
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "template_provider_rejected"
+    assert outcome.provider_status_code == 403
+    assert "held-access-token" not in repr(outcome)
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+@pytest.mark.parametrize("body", ["not json at all", '{"data": "not-a-list"}'])
+def test_an_unreadable_catalogue_response_is_not_an_empty_catalogue(
+    body: str,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text=body)
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _template_request()
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "template_response_invalid"
+    assert _sent_paths(seen) == ["message_templates"]
+
+
+def test_the_cache_is_scoped_to_the_credential_that_filled_it() -> None:
+    """One process serves many installations.
+
+    A key that named only the WABA would hand one installation's answer to
+    another whose credential was never checked against that account.
+    """
+    seen: list[httpx.Request] = []
+    clock = _Clock()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row()])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t7"}]})
+
+    plugin = _delivery_plugin(respond, clock)
+    first = _template_request()
+    assert plugin.handler_for("messaging.send.v1")(first).status is (
+        OutcomeStatus.SUCCEEDED
+    )
+
+    second = DispatchRequest(
+        capability_id=first.capability_id,
+        event_type=first.event_type,
+        payload=first.payload,
+        config=first.config,
+        secrets={"access_token": "a-different-installations-token"},
+        idempotency_key=first.idempotency_key,
+    )
+    assert plugin.handler_for("messaging.send.v1")(second).status is (
+        OutcomeStatus.SUCCEEDED
+    )
+
+    assert _sent_paths(seen) == [
+        "message_templates",
+        "messages",
+        "message_templates",
+        "messages",
+    ]
+
+
+def test_the_send_path_asks_the_provider_for_one_template_by_name() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if _is_catalogue(request):
+            return _catalogue_response([_row()])
+        return httpx.Response(200, json={"messages": [{"id": "wamid.t8"}]})
+
+    _delivery_plugin(respond).handler_for("messaging.send.v1")(_template_request())
+
+    catalogue = seen[0]
+    assert catalogue.url.path == "/v23.0/443723705501042/message_templates"
+    assert catalogue.url.params["name"] == "service_notice"
+    # Sub's exact field list and page size.
+    assert catalogue.url.params["fields"] == "name,status,language,category,components"
+    assert catalogue.url.params["limit"] == "200"
+    assert catalogue.headers["authorization"] == "Bearer held-access-token"
+
+
+# --------------------------------------------------------------------------
+# Attachment mapping and validation
+# --------------------------------------------------------------------------
+
+
+def _media_request(
+    params: dict[str, object] | None = None,
+    config: dict[str, object] | None = None,
+) -> DispatchRequest:
+    body: dict[str, object] = {
+        "recipient": "+2348000000001",
+        "media_type": "image",
+        "content_base64": base64.b64encode(b"binary").decode(),
+        "content_type": "image/png",
+    }
+    body.update(params or {})
+    return _send_request("send_media", body, config)
+
+
+def test_the_documented_media_limits_are_the_provider_numbers() -> None:
+    assert dict(DEFAULT_MEDIA_BYTE_LIMITS) == {
+        "image": 5 * 1024 * 1024,
+        "document": 100 * 1024 * 1024,
+        "audio": 16 * 1024 * 1024,
+        "video": 16 * 1024 * 1024,
+    }
+    assert DEFAULT_MAX_CAPTION_CHARACTERS == 1024
+    assert DEFAULT_MAX_FILENAME_CHARACTERS == 255
+
+
+def test_an_attachment_the_provider_does_not_accept_never_leaves() -> None:
+    seen: list[httpx.Request] = []
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        # Sub's own allowlist accepts image/gif; Meta accepts it for nothing,
+        # so today that file is uploaded in full and then rejected.
+        _media_request({"content_type": "image/gif"})
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "media_content_type_unsupported"
+    assert seen == []
+
+
+def test_a_mime_type_supported_for_another_media_type_is_still_refused() -> None:
+    seen: list[httpx.Request] = []
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _media_request({"media_type": "image", "content_type": "application/pdf"})
+    )
+
+    assert outcome.error_code == "media_content_type_unsupported"
+    assert seen == []
+
+
+def test_content_type_parameters_do_not_defeat_the_allowlist() -> None:
+    """Sub's named behaviour, kept: a charset suffix is not a different type."""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/media"):
+            return httpx.Response(200, json={"id": "media-9"})
+        return httpx.Response(200, json={"messages": [{"id": "wamid.m9"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _media_request(
+            {"media_type": "document", "content_type": "Text/Plain; charset=utf-8"}
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert b'name="type"\r\n\r\ntext/plain' in seen[0].content
+
+
+def test_an_oversize_attachment_never_reaches_the_upload() -> None:
+    seen: list[httpx.Request] = []
+    oversize = base64.b64encode(b"\0" * (5 * 1024 * 1024 + 1)).decode()
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _media_request({"content_base64": oversize})
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == "media_content_too_large"
+    assert seen == []
+
+
+def test_a_narrowed_configured_limit_is_the_one_that_bites() -> None:
+    seen: list[httpx.Request] = []
+    config = SEND_CONFIG | {"media_limits": {"image_bytes": 4}}
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _media_request(config=config)
+    )
+
+    assert outcome.error_code == "media_content_too_large"
+    assert seen == []
+
+
+def test_a_limit_above_the_provider_limit_is_refused_at_activation() -> None:
+    """A configuration may narrow a limit, never widen one.
+
+    Honouring 5 MB while the operator wrote 200 MB would make the configuration
+    a lie; refusing says so at the moment it can still be fixed.
+    """
+    widened: dict[str, object] = {"media_limits": {"image_bytes": 200 * 1024 * 1024}}
+    schema = Draft202012Validator(MANIFEST.capabilities[1].config_schema)
+    assert tuple(schema.iter_errors(SEND_CONFIG | widened))
+
+    diagnostics = PLUGIN.validate_connection(
+        config=dict(CONFIG) | widened, secrets=MATERIAL
+    )
+    assert diagnostics and diagnostics[0].code == "media_limits_invalid"
+
+
+def test_an_empty_attachment_is_refused() -> None:
+    seen: list[httpx.Request] = []
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _media_request({"content_base64": base64.b64encode(b"").decode()})
+    )
+
+    assert outcome.error_code == "media_reference_required"
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    ("params", "code"),
+    [
+        (
+            {
+                "media_type": "audio",
+                "content_type": "audio/mpeg",
+                "caption": "not renderable on audio",
+            },
+            "media_caption_unsupported",
+        ),
+        ({"caption": "x" * 1025}, "media_caption_too_long"),
+        ({"filename": "not-a-document.png"}, "media_filename_unsupported"),
+        (
+            {
+                "media_type": "document",
+                "content_type": "application/pdf",
+                "filename": "n" * 256,
+            },
+            "media_filename_too_long",
+        ),
+    ],
+)
+def test_caption_and_filename_rules_refuse_rather_than_edit_the_message(
+    params: dict[str, object], code: str
+) -> None:
+    """Sub trimmed to 1024/255 and silently dropped a caption audio cannot show.
+
+    Editing product content to fit a provider constraint is a decision that
+    belongs to whoever wrote the message. The limits stay; the edit does not.
+    """
+    seen: list[httpx.Request] = []
+
+    outcome = _delivery_plugin(_recording(seen)).handler_for("messaging.send.v1")(
+        _media_request(params)
+    )
+
+    assert outcome.status is OutcomeStatus.TERMINAL
+    assert outcome.error_code == code
+    assert seen == []
+
+
+def test_a_caption_at_the_limit_is_sent_whole() -> None:
+    seen: list[httpx.Request] = []
+    caption = "x" * 1024
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/media"):
+            return httpx.Response(200, json={"id": "media-2"})
+        return httpx.Response(200, json={"messages": [{"id": "wamid.m2"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _media_request({"caption": caption})
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert json.loads(seen[1].content)["image"]["caption"] == caption
+
+
+def test_a_link_reference_is_type_checked_but_not_size_checked() -> None:
+    """The connector never held these bytes, and does not pretend it did."""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "wamid.m3"}]})
+
+    plugin = _delivery_plugin(respond)
+    sent = plugin.handler_for("messaging.send.v1")(
+        _media_request(
+            {
+                "content_base64": None,
+                "link": "https://example.invalid/a.png",
+                "content_type": "image/png",
+            }
+        )
+    )
+    assert sent.status is OutcomeStatus.SUCCEEDED
+    assert _sent_paths(seen) == ["messages"]
+
+    refused = plugin.handler_for("messaging.send.v1")(
+        _media_request(
+            {
+                "content_base64": None,
+                "link": "https://example.invalid/a.gif",
+                "content_type": "image/gif",
+            }
+        )
+    )
+    assert refused.error_code == "media_content_type_unsupported"
+    assert _sent_paths(seen) == ["messages"]
+
+
+# --------------------------------------------------------------------------
+# The catalogue as a provider-neutral POLL capability
+# --------------------------------------------------------------------------
+
+CATALOGUE_CONFIG: dict[str, object] = {
+    "waba_id": "443723705501042",
+    "graph_api_version": "v23.0",
+    "timeout_seconds": 10,
+}
+
+
+def test_the_catalogue_poll_follows_the_cursor_and_types_every_row() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.params.get("after") is None:
+            return _catalogue_response(
+                [_row(body="Hello {{1}}", header={"format": "IMAGE"})],
+                after="page-2",
+            )
+        return _catalogue_response([_row(name="past_due", status="REJECTED")])
+
+    handler = _delivery_plugin(respond).poll_handler_for("messaging.templates.read.v1")
+    events, cursor = handler.poll(
+        None, config=dict(CATALOGUE_CONFIG), secrets={"access_token": "held"}
+    )
+
+    assert cursor is None
+    assert len(seen) == 2
+    assert [event.event_type for event in events] == [
+        "whatsapp.message_template.v1",
+        "whatsapp.message_template.v1",
+    ]
+    approved = events[0].payload["message_template"]
+    assert approved["approved"] is True
+    assert approved["body_parameter_count"] == 1
+    assert approved["header_format"] == "IMAGE"
+    assert approved["header_parameter_count"] == 1
+    # A non-approved template is reported as a FACT, not withheld: the product
+    # projection needs to know a template stopped being usable.
+    assert events[1].payload["message_template"]["approved"] is False
+    assert events[0].payload["provider_account_scope"] == "443723705501042"
+    assert events[0].payload["channel"] == "whatsapp"
+
+
+def test_a_catalogue_observation_identity_tracks_its_content() -> None:
+    def approved(request: httpx.Request) -> httpx.Response:
+        return _catalogue_response([_row()])
+
+    def paused(request: httpx.Request) -> httpx.Response:
+        return _catalogue_response([_row(status="PAUSED")])
+
+    secrets = {"access_token": "held"}
+    first, _ = (
+        _delivery_plugin(approved)
+        .poll_handler_for("messaging.templates.read.v1")
+        .poll(None, config=dict(CATALOGUE_CONFIG), secrets=secrets)
+    )
+    again, _ = (
+        _delivery_plugin(approved)
+        .poll_handler_for("messaging.templates.read.v1")
+        .poll(None, config=dict(CATALOGUE_CONFIG), secrets=secrets)
+    )
+    changed, _ = (
+        _delivery_plugin(paused)
+        .poll_handler_for("messaging.templates.read.v1")
+        .poll(None, config=dict(CATALOGUE_CONFIG), secrets=secrets)
+    )
+
+    assert first[0].provider_event_id == again[0].provider_event_id
+    assert first[0].provider_event_id != changed[0].provider_event_id
+
+
+def test_the_catalogue_poll_refuses_to_return_a_catalogue_it_cannot_finish() -> None:
+    """A short catalogue reads exactly like a withdrawn template.
+
+    Sub asked for one page of 200 and dropped whatever followed. That silence is
+    indistinguishable from "not approved", so this connector fails instead.
+    """
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _catalogue_response([_row()], after=f"page-{len(seen)}")
+
+    handler = _delivery_plugin(respond).poll_handler_for("messaging.templates.read.v1")
+    with pytest.raises(CatalogueReadError):
+        handler.poll(
+            None, config=dict(CATALOGUE_CONFIG), secrets={"access_token": "held"}
+        )
+
+    assert len(seen) == MAX_CATALOGUE_PAGES
+
+
+@pytest.mark.parametrize(
+    ("config", "secrets"),
+    [
+        ({"graph_api_version": "v23.0", "timeout_seconds": 10}, {"access_token": "h"}),
+        (CATALOGUE_CONFIG, {}),
+    ],
+)
+def test_the_catalogue_poll_refuses_an_incomplete_binding(
+    config: dict[str, object], secrets: dict[str, str]
+) -> None:
+    handler = _delivery_plugin(_recording([])).poll_handler_for(
+        "messaging.templates.read.v1"
+    )
+    with pytest.raises((CatalogueReadError, DeliveryContractError)):
+        handler.poll(None, config=dict(config), secrets=dict(secrets))
+
+
+def test_each_capability_is_served_only_by_its_declared_mode() -> None:
+    with pytest.raises(ValueError):
+        PLUGIN.poll_handler_for("messaging.send.v1")
+    with pytest.raises(ValueError):
+        PLUGIN.handler_for("messaging.templates.read.v1")
+    with pytest.raises(ValueError):
+        PLUGIN.ingress_handler_for("messaging.templates.read.v1")

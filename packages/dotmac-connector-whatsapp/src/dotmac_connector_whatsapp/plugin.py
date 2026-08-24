@@ -1,4 +1,16 @@
-"""Stateless ingress and delivery translation for Meta WhatsApp Cloud API."""
+"""Stateless ingress, catalogue and delivery translation for Meta WhatsApp
+Cloud API.
+
+Three modes over one provider: INGRESS verifies and normalizes webhook bytes,
+POLL reads the approved message-template catalogue, and DELIVERY sends text,
+template and media commands the product has already decided on.
+
+The two send-side gates that run BEFORE any wire call live in their own
+modules: `catalogue` (is this template approved, and does its arity match) and
+`media` (does this attachment fit the provider's type, size, caption and
+filename rules). Both exist because the alternative is paying a provider round
+trip for a refusal the connector could already make.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +19,8 @@ import hashlib
 import hmac
 import json
 import re
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Final
@@ -25,23 +38,51 @@ from dotmac_integration.spi import (
     InboundEvent,
     IngressHandler,
     IngressRequest,
+    PollHandler,
     SecretBindingDeclaration,
     SpiRange,
     VerificationResult,
 )
 
+from dotmac_connector_whatsapp.catalogue import (
+    DEFAULT_TEMPLATE_PAGE_SIZE,
+    MAX_TEMPLATE_CACHE_TTL_SECONDS,
+    TEMPLATE_READ_CAPABILITY_ID,
+    TemplateCatalogueCache,
+    TemplateCatalogueFailure,
+    WhatsAppTemplateCatalogueHandler,
+    ordered_template_parameters,
+    require_sendable_template,
+    require_waba_id,
+    resolve_cache_ttl_seconds,
+    resolve_page_size,
+)
+from dotmac_connector_whatsapp.media import (
+    MEDIA_LIMITS_SCHEMA,
+    MediaLimits,
+    normalized_mime_type,
+    require_supported_attachment,
+)
+from dotmac_connector_whatsapp.wire import (
+    CHANNEL,
+    GRAPH_HOST,
+    PROVIDER,
+    DeliveryContractError,
+    MediaUploadFailure,
+    graph_client,
+    request_failure,
+    retry_after_seconds,
+)
+
 CONNECTOR_KEY: Final = "meta_whatsapp"
 CAPABILITY_ID: Final = "messaging.receive.v1"
 SEND_CAPABILITY_ID: Final = "messaging.send.v1"
-PROVIDER: Final = "meta_cloud_api"
-CHANNEL: Final = "whatsapp"
 VERSION: Final = "0.1.0a3"
 SIGNATURE_HEADER: Final = "x-hub-signature-256"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
 WEBHOOK_VERIFY_TOKEN: Final = "webhook_verify_token"  # nosec B105
 ACCESS_TOKEN: Final = "access_token"  # nosec B105
-GRAPH_HOST: Final = "graph.facebook.com"
 SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r"sha256=[0-9a-f]{64}")
 SUPPORTED_MESSAGE_TYPES: Final[frozenset[str]] = frozenset(
     {"text", "image", "document", "audio", "video", "sticker", "location"}
@@ -96,6 +137,27 @@ DELIVERY_CONFIG_PROPERTIES: Final[dict[str, object]] = {
     },
 }
 
+# The catalogue knobs. `waba_id` is the account whose approved templates govern
+# a send: it is REQUIRED on a send binding rather than optional, because the
+# pre-flight gate has no fail-open branch to fall back to and an installation
+# that cannot name its WABA cannot be told whether a template is approved.
+WABA_CONFIG_PROPERTY: Final[dict[str, object]] = {
+    "waba_id": {"type": "string", "pattern": r"^[0-9]{1,40}$"},
+}
+TEMPLATE_CONFIG_PROPERTIES: Final[dict[str, object]] = {
+    # Sub's proven 300 s, as a knob. 0 disables reuse: every send re-reads.
+    "template_cache_ttl_seconds": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": MAX_TEMPLATE_CACHE_TTL_SECONDS,
+    },
+    "template_page_size": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": DEFAULT_TEMPLATE_PAGE_SIZE,
+    },
+}
+
 RECEIVE_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
@@ -105,8 +167,28 @@ RECEIVE_CONFIG_SCHEMA: Final[dict[str, object]] = {
 SEND_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["phone_number_id", "graph_api_version", "timeout_seconds"],
-    "properties": DELIVERY_CONFIG_PROPERTIES,
+    "required": [
+        "phone_number_id",
+        "graph_api_version",
+        "timeout_seconds",
+        "waba_id",
+    ],
+    "properties": DELIVERY_CONFIG_PROPERTIES
+    | WABA_CONFIG_PROPERTY
+    | TEMPLATE_CONFIG_PROPERTIES
+    | {"media_limits": MEDIA_LIMITS_SCHEMA},
+}
+
+TEMPLATE_READ_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["waba_id", "graph_api_version", "timeout_seconds"],
+    "properties": {
+        "graph_api_version": DELIVERY_CONFIG_PROPERTIES["graph_api_version"],
+        "timeout_seconds": DELIVERY_CONFIG_PROPERTIES["timeout_seconds"],
+    }
+    | WABA_CONFIG_PROPERTY
+    | {"template_page_size": TEMPLATE_CONFIG_PROPERTIES["template_page_size"]},
 }
 
 HISTORICAL_MANIFEST: Final = ConnectorManifest(
@@ -166,6 +248,11 @@ MANIFEST: Final = ConnectorManifest(
             config_schema=SEND_CONFIG_SCHEMA,
             modes=frozenset({ConnectorMode.DELIVERY}),
         ),
+        CapabilityDeclaration(
+            capability_id=TEMPLATE_READ_CAPABILITY_ID,
+            config_schema=TEMPLATE_READ_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.POLL}),
+        ),
     ),
     secret_bindings=(
         SecretBindingDeclaration(
@@ -185,7 +272,8 @@ MANIFEST: Final = ConnectorManifest(
             name=ACCESS_TOKEN,
             required=False,
             description=(
-                "Graph API access token; required when messaging.send.v1 is bound."
+                "Graph API access token; required when messaging.send.v1 or "
+                "messaging.templates.read.v1 is bound."
             ),
         ),
     ),
@@ -255,22 +343,6 @@ def _instant(value: object) -> str | None:
         return None
 
 
-class DeliveryContractError(ValueError):
-    """A product command cannot be translated into the provider contract."""
-
-    def __init__(self, code: str) -> None:
-        self.code = code if code.isidentifier() else "delivery_contract_invalid"
-        super().__init__(self.code)
-
-
-class MediaUploadFailure(RuntimeError):
-    """A typed upload outcome that must bypass payload-validation handling."""
-
-    def __init__(self, outcome: Outcome) -> None:
-        self.outcome = outcome
-        super().__init__(outcome.error_code or "media_upload_failed")
-
-
 @dataclass(frozen=True, slots=True)
 class _DeliveryConfig:
     phone_number_id: str
@@ -318,19 +390,6 @@ def _required_text(value: object, code: str) -> str:
     return value.strip()
 
 
-def _ordered_template_parameters(variables: Mapping[str, object]) -> list[str]:
-    numbered: list[tuple[int, str]] = []
-    trailing: list[str] = []
-    for key, value in variables.items():
-        rendered = "" if value is None else str(value)
-        normalized = str(key).strip()
-        if normalized.isdigit():
-            numbered.append((int(normalized), rendered))
-        else:
-            trailing.append(rendered)
-    return [value for _index, value in sorted(numbered)] + trailing
-
-
 def _text_payload(params: Mapping[str, object]) -> dict[str, object]:
     return {
         "messaging_product": "whatsapp",
@@ -359,7 +418,7 @@ def _template_payload(params: Mapping[str, object]) -> dict[str, object]:
         "name": name,
         "language": {"code": language},
     }
-    parameters = _ordered_template_parameters(variables)
+    parameters = ordered_template_parameters(variables)
     if components:
         template["components"] = [dict(item) for item in components]
     elif parameters:
@@ -378,12 +437,29 @@ def _template_payload(params: Mapping[str, object]) -> dict[str, object]:
 
 
 def _media_payload(
-    params: Mapping[str, object], *, uploaded_media_id: str | None = None
+    params: Mapping[str, object],
+    *,
+    limits: MediaLimits,
+    uploaded_media_id: str | None = None,
+    content_length: int | None = None,
 ) -> dict[str, object]:
     recipient = _required_text(params.get("recipient"), "recipient_required")
     media_type = _required_text(params.get("media_type"), "media_type_required").lower()
-    if media_type not in {"image", "document", "audio", "video"}:
-        raise DeliveryContractError("media_type_unsupported")
+    caption = params.get("caption")
+    filename = params.get("filename")
+    declared_type = params.get("content_type")
+    require_supported_attachment(
+        media_type=media_type,
+        content_type=(
+            declared_type
+            if isinstance(declared_type, str) and declared_type.strip()
+            else None
+        ),
+        content_length=content_length,
+        caption=caption,
+        filename=filename,
+        limits=limits,
+    )
     media_id_value = params.get("media_id")
     link_value = params.get("link")
     media_id = uploaded_media_id or (
@@ -397,13 +473,12 @@ def _media_payload(
         media = {"link": link.strip()}
     else:
         raise DeliveryContractError("media_reference_required")
-    caption = params.get("caption")
-    filename = params.get("filename")
-    if media_type in {"image", "document", "video"} and isinstance(caption, str):
-        if caption:
-            media["caption"] = caption[:1024]
-    if media_type == "document" and isinstance(filename, str) and filename:
-        media["filename"] = filename[:255]
+    # The lengths were checked above and refused, not trimmed, so what the
+    # product wrote is what goes on the wire.
+    if isinstance(caption, str) and caption:
+        media["caption"] = caption
+    if isinstance(filename, str) and filename:
+        media["filename"] = filename
     return {
         "messaging_product": "whatsapp",
         "to": recipient,
@@ -412,20 +487,13 @@ def _media_payload(
     }
 
 
-def _retry_after(response: httpx.Response) -> int | None:
-    value = response.headers.get("retry-after")
-    if value is None or not value.isdigit():
-        return None
-    return int(value)
-
-
 def _response_outcome(response: httpx.Response) -> Outcome:
     status = response.status_code
     if status == 429:
         return Outcome(
             status=OutcomeStatus.RETRYABLE,
             error_code="provider_rate_limited",
-            retry_after_seconds=_retry_after(response),
+            retry_after_seconds=retry_after_seconds(response),
             provider_status_code=status,
         )
     if status >= 500:
@@ -466,23 +534,20 @@ def _response_outcome(response: httpx.Response) -> Outcome:
     )
 
 
-def _request_failure(exc: httpx.RequestError) -> Outcome:
-    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
-        return Outcome(
-            status=OutcomeStatus.RETRYABLE,
-            error_code="provider_connect_failed",
-        )
-    return Outcome(
-        status=OutcomeStatus.RECONCILIATION_REQUIRED,
-        error_code="provider_outcome_ambiguous",
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class WhatsAppDeliveryHandler:
-    """Provider I/O only; the engine owns claims, retries and persistence."""
+    """Provider I/O only; the engine owns claims, retries and persistence.
+
+    The `catalogue_cache` it is handed is the connector's, not its own: a
+    handler is constructed per dispatch, so a cache owned here would be cold on
+    every send and the TTL would mean nothing.
+    """
 
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
+    catalogue_cache: TemplateCatalogueCache = field(
+        default_factory=TemplateCatalogueCache, repr=False
+    )
+    clock: Callable[[], float] = field(default=time.monotonic, repr=False)
 
     def __call__(self, request: DispatchRequest) -> Outcome:
         if request.capability_id != SEND_CAPABILITY_ID:
@@ -500,22 +565,40 @@ class WhatsAppDeliveryHandler:
             if action == "send_text":
                 payload = _text_payload(params)
             elif action == "send_template":
+                # The gate, before the wire call. An unapproved template or an
+                # arity the catalogue does not describe never reaches Meta.
+                require_sendable_template(
+                    params,
+                    config=request.config,
+                    token=token,
+                    transport=self.transport,
+                    cache=self.catalogue_cache,
+                    timeout_seconds=config.timeout_seconds,
+                    graph_api_version=config.graph_api_version,
+                    clock=self.clock,
+                )
                 payload = _template_payload(params)
             elif action == "send_media":
-                payload = self._media_payload(params, config=config, token=token)
+                payload = self._media_payload(
+                    params,
+                    config=config,
+                    token=token,
+                    request_config=request.config,
+                )
             else:
                 raise DeliveryContractError("action_unsupported")
-        except MediaUploadFailure as exc:
+        except (MediaUploadFailure, TemplateCatalogueFailure) as exc:
             return exc.outcome
         except DeliveryContractError as exc:
-            return Outcome(status=OutcomeStatus.TERMINAL, error_code=exc.code)
+            return Outcome(
+                status=OutcomeStatus.TERMINAL,
+                error_code=exc.code,
+                error_detail=exc.detail,
+            )
 
         try:
-            with httpx.Client(
-                base_url=f"https://{GRAPH_HOST}",
-                timeout=config.timeout_seconds,
-                transport=self.transport,
-                follow_redirects=False,
+            with graph_client(
+                timeout_seconds=config.timeout_seconds, transport=self.transport
             ) as client:
                 response = client.post(
                     f"/{config.graph_api_version}/{config.phone_number_id}/messages",
@@ -523,7 +606,7 @@ class WhatsAppDeliveryHandler:
                     headers={"authorization": f"Bearer {token}"},
                 )
         except httpx.RequestError as exc:
-            return _request_failure(exc)
+            return request_failure(exc)
         return _response_outcome(response)
 
     def _media_payload(
@@ -532,7 +615,9 @@ class WhatsAppDeliveryHandler:
         *,
         config: _DeliveryConfig,
         token: str,
+        request_config: Mapping[str, object],
     ) -> dict[str, object]:
+        limits = MediaLimits.resolve(request_config)
         content_base64 = params.get("content_base64")
         media_id = params.get("media_id")
         link = params.get("link")
@@ -542,24 +627,39 @@ class WhatsAppDeliveryHandler:
             and not (isinstance(media_id, str) and media_id.strip())
             and not (isinstance(link, str) and link.strip())
         ):
-            return _media_payload(params)
+            # A reference the connector never held the bytes of: type, caption
+            # and filename are still checked; size is not knowable and is not
+            # pretended to be.
+            return _media_payload(params, limits=limits)
         try:
             content = base64.b64decode(content_base64, validate=True)
         except (ValueError, TypeError):
             raise DeliveryContractError("media_content_invalid") from None
-        # These are the same safe wire defaults used by Sub's proven runtime.
-        # Graph API version deliberately has no equivalent default because it
-        # is a compatibility decision.
-        filename = _required_text(params.get("filename") or "attachment", "")
-        content_type = _required_text(
-            params.get("content_type") or "application/octet-stream", ""
+        # Sub defaulted the upload's declared type to `application/octet-stream`
+        # and its filename to `attachment`. The filename default stays; the type
+        # default does NOT, because Meta accepts no such type for any media kind
+        # and the upload it produced was always going to be rejected. Requiring
+        # a real, supported type turns that provider round trip into a local
+        # refusal — which is the whole point of this gate.
+        raw_content_type = params.get("content_type")
+        if not isinstance(raw_content_type, str) or not raw_content_type.strip():
+            raise DeliveryContractError("media_content_type_required")
+        media_type = _required_text(
+            params.get("media_type"), "media_type_required"
+        ).lower()
+        require_supported_attachment(
+            media_type=media_type,
+            content_type=raw_content_type,
+            content_length=len(content),
+            caption=params.get("caption"),
+            filename=params.get("filename"),
+            limits=limits,
         )
+        filename = _required_text(params.get("filename") or "attachment", "")
+        content_type = normalized_mime_type(raw_content_type)
         try:
-            with httpx.Client(
-                base_url=f"https://{GRAPH_HOST}",
-                timeout=config.timeout_seconds,
-                transport=self.transport,
-                follow_redirects=False,
+            with graph_client(
+                timeout_seconds=config.timeout_seconds, transport=self.transport
             ) as client:
                 response = client.post(
                     f"/{config.graph_api_version}/{config.phone_number_id}/media",
@@ -568,7 +668,7 @@ class WhatsAppDeliveryHandler:
                     files={"file": (filename, content, content_type)},
                 )
         except httpx.RequestError as exc:
-            upload_outcome = _request_failure(exc)
+            upload_outcome = request_failure(exc)
             raise MediaUploadFailure(
                 Outcome(
                     status=upload_outcome.status,
@@ -584,7 +684,7 @@ class WhatsAppDeliveryHandler:
                 Outcome(
                     status=OutcomeStatus.RETRYABLE,
                     error_code="media_upload_retryable_response",
-                    retry_after_seconds=_retry_after(response),
+                    retry_after_seconds=retry_after_seconds(response),
                     provider_status_code=response.status_code,
                 )
             )
@@ -609,7 +709,12 @@ class WhatsAppDeliveryHandler:
                     provider_status_code=response.status_code,
                 )
             )
-        return _media_payload(params, uploaded_media_id=uploaded)
+        return _media_payload(
+            params,
+            limits=limits,
+            uploaded_media_id=uploaded,
+            content_length=len(content),
+        )
 
 
 def _profile_name(value: Mapping[str, object], sender: str) -> str | None:
@@ -1122,9 +1227,19 @@ INGRESS_HANDLER: Final[IngressHandler] = WhatsAppIngressHandler()
 
 @dataclass(frozen=True, slots=True)
 class WhatsAppConnector:
-    """SPI plugin object discovered from package metadata."""
+    """SPI plugin object discovered from package metadata.
+
+    The catalogue cache lives HERE — one per plugin object, and therefore one
+    per process in a deployment, since discovery constructs the plugin once.
+    Handlers are constructed per call and are handed the cache rather than
+    owning one.
+    """
 
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
+    catalogue_cache: TemplateCatalogueCache = field(
+        default_factory=TemplateCatalogueCache, repr=False
+    )
+    clock: Callable[[], float] = field(default=time.monotonic, repr=False)
 
     @property
     def manifest(self) -> ConnectorManifest:
@@ -1136,7 +1251,9 @@ class WhatsAppConnector:
 
     @property
     def modes(self) -> frozenset[ConnectorMode]:
-        return frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
+        return frozenset(
+            {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
+        )
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         MANIFEST.require_declares(capability_id)
@@ -1148,7 +1265,13 @@ class WhatsAppConnector:
         MANIFEST.require_declares(capability_id)
         if capability_id != SEND_CAPABILITY_ID:
             raise ValueError(f"{capability_id!r} is not a delivery capability")
-        return WhatsAppDeliveryHandler(self.transport)
+        return WhatsAppDeliveryHandler(self.transport, self.catalogue_cache, self.clock)
+
+    def poll_handler_for(self, capability_id: str) -> PollHandler:
+        MANIFEST.require_declares(capability_id)
+        if capability_id != TEMPLATE_READ_CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not a poll capability")
+        return WhatsAppTemplateCatalogueHandler(self.transport)
 
     def validate_connection(
         self, *, config: dict[str, object], secrets: dict[str, object]
@@ -1173,6 +1296,26 @@ class WhatsAppConnector:
                 _access_token(secrets)
             except DeliveryContractError:
                 return (Diagnostic(ok=False, code="delivery_configuration_invalid"),)
+        # A template-bearing configuration is refused at ACTIVATION rather than
+        # at the first send: an installation that cannot name its WABA or whose
+        # limits are out of range would otherwise look enabled and refuse every
+        # template message it was given.
+        if any(
+            name in config
+            for name in (*WABA_CONFIG_PROPERTY, *TEMPLATE_CONFIG_PROPERTIES)
+        ):
+            try:
+                require_waba_id(config)
+                resolve_cache_ttl_seconds(config)
+                resolve_page_size(config)
+                _access_token(secrets)
+            except DeliveryContractError:
+                return (Diagnostic(ok=False, code="template_configuration_invalid"),)
+        if "media_limits" in config:
+            try:
+                MediaLimits.resolve(config)
+            except DeliveryContractError:
+                return (Diagnostic(ok=False, code="media_limits_invalid"),)
         return ()
 
 
@@ -1183,4 +1326,5 @@ __all__ = [
     "PLUGIN",
     "WhatsAppConnector",
     "WhatsAppDeliveryHandler",
+    "WhatsAppTemplateCatalogueHandler",
 ]
