@@ -4,9 +4,9 @@ classification = "stateless-protocol-adapter"
 status = "audit-complete"
 source_mode = "product-first"
 
-owner = "Meta WhatsApp Cloud API protocol edge: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, text/template/media delivery wire shapes, provider response classification, and provider acknowledgement bytes."
+owner = "Meta WhatsApp Cloud API protocol edge: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, approved message-template catalogue reads and their in-process freshness policy, provider attachment constraints (type, size, caption, filename), text/template/media delivery wire shapes, provider response classification, and provider acknowledgement bytes."
 
-contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key meta_whatsapp and capabilities messaging.receive.v1 plus messaging.send.v1. INGRESS verifies immutable request bytes and returns provider facts. DELIVERY receives product-decided text/template/media commands and already-materialized access material, performs only Meta Graph wire translation and I/O, and returns typed engine outcomes. The connector owns no rows, sessions, retries, checkpoints, product identity, customer-window decision, template selection, conversation state, tickets, subscribers, or destination decision."
+contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key meta_whatsapp and capabilities messaging.receive.v1, messaging.send.v1 plus messaging.templates.read.v1. INGRESS verifies immutable request bytes and returns provider facts. POLL reads the WABA's message-template catalogue and returns typed provider observations, so the product owns a rebuildable projection of what is approved. DELIVERY receives product-decided text/template/media commands and already-materialized access material, refuses before the wire call what the provider would reject anyway (unapproved template, variable arity the catalogue does not describe, unsupported MIME type, oversize attachment, caption or filename a media type cannot carry), performs only Meta Graph wire translation and I/O, and returns typed engine outcomes. The template catalogue is memoized in process under a configured freshness policy and is never persisted: it is a rebuildable memo of provider facts, never a second authority on approval. The connector owns no rows, sessions, retries, checkpoints, product identity, customer-window decision, template selection, conversation state, tickets, subscribers, or destination decision."
 
 source_repositories = [
   "dotmac_erp",
@@ -16,10 +16,16 @@ source_repositories = [
 
 source_paths = [
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_runtime.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_capability.py",
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_installation.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/team_inbox_commands.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/team_inbox_media.py",
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_integration_whatsapp_capability.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_attachments.py",
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_outbound.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_start_conversation.py",
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_whatsapp_webhook.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/architecture/test_team_inbox_boundaries.py",
   "dotmac_starter_mt:docs/inventories/whatsapp-connector-sources.md",
   "dotmac_starter_mt:docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md",
   "dotmac_starter_mt:tests/fixtures/meta_whatsapp/manifest.json",
@@ -48,4 +54,34 @@ shadow_and_drift = "Mirror the exact raw body and signature header into Integrat
 
 local_copy_retirement = "Retire only Sub's provider transport surface: webhook signature verification, provider payload traversal, provider event identity construction and provider acknowledgement. Sub retains the authoritative messaging decision, contact/conversation resolution and timeline consequences behind its typed observation port. No ERPNext or CRM connector is recreated; retired product connections stay retired."
 
-next_action = "Complete and release the additive DELIVERY slice: typed provider evidence and terminal outbound-content retention in dotmac-integration, text/template/media parity in this connector, then exact-pin both in dotmac_integrator and run its provider-neutral command intake and delivery pump. Shadow Sub's local outbox against Integrator before retiring the direct Graph client and lowering the external-connector ratchet. Move status to adopted only after ingress and outbound cutovers are both complete."
+next_action = "Complete and release the additive DELIVERY and POLL slice: typed provider evidence and terminal outbound-content retention in dotmac-integration, text/template/media parity plus the approved-template catalogue and attachment gates in this connector, then exact-pin both in dotmac_integrator and run its provider-neutral command intake, catalogue poll and delivery pump. Sub must declare messaging.templates.read.v1 and grow a local reader/reconciler for the whatsapp.message_template.v1 observations before its own `list_approved_templates` Graph call is retired; publication alone retires nothing. Shadow Sub's local outbox against Integrator before retiring the direct Graph client and lowering the external-connector ratchet. Move status to adopted only after ingress and outbound cutovers are both complete."
+
+# 2026-08-24 catalogue and attachment slice. Recorded here rather than in prose
+# elsewhere so the deviations travel with the dossier that authorized them.
+[extraction_notes]
+ported = [
+  "whatsapp_runtime._read_template: endpoint /{graph_version}/{waba_id}/message_templates, fields name,status,language,category,components, limit 200, optional name filter.",
+  "whatsapp_runtime._template_variables: BODY-component arity as the sorted DISTINCT {{n}} index set, pattern r'\\{\\{\\s*(\\d+)\\s*\\}\\}'.",
+  "whatsapp_runtime._ordered_template_parameters: numeric keys sorted numerically, other keys trailing in insertion order.",
+  "whatsapp_capability.list_approved_templates: case-insensitive status == 'approved', a process-local monotonic-clock memo, and a hard 300 s TTL under which stale is treated exactly as cold.",
+  "whatsapp_runtime template-read outcome codes: template_provider_unavailable, template_provider_retryable, template_provider_rejected, template_response_invalid, template_not_found, waba_id_required.",
+  "whatsapp_runtime.build_media_payload: caption on image/document/video only, filename on document only, and the 1024/255 limits.",
+  "team_inbox_media MIME normalization: split(';')[0].strip().lower(), so a charset parameter cannot defeat the comparison.",
+  "team_inbox_commands: the send is blocked when the catalogue cannot be read (fail closed).",
+  "architecture/test_team_inbox_boundaries: the ordering guard that the catalogue read precedes the committing step.",
+]
+not_present_in_sub = [
+  "Arity VALIDATION. Sub derives the placeholder count only to render form fields and never compares a submission against it, so a body needing three values is sent with one and fails at Meta as the generic template_unavailable.",
+  "A per-media-type byte limit table. Sub enforces one flat MAX_OUTBOUND_ATTACHMENT_BYTES = 10 MiB at upload-staging time, which is a product policy about what an operator may stage, not the provider's contract; it stays in Sub.",
+  "A MIME-to-media-type consistency check. Sub's flat allowlist admits image/gif, audio/wav, video/quicktime, application/zip and text/csv, which Meta accepts for no media type.",
+  "Catalogue pagination. Sub reads one page of 200 and ignores paging.next, so a large account silently truncates and a missing template is indistinguishable from an unapproved one.",
+  "A distinct reason for a non-approved template. Sub raises a generic rejection whose only distinguishing feature is an English message.",
+  "Cache eviction and bounds. Sub's dict is unbounded, leaks an entry per superseded config revision, and leaves the expired tuple in place after a failed refresh.",
+  "Any test of the catalogue fetch, the TTL, or the failure paths: list_approved_templates is monkeypatched out of every test that touches it.",
+]
+deliberate_deviations = [
+  "The upload's application/octet-stream default is RETIRED. Meta accepts that type for no media kind, so every upload it produced was streamed in full and then rejected; an upload with no declared supported type is now a local terminal refusal. The `attachment` filename default is kept.",
+  "Caption and filename over-length REFUSE instead of truncating, and a caption on audio refuses instead of being dropped. Editing product content to fit a provider constraint is a decision belonging to whoever wrote the message, not to the wire adapter.",
+  "A catalogue read timeout is RETRYABLE, not RECONCILIATION_REQUIRED. The send path keeps the ambiguous classification because a message may have landed; a catalogue GET has no effect to duplicate, and calling it ambiguous would park a message the provider never saw.",
+  "A catalogue longer than MAX_CATALOGUE_PAGES fails rather than truncating, because a short catalogue reads exactly like a withdrawn approval.",
+]
