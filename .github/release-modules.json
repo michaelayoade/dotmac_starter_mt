@@ -2393,6 +2393,44 @@
         ]
       }
     },
+    "dotmac-service-catalog": {
+      "$comment": [
+        "Provider-neutral technical service specifications, plan families, typed",
+        "characteristics and declared eligibility inputs; no commercial fields.",
+        "",
+        "AUTHORIZED FOR PUBLICATION 2026-08-24. Sub is the named first adopter.",
+        "Publication supplies the immutable coordinate for its versioned backfill",
+        "and full-cohort shadow comparison; it does not move catalogue authority."
+      ],
+      "package_dir": "packages/dotmac-service-catalog",
+      "import_name": "dotmac_service_catalog",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_svc_cat",
+      "tag_prefix": "dotmac-service-catalog-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_service_catalog/py.typed",
+          "dotmac_service_catalog/contracts.py",
+          "dotmac_service_catalog/manifest.py",
+          "dotmac_service_catalog/migrations/__init__.py",
+          "dotmac_service_catalog/migrations/versions/sc_0001_technical_catalog.py",
+          "dotmac_service_catalog/models.py",
+          "dotmac_service_catalog/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-service-changes": {
       "$comment": [
         "Durable customer service-change requests, their evidence and cross-domain",
@@ -2535,6 +2573,7 @@
           "dotmac_subscriptions/manifest.py",
           "dotmac_subscriptions/migrations/__init__.py",
           "dotmac_subscriptions/migrations/versions/su_0001_subscriptions.py",
+          "dotmac_subscriptions/migrations/versions/su_0002_offer_pricing.py",
           "dotmac_subscriptions/models.py",
           "dotmac_subscriptions/py.typed",
           "dotmac_subscriptions/service.py",

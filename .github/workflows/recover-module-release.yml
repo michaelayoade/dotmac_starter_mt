@@ -90,6 +90,7 @@ on:
           - dotmac-release-catalog
           - dotmac-remote-access
           - dotmac-reseller-management
+          - dotmac-service-catalog
           - dotmac-service-changes
           - dotmac-service-orders
           - dotmac-sites
