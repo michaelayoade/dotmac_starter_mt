@@ -378,6 +378,27 @@ specifics) points here and must never fork these rules.
     A remote projection requires a named local reader and reconciler; foreign-key
     compatibility alone is not a reason to keep one. Correlation-only needs use
     an opaque Integrator reference on the local owning record.
+    **One capability id is one contract with one PAYLOAD, and the payload
+    belongs to the owning DOMAIN.** `CapabilityContract` — what the owning
+    business application publishes — carries `command_schema`, `result_schema`,
+    `observation_schema`, a canonical contract digest and deprecation metadata;
+    a connector's `CapabilityDeclaration` may only CLAIM that digest and may
+    never publish a competing schema, because a schema per connector makes drift
+    machine-readable rather than prevented. Enforced at four seams: the command
+    before a delivery row exists (`execution.enqueue_delivery`), digest
+    agreement at composition AND at binding
+    (`capability_registry.require_implements_only_declared`,
+    `require_declared_for_binding`), the result before the claim-guarded settle
+    (`dispatch.settle`), and every observation before the inbox batch commits
+    (`ingress.record_batch`, which the polling path calls). A schema change
+    takes a new `.vN` id — a published version is SUCCEEDED, never redefined,
+    and `install_capability_registry` refuses a reload that redefines one. A
+    contract that has published nothing yet must SAY so, with a
+    `SchemaGrace(reason, retire_after)`; silence is refused at construction, the
+    ungated set is enumerable (`schema_grace_register`) and the window closes.
+    (ADR-0024 §§ 10-12, ADR-0061 A2;
+    `tests/unit/test_integration_capability_contract_gate.py`,
+    `tests/architecture/test_capability_contract_divergence.py`)
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
 

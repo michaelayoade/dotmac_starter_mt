@@ -98,6 +98,8 @@ compatible; an explicit mapping is covered by the manifest digest.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -139,10 +141,44 @@ __all__ = [
     "SpiVersion",
     "VerificationResult",
     "accepts_manifest_digest",
+    "canonical_digest",
     "require_capability_mode",
     "require_mode",
     "verify_plugin_modes",
 ]
+
+
+#: 64 lowercase hex characters — what :func:`canonical_digest` produces, and
+#: therefore the only shape a CLAIM to a domain contract's digest may take.
+_CONTRACT_DIGEST_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
+
+
+def canonical_digest(value: object) -> str:
+    """The ONE canonical-JSON digest rule in this module. SHA-256, sorted keys.
+
+    There was already exactly one such rule — `execution.payload_digest`, which
+    digests an outbound payload so a redelivery with reordered keys is still
+    recognised as the same effect. ADR-0024 § 10.2 needs the same rule for a
+    capability contract's schemas, and a second implementation would be a second
+    answer to "are these two structures the same?": the two would agree on every
+    case anybody tested and disagree on the first one nobody did.
+
+    So the implementation moved HERE, to the contract layer, and
+    `execution.payload_digest` delegates to it. That direction rather than the
+    reverse because `capability_registry` must be able to digest a schema
+    without importing the persistence layer — `execution` imports the ORM
+    models, and a contract value object that dragged a `Session`-shaped
+    dependency behind it would be unusable in the one place it matters most, an
+    owning application declaring its vocabulary at startup.
+
+    `sort_keys` so structurally equal values digest equally regardless of key
+    order. `default=str` so a value the JSON encoder refuses degrades to its
+    text form rather than raising — a digest is an identity, and a caller that
+    handed over something unserialisable is owed a stable answer rather than a
+    traceback from inside a hash function.
+    """
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class SpiIncompatibleError(ValueError):
@@ -322,6 +358,21 @@ class CapabilityDeclaration:
     `config_schema` is a JSON-schema fragment describing the capability's
     configuration. It may name secret REFERENCES; it may never carry a secret
     value — see `dotmac_integration.secret_refs`.
+
+    ## What this declaration may NOT contain: a payload schema
+
+    ADR-0024 § 10.3. A connector declares its own CONFIGURATION and its
+    executable MODES, because those are genuinely per-connector facts. It never
+    declares what a command, a result or an observation LOOKS like, because that
+    is what the capability MEANS, and meaning is the owning business
+    application's (§ 10.1, `capability_registry.CapabilityContract`).
+
+    The tempting alternative — every connector publishing its own payload schema
+    — does not prevent drift, it makes drift machine-readable: two connectors
+    serving one id would publish two individually valid schemas and the engine
+    would have no ground to prefer either. So the only thing a connector may say
+    about the payload is that it AGREES with the one published schema, which is
+    `claims_contract_digest`: a claim, never a definition.
     """
 
     capability_id: str
@@ -331,6 +382,12 @@ class CapabilityDeclaration:
     #: connectors state the mapping explicitly so conformance does not call an
     #: ingress factory for a delivery-only capability (or vice versa).
     modes: frozenset[ConnectorMode] | None = None
+    #: The domain contract digest this connector claims to implement — the value
+    #: of `CapabilityContract.contract_digest`, copied, never derived here.
+    #: ``None`` means "the owning domain has published no schema for this id
+    #: yet"; the registry refuses the two ways that can be wrong (a claim where
+    #: nothing is published, and a missing claim where something is).
+    claims_contract_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not _CAPABILITY_RE.fullmatch(self.capability_id):
@@ -347,6 +404,19 @@ class CapabilityDeclaration:
         if self.modes is not None and not self.modes:
             raise InvalidManifestError(
                 f"capability {self.capability_id!r} declares an empty mode set"
+            )
+        claim = self.claims_contract_digest
+        if claim is not None and not _CONTRACT_DIGEST_RE.fullmatch(claim):
+            # Shape-checked HERE so a truncated or upper-cased paste fails at
+            # manifest construction with a message about the paste, rather than
+            # at composition with a message about disagreement — which would
+            # send an author looking for a schema difference that does not
+            # exist.
+            raise InvalidManifestError(
+                f"capability {self.capability_id!r} claims contract digest "
+                f"{claim!r}, which is not 64 lowercase hex characters. The claim "
+                "is the owning domain contract's `contract_digest`, copied "
+                "verbatim — a connector never computes one"
             )
 
 
@@ -461,9 +531,11 @@ class ConnectorManifest:
         Over the fields a consumer can depend on — key, version, SPI range and
         the capability set. Deliberately not over the whole object: a docstring
         change must not invalidate every installation pinned to it.
-        """
-        import hashlib
 
+        NOT :func:`canonical_digest`: this hashes a field LIST whose ordering and
+        separators are its own published contract, not a JSON structure. The two
+        answer different questions and are deliberately not one function.
+        """
         fields = [
             self.connector_key,
             self.version,
@@ -476,6 +548,27 @@ class ConnectorManifest:
                 + ",".join(
                     f"{capability.capability_id}:"
                     + "+".join(sorted(mode.value for mode in capability.modes or ()))
+                    for capability in sorted(
+                        self.capabilities, key=lambda item: item.capability_id
+                    )
+                )
+            )
+        if any(
+            capability.claims_contract_digest is not None
+            for capability in self.capabilities
+        ):
+            # Appended only when at least one capability claims, so every
+            # manifest published before ADR-0024 § 10 keeps the digest its
+            # installations are pinned to. WHICH contract a connector claims to
+            # implement is reviewable contract, not documentation: a connector
+            # that silently re-pointed at a different published schema would be
+            # a different payload shape behind an unchanged installation pin,
+            # which is precisely what `accepts_manifest_digest` exists to catch.
+            fields.append(
+                "capability_contract_claims="
+                + ",".join(
+                    f"{capability.capability_id}:"
+                    f"{capability.claims_contract_digest or ''}"
                     for capability in sorted(
                         self.capabilities, key=lambda item: item.capability_id
                     )

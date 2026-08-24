@@ -44,7 +44,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from dotmac_integration.admission import (
@@ -76,6 +76,9 @@ from dotmac_integration.spi import (
     accepts_manifest_digest,
     require_capability_mode,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dotmac_integration.capability_registry import CapabilityRegistry
 
 __all__ = [
     "DispatchError",
@@ -361,6 +364,53 @@ def invoke(
     return outcome
 
 
+def _require_valid_result(
+    outcome: Outcome,
+    *,
+    prepared: PreparedDispatch,
+    registry: CapabilityRegistry | None,
+) -> None:
+    """ADR-0024 § 10.4.3 — the result gate, BEFORE the claim-guarded UPDATE.
+
+    Before the write, so a connector cannot settle a delivery with a shape no
+    product can read. After that write the attempt is `delivered` and final; a
+    product reading the result would be the first thing to discover the shape
+    was wrong, at which point the outbox says the effect succeeded and there is
+    nothing left to retry.
+
+    ## Only on a SUCCESS
+
+    A failed attempt has no normalized result to publish, and demanding one
+    would refuse to record the failure — turning "the provider returned 500"
+    into a permanently unsettled row with a live lease. `RECONCILIATION_REQUIRED`
+    is the sharpest case: `invoke` produces it for a connector that RAISED, so
+    insisting on a valid result body there would guarantee the one outcome
+    nobody may lose is the one that cannot be written.
+
+    ## The refusal reaches the dispatcher, not the row
+
+    Raising leaves the delivery `in_flight` with its lease. That is correct: the
+    engine has not decided anything about this attempt, and a lease expiry hands
+    it to a worker that will try again. The alternative — recording a
+    connector's malformed result as a terminal state — is the outcome this gate
+    exists to prevent.
+    """
+    if outcome.status is not OutcomeStatus.SUCCEEDED:
+        return
+    from dotmac_integration.capability_registry import capability_registry
+
+    declared = registry if registry is not None else capability_registry()
+    contract = declared.get(prepared.capability_id)
+    if contract.result_schema is None and outcome.result is None:
+        # A capability whose contract publishes no result body, and a connector
+        # that returned none. Nothing disagrees, so nothing is refused — this is
+        # the fire-and-forget delivery shape, where the effect IS the outcome
+        # and there is no normalized body to read. `require_result` would refuse
+        # it for a missing schema, which would be true and useless.
+        return
+    contract.require_result(outcome.result)
+
+
 def settle(
     db: Any,
     delivery: DeliveryAttempt,
@@ -369,6 +419,7 @@ def settle(
     prepared: PreparedDispatch,
     policy: ExecutionPolicy = DEFAULT_POLICY,
     now: datetime | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> DeliveryAttempt:
     """Record the outcome in ONE conditional UPDATE guarded by the claim.
 
@@ -394,6 +445,7 @@ def settle(
     """
     from sqlalchemy import update
 
+    _require_valid_result(outcome, prepared=prepared, registry=registry)
     moment = now or datetime.now(UTC)
     next_state_value = next_state(
         outcome, attempt_count=prepared.attempt_number, policy=policy
