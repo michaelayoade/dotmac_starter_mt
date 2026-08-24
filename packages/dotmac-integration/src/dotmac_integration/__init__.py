@@ -160,6 +160,8 @@ from dotmac_integration.dispatch import (
 )
 from dotmac_integration.execution import (
     CheckpointConflict,
+    DeliveryEnqueueRaced,
+    DeliveryIdempotencyConflict,
     ExecutionError,
     ProviderEventIdentityCollision,
     advance_checkpoint,
@@ -400,7 +402,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a14"
+__version__ = "0.1.0a15"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -645,6 +647,8 @@ __all__ = [
     "DEFAULT_POLICY",
     "ExecutionPolicy",
     "CheckpointConflict",
+    "DeliveryEnqueueRaced",
+    "DeliveryIdempotencyConflict",
     "CURRENT_SPI_VERSION",
     "ENTRY_POINT_GROUP",
     "PLATFORM_TABLES",

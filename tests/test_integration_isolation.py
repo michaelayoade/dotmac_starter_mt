@@ -1192,6 +1192,67 @@ def test_two_sessions_racing_one_provider_event_produce_one_typed_refusal(
     assert surviving == 1, "the race produced two receipts for one provider event"
 
 
+def test_a_delivery_enqueue_race_never_exposes_driver_parameters(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """A stale snapshot gets a typed retry instruction, not IntegrityError.
+
+    The driver's unique-violation text contains the bound payload and key. A
+    product command edge may log the exception class, so the module must contain
+    the expected conflict inside a savepoint and surface only its own constant
+    message.
+    """
+    from dotmac_integration import DeliveryEnqueueRaced, enqueue_delivery
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+    setup.dispose()
+
+    first_engine, second_engine = create_engine(admin_url), create_engine(admin_url)
+    first, second = Session(first_engine), Session(second_engine)
+    idempotency_key = f"material-key-{uuid.uuid4().hex}"
+    payload = {"content": f"material-payload-{uuid.uuid4().hex}"}
+    try:
+        second.connection(
+            execution_options={"isolation_level": "REPEATABLE READ"}
+        ).execute(text("SET LOCAL lock_timeout = '5s'"))
+        second.execute(text("SELECT 1"))
+
+        enqueue_delivery(
+            first,
+            installation_id=installation_id,
+            capability_binding_id=binding_id,
+            event_type="message.send",
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        first.commit()
+
+        with pytest.raises(DeliveryEnqueueRaced) as raised:
+            enqueue_delivery(
+                second,
+                installation_id=installation_id,
+                capability_binding_id=binding_id,
+                event_type="message.send",
+                idempotency_key=idempotency_key,
+                payload=payload,
+            )
+        rendered = str(raised.value)
+        assert idempotency_key not in rendered
+        assert str(payload["content"]) not in rendered
+        assert second.execute(text("SELECT 1")).scalar_one() == 1
+    finally:
+        second.rollback()
+        second.close()
+        first.close()
+        first_engine.dispose()
+        second_engine.dispose()
+
+
 def test_a_collision_mid_batch_leaves_no_partial_row_in_postgres(
     migrated_scratch: tuple[str, str],
     request: pytest.FixtureRequest,

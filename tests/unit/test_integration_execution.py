@@ -24,6 +24,7 @@ from dotmac_integration import (
     CheckpointConflict,
     ConnectorInstallation,
     DeliveryAttempt,
+    DeliveryIdempotencyConflict,
     ExecutionError,
     ExecutionPolicy,
     InboxReceipt,
@@ -344,6 +345,42 @@ def test_enqueueing_one_effect_twice_is_one_row(
     )
     assert new_first and not new_second
     assert first.id == second.id
+
+
+@pytest.mark.parametrize(
+    ("second_event_type", "second_payload", "second_binding"),
+    [
+        ("message.replace", {"a": 1}, None),
+        ("message.send", {"a": 2}, None),
+        ("message.send", {"a": 1}, uuid.UUID(int=2)),
+    ],
+)
+def test_reusing_an_outbox_key_for_a_different_effect_is_refused(
+    db: Session,
+    installation: ConnectorInstallation,
+    binding: CapabilityBinding,
+    second_event_type: str,
+    second_payload: dict[str, object],
+    second_binding: uuid.UUID | None,
+) -> None:
+    enqueue_delivery(
+        db,
+        installation_id=installation.id,
+        capability_binding_id=binding.id,
+        event_type="message.send",
+        idempotency_key="stable-key",
+        payload={"a": 1},
+    )
+
+    with pytest.raises(DeliveryIdempotencyConflict, match="different effect"):
+        enqueue_delivery(
+            db,
+            installation_id=installation.id,
+            capability_binding_id=second_binding or binding.id,
+            event_type=second_event_type,
+            idempotency_key="stable-key",
+            payload=second_payload,
+        )
 
 
 def test_a_leased_delivery_cannot_be_claimed_twice(
