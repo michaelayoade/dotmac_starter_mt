@@ -77,6 +77,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a95",
+      "reason": "ALLOCATION RELEASE PENDING THE PROTECTED WORKFLOW. a95 adds one MIGRATION_OWNER_LEDGER row (response_obligations / ro / mod_sla) and changes no behaviour for any existing consumer. dotmac-response-obligations declares it as a floor and is itself unreleasable until this ships. Remove this row in the a95 release-record change; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
@@ -90,11 +95,6 @@
     "dotmac-service-access-policy": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
-      "state": "never-published"
-    },
-    "dotmac-service-catalog": {
-      "declared": "0.1.0a1",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. The Sub-first technical catalogue is audit-complete and now release-allowlisted so Sub can exact-pin it for versioned backfill and full-cohort shadow comparison. Publication does not move authority: offers, prices and contracts remain outside, and Sub remains the technical-catalogue writer until zero-drift cutover and local-writer retirement. Remove this row in the automatic release record after registry verification writes dotmac-service-catalog-v0.1.0a1.",
       "state": "never-published"
     },
     "dotmac-services": {

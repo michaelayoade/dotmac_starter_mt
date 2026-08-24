@@ -346,6 +346,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "payments",
         "service_changes",
         "operational_escalations",
+        "response_obligations",
         # The two Cloud service-lifecycle owners (ADR-0030 amendment
         # 2026-08-23). `domains` takes `dn`, NOT the `do` its candidate tree
         # carried: `documents` holds `do` permanently and an allocation is
@@ -375,6 +376,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
             "payments",
             "service_changes",
             "operational_escalations",
+            "response_obligations",
             "domains",
             "hosting",
         )
@@ -397,6 +399,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "payments": ("mod_payments", "pm", "payments"),
         "service_changes": ("mod_servicechanges", "sch", "service_changes"),
         "operational_escalations": ("mod_escalations", "oe", "operational_escalations"),
+        "response_obligations": ("mod_sla", "ro", "response_obligations"),
         "domains": ("mod_domains", "dn", "domains"),
         "hosting": ("mod_hosting", "hs", "hosting"),
     }

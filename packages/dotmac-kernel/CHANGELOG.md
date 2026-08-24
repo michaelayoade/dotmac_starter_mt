@@ -6,6 +6,25 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a95 — 2026-08-24
+
+**Allocate the `response_obligations` database identity.** This additive
+release adds one row to `MIGRATION_OWNER_LEDGER` so a shared response-time
+clock can own a namespace. It changes no behaviour for any existing consumer.
+
+### Added
+
+- `RESPONSE_OBLIGATIONS_MIGRATION_OWNER` — owner `response_obligations`,
+  prefix `ro`, branch label `response_obligations`, schema `mod_sla` — and its
+  entry in `MIGRATION_OWNER_LEDGER` and the public `__all__`.
+
+The allocation exists because response-time promises are not one domain's
+property: Sub already carries an `entity_type` on both its SLA policy and its
+SLA clock, ERP recomputes the same targets at read time, and CRM keeps a third
+copy. `dotmac-durable-timers` schedules the sweeps and
+`dotmac-operational-escalations` decides the consequence; the clock itself had
+no owner until now.
+
 ## 0.1.0a94 — 2026-08-23
 
 **Declare product-owned recurring-commerce vocabularies without closing

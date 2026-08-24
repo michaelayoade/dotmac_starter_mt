@@ -1325,6 +1325,17 @@ OPERATIONAL_ESCALATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("escalations"),
 )
 
+# Response-time promises on an opaque subject: targets, running clocks, paused
+# time with a recorded reason, and warning/breach observations. `durable_timers`
+# schedules the sweeps, `operational_escalations` decides the consequence, and
+# Messaging/Integrator delivers; none of them owns the clock.
+RESPONSE_OBLIGATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="response_obligations",
+    prefix="ro",
+    branch_label="response_obligations",
+    db_schema=module_schema("sla"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1408,6 +1419,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PAYMENTS_MIGRATION_OWNER,
     SERVICE_CHANGES_MIGRATION_OWNER,
     OPERATIONAL_ESCALATIONS_MIGRATION_OWNER,
+    RESPONSE_OBLIGATIONS_MIGRATION_OWNER,
 )
 
 
@@ -1781,6 +1793,7 @@ __all__ = [
     "PAYMENTS_MIGRATION_OWNER",
     "SERVICE_CHANGES_MIGRATION_OWNER",
     "OPERATIONAL_ESCALATIONS_MIGRATION_OWNER",
+    "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
