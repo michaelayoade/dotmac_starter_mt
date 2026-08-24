@@ -94,7 +94,7 @@
     },
     "dotmac-service-catalog": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. The Sub-first technical catalogue is audit-complete and now release-allowlisted so Sub can exact-pin it for versioned backfill and full-cohort shadow comparison. Publication does not move authority: offers, prices and contracts remain outside, and Sub remains the technical-catalogue writer until zero-drift cutover and local-writer retirement. Remove this row in the automatic release record after registry verification writes dotmac-service-catalog-v0.1.0a1.",
       "state": "never-published"
     },
     "dotmac-subscriptions": {
