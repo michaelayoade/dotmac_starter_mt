@@ -68,9 +68,24 @@ def _charge_success(**overrides: object) -> dict[str, object]:
 def test_manifest_is_the_versioned_ingress_runtime_contract() -> None:
     assert MANIFEST.connector_key == "paystack"
     assert MANIFEST.version == __version__ == "0.1.0a2"
-    assert MANIFEST.capability_ids == {CAPABILITY_ID}
-    assert MANIFEST.spi_range.minimum.minor == 3
-    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    # The observation contract is unchanged by the outbound slice, and it is
+    # still mapped to the two modes that OBSERVE. The command capabilities and
+    # their DELIVERY mapping are asserted in
+    # `tests/unit/test_paystack_outbound_operations.py`.
+    assert CAPABILITY_ID in MANIFEST.capability_ids
+    observation = next(
+        capability
+        for capability in MANIFEST.capabilities
+        if capability.capability_id == CAPABILITY_ID
+    )
+    assert observation.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    # SPI 1.4 is what makes a per-capability mode mapping expressible, and a
+    # multi-mode connector without one has conformance calling an ingress
+    # factory for a delivery-only contract.
+    assert MANIFEST.spi_range.minimum.minor == 4
+    assert PLUGIN.modes == frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
+    )
     assert tuple(binding.name for binding in MANIFEST.secret_bindings or ()) == (
         WEBHOOK_SIGNING_SECRET,
         WEBHOOK_SIGNING_PREVIOUS_SECRET,
