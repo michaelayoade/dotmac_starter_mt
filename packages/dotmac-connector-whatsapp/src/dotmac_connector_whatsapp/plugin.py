@@ -1,21 +1,26 @@
-"""Stateless ingress translation for the Meta WhatsApp Cloud API."""
+"""Stateless ingress and delivery translation for Meta WhatsApp Cloud API."""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Final
 
+import httpx
+from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
     Acknowledgement,
     CapabilityDeclaration,
     ConnectorManifest,
     ConnectorMode,
     Diagnostic,
+    DispatchRequest,
     EgressDeclaration,
     InboundEvent,
     IngressHandler,
@@ -27,13 +32,16 @@ from dotmac_integration.spi import (
 
 CONNECTOR_KEY: Final = "meta_whatsapp"
 CAPABILITY_ID: Final = "messaging.receive.v1"
+SEND_CAPABILITY_ID: Final = "messaging.send.v1"
 PROVIDER: Final = "meta_cloud_api"
 CHANNEL: Final = "whatsapp"
-VERSION: Final = "0.1.0a2"
+VERSION: Final = "0.1.0a3"
 SIGNATURE_HEADER: Final = "x-hub-signature-256"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
 WEBHOOK_VERIFY_TOKEN: Final = "webhook_verify_token"  # nosec B105
+ACCESS_TOKEN: Final = "access_token"  # nosec B105
+GRAPH_HOST: Final = "graph.facebook.com"
 SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r"sha256=[0-9a-f]{64}")
 SUPPORTED_MESSAGE_TYPES: Final[frozenset[str]] = frozenset(
     {"text", "image", "document", "audio", "video", "sticker", "location"}
@@ -65,9 +73,40 @@ LEGACY_CONFIG_SCHEMA: Final[dict[str, object]] = {
 # configuration is empty and its references are keyed by the declarations
 # below. The a1 schema remains in HISTORICAL_MANIFEST so a persisted a1 digest
 # can still be identified and deliberately adopted.
-CONFIG_SCHEMA: Final[dict[str, object]] = {
+INGRESS_ONLY_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
+}
+
+DELIVERY_CONFIG_PROPERTIES: Final[dict[str, object]] = {
+    "phone_number_id": {
+        "type": "string",
+        "pattern": r"^[0-9]{1,40}$",
+    },
+    # Exact and explicit: an API version is a compatibility decision, not a
+    # connector default that silently ages into an unsupported endpoint.
+    "graph_api_version": {
+        "type": "string",
+        "pattern": r"^v[0-9]{1,2}\.[0-9]+$",
+    },
+    "timeout_seconds": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 60,
+    },
+}
+
+RECEIVE_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": DELIVERY_CONFIG_PROPERTIES,
+}
+
+SEND_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["phone_number_id", "graph_api_version", "timeout_seconds"],
+    "properties": DELIVERY_CONFIG_PROPERTIES,
 }
 
 HISTORICAL_MANIFEST: Final = ConnectorManifest(
@@ -82,14 +121,16 @@ HISTORICAL_MANIFEST: Final = ConnectorManifest(
     ),
 )
 
-MANIFEST: Final = ConnectorManifest(
+# Exact a2 contract. It remains discoverable so an installed ingress-only
+# revision can be adopted deliberately rather than becoming an unknown digest.
+INGRESS_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
-    version=VERSION,
+    version="0.1.0a2",
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(
         CapabilityDeclaration(
             capability_id=CAPABILITY_ID,
-            config_schema=CONFIG_SCHEMA,
+            config_schema=INGRESS_ONLY_CONFIG_SCHEMA,
         ),
     ),
     secret_bindings=(
@@ -108,6 +149,47 @@ MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(),
+)
+
+MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=VERSION,
+    spi_range=SpiRange.parse(">=1.4,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            capability_id=CAPABILITY_ID,
+            config_schema=RECEIVE_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.INGRESS}),
+        ),
+        CapabilityDeclaration(
+            capability_id=SEND_CAPABILITY_ID,
+            config_schema=SEND_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.DELIVERY}),
+        ),
+    ),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary exact-byte webhook signature key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook signature key during a bounded rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_VERIFY_TOKEN,
+            description="Subscription challenge comparison token.",
+        ),
+        SecretBindingDeclaration(
+            name=ACCESS_TOKEN,
+            required=False,
+            description=(
+                "Graph API access token; required when messaging.send.v1 is bound."
+            ),
+        ),
+    ),
+    egress=EgressDeclaration(hosts=(GRAPH_HOST,)),
 )
 
 
@@ -171,6 +253,363 @@ def _instant(value: object) -> str | None:
         return datetime.fromtimestamp(int(text), tz=UTC).isoformat()
     except (OverflowError, OSError, ValueError):
         return None
+
+
+class DeliveryContractError(ValueError):
+    """A product command cannot be translated into the provider contract."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code.isidentifier() else "delivery_contract_invalid"
+        super().__init__(self.code)
+
+
+class MediaUploadFailure(RuntimeError):
+    """A typed upload outcome that must bypass payload-validation handling."""
+
+    def __init__(self, outcome: Outcome) -> None:
+        self.outcome = outcome
+        super().__init__(outcome.error_code or "media_upload_failed")
+
+
+@dataclass(frozen=True, slots=True)
+class _DeliveryConfig:
+    phone_number_id: str
+    graph_api_version: str
+    timeout_seconds: float
+
+
+def _delivery_config(config: Mapping[str, object]) -> _DeliveryConfig:
+    phone_number_id = config.get("phone_number_id")
+    graph_api_version = config.get("graph_api_version")
+    timeout_seconds = config.get("timeout_seconds")
+    if (
+        not isinstance(phone_number_id, str)
+        or re.fullmatch(r"[0-9]{1,40}", phone_number_id) is None
+    ):
+        raise DeliveryContractError("phone_number_id_invalid")
+    if (
+        not isinstance(graph_api_version, str)
+        or re.fullmatch(r"v[0-9]{1,2}\.[0-9]+", graph_api_version) is None
+    ):
+        raise DeliveryContractError("graph_api_version_invalid")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int | float)
+        or not 1 <= float(timeout_seconds) <= 60
+    ):
+        raise DeliveryContractError("timeout_seconds_invalid")
+    return _DeliveryConfig(
+        phone_number_id=phone_number_id,
+        graph_api_version=graph_api_version,
+        timeout_seconds=float(timeout_seconds),
+    )
+
+
+def _access_token(secrets: Mapping[str, object]) -> str:
+    value = secrets.get(ACCESS_TOKEN)
+    if not isinstance(value, str) or not value:
+        raise DeliveryContractError("access_token_unavailable")
+    return value
+
+
+def _required_text(value: object, code: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise DeliveryContractError(code)
+    return value.strip()
+
+
+def _ordered_template_parameters(variables: Mapping[str, object]) -> list[str]:
+    numbered: list[tuple[int, str]] = []
+    trailing: list[str] = []
+    for key, value in variables.items():
+        rendered = "" if value is None else str(value)
+        normalized = str(key).strip()
+        if normalized.isdigit():
+            numbered.append((int(normalized), rendered))
+        else:
+            trailing.append(rendered)
+    return [value for _index, value in sorted(numbered)] + trailing
+
+
+def _text_payload(params: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "messaging_product": "whatsapp",
+        "to": _required_text(params.get("recipient"), "recipient_required"),
+        "type": "text",
+        "text": {"body": _required_text(params.get("body"), "body_required")},
+    }
+
+
+def _template_payload(params: Mapping[str, object]) -> dict[str, object]:
+    recipient = _required_text(params.get("recipient"), "recipient_required")
+    name = _required_text(params.get("template_name"), "template_name_required")
+    # Preserve Sub's production behaviour: the provider's default template
+    # locale is English when the product command does not name one.
+    language_value = params.get("language", "en")
+    language = _required_text(language_value or "en", "template_language_required")
+    variables = params.get("variables", {})
+    components = params.get("components", [])
+    if not isinstance(variables, Mapping):
+        raise DeliveryContractError("template_variables_invalid")
+    if not isinstance(components, list) or any(
+        not isinstance(item, Mapping) for item in components
+    ):
+        raise DeliveryContractError("template_components_invalid")
+    template: dict[str, object] = {
+        "name": name,
+        "language": {"code": language},
+    }
+    parameters = _ordered_template_parameters(variables)
+    if components:
+        template["components"] = [dict(item) for item in components]
+    elif parameters:
+        template["components"] = [
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": value} for value in parameters],
+            }
+        ]
+    return {
+        "messaging_product": "whatsapp",
+        "to": recipient,
+        "type": "template",
+        "template": template,
+    }
+
+
+def _media_payload(
+    params: Mapping[str, object], *, uploaded_media_id: str | None = None
+) -> dict[str, object]:
+    recipient = _required_text(params.get("recipient"), "recipient_required")
+    media_type = _required_text(params.get("media_type"), "media_type_required").lower()
+    if media_type not in {"image", "document", "audio", "video"}:
+        raise DeliveryContractError("media_type_unsupported")
+    media_id_value = params.get("media_id")
+    link_value = params.get("link")
+    media_id = uploaded_media_id or (
+        media_id_value if isinstance(media_id_value, str) else None
+    )
+    link = link_value if isinstance(link_value, str) else None
+    media: dict[str, object]
+    if media_id and media_id.strip():
+        media = {"id": media_id.strip()}
+    elif link and link.strip():
+        media = {"link": link.strip()}
+    else:
+        raise DeliveryContractError("media_reference_required")
+    caption = params.get("caption")
+    filename = params.get("filename")
+    if media_type in {"image", "document", "video"} and isinstance(caption, str):
+        if caption:
+            media["caption"] = caption[:1024]
+    if media_type == "document" and isinstance(filename, str) and filename:
+        media["filename"] = filename[:255]
+    return {
+        "messaging_product": "whatsapp",
+        "to": recipient,
+        "type": media_type,
+        media_type: media,
+    }
+
+
+def _retry_after(response: httpx.Response) -> int | None:
+    value = response.headers.get("retry-after")
+    if value is None or not value.isdigit():
+        return None
+    return int(value)
+
+
+def _response_outcome(response: httpx.Response) -> Outcome:
+    status = response.status_code
+    if status == 429:
+        return Outcome(
+            status=OutcomeStatus.RETRYABLE,
+            error_code="provider_rate_limited",
+            retry_after_seconds=_retry_after(response),
+            provider_status_code=status,
+        )
+    if status >= 500:
+        return Outcome(
+            status=OutcomeStatus.RETRYABLE,
+            error_code="provider_retryable_response",
+            provider_status_code=status,
+        )
+    if status < 200 or status >= 300:
+        return Outcome(
+            status=OutcomeStatus.TERMINAL,
+            error_code="provider_rejected_message",
+            provider_status_code=status,
+        )
+    try:
+        body = response.json()
+    except (ValueError, json.JSONDecodeError):
+        body = None
+    reference: object = None
+    if isinstance(body, Mapping):
+        messages = body.get("messages")
+        if isinstance(messages, list) and messages and isinstance(messages[0], Mapping):
+            reference = messages[0].get("id")
+    if (
+        not isinstance(reference, str)
+        or not reference.strip()
+        or len(reference.strip()) > 500
+    ):
+        return Outcome(
+            status=OutcomeStatus.RECONCILIATION_REQUIRED,
+            error_code="provider_receipt_missing",
+            provider_status_code=status,
+        )
+    return Outcome(
+        status=OutcomeStatus.SUCCEEDED,
+        provider_reference=reference,
+        provider_status_code=status,
+    )
+
+
+def _request_failure(exc: httpx.RequestError) -> Outcome:
+    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
+        return Outcome(
+            status=OutcomeStatus.RETRYABLE,
+            error_code="provider_connect_failed",
+        )
+    return Outcome(
+        status=OutcomeStatus.RECONCILIATION_REQUIRED,
+        error_code="provider_outcome_ambiguous",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class WhatsAppDeliveryHandler:
+    """Provider I/O only; the engine owns claims, retries and persistence."""
+
+    transport: httpx.BaseTransport | None = field(default=None, repr=False)
+
+    def __call__(self, request: DispatchRequest) -> Outcome:
+        if request.capability_id != SEND_CAPABILITY_ID:
+            return Outcome(
+                status=OutcomeStatus.TERMINAL,
+                error_code="capability_unsupported",
+            )
+        try:
+            config = _delivery_config(request.config)
+            token = _access_token(request.secrets)
+            action = _required_text(request.payload.get("action"), "action_required")
+            params = request.payload.get("params")
+            if not isinstance(params, Mapping):
+                raise DeliveryContractError("params_invalid")
+            if action == "send_text":
+                payload = _text_payload(params)
+            elif action == "send_template":
+                payload = _template_payload(params)
+            elif action == "send_media":
+                payload = self._media_payload(params, config=config, token=token)
+            else:
+                raise DeliveryContractError("action_unsupported")
+        except MediaUploadFailure as exc:
+            return exc.outcome
+        except DeliveryContractError as exc:
+            return Outcome(status=OutcomeStatus.TERMINAL, error_code=exc.code)
+
+        try:
+            with httpx.Client(
+                base_url=f"https://{GRAPH_HOST}",
+                timeout=config.timeout_seconds,
+                transport=self.transport,
+                follow_redirects=False,
+            ) as client:
+                response = client.post(
+                    f"/{config.graph_api_version}/{config.phone_number_id}/messages",
+                    json=payload,
+                    headers={"authorization": f"Bearer {token}"},
+                )
+        except httpx.RequestError as exc:
+            return _request_failure(exc)
+        return _response_outcome(response)
+
+    def _media_payload(
+        self,
+        params: Mapping[str, object],
+        *,
+        config: _DeliveryConfig,
+        token: str,
+    ) -> dict[str, object]:
+        content_base64 = params.get("content_base64")
+        media_id = params.get("media_id")
+        link = params.get("link")
+        if not (
+            isinstance(content_base64, str)
+            and content_base64
+            and not (isinstance(media_id, str) and media_id.strip())
+            and not (isinstance(link, str) and link.strip())
+        ):
+            return _media_payload(params)
+        try:
+            content = base64.b64decode(content_base64, validate=True)
+        except (ValueError, TypeError):
+            raise DeliveryContractError("media_content_invalid") from None
+        # These are the same safe wire defaults used by Sub's proven runtime.
+        # Graph API version deliberately has no equivalent default because it
+        # is a compatibility decision.
+        filename = _required_text(params.get("filename") or "attachment", "")
+        content_type = _required_text(
+            params.get("content_type") or "application/octet-stream", ""
+        )
+        try:
+            with httpx.Client(
+                base_url=f"https://{GRAPH_HOST}",
+                timeout=config.timeout_seconds,
+                transport=self.transport,
+                follow_redirects=False,
+            ) as client:
+                response = client.post(
+                    f"/{config.graph_api_version}/{config.phone_number_id}/media",
+                    headers={"authorization": f"Bearer {token}"},
+                    data={"messaging_product": "whatsapp", "type": content_type},
+                    files={"file": (filename, content, content_type)},
+                )
+        except httpx.RequestError as exc:
+            upload_outcome = _request_failure(exc)
+            raise MediaUploadFailure(
+                Outcome(
+                    status=upload_outcome.status,
+                    error_code=(
+                        "media_upload_connect_failed"
+                        if upload_outcome.status is OutcomeStatus.RETRYABLE
+                        else "media_upload_outcome_ambiguous"
+                    ),
+                )
+            ) from None
+        if response.status_code == 429 or response.status_code >= 500:
+            raise MediaUploadFailure(
+                Outcome(
+                    status=OutcomeStatus.RETRYABLE,
+                    error_code="media_upload_retryable_response",
+                    retry_after_seconds=_retry_after(response),
+                    provider_status_code=response.status_code,
+                )
+            )
+        if response.status_code < 200 or response.status_code >= 300:
+            raise MediaUploadFailure(
+                Outcome(
+                    status=OutcomeStatus.TERMINAL,
+                    error_code="media_upload_rejected",
+                    provider_status_code=response.status_code,
+                )
+            )
+        try:
+            body = response.json()
+        except (ValueError, json.JSONDecodeError):
+            body = None
+        uploaded = body.get("id") if isinstance(body, Mapping) else None
+        if not isinstance(uploaded, str) or not uploaded.strip():
+            raise MediaUploadFailure(
+                Outcome(
+                    status=OutcomeStatus.RECONCILIATION_REQUIRED,
+                    error_code="media_upload_receipt_missing",
+                    provider_status_code=response.status_code,
+                )
+            )
+        return _media_payload(params, uploaded_media_id=uploaded)
 
 
 def _profile_name(value: Mapping[str, object], sender: str) -> str | None:
@@ -678,11 +1117,14 @@ class WhatsAppIngressHandler:
         return tuple(events), ACKNOWLEDGEMENT
 
 
-HANDLER: Final[IngressHandler] = WhatsAppIngressHandler()
+INGRESS_HANDLER: Final[IngressHandler] = WhatsAppIngressHandler()
 
 
+@dataclass(frozen=True, slots=True)
 class WhatsAppConnector:
     """SPI plugin object discovered from package metadata."""
+
+    transport: httpx.BaseTransport | None = field(default=None, repr=False)
 
     @property
     def manifest(self) -> ConnectorManifest:
@@ -690,15 +1132,23 @@ class WhatsAppConnector:
 
     @property
     def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
-        return (HISTORICAL_MANIFEST,)
+        return (HISTORICAL_MANIFEST, INGRESS_MANIFEST)
 
     @property
     def modes(self) -> frozenset[ConnectorMode]:
-        return frozenset({ConnectorMode.INGRESS})
+        return frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         MANIFEST.require_declares(capability_id)
-        return HANDLER
+        if capability_id != CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not an ingress capability")
+        return INGRESS_HANDLER
+
+    def handler_for(self, capability_id: str) -> WhatsAppDeliveryHandler:
+        MANIFEST.require_declares(capability_id)
+        if capability_id != SEND_CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not a delivery capability")
+        return WhatsAppDeliveryHandler(self.transport)
 
     def validate_connection(
         self, *, config: dict[str, object], secrets: dict[str, object]
@@ -717,9 +1167,20 @@ class WhatsAppConnector:
             required = (WEBHOOK_SIGNING_SECRET, WEBHOOK_VERIFY_TOKEN)
         if any(_material(secrets, slot) is None for slot in required):
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
+        if any(name in config for name in DELIVERY_CONFIG_PROPERTIES):
+            try:
+                _delivery_config(config)
+                _access_token(secrets)
+            except DeliveryContractError:
+                return (Diagnostic(ok=False, code="delivery_configuration_invalid"),)
         return ()
 
 
 PLUGIN: Final = WhatsAppConnector()
 
-__all__ = ["MANIFEST", "PLUGIN", "WhatsAppConnector"]
+__all__ = [
+    "MANIFEST",
+    "PLUGIN",
+    "WhatsAppConnector",
+    "WhatsAppDeliveryHandler",
+]

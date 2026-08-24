@@ -7,12 +7,17 @@ import hmac
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 from dotmac_connector_whatsapp import MANIFEST, PLUGIN, __version__
+from dotmac_connector_whatsapp.plugin import WhatsAppConnector
 from dotmac_integration.conformance import assert_plugin_conforms
 from dotmac_integration.discovery import ConnectorRegistry
+from dotmac_integration.retry import OutcomeStatus
 from dotmac_integration.runtime_policy import derive_runtime_policy
 from dotmac_integration.spi import (
+    ConnectorMode,
+    DispatchRequest,
     EgressDeclaration,
     IngressRequest,
     InvalidManifestError,
@@ -51,10 +56,25 @@ def _delivery_request(relative: str, key: str = "primary") -> IngressRequest:
 
 
 def test_the_distribution_and_plugin_satisfy_the_released_spi() -> None:
-    assert __version__ == "0.1.0a2"
+    assert __version__ == "0.1.0a3"
     assert MANIFEST.version == __version__
-    assert str(MANIFEST.spi_range) == ">=1.3,<2.0"
+    assert str(MANIFEST.spi_range) == ">=1.4,<2.0"
     assert_plugin_conforms(PLUGIN)
+
+
+def test_the_connector_adds_delivery_without_losing_ingress() -> None:
+    assert MANIFEST.capability_ids == {
+        "messaging.receive.v1",
+        "messaging.send.v1",
+    }
+    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
+    assert MANIFEST.egress == EgressDeclaration(hosts=("graph.facebook.com",))
+    assert tuple(item.name for item in MANIFEST.secret_bindings or ()) == (
+        "webhook_signing_secret",
+        "webhook_signing_previous_secret",
+        "webhook_verify_token",
+        "access_token",
+    )
 
 
 def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
@@ -72,11 +92,33 @@ def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
             name="webhook_verify_token",
             description="Subscription challenge comparison token.",
         ),
+        SecretBindingDeclaration(
+            name="access_token",
+            required=False,
+            description=(
+                "Graph API access token; required when messaging.send.v1 is bound."
+            ),
+        ),
     )
-    assert MANIFEST.egress == EgressDeclaration()
+    assert MANIFEST.egress == EgressDeclaration(hosts=("graph.facebook.com",))
     assert MANIFEST.capabilities[0].config_schema == {
         "type": "object",
         "additionalProperties": False,
+        "properties": {
+            "phone_number_id": {
+                "type": "string",
+                "pattern": "^[0-9]{1,40}$",
+            },
+            "graph_api_version": {
+                "type": "string",
+                "pattern": "^v[0-9]{1,2}\\.[0-9]+$",
+            },
+            "timeout_seconds": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 60,
+            },
+        },
     }
     schema = Draft202012Validator(MANIFEST.capabilities[0].config_schema)
     assert not tuple(schema.iter_errors(CONFIG))
@@ -91,16 +133,17 @@ def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
 
     policy = derive_runtime_policy(ConnectorRegistry((PLUGIN,)))
 
-    assert policy.egress_hosts == ()
+    assert policy.egress_hosts == ("graph.facebook.com",)
     assert policy.secret_bindings == (
+        ("meta_whatsapp", "access_token", False),
         ("meta_whatsapp", "webhook_signing_previous_secret", False),
         ("meta_whatsapp", "webhook_signing_secret", True),
         ("meta_whatsapp", "webhook_verify_token", True),
     )
 
 
-def test_the_published_a1_contract_remains_an_exact_historical_manifest() -> None:
-    assert len(PLUGIN.historical_manifests) == 1
+def test_the_published_ingress_contracts_remain_historical_manifests() -> None:
+    assert len(PLUGIN.historical_manifests) == 2
     historical = PLUGIN.historical_manifests[0]
     assert historical.connector_key == "meta_whatsapp"
     assert historical.version == "0.1.0a1"
@@ -150,6 +193,216 @@ def test_the_published_a1_contract_remains_an_exact_historical_manifest() -> Non
         )
         .accepted
     )
+
+    ingress_only = PLUGIN.historical_manifests[1]
+    assert ingress_only.version == "0.1.0a2"
+    assert ingress_only.capability_ids == {"messaging.receive.v1"}
+    assert ingress_only.egress == EgressDeclaration()
+
+
+def _send_request(action: str, params: dict[str, object]) -> DispatchRequest:
+    return DispatchRequest(
+        capability_id="messaging.send.v1",
+        event_type="messaging.send.requested.v1",
+        payload={"action": action, "params": params},
+        config={
+            "phone_number_id": "123456789",
+            "graph_api_version": "v23.0",
+            "timeout_seconds": 10,
+        },
+        secrets={"access_token": "held-access-token"},
+        idempotency_key="sub:message:1",
+    )
+
+
+def _delivery_plugin(handler) -> WhatsAppConnector:
+    return WhatsAppConnector(transport=httpx.MockTransport(handler))
+
+
+def test_text_delivery_matches_the_qualifying_sub_wire_shape() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "wamid.sent-1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_text",
+            {"recipient": "+2348000000001", "body": "Service restored"},
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert outcome.provider_reference == "wamid.sent-1"
+    assert outcome.provider_status_code == 200
+    request = seen[0]
+    assert str(request.url) == ("https://graph.facebook.com/v23.0/123456789/messages")
+    assert json.loads(request.content) == {
+        "messaging_product": "whatsapp",
+        "to": "+2348000000001",
+        "type": "text",
+        "text": {"body": "Service restored"},
+    }
+    assert request.headers["authorization"] == "Bearer held-access-token"
+
+
+def test_template_parameters_keep_the_source_ordering_contract() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "wamid.template-1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_template",
+            {
+                "recipient": "+2348000000001",
+                "template_name": "service_notice",
+                "language": "en",
+                "variables": {"2": "restored", "1": "Internet", "name": "Ada"},
+            },
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    body = json.loads(seen[0].content)
+    assert body["template"]["components"][0]["parameters"] == [
+        {"type": "text", "text": "Internet"},
+        {"type": "text", "text": "restored"},
+        {"type": "text", "text": "Ada"},
+    ]
+
+
+def test_template_language_keeps_the_qualifying_sub_default() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"messages": [{"id": "wamid.template-1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_template",
+            {
+                "recipient": "+2348000000001",
+                "template_name": "service_notice",
+                "variables": {},
+            },
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert json.loads(seen[0].content)["template"]["language"] == {"code": "en"}
+
+
+def test_media_content_is_uploaded_before_the_message_is_sent() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/media"):
+            return httpx.Response(200, json={"id": "media-1"})
+        return httpx.Response(200, json={"messages": [{"id": "wamid.media-1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_media",
+            {
+                "recipient": "+2348000000001",
+                "media_type": "document",
+                "content_base64": "aGVsbG8=",
+                "content_type": "text/plain",
+                "filename": "notice.txt",
+                "caption": "Service notice",
+            },
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert [request.url.path.rsplit("/", 1)[-1] for request in seen] == [
+        "media",
+        "messages",
+    ]
+    sent = json.loads(seen[1].content)
+    assert sent["document"] == {
+        "id": "media-1",
+        "caption": "Service notice",
+        "filename": "notice.txt",
+    }
+
+
+def test_media_upload_keeps_the_qualifying_sub_wire_defaults() -> None:
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/media"):
+            return httpx.Response(200, json={"id": "media-1"})
+        return httpx.Response(200, json={"messages": [{"id": "wamid.media-1"}]})
+
+    outcome = _delivery_plugin(respond).handler_for("messaging.send.v1")(
+        _send_request(
+            "send_media",
+            {
+                "recipient": "+2348000000001",
+                "media_type": "document",
+                "content_base64": "aGVsbG8=",
+            },
+        )
+    )
+
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    upload = seen[0].content
+    assert b'name="type"\r\n\r\napplication/octet-stream' in upload
+    assert b'filename="attachment"' in upload
+
+
+def test_timeout_after_request_start_requires_reconciliation() -> None:
+    def ambiguous(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("private provider response", request=request)
+
+    outcome = _delivery_plugin(ambiguous).handler_for("messaging.send.v1")(
+        _send_request("send_text", {"recipient": "+2348000000001", "body": "hello"})
+    )
+    assert outcome.status is OutcomeStatus.RECONCILIATION_REQUIRED
+    assert outcome.error_code == "provider_outcome_ambiguous"
+    assert "private" not in (outcome.error_detail or "")
+
+
+@pytest.mark.parametrize(
+    ("status", "expected", "code"),
+    [
+        (429, OutcomeStatus.RETRYABLE, "provider_rate_limited"),
+        (500, OutcomeStatus.RETRYABLE, "provider_retryable_response"),
+        (400, OutcomeStatus.TERMINAL, "provider_rejected_message"),
+    ],
+)
+def test_provider_response_classification_matches_sub(
+    status: int, expected: OutcomeStatus, code: str
+) -> None:
+    plugin = _delivery_plugin(
+        lambda request: httpx.Response(status, text="held-access-token private")
+    )
+    outcome = plugin.handler_for("messaging.send.v1")(
+        _send_request("send_text", {"recipient": "+2348000000001", "body": "hello"})
+    )
+
+    assert outcome.status is expected
+    assert outcome.error_code == code
+    assert outcome.provider_status_code == status
+    assert "held-access-token" not in repr(outcome)
+    assert "private" not in repr(outcome)
+
+
+def test_success_without_a_provider_reference_is_not_reported_delivered() -> None:
+    plugin = _delivery_plugin(lambda request: httpx.Response(200, json={}))
+    outcome = plugin.handler_for("messaging.send.v1")(
+        _send_request("send_text", {"recipient": "+2348000000001", "body": "hello"})
+    )
+    assert outcome.status is OutcomeStatus.RECONCILIATION_REQUIRED
+    assert outcome.error_code == "provider_receipt_missing"
 
 
 def test_connection_validation_requires_resolved_material_without_naming_it() -> None:

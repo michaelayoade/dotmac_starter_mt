@@ -1,4 +1,4 @@
-# WhatsApp/Meta ingress connector — extraction dossier
+# WhatsApp/Meta connector — extraction dossier
 
 Created 2026-08-15; implementation authorized and materialized 2026-08-17.
 The machine-checked dossier now lives at
@@ -15,16 +15,43 @@ The governing evidence is:
 - `tests/unit/test_meta_whatsapp_ingress_conformance.py` — corpus integrity;
 - `tests/unit/test_whatsapp_connector.py` — implementation against that corpus.
 
+## Outbound authorization — 2026-08-23
+
+Michael directed completion of the WhatsApp outbox with parity against Sub.
+The exact qualifying revision, source-to-test dispositions and ownership split
+are recorded in `whatsapp-connector-sources.md`'s dated outbound amendment.
+This is an additive `DELIVERY` mode on the same independently released plugin,
+not a second WhatsApp connector or a provider branch in the engine.
+
+The outbound acceptance gate is end-to-end:
+
+1. the module durably accepts a provider-neutral command and resolves exactly
+   one enabled capability binding from trusted control-plane state;
+2. provider I/O runs outside a database transaction through the published SPI;
+3. text, template and media shapes match the qualifying Sub runtime;
+4. timeout/unknown outcomes stop in reconciliation rather than risk a duplicate;
+5. the terminal ledger preserves the provider message reference and HTTP status
+   but not a provider response body;
+6. an explicit retention policy redacts terminal outbound content without
+   erasing deduplication or correlation evidence; and
+7. the thin Integrator assembly pumps the generic delivery queue without naming
+   WhatsApp.
+
+Sub keeps the 24-hour customer-window check, template selection, conversation
+state, local message state and the product-owned durable outbox. Those are not
+connector parity omissions; moving them would move business authority.
+
 ## Authorization and release state
 
 | Gate | State |
 |---|---|
-| exact coordinates named | done: `dotmac-connector-whatsapp`, `dotmac_connector_whatsapp`, `meta_whatsapp`, `messaging.receive.v1` |
+| exact coordinates named | done: `dotmac-connector-whatsapp`, `dotmac_connector_whatsapp`, `meta_whatsapp`, `messaging.receive.v1`, `messaging.send.v1` |
 | executable ingress SPI | done: SPI 1.3, released in `dotmac-integration 0.1.0a10`; a2 declares exact secret bindings and explicit deny-all egress |
 | implementation authorization | done: Michael directed the first Meta/WhatsApp connector and later directed completion without further decision prompts |
 | secret materialization owner | done: `dotmac-integration` owns secret-reference resolution; the connector receives material and never dereferences a store |
 | release eligibility | done: a1 was rebuilt, inspected, installed from the private index, conformance-checked and tagged by release run `32015394987` on exact main SHA `2b6b046`; a2 repeated that proof for SPI 1.3 in release run `32236093441` and is tagged from exact main SHA `fb9aea0` |
-| provider operation / adoption | not claimed: requires an exact Integrator pin and Sub shadow/cutover |
+| outbound implementation | authorized, not yet claimed: requires typed delivery evidence, outbound retention, connector parity and a generic Integrator pump |
+| provider operation / adoption | not claimed: requires exact Integrator pins and Sub shadow/cutover |
 
 ADR-0030's original §6 prohibition is retained as history. Its dated amendment
 records the later authorization; the old paragraph is not silently rewritten.

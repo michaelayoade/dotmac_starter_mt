@@ -649,7 +649,11 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     resolved_keys = {
         distribution: gate.resolve(
             distribution,
-            tags={"dotmac-integration-v0.1.0a10", "dotmac-integration-v0.1.0a11"},
+            tags={
+                "dotmac-integration-v0.1.0a10",
+                "dotmac-integration-v0.1.0a11",
+                "dotmac-integration-v0.1.0a14",
+            },
         )["connector_key"]
         for distribution in _policy()["connectors"]
     }
@@ -680,14 +684,14 @@ def test_the_real_entry_resolves_through_the_release_command(
 
     gate = _gate()
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a2")
+        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a3")
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_whatsapp" in output
-    assert "tag=dotmac-connector-whatsapp-v0.1.0a2" in output
+    assert "tag=dotmac-connector-whatsapp-v0.1.0a3" in output
 
 
 def test_the_meta_social_entry_resolves_through_the_release_command(

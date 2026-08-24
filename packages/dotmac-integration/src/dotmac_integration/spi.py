@@ -85,6 +85,15 @@ provider allowlist of its own. Both declarations are explicit, so an empty
 egress tuple means DENY ALL rather than "not configured". SPI 1.2 manifests
 remain readable during adoption and retain their persisted digest, but a
 connector whose minimum SPI is 1.3 cannot omit either declaration.
+
+## SPI 1.4 maps capabilities to modes
+
+Plugin-wide modes are insufficient for a connector whose receive capability is
+INGRESS and whose send capability is DELIVERY. Before 1.4 conformance called
+every factory for every capability, forcing a mode-specific factory to lie or
+fail discovery. ``CapabilityDeclaration.modes`` is the exact mapping. ``None``
+retains the legacy all-plugin-modes meaning, so existing connectors remain
+compatible; an explicit mapping is covered by the manifest digest.
 """
 
 from __future__ import annotations
@@ -130,6 +139,7 @@ __all__ = [
     "SpiVersion",
     "VerificationResult",
     "accepts_manifest_digest",
+    "require_capability_mode",
     "require_mode",
     "verify_plugin_modes",
 ]
@@ -248,7 +258,7 @@ class SpiVersion:
 # in order to protect a compatibility promise nothing ever consumed. SPI 1.2
 # then added verification evidence without changing the handler protocols. SPI
 # 1.3 adds deployment declarations while keeping every handler protocol intact.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 3)
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 4)
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +303,18 @@ class SpiRange:
         return f">={self.minimum},<{self.below}"
 
 
+class ConnectorMode(str, Enum):
+    """How a connector moves data — a CLOSED union, deliberately.
+
+    Each member obliges the engine to supply machinery a plugin cannot bring:
+    a dispatch worker, ingress route, or scheduler/checkpoint loop.
+    """
+
+    INGRESS = "ingress"
+    POLL = "poll"
+    DELIVERY = "delivery"
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityDeclaration:
     """One capability contract a connector implements.
@@ -304,6 +326,11 @@ class CapabilityDeclaration:
 
     capability_id: str
     config_schema: dict[str, object] = field(default_factory=dict)
+    #: Which executable modes serve this capability. ``None`` is the published
+    #: SPI 1.0-1.3 meaning: every mode declared by the plugin. New multi-mode
+    #: connectors state the mapping explicitly so conformance does not call an
+    #: ingress factory for a delivery-only capability (or vice versa).
+    modes: frozenset[ConnectorMode] | None = None
 
     def __post_init__(self) -> None:
         if not _CAPABILITY_RE.fullmatch(self.capability_id):
@@ -317,6 +344,10 @@ class CapabilityDeclaration:
             raise InvalidManifestError(
                 f"capability {self.capability_id!r} declares an invalid config schema"
             ) from None
+        if self.modes is not None and not self.modes:
+            raise InvalidManifestError(
+                f"capability {self.capability_id!r} declares an empty mode set"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,6 +470,17 @@ class ConnectorManifest:
             str(self.spi_range),
             ",".join(sorted(self.capability_ids)),
         ]
+        if any(capability.modes is not None for capability in self.capabilities):
+            fields.append(
+                "capability_modes="
+                + ",".join(
+                    f"{capability.capability_id}:"
+                    + "+".join(sorted(mode.value for mode in capability.modes or ()))
+                    for capability in sorted(
+                        self.capabilities, key=lambda item: item.capability_id
+                    )
+                )
+            )
         if self.declares_runtime_boundaries:
             # Description text is documentation, not policy. Names,
             # requiredness and destinations are the reviewable contract and
@@ -486,22 +528,6 @@ class ConnectorManifest:
 
 
 # ── The executable contract ─────────────────────────────────────────────────
-
-
-class ConnectorMode(str, Enum):
-    """How a connector moves data — a CLOSED union, deliberately.
-
-    Declared, so the runtime knows which workers to start rather than
-    discovering it by calling and failing. Closed, because every member is an
-    obligation on the ENGINE (a dispatch worker, a mounted route, a scheduler
-    and its cursor) that a product cannot bring with it — see the "closed union"
-    section of this module's docstring for why this is not the enum ADR-0008
-    forbids.
-    """
-
-    INGRESS = "ingress"
-    POLL = "poll"
-    DELIVERY = "delivery"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1011,6 +1037,24 @@ def require_mode(plugin: ConnectorPlugin, mode: ConnectorMode) -> None:
         )
 
 
+def require_capability_mode(
+    plugin: ConnectorPlugin, capability_id: str, mode: ConnectorMode
+) -> None:
+    """Refuse when this capability is not mapped to the executable mode.
+
+    A legacy declaration with ``modes=None`` retains SPI 1.0-1.3 semantics and
+    is served by every plugin mode. An explicit SPI 1.4 mapping is exact.
+    """
+
+    require_mode(plugin, mode)
+    capability = plugin.manifest.require_declares(capability_id)
+    if capability.modes is not None and mode not in capability.modes:
+        raise ModeNotDeclaredError(
+            f"connector {plugin.manifest.connector_key!r} does not map "
+            f"capability {capability_id!r} to mode {mode.value!r}"
+        )
+
+
 def verify_plugin_modes(plugin: ConnectorPlugin) -> None:
     """The mode contract, checked at DISCOVERY. Raises :class:`ModeContractError`.
 
@@ -1049,6 +1093,20 @@ def verify_plugin_modes(plugin: ConnectorPlugin) -> None:
             "which workers to start for it"
         )
 
+    # Report an impossible declaration before inspecting structural extras on
+    # the plugin object. This is the more specific contract defect and keeps a
+    # test double that implements several factories from masking it.
+    for capability in plugin.manifest.capabilities:
+        if capability.modes is None:
+            continue
+        undeclared = capability.modes - plugin.modes
+        if undeclared:
+            raise ModeContractError(
+                f"connector {key!r} maps capability "
+                f"{capability.capability_id!r} to undeclared modes "
+                f"{sorted(mode.value for mode in undeclared)}"
+            )
+
     for mode, contract in MODE_PROTOCOLS.items():
         declares = mode in plugin.modes
         implements = isinstance(plugin, contract.plugin_protocol)
@@ -1068,7 +1126,17 @@ def verify_plugin_modes(plugin: ConnectorPlugin) -> None:
     for mode in sorted(plugin.modes, key=lambda m: m.value):
         contract = MODE_PROTOCOLS[mode]
         factory = getattr(plugin, contract.factory)
-        for capability in plugin.manifest.capabilities:
+        capabilities = tuple(
+            capability
+            for capability in plugin.manifest.capabilities
+            if capability.modes is None or mode in capability.modes
+        )
+        if not capabilities:
+            raise ModeContractError(
+                f"connector {key!r} declares mode {mode.value!r} but maps no "
+                "capability to it"
+            )
+        for capability in capabilities:
             try:
                 handler = factory(capability.capability_id)
             except Exception as exc:

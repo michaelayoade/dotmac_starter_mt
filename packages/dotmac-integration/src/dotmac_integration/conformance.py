@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from dotmac_integration.discovery import ConnectorRegistry, discover
 from dotmac_integration.retry import Outcome, OutcomeStatus
@@ -376,6 +376,70 @@ class _StaticEntryPoint:
         return self.plugin
 
 
+class _ManifestPlugin:
+    """Mode-exact executable stand-in for manifest-only conformance.
+
+    ``FakePlugin`` intentionally implements all three executable protocols. A
+    manifest-only check must not therefore reuse it for an SPI 1.4 manifest
+    that maps only a subset: two-way mode conformance would correctly report
+    the fake's extra factories, not a defect in the manifest under test.
+    """
+
+    def __init__(
+        self,
+        manifest: ConnectorManifest,
+        modes: frozenset[ConnectorMode],
+        backing: FakePlugin,
+    ) -> None:
+        self._manifest = manifest
+        self._modes = modes
+        self._backing = backing
+
+    @property
+    def manifest(self) -> ConnectorManifest:
+        return self._manifest
+
+    @property
+    def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
+        return ()
+
+    @property
+    def modes(self) -> frozenset[ConnectorMode]:
+        return self._modes
+
+    def validate_connection(
+        self, *, config: dict[str, object], secrets: dict[str, object]
+    ) -> tuple[Diagnostic, ...]:
+        return self._backing.validate_connection(config=config, secrets=secrets)
+
+
+def _plugin_for_manifest(manifest: ConnectorManifest) -> ConnectorPlugin:
+    """Build only the factories this manifest's capabilities can execute."""
+
+    if any(capability.modes is None for capability in manifest.capabilities):
+        modes = frozenset(ConnectorMode)
+    else:
+        modes = frozenset(
+            mode
+            for capability in manifest.capabilities
+            for mode in capability.modes or ()
+        )
+    backing = FakePlugin(manifest_=manifest, modes_=modes)
+
+    def _factory(name: str) -> Callable[[_ManifestPlugin, str], object]:
+        def factory(instance: _ManifestPlugin, capability_id: str) -> object:
+            return getattr(instance._backing, name)(capability_id)
+
+        return factory
+
+    factories = {
+        MODE_PROTOCOLS[mode].factory: _factory(MODE_PROTOCOLS[mode].factory)
+        for mode in modes
+    }
+    plugin_type = type("_ModeExactManifestPlugin", (_ManifestPlugin,), factories)
+    return cast(ConnectorPlugin, plugin_type(manifest, modes, backing))
+
+
 def fake_registry(
     manifests: Iterable[ConnectorManifest] | None = None,
     *,
@@ -391,7 +455,7 @@ def fake_registry(
     if plugins is not None:
         chosen = list(plugins)
     elif manifests is not None:
-        chosen = [FakePlugin(manifest_=m) for m in manifests]
+        chosen = [_plugin_for_manifest(manifest) for manifest in manifests]
     else:
         chosen = [fake_plugin()]
     # Structurally EntryPoint-shaped, deliberately not an EntryPoint: `discover`

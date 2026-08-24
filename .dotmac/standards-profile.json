@@ -213,6 +213,13 @@
       "sync_checkpoint": 1,
       "delivery_retry": 0
     },
-    "conserved_exclusions": []
+    "conserved_exclusions": [
+      {
+        "path": "tests/unit/test_whatsapp_connector.py",
+        "symbol": "<module>",
+        "category": "outbound_transport",
+        "fingerprint": "05e7df6596d0e08a6e900a8574f388344e6e387afa6c4cc06f0369b14656f586"
+      }
+    ]
   }
 }

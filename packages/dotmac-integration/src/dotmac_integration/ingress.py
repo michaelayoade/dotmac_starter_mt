@@ -841,6 +841,9 @@ def prepare_ingress(
         plugin, IngressPlugin
     ):
         raise ModeNotAvailable()
+    capability = plugin.manifest.require_declares(binding.capability_id)
+    if capability.modes is not None and ConnectorMode.INGRESS not in capability.modes:
+        raise ModeNotAvailable()
 
     revision = (
         db.get(ConnectorConfigRevision, installation.current_config_revision_id)

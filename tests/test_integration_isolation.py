@@ -706,9 +706,10 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 10
+    assert len(module.platform_tables) == 11
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
+    assert "delivery_legal_holds" in module.platform_tables
     assert "shadow_comparison_evidence" in module.platform_tables
     assert module.tables == ()
 
