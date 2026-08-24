@@ -54,6 +54,32 @@ port_deltas = [
 
 provider_idempotency = "NONE. Remita accepts no Idempotency-Key or X-Idempotency-Key header; verified by inventory across dotmac_erp and dotmac_sub. Its only natural key is orderId, answered with statuscode 021 when reused. The connector therefore carries the product's orderId verbatim and mints nothing; the engine's DispatchRequest.idempotency_key remains the at-most-once record in dotmac_kernel.idempotency and is not sent, because there is nowhere to send it."
 
+# ── ADR-0024 §§ 8-9 (2026-08-24): one contract per act, and parity is measured
+# against Dotmac's capabilities ──────────────────────────────────────────────
+#
+# `payments.reference.issuance.v1` is a genuinely distinct business act — asking
+# a biller to MINT a payment reference — and not a provider-shaped alias of
+# `payments.intent.v1`. It keeps its own id for that reason, not because Remita
+# has an endpoint called paymentinit.
+#
+# DIVERGENCE, recorded so the doc is actionable (ADR-0061 § 4 D3). This
+# connector's command payload matches dotmac-connector-flutterwave's family and
+# NOT dotmac-connector-paystack's: flat and per-capability rather than an
+# `{"action", "params"}` envelope, a PRODUCT-minted reference (`orderId`,
+# carried verbatim — the connector mints nothing), and a REQUIRED
+# `currency_minor_units` exponent supplied by the product from
+# dotmac_kernel.money. Paystack derives its reference and refuses an exponent.
+# Whichever payload the declared `payments.payout.v1` contract ends up taking
+# (ADR-0061 § 5 step 1), this connector's issuance capability adopts the same
+# conventions for reference and money, so a product reads one set of rules
+# across every payment connector rather than one per binding.
+#
+# Remita's absent idempotency header is NOT a divergence to close: it is a
+# provider fact, and `orderId` being the only natural key is why an ambiguous
+# `paymentinit` is classified reconciliation-required instead of retried. Under
+# ADR-0061 § 1 that classification is a transport statement; whether to ask
+# again is the product owner's decision.
+
 contract_consumers = []
 candidate_consumers = ["dotmac_integrator", "dotmac_erp"]
 

@@ -59,10 +59,10 @@ The first concrete plugin follows that split exactly:
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Versioned inter-application envelope, authenticated peer/source binding, schema validation, idempotency identity and payload fingerprint | `dotmac-app-sync` | Owns no transport, peer authentication, row, session, application route, domain resolver or consequence; each destination declares the capability schema and implements the atomic receiver |
-| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
+| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes; the WABA message-template catalogue read as typed provider observations; outbound text/template/media sends that refuse before the wire what the provider would reject anyway (unapproved template, variable arity the catalogue does not describe, unsupported MIME type, oversize attachment, a caption or filename the media type cannot carry) | `dotmac-connector-whatsapp` (`meta_whatsapp`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY + `messaging.templates.read.v1` POLL) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation, customer-window decision, template selection or product consequence. The template catalogue is an in-process memo under a configured freshness policy, never persisted and never a second authority on approval |
 | Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes; outbound Messenger/Instagram Direct sends and Facebook/Instagram comment replies, one Graph call per product-decided command, with Graph error codes classified into typed outcomes | `dotmac-connector-meta-social` (`meta_social`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY) | Owns no messaging-window decision, no permission to respond, no profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
 | Flutterwave API v4 exact-byte ingress authentication, OAuth-authenticated paged charge reconciliation, provider-event identity, exact amount/currency translation, and outbound payment-initialization and refund commands | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL on `payments.settlement.observation.v1`, DELIVERY on `payments.intent.v1` and `payments.refund.v1`) | Owns no v3 fallback, transfer/payout surface, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence. Outbound classifies only: a decline is terminal, a timeout after send is reconciliation-required, and the engine's idempotency key rides the provider's own header |
-| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
+| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1** |
 | Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
 | Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
 | Remita authenticated RRR status polling, provider-neutral response translation, and outbound RRR issuance under the provider SHA-512 request contract | `dotmac-connector-remita` (`remita`, POLL on `payments.reference.status.observation.v1`, DELIVERY on `payments.reference.issuance.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence. Issuance carries the PRODUCT's stable `orderId` and mints none of its own, because Remita accepts no idempotency header and `orderId` is its only natural key |
@@ -71,6 +71,7 @@ The first concrete plugin follows that split exactly:
 | Whether a stored outbound command may become a live effect again — replay by product idempotency key, dead-letter inspection and operator repair, and resolution of an INDETERMINATE attempt from provider evidence | `dotmac-integration.outbound_repair` | One decision (`classify_repair`) behind every entry point, so inspection and repair cannot disagree; re-dispatches only the row's own stored request checked against its enqueue digest, never a rebuilt payload; returns the recorded outcome for a landed effect instead of re-sending it; refuses to replay an ambiguous attempt; and owns no queue reset (`operations.replay_delivery`), no at-most-once ledger (`dotmac_kernel.idempotency`), no audit ledger (`dotmac_kernel.audit`), no outcome vocabulary (`retry.OutcomeStatus`) and no table of its own |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **ERP's Treasury/payment owner** (ADR-0061 § 1; the owner ADR-0042 § 3 left unnamed) | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
 
 External advertising and social-media observations use the same application
 boundary with a separate domain owner. The tenant-only
@@ -126,6 +127,80 @@ plane as their first candidate assembly. The seven newly constructed owners now
 have manifests, independent lineages, catalogue entries and live isolation
 canaries on this integration branch; this is construction, not composition,
 publication or adoption.
+
+### Outbound commands: one capability id, two payload dialects (as built, 2026-08-24)
+
+The connector contract-surface table at the top of this section is the
+ownership register, and it holds on the receiving side. On the SENDING side
+there is a gap, recorded here because `docs/ARCHITECTURE.md` is as-built truth
+and ADR-0061 and ADR-0024 § 8 are decisions the code has not yet reached.
+
+A capability id is supposed to be a contract (ADR-0024 § 8.1). Mechanically it
+is currently only a name: `dotmac_integration.spi.CapabilityDeclaration`
+carries `capability_id`, `config_schema` and `modes`, and
+`DispatchRequest.payload` is an unvalidated `dict[str, object]`. Configuration
+has a declared schema; commands do not. So each connector settled the command
+shape locally, and two shipped ids have two dialects each:
+
+| | `dotmac-connector-paystack` | `dotmac-connector-flutterwave` / `-remita` |
+|---|---|---|
+| envelope | `{"action": <verb>, "params": {…}}`; the verb is checked against `delivery.ACTIONS_BY_CAPABILITY`, so a binding granted intents cannot be talked into a payout | flat, typed per capability; no action verb |
+| provider reference | DERIVED: `operations.provider_reference` = `dmi` + SHA-256 of `DispatchRequest.idempotency_key`. Reading one from the payload is refused | PRODUCT-minted: Flutterwave requires `intent_reference`; Remita carries the product's `orderId` verbatim and mints none |
+| minor units | product sends an exact MAJOR-unit decimal string plus `currency`; the connector applies `PAYSTACK_WIRE_SCALE = 2` itself and accepts no `currency_minor_units` | product MUST send `currency_minor_units`; absence is `currency_minor_units_required` |
+| provider idempotency | the derived value in the provider's own `reference` field, which the provider refuses on reuse | Flutterwave: engine key on `X-Idempotency-Key`. Remita: none exists; `orderId` is the only natural key |
+
+Both refusals are locally correct. Paystack's wire multiplies by 100 for every
+supported currency **including zero-exponent XOF**, so a product-supplied
+exponent would be a second, contradictory authority on that provider's scale;
+and deriving the reference from the engine key is what makes every attempt of
+one delivery present an identical, provider-refusable key. Flutterwave and
+Remita cannot derive, because their natural key is the product's own and their
+exponent is genuinely currency-dependent.
+
+`messaging.send.v1` has the same shape of divergence: `meta_whatsapp` accepts
+`send_text | send_template | send_media` with a `recipient` param, while
+`meta_social` accepts `send_direct_message | reply_to_comment` with
+`recipient_id` plus `channel`. Both declare the same id deliberately — the
+outbound name is not minted per connector — and a product bound to one still
+cannot be re-bound to the other without changing its command.
+
+Consequence, stated plainly: **payout traffic cannot be switched between
+providers by changing a binding today.** `payments.payout.v1` has exactly one
+implementation (Paystack), and even with a second one the command shapes
+differ. ADR-0061 § 5 is the ordered list of what must become true before
+interchangeability may be claimed; ADR-0024 § 8.4 records the same gap from the
+contract side.
+
+### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
+
+`dotmac-integration` derives two kinds of runtime number from its own ledgers,
+both at read time and neither stored: `operations.health_report` answers "is
+anything silently stuck?" (in-flight leases expired, retryable overdue,
+dead-letter, reconciliation-required, receipts unprocessed, checkpoints stale)
+and `operations.dispatch_metrics` answers "how is the queue behaving?" (depth,
+oldest-queued age, end-to-end latency, retries, failures, quarantined
+installations).
+
+The module ships **no** metrics client, counter registry or `/metrics` route,
+and none of the other 80-odd distributions does either — verified by grep over
+`packages/*/src`. What the module owns is the NAMES:
+`operations.METRIC_NAMES` is a thirteen-entry tuple of stable,
+`integration_`-prefixed, unit-suffixed identifiers that
+`DispatchMetrics.as_metrics()` returns verbatim, pinned as literals by
+`tests/unit/test_integration_runtime_safety.py`. The exporter belongs to the
+deploying assembly (`dotmac_integrator`), which is why one module can be
+composed by several assemblies exporting to different systems without a fork.
+
+Two as-built qualifications:
+
+- `HealthReport.as_dict()` returns bare dataclass field names —
+  `dead_letter`, `checkpoints_stale` and so on — with no declared tuple and no
+  `integration_` prefix. An assembly exporting the health signals therefore
+  exports six unprefixed, undeclared names. ADR-0062 § 5 D2.
+- `dotmac-analytics` and `dotmac-media-observations` also speak of "metrics";
+  those are DOMAIN metrics — persisted, provenance-carrying, repairable facts
+  under ADR-0043 and ADR-0034 — and are a different subject from the runtime
+  numbers above. ADR-0062 § 4.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 

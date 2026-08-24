@@ -22,6 +22,30 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_linkedin_connector.py",
   "dotmac_starter_mt:tests/architecture/test_linkedin_connector_boundary.py",
 ]
+# ── ADR-0024 § 9 (2026-08-24): INGRESS-only is capability parity, not a gap ──
+#
+# HELD BACK, deliberately: every LinkedIn OUTBOUND surface — organic publishing
+# to an organization page, member/organization messaging, and lead write-back
+# into LinkedIn Lead Gen. No product consumer exists: no owner in Sub, ERP or
+# the vendor control plane commands a LinkedIn publication or message today,
+# and `dotmac-campaigns` (ADR-0056) owns outbound progression without naming
+# this channel.
+#
+# ADR-0024 § 9.1 measures connector completeness as Dotmac CAPABILITY parity —
+# every capability the ecosystem needs, with interchangeable providers behind
+# the ones that matter. It explicitly does NOT mean wrapping every endpoint
+# LinkedIn happens to expose. Publishing on an organization's behalf is exactly
+# the class where the first execution would also be the first review, so the
+# constraint is a named consumer, not an endpoint (ADR-0017).
+#
+# § 9.4 requires the withholding to be DECLARED rather than merely absent, and
+# this comment is that declaration. If outbound is ever built it uses the
+# existing fleet contracts for the acts involved (`messaging.send.v1` for a
+# message, whatever Campaigns/Publishing declares for a publication) rather than
+# a `social.*.linkedin.*` id minted from this provider's vocabulary
+# (ADR-0024 § 8.1). Note the current manifest declares DENY-ALL provider egress:
+# adding outbound is a visible egress change, not a quiet capability.
+
 contract_consumers = []
 candidate_consumers = ["dotmac-erp", "dotmac_integrator", "dotmac_sub"]
 inventory_evidence = [

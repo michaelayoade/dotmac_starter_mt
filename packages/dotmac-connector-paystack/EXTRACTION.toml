@@ -8,6 +8,54 @@ owner = "Paystack provider transport in both directions: exact-byte HMAC-SHA512 
 
 contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paystack. Serve payments.settlement.observation.v1 in INGRESS and POLL, and payments.intent.v1, payments.refund.v1, payments.payout.v1 and payments.customer.v1 in DELIVERY, each capability mapped to its own mode so an observation binding never carries command authority. Emit exact amount and provider-fee decimal strings with explicit currency, provider status verbatim, merchant reference and transport evidence; reconcile through the authenticated paged transaction list. On the command side: carry the engine's idempotency key through to Paystack's own duplicate protection (the client-supplied unique reference, and merchant_note where no reference field exists), convert exact major-unit decimal strings to provider minor units without float and without rounding, classify each attempt as succeeded/declined/retryable/terminal/ambiguous, and report the provider reference and transaction id as evidence on every outcome including the ones that received no answer. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, settlement admissibility, invoice targeting, refund warrant, retry/checkpoint engine, row, session or product database."
 
+# ── ADR-0061 (2026-08-24): the payout DECISION is ERP's, and this connector is
+# one BINDING behind one contract ────────────────────────────────────────────
+#
+# `payments.payout.v1` is ONE provider-neutral contract for the whole fleet, and
+# this distribution is currently its only implementation. That is a fact about
+# today, never a licence: ADR-0061 § 2 forbids a Paystack variant of the
+# contract, and § 3 requires that ERP be able to move payout traffic to another
+# connector by changing a capability binding — no ERP release, no provider name
+# anywhere in ERP.
+#
+# What this connector does NOT own, restated because the outbound leg makes it
+# easy to blur: whether a payout happens, to whom, for how much, and whether an
+# ambiguous attempt may be tried again. Those are ERP's Treasury/payment
+# owner's decisions (ADR-0061 § 1, the owner ADR-0042 § 3 left unnamed). This
+# package translates a decided command onto a wire and classifies the answer,
+# including the answer that never arrived.
+#
+# DIVERGENCE THIS CONNECTOR MUST CLOSE (ADR-0061 § 4 D3, § 5 step 2). Its
+# command payload is not the same shape as dotmac-connector-flutterwave's or
+# dotmac-connector-remita's, so no product could bind either interchangeably
+# today:
+#
+#   * envelope     `{"action": <verb>, "params": {...}}` checked against
+#                  delivery.ACTIONS_BY_CAPABILITY, against their flat,
+#                  per-capability payload with no action verb;
+#   * reference    DERIVED here (operations.provider_reference = "dmi" +
+#                  sha256(DispatchRequest.idempotency_key)), and reading one
+#                  from the payload is refused outright — against their
+#                  PRODUCT-minted `intent_reference` / `orderId`;
+#   * minor units  refused here: the product sends an exact MAJOR-unit decimal
+#                  string plus `currency` and PAYSTACK_WIRE_SCALE = 2 is applied
+#                  locally — against their REQUIRED `currency_minor_units`.
+#
+# Both sides are locally right. Paystack's wire multiplies by 100 for EVERY
+# supported currency including zero-exponent XOF, so a product-supplied exponent
+# would be a second, contradictory authority on this provider's scale; and
+# deriving the reference from the engine key is exactly what makes every attempt
+# of one delivery present an identical, provider-refusable key. Neither property
+# may be dropped to reach parity.
+#
+# The closure is therefore NOT "make Paystack look like Flutterwave". It is a
+# declared, provider-neutral command payload for `payments.payout.v1` (the SPI
+# has nowhere to put one today — CapabilityDeclaration carries a config schema
+# and DispatchRequest.payload is an unvalidated dict, ADR-0024 § 8.4), after
+# which this connector keeps deriving its provider reference but derives it from
+# the contract's stable reference plus the engine key, and IGNORES an exponent
+# it cannot use rather than refusing the command that carries it.
+
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 
 source_paths = [

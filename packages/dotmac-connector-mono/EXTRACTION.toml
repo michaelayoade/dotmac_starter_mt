@@ -22,6 +22,26 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_mono_connector_boundary.py",
 ]
 
+# ── ADR-0024 § 9 (2026-08-24): POLL-only is capability parity, not a gap ─────
+#
+# HELD BACK, deliberately: every Mono WRITE — payment/direct-debit initiation,
+# mandate creation, account actions. No product consumer exists. ERP's banking
+# owner (ADR-0044) consumes OBSERVATIONS and matches them; nothing in the fleet
+# commands Mono to move money, and `dotmac-banking`'s contract explicitly stops
+# at observations, matching and reconciliation.
+#
+# ADR-0024 § 9.1 measures connector completeness as Dotmac CAPABILITY parity,
+# never as coverage of a provider's published surface, and § 9.2 names
+# money-moving surface as the class where building ahead of a consumer means the
+# first execution is also the first review. § 9.4 requires the withholding to be
+# DECLARED, and this comment is that declaration.
+#
+# If a Mono write is ever built it implements the EXISTING contract for the act
+# — `payments.payout.v1` for a disbursement (ADR-0061 § 2, one contract, no
+# per-provider variant) — with the payout DECISION remaining ERP's under
+# ADR-0061 § 1, and never a `banking.*.mono.*` id minted from this provider's
+# vocabulary (ADR-0024 § 8.1).
+
 contract_consumers = []
 candidate_consumers = ["dotmac_integrator", "dotmac_erp"]
 
