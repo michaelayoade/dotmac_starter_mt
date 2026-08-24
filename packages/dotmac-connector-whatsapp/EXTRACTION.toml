@@ -58,11 +58,50 @@ preserved_tests = [
 # forbidden by ADR-0024 § 8.1/8.2. `reply_to_comment` is a genuinely different
 # act and may well deserve its own contract; a direct message is not.
 #
-# The root cause is not either connector: `spi.CapabilityDeclaration` declares a
-# CONFIG schema and no COMMAND schema, so nothing could have caught the drift
-# (ADR-0024 § 8.4). Closure is a declared command payload for
-# `messaging.send.v1` on the SPI, then both connectors accepting it — tracked as
-# the reopened open question in packages/dotmac-integration/EXTRACTION.toml.
+# The root cause is not either connector: nothing in the SPI or the registry
+# declares a COMMAND schema at all, so nothing could have caught the drift
+# (ADR-0024 § 8.4).
+#
+# CORRECTED 2026-08-24. The sentence that followed here read:
+#
+#   "Closure is a declared command payload for `messaging.send.v1` on the SPI,
+#   then both connectors accepting it."
+#
+# Two things in it are wrong. (1) The schema does not go on the SPI's
+# `CapabilityDeclaration`: a schema published per connector makes drift
+# machine-readable rather than prevented. It belongs to the business-owned
+# `capability_registry.CapabilityContract` — `command_schema`, `result_schema`,
+# `observation_schema`, a canonical digest and deprecation/replacement metadata
+# — and a connector declaration may only CLAIM that digest (ADR-0024 § 10,
+# ADR-0061 A2). (2) `messaging.send.v1` is PUBLISHED, so converging the two
+# dialects under it would redefine a published contract version. That is
+# forbidden; the repair is SUCCESSION (ADR-0024 § 11, ADR-0061 A4):
+#
+#   messaging.direct.send.v2   provider-neutral DIRECT delivery with a
+#                              DISCRIMINATED text/template/media content shape.
+#                              This is the successor that replaces the disjoint
+#                              send_text|send_template|send_media and
+#                              send_direct_message vocabularies at once.
+#   social.comment.reply.v1    public Facebook/Instagram comment consequences —
+#                              a different business act from a direct message,
+#                              and always was.
+#   social.profile.read.v1     caller-initiated profile OBSERVATION through a
+#                              REQUEST mode. ConnectorMode is a CLOSED union of
+#                              INGRESS|POLL|DELIVERY today, so this one is
+#                              blocked on an SPI mode that does not exist.
+#
+# Sub migrates to the successors; `messaging.send.v1` is retained for a BOUNDED
+# compatibility window and then RETIRED, and both the migration and the
+# retirement are obligations carried by the old contract's deprecation metadata
+# rather than intentions. Tracked as the reopened open question in
+# packages/dotmac-integration/EXTRACTION.toml.
+#
+# FOR THIS CONNECTOR: its whole outbound surface is direct delivery, so it
+# succeeds to `messaging.direct.send.v2` and to nothing else. The
+# text/template/media split it already makes becomes the successor's
+# discriminated content shape, and the WABA template-approval and media
+# refusals it performs before the wire are connector-internal validation of that
+# shape — not a second action vocabulary.
 
 contract_consumers = []
 candidate_consumers = ["dotmac_integrator"]

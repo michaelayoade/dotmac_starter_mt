@@ -93,6 +93,22 @@ provider_idempotency = "Flutterwave v4 publishes an X-Idempotency-Key request he
 # wire scale is fixed at 100 for every currency including zero-exponent XOF).
 # Implementing payout against today's two shapes would make ERP branch on
 # provider, which is the whole thing the binding exists to prevent.
+#
+# REFINED 2026-08-24 (ADR-0061 A2/A3, ADR-0024 §§ 10 and 12). "The divergence
+# has to close first" is right; how it closes is now settled, and it is not the
+# two connectors meeting halfway. The canonical command/result/observation
+# schemas and their digest live on the business-owned
+# `capability_registry.CapabilityContract`, and `payments.payout.v1` exposes
+# only product MEANING — `submit_payout`, a PRODUCT payout reference, exact
+# money, a provider-neutral destination, idempotency and correlation. Every
+# provider particular is an INTERNAL step: Paystack's recipient creation, and
+# this connector's direct-transfer details, are performed behind that one
+# command. When this capability is implemented here, this connector derives its
+# own required fields — including the `currency_minor_units` exponent it needs
+# and the `intent_reference`-shaped natural key its wire wants — from the
+# contract's exact money and stable reference, inside the connector. It does not
+# ask a product to supply a provider-shaped field, and it does not refuse a
+# command for carrying a field another provider needs.
 withheld_capabilities = ["payments.payout.v1"]
 
 contract_consumers = []

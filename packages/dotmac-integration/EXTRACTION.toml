@@ -175,12 +175,58 @@ binding_multiplicity = "Unique on (installation_id, capability_id). Many install
 # bindings if the payload changes with the binding.
 #
 # This module owns the closure, because the missing thing is a declaration
-# surface, not a connector fix: a command payload schema on
-# `CapabilityDeclaration`, validated by the engine BEFORE dispatch rather than
-# by each connector after. It is an SPI minor version and a coordinated
-# connector release wave. See ADR-0061 § 5 for the ordered sequence.
+# surface, not a connector fix.
+#
+# CORRECTED 2026-08-24, and the superseded statement is kept rather than quietly
+# replaced. The paragraph above originally continued:
+#
+#   "...: a command payload schema on `CapabilityDeclaration`, validated by the
+#   engine BEFORE dispatch rather than by each connector after."
+#
+# That places the schema on the CONNECTOR's declaration, and it is wrong. If
+# every connector publishes its own schema, drift merely becomes
+# MACHINE-READABLE rather than prevented: two connectors serving one capability
+# id would declare two individually valid schemas and the engine would have no
+# ground to prefer either. The canonical schema belongs to the artifact that
+# owns the capability's MEANING — `capability_registry.CapabilityContract`, the
+# business owner's declaration, of which the registry already permits exactly
+# one per id (DuplicateCapabilityDeclaration). ADR-0024 § 10 / ADR-0061 A2.
+#
+# WHAT `CapabilityContract` GAINS: `command_schema`, `result_schema`,
+# `observation_schema`, a canonical contract digest over the canonicalized
+# schemas, and deprecation/replacement metadata (which capability id replaces
+# this one, and the window after which this one is retired).
+#
+# WHAT `spi.CapabilityDeclaration` KEEPS: `capability_id`, `config_schema` and
+# `modes` — connector CONFIGURATION and executable modes, which are genuinely
+# per-connector facts — plus the ability to CLAIM the domain contract's digest.
+# It never publishes a competing schema. A manifest is a claim to implement,
+# never a claim to define, and that now covers the payload as well as the id.
+#
+# THE GATE, as one unit of work and as an OBLIGATION rather than an existing
+# control (none of it exists today):
+#   1. command validation before enqueue           -> execution.enqueue_delivery
+#   2. digest agreement at COMPOSITION             -> capability_registry
+#                                                     .require_implements_only_declared
+#   3. digest agreement again at BINDING           -> capability_registry
+#                                                     .require_declared_for_binding
+#   4. result validation before settlement         -> dispatch.settle
+#   5. observation validation before inbox record  -> ingress.record_batch
+#                                                     (and the polling settle)
+#   6. a schema change takes a NEW `.vN` capability id; a published contract
+#      version is never redefined in place.
+# Sensitivity proofs are PLANTED, not assumed: digest mismatch, missing schema,
+# invalid payload, invalid result — driven by a deliberately divergent fake
+# connector. Steps 2 and 3 are both required for the same reason the SPI already
+# checks its three declarations three times: a distribution can be installed
+# after composition ran, and a binding can be activated long after startup.
+#
+# It remains an SPI minor version plus a registry minor version and a
+# coordinated connector release wave. See ADR-0061 § 5 and its Amendment A2/A3
+# for the ordered sequence.
 open_questions = [
-  "CapabilityDeclaration declares a config schema but no COMMAND PAYLOAD schema, so a capability id is a name rather than a contract on the DELIVERY leg (ADR-0024 § 8.4, ADR-0061 § 4 D3/D5).",
+  "CapabilityContract declares an owner and a summary but no COMMAND, RESULT or OBSERVATION schema and no contract digest, so a capability id is a name rather than a contract on every leg; CapabilityDeclaration has a config schema and nothing to claim against (ADR-0024 § 10, ADR-0061 A2; the superseded framing that put the schema on CapabilityDeclaration is ADR-0024 § 8.4 / ADR-0061 § 4 D5).",
+  "ConnectorMode is a CLOSED union of INGRESS|POLL|DELIVERY with no REQUEST member, so a caller-initiated read that returns a typed observation (social.profile.read.v1) cannot be served at all (ADR-0024 § 11.3).",
 ]
 
 # ── ADR-0062 (2026-08-24): this module names its runtime metrics; the assembly

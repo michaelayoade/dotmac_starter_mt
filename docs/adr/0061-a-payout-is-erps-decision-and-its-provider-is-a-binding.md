@@ -6,7 +6,12 @@
 > applied there, the earlier record keeps the number, so a colliding new record
 > would have had to move anyway.
 
-- Status: Accepted
+- Status: Accepted. Amended 2026-08-24 — see "Amendment — 2026-08-24"
+  at the end of this record. The amendment names the interim payout owner
+  exactly, rules that `dotmac-treasury` is not created yet, moves the
+  command schema onto the domain-owned `CapabilityContract`, and replaces
+  § 4 D3's "both refusals are locally correct" conclusion. No earlier text
+  is rewritten.
 - Date: 2026-08-24
 - Deciders: Michael
 - Supersedes: none
@@ -51,6 +56,12 @@ Whether a payout happens, to whom, for how much, in which currency, on which
 schedule, and whether an ambiguous attempt may be tried again are **ERP's**
 decisions, made by ERP's Treasury/payment owner. This is the owner ADR-0042 § 3
 refers to.
+
+> **Corrected 2026-08-24 — see Amendment A1.** "ERP's Treasury/payment owner"
+> is a ROLE, not an owner, and a role cannot be held to a boundary. A1 names
+> the exact services that hold the decision today, path-qualified, and records
+> that no `dotmac-treasury` package or namespace may be allocated before a
+> product-first dossier establishes its lifecycle.
 
 No connector, no `dotmac-integration` code path, no `dotmac_integrator`
 configuration and no operator gesture inside the Integrator decides any of
@@ -164,6 +175,13 @@ The conclusion is not that one connector is wrong. It is that
 settled the question locally and correctly for itself, and the capability id is
 currently a name rather than a contract. § 5 says who closes that.
 
+> **Superseded 2026-08-24 — see Amendment A3.** The table's observations stand;
+> the conclusion drawn from them does not. "Both settled it locally and
+> correctly" describes a stand-off with no resolution path, and it is not the
+> ruling: the payload question is answered ONCE, by the domain contract, and
+> each connector adapts to it INTERNALLY. A3 states the resulting
+> `payments.payout.v1` surface and what stops being product-visible.
+
 **D4 — the same gap already bit `messaging.send.v1`.** Both messaging
 connectors declare the id and then diverge under it:
 `meta_whatsapp` accepts `send_text | send_template | send_media` with a
@@ -172,12 +190,24 @@ reply_to_comment` with `recipient_id` + `channel`. A product bound to one
 cannot be re-bound to the other without changing its command. The payments
 divergence is therefore a pattern, not an accident.
 
+> **Corrected 2026-08-24 — see Amendment A4 and ADR-0024 § 11.** The implied
+> repair — converge the two dialects under the published `messaging.send.v1` —
+> would redefine a published contract version, which is now forbidden. The
+> repair is SUCCESSION: `messaging.direct.send.v2`, `social.comment.reply.v1`
+> and `social.profile.read.v1`.
+
 **D5 — the SPI has no place to put a command contract.**
 `dotmac_integration.spi.CapabilityDeclaration` carries `capability_id`,
 `config_schema` and `modes`; `DispatchRequest.payload` is
 `dict[str, object]`, unvalidated. Configuration has a declared schema and
 commands do not, which is exactly why the divergence was invisible to every
 existing gate.
+
+> **Corrected 2026-08-24 — see Amendment A2 and ADR-0024 § 10.** The missing
+> declaration surface is NOT `CapabilityDeclaration`. A schema published by
+> each connector makes drift machine-readable instead of preventing it; the
+> canonical schema belongs to the business-owned `CapabilityContract`, and a
+> connector declaration may only CLAIM that contract's digest.
 
 ### 5. What must be true before payout interchangeability may be claimed
 
@@ -188,6 +218,10 @@ In order. Each is a reviewable diff, not a status change:
    decimal amount, explicit currency, product-minted stable reference,
    beneficiary as opaque references — owned by the declaring side and
    validated by the engine before dispatch, not by each connector after.
+   *(Amended 2026-08-24, A2: "the declaring side" is now named as the
+   domain-owned `CapabilityContract`, the schema set is command + result +
+   observation under one canonical digest, and "validated by the engine" is the
+   five-point gate in ADR-0024 § 10.4 rather than a single pre-dispatch check.)*
 2. **Every payment connector accepts it.** Paystack keeps deriving its provider
    reference (that behaviour is correct and stays) but from the contract's
    stable reference plus the engine key rather than from an `action`/`params`
@@ -242,3 +276,158 @@ connect-phase failure as `RETRYABLE` and post-send silence as
 **Name ERP's payout owner "Treasury" in a module now.** Premature. This ADR
 assigns the decision to ERP; whether that owner is later extracted as a shared
 module is an ADR-0006/ADR-0017 question with its own product-first inventory.
+*(Reaffirmed and made concrete 2026-08-24 by Amendment A1: the interim owner is
+two named ERP services, and the product-first dossier that would have to
+precede any `dotmac-treasury` allocation has a stated scope.)*
+
+
+## Amendment — 2026-08-24 (accepted corrections)
+
+Four corrections, accepted the same day this record was. Each says which
+section it corrects and why. Nothing above is rewritten; the original framing
+stays readable so the correction reads as one.
+
+### A1. The interim payout owner is two named ERP services — and `dotmac-treasury` is not created yet
+
+§ 1 assigned the payout decision to "ERP's Treasury/payment owner". That is a
+role. A role cannot be pointed at in a review, cannot be diffed, and cannot be
+held to the boundary § 1 draws. The owner is named:
+
+| Owner | Path | Owns |
+|---|---|---|
+| **`PaymentService`** | `dotmac_erp:app/services/finance/payments/payment_service.py` | the payout DECISION and the transfer lifecycle: `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal` |
+| **`BatchTransferService`** | `dotmac_erp:app/services/finance/payments/batch_transfer_service.py` | composition of BATCHES of expense-reimbursement transfers over `PaymentService` — it composes, it does not decide separately |
+
+Everything § 1 forbids an Integrator artifact from doing is forbidden because
+these two services do it. In particular `_recover_transfer_initiation` and
+`poll_transfer_status` are where an ambiguous attempt is resolved, which is the
+concrete form of "whether an ambiguous attempt may be tried again is ERP's
+call".
+
+**`dotmac-treasury` is NOT to be created yet.** No package, no distribution, no
+namespace allocation, no `mod_*` short code. The `Alternatives rejected` entry
+above already called it premature; this makes the precondition explicit rather
+than leaving it to judgement. A mandatory product-first dossier (ADR-0006's
+extraction amendment, `AGENTS.md` rule 22) must first cover, as one inventory:
+
+- ERP's `PaymentService` and `BatchTransferService` above;
+- `dotmac-payments`;
+- `dotmac-banking`;
+- `dotmac-accounting`; and
+- the approvals / payment-authorization paths that gate a disbursement.
+
+The existing modules explicitly exclude payment EXECUTION, so a reusable
+Treasury owner may well be justified — but the audit has to establish what
+lifecycle that owner would hold before anything is allocated to it. This
+amendment does not pre-empt that conclusion, and a separate record produces the
+dossier.
+
+*Corrects: § 1, and the "Name ERP's payout owner Treasury in a module now"
+alternative. Consequence: `docs/ARCHITECTURE.md`'s ownership register row and
+`AGENTS.md` rule 28 clause (d) carry the named services.*
+
+### A2. The command schema belongs to the DOMAIN contract, not the connector declaration
+
+§ 4 D5 recorded that `spi.CapabilityDeclaration` carries a config schema and no
+command schema, and § 5 step 1 asked for a command payload schema "owned by the
+declaring side". Read together they point at the connector's declaration, and
+that placement is wrong: **if every connector publishes its own schema, drift
+merely becomes machine-readable rather than prevented.** Two connectors serving
+one id would publish two individually valid schemas and the engine would have
+no ground to prefer either.
+
+The canonical schema belongs to `CapabilityContract` — the business-owned
+declaration in `dotmac_integration.capability_registry`, the artifact that owns
+the capability's MEANING and of which the registry already permits exactly one
+per id. It is extended with `command_schema`, `result_schema`,
+`observation_schema`, a canonical contract digest, and deprecation/replacement
+metadata.
+
+`CapabilityDeclaration` keeps what is genuinely per-connector — configuration
+and modes — and gains only the ability to CLAIM the domain contract's digest.
+It never publishes a competing schema.
+
+The required gate, stated as an obligation and not as an existing control:
+command validation before enqueue; connector digest agreement at composition
+AND at binding; result validation before settlement; observation validation
+before inbox recording; and a schema change taking a new `.vN` capability id,
+because a published contract version is never redefined. Sensitivity tests are
+planted for digest mismatch, missing schema, invalid payload and invalid
+result. ADR-0024 §§ 10.4–10.5 hold the full statement and name the exact
+seams.
+
+*Corrects: § 4 D5 and § 5 step 1. The gap they record is unchanged; only its
+closure moves.*
+
+### A3. `payments.payout.v1` exposes product meaning, not provider workflow — and the divergence is closed, not tolerated
+
+§ 4 D3 concluded that both connectors "settled the question locally and
+correctly". The observations in its table are accurate and stay. The conclusion
+is superseded, because it describes a stand-off with no resolution and licenses
+the divergence to persist. With A2 the payload question is answered ONCE, by
+the domain contract, and each connector adapts to it internally.
+
+`payments.payout.v1` exposes exactly this, and nothing else:
+
+- `submit_payout` — one command for the business act;
+- a PRODUCT payout reference — stable, minted by ERP, opaque to every provider;
+- exact money — an exact decimal amount with an explicit currency, never a
+  float;
+- a provider-neutral destination — opaque beneficiary references, not a
+  provider's account object;
+- idempotency and correlation identifiers.
+
+**Paystack's recipient creation and Flutterwave's direct-transfer details are
+internal connector steps.** ERP must never orchestrate "create a Paystack
+recipient" versus "send a Flutterwave transfer": if it does, switching a
+binding still requires an ERP code release, which defeats the whole of § 3.
+Concretely, Paystack's `resolve_bank_account` and `create_transfer_recipient`
+stop being product-visible actions and become steps the connector performs
+behind `submit_payout`; Paystack keeps deriving its provider reference and
+keeps applying its own wire scale, from the contract's stable reference and
+exact money, because those are provider protocol executed inside the connector;
+and it IGNORES a field it cannot use rather than refusing the command that
+carries it. Flutterwave and Remita derive their required fields the same way.
+
+**The same principle governs `payments.intent.v1` and `payments.refund.v1`.**
+Provider customer creation, provider recipient codes and provider transfer
+references are normalized RESULTS — returned under the contract's
+`result_schema` — or connector internals. They are not separate product-visible
+provider actions unless a genuinely independent lifecycle requires them, and
+that has to be ARGUED in an accepted record rather than assumed because a
+provider publishes an endpoint (§ 9.2 of ADR-0024's amendment, applied to
+command surface).
+
+This puts `dotmac-connector-paystack`'s `payments.customer.v1` — today
+`create_customer | update_customer | read_customer` — on notice: it is a
+capability id minted around a provider's customer object, and it either earns
+an argued independent lifecycle or it collapses into the intent contract's
+normalized result. Recorded as an open item, not decided here.
+
+*Supersedes: § 4 D3's conclusion, and § 5 step 2's framing of the closure as
+each connector meeting the other halfway.*
+
+### A4. `messaging.send.v1` is repaired by SUCCESSION, not redefinition
+
+§ 4 D4 recorded the two messaging dialects and implied they should converge
+under the published id. A published contract version is never redefined. The
+canonical successors, ruled in ADR-0024 § 11.2:
+
+| Successor | Replaces |
+|---|---|
+| `messaging.direct.send.v2` | provider-neutral direct delivery with a DISCRIMINATED text/template/media content shape — this is what replaces the disjoint `send_text` / `send_template` / `send_media` and `send_direct_message` vocabularies at once |
+| `social.comment.reply.v1` | public Facebook/Instagram comment consequences, a different business act that was never a direct message |
+| `social.profile.read.v1` | caller-initiated profile observation through REQUEST mode |
+
+Sub migrates to the successors. `messaging.send.v1` is retained only for a
+bounded compatibility window and is then RETIRED; the migration and the
+retirement are both recorded obligations carried by the old contract's
+deprecation metadata (A2), not intentions.
+
+Known gap, stated rather than implied: `spi.ConnectorMode` is a closed union of
+`INGRESS | POLL | DELIVERY` and has no REQUEST member, so
+`social.profile.read.v1` cannot be served until the SPI grows one —
+`dotmac-connector-meta-social`'s dossier already records the same fact from the
+connector side.
+
+*Corrects: § 4 D4.*
