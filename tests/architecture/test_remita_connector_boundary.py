@@ -67,6 +67,32 @@ def test_connector_owns_no_product_or_execution_machinery() -> None:
         assert forbidden not in source
 
 
+def test_the_declared_capability_set_is_a_reviewed_diff() -> None:
+    """Status stays a POLL concern. Remita has no push channel at all, so an
+    ingress capability here would be a channel the provider does not have, and
+    pinning the SET makes inventing one a line in a diff."""
+    assert MANIFEST.capability_ids == {
+        "payments.reference.status.observation.v1",
+        "payments.reference.issuance.v1",
+    }
+
+
+def test_the_two_provider_hash_orders_live_in_separate_functions() -> None:
+    """Remita hashes `rrr + apiKey + merchantId` for a status read and
+    `merchantId + serviceTypeId + orderId + amount + apiKey` for issuance. One
+    shared "remita hash" helper is precisely how those two get merged into a
+    single wrong one, and the provider's only feedback for that is a rejected
+    request. This requires them to stay apart."""
+    definitions = {
+        node.name
+        for path in sorted(SOURCE.rglob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert "issuance_hash" in definitions
+    assert not {name for name in definitions if name in {"remita_hash", "api_hash"}}
+
+
 def test_product_first_evidence_is_revision_pinned() -> None:
     dossier = tomllib.loads((PACKAGE / "EXTRACTION.toml").read_text(encoding="utf-8"))
     assert dossier["source_mode"] == "product-first"
@@ -74,3 +100,6 @@ def test_product_first_evidence_is_revision_pinned() -> None:
     assert all("@" in item and ":" in item for item in dossier["source_paths"])
     assert dossier["contract_consumers"] == []
     assert dossier["status"] == "audit-complete"
+    assert dossier["ported_behaviour"]
+    assert dossier["port_deltas"]
+    assert dossier["provider_idempotency"]

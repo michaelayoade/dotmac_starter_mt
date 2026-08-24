@@ -23,6 +23,14 @@ from dotmac_integration.spi import (
     SpiRange,
 )
 
+from dotmac_connector_remita.outbound import (
+    ISSUANCE_CAPABILITY_ID,
+    ISSUANCE_CONFIG_SCHEMA,
+    CommandContractError,
+    RemitaIssuanceHandler,
+    issuance_config,
+)
+
 CONNECTOR_KEY: Final = "remita"
 CAPABILITY_ID: Final = "payments.reference.status.observation.v1"
 VERSION: Final = "0.1.0a1"
@@ -54,7 +62,10 @@ CONFIG_SCHEMA: Final[dict[str, object]] = {
     },
 }
 
-MANIFEST: Final = ConnectorManifest(
+# The exact published SPI-1.3 poll-only contract. It stays discoverable so an
+# installed status-only revision is adopted deliberately rather than becoming an
+# unknown digest.
+POLL_ONLY_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
@@ -70,6 +81,37 @@ MANIFEST: Final = ConnectorManifest(
             description="Remita API key used only to derive request authentication.",
         ),
     ),
+    egress=EgressDeclaration(hosts=(DEMO_HOST, LIVE_HOST)),
+)
+
+MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=VERSION,
+    # SPI 1.4 for the per-capability mode mapping below. Without it a
+    # conformance run would call the poll factory for a delivery-only
+    # capability, which is exactly what `CapabilityDeclaration.modes` removes.
+    spi_range=SpiRange.parse(">=1.4,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            capability_id=CAPABILITY_ID,
+            config_schema=CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.POLL}),
+        ),
+        CapabilityDeclaration(
+            capability_id=ISSUANCE_CAPABILITY_ID,
+            config_schema=ISSUANCE_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.DELIVERY}),
+        ),
+    ),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=API_KEY,
+            description="Remita API key used only to derive request authentication.",
+        ),
+    ),
+    # Unchanged: issuance reaches the SAME two fixed provider hosts the status
+    # leg already reaches. An outbound capability that widened egress would be a
+    # new reachability decision hiding inside a feature.
     egress=EgressDeclaration(hosts=(DEMO_HOST, LIVE_HOST)),
 )
 
@@ -272,12 +314,22 @@ class RemitaPlugin:
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
     timeout_seconds: float = 30.0
     manifest: ConnectorManifest = MANIFEST
-    historical_manifests: tuple[ConnectorManifest, ...] = ()
-    modes: frozenset[ConnectorMode] = frozenset({ConnectorMode.POLL})
+    historical_manifests: tuple[ConnectorManifest, ...] = (POLL_ONLY_MANIFEST,)
+    modes: frozenset[ConnectorMode] = frozenset(
+        {ConnectorMode.POLL, ConnectorMode.DELIVERY}
+    )
 
     def poll_handler_for(self, capability_id: str) -> PollHandler:
         self.manifest.require_declares(capability_id)
+        if capability_id != CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not a poll capability")
         return RemitaPollHandler(self.transport, self.timeout_seconds)
+
+    def handler_for(self, capability_id: str) -> RemitaIssuanceHandler:
+        self.manifest.require_declares(capability_id)
+        if capability_id != ISSUANCE_CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not a delivery capability")
+        return RemitaIssuanceHandler(DEMO_HOST, LIVE_HOST, self.transport)
 
     def validate_connection(
         self,
@@ -285,6 +337,21 @@ class RemitaPlugin:
         config: dict[str, object],
         secrets: dict[str, object],
     ) -> tuple[Diagnostic, ...]:
+        if "settlement_currency" in config:
+            # An issuance binding: `settlement_currency` is required by
+            # ISSUANCE_CONFIG_SCHEMA and forbidden by the status schema's
+            # `additionalProperties: false`, so its presence is unambiguous.
+            # Validated STATICALLY, and that is deliberate:
+            # the only Remita issuance call there is MINTS a reference, so a
+            # live probe here would create a payment obligation just to answer
+            # whether the credentials look usable. The status leg below can
+            # probe because reading a reference changes nothing.
+            try:
+                issuance_config(config, DEMO_HOST, LIVE_HOST)
+                _secret(secrets)
+            except (CommandContractError, RemitaProtocolError):
+                return (Diagnostic(ok=False, code="configuration_invalid"),)
+            return ()
         try:
             resolved = _config(config)
             api_key = _secret(secrets)
