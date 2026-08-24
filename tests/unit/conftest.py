@@ -7,7 +7,8 @@ logic only and must scope queries explicitly where they care about tenancy.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
+from datetime import date
 
 # Installed MODULE models, for the same reason — and with one extra consequence:
 # these are bound to `mod_tstudio`, and `create_test_engine` ATTACHes every
@@ -26,6 +27,21 @@ import pytest
 from dotmac_application_directory import (
     models as application_directory_models,  # noqa: F401
 )
+
+# For the capability vocabulary the ADR-0024 § 10.4 payload gates resolve
+# against — see `_installed_capability_registry` at the foot of this file.
+# Unlike the two module-model imports above, this one adds no schema to the
+# shared engine: `dotmac_integration`'s tables live in `mod_intg`, which is not
+# in `_SHARED_TEST_SCHEMAS`, so `_unit_tables()` filters them out and the
+# ten-attachment budget is untouched.
+from dotmac_integration import (
+    CapabilityContract,
+    CapabilityOwner,
+    CapabilityRegistry,
+    SchemaGrace,
+    install_capability_registry,
+)
+from dotmac_integration.capability_registry import _reset_capability_registry
 
 # DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
 # root conftest), which pytest imports before this module — see the comment
@@ -242,3 +258,79 @@ def party_row(db: Session, tenant_row: Tenant) -> Party:
     db.add(PartyPerson(party_id=party.id, first_name="Ada", last_name="Lovelace"))
     db.flush()
     return party
+
+
+# ── The declared capability vocabulary these tests dispatch against ────────
+#
+# ADR-0024 § 10.4 puts a payload gate on `enqueue_delivery`, `dispatch.settle`
+# and `ingress.record_batch`. Each resolves the capability of the work in front
+# of it and asks the INSTALLED registry what that capability's contract says —
+# and `capability_registry()` fails closed when an assembly installed none,
+# which is deliberate: a runtime that dispatches without declaring what its
+# payloads mean is misconfigured, not permissive.
+#
+# So the unit lane installs one, exactly as a composing assembly would. Every id
+# here is SYNTHETIC — none names a fleet capability, which is the same property
+# `test_capability_ownership.py` asserts of the module itself — and every
+# contract is in an explicit `SchemaGrace`, because these fixtures exercise
+# ledger mechanics rather than payload shape. The payload gate's own fixtures
+# publish real schemas; they build their registries locally and pass them
+# explicitly, so nothing here can make one of them pass by accident.
+#
+# A test that binds an id NOT listed here fails with `UnknownCapabilityError`
+# naming the declared set, which is the correct answer and points at this list.
+_TEST_CAPABILITY_IDS: tuple[str, ...] = (
+    "alpha_domain.emit.v1",
+    "alpha_domain.receive.v1",
+    "alpha_domain.receive.v2",
+    "alpha_domain.receive.v3",
+    "alpha_domain.receive.v12",
+    "beta_domain.receive.v1",
+    "conformance.echo.v1",
+    "conformance.other.v1",
+    "conformance.second.v1",
+    "conformance.two.v1",
+    "example.observe.v1",
+    "message.observation.v1",
+    "messaging.receive.v1",
+    "messaging.receive.v2",
+    "messaging.send.v1",
+    "messaging.templates.read.v1",
+    "payments.settlement.observation.v1",
+    "ticket.observation.v1",
+)
+
+
+def _test_capability_registry() -> CapabilityRegistry:
+    grace = SchemaGrace(
+        reason=(
+            "a synthetic test capability with no owning domain to publish a "
+            "payload contract"
+        ),
+        retire_after=date(2099, 12, 31),
+        tracked_by="tests/unit/conftest.py",
+    )
+    return CapabilityRegistry.from_declarations(
+        CapabilityContract(
+            capability_id=capability_id,
+            owner=CapabilityOwner(application="testlab", module="fixtures"),
+            summary="a synthetic contract installed by the unit-test lane",
+            schema_grace=grace,
+        )
+        for capability_id in _TEST_CAPABILITY_IDS
+    )
+
+
+@pytest.fixture(autouse=True)
+def _installed_capability_registry() -> Iterator[None]:
+    """Install the vocabulary, and REMOVE it again.
+
+    The teardown is load-bearing. `install_capability_registry` holds a module
+    global, so a fixture that only installed would leave every later test — in
+    any file, in any lane — running against a vocabulary it never asked for, and
+    `test_capability_ownership.py::test_importing_the_package_declares_nothing`
+    would stop being able to observe the uninstalled state it exists to check.
+    """
+    install_capability_registry(_test_capability_registry())
+    yield
+    _reset_capability_registry()

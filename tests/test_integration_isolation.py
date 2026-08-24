@@ -339,6 +339,54 @@ def _installation_and_binding(conn, request=None) -> tuple[uuid.UUID, uuid.UUID]
     return installation_id, binding_id
 
 
+#: The one capability every fixture here binds. Synthetic, and declared below
+#: so the ADR-0024 § 10.4 payload gates on `enqueue_delivery` and `record_batch`
+#: can resolve it — those seams ask the INSTALLED registry what the capability
+#: means, and `capability_registry()` fails closed when nothing was installed.
+#: This canary proves Postgres concurrency and platform-plane grants, so the
+#: contract is in an explicit `SchemaGrace` rather than carrying a schema it
+#: never exercises.
+_CANARY_CAPABILITY = "conformance.echo.v1"
+
+
+@pytest.fixture(autouse=True)
+def _installed_capability_registry() -> Iterator[None]:
+    from datetime import date
+
+    from dotmac_integration import (
+        CapabilityContract,
+        CapabilityOwner,
+        CapabilityRegistry,
+        SchemaGrace,
+        install_capability_registry,
+    )
+    from dotmac_integration.capability_registry import _reset_capability_registry
+
+    install_capability_registry(
+        CapabilityRegistry.from_declarations(
+            [
+                CapabilityContract(
+                    capability_id=_CANARY_CAPABILITY,
+                    owner=CapabilityOwner(application="testlab", module="fixtures"),
+                    summary="the synthetic contract this isolation canary binds",
+                    schema_grace=SchemaGrace(
+                        reason=(
+                            "an isolation canary that proves grants and "
+                            "concurrency, not payload shape"
+                        ),
+                        retire_after=date(2099, 12, 31),
+                        tracked_by="tests/test_integration_isolation.py",
+                    ),
+                )
+            ]
+        )
+    )
+    yield
+    # Removed again: the installed registry is a module global, and leaving one
+    # behind would silently supply a vocabulary to every later test file.
+    _reset_capability_registry()
+
+
 def test_inbox_deduplication_is_enforced_by_the_database(
     migrated_scratch: tuple[str, str],
     request: pytest.FixtureRequest,

@@ -141,7 +141,7 @@ from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -170,6 +170,9 @@ from dotmac_integration.spi import (
     accepts_manifest_digest,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dotmac_integration.capability_registry import CapabilityRegistry
+
 __all__ = [
     "HANDSHAKE_INSTALLATION_STATES",
     "Acknowledgement",
@@ -196,6 +199,7 @@ __all__ = [
     "ManifestPinUnhonoured",
     "ModeNotAvailable",
     "NotAChallenge",
+    "ObservationRejected",
     "PayloadTooLarge",
     "PreparedIngress",
     "ReceiptWriteFailed",
@@ -246,6 +250,11 @@ class ReceiptBatchAddress(Protocol):
     the same inbox ledger. Keeping this as the smallest structural shape lets
     them share the one atomic batch writer without making polling pretend it
     owns an ingress endpoint or request.
+
+    `capability_id` joined the shape when ADR-0024 § 10.4.4 put observation
+    validation in the one place both paths already meet. Both phase-1 seams
+    resolve it from `binding.capability_id` and both already carry it, so this
+    widens the structural shape without widening what either seam knows.
     """
 
     @property
@@ -253,6 +262,9 @@ class ReceiptBatchAddress(Protocol):
 
     @property
     def binding_id(self) -> UUID: ...
+
+    @property
+    def capability_id(self) -> str: ...
 
 
 #: The engine's defaults, used when a connector leaves `media_type` unset.
@@ -349,6 +361,7 @@ class IngressCode(str, Enum):
     EVENT_IDENTITY_COLLISION = "event_identity_collision"
     RECEIPT_WRITE_RACED = "receipt_write_raced"
     RECEIPT_WRITE_FAILED = "receipt_write_failed"
+    OBSERVATION_REJECTED = "observation_rejected"
     PAYLOAD_TOO_LARGE = "payload_too_large"
 
 
@@ -600,6 +613,34 @@ class EventIdentityCollision(IngressRefused):
 
     MESSAGE = "a provider event id arrived with different content than before"
     CODE = IngressCode.EVENT_IDENTITY_COLLISION
+    STATUS = 503
+
+
+class ObservationRejected(IngressRefused):
+    """A normalized event violates its capability's published observation schema.
+
+    ADR-0024 § 10.4.4, translated into the one shape this seam may answer a
+    provider in.
+
+    **503, not 4xx, and the reasoning is `EventIdentityCollision`'s.** A 4xx
+    tells the provider not to redeliver, which discards a real provider fact
+    because two Dotmac artifacts disagree about its shape — the connector
+    normalized one way and the owning domain published another. Neither of those
+    is the provider's mistake, and neither is fixed by dropping the event. 503
+    keeps the fact at the provider, redelivering, until an operator repairs the
+    connector or the contract. That recurs, loudly, which is the intended page.
+
+    The specific violation — JSON pointer and failing keyword — is deliberately
+    NOT in this message and is not returned to the provider: `IngressRefused`
+    carries a constant message so a request fragment cannot be interpolated into
+    a response. The detailed `CapabilityPayloadRejected` reaches the polling
+    path, which has no provider to answer; on the webhook path it is
+    currently converted here and not otherwise surfaced, which is a real
+    observability gap and is recorded as one rather than papered over.
+    """
+
+    MESSAGE = "an event did not match the shape its owning domain published"
+    CODE = IngressCode.OBSERVATION_REJECTED
     STATUS = 503
 
 
@@ -1055,8 +1096,52 @@ def challenge_response(
 # ── Phase 3: record ─────────────────────────────────────────────────────────
 
 
+def _require_valid_observations(
+    prepared: ReceiptBatchAddress,
+    events: tuple[InboundEvent, ...],
+    *,
+    registry: CapabilityRegistry | None,
+) -> None:
+    """ADR-0024 § 10.4.4 — the observation gate, for BOTH inbound seams.
+
+    Placed here rather than in `ingress` and again in `polling` because this is
+    the one function both paths already share, and a second copy would be a
+    second answer: the two would agree until somebody fixed one of them.
+
+    ## Whole batch, before the first row
+
+    Validated in its own pass, ahead of the recording loop, for the same reason
+    `record_batch` takes a tuple and not one event. A refusal raised halfway
+    through the loop leaves the earlier events written; the caller catches it
+    OUTSIDE the unit of work and unwinds, so nothing is durable — but the
+    provider is told 5xx and redelivers the whole batch into the same refusal,
+    forever. Refusing before anything is written makes that a clean, repeatable
+    rejection of exactly the events that are wrong, and keeps
+    "the whole batch was recorded atomically" true.
+
+    ## Refused at the boundary, not discovered by a projector
+
+    An unreadable observation that reaches the inbox is a durable row a product
+    will fetch, fail to interpret and dead-letter — at which point the fact is
+    stored, acknowledged to the provider, and unusable. This is the last moment
+    the provider can still be told no.
+    """
+    if not events:
+        return
+    from dotmac_integration.capability_registry import capability_registry
+
+    declared = registry if registry is not None else capability_registry()
+    contract = declared.get(prepared.capability_id)
+    for event in events:
+        contract.require_observation(event.payload)
+
+
 def record_batch(
-    db: Any, prepared: ReceiptBatchAddress, events: tuple[InboundEvent, ...]
+    db: Any,
+    prepared: ReceiptBatchAddress,
+    events: tuple[InboundEvent, ...],
+    *,
+    registry: CapabilityRegistry | None = None,
 ) -> tuple[tuple[UUID, bool], ...]:
     """Record the WHOLE tuple. Mutates and flushes; the caller's unit of work
     decides the transaction.
@@ -1086,6 +1171,9 @@ def record_batch(
     whole batch was recorded atomically" untrue. That table's own contract is
     outbound.
 
+    :raises CapabilityPayloadRejected: an event's payload violates the owning
+        domain's `observation_schema` (ADR-0024 § 10.4.4). Raised for the WHOLE
+        batch before a single row is written — see `_require_valid_observations`.
     :raises EventIdentityCollision: one event id, two payload digests.
     :raises ReceiptWriteRaced: a concurrent insert won the uniqueness race.
     :raises ReceiptWriteFailed: any other write failure. Typed here rather than
@@ -1095,6 +1183,7 @@ def record_batch(
     """
     from sqlalchemy.exc import StatementError
 
+    _require_valid_observations(prepared, events, registry=registry)
     recorded: list[tuple[UUID, bool]] = []
     for event in events:
         try:
@@ -1196,6 +1285,7 @@ def receive(
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
     observe_verification: VerificationObserver = _ignore_verification,
+    capabilities: CapabilityRegistry | None = None,
 ) -> IngressOutcome:
     """The DELIVERY façade. Two units of work, neither spanning the plugin call.
 
@@ -1208,7 +1298,14 @@ def receive(
     still a delivery — a provider that signs an empty body and expects the event
     recorded would get a handshake attempt and a 400, with its events dropped
     while it was told the endpoint worked.
+
+    Two registries, two names, for the reason `polling.poll_once` states:
+    `registry` is what is INSTALLED and executable; `capabilities` is what the
+    fleet's payloads MEAN, published by owning applications. Omitted, the
+    installed capability registry is used.
     """
+    from dotmac_integration.capability_registry import CapabilityRegistryError
+
     try:
         with open_unit_of_work() as db:
             prepared = prepare_ingress(
@@ -1236,12 +1333,20 @@ def receive(
 
     try:
         with open_unit_of_work() as db:
-            receipts = record_batch(db, prepared, events)
+            receipts = record_batch(db, prepared, events, registry=capabilities)
     # OUTSIDE the `with`, and that placement is the whole point: catching inside
     # would let the block exit cleanly and commit the events recorded before the
     # refusal.
     except IngressRefused as exc:
         return refusal_outcome(exc, prepared=prepared)
+    except CapabilityRegistryError:
+        # The schema gate speaks the registry's vocabulary, which is right for
+        # the polling path and wrong for a provider: a webhook may only be
+        # answered in the one shape `refusal_outcome` builds, from a refusal
+        # whose message is a constant. Converted HERE rather than inside
+        # `record_batch`, so the detailed refusal still reaches every caller
+        # that is not answering a provider.
+        return refusal_outcome(ObservationRejected(), prepared=prepared)
 
     # Only now, and from values only. A refusal above returns without the
     # acknowledgement ever being emitted, which is correct: a batch that did not

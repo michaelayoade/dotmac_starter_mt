@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -44,6 +44,9 @@ from dotmac_integration.spi import (
     PollPlugin,
     accepts_manifest_digest,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dotmac_integration.capability_registry import CapabilityRegistry
 
 __all__ = [
     "CursorInvalid",
@@ -252,13 +255,28 @@ def record_poll_batch(
     db: Any,
     prepared: PreparedPoll,
     batch: PollBatch,
+    *,
+    registry: CapabilityRegistry | None = None,
 ) -> PollResult:
-    """Record every event and advance the cursor in the same transaction."""
+    """Record every event and advance the cursor in the same transaction.
+
+    The observation gate ADR-0024 § 10.4.4 requires is NOT re-implemented here.
+    `record_batch` owns it, and this path reaches it by handing over the same
+    `prepared` value it already hands over — `PreparedPoll` satisfies
+    `ReceiptBatchAddress`, `capability_id` included. A second copy of the check
+    on this side would be a second answer to what an observation is, in the one
+    module whose docstring says polling must not grow a second inbox.
+
+    A refusal therefore lands BEFORE `advance_checkpoint`, which is the ordering
+    that matters here: the cursor is a claim about durable receipts, and
+    advancing it past events that were refused would permanently skip provider
+    facts nothing ever recorded.
+    """
     checkpoint = db.get(PollingCheckpoint, prepared.checkpoint_id)
     if checkpoint is None:
         raise PollUnavailable("polling checkpoint disappeared before settlement")
 
-    recorded = record_batch(db, prepared, batch.events)
+    recorded = record_batch(db, prepared, batch.events, registry=registry)
     advance_checkpoint(
         db,
         checkpoint=checkpoint,
@@ -280,8 +298,17 @@ def poll_once(
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
     unit_of_work: UnitOfWork,
+    capabilities: CapabilityRegistry | None = None,
 ) -> PollResult:
-    """Run the three phases with no transaction spanning provider I/O."""
+    """Run the three phases with no transaction spanning provider I/O.
+
+    Two registries, deliberately two names. `registry` is the CONNECTOR registry
+    — what is installed and executable. `capabilities` is the declared
+    capability vocabulary — what the fleet's payloads MEAN. They are supplied by
+    different parties (a deployment installs connectors; an owning application
+    publishes contracts), and collapsing them into one argument would be the
+    Integrator holding both, which is the ownership split ADR-0024 § 7 draws.
+    """
     with unit_of_work() as db:
         prepared = prepare_poll(db, checkpoint_id=checkpoint_id, registry=registry)
     batch = invoke_poll(
@@ -290,4 +317,4 @@ def poll_once(
         resolve_secrets=resolve_secrets,
     )
     with unit_of_work() as db:
-        return record_poll_batch(db, prepared, batch)
+        return record_poll_batch(db, prepared, batch, registry=capabilities)

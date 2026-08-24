@@ -120,6 +120,23 @@ class Outcome:
     #: Kept typed so a connector cannot smuggle a response body through an
     #: unstructured evidence mapping.
     provider_status_code: int | None = None
+    #: The NORMALIZED result body, in the owning domain's vocabulary — the thing
+    #: ADR-0024 § 10.2 calls `result_schema` and § 12.2 says a provider customer
+    #: id, recipient code or transfer reference must arrive as, rather than as a
+    #: separate product-visible provider action.
+    #:
+    #: This is not a loophole in the rule two fields above. `provider_status_code`
+    #: is typed precisely so a raw response body cannot travel as unstructured
+    #: evidence, and this field does not reopen that: `dispatch.settle` validates
+    #: it against the DOMAIN's published `result_schema` before it writes, so
+    #: what may travel here is exactly what one owner published and every product
+    #: can already read. An unvalidated mapping is what was refused; a
+    #: contract-validated one is what makes provider normalization possible at
+    #: all.
+    #:
+    #: ``None`` means the connector returned no body — legitimate for a capability
+    #: whose contract publishes no `result_schema`, and refused for one that does.
+    result: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         reference = self.provider_reference

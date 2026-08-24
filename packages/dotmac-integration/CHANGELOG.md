@@ -77,6 +77,61 @@ Nothing in this file is a publication claim except this section.
 
 ## Unreleased
 
+### One capability id now means one PAYLOAD, and the domain owns it
+
+ADR-0024 §§ 10-12 and ADR-0061 A2. A capability id was already one contract with
+one owner; its payload was not. `CapabilityDeclaration` carried a config schema
+and `DispatchRequest.payload` was an unvalidated `dict[str, object]` — so
+configuration had a declared contract and commands did not, which is how one id
+grew two disjoint command vocabularies with nothing able to see it.
+
+- `CapabilityContract` — the declaration the owning BUSINESS application
+  publishes — gains `command_schema`, `result_schema`, `observation_schema`, a
+  canonical `contract_digest` over those three plus the id, and
+  `ContractDeprecation` (`replaced_by`, `retire_after`). Schemas are validated
+  at construction, exactly as `config_schema` already was.
+- `CapabilityDeclaration` gains `claims_contract_digest` and NOTHING else. A
+  connector never publishes a schema for a capability it merely implements: if
+  every connector published one, drift would become machine-readable rather than
+  prevented, because two connectors serving one id would declare two
+  individually valid schemas and nothing could prefer either.
+- **Four seams enforce it.** `execution.enqueue_delivery` validates the command
+  before a row exists; `capability_registry.require_implements_only_declared`
+  and `require_declared_for_binding` both check digest agreement — composition
+  and binding, because a distribution can be installed after composition ran;
+  `dispatch.settle` validates the result before the claim-guarded UPDATE; and
+  `ingress.record_batch` validates every observation before the batch commits,
+  which is also the polling path's gate because `record_poll_batch` calls it.
+- **A published version is SUCCEEDED, never redefined.**
+  `install_capability_registry` refuses a reload that gives an already published
+  id a different digest, or that walks a published contract back into a grace; a
+  deprecation must name a successor declared in the same registry; and a
+  contract may not name itself as its own replacement.
+- **Adoption is a declared, dated grace — not an optional field.** A contract
+  that declares neither a schema nor a `SchemaGrace(reason=…, retire_after=…)`
+  is refused at construction. `schema_grace_register` enumerates every ungated
+  capability with its owner and deadline, and `require_no_expired_grace` (run by
+  `require_governable`) refuses once a window has closed.
+- `Outcome` gains `result` — the normalized outcome body ADR-0024 § 12.2 says a
+  provider customer id, recipient code or transfer reference must arrive as. It
+  is validated against the domain's `result_schema` before settlement, which is
+  what distinguishes it from the unstructured evidence mapping
+  `provider_status_code` exists to refuse.
+- New refusal `ingress.ObservationRejected` (503, constant message) answers a
+  provider; the detailed `CapabilityPayloadRejected` reaches every caller that
+  is not answering one. Neither ever repeats the offending value — the summary
+  is a JSON pointer and a failing keyword, because `error_detail` is persisted.
+- `spi.canonical_digest` is now the ONE canonical-JSON hashing rule;
+  `execution.payload_digest` delegates to it and keeps its meaning.
+- No schema change and no migration slot is consumed. Every obligation is a
+  boundary validation over values both sides already hold in memory.
+- **Not repaired here, and deliberately visible:** `messaging.send.v1` still has
+  two connectors with disjoint command vocabularies. ADR-0024 § 11.2 repairs it
+  by SUCCESSION rather than redefinition, so it stays in grace until Sub
+  migrates. `tests/architecture/test_capability_contract_divergence.py` holds
+  that and the four other shared-and-ungated capability ids in a
+  two-directional ratchet.
+
 ### Declaring a binding no longer erases how it is selected
 
 - `add_binding` is idempotent by contract, so every activation and reconcile

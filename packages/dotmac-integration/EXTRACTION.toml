@@ -160,6 +160,63 @@ binding_multiplicity = "Unique on (installation_id, capability_id). Many install
 # the plugin did not change but the host did.
 open_questions = []
 
+# THE PAYLOAD CONTRACT IS THE DOMAIN'S, and this is where that is recorded for a
+# reviewer who reaches this dossier before the ADR. ADR-0024 §§ 10-12 (2026-08-24)
+# and ADR-0061 A2.
+#
+# The defect: a capability id was one contract with one owner, and its PAYLOAD
+# was nothing. `spi.CapabilityDeclaration` carried `config_schema` and
+# `DispatchRequest.payload` was an unvalidated `dict[str, object]` — configuration
+# had a declared contract and commands did not. Two shipped capability families
+# each grew two dialects behind one id with no gate able to see it.
+#
+# The closure is NOT a command schema on the connector's declaration. If every
+# connector published its own schema, two connectors serving one id would publish
+# two individually valid schemas and the engine would have no ground to prefer
+# either — drift becomes machine-readable rather than prevented. The schema
+# therefore lives on `capability_registry.CapabilityContract`, the declaration the
+# owning business application publishes and of which the registry already permits
+# exactly one per id. A connector may only CLAIM its digest.
+capability_payload_contract = "OWNED BY THE DECLARING DOMAIN. CapabilityContract carries command_schema, result_schema, observation_schema, a canonical contract_digest and ContractDeprecation. CapabilityDeclaration carries only claims_contract_digest. Enforced at four seams: enqueue_delivery (command), require_implements_only_declared and require_declared_for_binding (digest agreement, composition AND binding), dispatch.settle (result), ingress.record_batch (observation, shared by the polling path). A schema change takes a new .vN id; install_capability_registry refuses a redefinition."
+
+# ADOPTION IS A DECLARED, DATED GRACE — not a permanent optional field. Every
+# capability in the fleet predates the rule, so fail-closed on day one would
+# break every binding; but an optional `command_schema` is exactly how the defect
+# returns, because nothing would separate "this owner has not published a payload
+# contract" from "nobody has looked at this capability". A contract must declare a
+# schema OR a SchemaGrace with a reason and a retire_after date; silence is
+# refused at construction, the ungated set is enumerable through
+# `schema_grace_register`, and `require_no_expired_grace` closes the window.
+schema_adoption = "Fail closed on SILENCE, not on absence. A CapabilityContract declares at least one payload schema or an explicit SchemaGrace(reason, retire_after); neither is refused. The ungated set is enumerable with owner and deadline; an expired grace refuses at boot."
+
+# WITHHELD, AND SAID OUT LOUD (ADR-0032; ADR-0024 § 9.4 applied to this module).
+# The gate above does not repair what has already shipped, and it is not supposed
+# to: ADR-0024 § 11.2 rules that `messaging.send.v1` is repaired by SUCCESSION
+# (`messaging.direct.send.v2`, `social.comment.reply.v1`,
+# `social.profile.read.v1`) rather than by redefining a published version. Five
+# capability ids are currently served by two connectors each with no domain
+# contract published between them; they are held in a two-directional ratchet at
+# `tests/architecture/test_capability_contract_divergence.py` so the set cannot
+# grow — or silently shrink — without a reviewer seeing it.
+unrepaired_shared_capabilities = "messaging.receive.v1 and messaging.send.v1 (meta_whatsapp, meta_social); payments.intent.v1, payments.refund.v1 and payments.settlement.observation.v1 (paystack, flutterwave). messaging.send.v1 carries the documented divergence: send_text|send_template|send_media with `recipient` against send_direct_message|reply_to_comment with `recipient_id`+`channel`. Repaired by succession, not redefinition."
+
+# NOT BUILT, AND NAMED SO THE ABSENCE IS REVIEWABLE. Two obligations the gate
+# leaves open:
+#
+# 1. A binding does NOT durably pin the contract digest it was activated against.
+#    Redefinition is refused in-process (a changed digest breaks every connector
+#    claim at composition and at binding, and `install_capability_registry`
+#    refuses a reload that redefines), but a coordinated owner+connector change
+#    across a restart is a reviewable two-repository diff rather than a refusal.
+#    A `contract_digest` column on `capability_bindings` is the next ratchet and
+#    was deliberately NOT taken now: with every contract in grace it would be
+#    NULL for every row on day one, which is a control over an empty set.
+# 2. A webhook refusal carries no detail. `ObservationRejected` has a constant
+#    message by the `IngressRefused` contract, and the detailed
+#    `CapabilityPayloadRejected` is currently converted and not otherwise
+#    surfaced on the ingress path.
+contract_gate_gaps = "No durable per-binding contract-digest pin (deferred: every contract is in grace, so the column would be uniformly NULL). No observability seam for an ingress-side observation refusal."
+
 # PAYLOAD RETENTION IS NEW BEHAVIOUR, NOT A PORT — recorded so the product-first
 # rule is answered rather than skipped. Sub keeps every `integration_inbox_event`
 # payload forever: there is no purge job, no legal-hold table and no retention
