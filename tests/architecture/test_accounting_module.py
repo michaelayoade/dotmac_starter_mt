@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import tomllib
 from pathlib import Path
 
 from dotmac_accounting import models, service
@@ -16,6 +17,32 @@ from dotmac_kernel.namespaces import (
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/ac_0001_accounting.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DOSSIER = REPO_ROOT / "packages/dotmac-accounting/EXTRACTION.toml"
+
+
+def _clean_cutover_violations(dossier: dict[str, object]) -> list[str]:
+    first_cutover = str(dossier.get("first_cutover", ""))
+    evidence = str(dossier.get("shadow_and_drift", ""))
+    required_first_cutover = (
+        "governed opening state",
+        "never replays legacy journal",
+        "read-only owner of pre-cutover history",
+        "cross-database sealing protocol",
+    )
+    required_evidence = (
+        "independently migrated clean databases",
+        "Legacy full-history digests remain forensic evidence",
+        "not import or parity targets",
+    )
+    return [
+        f"first_cutover missing {phrase!r}"
+        for phrase in required_first_cutover
+        if phrase not in first_cutover
+    ] + [
+        f"shadow_and_drift missing {phrase!r}"
+        for phrase in required_evidence
+        if phrase not in evidence
+    ]
 
 
 def test_manifest_matches_same_change_namespace_allocation() -> None:
@@ -121,3 +148,20 @@ def test_lineage_passes_the_composed_migration_gate() -> None:
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, report.violations
+
+
+def test_erp_first_cutover_forbids_legacy_accounting_history_replay() -> None:
+    dossier = tomllib.loads(DOSSIER.read_text(encoding="utf-8"))
+    assert not _clean_cutover_violations(dossier)
+
+
+def test_clean_cutover_dossier_guard_is_sensitive() -> None:
+    dossier = tomllib.loads(DOSSIER.read_text(encoding="utf-8"))
+    dossier["first_cutover"] = "Copy every legacy journal into the new database."
+    dossier["shadow_and_drift"] = "Compare row counts after import."
+
+    violations = _clean_cutover_violations(dossier)
+
+    assert len(violations) == 7
+    assert "first_cutover missing 'never replays legacy journal'" in violations
+    assert "shadow_and_drift missing 'not import or parity targets'" in violations
