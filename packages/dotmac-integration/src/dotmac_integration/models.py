@@ -550,7 +550,6 @@ class InboxReceipt(Base):
     #: A CONNECTOR's vocabulary. Stored, never branched on — see `retry`.
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-
     # ── Receipt-to-product delivery (ig_0005) ──────────────────────────────
     # A delivery is a STATE OF THE RECEIPT, not a row in a second table. The
     # specific failure ADR-0014 records is a parallel ledger: "did this land?"
@@ -635,6 +634,10 @@ class DeliveryAttempt(Base):
             name="ck_delivery_attempts_state",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_delivery_attempts_attempts"),
+        CheckConstraint(
+            "provider_status_code IS NULL OR provider_status_code BETWEEN 100 AND 599",
+            name="ck_delivery_attempts_provider_status",
+        ),
         # The dispatcher's query: what is due, oldest first.
         Index("ix_delivery_attempts_state_next", "state", "next_attempt_at"),
         schema_table_args(SCHEMA),
@@ -670,6 +673,10 @@ class DeliveryAttempt(Base):
     )
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Typed provider evidence only. Arbitrary response bodies deliberately
+    #: have no column: they are content, not retry/correlation evidence.
+    provider_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    provider_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False

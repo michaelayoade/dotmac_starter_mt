@@ -108,7 +108,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_integration.execution import payload_digest
-from dotmac_integration.models import InboxReceipt
+from dotmac_integration.models import DeliveryAttempt, InboxReceipt
 from dotmac_integration.operations import record_operation
 
 __all__ = [
@@ -120,6 +120,9 @@ __all__ = [
     "RETENTION_PLATFORM_TABLES",
     "REDACTABLE_COLUMNS",
     "REFUSAL_REASONS",
+    "DeliveryLegalHold",
+    "DeliveryRetentionRefusal",
+    "DeliveryRetentionSweep",
     "ReceiptLegalHold",
     "RetentionBacklog",
     "ReplayEvidenceSweep",
@@ -128,13 +131,20 @@ __all__ = [
     "RetentionRefusal",
     "RetentionRefused",
     "RetentionSweep",
+    "active_delivery_hold_for",
     "active_hold_for",
+    "classify_delivery",
     "classify_receipt",
+    "is_delivery_redacted",
     "is_redacted",
+    "place_delivery_legal_hold",
     "place_legal_hold",
+    "purge_expired_delivery_payloads",
     "purge_expired_payloads",
     "purge_expired_replay_evidence",
+    "redact_delivery",
     "redact_receipt",
+    "release_delivery_legal_hold",
     "release_legal_hold",
     "resolve_retention_policy",
     "retention_backlog",
@@ -148,7 +158,10 @@ SCHEMA: Final = module_schema("intg")
 #: `manifest.py`. Declared here rather than appended to `models.PLATFORM_TABLES`
 #: so the area that owns the table also declares it, and so two concurrent
 #: slices do not edit one tuple.
-RETENTION_PLATFORM_TABLES: tuple[str, ...] = ("receipt_legal_holds",)
+RETENTION_PLATFORM_TABLES: tuple[str, ...] = (
+    "receipt_legal_holds",
+    "delivery_legal_holds",
+)
 
 #: The tombstone key. NAMESPACED because it is written into a column whose other
 #: contents are provider-controlled: a bare `redacted` could collide with a
@@ -226,7 +239,7 @@ class RetentionNotConfigured(RuntimeError):
 
 
 class RetentionRefused(RuntimeError):
-    """This receipt may not be redacted, and here is which rule said so."""
+    """This receipt or delivery may not be redacted, with its named rule."""
 
     def __init__(self, receipt_id: UUID | None, reason: str, detail: str) -> None:
         super().__init__(detail)
@@ -412,6 +425,72 @@ class ReceiptLegalHold(Base):
     release_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class DeliveryLegalHold(Base):
+    """A standing instruction that one outbound payload must not age out.
+
+    The table parallels :class:`ReceiptLegalHold` because the two ledgers have
+    different owners and foreign keys. A polymorphic UUID would turn database
+    referential integrity into a service convention.
+    """
+
+    __tablename__ = "delivery_legal_holds"
+    __table_args__ = (
+        Index(
+            "uq_delivery_legal_holds_active",
+            "delivery_id",
+            unique=True,
+            postgresql_where=sa.text("released_at IS NULL"),
+            sqlite_where=sa.text("released_at IS NULL"),
+        ),
+        Index("ix_delivery_legal_holds_released", "released_at"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    delivery_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        sa.ForeignKey(f"{SCHEMA}.delivery_attempts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_owner: Mapped[str] = mapped_column(String(160), nullable=False)
+    placed_by: Mapped[str] = mapped_column(String(160), nullable=False)
+    placed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    released_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    release_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+def _active_delivery_hold_exists() -> Any:
+    """Correlated SQL predicate for an active hold on a delivery."""
+
+    return (
+        sa.select(sa.literal(1))
+        .select_from(DeliveryLegalHold)
+        .where(
+            DeliveryLegalHold.delivery_id == DeliveryAttempt.id,
+            DeliveryLegalHold.released_at.is_(None),
+        )
+        .exists()
+    )
+
+
+def active_delivery_hold_for(db: Any, delivery_id: UUID) -> DeliveryLegalHold | None:
+    hold = db.execute(
+        sa.select(DeliveryLegalHold).where(
+            DeliveryLegalHold.delivery_id == delivery_id,
+            DeliveryLegalHold.released_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if hold is None or isinstance(hold, DeliveryLegalHold):
+        return hold
+    raise TypeError(f"expected a DeliveryLegalHold, got {type(hold).__name__}")
+
+
 def _active_hold_exists() -> Any:
     """`EXISTS (an unreleased hold on this receipt)`, as SQL.
 
@@ -550,6 +629,91 @@ def release_legal_hold(
         details={
             "reason": stated,
             "released_by": released_by.strip(),
+            "policy_owner": hold.policy_owner,
+        },
+    )
+    return hold
+
+
+def place_delivery_legal_hold(
+    db: Any,
+    delivery: DeliveryAttempt,
+    *,
+    policy: RetentionPolicy,
+    reason: str,
+    placed_by: str,
+    actor_admin_id: UUID | None = None,
+) -> DeliveryLegalHold:
+    """Hold one outbound payload. Idempotent while a hold is active."""
+
+    stated = reason.strip()
+    actor = placed_by.strip()
+    if not stated:
+        raise ValueError("a delivery legal hold requires a stated reason")
+    if not actor:
+        raise ValueError("a delivery legal hold requires the identity that placed it")
+    existing = active_delivery_hold_for(db, delivery.id)
+    if existing is not None:
+        return existing
+    hold = DeliveryLegalHold(
+        delivery_id=delivery.id,
+        reason=stated,
+        policy_owner=policy.legal_policy_owner,
+        placed_by=actor,
+        placed_at=datetime.now(UTC),
+    )
+    db.add(hold)
+    db.flush()
+    record_operation(
+        db,
+        action="retention.hold.placed",
+        entity_type="delivery_attempt",
+        entity_id=str(delivery.id),
+        actor_admin_id=actor_admin_id,
+        details={
+            "reason": stated,
+            "policy_owner": policy.legal_policy_owner,
+            "placed_by": actor,
+            "already_redacted": is_delivery_redacted(delivery),
+        },
+    )
+    return hold
+
+
+def release_delivery_legal_hold(
+    db: Any,
+    hold: DeliveryLegalHold,
+    *,
+    released_by: str,
+    reason: str,
+    actor_admin_id: UUID | None = None,
+) -> DeliveryLegalHold:
+    """Release an outbound hold while preserving its history row."""
+
+    stated = reason.strip()
+    actor = released_by.strip()
+    if not stated:
+        raise ValueError("releasing a delivery legal hold requires a stated reason")
+    if not actor:
+        raise ValueError("releasing a delivery legal hold requires an identity")
+    if hold.released_at is not None:
+        raise RetentionRefused(
+            hold.delivery_id,
+            "legal_hold",
+            f"delivery hold {hold.id} was already released at {hold.released_at}",
+        )
+    hold.released_at = datetime.now(UTC)
+    hold.released_by = actor
+    hold.release_reason = stated
+    record_operation(
+        db,
+        action="retention.hold.released",
+        entity_type="delivery_attempt",
+        entity_id=str(hold.delivery_id),
+        actor_admin_id=actor_admin_id,
+        details={
+            "reason": stated,
+            "released_by": actor,
             "policy_owner": hold.policy_owner,
         },
     )
@@ -927,6 +1091,237 @@ def purge_expired_payloads(
                 # `legal_policy_owner` is recorded on the RUN, so "who was
                 # accountable when this content was destroyed" is answerable
                 # from the ledger and not only from today's configuration.
+                "legal_policy_owner": policy.legal_policy_owner,
+                "retention_days": policy.payload_retention_days,
+            },
+        )
+    return sweep
+
+
+# ── Outbound payload retention ─────────────────────────────────────────────
+
+
+def is_delivery_redacted(delivery: DeliveryAttempt) -> bool:
+    """Whether the outbox payload has been replaced by a retention tombstone."""
+
+    payload = delivery.payload_json
+    return isinstance(payload, dict) and isinstance(payload.get(REDACTION_MARKER), dict)
+
+
+def classify_delivery(
+    delivery: DeliveryAttempt,
+    *,
+    policy: RetentionPolicy,
+    now: datetime,
+    held: bool,
+) -> str | None:
+    """The named reason an outbound payload may not be redacted."""
+
+    if held:
+        return "legal_hold"
+    if delivery.state == "in_flight":
+        return "leased"
+    if delivery.state == "reconciliation_required":
+        return "reconciliation_required"
+    # Dead-letter and retryable deliveries remain replayable through the
+    # operations API, so their payload is unresolved content, not old evidence.
+    if delivery.state != "delivered":
+        return "unresolved"
+    if is_delivery_redacted(delivery):
+        return "already_redacted"
+    if delivery.payload_json is None:
+        return "no_payload"
+    if _as_utc(delivery.created_at) >= policy.cutoff(now):
+        return "not_expired"
+    return None
+
+
+def _delivery_tombstone(
+    delivery: DeliveryAttempt, *, policy: RetentionPolicy, moment: datetime
+) -> dict[str, object]:
+    payload = delivery.payload_json
+    return {
+        REDACTION_MARKER: {
+            "redacted_at": moment.isoformat(),
+            "retention_days": policy.payload_retention_days,
+            "legal_policy_owner": policy.legal_policy_owner,
+            "payload_digest": delivery.payload_digest,
+            "key_count": len(payload) if isinstance(payload, dict) else 0,
+        }
+    }
+
+
+def redact_delivery(
+    db: Any,
+    delivery: DeliveryAttempt,
+    *,
+    policy: RetentionPolicy,
+    now: datetime | None = None,
+) -> DeliveryAttempt:
+    """Redact one delivered payload with a hold-aware conditional update."""
+
+    moment = now or datetime.now(UTC)
+    held = active_delivery_hold_for(db, delivery.id) is not None
+    refusal = classify_delivery(delivery, policy=policy, now=moment, held=held)
+    if refusal is not None:
+        detail = (
+            f"delivery {delivery.id} has an active legal hold"
+            if refusal == "legal_hold"
+            else f"delivery {delivery.id} cannot be redacted: {refusal}"
+        )
+        raise RetentionRefused(delivery.id, refusal, detail)
+
+    result = db.execute(
+        sa.update(DeliveryAttempt)
+        .where(
+            DeliveryAttempt.id == delivery.id,
+            DeliveryAttempt.state == "delivered",
+            DeliveryAttempt.created_at < policy.cutoff(moment),
+            DeliveryAttempt.payload_json.is_not(None),
+            ~_active_delivery_hold_exists(),
+        )
+        .values(
+            payload_json=_delivery_tombstone(delivery, policy=policy, moment=moment)
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise RetentionRefused(
+            delivery.id,
+            "raced",
+            f"delivery {delivery.id} changed under the sweep; nothing was written",
+        )
+    db.refresh(delivery)
+    return delivery
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryRetentionRefusal:
+    """One outbound delivery this sweep lost to a concurrent refusal."""
+
+    delivery_id: UUID
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryRetentionSweep:
+    """What one bounded outbound-content sweep changed and refused."""
+
+    cutoff: datetime
+    batch_size: int
+    redacted: int = 0
+    redacted_ids: tuple[UUID, ...] = ()
+    refusals: tuple[DeliveryRetentionRefusal, ...] = ()
+    refused_by_reason: Mapping[str, int] = field(default_factory=dict)
+
+    @property
+    def refused_total(self) -> int:
+        return sum(self.refused_by_reason.values())
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "cutoff": self.cutoff.isoformat(),
+            "batch_size": self.batch_size,
+            "redacted": self.redacted,
+            "refused_total": self.refused_total,
+            "refused_by_reason": dict(self.refused_by_reason),
+        }
+
+
+def _expired_delivery_content(cutoff: datetime) -> list[Any]:
+    return [
+        DeliveryAttempt.created_at < cutoff,
+        DeliveryAttempt.payload_json.is_not(None),
+        DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None),
+    ]
+
+
+def _delivery_refusal_counts(db: Any, cutoff: datetime) -> dict[str, int]:
+    base = _expired_delivery_content(cutoff)
+    held = _active_delivery_hold_exists()
+
+    def _count(*where: Any) -> int:
+        return int(
+            db.execute(
+                sa.select(sa.func.count())
+                .select_from(DeliveryAttempt)
+                .where(*base, *where)
+            ).scalar_one()
+            or 0
+        )
+
+    counts = {
+        "legal_hold": _count(held),
+        "leased": _count(~held, DeliveryAttempt.state == "in_flight"),
+        "reconciliation_required": _count(
+            ~held, DeliveryAttempt.state == "reconciliation_required"
+        ),
+        "unresolved": _count(
+            ~held,
+            DeliveryAttempt.state.not_in(
+                ("delivered", "in_flight", "reconciliation_required")
+            ),
+        ),
+    }
+    return {reason: count for reason, count in counts.items() if count}
+
+
+def purge_expired_delivery_payloads(
+    db: Any,
+    *,
+    policy: RetentionPolicy,
+    now: datetime | None = None,
+    actor_admin_id: UUID | None = None,
+) -> DeliveryRetentionSweep:
+    """Redact one oldest-first batch of delivered outbox payloads."""
+
+    moment = now or datetime.now(UTC)
+    cutoff = policy.cutoff(moment)
+    candidates = list(
+        db.execute(
+            sa.select(DeliveryAttempt)
+            .where(
+                *_expired_delivery_content(cutoff),
+                DeliveryAttempt.state == "delivered",
+                ~_active_delivery_hold_exists(),
+            )
+            .order_by(DeliveryAttempt.created_at, DeliveryAttempt.id)
+            .limit(policy.batch_size)
+        )
+        .scalars()
+        .all()
+    )
+    redacted: list[UUID] = []
+    refusals: list[DeliveryRetentionRefusal] = []
+    for delivery in candidates:
+        try:
+            redact_delivery(db, delivery, policy=policy, now=moment)
+        except RetentionRefused as refused:
+            refusals.append(DeliveryRetentionRefusal(delivery.id, refused.reason))
+            continue
+        redacted.append(delivery.id)
+
+    sweep = DeliveryRetentionSweep(
+        cutoff=cutoff,
+        batch_size=policy.batch_size,
+        redacted=len(redacted),
+        redacted_ids=tuple(redacted),
+        refusals=tuple(refusals),
+        refused_by_reason=_delivery_refusal_counts(db, cutoff),
+    )
+    if redacted or refusals:
+        record_operation(
+            db,
+            action="retention.payloads.redacted",
+            entity_type="delivery_attempt",
+            actor_admin_id=actor_admin_id,
+            details={
+                **sweep.as_dict(),
+                "delivery_ids": [str(identifier) for identifier in redacted],
+                "refusals": [
+                    {"delivery_id": str(item.delivery_id), "reason": item.reason}
+                    for item in refusals
+                ],
                 "legal_policy_owner": policy.legal_policy_owner,
                 "retention_days": policy.payload_retention_days,
             },

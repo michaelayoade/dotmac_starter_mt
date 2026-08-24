@@ -256,7 +256,14 @@ def test_no_retention_table_persists_a_health_or_status_summary() -> None:
     `operations.health_report`. A stored summary is a second writer over facts
     the ledger already holds, and it drifts the instant a sweep dies half-way —
     which is exactly when someone reads it."""
-    columns = [c.name for c in retention_module.ReceiptLegalHold.__table__.columns]
+    columns = [
+        column.name
+        for model in (
+            retention_module.ReceiptLegalHold,
+            retention_module.DeliveryLegalHold,
+        )
+        for column in model.__table__.columns
+    ]
     offenders = _persisted_status_columns(columns)
     assert not offenders, (
         f"{sorted(offenders)} would make a derived verdict settable. "

@@ -883,8 +883,8 @@ url = "packages/dotmac-connector-remita"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
-version = "0.1.0a2"
-description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
+version = "0.1.0a3"
+description = "Meta WhatsApp Cloud API ingress and delivery connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["dev"]
@@ -892,7 +892,8 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a10"
+dotmac-integration = ">=0.1.0a14"
+httpx = ">=0.27,<1.0"
 
 [package.source]
 type = "directory"
@@ -1205,7 +1206,7 @@ url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a13"
+version = "0.1.0a14"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"

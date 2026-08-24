@@ -173,6 +173,9 @@ def prepare_poll(
         raise PollUnavailable("poll connector no longer honours the manifest pin")
     if ConnectorMode.POLL not in plugin.modes or not isinstance(plugin, PollPlugin):
         raise PollUnavailable("binding does not resolve to an executable poll mode")
+    capability = plugin.manifest.require_declares(binding.capability_id)
+    if capability.modes is not None and ConnectorMode.POLL not in capability.modes:
+        raise PollUnavailable("binding capability is not mapped to poll mode")
 
     revision = (
         db.get(ConnectorConfigRevision, installation.current_config_revision_id)

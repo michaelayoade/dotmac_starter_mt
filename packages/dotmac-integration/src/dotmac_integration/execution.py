@@ -327,6 +327,8 @@ def record_delivery_outcome(
     )
     delivery.error_code = outcome.error_code
     delivery.error_detail = outcome.error_detail
+    delivery.provider_reference = outcome.provider_reference
+    delivery.provider_status_code = outcome.provider_status_code
 
     if delivery.state == "delivered":
         delivery.delivered_at = moment

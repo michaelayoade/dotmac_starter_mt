@@ -67,7 +67,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     DispatchRequest,
     accepts_manifest_digest,
-    require_mode,
+    require_capability_mode,
 )
 
 __all__ = [
@@ -258,7 +258,7 @@ def invoke(
     # a binding pointed at an ingress-only connector used to fail with an
     # AttributeError from inside the lookup — which reads as a broken plugin
     # rather than as a binding pointed at a connector that cannot deliver.
-    require_mode(plugin, ConnectorMode.DELIVERY)
+    require_capability_mode(plugin, prepared.capability_id, ConnectorMode.DELIVERY)
     # The `cast` is honest rather than convenient: `registry.plugin` is typed to
     # the BASE protocol and `handler_for` lives on `DeliveryPlugin`.
     # `require_mode` on the line above is what turned "this connector delivers"
@@ -337,6 +337,10 @@ def settle(
         "leased_until": None,
         "error_code": outcome.error_code,
         "error_detail": outcome.error_detail,
+        # Evidence belongs to THIS attempt. A later retry replaces a 429 with
+        # the success it actually observed rather than retaining stale facts.
+        "provider_reference": outcome.provider_reference,
+        "provider_status_code": outcome.provider_status_code,
     }
     if next_state_value == "delivered":
         values.update(

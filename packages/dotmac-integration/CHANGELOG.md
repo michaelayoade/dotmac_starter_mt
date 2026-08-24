@@ -2,17 +2,18 @@
 
 ## Release state — read this before pinning
 
-**Twelve versions have been released. Pin `0.1.0a12`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a12`; a12 was published, installed
-back from the private index, registered and tagged from `9f59d02b` by release
-run `32587960069`.
+**Thirteen versions have been released. Pin `0.1.0a13`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a13`; a13 was published, installed
+back from the private index, registered and tagged from `1b1d62b` by release
+run `32665771169`.
 
-`0.1.0a12` is the latest published version. It adds the capability-wide
-product-port reconciliation `dotmac_integrator` composes.
-
-`0.1.0a13` is declared and unreleased. It adds the provider-neutral
+`0.1.0a13` is the latest published version. It adds the provider-neutral
 ProductObservation v1 document and accepts product-port descriptor v2 without
 changing connector SPI 1.3.
+
+`0.1.0a14` is declared and unreleased. It adds bounded provider evidence to the
+outbound delivery ledger and legal-hold-aware retention for delivered payload
+content and capability-to-mode declarations in additive connector SPI 1.4.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -73,6 +74,22 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a14 — unreleased
+
+### Outbound delivery evidence and content retention
+
+- Adds typed `provider_reference` and `provider_status_code` outcome fields and
+  persists them atomically with the claimed attempt. Arbitrary provider response
+  bodies remain unrepresentable.
+- Adds `delivery_legal_holds` and a bounded, oldest-first redaction sweep for
+  delivered outbox payloads. Deduplication keys, payload digests, state and
+  provider evidence survive redaction; replayable and reconciliation-required
+  deliveries are refused by name.
+- Adds migration `ig_0012_delivery_evidence` on the platform plane.
+- Adds SPI 1.4's optional per-capability mode mapping. Legacy declarations keep
+  the 1.0–1.3 meaning; multi-mode connectors no longer have to pretend every
+  factory serves every capability.
 
 ## 0.1.0a13 — unreleased
 

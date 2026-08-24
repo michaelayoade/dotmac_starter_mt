@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0a3 — unreleased
+
+- Adds `messaging.send.v1` in `ConnectorMode.DELIVERY` while retaining the
+  exact published a1 and a2 ingress manifests.
+- Ports Sub's text, template and media Graph wire shapes and provider response
+  classification through an injected HTTP transport.
+- Requires an explicit Graph API version, phone-number id and timeout for a
+  send binding; the connector provides no ageing API-version fallback.
+- Returns only typed outcome status, provider message reference and numeric
+  HTTP status. Provider response bodies and exception text are never retained.
+
 ## 0.1.0a2 — 2026-08-19
 
 Published, installed back from the private index, conformance-checked and

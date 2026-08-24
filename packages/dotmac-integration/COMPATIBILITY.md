@@ -8,8 +8,8 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a12`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, and a12 adds capability-wide product-port reconciliation |
-| Declared | `0.1.0a13` adds ProductObservation v1 projection and product-port descriptor v2 compatibility without changing SPI 1.3 |
+| Released | `0.1.0a1` through **`0.1.0a13`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, and a13 adds ProductObservation v1 projection |
+| Declared | `0.1.0a14` adds typed outbound provider evidence, delivered-payload retention and additive SPI 1.4 capability-to-mode declarations |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -21,6 +21,13 @@ seam. A current manifest declares named secret bindings and an exact external
 host allowlist; the empty allowlist means deny-all. Pre-1.3 manifests remain
 readable during adoption and keep their digest. A connector whose declared
 minimum is 1.3 cannot omit either runtime declaration.
+
+SPI 1.4 adds an optional mode set to each capability declaration. Omission
+retains the published 1.0–1.3 meaning: all plugin modes serve the capability.
+When present, the mapping is exact, included in the manifest digest and checked
+at discovery and invocation. This lets one plugin expose an ingress-only
+receive capability and a delivery-only send capability without either factory
+lying about the other.
 
 The `InboundEvent.disposition` field declared for a7 defaults to `deliver`.
 Existing connectors therefore keep their behaviour; connectors may explicitly
