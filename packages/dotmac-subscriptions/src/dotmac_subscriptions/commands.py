@@ -14,8 +14,14 @@ from sqlalchemy.orm import Session
 
 from dotmac_subscriptions.cadence import BillingCadence
 from dotmac_subscriptions.contracts import (
+    BillingArrangementDecision,
     CommercialEntitlementProjectionV1,
+    NonCashGrantOutputV1,
     RatedObligationOutputV1,
+)
+from dotmac_subscriptions.lifecycle import (
+    BillingTreatmentReason,
+    SubscriptionBillingTreatment,
 )
 from dotmac_subscriptions.values import ExactAmount
 
@@ -123,6 +129,67 @@ class GenerateRecurringChargeCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviewBillingArrangementCommand:
+    scope: Scope
+    subscription_contract_id: UUID
+    contract_version_id: UUID
+    contract_line_key: UUID
+    treatment: SubscriptionBillingTreatment
+    reason_code: BillingTreatmentReason
+    reason: str
+    starts_at: datetime
+    ends_at: datetime
+    approval_policy_reference: str
+    approval_policy_version: str
+    approval_policy_max_days: int
+    sponsor_reference: str | None
+    cost_center: str | None
+    evaluated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ApproveBillingArrangementCommand:
+    preview: PreviewBillingArrangementCommand
+    preview_fingerprint: str
+    approved_by: str
+    approved_at: datetime
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class RevokeBillingArrangementCommand:
+    scope: Scope
+    arrangement_id: UUID
+    revoked_by: str
+    revoked_at: datetime
+    reason: str
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecordNonCashGrantCommand:
+    scope: Scope
+    arrangement_id: UUID
+    occurrence_id: UUID
+    subscription_contract_id: UUID
+    contract_version_id: UUID
+    contract_line_key: UUID
+    starts_at: datetime
+    ends_at: datetime
+    reference_amount: ExactAmount
+    actor: str
+    reason: str
+    recorded_at: datetime
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
 class PublishOfferVersionResult:
     offer_id: UUID
     offer_version_id: UUID
@@ -150,6 +217,25 @@ class OccurrenceResult:
     occurrence_id: UUID
     replayed: bool
     staged_output: RatedObligationOutputV1
+
+
+@dataclass(frozen=True, slots=True)
+class BillingArrangementResult:
+    arrangement_id: UUID
+    decision: BillingArrangementDecision
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BillingArrangementRevocationResult:
+    arrangement_id: UUID
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashGrantResult:
+    output: NonCashGrantOutputV1
+    replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +273,9 @@ class DurableTimerPort(Protocol):
 
 
 __all__ = [
+    "ApproveBillingArrangementCommand",
+    "BillingArrangementResult",
+    "BillingArrangementRevocationResult",
     "ContractLineInput",
     "ContractVersionResult",
     "DurableTimerPort",
@@ -194,11 +283,15 @@ __all__ = [
     "EndContractVersionResult",
     "GenerateRecurringChargeCommand",
     "OccurrenceResult",
+    "NonCashGrantResult",
     "OfferPriceInput",
     "OfferPricingMode",
     "PublishOfferVersionCommand",
     "PublishOfferVersionResult",
+    "PreviewBillingArrangementCommand",
+    "RecordNonCashGrantCommand",
     "RecordSubscriptionContractVersionCommand",
+    "RevokeBillingArrangementCommand",
     "TimerCancelResult",
     "TimerScheduleResult",
     "WithdrawOfferVersionCommand",

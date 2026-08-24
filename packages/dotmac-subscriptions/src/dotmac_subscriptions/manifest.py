@@ -12,7 +12,7 @@ from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="subscriptions",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     short_code="subscriptions",
     migration_prefix="su",

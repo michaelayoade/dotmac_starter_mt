@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.0a3
+
+- Extract Sub's complimentary and sponsored billing-treatment lifecycle into
+  the recurring-commercial owner on both declared persistence planes.
+- Keep the strictly positive contracted price on the contract line and record
+  each waived service period as an exact append-only non-cash grant against a
+  rated occurrence; no zero-price concealment or customer-money consequence is
+  introduced.
+- Add finite policy-bound approval, seven reason codes, sponsor evidence,
+  replay-safe approval/revocation, overlap refusal, prospective revocation and
+  protected-drift resolution.
+- Freeze contract-version changes while an arrangement remains open and block
+  grant creation when offer, price, currency, scale or cadence evidence drifts.
+- Add additive `su_0003_billing_treatments` tenant/platform tables, RLS and
+  privilege boundaries, append-only grant guards and database term-freeze
+  canaries while leaving released a1/a2 migration bytes unchanged.
+
 ## 0.1.0a2
 
 - Flush the contract version before adding its lines, so recording a contract

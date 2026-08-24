@@ -2618,6 +2618,7 @@
           "dotmac_subscriptions/migrations/__init__.py",
           "dotmac_subscriptions/migrations/versions/su_0001_subscriptions.py",
           "dotmac_subscriptions/migrations/versions/su_0002_offer_pricing.py",
+          "dotmac_subscriptions/migrations/versions/su_0003_billing_treatments.py",
           "dotmac_subscriptions/models.py",
           "dotmac_subscriptions/py.typed",
           "dotmac_subscriptions/service.py",

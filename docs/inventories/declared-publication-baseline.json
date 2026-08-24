@@ -107,6 +107,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a3",
+      "reason": "OUTSTANDING UNTIL THIS PRODUCT-FIRST SLICE PASSES ACCEPTANCE. Version 0.1.0a2 is registry-verified and tagged; a3 adds Sub-derived finite complimentary/sponsored arrangements and append-only positive non-cash grants in additive su_0003. Remove this row in the authorized release-record change after Observer and hosted CI prove service behavior, dual-plane isolation, released-a2 upgrade and migration immutability; source presence is not release or Sub adoption.",
+      "state": "declared-unpublished"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",

@@ -23,6 +23,7 @@ PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
 ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
 PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
+TREATMENT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0003_billing_treatments.py"
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -189,8 +190,8 @@ def test_manifest_declares_one_dual_plane_owner() -> None:
         "module_database_roles.v1",
         "idempotency_ledger.v1",
     )
-    assert len(TENANT_TABLES) == 7
-    assert len(PLATFORM_TABLES) == 7
+    assert len(TENANT_TABLES) == 9
+    assert len(PLATFORM_TABLES) == 9
     assert set(TENANT_TABLES).isdisjoint(PLATFORM_TABLES)
     assert module.supported_plane_sets == (
         (ModulePlane.TENANT,),
@@ -401,9 +402,9 @@ def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
     assert "REVOKE ALL PRIVILEGES" in source
     assert "platform_api" in source
     assert "CREATE TRIGGER" in source
-    for table in TENANT_TABLES:
+    for table in TENANT_TABLES[:7]:
         assert table in source
-    for table in PLATFORM_TABLES:
+    for table in PLATFORM_TABLES[:7]:
         assert table in source
 
 
@@ -434,6 +435,57 @@ def test_offer_pricing_revision_loads_through_alembics_module_loader() -> None:
     assert migration.down_revision == "su_0001_subscriptions"
 
 
+def test_billing_treatment_is_additive_dual_plane_and_structurally_guarded() -> None:
+    source = TREATMENT_MIGRATION.read_text()
+
+    assert 'revision = "su_0003_billing_treatments"' in source
+    assert 'down_revision = "su_0002_offer_pricing"' in source
+    assert "selected_module_planes" in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "GRANT SELECT, INSERT ON" in source
+    assert "REVOKE ALL PRIVILEGES" in source
+    assert "billing_grants_immutable" in source
+    assert "billing_arrangements_no_overlap" in source
+    assert "contract_versions_billing_arrangement_freeze" in source
+    for table in TENANT_TABLES[7:]:
+        assert table in source
+    for table in PLATFORM_TABLES[7:]:
+        assert table in source
+
+
+def test_billing_treatment_revision_loads_through_alembics_module_loader() -> None:
+    from alembic.util.pyfiles import load_python_file
+
+    migration = load_python_file(
+        str(TREATMENT_MIGRATION.parent),
+        TREATMENT_MIGRATION.name,
+    )
+
+    assert migration.revision == "su_0003_billing_treatments"
+    assert migration.down_revision == "su_0002_offer_pricing"
+
+
+def test_billing_treatment_public_surface_is_product_neutral() -> None:
+    expected = {
+        "ApproveBillingArrangementCommand",
+        "BillingArrangementDecision",
+        "BillingTreatmentReason",
+        "NonCashGrantOutputV1",
+        "PreviewBillingArrangementCommand",
+        "RecordNonCashGrantCommand",
+        "RevokeBillingArrangementCommand",
+        "SubscriptionBillingTreatment",
+        "approve_billing_arrangement",
+        "preview_billing_arrangement",
+        "record_non_cash_grant",
+        "resolve_billing_arrangement",
+        "revoke_billing_arrangement",
+    }
+
+    assert expected <= set(dotmac_subscriptions.__all__)
+
+
 def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
 
@@ -443,9 +495,9 @@ def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
         "dotmac_vendor_control_plane",
     ]
     assert dossier["source_revisions"] == [
-        "dotmac_sub:27c76aaeebb792f089000af764d80f4dfe45c104",
+        "dotmac_sub:943bc59f8e4ca0849c7de578bc9dbc17c57b116f",
         "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
         "dotmac_vendor_control_plane:89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8",
     ]
-    assert len(dossier["source_paths"]) >= 11
-    assert len(dossier["preserved_tests"]) >= 14
+    assert len(dossier["source_paths"]) >= 16
+    assert len(dossier["preserved_tests"]) >= 17

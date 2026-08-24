@@ -6,7 +6,7 @@ there are private. `models`, `service`, and migration internals may be imported
 by the package itself but are not separate compatibility surfaces.
 
 The package version in `pyproject.toml`, `dotmac_subscriptions.__version__`, and
-the manifest version move together. The two output contracts have independent
+the manifest version move together. The three output contracts have independent
 wire versions carried both in their type name and `contract_version` field:
 
 - `RatedObligationOutputV1` is the subscriptions-to-assembly pre-tax rating
@@ -16,6 +16,9 @@ wire versions carried both in their type name and `contract_version` field:
 - `CommercialEntitlementProjectionV1` is money-free commercial intent. It is
   never a grant or a product-state command and follows the same versioning
   rule.
+- `NonCashGrantOutputV1` is positive foregone-value evidence for one exact
+  rated period under a finite approved arrangement. It creates no invoice,
+  entitlement, accounting entry, sponsor receivable or customer balance.
 
 `BillingCadence`, `Interval`, `ExactAmount`, command/result dataclasses, domain
 errors, link helpers, publisher protocols/fakes, `DurableTimerPort`, and the

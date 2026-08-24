@@ -6,7 +6,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier
 
@@ -746,6 +746,165 @@ def test_effective_contract_and_emitted_occurrence_are_structurally_immutable(
                 "WHERE id = :id"
             ),
             {"id": occurrence_id},
+        )
+    engine.dispose()
+
+
+def test_billing_grants_are_append_only_and_open_arrangements_freeze_terms(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    _, _, occurrence_id = _run_platform_occurrence_race(admin_url)
+    engine = create_engine(admin_url)
+    arrangement_id = uuid.uuid4()
+    grant_id = uuid.uuid4()
+    with engine.begin() as conn:
+        facts = (
+            conn.execute(
+                text(
+                    "SELECT o.contract_id, o.contract_version_id, "
+                    "o.contract_line_key, l.offer_version_id, o.period_start, "
+                    "o.period_end, o.pre_tax_amount, o.currency, o.amount_scale "
+                    "FROM mod_subscriptions.platform_recurring_charge_occurrences o "
+                    "JOIN mod_subscriptions.platform_subscription_contract_lines l "
+                    "ON l.contract_version_id = o.contract_version_id "
+                    "AND l.contract_line_key = o.contract_line_key "
+                    "WHERE o.id = :occurrence_id"
+                ),
+                {"occurrence_id": occurrence_id},
+            )
+            .mappings()
+            .one()
+        )
+        conn.execute(
+            text(
+                "INSERT INTO "
+                "mod_subscriptions.platform_subscription_billing_arrangements "
+                "(id, subscription_contract_id, contract_version_id, "
+                "contract_line_key, offer_version_id, treatment, reason_code, "
+                "reason, starts_at, ends_at, approval_policy_reference, "
+                "approval_policy_version, approval_policy_max_days, "
+                "maximum_recurring_amount, currency, scale, cadence_fingerprint, "
+                "status, approved_by, approved_at, command_id, correlation_id, "
+                "idempotency_key, content_digest) VALUES "
+                "(:id, :contract_id, :version_id, :line_key, :offer_version_id, "
+                "'complimentary', 'commercial_concession', 'approved canary', "
+                ":starts_at, :ends_at, 'policy:canary', '1', 366, :amount, "
+                ":currency, :scale, :cadence, 'active', 'approver', :starts_at, "
+                ":command_id, :correlation_id, :idempotency_key, :digest)"
+            ),
+            {
+                "id": arrangement_id,
+                "contract_id": facts["contract_id"],
+                "version_id": facts["contract_version_id"],
+                "line_key": facts["contract_line_key"],
+                "offer_version_id": facts["offer_version_id"],
+                "starts_at": facts["period_start"],
+                "ends_at": facts["period_end"],
+                "amount": facts["pre_tax_amount"],
+                "currency": facts["currency"],
+                "scale": facts["amount_scale"],
+                "cadence": "d" * 64,
+                "command_id": uuid.uuid4(),
+                "correlation_id": uuid.uuid4(),
+                "idempotency_key": f"arrangement:{arrangement_id}",
+                "digest": "e" * 64,
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_subscriptions.platform_subscription_billing_grants "
+                "(id, arrangement_id, occurrence_id, subscription_contract_id, "
+                "contract_version_id, contract_line_key, treatment, reason_code, "
+                "arrangement_reason, starts_at, ends_at, reference_amount, "
+                "currency, scale, actor, reason, recorded_at, command_id, "
+                "correlation_id, idempotency_key, content_digest) VALUES "
+                "(:id, :arrangement_id, :occurrence_id, :contract_id, :version_id, "
+                ":line_key, 'complimentary', 'commercial_concession', "
+                "'approved canary', :starts_at, :ends_at, :amount, :currency, "
+                ":scale, 'billing-owner', 'apply approved grant', :starts_at, "
+                ":command_id, :correlation_id, :idempotency_key, :digest)"
+            ),
+            {
+                "id": grant_id,
+                "arrangement_id": arrangement_id,
+                "occurrence_id": occurrence_id,
+                "contract_id": facts["contract_id"],
+                "version_id": facts["contract_version_id"],
+                "line_key": facts["contract_line_key"],
+                "starts_at": facts["period_start"],
+                "ends_at": facts["period_end"],
+                "amount": facts["pre_tax_amount"],
+                "currency": facts["currency"],
+                "scale": facts["amount_scale"],
+                "command_id": uuid.uuid4(),
+                "correlation_id": uuid.uuid4(),
+                "idempotency_key": f"grant:{grant_id}",
+                "digest": "f" * 64,
+            },
+        )
+
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
+        conn.execute(
+            text(
+                "UPDATE mod_subscriptions.platform_subscription_billing_grants "
+                "SET reference_amount = reference_amount + 1 WHERE id = :id"
+            ),
+            {"id": grant_id},
+        )
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
+        conn.execute(
+            text(
+                "DELETE FROM mod_subscriptions.platform_subscription_billing_grants "
+                "WHERE id = :id"
+            ),
+            {"id": grant_id},
+        )
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
+        conn.execute(
+            text(
+                "UPDATE "
+                "mod_subscriptions.platform_subscription_billing_arrangements "
+                "SET maximum_recurring_amount = maximum_recurring_amount + 1 "
+                "WHERE id = :id"
+            ),
+            {"id": arrangement_id},
+        )
+    with (
+        engine.connect() as conn,
+        pytest.raises(DBAPIError, match="revoke open billing arrangement"),
+    ):
+        conn.execute(
+            text(
+                "INSERT INTO "
+                "mod_subscriptions.platform_subscription_contract_versions "
+                "(id, contract_id, version, state, source_code, source_id, "
+                "source_version, starts_at, currency, rate_basis, rate_unit, "
+                "rate_quantity, service_interval_unit, service_interval_count, "
+                "invoice_interval_unit, invoice_interval_count, collection_timing, "
+                "alignment, end_of_month_rule, timezone_name, proration_policy, "
+                "rating_policy_version, actor, reason, recorded_at, command_id, "
+                "correlation_id, idempotency_key, content_digest) "
+                "SELECT :new_id, contract_id, 2, 'effective', source_code, "
+                "source_id, source_version + 1, :starts_at, currency, rate_basis, "
+                "rate_unit, rate_quantity, service_interval_unit, "
+                "service_interval_count, invoice_interval_unit, "
+                "invoice_interval_count, collection_timing, alignment, "
+                "end_of_month_rule, timezone_name, proration_policy, "
+                "rating_policy_version, 'term-change', 'canary', :starts_at, "
+                ":command_id, :correlation_id, :idempotency_key, :digest "
+                "FROM mod_subscriptions.platform_subscription_contract_versions "
+                "WHERE id = :version_id"
+            ),
+            {
+                "new_id": uuid.uuid4(),
+                "starts_at": facts["period_start"] + timedelta(days=15),
+                "command_id": uuid.uuid4(),
+                "correlation_id": uuid.uuid4(),
+                "idempotency_key": f"contract-change:{uuid.uuid4()}",
+                "digest": "1" * 64,
+                "version_id": facts["contract_version_id"],
+            },
         )
     engine.dispose()
 

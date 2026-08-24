@@ -21,6 +21,11 @@ from dotmac_subscriptions.errors import (
     SubscriptionConflictError,
     SubscriptionDataError,
 )
+from dotmac_subscriptions.lifecycle import (
+    BillingTreatmentDecisionStatus,
+    BillingTreatmentReason,
+    SubscriptionBillingTreatment,
+)
 from dotmac_subscriptions.values import (
     ExactAmount,
     entitlement_projection_fingerprint,
@@ -35,6 +40,97 @@ def _aware(value: datetime, field_name: str) -> None:
             "contracts.naive_datetime",
             f"{field_name} must be timezone-aware.",
         )
+
+
+@dataclass(frozen=True, slots=True)
+class BillingArrangementPreview:
+    subscription_contract_id: UUID
+    contract_version_id: UUID
+    contract_line_key: UUID
+    offer_version_id: UUID
+    treatment: SubscriptionBillingTreatment
+    reason_code: BillingTreatmentReason
+    reason: str
+    starts_at: datetime
+    ends_at: datetime
+    approval_policy_reference: str
+    approval_policy_version: str
+    approval_policy_max_days: int
+    maximum_recurring_amount: ExactAmount
+    cadence_fingerprint: str
+    sponsor_reference: str | None
+    cost_center: str | None
+    evaluated_at: datetime
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class BillingArrangementDecision:
+    scope: Scope
+    subscription_contract_id: UUID
+    contract_version_id: UUID
+    contract_line_key: UUID
+    status: BillingTreatmentDecisionStatus
+    treatment: SubscriptionBillingTreatment
+    arrangement_id: UUID | None
+    reason_code: BillingTreatmentReason | None
+    reason: str | None
+    starts_at: datetime | None
+    ends_at: datetime | None
+    maximum_recurring_amount: ExactAmount | None
+    drift_reason: str | None
+
+    @property
+    def suppress_customer_billing(self) -> bool:
+        return self.status is not BillingTreatmentDecisionStatus.standard
+
+    @property
+    def grantable(self) -> bool:
+        return self.status is BillingTreatmentDecisionStatus.effective
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashGrantOutputV1:
+    contract_type: str = field(init=False, default="subscriptions.non_cash_grant")
+    contract_version: int = field(init=False, default=1)
+    grant_id: UUID
+    arrangement_id: UUID
+    scope: Scope
+    subscription_contract_id: UUID
+    contract_version_id: UUID
+    contract_line_key: UUID
+    occurrence_id: UUID
+    treatment: SubscriptionBillingTreatment
+    reason_code: BillingTreatmentReason
+    arrangement_reason: str
+    starts_at: datetime
+    ends_at: datetime
+    reference_amount: ExactAmount
+    actor: str
+    reason: str
+    recorded_at: datetime
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        for name in ("starts_at", "ends_at", "recorded_at"):
+            _aware(getattr(self, name), name)
+        if self.ends_at <= self.starts_at:
+            raise SubscriptionDataError(
+                "contracts.invalid_grant_period",
+                "A non-cash grant requires a non-empty half-open service period.",
+            )
+        if self.reference_amount.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_grant",
+                "A non-cash grant must preserve a strictly positive foregone amount.",
+            )
+        if self.treatment is SubscriptionBillingTreatment.standard:
+            raise SubscriptionDataError(
+                "contracts.standard_grant",
+                "Standard customer billing cannot create non-cash grant evidence.",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,11 +419,14 @@ class FakeEntitlementProjectionPublisher:
 
 
 __all__ = [
+    "BillingArrangementDecision",
+    "BillingArrangementPreview",
     "CommercialEntitlementProjectionV1",
     "EntitlementIntent",
     "EntitlementProjectionPublisher",
     "FakeEntitlementProjectionPublisher",
     "FakeRatedObligationPublisher",
+    "NonCashGrantOutputV1",
     "RatedObligationOutputV1",
     "RatedObligationPublisher",
     "StageResult",

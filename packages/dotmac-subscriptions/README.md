@@ -6,9 +6,12 @@ planes.
 The module owns stable offers, immutable published offer/price versions,
 stable subscription contracts with immutable effective-dated versions and line
 lineage, calendar cadence and declared proration, and one replayable recurring
-charge occurrence per natural identity. It emits exact pre-tax rated facts and
-commercial-intent projections. The consuming assembly maps those outputs to
-the independently owned Billing or entitlement/access services.
+charge occurrence per natural identity. It also owns finite complimentary or
+sponsored arrangements and append-only non-cash grants against exact positive
+rated occurrences. It emits exact pre-tax rated facts, commercial-intent
+projections, and non-cash grant facts. The consuming assembly maps those
+outputs to independently owned Billing, entitlement/access, or Accounting
+services.
 
 The checked-in Cloud composition canary proves that the Billing mapping
 preserves source identity, the rated service period, collection timing and
@@ -31,7 +34,7 @@ The extraction dossier is [EXTRACTION.toml](EXTRACTION.toml); source and parity
 evidence remain in `docs/inventories/subscriptions-sources.md` and
 `docs/inventories/subscriptions-extraction-dossier.md`.
 
-The current release candidate is `0.1.0a2` and requires
+The current release candidate is `0.1.0a3` and requires
 `dotmac-kernel>=0.1.0a94` plus `alembic>=1.13`. Kernel `a89` supplies the
 subscriptions lineage allocation; `a94` is the actual minimum because it adds
 the manifest-owned `charge_models` and `obligation_sources` declarations that
