@@ -107,11 +107,6 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
-    "dotmac-tax": {
-      "declared": "0.1.0a2",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Published a1 is registry-verified at release run 32480725191 and tag dotmac-tax-v0.1.0a1; a2 adds the additive tx_0002 multi-component determination set and evidenced tax-specific party/supply/place classifications while retaining the a1 single-tax API. Release a2 only after its PostgreSQL migration/RLS, released-byte, unit, architecture and package gates are green. Publication does not move product authority: ERP remains the first statutory-policy/reporting cutover after its accounting consequence seam, backfill and zero-drift shadow; Sub containment may precede that cutover but Sub remains a fact producer. Remove this row in the release record change after registry verification writes dotmac-tax-v0.1.0a2.",
-      "state": "declared-unpublished"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
