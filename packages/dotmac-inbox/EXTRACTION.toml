@@ -17,6 +17,12 @@ source_revisions = [
   "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
   "dotmac_vendor_control_plane:e6b2bbee815cf9fd3ce99ceed0ff3a1f5763f057",
 ]
+revalidation_revisions = [
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_sub:app/models/team_inbox.py",
   "dotmac_sub:app/services/team_inbox_channel_receive.py",
@@ -55,3 +61,29 @@ first_cutover = "dotmac_sub is cutover 1 because it is the only active productio
 shadow_and_drift = "Sub shadows owner commands against the module in the same transaction and compares thread identity, status/reason, ordered messages, activity clocks, and per-operator read cursors. Channel declarations replace Sub's hardcoded opaque-channel set and global message-id uniqueness; account-scoped provider ids will admit legitimate events the old global constraint drops, so the shadow report must classify and count that expected delta. The Integrator mirror remains the transport cutover proof and is not replaced by module parity. Cutover requires zero unexplained owner differences, a PostgreSQL cross-tenant canary, a sealed one-writer switch, and product consequence adapters proven against the module outputs."
 local_copy_retirement = "After Sub cutover, retire local ownership of inbox_conversations, inbox_messages, inbox_conversation_read_states, the generic lifecycle/threading/dedup writers, and _OPAQUE_CONTACT_CHANNELS. Keep and rebind provider observations until the Integrator producer cutover separately retires them; keep product-owned participant/contact links, teams, routing, assignments, queues, presence, media, realtime, outbound delivery, AI intake, ticket/lead handoff, and product audit consequences. CRM remains retirement evidence under the existing CRM-to-Sub ledger, not a second owner. Two-directional caller/model/table ratchets reach zero before the local conversation owner is declared retired."
 next_action = "Validate this audit-complete package on Observer, then land Sub's expand migration and typed adapter as the first adoption slice. Do not compose or publish dotmac-inbox from Starter before that adopter proof, and do not add routers, provider clients, connector configuration, assignment/routing, attachments, realtime, templates, AI, or product subject columns to make the candidate look complete."
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["README.md", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/crm/conversation.py", "app/services/crm/inbox/dedup.py", "app/services/crm/inbox/conversation_status.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/support/ticket.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/team_inbox.py", "app/services/team_inbox_channel_receive.py", "app/services/team_inbox_commands.py", "app/services/team_inbox_read_state.py"]

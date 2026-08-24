@@ -15,6 +15,13 @@ source_revisions = [
   "dotmac_workspace:a158846c97e39b007724584244cb1ed4f9e6e58f",
   "dotmac_starter_mt:f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
 ]
+revalidation_revisions = [
+  "dotmac_workspace:c72fe304d3c8b2a2741d111379e4c4ab0af5da57",
+  "dotmac_academy_app:40423a07a4eaa6172a36997f3276cb7a79dda343",
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_erp:app/models/finance/gl/account.py",
   "dotmac_erp:app/models/finance/gl/account_category.py",
@@ -49,3 +56,42 @@ first_cutover = "ERP is source and first exact-pin adopter. Its clean installati
 shadow_and_drift = "On independently migrated clean databases, compare governed-opening counts, exact totals and content digests plus versioned business-fixture journal, line, account, dimension, lifecycle and refusal outcomes. Prove retry no-op, changed-fingerprint conflict and synthetic-second-tenant isolation. Legacy full-history digests remain forensic evidence, not import or parity targets; a rehearsal report never authorizes a switch."
 local_copy_retirement = "An ERP writer ratchet reaches zero for chart, fiscal period, journal, posting, reversal and ledger mutation paths at the sealed cutover. Ledger query/report adapters move to the module contract. Fixed-asset, AP, AR, inventory and tax owners retain only typed consequence production and cannot write GL tables. No permanent mirror or fallback writer remains."
 next_action = "ERP implements the governed clean-bootstrap manifest and module adapters, proves two fresh-database rehearsals, then retires its writer/caller ratchets in coherent domain slices. Finance approval of the opening pack and an accepted cross-database sealing protocol remain final cutover gates."
+[[product_writers]]
+product = "dotmac_workspace"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "c72fe304d3c8b2a2741d111379e4c4ab0af5da57"
+evidence_paths = ["README.md", "src/dotmac_workspace/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "40423a07a4eaa6172a36997f3276cb7a79dda343"
+evidence_paths = ["README.md", "app/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["README.md", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["docs/ARCHITECTURE.md"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/finance/gl/account.py", "app/models/finance/gl/fiscal_period.py", "app/models/finance/gl/journal_entry.py", "app/services/finance/gl/ledger_posting.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/customer_subledger.py"]

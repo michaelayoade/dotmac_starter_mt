@@ -62,10 +62,13 @@ credits, and that ERP owns the general ledger. Sub's invoices and credit notes
 remain the operational receivables owner described by ADR-0020. They may emit
 accounting facts but do not move into Accounting or Payables.
 
-CRM, Vendor control plane, Academy, Workspace and Backoffice have no generic
-chart, journal, fiscal-period, supplier-invoice or payable-obligation owner at
-the pinned revisions. Academy's matches are course content. CRM's matches are
-reports/settings. Vendor and Workspace have none.
+CRM has no generic chart, journal or fiscal-period owner, but it does have an
+active, tested project-bound `VendorPurchaseInvoice` lifecycle and ERP push
+path. It is not the qualifying Payables source and owns no general liability,
+obligation, settlement or accounting-receipt ledger, but it is a legacy
+supplier-invoice writer that must retire rather than be reported absent.
+Vendor control plane, Academy, Workspace and Backoffice have no competing
+owner at the pinned revisions; Academy's matches are course content.
 
 The local `agent/dotmac-finance` worktree was inspected as non-authoritative
 candidate evidence. It is uncommitted fixed-asset book work and explicitly

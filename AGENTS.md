@@ -484,7 +484,7 @@ specifics) points here and must never fork these rules.
     identity if a repository setting changes.
     (`scripts/assert_current_main.sh`)
 
-33. **A writer claim is TYPED, and the prose channel only shrinks.**
+33. **A writer claim is TYPED and COMPLETE.**
     `[[product_writers]]` in a dossier states, per product, whether it is the
     `qualifying_source`, a `legacy_writer` that must stop, a `no_writer`, or
     `inventory_only` — with an immutable revision and evidence paths. Governance
@@ -492,22 +492,26 @@ specifics) points here and must never fork these rules.
     contradicted by the dossiers they described because the cited claim was
     prose.
 
-    The block may be ABSENT, deliberately: silence must stay distinguishable
-    from a claim of absence, so a consumer that cannot find its row fails as
-    UNKNOWN. That makes #354 migration support, not enforcement — which is what
-    this rule adds. `product-writer-baseline.json` freezes the prose-only
-    dossier/product pairs (303 across 86 dossiers at the freeze; one dossier
-    fully typed) as a TWO-DIRECTIONAL ratchet: it may not grow, and it may not
-    shrink without being regenerated in the same change. A dossier absent from
-    the baseline must be complete, which is what stops the debt growing with
-    the package count.
+    Silence still means UNKNOWN rather than `no_writer`, but UNKNOWN is no
+    longer admissible in a checked-in dossier: every product named by
+    `source_repositories` except this Starter repository has exactly one typed
+    row. The row's immutable `revision` equals that product's exactly one
+    effective audit coordinate — `revalidation_revisions` when the dossier has
+    re-audited that product, otherwise `source_revisions` — so prose cannot be
+    refreshed while the typed claim silently continues to describe another
+    tree. `source_revisions` is historical provenance and is never rewritten to
+    a later tree; a later verified coordinate is added under
+    `revalidation_revisions`. The transitional
+    prose-only baseline was deleted when every dossier reached complete typed
+    coverage on 2026-08-23; recreating a baseline would weaken the absolute
+    rule back into an exemption.
 
     Retire a pair by READING the source product and recording what you found.
     Never by inferring a state from the prose already there — a scanner
     guessing `no_writer` from a sentence manufactures the false confidence this
     exists to remove.
-    (`scripts/product_writer_sweep.py`; `make product-writer-check`;
-    `tests/architecture/test_product_writer_ratchet.py`)
+    (`scripts/product_writer_check.py`; `make product-writer-check`;
+    `tests/architecture/test_product_writer_completeness.py`)
 
 ## Everything by config — no hardcoding
 

@@ -14,6 +14,11 @@ source_repositories = [
   "dotmac_starter_mt",
 ]
 
+source_revisions = [
+  "dotmac_sub:0324d2dcf91e2be038459e41aa013125128e9d43",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
+
 source_paths = [
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_runtime.py",
   "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_installation.py",
@@ -49,3 +54,16 @@ shadow_and_drift = "Mirror the exact raw body and signature header into Integrat
 local_copy_retirement = "Retire only Sub's provider transport surface: webhook signature verification, provider payload traversal, provider event identity construction and provider acknowledgement. Sub retains the authoritative messaging decision, contact/conversation resolution and timeline consequences behind its typed observation port. No ERPNext or CRM connector is recreated; retired product connections stay retired."
 
 next_action = "Complete and release the additive DELIVERY slice: typed provider evidence and terminal outbound-content retention in dotmac-integration, text/template/media parity in this connector, then exact-pin both in dotmac_integrator and run its provider-neutral command intake and delivery pump. Shadow Sub's local outbox against Integrator before retiring the direct Graph client and lowering the external-connector ratchet. Move status to adopted only after ingress and outbound cutovers are both complete."
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["README.md", "docs/SOT_RELATIONSHIP_MAP.md"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0324d2dcf91e2be038459e41aa013125128e9d43"
+evidence_paths = ["app/services/integrations/whatsapp_runtime.py", "app/services/integrations/whatsapp_installation.py", "tests/test_integration_whatsapp_capability.py", "tests/test_team_inbox_outbound.py", "tests/test_team_inbox_whatsapp_webhook.py"]

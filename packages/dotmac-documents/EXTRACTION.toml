@@ -25,6 +25,12 @@ source_revisions = [
   "dotmac_vendor_control_plane:e6b2bbee815cf9fd3ce99ceed0ff3a1f5763f057",
   "dotmac_starter_mt:68939275174885fa9d673c1778e6fd03b11b9f2f",
 ]
+revalidation_revisions = [
+  "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
+  "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+]
 source_paths = [
   "dotmac_erp:app/models/people/hr/handbook.py",
   "dotmac_erp:app/services/people/hr/handbook_service.py",
@@ -53,5 +59,52 @@ inventory_evidence = [
 composition_boundary = "ADR-0024/0033: each product installs its own tenant-only do lineage. Documents imports the kernel but no sibling/product. Assemblies pass opaque Files ids/checksums, approval observations and timer requests across typed seams; Records may consume a Documents version only as an opaque source snapshot, never by FK or ORM import."
 first_cutover = "ERP after its E8 tenant/session/lineage gate: HR handbook is the first coherent slice because it is the qualifying source and already has version/effective-date/acknowledgement demand. Sub follows with controlled legal documents after the exact release is proven in ERP; quote business meaning and rendering stay in Sub."
 shadow_and_drift = "ERP backfills stable documents plus exact immutable versions and Files ids/checksums; shadow compares document code, version chain, current/effective state, metadata, checksum and acknowledgement identity. The last typed comparison, sealed ADR-0031 authority switch and legacy-writer lock are one transaction. Sub repeats for its legal-document slice. Rendition checks compare source/output digest and renderer version, never visual filenames."
-local_copy_retirement = "ERP removes HRDocument lifecycle/version allocation and direct handbook byte-path authority after the sealed switch and rollback window; domain applicability adapters may remain. A two-directional caller/table ratchet reaches zero. Sub removes mutable LegalDocument replace/delete/current-version ownership for the adopted slice. Neither product keeps a fallback writer."
+local_copy_retirement = "ERP removes HRDocument lifecycle/version allocation and direct handbook byte-path authority after the sealed switch and rollback window; domain applicability adapters may remain. A two-directional caller/table ratchet reaches zero. Sub removes mutable LegalDocument replace/delete/current-version ownership for the adopted slice. CRM's mutable LegalDocument service and replace-in-place filesystem path are retirement inputs too: they drain with CRM or migrate through the exact module and Files seams, never remain as a fallback writer."
 next_action = "Complete exact-commit Observer validation, then cut ERP's E8 prerequisite and checked-in adoption plan. Keep kernel a84 and Documents a1 unpublished until the package, lineage and adopter gates are green; do not claim adoption until ERP's old writer is retired."
+
+[[product_writers]]
+product = "dotmac-academy"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "71b87b2abfb1dc5c1db540faca257004a8c2bf9c"
+evidence_paths = ["README.md", "scripts/build_pdf.py"]
+
+[[product_writers]]
+product = "dotmac_workspace"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "c72fe304d3c8b2a2741d111379e4c4ab0af5da57"
+evidence_paths = ["README.md", "src/dotmac_workspace/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "40423a07a4eaa6172a36997f3276cb7a79dda343"
+evidence_paths = ["app/models/certificate.py", "app/services/certificates.py"]
+
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "0c77e85c7f54538e69061614c8de42ad0f6d2332"
+evidence_paths = ["README.md", "src/vendor_cp/assembly.py"]
+
+[[product_writers]]
+product = "dotmac_crm"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "60daaa2dd305696636632f48505ab784110a55d2"
+evidence_paths = ["app/models/legal.py", "app/services/legal.py"]
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/people/hr/handbook.py", "app/services/people/hr/handbook_service.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/services/sales/quote_documents.py", "alembic/versions/471_quote_documents_and_delivery.py", "app/models/legal.py"]

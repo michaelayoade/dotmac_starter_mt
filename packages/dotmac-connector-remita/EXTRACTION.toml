@@ -10,6 +10,11 @@ contract = "Implement dotmac-integration SPI >=1.3,<2.0 for connector key remita
 
 source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_starter_mt"]
 
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
+
 source_paths = [
   "dotmac_erp@c656bb9070b7f35659f1968e44823e4727b309b9:app/services/remita/client.py",
   "dotmac_erp@c656bb9070b7f35659f1968e44823e4727b309b9:app/services/remita/rrr_service.py",
@@ -38,3 +43,15 @@ shadow_and_drift = "For every configured reference compare authenticated provide
 local_copy_retirement = "Delete ERP's Remita status HTTP transport, provider credential reader and polling schedule after cutover, lowering the external-connector ratchet in the same change. ERP keeps RRR intent and lifecycle, biller/service selection, source linkage, payment decisions and every accounting consequence."
 
 next_action = "Validate on Observer and GitHub CI. After dotmac-integration 0.1.0a11 and this package are published, exact-pin them in dotmac_integrator and execute the ERP shadow/cutover. RRR issuance remains blocked on a durable request-response seam and is not disguised as fire-and-forget delivery."
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/services/remita/client.py", "app/services/remita/rrr_service.py"]
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
