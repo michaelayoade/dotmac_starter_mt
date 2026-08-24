@@ -813,7 +813,7 @@ url = "packages/dotmac-connector-linkedin"
 [[package]]
 name = "dotmac-connector-meta-social"
 version = "0.1.0a1"
-description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
+description = "Facebook and Instagram ingress and delivery connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["dev"]
@@ -821,7 +821,8 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a10"
+dotmac-integration = ">=0.1.0a14"
+httpx = ">=0.27,<1.0"
 
 [package.source]
 type = "directory"
