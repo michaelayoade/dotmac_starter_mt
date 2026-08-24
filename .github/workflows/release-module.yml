@@ -93,6 +93,7 @@ on:
           - dotmac-network-topology
           - dotmac-numbering
           - dotmac-operational-escalations
+          - dotmac-response-obligations
           - dotmac-party
           - dotmac-payables
           - dotmac-payments
