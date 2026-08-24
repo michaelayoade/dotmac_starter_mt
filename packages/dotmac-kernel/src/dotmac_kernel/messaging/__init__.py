@@ -19,7 +19,7 @@ level. Import it directly: `from dotmac_kernel.messaging import ...`.
 
 from __future__ import annotations
 
-from dotmac_kernel.messaging.envelope import CommandEnvelope
+from dotmac_kernel.messaging.envelope import CommandEnvelope, UnattributedCommandError
 from dotmac_kernel.messaging.inbox import (
     CommandHandler,
     ProcessOutcome,
@@ -61,6 +61,7 @@ from dotmac_kernel.messaging.worker import (
 __all__ = [
     # envelope
     "CommandEnvelope",
+    "UnattributedCommandError",
     # inbox / idempotent processing (tenant-scoped)
     "CommandHandler",
     "ProcessOutcome",

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from collections.abc import Mapping, Sequence, Set
 from contextlib import asynccontextmanager
 
@@ -71,6 +72,13 @@ from dotmac_kernel.setting_value_types import (
     install_setting_value_types,
 )
 from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.source_applications import (
+    InvalidSourceApplicationError,
+    SourceApplicationRegistry,
+    install_host_application,
+    install_source_applications,
+    validate_source_application,
+)
 from dotmac_kernel.templating import (
     compose_templates,
     install_stylesheets,
@@ -347,6 +355,54 @@ def _validate_referenced_capabilities(
         )
 
 
+def _normalized_application_code(raw: str) -> str | None:
+    """Best-effort conversion of an assembly NAME into a source-application code.
+
+    An assembly name is prose-ish by contract (`ProductAssemblySpec.name`), and
+    plenty of real ones — `api-only-probe`, `dedicated-product` — differ from a
+    code only in punctuation. Converting those is honest: it is still this
+    application naming itself.
+
+    Returns None rather than inventing something when the name cannot be made
+    into a code (a single letter, an empty string). NOT installing a host
+    identity is the correct outcome there: the process genuinely has not said
+    who it is, `write_audit_event` says exactly that when something tries to
+    record an unattributed event, and the fix is to set SOURCE_APPLICATION.
+    Substituting `"app"` or `"system"` would turn a loud omission into a quiet
+    wrong answer in the one column meant to be trustworthy.
+    """
+    candidate = re.sub(r"[^a-z0-9_]+", "_", raw.strip().lower()).strip("_")
+    try:
+        return validate_source_application(candidate)
+    except InvalidSourceApplicationError:
+        return None
+
+
+def _install_attribution(spec: ProductAssemblySpec) -> None:
+    """Install the accepted-peer registry and, when resolvable, the host identity.
+
+    The host's own code is always in the accepted set. That is not a widening:
+    "this deployment accepts attribution from itself" is what a host identity
+    MEANS, and requiring an operator to also list it would make forgetting to
+    a silent way to break every locally originated audit write.
+    """
+    host = settings.source_application.strip() or _normalized_application_code(
+        spec.name
+    )
+    if host is not None and settings.source_application.strip():
+        # An explicitly configured code is never normalized. A typo there must
+        # fail at boot naming the variable, not be quietly reshaped into a
+        # different application's name.
+        validate_source_application(host)
+
+    accepted = set(settings.accepted_source_application_set)
+    if host is not None:
+        accepted.add(host)
+    install_source_applications(SourceApplicationRegistry(accepted))
+    if host is not None:
+        install_host_application(host)
+
+
 def _install_profile_defaults(defaults: Mapping[str, object]) -> None:
     """Validate and install the assembly's declared setting defaults.
 
@@ -427,6 +483,13 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    # Attribution: which applications this deployment accepts, and which one it
+    # IS. Installed with the other declaration catalogues and for the same
+    # reason — both are read at request/write time by code the mount produces —
+    # but sourced from CONFIGURATION rather than from manifests, because a peer
+    # application is a fact about the deployment's topology and not something
+    # any composed module owns. See `dotmac_kernel.source_applications`.
+    _install_attribution(spec)
     install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     # Capabilities join them (step 4). Same installed-not-enabled rule, and the
     # same reason it matters more here: a tenant's entitlement GRANT references a

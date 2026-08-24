@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from dotmac_kernel.idempotency import execute_once
 from dotmac_kernel.idempotency_models import INBOX_SCOPE
 from dotmac_kernel.messaging.envelope import CommandEnvelope
+from dotmac_kernel.source_applications import active_source_applications
 
 # A handler applies the command's effect and returns a JSON-serializable result
 # (or None) recorded for idempotent replay. It runs inside the caller's
@@ -53,7 +54,19 @@ def process_once(
 ) -> ProcessOutcome:
     """Process `envelope` at most once. Returns a `ProcessOutcome` whose
     `was_duplicate` is True when a prior result was replayed instead of running
-    `handler`."""
+    `handler`.
+
+    The issuing application is checked against this deployment's accepted set
+    BEFORE the idempotency ledger is touched, so a command from an application
+    this deployment does not talk to is refused rather than recorded as
+    processed — recording it first would make the refusal permanent on replay
+    and would let an unaccepted issuer consume a `command_id`.
+
+    Membership is exact. `dotmac_sub_staging` does not pass as `dotmac_sub`,
+    and there is no wildcard entry that would let one line re-open everything
+    the registry exists to close.
+    """
+    active_source_applications().require(envelope.issuer())
     outcome = execute_once(
         db,
         tenant_id=envelope.tenant_id,

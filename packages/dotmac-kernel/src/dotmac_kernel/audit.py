@@ -40,6 +40,11 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from dotmac_kernel.audit_actions import active_audit_actions
 from dotmac_kernel.models import Base, uuid_pk
 from dotmac_kernel.models_platform import PlatformAuditEvent
+from dotmac_kernel.source_applications import (
+    SOURCE_APPLICATION_MAX_LENGTH,
+    host_application_or_none,
+    validate_source_application,
+)
 
 #: The four actor kinds the contract defines. Deliberately a Python constant
 #: over a `String` column, NOT a PostgreSQL enum. Actor kinds are kernel-owned
@@ -59,6 +64,17 @@ ACTOR_TYPES: frozenset[str] = frozenset({"system", "user", "api_key", "service"}
 #:   service   service-principal identifier             no party
 #:   api_key   the key ID — NEVER the token             optional owning party
 #:   user      principal identifier                     party when available
+
+
+class UnattributedAuditEventError(ValueError):
+    """No source application could be resolved for an audit event.
+
+    Fatal for the same reason `MissingAuditActorError` is: the alternative is a
+    NULL, or worse a plausible-looking `"system"`, in the one column that is
+    supposed to answer "which application did this". An audit trail whose
+    attribution is mostly a placeholder is not a partial trail — it is a trail
+    that reads as complete and is not.
+    """
 
 
 class MissingAuditActorError(ValueError):
@@ -95,6 +111,16 @@ class AuditEvent(Base):
     #: Optional accountability enrichment. NOT a foreign key: an audit row must
     #: outlive the party it references.
     actor_party_id: Mapped[UUID | None] = mapped_column(Uuid(), index=True)
+    #: WHICH APPLICATION issued this. A different question from the actor pair:
+    #: `("api_key", "<key id>")` says a machine did it, and this says whose
+    #: machine. Nullable only because rows written before `0028_machine_
+    #: attribution` never recorded one — exactly the reason `actor_type` is
+    #: nullable, and with the same non-backfill: an application nobody can name
+    #: from the row is not recoverable by guessing, and a guess written into an
+    #: audit column is indistinguishable from a fact.
+    source_application: Mapped[str | None] = mapped_column(
+        String(SOURCE_APPLICATION_MAX_LENGTH), index=True
+    )
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(120))
@@ -171,6 +197,41 @@ def resolve_audit_actor(
     return actor_type, resolved_id
 
 
+def resolve_event_attribution(source_application: str | None) -> str:
+    """Return the source application to record, or raise.
+
+    Two legitimate answers, and they are not a fallback chain from a good one to
+    a bad one — they are two different true statements:
+
+    * an EXPLICIT value, which is what a caller passes when the operation was
+      issued by somebody else: a machine-authenticated request passes
+      `request.state.source_application`, set from the credential;
+    * the HOST identity, which is what this process IS. An operator clicking a
+      button in this application's own admin portal really was issued by this
+      application, and recording that is the truth rather than a default.
+
+    What is NOT here is a third answer for "we could not work it out". Neither
+    `None` nor `"system"` nor `"unknown"` is produced: a process that never
+    declared its identity raises, and the message says so, because the failure
+    is a startup wiring omission and fixing it anywhere else makes the column
+    lie.
+    """
+    if source_application is not None:
+        return validate_source_application(source_application)
+    host = host_application_or_none()
+    if host is None:
+        raise UnattributedAuditEventError(
+            "no source application for this audit event: none was passed and "
+            "this process never declared which application it is. Pass "
+            "`source_application=` (for a machine-authenticated caller, "
+            "`request.state.source_application`), or call "
+            "`dotmac_kernel.source_applications.install_host_application(...)` "
+            "at startup. Refusing to record 'system' or NULL — an attribution "
+            "column that is mostly a placeholder reads as complete and is not."
+        )
+    return host
+
+
 def write_audit_event(
     db: Session,
     *,
@@ -179,6 +240,7 @@ def write_audit_event(
     actor_type: str,
     actor_id: str | None = None,
     actor_label: str | None = None,
+    source_application: str | None = None,
     action: str,
     entity_type: str,
     entity_id: str | None = None,
@@ -197,6 +259,13 @@ def write_audit_event(
     anything is added to the session, so a rejected write leaves no partial
     state. See this module's docstring for why the trail's vocabulary is a
     declaration rather than free text.
+
+    `source_application` says WHICH APPLICATION issued the operation, and every
+    row carries one — see `resolve_event_attribution` for the two legitimate
+    answers and why there is no third. Pass it explicitly whenever the operation
+    arrived from another application (a machine-authenticated request has it on
+    `request.state.source_application`); leave it unset for something this
+    application originated itself and the host identity is recorded.
 
     The actor is resolved by `resolve_audit_actor`: pass `actor_type` and, for
     every non-system actor, an explicit `actor_id`. `actor_party_id` is optional
@@ -217,12 +286,17 @@ def write_audit_event(
         actor_id=actor_id,
         actor_party_id=actor_party_id,
     )
+    # Validated with `action` and the actor pair, BEFORE anything is added to
+    # the session, for the same reason those two are: a rejected write must
+    # leave no partial state behind in the caller's transaction.
+    resolved_application = resolve_event_attribution(source_application)
     event = AuditEvent(
         tenant_id=tenant_id,
         actor_type=resolved_type,
         actor_id=resolved_id,
         actor_label=actor_label,
         actor_party_id=actor_party_id,
+        source_application=resolved_application,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -269,8 +343,10 @@ __all__ = [
     "AuditEvent",
     "MissingAuditActorError",
     "PlatformAuditEvent",
+    "UnattributedAuditEventError",
     "UnknownAuditActorTypeError",
     "resolve_audit_actor",
+    "resolve_event_attribution",
     "write_audit_event",
     "write_platform_audit_event",
 ]
