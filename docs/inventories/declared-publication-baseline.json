@@ -102,6 +102,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a16",
+      "reason": "DECLARED BY THE DOMAIN-OWNED PAYLOAD-CONTRACT AND DURABLE RESULT SLICE, NOT YET RELEASED. a15 IS published (peeled tag dotmac-integration-v0.1.0a15 -> bd8d2262c26f62041cc22a813916066b9af85c7f), so the new CapabilityContract schema/digest surface, Outcome.result and ig_0013 delivery result storage require a new version. It is NOT to be repaired by editing the version down: remove this row only when the module release workflow installs, verifies and tags 0.1.0a16, and never publish a connector that requires the new contract before that tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a95",
       "reason": "ALLOCATION RELEASE PENDING THE PROTECTED WORKFLOW. a95 adds one MIGRATION_OWNER_LEDGER row (response_obligations / ro / mod_sla) and changes no behaviour for any existing consumer. dotmac-response-obligations declares it as a floor and is itself unreleasable until this ships. Remove this row in the a95 release-record change; do not edit the declared version down.",

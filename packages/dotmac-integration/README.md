@@ -12,7 +12,7 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a14`; `0.1.0a15` is declared and
+**Released: `0.1.0a1` through `0.1.0a15`; `0.1.0a16` is declared and
 unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
@@ -29,6 +29,8 @@ a14 adds typed outbound provider evidence, delivered-payload retention and SPI
 1.4's explicit capability-to-mode mapping.
 a15 refuses changed-effect reuse of an outbound idempotency key and contains
 concurrent enqueue uniqueness failures behind typed, material-safe outcomes.
+a16 adds the domain-owned capability payload contract and durably stores its
+validated command result; raw provider response bodies remain unrepresentable.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

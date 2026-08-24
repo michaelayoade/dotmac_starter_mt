@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from dotmac_integration import (
@@ -426,7 +426,7 @@ def test_the_missing_schema_refusal_does_not_fire_in_a_grace() -> None:
 def test_an_expired_grace_refuses_rather_than_warning() -> None:
     """An expiry that does nothing is a permanent optional field with a date
     attached, which is the exact shape this rule exists to stop."""
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = datetime.now(UTC).date() - timedelta(days=1)
     lapsed = CapabilityContract(
         capability_id=FAKE_CAPABILITY,
         owner=OWNER,
@@ -651,6 +651,9 @@ def test_a_valid_result_settles_against_the_GATED_contract(
     settle(db, delivery, good, prepared=prepared, registry=registry)
     db.refresh(delivery)
     assert delivery.state == "delivered"
+    assert (
+        delivery.result_json == VALID_RESULT
+    ), "validation without durable storage discards the reply after reporting success"
 
 
 def test_a_failed_attempt_is_still_recordable_without_a_result_body(
@@ -671,6 +674,7 @@ def test_a_failed_attempt_is_still_recordable_without_a_result_body(
     )
     db.refresh(delivery)
     assert delivery.state == "reconciliation_required"
+    assert delivery.result_json is None
 
 
 # ══ 8. PLANT: an unreadable observation, at the inbox seam ═════════════════

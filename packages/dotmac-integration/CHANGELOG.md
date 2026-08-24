@@ -2,18 +2,17 @@
 
 ## Release state — read this before pinning
 
-**Fourteen versions have been released. Pin `0.1.0a14`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a14`; a14 was published, installed
-back from the private index, registered and tagged from `70459efd` by release
-run `32693378851`.
+**Fifteen versions have been released. Pin `0.1.0a15`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a15`; a15 was published, installed
+back from the private index, registered and tagged from exact revision
+`bd8d2262c26f62041cc22a813916066b9af85c7f`.
 
-`0.1.0a14` is the latest published version. It adds typed outbound provider
-evidence, delivered-payload retention and additive SPI 1.4 capability-to-mode
-declarations.
+`0.1.0a15` is the latest published version. It makes outbound idempotency
+collisions and enqueue races typed, adds repair/reconciliation, runtime safety
+and module-owned metric definitions.
 
-`0.1.0a15` is declared and unreleased. It makes outbound idempotency collisions
-and enqueue races typed: a reused key with a changed event, binding or payload
-is refused, and a uniqueness loser never exposes driver-bound parameters.
+`0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts
+and durably stores a validated normalized result in `ig_0013`.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -75,7 +74,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## Unreleased
+## 0.1.0a16 — unreleased
 
 ### One capability id now means one PAYLOAD, and the domain owns it
 
@@ -123,8 +122,9 @@ grew two disjoint command vocabularies with nothing able to see it.
   is a JSON pointer and a failing keyword, because `error_detail` is persisted.
 - `spi.canonical_digest` is now the ONE canonical-JSON hashing rule;
   `execution.payload_digest` delegates to it and keeps its meaning.
-- No schema change and no migration slot is consumed. Every obligation is a
-  boundary validation over values both sides already hold in memory.
+- Adds `ig_0013_delivery_result`. A validated `Outcome.result` is persisted
+  atomically with settlement rather than discarded after validation, and ages
+  out with the command payload under the same legal hold.
 - **Not repaired here, and deliberately visible:** `messaging.send.v1` still has
   two connectors with disjoint command vocabularies. ADR-0024 § 11.2 repairs it
   by SUCCESSION rather than redefinition, so it stays in grace until Sub
@@ -160,7 +160,10 @@ grew two disjoint command vocabularies with nothing able to see it.
 - No schema change: both columns already exist, and no migration slot is
   consumed.
 
-## 0.1.0a15 — unreleased
+## 0.1.0a15 — released 2026-08-24
+
+Published, installed back from the private index, registered and tagged from
+exact revision `bd8d2262c26f62041cc22a813916066b9af85c7f`.
 
 ### Outbound enqueue identity and race safety
 

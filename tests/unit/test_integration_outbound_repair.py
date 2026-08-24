@@ -293,6 +293,7 @@ def test_replaying_a_landed_command_returns_the_recorded_outcome(
         delivered_at=delivered_at,
         provider_reference="wamid.outbound-2",
         provider_status_code=200,
+        result_json={"accepted_reference": "message-2"},
     )
 
     decision = replay_by_idempotency_key(
@@ -308,6 +309,7 @@ def test_replaying_a_landed_command_returns_the_recorded_outcome(
     assert decision.outcome.delivered_at == delivered_at
     assert decision.outcome.provider_reference == "wamid.outbound-2"
     assert decision.outcome.provider_status_code == 200
+    assert decision.outcome.result == {"accepted_reference": "message-2"}
     assert decision.outcome.attempt_count == 2
     # NOTHING moved, and nothing was audited: no decision was taken.
     assert delivery.state == "delivered"

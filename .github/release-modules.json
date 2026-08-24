@@ -1431,7 +1431,8 @@
           "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py",
           "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py",
           "dotmac_integration/migrations/versions/ig_0011_replay_retention.py",
-          "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py"
+          "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py",
+          "dotmac_integration/migrations/versions/ig_0013_delivery_result.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -674,14 +674,15 @@ def inspect_delivery(db: Any, *, delivery_id: UUID) -> DeadLetterEntry:
 class RecordedOutcome:
     """What a command that already landed actually did.
 
-    Returned instead of a re-dispatch. Typed provider evidence only — the same
-    two columns the outbox stores, for the same reason it stores only those.
+    Returned instead of a re-dispatch. Provider evidence stays typed, while a
+    domain-normalized result is returned only while retention still holds it.
     """
 
     delivered_at: datetime | None
     attempt_count: int
     provider_reference: str | None
     provider_status_code: int | None
+    result: dict[str, object] | None
 
     @classmethod
     def of(cls, delivery: DeliveryAttempt) -> RecordedOutcome:
@@ -690,6 +691,7 @@ class RecordedOutcome:
             attempt_count=delivery.attempt_count,
             provider_reference=delivery.provider_reference,
             provider_status_code=delivery.provider_status_code,
+            result=delivery.result_json,
         )
 
 

@@ -459,6 +459,11 @@ def settle(
         # the success it actually observed rather than retaining stale facts.
         "provider_reference": outcome.provider_reference,
         "provider_status_code": outcome.provider_status_code,
+        # The schema gate above makes this a domain result, not an arbitrary
+        # provider body. Failed outcomes never publish content.
+        "result_json": (
+            outcome.result if outcome.status is OutcomeStatus.SUCCEEDED else None
+        ),
     }
     if next_state_value == "delivered":
         values.update(
