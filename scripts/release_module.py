@@ -16,6 +16,20 @@ The workflow's `choice` input constrains the same set at the UI layer, and
 `tests/architecture/test_module_release_allowlist.py` asserts the two agree, so
 the convenience list cannot drift away from the enforced one.
 
+## Stateful and stateless modules without an optional gate
+
+Both shapes have a ``ModuleManifest`` and a real kernel floor. Every allowlist
+row also has a mandatory ``db_schema`` key: a ``mod_*`` string for a stateful
+module or explicit null for a stateless one. ``resolve`` reads the manifest's
+literal ``short_code`` and ``migration_prefix`` and requires both or neither,
+then compares the result to that key. Dropping a stateful row's schema therefore
+still refuses; changing it to null while the manifest remains stateful also
+refuses. The clean-wheel smoke repeats the proof through ``ModuleRegistry``, and
+a stateless wheel containing a migration lineage is refused.
+
+This is distinct from ``stateless-protocol-adapter``: an adapter has no
+``ModuleManifest`` and no kernel floor, and remains in its own stricter lane.
+
 ## Why the kernel floor is checked here
 
 `kernel_floor` is the EARLIEST kernel that can actually load and register the
@@ -41,6 +55,7 @@ Stdlib only, deliberately: this runs before anything is installed.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import subprocess
@@ -54,6 +69,7 @@ from typing import Final
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = REPO_ROOT / ".github" / "release-modules.json"
 PACKAGES_ROOT = REPO_ROOT / "packages"
+CLASSIFICATION: Final = "optional-module"
 
 
 class ReleaseRefused(SystemExit):
@@ -68,6 +84,75 @@ def load_allowlist() -> dict[str, dict]:
     return data["modules"]
 
 
+def _manifest_db_schema(entry: dict) -> str | None:
+    """Read the manifest's persistence shape without importing the package.
+
+    The release gate runs before dependencies are installed.  The manifest is
+    nevertheless authoritative for whether this is a stateful or stateless
+    installable module, so read its literal ``short_code`` and
+    ``migration_prefix`` declarations from the AST.  Requiring both or neither
+    is the guard that prevents a stateful module with one dropped identity field
+    from being silently treated as stateless.
+    """
+    path = entry["package_path"] / "src" / entry["import_name"] / "manifest.py"
+    if not path.is_file():
+        raise ReleaseRefused(
+            f"{entry['distribution']}: no manifest.py at "
+            f"{path.relative_to(REPO_ROOT)}"
+        )
+
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    declaration: ast.Call | None = None
+    for statement in tree.body:
+        value: ast.expr | None = None
+        targets: list[ast.expr] = []
+        if isinstance(statement, ast.Assign):
+            value = statement.value
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign):
+            value = statement.value
+            targets = [statement.target]
+        if not isinstance(value, ast.Call):
+            continue
+        if any(
+            isinstance(target, ast.Name) and target.id == entry["manifest_attr"]
+            for target in targets
+        ):
+            declaration = value
+            break
+    if declaration is None:
+        raise ReleaseRefused(
+            f"{entry['distribution']}: manifest.py does not assign "
+            f"{entry['manifest_attr']!r}"
+        )
+
+    keywords = {
+        keyword.arg: keyword.value
+        for keyword in declaration.keywords
+        if keyword.arg is not None
+    }
+
+    def optional_literal(name: str) -> str | None:
+        node = keywords.get(name)
+        if node is None or (isinstance(node, ast.Constant) and node.value is None):
+            return None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        raise ReleaseRefused(
+            f"{entry['distribution']}: manifest {name} must be a literal string "
+            "or absent so the pre-install release gate can prove its shape"
+        )
+
+    short_code = optional_literal("short_code")
+    migration_prefix = optional_literal("migration_prefix")
+    if (short_code is None) != (migration_prefix is None):
+        raise ReleaseRefused(
+            f"{entry['distribution']}: manifest must declare short_code and "
+            "migration_prefix together, or neither for a stateless module"
+        )
+    return None if short_code is None else f"mod_{short_code}"
+
+
 def resolve(distribution: str) -> dict:
     """The gate. Every other subcommand takes its facts from this result."""
     modules = load_allowlist()
@@ -78,13 +163,61 @@ def resolve(distribution: str) -> dict:
             f"are: {', '.join(sorted(modules))}. Adding one is a reviewed change "
             f"to {ALLOWLIST.relative_to(REPO_ROOT)}, not a dispatch input."
         )
+    required = {
+        "package_dir",
+        "import_name",
+        "manifest_attr",
+        "kernel_floor",
+        "db_schema",
+        "tag_prefix",
+        "wheel_contents",
+    }
+    missing = sorted(required - set(entry))
+    if missing:
+        raise ReleaseRefused(
+            f"{distribution}: release entry is missing mandatory field(s): "
+            + ", ".join(missing)
+        )
+
     package_dir = REPO_ROOT / entry["package_dir"]
     if not (package_dir / "pyproject.toml").is_file():
         raise ReleaseRefused(
             f"{distribution}: allowlisted package_dir {entry['package_dir']!r} "
             "has no pyproject.toml"
         )
-    return {**entry, "distribution": distribution, "package_path": package_dir}
+    resolved = {**entry, "distribution": distribution, "package_path": package_dir}
+
+    dossier_path = package_dir / "EXTRACTION.toml"
+    if not dossier_path.is_file():
+        raise ReleaseRefused(
+            f"{distribution}: no EXTRACTION.toml — the module lane cannot prove "
+            "the governed classification"
+        )
+    dossier = tomllib.loads(dossier_path.read_text(encoding="utf-8"))
+    declared = dossier.get("classification")
+    if declared != CLASSIFICATION:
+        raise ReleaseRefused(
+            f"{distribution}: EXTRACTION.toml declares classification "
+            f"{declared!r}, but this lane publishes only {CLASSIFICATION!r}"
+        )
+
+    recorded_schema = entry["db_schema"]
+    if recorded_schema is not None and not (
+        isinstance(recorded_schema, str) and recorded_schema.startswith("mod_")
+    ):
+        raise ReleaseRefused(
+            f"{distribution}: db_schema must be a mod_* string for a stateful "
+            "module or null for a stateless module"
+        )
+    manifest_schema = _manifest_db_schema(resolved)
+    if manifest_schema != recorded_schema:
+        raise ReleaseRefused(
+            f"{distribution}: manifest schema {manifest_schema!r} disagrees "
+            f"with release allowlist {recorded_schema!r}. null is mandatory for "
+            "a stateless module; a stateful module may not drop its schema."
+        )
+
+    return resolved
 
 
 def _declared(entry: dict) -> dict:
@@ -150,11 +283,15 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     floor = manifest["dependencies"].get("dotmac-kernel")
     expected = f">={entry['kernel_floor']}"
     if floor != expected:
+        floor_reason = (
+            f"the release that allocated {entry['db_schema']!r}"
+            if entry["db_schema"] is not None
+            else "the earliest published kernel capability the stateless manifest uses"
+        )
         raise ReleaseRefused(
             f"{args.distribution}: kernel floor is {floor!r} but the allowlist "
-            f"records {expected!r} as the release that allocated "
-            f"{entry['db_schema']!r}. An earlier kernel cannot register this "
-            "module at all."
+            f"records {expected!r} as {floor_reason}. An earlier kernel cannot "
+            "register this module at all."
         )
 
     # Consumed by the workflow via $GITHUB_OUTPUT.
@@ -163,10 +300,14 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         "import_name",
         "manifest_attr",
         "kernel_floor",
-        "db_schema",
         "tag_prefix",
     ):
         print(f"{key}={entry[key]}")
+    if entry["db_schema"] is None:
+        print("release_shape=stateless")
+    else:
+        print("release_shape=stateful")
+        print(f"db_schema={entry['db_schema']}")
     print(f"version={manifest['version']}")
     print(f"tag={entry['tag_prefix']}{manifest['version']}")
 
@@ -203,6 +344,15 @@ def cmd_inspect(args: argparse.Namespace) -> None:
         for prefix in policy["forbidden_prefixes"]:
             if name.startswith(prefix):
                 problems.append(f"forbidden content: {name}")
+
+    if entry["db_schema"] is None:
+        for name in names:
+            if "/migrations/" in name:
+                problems.append(
+                    f"migration lineage in a stateless module wheel: {name} — "
+                    "the package gained persistence without changing its "
+                    "release profile"
+                )
 
     # Dependency closure is reviewed per module. Most modules depend on the
     # kernel and third-party persistence libraries only; ADR-0006 also permits
@@ -281,7 +431,7 @@ def _venv(path: Path) -> tuple[Path, Path]:
 _REGISTER = """
 import pathlib, sys
 import dotmac_kernel
-from dotmac_kernel.namespaces import NamespaceRegistry
+from dotmac_kernel.modules import ModuleRegistry
 
 manifests, names = [], {names!r}
 for import_name, attr, schema in names:
@@ -291,17 +441,23 @@ for import_name, attr, schema in names:
     # The installed distribution, never the checkout it was built from.
     assert "site-packages" in str(here), f"{{import_name}} resolved to {{here}}"
     assert manifest.db_schema == schema, (import_name, manifest.db_schema, schema)
+    assert manifest.stateful is (schema is not None), (
+        import_name, manifest.stateful, schema
+    )
+    if schema is None:
+        assert manifest.migration_owner() is None, import_name
     manifests.append(manifest)
 
-# Construction IS validation: distinct schemas, prefixes, branch labels, and no
-# contested table. With more than one manifest this is the composition proof.
-NamespaceRegistry.from_manifests(manifests)
+# Construction IS validation: module identities, dependencies and contracts,
+# plus the namespace checks for every stateful member. A stateless manifest is
+# registered as a module while contributing no schema or migration owner.
+ModuleRegistry(manifests)
 print("kernel", dotmac_kernel.__version__, "registered:",
-      ", ".join(m.db_schema for m in manifests))
+      ", ".join(m.db_schema or f"{{m.code}} (stateless)" for m in manifests))
 """
 
 
-def _verify_installed(python: Path, targets: list[tuple[str, str, str]]) -> None:
+def _verify_installed(python: Path, targets: list[tuple[str, str, str | None]]) -> None:
     subprocess.run([str(python), "-c", _REGISTER.format(names=targets)], check=True)
 
 
@@ -389,7 +545,7 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     """
     import tempfile
 
-    targets: list[tuple[str, str, str]] = []
+    targets: list[tuple[str, str, str | None]] = []
     specs: list[str] = []
     if args.kernel:
         # The kernel is NOT an allowlisted module — it has its own release
