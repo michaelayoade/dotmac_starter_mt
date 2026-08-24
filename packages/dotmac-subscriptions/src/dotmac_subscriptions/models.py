@@ -47,6 +47,8 @@ class _OfferColumns:
 
 class _OfferVersionColumns:
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    charge_model_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    pricing_mode: Mapped[str] = mapped_column(String(24), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     effective_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -239,6 +241,10 @@ class OfferVersion(Base, _OfferVersionColumns):
             name="ck_offer_versions_state",
         ),
         CheckConstraint(
+            "pricing_mode IN ('catalog_price', 'contract_price')",
+            name="ck_offer_versions_pricing_mode",
+        ),
+        CheckConstraint(
             "effective_until IS NULL OR effective_until > effective_from",
             name="ck_offer_versions_interval",
         ),
@@ -268,7 +274,7 @@ class OfferVersionPrice(Base, _PriceColumns):
             name="uq_offer_version_prices_key",
         ),
         CheckConstraint(
-            "amount >= 0 AND quantity > 0", name="ck_offer_version_prices_amounts"
+            "amount > 0 AND quantity > 0", name="ck_offer_version_prices_amounts"
         ),
         CheckConstraint("scale >= 0 AND scale <= 6", name="ck_offer_prices_scale"),
         schema_table_args(SCHEMA),
@@ -395,7 +401,7 @@ class SubscriptionContractLine(Base, _ContractLineColumns):
             name="uq_contract_lines_component",
         ),
         CheckConstraint(
-            "quantity > 0 AND unit_price >= 0", name="ck_contract_lines_amounts"
+            "quantity > 0 AND unit_price > 0", name="ck_contract_lines_amounts"
         ),
         CheckConstraint("scale >= 0 AND scale <= 6", name="ck_contract_lines_scale"),
         CheckConstraint(
@@ -535,6 +541,10 @@ class PlatformOfferVersion(Base, _OfferVersionColumns):
             name="ck_platform_offer_versions_state",
         ),
         CheckConstraint(
+            "pricing_mode IN ('catalog_price', 'contract_price')",
+            name="ck_platform_offer_versions_pricing_mode",
+        ),
+        CheckConstraint(
             "effective_until IS NULL OR effective_until > effective_from",
             name="ck_platform_offer_versions_interval",
         ),
@@ -556,7 +566,7 @@ class PlatformOfferVersionPrice(Base, _PriceColumns):
             "offer_version_id", "price_key", name="uq_platform_offer_prices_key"
         ),
         CheckConstraint(
-            "amount >= 0 AND quantity > 0", name="ck_platform_offer_prices_amounts"
+            "amount > 0 AND quantity > 0", name="ck_platform_offer_prices_amounts"
         ),
         CheckConstraint(
             "scale >= 0 AND scale <= 6", name="ck_platform_offer_prices_scale"
@@ -652,7 +662,7 @@ class PlatformSubscriptionContractLine(Base, _ContractLineColumns):
             name="uq_platform_contract_lines_component",
         ),
         CheckConstraint(
-            "quantity > 0 AND unit_price >= 0",
+            "quantity > 0 AND unit_price > 0",
             name="ck_platform_contract_lines_amounts",
         ),
         CheckConstraint(

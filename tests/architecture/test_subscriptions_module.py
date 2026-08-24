@@ -21,7 +21,8 @@ from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
-MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
+ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
+PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -152,9 +153,14 @@ def _scope_shape_violations(source: str) -> set[str]:
                 violations.add("nullable_tenant_id")
         if isinstance(node, ast.Name) and node.id == "scope_kind":
             violations.add("scope_kind")
-        if isinstance(node, ast.Name) and "sentinel_tenant" in node.id:
-            violations.add("sentinel_tenant")
-        if isinstance(node, ast.arg) and "sentinel_tenant" in node.arg:
+        identifier = (
+            node.id
+            if isinstance(node, ast.Name)
+            else node.arg
+            if isinstance(node, ast.arg)
+            else ""
+        )
+        if "sentinel_tenant" in identifier:
             violations.add("sentinel_tenant")
     return violations
 
@@ -316,6 +322,7 @@ def test_commercial_inputs_have_no_implicit_defaults() -> None:
         BillingCadence,
         ContractLineInput,
         ExactAmount,
+        PublishOfferVersionCommand,
         RecordSubscriptionContractVersionCommand,
     )
 
@@ -328,6 +335,10 @@ def test_commercial_inputs_have_no_implicit_defaults() -> None:
     for value_type, names in (
         (ExactAmount, {"amount", "currency", "scale"}),
         (ContractLineInput, {"product_link_ref", "unit_price", "quantity"}),
+        (
+            PublishOfferVersionCommand,
+            {"charge_model_code", "pricing_mode", "prices"},
+        ),
         (
             RecordSubscriptionContractVersionCommand,
             {"currency", "cadence", "source_code"},
@@ -379,7 +390,7 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
 
 
 def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    source = MIGRATION.read_text()
+    source = ROOT_MIGRATION.read_text()
 
     assert 'revision = "su_0001_subscriptions"' in source
     assert 'branch_labels = ("subscriptions",)' in source
@@ -394,6 +405,33 @@ def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
         assert table in source
     for table in PLATFORM_TABLES:
         assert table in source
+
+
+def test_offer_pricing_evolves_in_an_additive_composable_revision() -> None:
+    source = PRICING_MIGRATION.read_text()
+
+    assert 'revision = "su_0002_offer_pricing"' in source
+    assert 'down_revision = "su_0001_subscriptions"' in source
+    assert "selected_module_planes" in source
+    assert "ModulePlane.TENANT" in source
+    assert "ModulePlane.PLATFORM" in source
+    assert "sa.func.count(sa.distinct(price_table.c.charge_model_code)) != 1" in source
+    assert "contains a non-positive price" in source
+    assert "contains a non-positive contract price" in source
+    assert 'pricing_mode="catalog_price"' in source
+    assert 'version_table.c.pricing_mode == "contract_price"' in source
+
+
+def test_offer_pricing_revision_loads_through_alembics_module_loader() -> None:
+    from alembic.util.pyfiles import load_python_file
+
+    migration = load_python_file(
+        str(PRICING_MIGRATION.parent),
+        PRICING_MIGRATION.name,
+    )
+
+    assert migration.revision == "su_0002_offer_pricing"
+    assert migration.down_revision == "su_0001_subscriptions"
 
 
 def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:

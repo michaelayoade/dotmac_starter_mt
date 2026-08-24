@@ -17,9 +17,12 @@ VERSIONS = (
     / "packages/dotmac-service-catalog/src/dotmac_service_catalog/migrations/versions"
 )
 TABLES = (
-    "service_specifications",
     "plan_families",
+    "plan_family_versions",
+    "service_specifications",
+    "service_specification_versions",
     "characteristic_definitions",
+    "service_specification_characteristics",
     "eligibility_input_definitions",
 )
 
@@ -82,7 +85,11 @@ def test_every_catalogue_table_is_forced_and_filters_cross_tenant_rows(
     admin = create_engine(admin_url)
     with admin.begin() as connection:
         for index, tenant in enumerate(tenants):
+            family = uuid.uuid4()
+            family_version = uuid.uuid4()
             specification = uuid.uuid4()
+            specification_version = uuid.uuid4()
+            definition = uuid.uuid4()
             connection.execute(
                 text(
                     "INSERT INTO public.tenants (id, slug, name) "
@@ -92,29 +99,107 @@ def test_every_catalogue_table_is_forced_and_filters_cross_tenant_rows(
             )
             connection.execute(
                 text(
-                    "INSERT INTO mod_svc_cat.service_specifications "
-                    "(id, tenant_id, code, name) "
-                    "VALUES (:id, :tenant, :code, :code)"
+                    "INSERT INTO mod_svc_cat.plan_families "
+                    "(id, tenant_id, code) VALUES (:id, :tenant, :code)"
                 ),
-                {"id": specification, "tenant": tenant, "code": f"spec-{index}"},
+                {"id": family, "tenant": tenant, "code": f"family-{index}"},
             )
-            for table in TABLES[1:]:
-                kind_column = ", kind" if table == "characteristic_definitions" else ""
-                kind_value = ", 'STRING'" if kind_column else ""
-                columns = f"id, tenant_id, specification_id, code, name{kind_column}"
-                values = f":id, :tenant, :specification, :code, :code{kind_value}"
-                connection.execute(
-                    text(
-                        f"INSERT INTO mod_svc_cat.{table} "  # noqa: S608
-                        f"({columns}) VALUES ({values})"
-                    ),
-                    {
-                        "id": uuid.uuid4(),
-                        "tenant": tenant,
-                        "specification": specification,
-                        "code": f"{table}-{index}",
-                    },
-                )
+            evidence = {
+                "tenant": tenant,
+                "source_id": uuid.uuid4(),
+                "command_id": uuid.uuid4(),
+            }
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.plan_family_versions "
+                    "(id, tenant_id, plan_family_id, version, name, state, "
+                    "effective_from, source_code, source_id, source_version, "
+                    "command_id, content_digest) VALUES "
+                    "(:id, :tenant, :family, 1, :name, 'published', now(), "
+                    "'isolation', :source_id, 1, :command_id, :digest)"
+                ),
+                {
+                    **evidence,
+                    "id": family_version,
+                    "family": family,
+                    "name": f"Family {index}",
+                    "digest": f"{index:064d}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.service_specifications "
+                    "(id, tenant_id, plan_family_id, code) "
+                    "VALUES (:id, :tenant, :family, :code)"
+                ),
+                {
+                    "id": specification,
+                    "tenant": tenant,
+                    "family": family,
+                    "code": f"spec-{index}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.service_specification_versions "
+                    "(id, tenant_id, specification_id, plan_family_id, "
+                    "plan_family_version_id, version, name, state, effective_from, "
+                    "source_code, source_id, source_version, command_id, "
+                    "content_digest) VALUES (:id, :tenant, :specification, "
+                    ":family, :family_version, 1, :name, 'published', now(), "
+                    "'isolation', :source_id, 1, :command_id, :digest)"
+                ),
+                {
+                    **evidence,
+                    "id": specification_version,
+                    "specification": specification,
+                    "family": family,
+                    "family_version": family_version,
+                    "name": f"Specification {index}",
+                    "digest": f"{index + 10:064d}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.characteristic_definitions "
+                    "(id, tenant_id, specification_id, code, name, kind) "
+                    "VALUES (:id, :tenant, :specification, :code, :code, 'INTEGER')"
+                ),
+                {
+                    "id": definition,
+                    "tenant": tenant,
+                    "specification": specification,
+                    "code": f"speed-{index}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.service_specification_characteristics "
+                    "(id, tenant_id, specification_version_id, specification_id, "
+                    "definition_id, integer_value) VALUES "
+                    "(:id, :tenant, :version, :specification, :definition, 100)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": tenant,
+                    "version": specification_version,
+                    "specification": specification,
+                    "definition": definition,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_svc_cat.eligibility_input_definitions "
+                    "(id, tenant_id, specification_id, code, name) VALUES "
+                    "(:id, :tenant, :specification, :code, :code)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": tenant,
+                    "specification": specification,
+                    "code": f"address-{index}",
+                },
+            )
     admin.dispose()
     app = create_engine(app_url)
     try:
