@@ -123,15 +123,17 @@ replacement.
 the a92 tag and the hand-written record, and every open branch inherited the
 five failures during that window — each presenting as that branch being broken.
 
-**Status:** silent success remediated; automatic opening remains open.
+**Status:** silent success remediated; the dedicated recorder and protected
+credential projection are installed; one real automatic-opening proof remains.
 
 | # | Action | Owner | State |
 |---|---|---|---|
 | 1 | `give_up` fails the run, links the ready-made pull-request page | this change | done |
 | 2 | Guard pinning that no third success path can appear | this change | done |
 | 3 | Remove pull-request authority from every tag-writing job's ordinary workflow token and enforce exact `contents: write` | this change | done |
-| 4 | Install a dedicated recorder GitHub App with metadata read, contents write and pull-requests write, but no Actions, deployment, environment or administration authority | Michael | **open** |
-| 5 | Prove one low-risk release automatically opens its record through that App and keep the freeze until the green record merges and protected `main` is verified | Michael + release captain | **open** |
+| 4 | Install a dedicated recorder GitHub App with metadata read, contents write and pull-requests write, but no Actions, deployment, environment or administration authority | Michael | done 2026-08-24 |
+| 5 | Hold the private key canonically in OpenBao and project it only into the protected `registry-release` environment | Michael | done 2026-08-24 |
+| 6 | Prove one low-risk release automatically opens its record through that App and keep the freeze until the green record merges and protected `main` is verified; then revoke the old App key and remove the repository-level fallback inputs | Michael + release captain | **open** |
 
 The repaired loud path has now run for real. Kernel a93 run `32622991682`
 pushed `chore/record-dotmac-kernel-0.1.0a93`, failed RED when PR creation was
@@ -144,10 +146,19 @@ pull-request-write permission also reaches the review API, so the App is not
 described as intrinsically review-incapable. Instead, it authors and last-pushes
 its own mechanical PR, protected `main` requires a fresh approval from another
 actor with no bypass, and the App has no Actions, deployment, environment or
-administration authority. The publisher token has contents write only. Until
-the App is installed, it can push the correct branch but cannot open the PR;
-the accepted fail-closed bridge is one manual click and a red run rather than
-silent green.
+administration authority. The publisher token has contents write only.
+
+As observed at 2026-08-24 22:35 UTC, private App
+`dotmac-release-recorder-328160` is installed with selected-repository access
+to `michaelayoade/dotmac_starter_mt` only. A direct key proof authenticated the
+App, checked its exact permission declaration, enumerated only Starter through
+an unrestricted installation token and revoked that token. Canonical custody
+is `secret/dotmac/github/release-recorder#private_key`; the protected
+`registry-release` environment carries variable
+`RELEASE_RECORDER_CLIENT_ID` and secret `RELEASE_RECORDER_PRIVATE_KEY`.
+Repository-level copies and the previous App key remain a deliberate rollback
+until item 6 passes. The release captain refreshes this mutable settings
+observation before dispatch and removes that fallback after the proof.
 
 ---
 
