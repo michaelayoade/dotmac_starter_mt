@@ -72,6 +72,29 @@ class Outcome:
     error_detail: str | None = None
     #: A provider's own instruction, in seconds. Always wins over the curve.
     retry_after_seconds: int | None = None
+    #: Bounded provider evidence used to correlate a later callback. This is a
+    #: reference, not an arbitrary result object: response bodies are neither
+    #: required for retry classification nor safe to retain in the outbox.
+    provider_reference: str | None = None
+    #: The HTTP status observed for this attempt, when the provider spoke HTTP.
+    #: Kept typed so a connector cannot smuggle a response body through an
+    #: unstructured evidence mapping.
+    provider_status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        reference = self.provider_reference
+        if reference is not None:
+            normalized = reference.strip()
+            if not normalized or len(normalized) > 500:
+                raise ValueError("provider_reference must be 1..500 characters")
+            object.__setattr__(self, "provider_reference", normalized)
+        status = self.provider_status_code
+        if status is not None and (
+            not isinstance(status, int)
+            or isinstance(status, bool)
+            or not 100 <= status <= 599
+        ):
+            raise ValueError("provider_status_code must be an HTTP status 100..599")
 
     @property
     def is_final(self) -> bool:

@@ -4,9 +4,53 @@ Dated 2026-08-14. As-built characterisation of what already exists in the fleet,
 written before any connector code, per **hard rule 24** (product-first
 extraction; `AGENTS.md` numbering is authoritative). Facts, not mandates.
 
-The target is the first real connector for the Integrator: **ingress-only**
-Meta/WhatsApp, a separately released distribution discovered through the
-`dotmac_integration.connectors` entry-point group.
+The original target was the first real connector for the Integrator:
+**ingress-only** Meta/WhatsApp, a separately released distribution discovered
+through the `dotmac_integration.connectors` entry-point group.
+
+## Outbound amendment — 2026-08-23
+
+Michael directed completion of the WhatsApp outbox with parity against the
+current Sub system. The qualifying source is pinned to
+`dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43`; the dirty local checkout is
+not evidence. The send-side surface previously excluded below is now the
+mandatory product-first source for a second, additive `DELIVERY` mode.
+
+The ownership boundary is:
+
+| Concern | Owner after extraction |
+|---|---|
+| customer-window eligibility, template choice, conversation/message state and local durable outbox | Sub |
+| provider-neutral command acceptance, installation/binding selection, claim/retry/dead-letter/reconciliation and bounded content retention | `dotmac-integration` in the Integrator deployment |
+| Graph URL and authorization, text/template/media wire shapes, media upload and provider-response classification | `dotmac-connector-whatsapp` |
+| HTTP validation/delegation and worker scheduling | thin `dotmac_integrator` assembly |
+
+The connector receives a product-decided action. It does not decide whether a
+free-form message is allowed inside the customer-service window and does not
+select a template. The engine stores only typed provider evidence needed to
+correlate the later status webhook: the provider message reference and numeric
+HTTP status. It never stores a provider response body.
+
+### Exact source and parity set
+
+| Source | Disposition |
+|---|---|
+| `whatsapp_runtime.py`: `build_text_payload`, `build_template_payload`, `_ordered_template_parameters` | port |
+| `whatsapp_runtime.py`: `build_media_payload`, `_uploading_media_payload` | port, retaining upload-before-send sequencing and classifying an ambiguous second call as reconciliation-required |
+| `whatsapp_runtime.py`: `_endpoint`, `_media_endpoint`, `_headers`, `_response_receipt` | port behind the connector's injected HTTP seam; persist no response body |
+| `test_integration_whatsapp_capability.py`: preview does not call provider | superseded: preview is a product operation and no preview command enters the durable Integrator outbox |
+| `test_integration_whatsapp_capability.py`: ambiguous timeout | port |
+| `test_integration_whatsapp_capability.py`: one enabled typed binding | port to the generic engine/assembly, without a WhatsApp branch |
+| `test_team_inbox_outbound.py`: text/template/media payloads and retry preservation | port at the provider edge; Sub retains its local message/outbox assertions |
+| `test_team_inbox_outbound.py`: 24-hour window, template selection, scheduling and conversation mutation | keep in Sub; these are product decisions |
+| template listing/reading | defer: it is request/response discovery, not an outbound delivery, and the current delivery outcome cannot return arbitrary provider data safely |
+
+Two engine gaps are prerequisites, not connector workarounds. A successful
+`Outcome` must carry bounded typed provider evidence into the delivery ledger,
+or Meta's `wamid` is lost before the status callback arrives. And terminal
+outbound payload content must age out under an explicit retention policy while
+the idempotency key, digest, state and provider reference survive. The connector
+must not create a private result table or retention loop to compensate.
 
 ## Blocking finding: `modes` is decorative across the whole SPI
 
@@ -154,17 +198,16 @@ qualifies rather than merely existing.
 - `_message_text`, `_message_attachments`, `_event_timestamp` — payload shaping.
 - `normalize_phone_identifier` — sender identity normalisation.
 
-### Explicitly OUT of scope (egress / `DELIVERY`)
+### Explicitly OUT of scope for the original ingress slice
 
 `build_text_payload`, `build_template_payload`, `build_media_payload`,
 `_endpoint`, `_media_endpoint`, `_headers`, `_response_receipt`,
 `_template_variables`, `WhatsAppRuntimeRunner`, `_ordered_template_parameters`.
 
-Roughly two thirds of `whatsapp_runtime.py` is send-side. Ingress-only means
-this connector declares `frozenset({ConnectorMode.INGRESS})`, satisfies
-`IngressPlugin` only, and ships none of it — a connector that could send would
-need a shadow plan for outbound traffic too, and outbound is where a mistake
-reaches a customer.
+Roughly two thirds of `whatsapp_runtime.py` is send-side. It stayed out of the
+first release because a connector that can send needs an independently proved
+outbox and outbound shadow plan. The 2026-08-23 amendment above authorizes that
+second slice; this paragraph remains the historical disposition of a1/a2.
 
 ### Coupling to remove during the port
 

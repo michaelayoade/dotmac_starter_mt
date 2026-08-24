@@ -12,7 +12,7 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a12`; `0.1.0a13` is declared and
+**Released: `0.1.0a1` through `0.1.0a13`; `0.1.0a14` is declared and
 unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
@@ -25,6 +25,8 @@ carries its capability, without putting a binding list in the assembly.
 a13 accepts the product-owned v2 descriptor and projects a generic
 ProductObservation v1 document with engine-derived installation provenance;
 connector SPI remains 1.3.
+a14 adds typed outbound provider evidence, delivered-payload retention and SPI
+1.4's explicit capability-to-mode mapping.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

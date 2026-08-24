@@ -4,9 +4,9 @@ classification = "stateless-protocol-adapter"
 status = "audit-complete"
 source_mode = "product-first"
 
-owner = "Meta WhatsApp Cloud API ingress authentication and wire translation: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, and provider acknowledgement bytes."
+owner = "Meta WhatsApp Cloud API protocol edge: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, text/template/media delivery wire shapes, provider response classification, and provider acknowledgement bytes."
 
-contract = "Implement dotmac-integration SPI >=1.3,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector declares and reads only webhook_signing_secret, optional webhook_signing_previous_secret, and webhook_verify_token, with explicit deny-all provider egress. It receives immutable request bytes plus already-materialized secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision."
+contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key meta_whatsapp and capabilities messaging.receive.v1 plus messaging.send.v1. INGRESS verifies immutable request bytes and returns provider facts. DELIVERY receives product-decided text/template/media commands and already-materialized access material, performs only Meta Graph wire translation and I/O, and returns typed engine outcomes. The connector owns no rows, sessions, retries, checkpoints, product identity, customer-window decision, template selection, conversation state, tickets, subscribers, or destination decision."
 
 source_repositories = [
   "dotmac_erp",
@@ -15,9 +15,11 @@ source_repositories = [
 ]
 
 source_paths = [
-  "dotmac_sub:app/services/integrations/whatsapp_runtime.py",
-  "dotmac_sub:app/services/integrations/whatsapp_installation.py",
-  "dotmac_sub:tests/services/integrations/test_whatsapp_runtime.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_runtime.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:app/services/integrations/whatsapp_installation.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_integration_whatsapp_capability.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_outbound.py",
+  "dotmac_sub@0324d2dcf91e2be038459e41aa013125128e9d43:tests/test_team_inbox_whatsapp_webhook.py",
   "dotmac_starter_mt:docs/inventories/whatsapp-connector-sources.md",
   "dotmac_starter_mt:docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md",
   "dotmac_starter_mt:tests/fixtures/meta_whatsapp/manifest.json",
@@ -40,10 +42,10 @@ inventory_evidence = [
   "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
 ]
 
-first_cutover = "Sub is the first product destination, through the independently deployed dotmac_integrator assembly. The connector is published first, then exact-pinned beside dotmac-integration 0.1.0a10. The assembly derives secret and egress policy from the installed manifest, records provider-neutral verification evidence and delivers the typed messaging.receive.v1 observation to Sub's product-owned port. Sub shadows the direct WhatsApp receiver before the provider callback changes; publication alone is not a cutover and does not enter contract_consumers."
+first_cutover = "Sub is the first product destination, through the independently deployed dotmac_integrator assembly. The outbound connector is published after dotmac-integration 0.1.0a14, then both are exact-pinned. The assembly derives secret and egress policy from the installed manifest, runs a provider-neutral delivery pump and delivers typed messaging.receive.v1 observations to Sub's product-owned port. Sub shadows both its direct WhatsApp receiver and local Graph outbox before either authority changes; publication alone is not a cutover and does not enter contract_consumers."
 
 shadow_and_drift = "Mirror the exact raw body and signature header into Integrator without changing Sub's current response path. Compare provider event identities, observation count, event type, typed message/status/location content, and refusal reason; never compare product consequences the old source cannot express. Duplicate observations are safe only through mod_intg's binding-scoped receipt identity and the product port's own idempotency. Cut over the provider callback after the corpus and live shadow agree for the configured retry horizon, then lower Sub's external-connector ratchet in the same change that removes the displaced direct verification/normalization surface."
 
 local_copy_retirement = "Retire only Sub's provider transport surface: webhook signature verification, provider payload traversal, provider event identity construction and provider acknowledgement. Sub retains the authoritative messaging decision, contact/conversation resolution and timeline consequences behind its typed observation port. No ERPNext or CRM connector is recreated; retired product connections stay retired."
 
-next_action = "dotmac-connector-whatsapp 0.1.0a2 and dotmac-integration 0.1.0a10 are published and registry-verified. Exact-pin both in dotmac_integrator; render the connector's manifest-owned secret bindings and deny-all provider egress into runtime enforcement, add the provider-neutral verification observer and Sub ProductPort transport-evidence/location mapping, then run the Sub shadow and callback cutover. Move status to adopted only after the assembly is deployed and Sub's direct provider surface is removed with a measured ratchet reduction."
+next_action = "Complete and release the additive DELIVERY slice: typed provider evidence and terminal outbound-content retention in dotmac-integration, text/template/media parity in this connector, then exact-pin both in dotmac_integrator and run its provider-neutral command intake and delivery pump. Shadow Sub's local outbox against Integrator before retiring the direct Graph client and lowering the external-connector ratchet. Move status to adopted only after ingress and outbound cutovers are both complete."

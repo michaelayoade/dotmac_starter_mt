@@ -20,6 +20,10 @@ SPI 1.2 adds provider-neutral verification evidence while retaining SPI 1.1's
 boolean result. It also closes the truthiness hole explicitly: a random truthy
 object is not proof that a request was authenticated.
 
+SPI 1.4 maps each capability to its executable modes. Omission preserves the
+legacy all-plugin-modes meaning; an explicit map stops conformance from calling
+an ingress factory for a delivery-only capability or the reverse.
+
 Every guard below is paired with a case that makes it FIRE. A test that only
 shows a guard accepting a good connector proves nothing about what it refuses,
 and the empty-set trap is real here: three of these checks would pass vacuously
@@ -56,6 +60,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     Diagnostic,
     DispatchRequest,
+    EgressDeclaration,
     InboundEvent,
     IngressHandler,
     IngressPlugin,
@@ -117,6 +122,59 @@ def test_each_mode_has_exactly_one_executable_protocol(
         f"{plugin_protocol.__name__} should add exactly {factory!r} — a mode "
         "protocol that adds two methods is two modes wearing one name"
     )
+
+
+def test_capabilities_can_map_to_different_modes_without_false_factory_calls() -> None:
+    """SPI 1.3 called every factory for every capability.
+
+    That made an honest receive=INGRESS/send=DELIVERY connector impossible:
+    conformance required both factories to lie about supporting both contracts.
+    """
+    receive = "messaging.receive.v1"
+    send = "messaging.send.v1"
+    manifest = ConnectorManifest(
+        connector_key="mode_specific",
+        version="1.0.0",
+        spi_range=SpiRange.parse(">=1.4,<2.0"),
+        capabilities=(
+            CapabilityDeclaration(
+                capability_id=receive,
+                modes=frozenset({ConnectorMode.INGRESS}),
+            ),
+            CapabilityDeclaration(
+                capability_id=send,
+                modes=frozenset({ConnectorMode.DELIVERY}),
+            ),
+        ),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
+    )
+
+    registry = fake_registry([manifest])
+    plugin = registry.plugin("mode_specific")
+    verify_plugin_modes(plugin)
+
+
+def test_a_capability_cannot_name_a_mode_the_plugin_does_not_declare() -> None:
+    manifest = ConnectorManifest(
+        connector_key="mode_mismatch",
+        version="1.0.0",
+        spi_range=SpiRange.parse(">=1.4,<2.0"),
+        capabilities=(
+            CapabilityDeclaration(
+                capability_id=FAKE,
+                modes=frozenset({ConnectorMode.POLL}),
+            ),
+        ),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
+    )
+    plugin = fake_plugin(
+        manifest_=manifest,
+        modes_=frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY}),
+    )
+    with pytest.raises(ModeContractError, match="undeclared modes.*poll"):
+        verify_plugin_modes(plugin)
 
 
 # ── The mode registry is FROZEN: closed, exhaustive, uninventable ───────────
@@ -868,7 +926,7 @@ def test_the_spi_range_check_is_live_for_the_fixture() -> None:
     nothing being checked.
     """
     assert SpiRange.parse(">=1.0,<2.0").admits(CURRENT_SPI_VERSION)
-    assert CURRENT_SPI_VERSION == SpiVersion(1, 3)
+    assert CURRENT_SPI_VERSION == SpiVersion(1, 4)
     with pytest.raises(SpiIncompatibleError, match="running module implements"):
         discover(points=[_point(_Spi10DeliveryConnector(spi_range=">=1.0,<1.3"))])
 

@@ -40,17 +40,29 @@ def test_connector_imports_only_the_spi_among_dotmac_packages() -> None:
     assert internal - {"dotmac_connector_whatsapp"} == {"dotmac_integration"}
 
 
-def test_ingress_normalization_has_no_network_or_persistence_dependency() -> None:
+def test_connector_has_no_persistence_or_execution_dependency() -> None:
     forbidden = {
         "alembic",
         "asyncpg",
-        "httpx",
         "psycopg",
-        "requests",
         "sqlalchemy",
-        "urllib3",
+        "celery",
+        "tenacity",
     }
     assert not (_imports() & forbidden)
+
+
+def test_ingress_handler_performs_no_network_io() -> None:
+    source = (SOURCE / "plugin.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    ingress = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "WhatsAppIngressHandler"
+    )
+    rendered = ast.unparse(ingress)
+    assert "httpx" not in rendered
+    assert ".post(" not in rendered
 
 
 def test_connector_has_no_product_decision_vocabulary() -> None:

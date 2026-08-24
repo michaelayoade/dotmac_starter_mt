@@ -1271,7 +1271,7 @@
         "deployment. A wheel that shipped the manifest but dropped a migration",
         "would therefore fail first in the Integrator's deployment, not here.",
         "The list once said 'both migrations' while the lineage kept growing;",
-        "all eleven migrations are now named explicitly so the claim stays true.",
+        "all twelve migrations are now named explicitly so the claim stays true.",
         "ig_0007 and ig_0008 are load-bearing for this rule: both create",
         "nothing, so a wheel that dropped either would install a module whose",
         "prerequisite is declared and never verified. a68 published",
@@ -1329,7 +1329,8 @@
           "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py",
           "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py",
           "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py",
-          "dotmac_integration/migrations/versions/ig_0011_replay_retention.py"
+          "dotmac_integration/migrations/versions/ig_0011_replay_retention.py",
+          "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py"
         ],
         "forbidden_prefixes": [
           "app/",

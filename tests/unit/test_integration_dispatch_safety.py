@@ -31,6 +31,7 @@ from dotmac_integration import (
     ConnectorInstallation,
     DeliveryAttempt,
     DispatchUnavailable,
+    InboxReceipt,
     OutcomeStatus,
     add_binding,
     claim_delivery,
@@ -45,6 +46,17 @@ from dotmac_integration import (
 from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin, fake_registry
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
+
+def test_provider_evidence_belongs_to_the_outbound_ledger_only() -> None:
+    delivery_columns = {column.name for column in DeliveryAttempt.__table__.columns}
+    receipt_columns = {column.name for column in InboxReceipt.__table__.columns}
+
+    assert {"provider_reference", "provider_status_code"} <= delivery_columns
+    assert {"provider_reference", "provider_status_code"}.isdisjoint(receipt_columns)
+    assert "ck_delivery_attempts_provider_status" in {
+        constraint.name for constraint in DeliveryAttempt.__table__.constraints
+    }
 
 
 @pytest.fixture()
@@ -471,3 +483,73 @@ def test_settling_a_success_clears_the_schedule(db: Session, registry) -> None:
     assert delivery.next_attempt_at is None
     assert delivery.delivered_at is not None
     assert delivery.error_code is None
+
+
+def test_settlement_persists_only_typed_provider_evidence(
+    db: Session, registry
+) -> None:
+    """A later status webhook correlates by the provider reference.
+
+    Arbitrary response bodies are deliberately not expressible on ``Outcome``;
+    keeping them would turn the delivery ledger into a second provider-payload
+    archive and a likely secret/error-body sink.
+    """
+    from dataclasses import fields
+
+    from dotmac_integration import Outcome, settle
+
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    prepared = prepare(db, delivery, registry=registry)
+
+    outcome = Outcome(
+        status=OutcomeStatus.SUCCEEDED,
+        provider_reference="wamid.outbound-1",
+        provider_status_code=200,
+    )
+    settle(db, delivery, outcome, prepared=prepared)
+
+    assert delivery.provider_reference == "wamid.outbound-1"
+    assert delivery.provider_status_code == 200
+    assert {field.name for field in fields(Outcome)}.isdisjoint(
+        {"response", "response_body", "output", "payload"}
+    )
+
+
+def test_retry_evidence_is_replaced_by_the_attempt_that_finally_succeeds(
+    db: Session, registry
+) -> None:
+    from dotmac_integration import Outcome, settle
+
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    first = prepare(db, delivery, registry=registry)
+    settle(
+        db,
+        delivery,
+        Outcome(
+            status=OutcomeStatus.RETRYABLE,
+            error_code="rate_limited",
+            provider_status_code=429,
+        ),
+        prepared=first,
+    )
+    assert delivery.provider_status_code == 429
+    assert delivery.provider_reference is None
+
+    delivery.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+    db.flush()
+    second = prepare(db, delivery, registry=registry)
+    settle(
+        db,
+        delivery,
+        Outcome(
+            status=OutcomeStatus.SUCCEEDED,
+            provider_reference="wamid.outbound-2",
+            provider_status_code=200,
+        ),
+        prepared=second,
+    )
+
+    assert delivery.provider_status_code == 200
+    assert delivery.provider_reference == "wamid.outbound-2"
