@@ -450,7 +450,10 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
     writer.
     """
     from dotmac_integration import module
-    from dotmac_integration.lifecycle import ENDPOINT_AUDIT_ACTIONS
+    from dotmac_integration.lifecycle import (
+        ENDPOINT_AUDIT_ACTIONS,
+        QUARANTINE_AUDIT_ACTIONS,
+    )
     from dotmac_integration.operations import AUDIT_ACTION_PREFIX
     from dotmac_integration.outbound_repair import REPAIR_AUDIT_ACTIONS
     from dotmac_integration.retention import RETENTION_AUDIT_ACTIONS
@@ -466,6 +469,8 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
             *ENDPOINT_AUDIT_ACTIONS,
             *RETENTION_AUDIT_ACTIONS,
             *REPAIR_AUDIT_ACTIONS,
+            *QUARANTINE_AUDIT_ACTIONS,
+            *RETENTION_AUDIT_ACTIONS,
         )
     }
     assert all(a.startswith(f"{AUDIT_ACTION_PREFIX}.") for a in declared)

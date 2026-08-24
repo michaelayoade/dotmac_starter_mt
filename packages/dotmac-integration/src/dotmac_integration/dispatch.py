@@ -47,6 +47,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
+from dotmac_integration.admission import (
+    AdmissionDecision,
+    admit_installation,
+    admit_runtime,
+    apply_provider_cooldown,
+)
 from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.execution import LostClaim, claim_delivery
 from dotmac_integration.models import (
@@ -61,6 +67,7 @@ from dotmac_integration.retry import (
     OutcomeStatus,
     next_state,
     retry_delay_seconds,
+    throttle_cooldown_seconds,
 )
 from dotmac_integration.spi import (
     ConnectorMode,
@@ -72,6 +79,7 @@ from dotmac_integration.spi import (
 
 __all__ = [
     "DispatchError",
+    "DispatchNotAdmitted",
     "DispatchUnavailable",
     "LostClaim",
     "PreparedDispatch",
@@ -103,6 +111,35 @@ class DispatchUnavailable(DispatchError):
                               caller that treated this as contention would idle
                               silently on a misconfiguration.
     """
+
+
+class DispatchNotAdmitted(DispatchError):
+    """The runtime WILL not dispatch this right now — stop, do not alert.
+
+    The third answer, and it is neither of the other two. `DispatchUnavailable`
+    means something is broken; this means something is deliberately switched off
+    — the kill switch, a quarantined installation, or a concurrency ceiling —
+    and it is expected, reversible, and already visible to whoever switched it.
+
+    A caller that folded this into `DispatchUnavailable` would page an on-call
+    engineer every time an operator quarantined a connector. One that folded it
+    into `prepare` returning `None` would make a halted deployment look like a
+    busy one, so the queue-depth graph climbs while every dashboard says the
+    dispatcher is healthy.
+
+    `.decision` carries the closed reason code and, when the refusing rule knows
+    one, how long to wait — so a worker can back off correctly without parsing
+    the message.
+    """
+
+    def __init__(self, decision: AdmissionDecision) -> None:
+        super().__init__(decision.detail or decision.reason)
+        self.decision = decision
+
+    @property
+    def reason(self) -> str:
+        """The closed `admission.ADMISSION_REASONS` code."""
+        return self.decision.reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +178,16 @@ def prepare(
     expires, and the queue reports busy rather than broken — the worst of both.
 
     So everything that can refuse runs against unclaimed state, and the claim is
-    the last thing that happens.
+    the last thing that happens. The admission checks added later obey the same
+    rule: they are refusals, so they run BEFORE the claim, and a halted or
+    quarantined runtime therefore leaves the queue exactly as it found it.
     """
+    # FIRST, and before a single query. A deployment that has been switched off
+    # must not spend a round trip per queued row rediscovering that it is off.
+    halted = admit_runtime(policy)
+    if not halted.admitted:
+        raise DispatchNotAdmitted(halted)
+
     binding = (
         db.get(CapabilityBinding, delivery.capability_binding_id)
         if delivery.capability_binding_id
@@ -161,6 +206,16 @@ def prepare(
     installation = db.get(ConnectorInstallation, binding.installation_id)
     if installation is None:
         raise DispatchUnavailable(f"binding {binding.id} has no installation")
+
+    # BEFORE the `enabled` check below, because a quarantined installation is
+    # also not enabled and the operator is owed the specific answer: "the
+    # platform stopped trusting this", not "this is off". `admit_installation`
+    # deliberately declines every other non-enabled state, so the line below
+    # keeps raising `DispatchUnavailable` exactly as it did.
+    admitted = admit_installation(db, installation, policy=policy, now=now)
+    if not admitted.admitted:
+        raise DispatchNotAdmitted(admitted)
+
     if installation.state != "enabled":
         raise DispatchUnavailable(
             f"installation {installation.name!r} is {installation.state!r}, "
@@ -325,6 +380,17 @@ def settle(
     the WHERE clause, and `rowcount != 1` means this worker no longer holds the
     claim. The database decides, which also removes the naive/aware timestamp
     comparison the previous read-then-compare version needed.
+
+    ## And backpressure, for the same reason it is not somewhere else
+
+    A provider throttle is learned HERE and nowhere else: this is the moment the
+    engine holds both the outcome and a session, immediately after the network
+    call has returned. So the installation-wide cooldown is applied here, AFTER
+    the claim-guarded write succeeds — a worker that lost its lease must not get
+    to delay a queue on the strength of an outcome it was not allowed to record.
+
+    It is still two short statements in one short transaction, and neither waits
+    on anything: the pause is a `next_attempt_at`, not a sleep.
     """
     from sqlalchemy import update
 
@@ -377,5 +443,19 @@ def settle(
             f"took at attempt {prepared.attempt_number} — the lease expired or "
             "another worker took over. Refusing to overwrite its outcome"
         )
+
+    # Only now — the claim held, so this outcome is this installation's actual
+    # observation rather than a stale worker's opinion of it.
+    if policy.apply_provider_backpressure:
+        cooldown = throttle_cooldown_seconds(outcome, policy=policy)
+        if cooldown is not None:
+            apply_provider_cooldown(
+                db,
+                installation_id=prepared.installation_id,
+                cooldown_seconds=cooldown,
+                now=moment,
+                policy=policy,
+            )
+
     db.refresh(delivery)
     return delivery
