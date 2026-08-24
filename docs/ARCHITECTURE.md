@@ -387,12 +387,15 @@ to ERP and touches no rail. But:
 > **No payout release and no payout enablement passes the authorization
 > blocker.**
 
-The blocker is an as-built ERP fact, not a design concern: **an ERP READ
-permission (`payments:read`) currently satisfies the guard on
+The blocker is an as-built ERP fact, not a design concern: **ERP's broad
+module-access scope `finance:access` currently satisfies the guard on
 `POST /transfers/{intent_id}/initiate`, which executes a real transfer.** The
+old helper also names `payments:read`, but that permission is absent from the
+normal token allowlist and seeder, so it is not the live reachability mechanism.
+The
 weakest admitted credential is the one that defines a path's real authorization,
 which makes every other control on that path decorative. A dedicated ERP
-security change is in progress on `fix/payout-execute-permission-containment`.
+security change is implemented on `fix/payout-execute-permission-containment`.
 This is a gate on RELEASE and ENABLEMENT and is independent of ADR-0063 § 7's
 gate on CONSTRUCTION; satisfying either does not satisfy the other. It changes
 no evidentiary claim in either direction — *"Implemented and tested; production

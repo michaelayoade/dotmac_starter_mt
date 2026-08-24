@@ -5,13 +5,14 @@
 > branch. This record takes `0063` under the same rule ADR-0061 recorded: the
 > earlier record keeps the number.
 
-- Status: Accepted. Amended 2026-08-24 (A1–A3) — see "Amendment — 2026-08-24"
+- Status: Accepted. Amended 2026-08-24 (A1–A4) — see "Amendment — 2026-08-24"
   at the end of this record. A1 rules that ERP's `PROCESSING` state is SPLIT
   before extraction and that an unprobed row migrates to `ambiguous`, never
   `submitted`. A2 names payroll as a producer of `PaymentInstruction` rows and
   records the salary-component privacy boundary. A3 fixes the ordered
   dependency and makes ERP's payout authorization defect a hard RELEASE gate
-  alongside § 7's construction gate. No earlier text is rewritten.
+  alongside § 7's construction gate. A4 corrects which credential made that
+  defect normally reachable. No earlier text is rewritten.
 - Date: 2026-08-24
 - Deciders: Michael
 - Supersedes: none
@@ -453,7 +454,7 @@ being designed around a shape nobody has agreed to. The GATE stops construction;
 it does not stop deciding.
 
 
-## Amendment — 2026-08-24 (accepted corrections A1–A3)
+## Amendment — 2026-08-24 (accepted corrections A1–A4)
 
 Three corrections accepted the same day this record was. Each names the section
 it extends or corrects; nothing above is rewritten, and each superseded or
@@ -662,3 +663,29 @@ not evidence about whether it has happened.
 ADR-0061 A7 and § 5, `AGENTS.md` rules 28 (m)–(o) and 30,
 `docs/inventories/treasury-payment-execution-sources.md` § 5 (the seven-way RBAC
 dependency that admits `payments:read`).*
+
+### A4. Reachability correction: `finance:access` was the live payout bypass
+
+A3 correctly concluded that the payout guard admitted a non-execute authority
+and incorrectly named the credential deployments could normally hold.
+`payments:read` is referenced by the old helper, but it is absent from ERP's
+JWT module-access allowlist and absent from its RBAC seeder. It was reachable
+only if an operator hand-created that exact permission row.
+
+The live path was broader. `finance:access` is a seeded, token-carried module
+scope and the helper returned on it before consulting the permission list. A
+principal authorized to see Finance could therefore reach
+`POST /transfers/{intent_id}/initiate` and execute a real transfer. The gate and
+its conclusion stand; this amendment replaces only A3's reachability mechanism.
+
+Containment is implemented on `fix/payout-execute-permission-containment`:
+lookup, preparation and execution are separate tiers; execution requires the
+single exact `payments:transfer:initiate` permission; `finance:access` no longer
+satisfies it; and an administrator is re-checked from current role rows rather
+than trusted from a possibly stale token. Release and enablement remain blocked
+until that change is merged and its CI is green.
+
+*Corrects: A3's identification of `payments:read` as the normally reachable
+credential. Preserves: A3's authorization conclusion and release/enablement
+gate. Evidence: ERP branch `fix/payout-execute-permission-containment` and its
+authorization canaries.*

@@ -407,6 +407,16 @@ real and is blocking work already done.
 
 ## 5. Authorization — what actually gates a payout today
 
+> **Correction, 2026-08-24.** The audit below identified a broken shared guard
+> and named the wrong normally reachable credential. `payments:read` appears in
+> the helper but is absent from ERP's JWT module-scope allowlist and RBAC seeder;
+> only a hand-created row could have exercised that arm. The live, seeded bypass
+> was broader: `finance:access` short-circuited the helper before its permission
+> list, so module visibility authorized transfer execution. The containment on
+> `fix/payout-execute-permission-containment` gives the execute route its own
+> exact `payments:transfer:initiate` check. The original text remains below as
+> audit history; this correction controls its reachability conclusion.
+
 **There is no Approvals integration in any ERP payout path.** A grep for
 `approval_request_id|require_approval|ApprovalService|ApprovalWorkflowService|
 authorized_by|approval_id` across `app/services/finance/ap/supplier_payment.py`,

@@ -621,11 +621,13 @@ specifics) points here and must never fork these rules.
     archived beyond HR's reach to correct or redact. Relatedly, a payee who
     cannot be paid is a STATE, never an omission from a spreadsheet.
     *(o)* **No payout release or enablement passes the authorization blocker.**
-    An ERP READ permission (`payments:read`) currently satisfies the guard on
-    `POST /transfers/{intent_id}/initiate`, which executes a real transfer. The
+    ERP's module-access scope `finance:access` currently satisfies the guard on
+    `POST /transfers/{intent_id}/initiate`, which executes a real transfer;
+    `payments:read` is referenced by the old helper but is not normally grantable.
+    The
     weakest admitted credential defines a path's real authorization, which makes
     every other control on that path decorative; a dedicated ERP security change
-    is in progress on `fix/payout-execute-permission-containment`. Until it
+    is implemented on `fix/payout-execute-permission-containment`. Until it
     lands: no payout capability is enabled in any environment, no payout release
     is cut, and no claim of payout readiness is made — however much of the rest
     is finished. This gates RELEASE and ENABLEMENT and is INDEPENDENT of
