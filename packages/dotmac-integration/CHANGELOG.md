@@ -115,6 +115,44 @@ Nothing in this file is a publication claim except this section.
   caller replays the winning row; a stale snapshot receives a typed retry
   instruction whose message cannot carry payload-bound driver parameters.
 
+### Outbound replay, dead-letter repair and ambiguous-outcome reconciliation
+
+- Adds `outbound_repair`, the single owner of whether a stored outbound command
+  may become a live effect again. Every entry point routes through one
+  `classify_repair` decision, so an inspection report can never show a row as
+  repairable that the repair command then refuses.
+- Replays a command by the `(installation, idempotency_key)` a product
+  addressed it with. The re-dispatched request is the row's own stored payload,
+  verified against the digest recorded at enqueue; neither entry point accepts
+  a content parameter, so a replay cannot carry anything the recorded evidence
+  does not describe.
+- A replay of a command that already landed returns the recorded outcome —
+  delivered-at, attempt count and typed provider evidence — and re-dispatches
+  nothing. A command whose stored request was redacted by the retention sweep,
+  lost, or no longer digests to what was recorded is refused by name rather
+  than retried into a live effect.
+- Adds oldest-first, page-bounded dead-letter and ambiguous inspection carrying
+  what was attempted, the binding and installation it was attempted against,
+  the typed provider evidence, the connector's classification, the legal-hold
+  state and whether the request is still verifiable. Derived at read time;
+  no status column and no new table.
+- Resolves an INDETERMINATE attempt against provider evidence in three phases
+  with no session held across the probe. A `landed` verdict closes the command
+  as delivered without re-dispatching it, only a provider-proven `not_landed`
+  returns it to the queue (and still only with verifiable request evidence),
+  and `unknown` leaves it ambiguous with a module-owned marker rather than
+  blindly retrying or blindly failing it. Replaying an ambiguous command
+  through the operator path is refused and pointed at reconciliation.
+- Declares one new audit action, `integration.delivery.reconciled`, carrying
+  the verdict, the previous and resulting state and typed provider evidence.
+  Connector-authored probe text is returned to the caller and persisted
+  nowhere. Requeueing keeps its existing single writer,
+  `integration.delivery.replayed`.
+- `INTEGRATION_DEAD_LETTER_PAGE_SIZE` is the new configuration knob (default
+  100, bounded at 1000). No schema change: the reconciliation trail is the
+  fleet's one platform audit ledger, and the four-state outcome vocabulary
+  stays `retry.OutcomeStatus`.
+
 ## 0.1.0a14 — released 2026-08-24
 
 Published, installed back from the private index, registered and tagged from

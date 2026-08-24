@@ -452,6 +452,7 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
     from dotmac_integration import module
     from dotmac_integration.lifecycle import ENDPOINT_AUDIT_ACTIONS
     from dotmac_integration.operations import AUDIT_ACTION_PREFIX
+    from dotmac_integration.outbound_repair import REPAIR_AUDIT_ACTIONS
     from dotmac_integration.retention import RETENTION_AUDIT_ACTIONS
 
     declared = set(module.audit_actions)
@@ -461,7 +462,11 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
         f"{AUDIT_ACTION_PREFIX}.leases.released",
     } | {
         f"{AUDIT_ACTION_PREFIX}.{action}"
-        for action in (*ENDPOINT_AUDIT_ACTIONS, *RETENTION_AUDIT_ACTIONS)
+        for action in (
+            *ENDPOINT_AUDIT_ACTIONS,
+            *RETENTION_AUDIT_ACTIONS,
+            *REPAIR_AUDIT_ACTIONS,
+        )
     }
     assert all(a.startswith(f"{AUDIT_ACTION_PREFIX}.") for a in declared)
     assert len(declared) == len(module.audit_actions), "a code is declared twice"

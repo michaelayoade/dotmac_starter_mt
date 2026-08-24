@@ -141,6 +141,17 @@ module = ModuleManifest(
         "integration.retention.payloads.redacted",
         "integration.retention.hold.placed",
         "integration.retention.hold.released",
+        # Ambiguous-outcome reconciliation, written by
+        # `dotmac_integration.outbound_repair`. ONE code for all three provider
+        # verdicts, with the verdict in the event's details: landed, not landed
+        # and unknown are one operation whose answer differed, not three
+        # operations. Splitting them would turn "how many commands were
+        # reconciled" into a query over a vocabulary.
+        #
+        # Requeueing has no code of its own here on purpose — `operations`
+        # already writes `integration.delivery.replayed` and stays the single
+        # writer of that fact whether an operator or a reconciler asked for it.
+        "integration.delivery.reconciled",
     ),
     # ── No capabilities or permissions YET ──────────────────────────────────
     # Both exist to gate a ROUTE, and this slice ships none. A declared code
