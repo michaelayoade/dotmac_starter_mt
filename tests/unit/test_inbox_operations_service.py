@@ -682,7 +682,9 @@ def test_history_import_preserves_operational_ids_and_exact_replay(
     )
     cursor = import_round_robin_rotation(db, scope=scope, command=cursor_command)
     assert cursor.id == cursor_command.id
-    assert import_round_robin_rotation(db, scope=scope, command=cursor_command) is cursor
+    assert (
+        import_round_robin_rotation(db, scope=scope, command=cursor_command) is cursor
+    )
     assert db.get(InboxAgentPresence, presence.id) is presence
     assert db.get(InboxQueueEntry, entry.id) is entry
     assert db.get(InboxRoundRobinCursor, cursor.id) is cursor
