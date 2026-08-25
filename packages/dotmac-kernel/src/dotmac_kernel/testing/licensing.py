@@ -6,7 +6,11 @@ tests — never persisted, never a real issuer key. Vendor-plane and product
 tests use it to build valid (and deliberately broken) envelopes without any
 key-custody machinery; production issuance lives in the vendor control plane.
 
-Needs the `cryptography` package (the `licensing` or `testing` extra).
+Needs the `cryptography` package, which the `licensing` extra supplies. The
+`testing` extra deliberately does NOT — it is `["httpx"]` only, so that a
+product consuming the harness and fakes never inherits a compiled crypto stack
+it does not use. Install `dotmac-kernel[testing,licensing]` to instantiate this
+class.
 Deterministic apart from the keypair itself: default payload timestamps are
 fixed constants, and nothing here reads the wall clock.
 """
@@ -24,6 +28,7 @@ from dotmac_kernel.licensing import (
     KeyStatus,
     LicenceKey,
     LicenceKeyRing,
+    MalformedLicenceError,
     VerificationUnavailableError,
 )
 
@@ -119,15 +124,40 @@ class FakeLicenceSigner:
 
     def add_signature(self, envelope: Mapping[str, object]) -> dict[str, object]:
         """A copy of `envelope` with this signer's signature appended — the
-        rotation-window double-signing shape."""
+        rotation-window double-signing shape.
+
+        Raises `MalformedLicenceError` if `envelope` is not shaped like one.
+        These are explicit raises rather than `assert`s: the input is
+        caller-supplied, and under `python -O` an assert-based check would be
+        stripped, so a malformed envelope would fail later as an opaque
+        `TypeError` from inside base64 or list unpacking instead of naming the
+        bad field. `MalformedLicenceError` is the same error the real verifier
+        raises for the same shape fault, so a test asserting on it does not have
+        to know whether the envelope came from this fake or from an issuer.
+        """
         payload_b64 = envelope["payload_b64"]
-        assert isinstance(payload_b64, str)
+        if not isinstance(payload_b64, str):
+            raise MalformedLicenceError(
+                f"envelope['payload_b64'] must be a str, got "
+                f"{type(payload_b64).__name__}"
+            )
         payload = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
         signatures = envelope["signatures"]
-        assert isinstance(signatures, list)
+        if not isinstance(signatures, list):
+            raise MalformedLicenceError(
+                f"envelope['signatures'] must be a list, got "
+                f"{type(signatures).__name__}"
+            )
         signed = self.sign(payload)
         signed_signatures = signed["signatures"]
-        assert isinstance(signed_signatures, list)
+        if not isinstance(signed_signatures, list):  # pragma: no cover
+            # Unreachable via this class — `sign` always builds a list. Kept as
+            # a real raise so a future change to `sign` cannot silently produce
+            # a malformed envelope for a caller to trip over downstream.
+            raise MalformedLicenceError(
+                "sign() produced a non-list `signatures` — the fake signer is "
+                "broken, not the caller's envelope"
+            )
         return {
             "schema": envelope["schema"],
             "payload_b64": payload_b64,

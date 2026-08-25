@@ -7,7 +7,10 @@ provisioning-provider contract driven against `FakeProvisioningProvider`.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from dotmac_kernel import ProductAssemblySpec, create_app
@@ -101,6 +104,67 @@ def test_fake_provisioning_provider_satisfies_the_contract() -> None:
     """The reusable contract, run against the fake — the same call a consumer
     makes against THEIR provider factory to prove protocol conformance."""
     check_provisioning_provider_contract(FakeProvisioningProvider)
+
+
+class _NonIdempotentProvider(FakeProvisioningProvider):
+    """Structurally a valid provider, semantically broken in the realistic way.
+
+    It satisfies the Protocol (all four methods, right shapes) but mints a fresh
+    `operation_id` on every `apply`, so re-applying is a NEW operation rather
+    than a no-op returning the prior result. That is the mistake a real provider
+    actually makes — the protocol's hardest requirement is idempotency, not
+    method presence — and a contract that only checked `isinstance` would wave
+    it through.
+    """
+
+    def apply(self, request):  # type: ignore[no-untyped-def]
+        self._counter = getattr(self, "_counter", 0) + 1
+        fresh = ProvisioningRequest(
+            intent_id=request.intent_id,
+            spec=request.spec,
+            operation_id=f"op-{self._counter}",
+        )
+        return super().apply(fresh)
+
+
+def test_the_contract_rejects_a_broken_provider() -> None:
+    """Canary: the contract must FAIL something. A conformance suite that has
+    never been shown to reject anything is decoration — it is indistinguishable
+    from one whose checks stopped running."""
+    with pytest.raises(AssertionError, match="operation_id"):
+        check_provisioning_provider_contract(_NonIdempotentProvider)
+
+
+def test_the_contract_still_rejects_a_broken_provider_under_O() -> None:
+    """The reason the contract stopped using bare `assert` (ADR-0018 work).
+
+    `python -O` strips every `assert` statement. While the suite was written
+    with asserts, a consumer running an optimised interpreter got a clean return
+    from a contract that had checked nothing — a green conformance signal for an
+    unverified provider. This runs the real suite in a real `-O` subprocess and
+    requires the rejection to survive.
+    """
+    source = (
+        "from dotmac_kernel.testing import check_provisioning_provider_contract\n"
+        "from tests.unit.test_testing_kit import _NonIdempotentProvider\n"
+        "try:\n"
+        "    check_provisioning_provider_contract(_NonIdempotentProvider)\n"
+        "except AssertionError:\n"
+        "    print('REJECTED')\n"
+        "else:\n"
+        "    print('PASSED-SILENTLY')\n"
+    )
+    result = subprocess.run(  # noqa: S603 # nosec B603
+        [sys.executable, "-O", "-c", source],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert result.returncode == 0, result.stderr
+    assert "REJECTED" in result.stdout, (
+        "the provider contract evaporated under `python -O` — its checks must "
+        f"be explicit raises, not asserts. stdout={result.stdout!r}"
+    )
 
 
 def test_fake_provisioning_records_calls_and_conforms_to_protocol() -> None:

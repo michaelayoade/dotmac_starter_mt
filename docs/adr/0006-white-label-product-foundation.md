@@ -105,6 +105,9 @@ dotmac-ui              the presentation system (no business logic, no DB)
   packaged static assets
 
 dotmac-module-sdk      development and conformance tooling (never a runtime dep)
+                       SUPERSEDED 2026-08-11 — cancelled as a distribution;
+                       these responsibilities are kernel-owned. See the
+                       amendment of that date.
 dotmac-template-studio a MODULE — the first stateful one, not a kernel facility
 dotmac-theme-*         trusted packaged themes, where tokens are insufficient
 
@@ -124,8 +127,13 @@ assembly → module → dotmac-ui → dotmac-kernel
 - A module never imports another module (already enforced by import-linter;
   cross-module UI composition uses the htmx-fragment pattern, not an import).
 - A theme never imports a module and never reads the database.
-- `dotmac-module-sdk` is a development/test dependency only. A product that ships
-  with the SDK in its runtime image is a packaging defect.
+- ~~`dotmac-module-sdk` is a development/test dependency only. A product that
+  ships with the SDK in its runtime image is a packaging defect.~~ **SUPERSEDED
+  by the 2026-08-11 amendment.** The package is cancelled; the scaffolder, test
+  kit, fake host/providers and validators are kernel-owned, reached through one
+  aggregate entrypoint per conformance domain. Dev tooling in the runtime image
+  is accepted deliberately and contained by explicit, shrink-only governance
+  exemptions rather than by a package boundary.
 
 **Ownership rulings that follow, and that later steps may not relitigate:**
 
@@ -842,6 +850,98 @@ PERMANENT failure is `bounced`. A soft bounce recorded as `bounced` permanently
 stops that customer's invoices, and the kernel cannot classify the difference
 because every provider spells it differently.
 
+### Decision amendment — 2026-08-11 (`dotmac-module-sdk` is cancelled; SDK is a kernel-owned role)
+
+**This supersedes the `dotmac-module-sdk` ruling in § 2 — the package-ownership
+map row and the "development/test dependency only" bullet.** Both stay in place
+above as history: they record what was decided on 2026-08-02 and are the reason
+the responsibilities below were ever named as a set. Nothing else in § 2 changes
+— the dependency direction `assembly → module → dotmac-ui → dotmac-kernel` and
+every other row stand.
+
+**Decision: `dotmac-module-sdk` will not be built as a distribution. Its four
+responsibilities — scaffolder, test kit, fake host/providers, validators — are
+kernel-owned. "SDK" is a role, not a wheel.**
+
+#### What the plan assumed, and what was actually there
+
+The row was written as though the SDK were unbuilt. An audit on 2026-08-11 found
+three of its four responsibilities already implemented in the kernel, working,
+and wired into CI:
+
+| Responsibility | As-built owner |
+| --- | --- |
+| validators | `dotmac_kernel.migrations.gate` (`run_gate`), `dotmac_kernel.namespaces`, `ModuleRegistry` |
+| test kit | `dotmac_kernel.testing` (published API, `COMPATIBILITY.md`) |
+| fake host/providers | `dotmac_kernel.testing.harness` / `.fakes` / `.provisioning` / `.licensing` |
+| scaffolder | not built — nothing exists |
+
+Extracting a new distribution would therefore have meant *moving working,
+published kernel API out of the kernel* to satisfy a packaging rule, not
+building something absent.
+
+#### Why the kernel is the right owner, not merely the incumbent
+
+1. **Lockstep is a correctness property, not a cost to manage.** Validators
+   track kernel invariants exactly. Across two independently released
+   distributions, a kernel that adds a *new* rule leaves an older SDK silently
+   not checking it — under-enforcement with no failure signal, which is the
+   drift class this ADR exists to prevent. In-kernel, an invariant and its
+   validator land in one commit and ship in one release.
+2. **Co-location alone is insufficient, and this is the binding rule.** If
+   consumers hand-pick individual validators, a newly added kernel validator is
+   still missed despite living in the same wheel. **A module-conformance check
+   MUST be reachable through one evolving kernel-owned aggregate entrypoint, so
+   that every existing caller picks it up with no call-site change.** For
+   migration conformance that entrypoint is `run_gate`. A check added beside it
+   rather than inside it is a defect, whatever package it lives in.
+3. **Adoption friction is real.** ERP and Sub are already being asked to adopt
+   the kernel. Conformance arriving with it beats a second pin, a second
+   approval, and a second supply-chain review.
+
+#### What is accepted, and what pays for it
+
+The § 2 concern was sound: dev tooling in the kernel wheel means dev tooling in
+every runtime image, and `dotmac_kernel.testing` genuinely holds an RLS-free
+session factory (`create_test_engine`, whose engine `isolated_session` binds a
+test session onto) and an Ed25519 signing helper. That cost is now **accepted
+deliberately rather than incurred accidentally** — but a separate distribution
+was never what contained it. The containment is that every governance exemption
+admitting this code must be explicit, minimal, and shrink-only.
+
+Three exemptions admit it today, and each is directory-wide — new files enter an
+existing blind spot without the list changing:
+
+- `tests/architecture/test_session_authority.py` — `_UNSCANNED_PREFIXES =
+  ("dotmac_kernel/testing/",)`, whose own comment reads "the shipped test kit is
+  a session authority by design".
+- `pyproject.toml` — the Bandit `exclude_dirs` entry for the same directory.
+- `scripts/kernel_floor_check.sh` — the products' import allowlists name
+  `dotmac_kernel.testing`.
+
+**Obligation, tracked as its own change:** narrow these to exact files and rules
+where practical, cap them shrink-only, prove each remaining exemption is still
+necessary, and add a red sensitivity test. Kept separate from this amendment so
+the ownership correction stays reviewable on its own.
+
+#### What landed with this amendment
+
+A consolidation, not an extraction. `tests/architecture/test_template_studio_module.py`
+hand-rolled five migration-lineage rules the gate already owned generically —
+a second authority for one rule set, scoped to one module, and weaker than the
+original (its table check keyed off a regex matching only Template Studio's own
+`_TEMPLATES`/`_VERSIONS` constant names). Four were exact duplicates. The fifth,
+declared-but-never-created, was a genuine hole in the static gate: it was
+reachable only through the live catalog validator, which deliberately reads a
+migrated PostgreSQL, so an operator met it after `alembic upgrade` instead of in
+`make check`. `_check_declared_tables_are_built` closes it inside `run_gate` —
+per rule 2 above, every existing caller gained it with no call-site change — and
+the duplicated block is deleted.
+
+**The scaffolder remains unbuilt and is not scheduled here.** It is the one
+responsibility with nothing to consolidate, and building it against a single
+existing module is precisely the extraction-from-similarity failure § 5's gate
+exists to stop.
 
 ## Consequences
 

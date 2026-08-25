@@ -363,6 +363,67 @@ def test_an_empty_table_declaration_does_not_disable_ownership_checks(
     assert "its manifest's `tables` does not declare" in _messages(report)
 
 
+def test_rejects_a_declared_table_the_lineage_never_creates(tmp_path: Path) -> None:
+    """The OTHER direction of the same declaration (D1, item 6).
+
+    `test_rejects_a_table_the_manifest_does_not_declare` covers created-but-
+    undeclared. This covers declared-but-never-created, which used to pass the
+    static gate: `_check_table_ownership` only ever walked what the revisions
+    CREATE, so a table no revision builds was invisible to it. The defect
+    surfaced only in the live catalog validator — which deliberately reads a
+    migrated PostgreSQL — so an operator learned about it after `alembic
+    upgrade`, not in `make check`.
+
+    The failure it prevents is concrete: a module whose models map to
+    `mod_bill.credit_notes` boots fine, serves every request that never touches
+    that table, and 500s on the first one that does.
+    """
+    manifest = ModuleManifest(
+        code="billing",
+        version="1.0.0",
+        short_code="bill",
+        migration_prefix="bl",
+        migration_branch="billing",
+        tables=("invoices", "credit_notes"),
+    )
+    location = tmp_path / "billing"
+    _billing_root(location)  # creates mod_bill.invoices, and nothing else
+    report = run_gate(
+        [manifest],
+        [location],
+        registry=NamespaceRegistry.from_manifests([manifest], ledger=LEDGER),
+    )
+    assert not report.ok
+    assert "mod_bill.credit_notes" in _messages(report)
+    assert "no selected revision creates it" in _messages(report)
+
+
+def test_a_dropped_and_rebuilt_table_still_counts_as_created(tmp_path: Path) -> None:
+    """Sensitivity guard for the check above: it must key off "created
+    anywhere in the lineage", not "created by the latest revision".
+
+    A module legitimately drops and rebuilds its own table across releases
+    (`_check_table_ownership` allows exactly that, cross-revision). If the
+    declared-but-never-created check looked only at the head, this composition
+    would fail — a false positive that would push authors toward not declaring
+    tables at all.
+    """
+    location = tmp_path / "billing"
+    _billing_root(location)
+    _write(
+        location,
+        "bl_0002_rebuild",
+        revision="bl_0002_rebuild",
+        down_revision="bl_0001_invoices",
+        body=(
+            '    op.drop_table("invoices", schema="mod_bill")\n'
+            '    op.create_table("invoices", schema="mod_bill")'
+        ),
+    )
+    report = _gate(location)
+    assert report.ok, report.render()
+
+
 # ── Lineage, qualification and length rules stated alongside them ───────────
 
 

@@ -1404,7 +1404,32 @@ enforcement is `dotmac_kernel.migrations.catalog`.
 | That the allocation never moves | `namespaces.MIGRATION_OWNER_LEDGER` (checked-in, kernel-shipped) | unconditional whole-ledger validation, then `NamespaceRegistry.from_manifests` → `UnallocatedNamespaceError` / `NamespaceAllocationError` |
 | No two owners share a schema / prefix / branch label / table | `NamespaceRegistry` | construction raises `DuplicateSchemaError` / `DuplicateMigrationPrefixError` / `DuplicateBranchLabelError` / `DuplicateTableOwnerError` |
 | Coherent composed migration graph | `migrations.gate.run_gate` | `make migration-gate` (in `make check`; the CI `quality` matrix, which `docker-build` now `needs`) |
+| Declared `tables` ↔ what the lineage builds, both directions | `migrations.gate.run_gate` | `_check_table_ownership` (created-but-undeclared) + `_check_declared_tables_are_built` (declared-but-never-created) |
 | Live RLS/grant contract per module schema | `migrations.catalog.audit_live_schemas` | `tests/test_module_schema_catalog.py` (Postgres) |
+
+**Module conformance is kernel-owned, and `run_gate` is its one entrypoint.**
+ADR-0006 § 2 originally assigned scaffolder / test kit / fake host+providers /
+validators to a planned `dotmac-module-sdk` distribution; the **2026-08-11
+amendment cancels that package** — three of the four were already built in the
+kernel (`migrations.gate`, `namespaces`, `ModuleRegistry`, `dotmac_kernel.testing`)
+and the fourth, the scaffolder, remains unbuilt. "SDK" is a role, not a wheel.
+
+The binding rule that makes co-location sufficient: **a new module-conformance
+check goes INSIDE the aggregate entrypoint for its domain, never beside it.**
+Package co-location alone does not prevent under-enforcement — a consumer
+hand-picking individual validators still misses a newly added one. For migration
+conformance that entrypoint is `run_gate`, which is why
+`_check_declared_tables_are_built` was added to it rather than exported
+separately: `make check`, `scripts/migration_gate.py` and
+`tests/unit/test_migration_gate.py` all gained the check with no call-site change.
+
+A corollary for per-module tests: `tests/architecture/test_template_studio_module.py`
+covers only what is specific to that module — its manifest agreeing with its
+ledger row, and the sensitivity proofs that the agreement check bites. It
+deliberately holds **no** migration-lineage assertions; those are generic gate
+rules, and hand-rolling them per module recreates a second authority (that file
+previously did exactly this, with a regex that matched only Template Studio's own
+constant names).
 
 **`public` is a compatibility namespace, not a shared one.** It belongs to the
 kernel and to this one host assembly — every feature in `app/features/` is a
@@ -1528,11 +1553,36 @@ There is exactly ONE transaction authority in this codebase:
 Enforced by `tests/architecture/test_session_authority.py` (AST-based: no
 module outside `dotmac_kernel/db.py` may call `SessionLocal()`,
 `PlatformSessionLocal()`, `sessionmaker(...)`, or construct `Session(...)`;
-no feature module may import `sessionmaker`; sensitivity self-tested). The
-one allowlisted exception is `dotmac_kernel/middleware/tenant.py`: the resolver
-runs before any route dependency exists, so it owns its own short
-read-only session boundary — the allowlist entry and this paragraph must
-stay in sync.
+no feature module may import `sessionmaker`; sensitivity self-tested).
+
+**The one justified exception, pinned by count.** `dotmac_kernel/testing/
+harness.py` constructs exactly ONE session factory — `isolated_session`, the
+savepoint-isolated session a consumer's unit tests receive. It is recorded in
+`_JUSTIFIED_CALLS` as an exact count, not as set membership, so the number
+moving in EITHER direction fails: upward is new debt hiding behind an existing
+justification, downward is progress the pin must record, and a file dropping
+out of the scan is a stale entry. `test_the_ratchet_catches_a_second_
+construction_site` proves it bites, using the real harness source plus one
+smuggled call.
+
+**Narrowed 2026-08-11 (ADR-0018).** The whole `dotmac_kernel/testing/` tree was
+previously skipped by directory prefix, on the premise that the kit "is a
+session authority by design". That premise was true of one function and one
+line, but was written as a whole-tree exemption — so any new file under it
+inherited the blind spot without the exemption list changing. The prefix skip
+is gone; the tree is scanned like every other, and the single justified call is
+the entire remaining surface. A companion contract,
+`tests/architecture/test_testing_kit_boundary.py`, additionally forbids
+application, module, and ordinary kernel runtime code from importing the kit at
+all — the kit ships in the wheel, so nothing but this test keeps its RLS-free
+engine and signing helper out of production paths.
+
+Historical note: the earlier allowlist entry was
+`dotmac_kernel/middleware/tenant.py`, which opened a bare `SessionLocal()`
+because the resolver runs before any route dependency exists. `resolver_session()`
+named that need on the public surface, so the resolver now uses a boundary like
+everything else and the exemption was **deleted rather than documented** — which
+is the outcome an exemption should be aiming for.
 
 ## Conflict handling: savepoints preserve RLS context (2b.1-T2, finding F3)
 

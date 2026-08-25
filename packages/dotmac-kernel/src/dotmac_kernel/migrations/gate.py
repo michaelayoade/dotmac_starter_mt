@@ -505,7 +505,8 @@ def run_gate(
     _check_duplicate_revisions(records, violations)
     _check_revision_ids(records, owner_of_location, violations)
     _check_lineage_edges(records, owner_of_location, violations)
-    _check_table_ownership(records, owner_of_location, registry, violations)
+    creator = _check_table_ownership(records, owner_of_location, registry, violations)
+    _check_declared_tables_are_built(owner_of_location, registry, creator, violations)
     _check_search_path_independence(records, owner_of_location, violations)
     _check_stateful_modules_have_a_lineage(owner_of_location, registry, violations)
 
@@ -658,13 +659,18 @@ def _check_table_ownership(
     owner_of_location: Mapping[Path, MigrationOwner],
     registry: NamespaceRegistry,
     violations: list[str],
-) -> None:
+) -> dict[str, tuple[str, Path]]:
     """One qualified table, one creating OWNER — and a module creates only
     inside its own schema, only tables its manifest declares.
 
     Cross-owner, not cross-revision: one owner's lineage may legitimately drop
     and rebuild its own table over time. Two OWNERS creating one qualified
     table is the F0 collision class, and it is the dangerous one.
+
+    Returns the qualified-table → (owner, defining file) map it built, which is
+    the reverse direction's input: `_check_declared_tables_are_built` needs to
+    know what the lineages actually create, and rebuilding that map would mean
+    two walks that could disagree.
     """
     creator: dict[str, tuple[str, Path]] = {}
     for record in records:
@@ -701,6 +707,54 @@ def _check_table_ownership(
                     "which its manifest's `tables` does not declare — the "
                     "manifest is the table-ownership declaration"
                 )
+    return creator
+
+
+def _check_declared_tables_are_built(
+    owner_of_location: Mapping[Path, MigrationOwner],
+    registry: NamespaceRegistry,
+    creator: Mapping[str, tuple[str, Path]],
+    violations: list[str],
+) -> None:
+    """The other direction of the same declaration: a table the manifest
+    declares that no selected revision ever CREATES.
+
+    `_check_table_ownership` walks what migrations create, so it can only ever
+    catch created-but-undeclared. Declared-but-never-built was invisible to it
+    and surfaced only in the live catalog validator — which deliberately reads
+    a migrated PostgreSQL — so an operator met it after `alembic upgrade`
+    rather than in `make check`. The module boots, serves every request that
+    misses the table, and fails on the first one that hits it.
+
+    Keyed off "created anywhere in this owner's lineage", not "created by the
+    head revision": a module may legitimately drop and rebuild its own table
+    across releases, and flagging that would push authors toward declaring
+    nothing at all.
+
+    A module that ships NO lineage is deliberately not reported here —
+    `_check_stateful_modules_have_a_lineage` already names that, and one fault
+    should not produce a violation per declared table.
+    """
+    built: dict[tuple[str, str], set[str]] = {}
+    for table, (owner_name, _path) in creator.items():
+        schema, _, bare = table.partition(".")
+        if schema:
+            built.setdefault((owner_name, schema), set()).add(bare)
+
+    attributed = {owner.owner: owner for owner in owner_of_location.values()}
+    for owner_name in sorted(attributed):
+        owner = attributed[owner_name]
+        if owner.is_legacy or owner.db_schema is None:
+            continue
+        declared = registry.declared_tables(owner.db_schema)
+        missing = declared - built.get((owner_name, owner.db_schema), set())
+        for bare in sorted(missing):
+            violations.append(
+                f"module {owner_name!r} declares table "
+                f"{qualified(owner.db_schema, bare)} but no selected revision "
+                "creates it — the manifest is the table-ownership declaration, "
+                "and its models would map to a table that never exists"
+            )
 
 
 def _check_search_path_independence(

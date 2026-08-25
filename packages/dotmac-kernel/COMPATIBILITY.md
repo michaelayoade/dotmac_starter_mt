@@ -286,7 +286,11 @@ from the deployment's own Alembic config via `version_locations_from_ini()` —
 and rejects duplicate revisions, unregistered or mismatched prefixes,
 duplicate/foreign branch labels, duplicate schema claims and duplicate table
 ownership, plus lineage-root, `down_revision`-crossing, id-length and
-`schema=` qualification faults. The scanner follows local `upgrade()` helpers,
+`schema=` qualification faults. Manifest `tables` is checked in **both**
+directions: a revision creating a table the manifest does not declare, and a
+manifest declaring a table no selected revision ever creates (the latter would
+otherwise surface only in the live-catalog gate, against an already-migrated
+database). The scanner follows local `upgrade()` helpers,
 understands typed Alembic metadata and D1 schema constants, checks inline and
 imperative foreign keys, and rejects schema-qualified writes aimed at another
 owner. It is a pure **AST** scan: nothing is imported and no database is
@@ -529,14 +533,22 @@ fakes work without it). The package re-exports everything from three submodules:
   partial/resume behavior) and `check_provisioning_provider_contract(factory)`,
   the reusable assertion suite a consumer runs against THEIR provider factory to
   prove it honors the protocol's determinism / idempotency / partial-resume /
-  cancellation semantics.
+  cancellation semantics. It raises `AssertionError` naming the violated
+  requirement. Since the 2026-08-11 hardening every check is an **explicit
+  raise, never a bare `assert`** — the suite therefore still enforces under
+  `python -O`, which strips `assert` statements and previously turned a
+  conformance run into a clean no-op.
 - **`licensing`** — `FakeLicenceSigner`: signs licence payloads /
   revocation lists with an **ephemeral, per-instance, in-memory Ed25519 key**
   (the only private key anywhere in the kernel — never persisted, never a real
   issuer key), so vendor-plane and product tests can build valid and
   deliberately-broken envelopes for `dotmac_kernel.licensing` without key
-  custody. Instantiation needs the `cryptography` package (the `testing` extra
-  now includes it, as does `licensing`).
+  custody. Instantiation needs the `cryptography` package, which the
+  `licensing` extra supplies; `[testing]` deliberately does NOT (see "Extras
+  are split by consumer need" below). Install `[testing,licensing]`.
+  `add_signature()` raises `MalformedLicenceError` — the same error the real
+  verifier raises — when handed an envelope whose `payload_b64` or `signatures`
+  field is the wrong type.
 
 ### Outbox/inbox + idempotent commands (`dotmac_kernel.messaging`)
 

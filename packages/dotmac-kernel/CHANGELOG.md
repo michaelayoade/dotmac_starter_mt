@@ -6,6 +6,70 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+Module-conformance consolidation (ADR-0006 amendment 2026-08-11). Additive; no
+migration. No version bump here — that is a release decision.
+
+### Added
+- **The composed migration gate checks manifest `tables` in BOTH directions.**
+  `run_gate` already rejected a revision creating a table its manifest does not
+  declare; `_check_declared_tables_are_built` now also rejects a manifest
+  declaring a table **no selected revision ever creates**.
+
+  Previously that fault was reachable only through the live-catalog validator,
+  which deliberately reads a migrated PostgreSQL — so an operator met it after
+  `alembic upgrade` rather than in `make check`. The module boots, serves every
+  request that misses the table, and fails on the first one that hits it.
+
+  Keyed off "created anywhere in the owner's lineage", not "created by the head
+  revision", so a module that legitimately drops and rebuilds its own table
+  across releases still passes. A module shipping no lineage at all is still
+  reported once by `_check_stateful_modules_have_a_lineage`, not once per
+  declared table.
+
+  Added INSIDE `run_gate` rather than exported alongside it, per the amendment's
+  aggregate-entrypoint rule: `make check`, `scripts/migration_gate.py` and the
+  unit suite all gained the check with no call-site change.
+
+### Changed
+- **`dotmac-module-sdk` is cancelled as a planned distribution**; the
+  scaffolder, test kit, fake host/providers and validators are kernel-owned
+  responsibilities. This supersedes the ADR-0006 § 2 ruling. No code moved —
+  three of the four were already here.
+
+### Changed
+- **`check_provisioning_provider_contract` no longer uses bare `assert`.** Every
+  check is an explicit raise, so the suite keeps working under `python -O`.
+
+  This is a real defect fix, not a style change. `python -O` strips `assert`
+  statements, so a consumer running an optimised interpreter got a **clean
+  return from a contract that checked nothing** — a green conformance signal for
+  an unverified provider. Proven both ways in
+  `tests/unit/test_testing_kit.py::test_the_contract_still_rejects_a_broken_
+  provider_under_O`, which runs the real suite in a real `-O` subprocess: with
+  the old asserts a deliberately non-idempotent provider returns
+  `PASSED-SILENTLY`; now it is `REJECTED`.
+
+  Failures also name the violated requirement ("re-applying a terminal operation
+  must be a no-op returning the SAME operation_id…") instead of surfacing as a
+  bare `assert applied.is_terminal`.
+
+- **`FakeLicenceSigner.add_signature` raises `MalformedLicenceError`** for a
+  malformed envelope, instead of asserting. Same `-O` reasoning: the input is
+  caller-supplied, and a stripped assert turned a bad field into an opaque
+  `TypeError` from inside base64 decoding. It is the error the real verifier
+  raises for the same fault, so a test need not know whether the envelope came
+  from the fake or an issuer.
+
+### Fixed
+- **Documentation contradicted packaging on the `testing` extra.**
+  `dotmac_kernel.testing.licensing` and `COMPATIBILITY.md` both claimed the
+  `testing` extra supplies `cryptography`. It does not — `testing = ["httpx"]`,
+  deliberately, so a product consuming the harness and fakes never inherits a
+  compiled crypto stack. `FakeLicenceSigner` needs `[testing,licensing]`. A
+  reader following either doc hit an ImportError at instantiation.
+
 ## 0.1.0a36 — 2026-08-10
 
 The provider seam and the channel-policy reader (ADR-0006 § 5c/5d). Additive; no

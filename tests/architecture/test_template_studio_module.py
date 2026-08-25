@@ -9,9 +9,6 @@ mode is an assertion, not a guarantee.
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
 import dotmac_template_studio as template_studio
 import pytest
 from dotmac_kernel.modules import ModuleManifest, ModuleRegistry
@@ -22,7 +19,6 @@ from dotmac_kernel.namespaces import (
     UnallocatedNamespaceError,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODULE = template_studio.module
 LEDGER_ROW = next(
     owner for owner in MIGRATION_OWNER_LEDGER if owner.owner == "template_studio"
@@ -83,71 +79,27 @@ def test_the_module_composes_with_the_assembly_features() -> None:
 
 
 # ── The migration lineage ───────────────────────────────────────────────────
-
-_VERSIONS_DIR = (
-    PROJECT_ROOT
-    / "packages/dotmac-template-studio/src/dotmac_template_studio/migrations/versions"
-)
-
-
-def _revision_files() -> list[Path]:
-    return sorted(p for p in _VERSIONS_DIR.glob("*.py") if p.name != "__init__.py")
-
-
-def test_the_lineage_ships_at_least_one_revision() -> None:
-    """Assert on the set walked: an empty lineage would make every check below
-    pass over nothing, and the module's tables would never be created."""
-    assert _revision_files(), f"no revisions found under {_VERSIONS_DIR}"
-
-
-def test_every_revision_id_uses_the_allocated_prefix_and_fits_the_column() -> None:
-    pattern = re.compile(rf"^{LEDGER_ROW.prefix}_\d{{4}}_[a-z0-9_]+$")
-    for path in _revision_files():
-        text = path.read_text(encoding="utf-8")
-        match = re.search(r'^revision = "([^"]+)"', text, re.MULTILINE)
-        assert match, f"{path.name}: no `revision` assignment"
-        revision = match.group(1)
-        assert pattern.match(revision), (
-            f"{path.name}: revision {revision!r} does not match the allocated "
-            f"prefix pattern {pattern.pattern}"
-        )
-        # `alembic_version.version_num` is VARCHAR(32); a longer id fails only
-        # against a real database, mid-deploy.
-        assert len(revision) <= 32, f"{revision!r} exceeds 32 characters"
-
-
-def test_the_lineage_root_carries_the_owner_branch_label() -> None:
-    """How an `alembic_version` row is attributed to this module."""
-    roots = [
-        path
-        for path in _revision_files()
-        if re.search(r"^down_revision = None$", path.read_text(encoding="utf-8"), re.M)
-    ]
-    assert len(roots) == 1, f"expected exactly one lineage root, found {len(roots)}"
-    text = roots[0].read_text(encoding="utf-8")
-    assert f'branch_labels = ("{LEDGER_ROW.branch_label}",)' in text
-
-
-def test_no_revision_crosses_lineages_with_down_revision() -> None:
-    """Cross-lineage ordering is `depends_on`; `down_revision` would splice two
-    independently released lineages into one chain."""
-    for path in _revision_files():
-        text = path.read_text(encoding="utf-8")
-        match = re.search(r'^down_revision = "([^"]+)"', text, re.MULTILINE)
-        if match:
-            assert match.group(1).startswith(f"{LEDGER_ROW.prefix}_"), (
-                f"{path.name}: down_revision {match.group(1)!r} points outside "
-                "this module's lineage — use `depends_on` instead"
-            )
-
-
-def test_declared_tables_match_what_the_lineage_creates() -> None:
-    created = set()
-    for path in _revision_files():
-        text = path.read_text(encoding="utf-8")
-        created |= set(re.findall(r'^_(?:TEMPLATES|VERSIONS) = "([^"]+)"', text, re.M))
-    assert created == set(MODULE.tables), (
-        f"manifest declares {sorted(MODULE.tables)} but the lineage creates "
-        f"{sorted(created)} — the composed gate rejects a create outside the "
-        "declaration, and the live-catalog gate checks it in both directions"
-    )
+#
+# Deliberately EMPTY. This file used to hand-roll five lineage checks here —
+# revision-id prefix and length, one lineage root carrying the owner's branch
+# label, `down_revision` never crossing lineages, and declared tables matching
+# what the lineage creates — each with its own regex over the revision files.
+#
+# All five are rules `dotmac_kernel.migrations.gate` already owns and enforces
+# GENERICALLY, off the manifest, over the same files, in `make check` (via
+# `scripts/migration_gate.py`) and in `tests/unit/test_migration_gate.py`. The
+# copies here were a second authority for one set of rules, scoped to one
+# module and weaker than the originals: the table check keyed off a regex that
+# only matched Template Studio's own `_TEMPLATES`/`_VERSIONS` constant names,
+# so it could not have been reused by a second module even in principle.
+#
+# The last of the five to become generic was declared-but-never-created, which
+# the static gate did not cover until `_check_declared_tables_are_built` landed
+# alongside this deletion; it was reachable only through the live catalog
+# validator, against an already-migrated PostgreSQL.
+#
+# A new module inherits all five by being registered in the ledger and having
+# its version location selected in `alembic.ini` — not by copying this block.
+# The rule for anything added later: a new module-conformance check belongs
+# inside `run_gate`, so every existing caller picks it up with no call-site
+# change (ADR-0006 amendment 2026-08-11).

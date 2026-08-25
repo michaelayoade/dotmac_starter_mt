@@ -169,6 +169,23 @@ class FakeProvisioningProvider:
         )
 
 
+def _require(condition: object, requirement: str) -> None:
+    """Raise `AssertionError` unless `condition` holds.
+
+    Deliberately NOT `assert`. This function is the body of a PUBLIC conformance
+    suite that consumers run against their own providers, and `python -O` strips
+    every `assert` statement — which would turn the whole contract into a
+    no-op that returns cleanly. A conformance run that passes because it checked
+    nothing is worse than no conformance run at all: it produces a green signal
+    for a provider nobody verified.
+
+    `AssertionError` rather than a bespoke type so that pytest, unittest and a
+    bare `python -c` all report it the way a consumer expects.
+    """
+    if not condition:
+        raise AssertionError(f"provisioning provider contract violated — {requirement}")
+
+
 def check_provisioning_provider_contract(
     make_provider: Callable[..., ProvisioningProvider],
 ) -> None:
@@ -178,46 +195,91 @@ def check_provisioning_provider_contract(
     `FakeProvisioningProvider` config (`fail_apply`, `partial_first_apply`) — a
     real provider's factory should accept and honor the same behavioral knobs,
     or wrap itself so the contract can drive them. Run this from a consumer's
-    test suite: `check_provisioning_provider_contract(MyProvider.for_tests)`."""
+    test suite: `check_provisioning_provider_contract(MyProvider.for_tests)`.
+
+    Raises `AssertionError` naming the violated requirement. Every check is an
+    explicit raise (see `_require`), so the suite keeps working under
+    `python -O`.
+    """
     req = ProvisioningRequest(intent_id="i-1", spec={"size": 1})
 
     # Structural conformance.
     provider = make_provider()
-    assert isinstance(provider, ProvisioningProvider)
+    _require(
+        isinstance(provider, ProvisioningProvider),
+        "the factory must return an object satisfying the ProvisioningProvider "
+        "protocol (plan/apply/observe/cancel)",
+    )
 
     # plan is deterministic in plan_hash for the same request.
-    assert provider.plan(req).plan_hash == make_provider().plan(req).plan_hash
+    _require(
+        provider.plan(req).plan_hash == make_provider().plan(req).plan_hash,
+        "plan() must be deterministic: the same request must yield the same "
+        "plan_hash across two fresh providers, since apply() keys idempotency "
+        "off it",
+    )
 
     # A clean apply reaches a terminal SUCCEEDED and is idempotent on re-apply.
     applied = provider.apply(req)
-    assert applied.status is ProvisioningStatus.SUCCEEDED
-    assert applied.is_terminal
+    _require(
+        applied.status is ProvisioningStatus.SUCCEEDED,
+        f"a clean apply() must reach SUCCEEDED, got {applied.status}",
+    )
+    _require(applied.is_terminal, "a SUCCEEDED apply() result must be terminal")
     again = provider.apply(req)
-    assert again.operation_id == applied.operation_id
-    assert again.status is applied.status
+    _require(
+        again.operation_id == applied.operation_id,
+        "re-applying a terminal operation must be a no-op returning the SAME "
+        "operation_id, not a new operation",
+    )
+    _require(
+        again.status is applied.status,
+        "re-applying a terminal operation must return the prior status " "unchanged",
+    )
 
     # observe reflects the recorded operation.
     observed = provider.observe(applied.operation_id)
-    assert observed.status is ProvisioningStatus.SUCCEEDED
+    _require(
+        observed.status is ProvisioningStatus.SUCCEEDED,
+        "observe() must report the recorded status of a settled operation",
+    )
 
     # Partial apply is RESUMABLE: re-applying the same operation converges.
     partial_provider = make_provider(partial_first_apply=True)
     first = partial_provider.apply(req)
-    assert first.is_partial
-    assert first.outstanding_steps  # something remains
+    _require(
+        first.is_partial,
+        "a provider configured for a partial first apply must return PARTIAL, "
+        "which is a first-class result and not an error",
+    )
+    _require(
+        first.outstanding_steps,
+        "a PARTIAL result must name what remains in outstanding_steps — that "
+        "is what a resume reconciles",
+    )
     resumed = partial_provider.apply(
         ProvisioningRequest(
             intent_id="i-1", spec={"size": 1}, operation_id=first.operation_id
         )
     )
-    assert resumed.status is ProvisioningStatus.SUCCEEDED
-    assert not resumed.outstanding_steps
+    _require(
+        resumed.status is ProvisioningStatus.SUCCEEDED,
+        "re-applying a PARTIAL operation_id must RESUME it to SUCCEEDED, not "
+        "start a new operation",
+    )
+    _require(
+        not resumed.outstanding_steps,
+        "a resumed operation that SUCCEEDED must leave no outstanding steps",
+    )
 
     # Failure injection → terminal FAILED, not a partial.
     failing = make_provider(fail_apply=True)
     failed = failing.apply(req)
-    assert failed.status is ProvisioningStatus.FAILED
-    assert failed.is_terminal
+    _require(
+        failed.status is ProvisioningStatus.FAILED,
+        f"an injected apply failure must settle to FAILED, got {failed.status}",
+    )
+    _require(failed.is_terminal, "a FAILED apply() result must be terminal")
 
     # plan failure raises the stable terminal error.
     plan_failing = make_provider(fail_plan=True)
@@ -225,17 +287,28 @@ def check_provisioning_provider_contract(
         plan_failing.plan(req)
     except ProvisioningPlanError:
         pass
-    else:  # pragma: no cover
-        raise AssertionError("expected ProvisioningPlanError")
+    else:
+        raise AssertionError(
+            "provisioning provider contract violated — an invalid spec must "
+            "raise ProvisioningPlanError (terminal), not return a result"
+        )
 
     # cancel settles to a terminal CANCELLED snapshot.
     cancel_provider = make_provider()
     op = cancel_provider.apply(req).operation_id
     snapshot = cancel_provider.cancel(op)
-    assert snapshot.status is ProvisioningStatus.CANCELLED
+    _require(
+        snapshot.status is ProvisioningStatus.CANCELLED,
+        "cancel() must return a snapshot settling to CANCELLED — cancellation "
+        "is cooperative, but the outcome is still terminal",
+    )
 
     # The apply/plan error classification is stable.
-    assert ProvisioningApplyError("x").retryable is False
+    _require(
+        ProvisioningApplyError("x").retryable is False,
+        "ProvisioningApplyError must classify as non-retryable; a caller "
+        "branches on `retryable` to decide whether to retry the operation",
+    )
 
 
 __all__ = ["FakeProvisioningProvider", "check_provisioning_provider_contract"]
