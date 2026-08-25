@@ -241,6 +241,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-services"
         / "src/dotmac_services/migrations/versions"
     ),
+    "dotmac-template-studio": (
+        REPO_ROOT
+        / "packages/dotmac-template-studio"
+        / "src/dotmac_template_studio/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -276,6 +281,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-sales": "sa_*.py",
     "dotmac-service-access-policy": "sap_*.py",
     "dotmac-services": "se_*.py",
+    "dotmac-template-studio": "ts_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -308,6 +314,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-sales": "dotmac-sales-v",
     "dotmac-service-access-policy": "dotmac-service-access-policy-v",
     "dotmac-services": "dotmac-services-v",
+    "dotmac-template-studio": "dotmac-template-studio-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1277,6 +1284,19 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-template-studio ──
+    "dotmac-template-studio-v0.2.0a3": (
+        "dotmac-template-studio",
+        "5777ceb5",
+        {
+            "ts_0001_templates.py": (
+                "511073d3225c8fa9be09c687500e0515efbb5d8fdc4859791e1e4f16ed7308f4"
+            ),
+            "ts_0002_notification_identity.py": (
+                "b50c2387f54a877cf0f0ff772bcfc84083a973595c490d6facf6bf7a8f196088"
+            ),
+        },
+    ),
 }
 
 
@@ -1370,6 +1390,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-sales": frozenset(),
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
+    "dotmac-template-studio": frozenset(),
 }
 
 
