@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from dotmac_kernel.assembly import ProductAssemblySpec
@@ -165,15 +167,21 @@ def test_legacy_web_shape_requires_an_explicit_staff_facet() -> None:
 
 
 @pytest.mark.parametrize(
-    ("authentication_profile", "admission_permission"),
+    ("authentication_profile", "admission_permission", "match"),
     (
-        (None, "legacy.portal.access"),
-        ("staff_session", None),
+        # Refused when the MOUNT is constructed: a facet that admits on a
+        # permission but names no authentication profile has no established
+        # party to evaluate that permission against.
+        (None, "legacy.portal.access", "admission without authentication"),
+        # Refused by the REGISTRY: authenticating is not admitting, and the v1
+        # compatibility adapter never infers an authorization policy.
+        ("staff_session", None, "authentication profile and an admission"),
     ),
 )
 def test_legacy_staff_facet_requires_authentication_and_admission(
     authentication_profile: str | None,
     admission_permission: str | None,
+    match: str,
 ) -> None:
     router = APIRouter(prefix="/admin")
 
@@ -186,19 +194,23 @@ def test_legacy_staff_facet_requires_authentication_and_admission(
         version="1.0.0",
         web_routers=(router,),
     )
-    unsecured = WebFacetMount(
-        code="staff_admin",
-        url_prefix="/admin",
-        shell=TemplateRef("layouts/admin.html"),
-        authentication_profile=authentication_profile,
-        admission_permission=admission_permission,
-        navigation_regions=(NavigationRegion("primary"),),
-    )
-
-    with pytest.raises(WebSurfaceError, match="authentication.*admission"):
+    # The mount is built INSIDE the raises block on purpose: one of these two
+    # under-secured shapes is refused by `WebFacetMount.__post_init__` and the
+    # other by the registry, so hoisting the construction out would let the
+    # first case raise before `pytest.raises` was watching.
+    with pytest.raises(WebSurfaceError, match=match):
         WebSurfaceRegistry(
             manifests=(manifest,),
-            facets=(unsecured,),
+            facets=(
+                WebFacetMount(
+                    code="staff_admin",
+                    url_prefix="/admin",
+                    shell=TemplateRef("layouts/admin.html"),
+                    authentication_profile=authentication_profile,
+                    admission_permission=admission_permission,
+                    navigation_regions=(NavigationRegion("primary"),),
+                ),
+            ),
             authentication_profiles=(_profile(),),
             ui_contract_version=1,
         )
@@ -486,7 +498,22 @@ def test_navigation_references_one_named_parameterless_get_route() -> None:
     )
 
 
-def test_entry_route_is_assembly_approved_while_sibling_route_uses_profile() -> None:
+def test_entry_route_is_assembly_approved_while_sibling_route_uses_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `TenantResolverMiddleware` short-circuits only `/health` and `/static`,
+    # so every other path resolves a tenant against the DATABASE — and in the
+    # unit tier `DATABASE_URL` is a hermetic placeholder with nothing behind it
+    # (tests/conftest.py). This test is about the SURFACE CONTEXT a facet
+    # builds, not about tenancy, so resolution is stubbed rather than backed by
+    # a real engine; the isolation canaries under tests/ own the tenancy
+    # question against a migrated Postgres.
+    from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+
+    tenant = SimpleNamespace(id=uuid.uuid4(), slug="facet-test")
+    monkeypatch.setattr(TenantResolverMiddleware, "_resolve", lambda self, host: tenant)
+    monkeypatch.setattr(TenantResolverMiddleware, "_allow", lambda self, t: t)
+
     router = APIRouter(prefix="/session")
 
     @router.get("/login", name="login")
