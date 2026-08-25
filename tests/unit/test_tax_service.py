@@ -621,10 +621,15 @@ def test_one_source_fact_produces_multiple_ordered_tax_components(
     assert_replay_refused("strict unique ordering")
     persisted.components = original_components
 
+    original_seal_state = persisted.result_seal_state
     original_result_fingerprint = persisted.result_fingerprint
+    assert original_seal_state == "sealed"
     assert original_result_fingerprint is not None
     persisted.result_fingerprint = None
+    assert_replay_refused("sealed determination has no result fingerprint")
+    persisted.result_seal_state = None
     assert_replay_refused("predates the rv1 result-content seal")
+    persisted.result_seal_state = original_seal_state
     persisted.result_fingerprint = original_result_fingerprint
 
     original_tax_code_id = first.tax_code_id
@@ -1379,7 +1384,7 @@ def test_inclusive_tax_cannot_mix_with_another_component(db: Session) -> None:
 def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> None:
     tenant = _tenant(db)
     _, jurisdiction, code = _masters(db, tenant.id)
-    publish_tax_rule(
+    rule = publish_tax_rule(
         db,
         tenant_id=tenant.id,
         command=TaxRuleInput(
@@ -1463,22 +1468,42 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
     assert obligation.due_on == date(2026, 8, 18)
     assert report.total_payable == Decimal("25.00")
 
-    determine_tax(
-        db,
-        tenant_id=tenant.id,
-        fact=TaxFact(
-            jurisdiction_id=jurisdiction.id,
-            occurred_on=date(2026, 7, 11),
-            fact_kind="cash-receipt",
-            recognition_basis_code="cash-received",
-            transaction_side="output",
-            base_amount=Money.of("1000", NGN),
-            source_ref="receipt:legacy-report-refusal",
-            source_version="1",
-            evidence_ref="receipt:legacy-report-refusal",
-        ),
-        determined_at=NOW,
+    legacy_fact = TaxFact(
+        jurisdiction_id=jurisdiction.id,
+        occurred_on=date(2026, 7, 11),
+        fact_kind="cash-receipt",
+        recognition_basis_code="cash-received",
+        transaction_side="output",
+        base_amount=Money.of("1000", NGN),
+        source_ref="receipt:legacy-report-refusal",
+        source_version="1",
+        evidence_ref="receipt:legacy-report-refusal",
     )
+    db.add(
+        TaxDetermination(
+            tenant_id=tenant.id,
+            jurisdiction_id=jurisdiction.id,
+            tax_code_id=code.id,
+            rule_id=rule.id,
+            rule_version=rule.version,
+            occurred_on=legacy_fact.occurred_on,
+            fact_kind=legacy_fact.fact_kind,
+            recognition_basis_code=legacy_fact.recognition_basis_code,
+            transaction_side=legacy_fact.transaction_side,
+            base_amount=Decimal("1000.00"),
+            tax_amount=Decimal("25.00"),
+            recoverable_amount=Decimal("0.00"),
+            non_recoverable_amount=Decimal("25.00"),
+            currency_code="NGN",
+            minor_units=2,
+            source_ref=legacy_fact.source_ref,
+            source_version=legacy_fact.source_version,
+            source_fingerprint=_a1_fingerprint(legacy_fact),
+            evidence_ref=legacy_fact.evidence_ref,
+            determined_at=NOW,
+        )
+    )
+    db.flush()
     with pytest.raises(TaxConflict, match="legacy unsealed determinations cannot feed"):
         generate_statutory_report(
             db,
