@@ -624,6 +624,25 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-documents` and `dotmac-records` are two independent tenant-only
+# owners presented together by product assemblies. Documents owns controlled
+# working identity and exact immutable versions. Records takes retention/hold/
+# preservation/disposition authority only after explicit declaration. Their
+# adjacent allocations do not create a dependency or a shared lineage.
+DOCUMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="documents",
+    prefix="dc",
+    branch_label="documents",
+    db_schema=module_schema("documents"),
+)
+
+RECORDS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="records",
+    prefix="re",
+    branch_label="records",
+    db_schema=module_schema("records"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +658,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    DOCUMENTS_MIGRATION_OWNER,
+    RECORDS_MIGRATION_OWNER,
 )
 
 
@@ -995,6 +1016,7 @@ __all__ = [
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
     "DURABLE_TIMERS_MIGRATION_OWNER",
+    "DOCUMENTS_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",
@@ -1003,6 +1025,7 @@ __all__ = [
     "NamespaceAllocationError",
     "NamespaceError",
     "NamespaceRegistry",
+    "RECORDS_MIGRATION_OWNER",
     "UnallocatedNamespaceError",
     "module_schema",
     "qualified",

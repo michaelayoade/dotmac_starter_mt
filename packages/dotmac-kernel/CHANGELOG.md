@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a74 — 2026-08-19
+
+Allocates the independent tenant-only Documents and Records lineages. This is
+namespace governance only: the kernel gains no document, retention, hold or
+disposition behavior.
+
+### Added
+
+- `DOCUMENTS_MIGRATION_OWNER`: schema `mod_documents`, revision prefix `dc`,
+  branch label `documents`.
+- `RECORDS_MIGRATION_OWNER`: schema `mod_records`, revision prefix `re`, branch
+  label `records`.
+
+The two allocations are adjacent because assemblies present them under one
+product surface; they remain separate owners, packages and Alembic lineages.
+
 ## 0.1.0a73 — 2026-08-19
 
 Makes caller-session kernel services safe for independently assembled products.

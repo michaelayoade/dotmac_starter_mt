@@ -9,6 +9,23 @@
 (dual-plane modules), ADR-0024 (applications synchronize data; module
 installations do not share rows)
 
+## Amendment, 2026-08-19: a declared record transfers compliance authority
+
+ADR-0033 narrows § 2's statement that every source domain owns legal hold and
+retention. The source domain owns attachment meaning, access and retention
+until it explicitly declares one exact immutable artifact as a managed record.
+From declaration onward, `dotmac-records` is the sole writer of retention,
+hold, preservation and disposition state for that record. The source domain
+retains business meaning and must consult Records before deletion.
+
+This is an authority handoff, not shared policy. `dotmac-files` still owns the
+physical object lifecycle and cannot decide whether content may be destroyed.
+Records issues a digest-bound deletion authorization only after deterministic
+eligibility, approval and hold rechecks; Files performs physical deletion;
+Records records final evidence only after Files confirms the resulting state.
+Attachments never declared as records remain under the source domain's
+retention and access authority exactly as this ADR originally decided.
+
 ## Amendment, 2026-08-13: one physical lifecycle, two persistence planes
 
 ADR-0023 supersedes this ADR's original tenant-only persistence shape. The
@@ -93,12 +110,15 @@ ENABLEd and FORCEd in the same `fi` lineage migration. The allocation is
 The package is non-core and is built/tested here without being composed into the
 Starter assembly.
 
-### 2. Domains own attachment meaning and authorization
+### 2. Domains own attachment meaning and authorization until record declaration
 
 A ticket, invoice, subscriber, work order, message, or import run stores an
-opaque file UUID and owns its relation, visibility, permissions, legal hold,
-retention rule, and audit vocabulary. `stored_files` has no polymorphic entity
-columns, public flag, domain ID, or generated public URL.
+opaque file UUID and owns its relation, visibility, permissions, retention and
+audit vocabulary while it remains an ordinary domain attachment. An explicit
+record declaration transfers only retention, hold, preservation and
+disposition authority to `dotmac-records`; it does not transfer invoice,
+employee, contract, ticket or work-order meaning. `stored_files` has no
+polymorphic entity columns, public flag, domain ID, or generated public URL.
 
 The application/assembly adapter authorizes the domain operation, validates or
 loads the file through `dotmac-files`, and delegates to the domain service.

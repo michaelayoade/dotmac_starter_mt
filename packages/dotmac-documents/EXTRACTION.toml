@@ -1,0 +1,48 @@
+schema_version = 1
+package = "dotmac-documents"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Controlled document identity, immutable exact-content versions, document lifecycle, document-scoped access/collaboration and acknowledgements"
+contract = "Create tenant libraries and immutable document-type policy versions; create stable document identity independent of filename/folder; allocate immutable major/minor versions under a locked current pointer with explicit author/time/reason/provenance and opaque Files evidence; bind renditions and approvals to the exact version checksum; perform the configured Documents-owned lifecycle; record checkout, classifications, relations, annotations, access grants, acknowledgements and append-only evidence. NOT bytes/provider lifecycle, billing rendering, approval decisions, durable timer delivery, general conversation, external delivery, OCR/provider I/O, records retention/holds/disposition or source-domain business meaning."
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_backoffice",
+  "dotmac-academy",
+  "dotmac_academy_app",
+  "dotmac_workspace",
+  "dotmac_vendor_control_plane",
+  "dotmac_starter_mt",
+]
+source_paths = [
+  "dotmac_erp:app/models/people/hr/handbook.py",
+  "dotmac_erp:app/services/people/hr/handbook_service.py",
+  "dotmac_erp:app/models/finance/automation/generated_document.py",
+  "dotmac_sub:app/services/sales/quote_documents.py",
+  "dotmac_sub:alembic/versions/471_quote_documents_and_delivery.py",
+  "dotmac_sub:app/models/legal.py",
+  "dotmac_crm:app/models/legal.py",
+  "dotmac_starter_mt:packages/dotmac-documents/src/dotmac_documents",
+]
+preserved_tests = [
+  "dotmac_erp:tests/integration/services/test_document_generator.py",
+  "dotmac_erp:tests/people/hr/test_employee_document_upload.py",
+  "dotmac_sub:tests/test_quote_documents_and_delivery.py",
+  "dotmac_sub:tests/architecture/test_quote_document_delivery_boundary.py",
+  "dotmac_starter_mt:tests/unit/test_documents_lifecycle.py",
+  "dotmac_starter_mt:tests/architecture/test_documents_module.py",
+  "dotmac_starter_mt:tests/test_documents_records_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp", "dotmac_sub"]
+inventory_evidence = [
+  "dotmac_starter_mt:docs/inventories/documents-records-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-documents-own-controlled-versions-records-own-declared-evidence.md",
+]
+composition_boundary = "ADR-0024/0033: each product installs its own tenant-only dc lineage. Documents imports the kernel but no sibling/product. Assemblies pass opaque Files ids/checksums, approval observations and timer requests across typed seams; Records may consume a Documents version only as an opaque source snapshot, never by FK or ORM import."
+first_cutover = "ERP after its E8 tenant/session/lineage gate: HR handbook is the first coherent slice because it is the qualifying source and already has version/effective-date/acknowledgement demand. Sub follows with controlled legal documents after the exact release is proven in ERP; quote business meaning and rendering stay in Sub."
+shadow_and_drift = "ERP backfills stable documents plus exact immutable versions and Files ids/checksums; shadow compares document code, version chain, current/effective state, metadata, checksum and acknowledgement identity. The last typed comparison, sealed ADR-0031 authority switch and legacy-writer lock are one transaction. Sub repeats for its legal-document slice. Rendition checks compare source/output digest and renderer version, never visual filenames."
+local_copy_retirement = "ERP removes HRDocument lifecycle/version allocation and direct handbook byte-path authority after the sealed switch and rollback window; domain applicability adapters may remain. A two-directional caller/table ratchet reaches zero. Sub removes mutable LegalDocument replace/delete/current-version ownership for the adopted slice. Neither product keeps a fallback writer."
+next_action = "Complete exact-commit Observer validation, then cut ERP's E8 prerequisite and checked-in adoption plan. Publish kernel a74 and Documents a1 only after the package and lineage gates are green; do not claim adoption until ERP's old writer is retired."
