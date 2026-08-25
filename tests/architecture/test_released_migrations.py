@@ -1225,7 +1225,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
-    "dotmac-subscriptions": frozenset(),
+    "dotmac-subscriptions": frozenset({"su_0003_billing_treatments.py"}),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),

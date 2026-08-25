@@ -30,6 +30,37 @@ class OccurrenceState(str, Enum):
     cancelled = "cancelled"
 
 
+class SubscriptionBillingTreatment(str, Enum):
+    """Customer billing treatment; standard is represented by no arrangement."""
+
+    standard = "standard"
+    complimentary = "complimentary"
+    sponsored = "sponsored"
+
+
+class BillingTreatmentReason(str, Enum):
+    """Product-first reason vocabulary proven by Sub's live owner."""
+
+    internal_service = "internal_service"
+    staff_benefit = "staff_benefit"
+    partner_service = "partner_service"
+    community_support = "community_support"
+    commercial_concession = "commercial_concession"
+    sponsored_service = "sponsored_service"
+    other_approved = "other_approved"
+
+
+class BillingTreatmentStatus(str, Enum):
+    active = "active"
+    revoked = "revoked"
+
+
+class BillingTreatmentDecisionStatus(str, Enum):
+    standard = "standard"
+    effective = "effective"
+    protected_drift = "protected_drift"
+
+
 _OFFER_TRANSITIONS = {
     OfferState.draft: frozenset({OfferState.published}),
     OfferState.published: frozenset({OfferState.withdrawn}),
@@ -90,9 +121,13 @@ def _require_transition(
 
 
 __all__ = [
+    "BillingTreatmentDecisionStatus",
+    "BillingTreatmentReason",
+    "BillingTreatmentStatus",
     "ContractVersionState",
     "OccurrenceState",
     "OfferState",
+    "SubscriptionBillingTreatment",
     "require_contract_transition",
     "require_occurrence_transition",
     "require_offer_transition",

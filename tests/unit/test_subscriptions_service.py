@@ -13,7 +13,10 @@ from dotmac_kernel.cache import PlatformScope, Scope
 from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_subscriptions import (
+    ApproveBillingArrangementCommand,
     BillingCadence,
+    BillingTreatmentDecisionStatus,
+    BillingTreatmentReason,
     CadenceAlignment,
     CollectionTiming,
     ContractLineInput,
@@ -25,24 +28,33 @@ from dotmac_subscriptions import (
     OfferCatalogPage,
     OfferPriceInput,
     OfferPricingMode,
+    PreviewBillingArrangementCommand,
     ProrationPolicy,
     PublishOfferVersionCommand,
     RateBasis,
+    RecordNonCashGrantCommand,
     RecordSubscriptionContractVersionCommand,
+    RevokeBillingArrangementCommand,
+    SubscriptionBillingTreatment,
     SubscriptionConflictError,
     SubscriptionDataError,
     SubscriptionVocabularyRegistry,
     TimerCancelResult,
     TimerScheduleResult,
     WithdrawOfferVersionCommand,
+    approve_billing_arrangement,
     cadence_of,
     effective_version_at,
     end_contract_version,
     generate_recurring_charge,
     list_effective_offers,
     offer_version_snapshot,
+    preview_billing_arrangement,
     publish_offer_version,
     record_contract_version,
+    record_non_cash_grant,
+    resolve_billing_arrangement,
+    revoke_billing_arrangement,
     unacknowledged_outputs,
     withdraw_offer_version,
 )
@@ -51,14 +63,17 @@ from dotmac_subscriptions.models import (
     PlatformOfferVersion,
     PlatformOfferVersionPrice,
     PlatformRecurringChargeOccurrence,
+    PlatformSubscriptionBillingArrangement,
+    PlatformSubscriptionBillingGrant,
     PlatformSubscriptionContract,
     PlatformSubscriptionContractLine,
     PlatformSubscriptionContractVersion,
 )
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 NOW = datetime(2026, 8, 18, tzinfo=UTC)
+ARRANGEMENT_END = datetime(2026, 9, 18, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -76,6 +91,8 @@ def db() -> Iterator[Session]:
         PlatformSubscriptionContractVersion,
         PlatformSubscriptionContractLine,
         PlatformRecurringChargeOccurrence,
+        PlatformSubscriptionBillingArrangement,
+        PlatformSubscriptionBillingGrant,
     ):
         model.__table__.create(engine)
     with Session(engine) as session:
@@ -219,6 +236,64 @@ def _contract_command(
         correlation_id=uuid4(),
         idempotency_key=idempotency_key,
     )
+
+
+def _arrangement_preview_command(
+    *,
+    contract_id: UUID,
+    contract_version_id: UUID,
+    contract_line_key: UUID,
+    treatment: SubscriptionBillingTreatment = (
+        SubscriptionBillingTreatment.complimentary
+    ),
+    starts_at: datetime = NOW,
+    ends_at: datetime = ARRANGEMENT_END,
+) -> PreviewBillingArrangementCommand:
+    return PreviewBillingArrangementCommand(
+        scope=PlatformScope(),
+        subscription_contract_id=contract_id,
+        contract_version_id=contract_version_id,
+        contract_line_key=contract_line_key,
+        treatment=treatment,
+        reason_code=BillingTreatmentReason.commercial_concession,
+        reason="approved service concession",
+        starts_at=starts_at,
+        ends_at=ends_at,
+        approval_policy_reference="policy:complimentary-service",
+        approval_policy_version="2026-08",
+        approval_policy_max_days=366,
+        sponsor_reference=None,
+        cost_center=None,
+        evaluated_at=NOW,
+    )
+
+
+def _approve_arrangement(
+    db: Session,
+    *,
+    contract_id: UUID,
+    contract_version_id: UUID,
+    contract_line_key: UUID,
+) -> tuple[PreviewBillingArrangementCommand, UUID]:
+    preview_command = _arrangement_preview_command(
+        contract_id=contract_id,
+        contract_version_id=contract_version_id,
+        contract_line_key=contract_line_key,
+    )
+    preview = preview_billing_arrangement(db, preview_command)
+    result = approve_billing_arrangement(
+        db,
+        ApproveBillingArrangementCommand(
+            preview=preview_command,
+            preview_fingerprint=preview.fingerprint,
+            approved_by="finance-approver",
+            approved_at=NOW,
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:test:1",
+        ),
+    )
+    return preview_command, result.arrangement_id
 
 
 def test_contract_priced_offer_has_no_fake_reference_price_and_line_stays_positive(
@@ -810,3 +885,361 @@ def test_occurrence_generation_requires_an_existing_contract_version(
             registry=registry,
             timer=FakeTimer(),
         )
+
+
+def test_billing_arrangement_approves_replays_and_resolves_one_owner(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    contract_command = _contract_command(offer_version_id)
+    contract = record_contract_version(
+        db,
+        contract_command,
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    preview_command = _arrangement_preview_command(
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+    )
+    preview = preview_billing_arrangement(db, preview_command)
+    command = ApproveBillingArrangementCommand(
+        preview=preview_command,
+        preview_fingerprint=preview.fingerprint,
+        approved_by="finance-approver",
+        approved_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key="billing-arrangement:approve:1",
+    )
+
+    approved = approve_billing_arrangement(db, command)
+    replay = approve_billing_arrangement(db, command)
+    decision = resolve_billing_arrangement(
+        db,
+        scope=PlatformScope(),
+        subscription_contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        effective_at=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+
+    assert preview.maximum_recurring_amount == ExactAmount(Decimal("100.00"), "EUR", 2)
+    assert approved.replayed is False
+    assert replay.arrangement_id == approved.arrangement_id
+    assert replay.replayed is True
+    assert decision.status is BillingTreatmentDecisionStatus.effective
+    assert decision.treatment is SubscriptionBillingTreatment.complimentary
+    assert decision.suppress_customer_billing is True
+    assert decision.grantable is True
+
+    revoke_billing_arrangement(
+        db,
+        RevokeBillingArrangementCommand(
+            scope=PlatformScope(),
+            arrangement_id=approved.arrangement_id,
+            revoked_by="finance-approver",
+            revoked_at=datetime(2026, 8, 25, tzinfo=UTC),
+            reason="approved commercial change",
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:approve-replay:revoke",
+        ),
+    )
+    record_contract_version(
+        db,
+        replace(
+            contract_command,
+            contract_id=contract.contract_id,
+            starts_at=datetime(2026, 9, 1, tzinfo=UTC),
+            recorded_at=datetime(2026, 9, 1, tzinfo=UTC),
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="contract:after-arrangement:1",
+        ),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+
+    late_replay = approve_billing_arrangement(db, command)
+    assert late_replay.arrangement_id == approved.arrangement_id
+    assert late_replay.replayed is True
+
+
+def test_billing_arrangement_requires_sponsor_evidence_and_no_overlap(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    contract = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    sponsored = _arrangement_preview_command(
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        treatment=SubscriptionBillingTreatment.sponsored,
+    )
+    with pytest.raises(SubscriptionDataError, match="sponsor"):
+        preview_billing_arrangement(db, sponsored)
+
+    _approve_arrangement(
+        db,
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+    )
+    with pytest.raises(SubscriptionConflictError, match="overlap"):
+        preview_billing_arrangement(
+            db,
+            _arrangement_preview_command(
+                contract_id=contract.contract_id,
+                contract_version_id=contract.version_id,
+                contract_line_key=contract.line_keys[0],
+            ),
+        )
+
+
+def test_non_cash_grant_preserves_positive_rated_value_and_replays(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    timer = FakeTimer()
+    contract = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=timer,
+    )
+    _, arrangement_id = _approve_arrangement(
+        db,
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+    )
+    occurrence = generate_recurring_charge(
+        db,
+        GenerateRecurringChargeCommand(
+            scope=PlatformScope(),
+            contract_version_id=contract.version_id,
+            contract_line_key=contract.line_keys[0],
+            period_index=0,
+            generation=1,
+            emitted_at=NOW,
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+        ),
+        registry=registry,
+        timer=timer,
+    )
+    grant_command = RecordNonCashGrantCommand(
+        scope=PlatformScope(),
+        arrangement_id=arrangement_id,
+        occurrence_id=occurrence.occurrence_id,
+        subscription_contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        starts_at=occurrence.staged_output.period_start,
+        ends_at=occurrence.staged_output.period_end,
+        reference_amount=occurrence.staged_output.pre_tax_amount,
+        actor="billing-owner",
+        reason="apply approved non-cash treatment",
+        recorded_at=NOW,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key="billing-grant:period:1",
+    )
+
+    grant = record_non_cash_grant(db, grant_command)
+    replay = record_non_cash_grant(db, grant_command)
+
+    assert grant.output.reference_amount == ExactAmount(Decimal("100.00"), "EUR", 2)
+    assert grant.output.occurrence_id == occurrence.occurrence_id
+    assert grant.replayed is False
+    assert replay.output.grant_id == grant.output.grant_id
+    assert replay.replayed is True
+
+    revoke_billing_arrangement(
+        db,
+        RevokeBillingArrangementCommand(
+            scope=PlatformScope(),
+            arrangement_id=arrangement_id,
+            revoked_by="finance-approver",
+            revoked_at=NOW,
+            reason="restore customer billing at the service-period boundary",
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:grant-replay:revoke",
+        ),
+    )
+    late_replay = record_non_cash_grant(db, grant_command)
+    assert late_replay.output.grant_id == grant.output.grant_id
+    assert late_replay.replayed is True
+
+
+def test_protected_drift_suppresses_billing_but_cannot_create_a_grant(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    contract = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    _, arrangement_id = _approve_arrangement(
+        db,
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+    )
+    line = db.scalar(
+        select(PlatformSubscriptionContractLine).where(
+            PlatformSubscriptionContractLine.contract_version_id == contract.version_id,
+            PlatformSubscriptionContractLine.contract_line_key == contract.line_keys[0],
+        )
+    )
+    assert line is not None
+    line.unit_price = Decimal("125.00")
+    db.flush()
+
+    decision = resolve_billing_arrangement(
+        db,
+        scope=PlatformScope(),
+        subscription_contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        effective_at=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+
+    assert decision.status is BillingTreatmentDecisionStatus.protected_drift
+    assert decision.suppress_customer_billing is True
+    assert decision.grantable is False
+    with pytest.raises(SubscriptionConflictError, match="drift"):
+        record_non_cash_grant(
+            db,
+            RecordNonCashGrantCommand(
+                scope=PlatformScope(),
+                arrangement_id=arrangement_id,
+                occurrence_id=uuid4(),
+                subscription_contract_id=contract.contract_id,
+                contract_version_id=contract.version_id,
+                contract_line_key=contract.line_keys[0],
+                starts_at=NOW,
+                ends_at=datetime(2026, 9, 18, tzinfo=UTC),
+                reference_amount=ExactAmount(Decimal("100.00"), "EUR", 2),
+                actor="billing-owner",
+                reason="must fail closed",
+                recorded_at=NOW,
+                command_id=uuid4(),
+                correlation_id=uuid4(),
+                idempotency_key="billing-grant:drift",
+            ),
+        )
+
+
+def test_open_arrangement_freezes_contract_terms_until_revoked(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    source_id = uuid4()
+    line_key = uuid4()
+    first_command = _contract_command(
+        offer_version_id,
+        source_id=source_id,
+        line_key=line_key,
+    )
+    first = record_contract_version(
+        db, first_command, registry=registry, timer=FakeTimer()
+    )
+    _, arrangement_id = _approve_arrangement(
+        db,
+        contract_id=first.contract_id,
+        contract_version_id=first.version_id,
+        contract_line_key=line_key,
+    )
+    second = replace(
+        first_command,
+        contract_id=first.contract_id,
+        starts_at=datetime(2026, 9, 1, tzinfo=UTC),
+        recorded_at=datetime(2026, 9, 1, tzinfo=UTC),
+        lines=(
+            replace(
+                first_command.lines[0],
+                unit_price=ExactAmount(Decimal("125.00"), "EUR", 2),
+            ),
+        ),
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key="contract:test:after-treatment",
+    )
+    with pytest.raises(SubscriptionConflictError, match="billing arrangement"):
+        record_contract_version(db, second, registry=registry, timer=FakeTimer())
+
+    revoke_billing_arrangement(
+        db,
+        RevokeBillingArrangementCommand(
+            scope=PlatformScope(),
+            arrangement_id=arrangement_id,
+            revoked_by="finance-approver",
+            revoked_at=datetime(2026, 8, 25, tzinfo=UTC),
+            reason="approved commercial change",
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            idempotency_key="billing-arrangement:revoke:1",
+        ),
+    )
+    recorded = record_contract_version(db, second, registry=registry, timer=FakeTimer())
+    assert recorded.version == 2
+
+
+def test_revocation_is_prospective_and_preserves_historical_decision(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    contract = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    _, arrangement_id = _approve_arrangement(
+        db,
+        contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+    )
+    revoke = RevokeBillingArrangementCommand(
+        scope=PlatformScope(),
+        arrangement_id=arrangement_id,
+        revoked_by="finance-approver",
+        revoked_at=datetime(2026, 8, 25, tzinfo=UTC),
+        reason="restore customer billing",
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key="billing-arrangement:revoke:history",
+    )
+    assert revoke_billing_arrangement(db, revoke).replayed is False
+    assert revoke_billing_arrangement(db, revoke).replayed is True
+
+    historical = resolve_billing_arrangement(
+        db,
+        scope=PlatformScope(),
+        subscription_contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        effective_at=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+    restored = resolve_billing_arrangement(
+        db,
+        scope=PlatformScope(),
+        subscription_contract_id=contract.contract_id,
+        contract_version_id=contract.version_id,
+        contract_line_key=contract.line_keys[0],
+        effective_at=datetime(2026, 8, 26, tzinfo=UTC),
+    )
+    assert historical.status is BillingTreatmentDecisionStatus.effective
+    assert restored.status is BillingTreatmentDecisionStatus.standard

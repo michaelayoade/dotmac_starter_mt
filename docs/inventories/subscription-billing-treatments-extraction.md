@@ -1,9 +1,9 @@
 # Complimentary and sponsored subscription treatment extraction
 
 **As of:** 2026-08-23
-**Status:** product-first audit complete; implementation waits for the
-registry-verified `dotmac-subscriptions 0.1.0a2` release and begins as a separate
-`0.1.0a3` / `su_0002` slice.
+**Status:** product-first audit complete; registry-verified
+`dotmac-subscriptions 0.1.0a2` prerequisite released; separate `0.1.0a3` /
+`su_0003` implementation in progress.
 **Qualifying source:** `dotmac_sub` at
 `943bc59f8e4ca0849c7de578bc9dbc17c57b116f`.
 
@@ -33,9 +33,9 @@ the core invariants:
 - approval and revocation carry actor, reason, command, correlation,
   idempotency and fingerprint evidence;
 - overlapping active arrangements fail closed;
-- a price, currency, cadence, offer or account mismatch becomes protected
-  drift: customer charging remains suppressed, but a grant cannot be
-  fabricated;
+- a contract-version, line, price, currency, cadence or offer mismatch becomes
+  protected drift: customer charging remains suppressed, but a grant cannot be
+  fabricated; product account identity remains an adopter-side check;
 - every grant is positive, bounded by the approved and contracted amount,
   exact-period, idempotent and append-only; and
 - changing commercial terms while an arrangement is open requires revocation
@@ -93,7 +93,7 @@ policy reference/version and maximum-days value. Sub's existing registered
 setting keeps its one-to-366-day bound; the package records and enforces the
 supplied snapshot without reading product settings.
 
-`su_0002` must:
+`su_0003` must:
 
 - create both new tables on every supported selected plane with the existing
   plane's isolation contract;
@@ -101,7 +101,7 @@ supplied snapshot without reading product settings.
 - refuse an overlapping contract-version insertion while an arrangement is
   open, so a plan/price change requires revocation and reapproval;
 - use composite same-plane FKs only; and
-- leave the released `su_0001` bytes unchanged.
+- leave the released `su_0001` and `su_0002` bytes unchanged.
 
 ## Product consequences that do not port
 
@@ -116,8 +116,8 @@ supplied snapshot without reading product settings.
 
 ## Migration and cutover gates
 
-1. Release and registry-verify subscriptions a2 first. Do not silently widen
-   the unreleased candidate and claim two separately reviewable slices were one.
+1. Subscriptions a2 was registry-verified and tagged before this slice began.
+   Keep its released migrations byte-identical.
 2. Implement a3 canary-first from the exact sources above and prove tenant,
    platform and dual-plane isolation plus an a2-to-a3 migration rehearsal.
 3. In Sub, backfill only cases with a provable positive contracted value,
