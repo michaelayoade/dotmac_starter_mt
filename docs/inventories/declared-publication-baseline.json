@@ -137,11 +137,6 @@
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill and lifecycle shadow; it does not compose the module, move service-lifecycle authority, or retire Sub's writer. Fulfillment, Network Access, subscriptions and billing stay outside. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
-    "dotmac-subscriptions": {
-      "declared": "0.1.0a3",
-      "reason": "RELEASE PENDING FOR THE PORTED COMPLIMENTARY/SPONSORED LIFECYCLE. a3 adds the su_0003 arrangement and non-cash-grant tables on both declared planes and the product-neutral treatment service ported product-first from dotmac_sub (ADR-0006). It changes nothing an a2 consumer already uses: su_0001 and su_0002 keep their released bytes, and the a2 public surface is unchanged. No adopter pins a3, and Sub still owns its own arrangement writer until the G5/G6 backfill and cutover. Remove this row in the a3 release-record change; never by editing the declared version down.",
-      "state": "declared-unpublished"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer for the notification-template contract. Publication makes an immutable artifact available for the separately governed seed/shadow and renderer retirement work; it does not compose the module, move template authority, or retire Sub's local renderer. The release authorization also corrects the stale runtime version surface to the already-declared 0.2.0a3. Remove this row only in the a3 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
