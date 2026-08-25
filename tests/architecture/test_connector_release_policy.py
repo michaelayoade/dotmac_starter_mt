@@ -687,11 +687,11 @@ def test_the_real_entry_resolves_through_the_release_command(
         gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a3")
+        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a4")
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_whatsapp" in output
-    assert "tag=dotmac-connector-whatsapp-v0.1.0a3" in output
+    assert "tag=dotmac-connector-whatsapp-v0.1.0a4" in output
 
 
 def test_the_meta_social_entry_resolves_through_the_release_command(

@@ -135,11 +135,13 @@ PAYSTACK_WIRE_SCALE: Final = 2
 #: dashboard can tell a Dotmac-issued reference from a hand-made one.
 REFERENCE_PREFIX: Final = "dmi"
 
-#: An exact amount in MAJOR units. Anchored, digits only, at most six fraction
-#: digits — wide enough for any minor-unit scale, narrow enough that a
+#: An exact amount in MAJOR units. Anchored, digits plus an explicit decimal
+#: point and at most six fraction digits — wide enough for any minor-unit scale,
+#: while making ``"5000"`` (major units or minor units?) unrepresentable and
+#: narrow enough that a
 #: float's repr (``1e-05``, ``0.1000000000000000055``) cannot pass.
 _EXACT_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(
-    r"(0|[1-9][0-9]{0,15})(\.[0-9]{1,6})?"
+    r"(0|[1-9][0-9]{0,15})\.[0-9]{1,6}"
 )
 _CURRENCY_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z]{3}")
 #: What may appear in a URL path segment or a provider identifier we echo back.

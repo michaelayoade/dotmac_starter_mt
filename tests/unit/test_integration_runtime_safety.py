@@ -285,6 +285,13 @@ def test_quarantine_is_scoped_to_the_installation(db: Session, registry: Any) ->
     second = add_binding(
         db, suspect, registry=two_capability_registry, capability_id=SECOND_CAPABILITY
     )
+    # Adding a capability invalidates the previous activation and disables the
+    # whole binding set. Re-prove the installation, then deliberately enable
+    # both capabilities before testing quarantine's scope.
+    enable(db, suspect, registry=two_capability_registry)
+    set_binding_enabled(
+        db, suspect, first, registry=two_capability_registry, enabled=True
+    )
     set_binding_enabled(
         db, suspect, second, registry=two_capability_registry, enabled=True
     )
@@ -357,10 +364,13 @@ def test_both_quarantine_directions_write_a_platform_audit_event(
     quarantine(db, installation, reason="provider abuse report", actor="ops")
     release_quarantine(db, installation, reason="false positive", actor="ops")
 
-    assert _audit_actions(db) == [
+    # SQLite's server timestamp has only second precision, so two valid events
+    # in the same second have no database ordering fact. Assert the two durable
+    # actions, and inspect each event by identity below.
+    assert set(_audit_actions(db)) == {
         "integration.installation.quarantined",
         "integration.installation.quarantine_released",
-    ]
+    }
     entered = (
         db.query(PlatformAuditEvent)
         .filter(PlatformAuditEvent.action == "integration.installation.quarantined")

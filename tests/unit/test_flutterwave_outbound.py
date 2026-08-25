@@ -340,7 +340,10 @@ def test_a_charge_id_is_escaped_into_the_refund_path() -> None:
         _refund(provider_transaction_id="chg/../../admin"),
         capability_id=REFUND_CAPABILITY_ID,
     )
-    assert provider.seen[-1].url.path == "/charges/chg%2F..%2F..%2Fadmin/refunds"
+    # ``URL.path`` is decoded for application use; ``raw_path`` is the wire
+    # representation and therefore the only surface that proves the segment
+    # cannot become path traversal at the provider.
+    assert provider.seen[-1].url.raw_path == b"/charges/chg%2F..%2F..%2Fadmin/refunds"
 
 
 # ── idempotency ──────────────────────────────────────────────────────────────

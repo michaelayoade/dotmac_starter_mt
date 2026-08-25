@@ -61,11 +61,13 @@ def _fields_without_a_default(cls: type) -> set[str]:
     }
 
 
-def _values_keywords(source: str) -> set[str]:
-    """Every column named in a `.values(...)` call in this source.
+def _values_keywords(source: str, *, model: str) -> set[str]:
+    """Columns named in ``sa.update(model)...values(...)`` calls.
 
     An AST walk rather than a regex: `values(` appears in comments and
-    docstrings, and a guard that a comment can satisfy is not a guard.
+    docstrings, and a guard that a comment can satisfy is not a guard. The
+    updated model is part of the predicate because receipt and delivery content
+    have different permitted columns in the same retention module.
     """
     found: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -73,7 +75,17 @@ def _values_keywords(source: str) -> set[str]:
             continue
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr == "values":
-            found.update(kw.arg for kw in node.keywords if kw.arg is not None)
+            updates_model = any(
+                isinstance(candidate, ast.Call)
+                and isinstance(candidate.func, ast.Attribute)
+                and candidate.func.attr == "update"
+                and len(candidate.args) == 1
+                and isinstance(candidate.args[0], ast.Name)
+                and candidate.args[0].id == model
+                for candidate in ast.walk(func.value)
+            )
+            if updates_model:
+                found.update(kw.arg for kw in node.keywords if kw.arg is not None)
     return found
 
 
@@ -163,8 +175,10 @@ def test_the_ready_made_detector_bites() -> None:
 # ── 2. Redaction may only write the content columns ─────────────────────────
 
 
-def test_redaction_writes_only_the_three_content_columns() -> None:
-    written = _values_keywords(RETENTION_SOURCE.read_text(encoding="utf-8"))
+def test_receipt_redaction_writes_only_the_three_content_columns() -> None:
+    written = _values_keywords(
+        RETENTION_SOURCE.read_text(encoding="utf-8"), model="InboxReceipt"
+    )
     assert written == set(REDACTABLE_COLUMNS), (
         f"retention's UPDATE writes {sorted(written)}. Everything outside "
         f"{sorted(REDACTABLE_COLUMNS)} is deduplication identity, ordering or "
@@ -174,10 +188,20 @@ def test_redaction_writes_only_the_three_content_columns() -> None:
     assert set(REDACTABLE_COLUMNS) <= receipt_columns
 
 
+def test_delivery_redaction_writes_only_command_and_result_content() -> None:
+    written = _values_keywords(
+        RETENTION_SOURCE.read_text(encoding="utf-8"), model="DeliveryAttempt"
+    )
+    assert written == {"payload_json", "result_json"}
+
+
 def test_the_update_detector_bites() -> None:
     """Sensitivity proof: the widening this guard exists to catch."""
     violation = "sa.update(InboxReceipt).values(payload_json=None, payload_digest=None)"
-    assert _values_keywords(violation) == {"payload_json", "payload_digest"}
+    assert _values_keywords(violation, model="InboxReceipt") == {
+        "payload_json",
+        "payload_digest",
+    }
 
 
 # ── 3. Every schema state has a stated disposition ──────────────────────────
