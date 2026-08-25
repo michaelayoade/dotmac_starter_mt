@@ -17,10 +17,11 @@ its body (unlike the `errors/*.html` templates, which only reference
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from dotmac_kernel.branding import get_brand
-from dotmac_kernel.templating import render
+from dotmac_kernel.templating import compose_templates, render, templates
 
 
 def _fake_request(branding: dict | None = None):
@@ -60,3 +61,21 @@ def test_render_context_explicit_brand_overrides_request_state_branding() -> Non
     body = response.body.decode()
     assert "Explicit Route Brand" in body
     assert "Per-Request Brand" not in body
+
+
+def test_declared_template_namespace_cannot_be_shadowed_by_assembly(
+    tmp_path: Path,
+) -> None:
+    assembly = tmp_path / "assembly"
+    package = tmp_path / "package"
+    (assembly / "sample").mkdir(parents=True)
+    package.mkdir()
+    (assembly / "sample" / "page.html").write_text("assembly")
+    (package / "page.html").write_text("module")
+
+    compose_templates(
+        assembly_dir=assembly,
+        namespaced_dirs={"sample": package},
+    )
+
+    assert templates.env.get_template("sample/page.html").render() == "module"

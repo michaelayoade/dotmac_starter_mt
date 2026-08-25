@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     session_hash_secret: str = "dev-insecure-change-me"
     jwt_ttl_seconds: int = 3600
     csrf_enabled: bool = True
+    csrf_secret: str = "dev-insecure-change-me"
+    csrf_token_ttl_seconds: int = 7200
     # Emit an outbox event when a setting changes, so a process holding derived
     # state learns of it. OFF by default: an event with no relay running is a
     # row that accumulates forever, and a deployment that runs no relay is
@@ -54,7 +56,9 @@ class Settings(BaseSettings):
     rate_limit_redis_url: str = ""
     # Security response headers (Task 5). Disable only when a fronting
     # proxy owns these headers. Empty CSP = the computed strict default in
-    # dotmac_kernel/middleware/security_headers.py.
+    # dotmac_kernel/middleware/security_headers.py. A non-empty compatibility
+    # value may only tighten that baseline; weakening or partial policies fail
+    # application construction.
     security_headers_enabled: bool = True
     content_security_policy: str = ""
     trust_inbound_request_id: bool = False
@@ -124,6 +128,20 @@ def validate_settings(s: Settings) -> list[str]:
         errors.append("JWT_SECRET must be set in production")
     if s.is_production and session_is_dev_default:
         errors.append("SESSION_HASH_SECRET must be set in production")
+    csrf_is_dev_default = s.csrf_secret == "dev-insecure-change-me"  # noqa: S105 # nosec B105
+    if s.is_production and not s.csrf_enabled:
+        errors.append("CSRF_ENABLED cannot be false in production")
+    if s.is_production and csrf_is_dev_default:
+        errors.append("CSRF_SECRET must be set in production")
+    if s.is_production and len(s.csrf_secret.encode("utf-8")) < 32:
+        errors.append("CSRF_SECRET must contain at least 32 bytes in production")
+    if s.is_production and s.csrf_secret in {s.jwt_secret, s.session_hash_secret}:
+        errors.append(
+            "CSRF_SECRET must be distinct from JWT_SECRET and "
+            "SESSION_HASH_SECRET in production"
+        )
+    if s.csrf_token_ttl_seconds < 1:
+        errors.append("CSRF_TOKEN_TTL_SECONDS must be positive")
     return errors
 
 

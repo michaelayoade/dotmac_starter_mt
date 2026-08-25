@@ -142,6 +142,25 @@ def test_safe_next_url(raw, expected) -> None:
     assert safe_next_url(raw) == expected
 
 
+def test_safe_next_url_can_be_confined_to_one_facet() -> None:
+    assert (
+        safe_next_url(
+            "/staff/templates?draft=1",
+            default="/staff",
+            allowed_prefix="/staff",
+        )
+        == "/staff/templates?draft=1"
+    )
+    assert (
+        safe_next_url(
+            "/platform",
+            default="/staff",
+            allowed_prefix="/staff",
+        )
+        == "/staff"
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /admin/login — unguarded, always 200
 # ---------------------------------------------------------------------------
@@ -265,7 +284,7 @@ def test_dashboard_with_valid_admin_cookie_renders_200(
     assert 'aria-current="page"' in resp.text
 
 
-def test_dashboard_rejects_non_admin_party(
+def test_bare_v1_router_authenticates_non_admin_without_facet_admission(
     web_client: TestClient,
     db: Session,
     tenant_row: Tenant,
@@ -288,8 +307,7 @@ def test_dashboard_rejects_non_admin_party(
     resp = web_client.get(
         "/admin", cookies={"access_token": token}, follow_redirects=False
     )
-    assert resp.status_code == 302
-    assert resp.headers["location"].startswith("/admin/login")
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------

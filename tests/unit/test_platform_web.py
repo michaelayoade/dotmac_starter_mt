@@ -53,7 +53,7 @@ def client(db) -> TestClient:
     the fixtures write through the same connection.
     """
     app = FastAPI()
-    app.include_router(platform_router)
+    app.include_router(platform_router, prefix="/platform")
     register_error_handlers(app)
     app.dependency_overrides[get_platform_db] = lambda: db
     app.dependency_overrides[get_db] = lambda: db
@@ -157,10 +157,15 @@ def test_login_sets_the_platform_cookie(client, platform_admin) -> None:
 def test_logout_requires_a_session_and_clears_the_cookie(
     client, db, platform_admin
 ) -> None:
-    client.cookies.set(PLATFORM_COOKIE, _session_cookie(db, platform_admin))
+    token = _session_cookie(db, platform_admin)
+    client.cookies.set(PLATFORM_COOKIE, token)
     response = client.post("/platform/logout", headers={"Host": _HOST})
     assert response.status_code == 302
     assert response.headers["location"] == "/platform/login"
+    session = db.scalars(
+        select(PlatformSession).where(PlatformSession.admin_id == platform_admin.id)
+    ).one()
+    assert session.revoked_at is not None
 
 
 # ── Feature flag overrides ──────────────────────────────────────────────────

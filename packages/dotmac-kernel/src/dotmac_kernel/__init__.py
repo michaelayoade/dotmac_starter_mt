@@ -238,8 +238,31 @@ from dotmac_kernel.source_applications import (
     install_source_applications,
     validate_source_application,
 )
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserAuthenticationProvider,
+    BrowserCapabilityProvision,
+    BrowserCapabilityRequirement,
+    BrowserCredentialTransport,
+    BrowserSecurityPlane,
+    BrowserSecurityRequirement,
+    BrowserSessionPolicy,
+    LocalizedText,
+    NavigationRegion,
+    StaticPackage,
+    SurfaceContext,
+    TemplatePackage,
+    TemplateRef,
+    WebFacetMount,
+    WebNavItem,
+    WebRouteRef,
+    WebSurfaceContribution,
+    WebSurfaceRegistry,
+    qualified_route_name,
+    surface_path,
+)
 
-__version__ = "0.1.0a96"
+__version__ = "0.1.0a97"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -327,6 +350,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
         "dotmac_kernel.web_deps",
+        "dotmac_kernel.web_surfaces",
     }
 )
 
@@ -341,6 +365,8 @@ INTERNAL_MODULES: frozenset[str] = frozenset(
     {
         "dotmac_kernel._transactions",
         "dotmac_kernel.display",
+        "dotmac_kernel.route_metadata",
+        "dotmac_kernel.web_runtime",
     }
 )
 
@@ -367,6 +393,27 @@ __all__ = [
     "ModulePlane",
     "ModulePlaneSelection",
     "create_app",
+    "AuthenticationProfileBinding",
+    "BrowserAuthenticationProvider",
+    "BrowserCapabilityProvision",
+    "BrowserCapabilityRequirement",
+    "BrowserCredentialTransport",
+    "BrowserSecurityPlane",
+    "BrowserSecurityRequirement",
+    "BrowserSessionPolicy",
+    "LocalizedText",
+    "NavigationRegion",
+    "StaticPackage",
+    "SurfaceContext",
+    "TemplatePackage",
+    "TemplateRef",
+    "WebFacetMount",
+    "WebNavItem",
+    "WebRouteRef",
+    "WebSurfaceContribution",
+    "WebSurfaceRegistry",
+    "qualified_route_name",
+    "surface_path",
     # audit
     "AuditEvent",
     "write_audit_event",

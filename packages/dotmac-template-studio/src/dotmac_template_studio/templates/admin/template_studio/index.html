@@ -21,7 +21,7 @@
   Fragment vs full page: an `HX-Request` GET gets `_templates_table.html`
   instead of this shell — the same convention as the assembly's own screens.
 #}
-{% extends "layouts/admin.html" %}
+{% extends surface.shell or "layouts/admin.html" %}
 
 {% block admin_content %}
 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--dmui-space-lg);">
@@ -31,7 +31,7 @@
       Tenant-authored notification and document templates.
     </p>
   </div>
-  <a href="/admin/templates/create"
+  <a href="{{ surface_url('create_form') }}"
      style="display:inline-flex; align-items:center; gap:var(--dmui-space-xs);
             border-radius:var(--dmui-radius-lg);
             background:var(--dmui-action-primary-default);
@@ -44,6 +44,6 @@
 </div>
 
 <div id="templates-table">
-  {% include "admin/template_studio/_templates_table.html" %}
+  {% include "template_studio/admin/template_studio/_templates_table.html" %}
 </div>
 {% endblock %}

@@ -47,7 +47,7 @@
           </span>
         </div>
         {% if template.published_version != version.version %}
-        <button hx-post="/admin/templates/{{ template.id }}/versions/{{ version.version }}/publish"
+        <button hx-post="{{ surface_url('publish_version', template_id=template.id, version=version.version) }}"
                 hx-target="#versions-panel" hx-swap="outerHTML"
                 style="border-radius:var(--dmui-radius-md); border:1px solid var(--dmui-border-default);
                        background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);

@@ -50,7 +50,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.config import settings
-from dotmac_kernel.db import get_platform_db
+from dotmac_kernel.deps import get_platform_db
 from dotmac_kernel.exceptions import UnauthorizedError
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
 from dotmac_kernel.security import (
@@ -60,8 +60,17 @@ from dotmac_kernel.security import (
     hash_token,
     verify_password,
 )
+from dotmac_kernel.web_deps import WebAuthRedirect
+from dotmac_kernel.web_surfaces import (
+    BrowserCredentialTransport,
+    BrowserSessionPolicy,
+    WebSurfaceError,
+    current_session_policy,
+)
 
 PLATFORM_AUDIENCE = "platform"
+PLATFORM_COOKIE = "platform_access_token"  # nosec B105 -- a name
+PLATFORM_LOGIN_PATH = "/platform/login"
 
 # Constant-work login: verified against when the email doesn't resolve to an
 # active admin, so the "no such admin" and "wrong password" paths both run
@@ -148,6 +157,49 @@ def require_platform_admin(
     if admin is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return admin
+
+
+def _browser_session_policy(request: Request) -> BrowserSessionPolicy:
+    try:
+        return current_session_policy(request)
+    except WebSurfaceError:
+        return BrowserSessionPolicy(
+            cookie_name=PLATFORM_COOKIE, cookie_path="/platform"
+        )
+
+
+def require_platform_web_auth(
+    request: Request,
+    db: Session = Depends(get_platform_db),
+) -> PlatformAdmin:
+    """Authenticate the platform browser cookie and decide no authorization."""
+
+    require_platform_host(request)
+    token = request.cookies.get(_browser_session_policy(request).cookie_name)
+    login_path = (
+        None
+        if getattr(request.app.state, "web_surface_registry", None) is not None
+        else PLATFORM_LOGIN_PATH
+    )
+    if not token:
+        raise WebAuthRedirect(next_url=request.url.path, login_path=login_path)
+    admin = authenticate_platform_request(request, db, token=token)
+    if admin is None:
+        raise WebAuthRedirect(next_url=request.url.path, login_path=login_path)
+    return admin
+
+
+class PlatformCookieAuthenticationProvider:
+    """Typed authentication binding for an assembly's platform facet."""
+
+    transport = BrowserCredentialTransport.COOKIE_SESSION
+
+    @property
+    def dependency(self):
+        return require_platform_web_auth
+
+
+PLATFORM_COOKIE_AUTHENTICATION = PlatformCookieAuthenticationProvider()
 
 
 def _bearer_token(authorization: str | None) -> str | None:
@@ -248,6 +300,10 @@ def platform_logout(
 
 __all__ = [
     "PLATFORM_AUDIENCE",
+    "PLATFORM_COOKIE",
+    "PLATFORM_COOKIE_AUTHENTICATION",
+    "PLATFORM_LOGIN_PATH",
     "platform_auth_router",
     "require_platform_admin",
+    "require_platform_web_auth",
 ]

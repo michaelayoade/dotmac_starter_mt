@@ -1,40 +1,43 @@
-"""Template Studio's admin surface: `/admin/templates` (ADR-0006 M1).
+"""Template Studio's facet-relative staff surface (ADR-0006 M1).
 
 Held to the same rules as an assembly feature's `web.py` — thin wrapper (no
-query in this file), `render()` for every HTML response, `hx-post` mutations so
-the CSRF header-bridge applies, and "re-render at 200, don't redirect" on a
-validation or conflict failure. The governance tests that enforce those rules
+query in this file), `render()` for every HTML response, and both declared CSRF
+transports for native/htmx mutations, with "re-render at 200, don't redirect"
+on a validation or conflict failure. The governance tests that enforce those rules
 walk this package too; extending their globs was part of shipping it, because a
 module that escaped them would be held to a weaker standard than the assembly it
 installs into.
 
 **Templates are PACKAGE DATA.** They live in this package's own `templates/`
 directory, not in the assembly's, and reach the shared Jinja environment through
-`ProductAssemblySpec.packaged_template_dirs` (kernel 0.1.0a13). They are namespaced
-`admin/template_studio/...` so an assembly can shadow any one of them by shipping
-a file at the same path — first match wins, assembly over package.
+the manifest's `TemplatePackage(namespace="template_studio", ...)`. Render names
+therefore begin `template_studio/`; another module cannot shadow them by choosing
+the same relative file name.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.deps import get_db, require_capability, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
-from dotmac_kernel.models import Tenant
+from dotmac_kernel.models import Party, Tenant
 from dotmac_kernel.templating import render
-from dotmac_kernel.web_deps import require_web_auth
+from dotmac_kernel.web_deps import require_web_permission
+from dotmac_kernel.web_surfaces import surface_path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from dotmac_template_studio import service
 from dotmac_template_studio.contexts import registered_contexts
+from dotmac_template_studio.schemas import TemplateRead, VersionRead
 
 router = APIRouter(
-    prefix="/admin",
+    prefix="/templates",
     tags=["web"],
     # Same capability as the JSON API — one feature, one entitlement
     # decision, both surfaces.
@@ -45,34 +48,49 @@ _PKG_DIR = Path(__file__).resolve().parent
 
 
 def template_dir() -> Path:
-    """This package's Jinja directory — the path an assembly puts in
-    `ProductAssemblySpec.packaged_template_dirs`. Resolved by package path, not
-    CWD: a pip-installed module lives outside any assembly's working directory.
-    """
+    """This package's namespaced Jinja root, resolved by package path."""
     return _PKG_DIR / "templates"
 
 
-@router.get("/templates")
+def _template_view(value: object) -> TemplateRead:
+    """Detach a template render model from the request's ORM session."""
+
+    return TemplateRead.model_validate(value)
+
+
+def _version_views(values: Sequence[object]) -> tuple[VersionRead, ...]:
+    """Templates consume typed values, never live ORM instances."""
+
+    return tuple(VersionRead.model_validate(value) for value in values)
+
+
+@router.get("", name="list")
 def templates_index(
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.read")),
 ) -> HTMLResponse:
-    templates = service.list_templates(db, tenant.id)
-    context: dict[str, object] = {"templates": templates}
+    template_views = tuple(
+        _template_view(value) for value in service.list_templates(db, tenant.id)
+    )
+    context: dict[str, object] = {"templates": template_views}
     if request.headers.get("HX-Request"):
-        return render(request, "admin/template_studio/_templates_table.html", context)
+        return render(
+            request,
+            "template_studio/admin/template_studio/_templates_table.html",
+            context,
+        )
     context.update({"active_nav": "templates", "page_title": "Templates"})
-    return render(request, "admin/template_studio/index.html", context)
+    return render(request, "template_studio/admin/template_studio/index.html", context)
 
 
-@router.get("/templates/create")
+@router.get("/create", name="create_form")
 def template_create_form(
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.manage")),
 ) -> HTMLResponse:
     return _render_create_form(request)
 
@@ -86,7 +104,7 @@ def _render_create_form(
 ) -> HTMLResponse:
     return render(
         request,
-        "admin/template_studio/create.html",
+        "template_studio/admin/template_studio/create.html",
         {
             "active_nav": "templates",
             "page_title": "New Template",
@@ -101,12 +119,12 @@ def _render_create_form(
     )
 
 
-@router.post("/templates", response_model=None)
+@router.post("", response_model=None, name="create")
 async def template_create_submit(
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.manage")),
 ) -> HTMLResponse | RedirectResponse:
     form_data = await request.form()
     raw = {
@@ -129,9 +147,9 @@ async def template_create_submit(
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_party_id=auth["party"].id,
+        actor_party_id=party.id,
         actor_type="user",
-        actor_id=str(auth["party"].id),
+        actor_id=str(party.id),
         action="template_studio.template.create",
         entity_type="template",
         entity_id=str(template.id),
@@ -142,7 +160,9 @@ async def template_create_submit(
         },
     )
     response = HTMLResponse("")
-    response.headers["HX-Redirect"] = f"/admin/templates/{template.id}"
+    response.headers["HX-Redirect"] = surface_path(
+        request, "detail", template_id=str(template.id)
+    )
     return response
 
 
@@ -162,19 +182,19 @@ def _context_variables(name: str) -> list[str]:
         return []
 
 
-@router.get("/templates/{template_id}")
+@router.get("/{template_id}", name="detail")
 def template_detail(
     request: Request,
     template_id: UUID,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.read")),
 ) -> HTMLResponse:
-    template = service.get_template(db, tenant.id, template_id)
-    versions = service.list_versions(db, tenant.id, template_id)
+    template = _template_view(service.get_template(db, tenant.id, template_id))
+    versions = _version_views(service.list_versions(db, tenant.id, template_id))
     return render(
         request,
-        "admin/template_studio/detail.html",
+        "template_studio/admin/template_studio/detail.html",
         {
             "active_nav": "templates",
             "page_title": template.name,
@@ -185,18 +205,18 @@ def template_detail(
     )
 
 
-@router.post("/templates/{template_id}/versions", response_model=None)
+@router.post("/{template_id}/versions", response_model=None, name="create_version")
 async def version_create_submit(
     request: Request,
     template_id: UUID,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.manage")),
 ) -> HTMLResponse:
     form_data = await request.form()
     body = str(form_data.get("body", "")).strip()
     subject = str(form_data.get("subject", "")).strip() or None
-    template = service.get_template(db, tenant.id, template_id)
+    template_record = service.get_template(db, tenant.id, template_id)
     error = None
     if not body:
         error = "A version needs a body."
@@ -208,7 +228,7 @@ async def version_create_submit(
                 template_id,
                 body=body,
                 subject=subject,
-                author_party_id=auth["party"].id,
+                author_party_id=party.id,
             )
         except BadRequestError as exc:
             # Save-time placeholder validation. Re-render at 200 with the
@@ -219,9 +239,9 @@ async def version_create_submit(
             write_audit_event(
                 db,
                 tenant_id=tenant.id,
-                actor_party_id=auth["party"].id,
+                actor_party_id=party.id,
                 actor_type="user",
-                actor_id=str(auth["party"].id),
+                actor_id=str(party.id),
                 action="template_studio.version.create",
                 entity_type="template_version",
                 entity_id=str(version.id),
@@ -229,25 +249,31 @@ async def version_create_submit(
             )
     return render(
         request,
-        "admin/template_studio/_versions_panel.html",
+        "template_studio/admin/template_studio/_versions_panel.html",
         {
-            "template": template,
-            "versions": service.list_versions(db, tenant.id, template_id),
-            "variables": _context_variables(template.context),
+            "template": _template_view(template_record),
+            "versions": _version_views(
+                service.list_versions(db, tenant.id, template_id)
+            ),
+            "variables": _context_variables(template_record.context),
             "error": error,
         },
         status_code=200,
     )
 
 
-@router.post("/templates/{template_id}/versions/{version}/publish", response_model=None)
+@router.post(
+    "/{template_id}/versions/{version}/publish",
+    response_model=None,
+    name="publish_version",
+)
 def version_publish(
     request: Request,
     template_id: UUID,
     version: int,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    auth: dict = Depends(require_web_auth),
+    party: Party = Depends(require_web_permission("template_studio.templates.publish")),
 ) -> HTMLResponse:
     error = None
     try:
@@ -258,22 +284,24 @@ def version_publish(
         write_audit_event(
             db,
             tenant_id=tenant.id,
-            actor_party_id=auth["party"].id,
+            actor_party_id=party.id,
             actor_type="user",
-            actor_id=str(auth["party"].id),
+            actor_id=str(party.id),
             action="template_studio.version.publish",
             entity_type="template_version",
             entity_id=str(revision.id),
             details={"template_id": str(template_id), "version": version},
         )
-    template = service.get_template(db, tenant.id, template_id)
+    template_record = service.get_template(db, tenant.id, template_id)
     return render(
         request,
-        "admin/template_studio/_versions_panel.html",
+        "template_studio/admin/template_studio/_versions_panel.html",
         {
-            "template": template,
-            "versions": service.list_versions(db, tenant.id, template_id),
-            "variables": _context_variables(template.context),
+            "template": _template_view(template_record),
+            "versions": _version_views(
+                service.list_versions(db, tenant.id, template_id)
+            ),
+            "variables": _context_variables(template_record.context),
             "error": error,
         },
         status_code=200,
