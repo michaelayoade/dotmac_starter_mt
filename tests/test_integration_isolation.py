@@ -522,6 +522,109 @@ def test_only_one_session_can_advance_a_checkpoint(
     assert (won, lost) == (1, 0)
 
 
+def test_two_concurrent_checkpoint_declarations_converge_on_one_row(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The public lifecycle contains its SELECT-then-INSERT uniqueness race.
+
+    Both sessions are stopped immediately before their first checkpoint SELECT,
+    so both observe the row as absent and contend on the real PostgreSQL unique
+    index. The module's savepoint preserves transaction authority: one result
+    is CREATED, the other is an idempotent replay, and neither leaks a driver
+    exception or opens/commits a session on the caller's behalf.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dotmac_integration import (
+        CapabilityBinding,
+        ConnectorInstallation,
+        ConnectorRegistry,
+        ensure_polling_checkpoint,
+    )
+    from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    plugin = fake_plugin()
+    registry = ConnectorRegistry((plugin,))
+    installation_id, binding_id = uuid.uuid4(), uuid.uuid4()
+    setup = create_engine(admin_url)
+    with Session(setup) as db:
+        db.add(
+            ConnectorInstallation(
+                id=installation_id,
+                connector_key=plugin.manifest.connector_key,
+                connector_version=plugin.manifest.version,
+                spi_range=str(plugin.manifest.spi_range),
+                manifest_digest=plugin.manifest.digest,
+                name=f"{request.node.name}-{uuid.uuid4().hex[:8]}",
+                state="enabled",
+            )
+        )
+        db.flush()
+        db.add(
+            CapabilityBinding(
+                id=binding_id,
+                installation_id=installation_id,
+                capability_id=FAKE_CAPABILITY,
+                state="enabled",
+            )
+        )
+        db.commit()
+    setup.dispose()
+
+    engine = create_engine(admin_url)
+    rendezvous = threading.Barrier(2, timeout=20.0)
+
+    def synchronize_first_checkpoint_read(  # type: ignore[no-untyped-def]
+        conn, cursor, statement, parameters, context, executemany
+    ) -> None:
+        if (
+            "FROM mod_intg.polling_checkpoints" in statement
+            and "job_key" in statement
+            and not conn.info.get("checkpoint_declaration_synchronized")
+        ):
+            conn.info["checkpoint_declaration_synchronized"] = True
+            rendezvous.wait()
+
+    event.listen(engine, "before_cursor_execute", synchronize_first_checkpoint_read)
+
+    def declare():  # type: ignore[no-untyped-def]
+        with Session(engine) as db:
+            result = ensure_polling_checkpoint(
+                db,
+                capability_binding_id=binding_id,
+                job_key="concurrent-live-tail",
+                initial_cursor="origin",
+                registry=registry,
+            )
+            db.commit()
+            return result
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = (pool.submit(declare), pool.submit(declare))
+            results = tuple(future.result(timeout=20.0) for future in futures)
+    finally:
+        event.remove(engine, "before_cursor_execute", synchronize_first_checkpoint_read)
+
+    assert sorted(result.created for result in results) == [False, True]
+    assert len({result.checkpoint.id for result in results}) == 1
+    with engine.connect() as conn:
+        surviving = conn.execute(
+            text(
+                "SELECT count(*) FROM mod_intg.polling_checkpoints "
+                "WHERE capability_binding_id = :binding AND job_key = :job_key"
+            ),
+            {"binding": binding_id, "job_key": "concurrent-live-tail"},
+        ).scalar_one()
+    engine.dispose()
+    assert surviving == 1
+
+
 def test_only_one_session_can_settle_a_delivery(
     migrated_scratch: tuple[str, str],
     request: pytest.FixtureRequest,

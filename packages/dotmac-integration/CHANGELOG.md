@@ -11,8 +11,9 @@ back from the private index, registered and tagged from exact revision
 collisions and enqueue races typed, adds repair/reconciliation, runtime safety
 and module-owned metric definitions.
 
-`0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts
-and durably stores a validated normalized result in `ig_0013`.
+`0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts,
+durably stores a validated normalized result in `ig_0013`, and adds the public
+checkpoint lifecycle an external scheduler needs before it can drive POLL.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -75,6 +76,27 @@ before the version was cut. They are not four releases.
 Nothing in this file is a publication claim except this section.
 
 ## 0.1.0a16 — unreleased
+
+### Polling checkpoint lifecycle, without a second scheduler
+
+- Adds `ensure_polling_checkpoint`, an idempotent, caller-transaction-owned
+  declaration keyed by `(capability_binding_id, job_key)`. It validates the
+  pinned connector/capability as POLL-capable before writing, normalizes and
+  bounds the key, contains the unique-insert race in the kernel savepoint, and
+  offers no delete or rewind operation.
+- An unchanged declaration may revalidate its initial cursor only before the
+  checkpoint advances. Afterwards the schema no longer retains initial-cursor
+  provenance: omitting `initial_cursor` returns the existing checkpoint, while
+  supplying any value is refused rather than comparing it with the current
+  cursor and calling that historical proof.
+- Adds `enabled_polling_checkpoint_page`, an enabled-binding/installation-only,
+  UUID-keyset page. The selector is only a scheduling hint; `poll_once` remains
+  the final manifest/mode/configuration/version gate. Stable pagination prevents
+  one stale failing checkpoint from occupying every bounded batch.
+- Adds a real PostgreSQL two-session declaration race canary. No migration is
+  required: `ig_0002` already owns the unique key, version, cursor and timestamps.
+- This release still adds no scheduler and records no per-poll failure/backoff
+  evidence. The assembly must not invent either inside its thin pump.
 
 ### One capability id now means one PAYLOAD, and the domain owns it
 

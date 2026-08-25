@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -49,6 +49,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from dotmac_integration.capability_registry import CapabilityRegistry
 
 __all__ = [
+    "CheckpointCreationRaced",
+    "CheckpointDefinitionConflict",
+    "CheckpointLifecycleError",
     "CursorInvalid",
     "PollBatch",
     "PollConnectorRaised",
@@ -58,7 +61,12 @@ __all__ = [
     "PollResult",
     "PollSecretsUnavailable",
     "PollUnavailable",
+    "PollingCheckpointPage",
+    "PollingCheckpointRef",
+    "PollingCheckpointRegistration",
     "PreparedPoll",
+    "enabled_polling_checkpoint_page",
+    "ensure_polling_checkpoint",
     "invoke_poll",
     "poll_once",
     "prepare_poll",
@@ -69,8 +77,29 @@ SecretResolver = Callable[[Mapping[str, str]], Mapping[str, str]]
 UnitOfWork = Callable[[], AbstractContextManager[Any]]
 
 
+class _InitialCursorUnspecified:
+    __slots__ = ()
+
+
+_INITIAL_CURSOR_UNSPECIFIED: Final[_InitialCursorUnspecified] = (
+    _InitialCursorUnspecified()
+)
+
+
 class PollError(RuntimeError):
     """A polling cycle could not complete safely."""
+
+
+class CheckpointLifecycleError(PollError):
+    """A polling checkpoint could not be declared safely."""
+
+
+class CheckpointDefinitionConflict(CheckpointLifecycleError):
+    """The checkpoint key already names a different initial position."""
+
+
+class CheckpointCreationRaced(CheckpointLifecycleError):
+    """Another transaction created the checkpoint outside this snapshot."""
 
 
 class PollUnavailable(PollError):
@@ -137,6 +166,33 @@ class PollResult:
     duplicates: int
 
 
+@dataclass(frozen=True, slots=True)
+class PollingCheckpointRef:
+    """A detached checkpoint value safe to return beyond the transaction."""
+
+    id: UUID
+    capability_binding_id: UUID
+    job_key: str
+    version: int
+    cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PollingCheckpointRegistration:
+    """The idempotent result of declaring one polling job."""
+
+    checkpoint: PollingCheckpointRef
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PollingCheckpointPage:
+    """A stable, bounded page for an assembly scheduler to delegate."""
+
+    checkpoint_ids: tuple[UUID, ...]
+    next_after: UUID | None
+
+
 def _cursor(value: dict[str, object] | None) -> str | None:
     if value is None:
         return None
@@ -150,6 +206,215 @@ def _cursor(value: dict[str, object] | None) -> str | None:
     return cursor
 
 
+def _checkpoint_ref(checkpoint: PollingCheckpoint) -> PollingCheckpointRef:
+    return PollingCheckpointRef(
+        id=checkpoint.id,
+        capability_binding_id=checkpoint.capability_binding_id,
+        job_key=checkpoint.job_key,
+        version=checkpoint.version,
+        cursor=_cursor(checkpoint.cursor_json),
+    )
+
+
+def _poll_binding(
+    db: Any,
+    *,
+    binding_id: UUID,
+    registry: ConnectorRegistry,
+    require_enabled: bool,
+) -> tuple[CapabilityBinding, ConnectorInstallation]:
+    """Resolve one POLL-capable binding without duplicating mode rules."""
+
+    binding = db.get(CapabilityBinding, binding_id)
+    if binding is None:
+        raise CheckpointLifecycleError("polling capability binding does not exist")
+    installation = db.get(ConnectorInstallation, binding.installation_id)
+    if installation is None:
+        raise CheckpointLifecycleError("polling binding has no connector installation")
+    if require_enabled and not _usable(binding, installation):
+        raise PollUnavailable("polling binding or installation is not enabled")
+
+    try:
+        registry.require_compatible(installation.connector_key)
+        plugin = registry.plugin(installation.connector_key)
+    except Exception:
+        raise CheckpointLifecycleError(
+            "poll connector is not installed or compatible"
+        ) from None
+    if not accepts_manifest_digest(plugin, installation.manifest_digest):
+        raise CheckpointLifecycleError(
+            "poll connector no longer honours the manifest pin"
+        )
+    if ConnectorMode.POLL not in plugin.modes or not isinstance(plugin, PollPlugin):
+        raise CheckpointLifecycleError(
+            "polling binding does not resolve to an executable poll mode"
+        )
+    try:
+        capability = plugin.manifest.require_declares(binding.capability_id)
+    except Exception:
+        raise CheckpointLifecycleError(
+            "polling binding capability is absent from the pinned manifest"
+        ) from None
+    if capability.modes is not None and ConnectorMode.POLL not in capability.modes:
+        raise CheckpointLifecycleError(
+            "polling binding capability is not mapped to poll mode"
+        )
+    return binding, installation
+
+
+def ensure_polling_checkpoint(
+    db: Any,
+    *,
+    capability_binding_id: UUID,
+    job_key: str,
+    registry: ConnectorRegistry,
+    initial_cursor: str | None | _InitialCursorUnspecified = (
+        _INITIAL_CURSOR_UNSPECIFIED
+    ),
+) -> PollingCheckpointRegistration:
+    """Idempotently declare one polling job, without offering rewind/delete.
+
+    The unique ``(binding, job_key)`` pair is the identity. Replaying the same
+    declaration returns its detached snapshot; asking that identity to start
+    at another cursor is refused because accepting it would be an implicit
+    rewind (or skip). The caller owns the transaction: this function mutates
+    and flushes, but never commits, rolls back, or opens a session.
+    """
+
+    from dotmac_kernel.db import conflict_savepoint
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    normalized_job_key = job_key.strip()
+    if not normalized_job_key:
+        raise CheckpointLifecycleError("polling checkpoint job key is required")
+    if len(normalized_job_key) > 160:
+        raise CheckpointLifecycleError(
+            "polling checkpoint job key exceeds 160 characters"
+        )
+    initial_cursor_was_supplied = not isinstance(
+        initial_cursor, _InitialCursorUnspecified
+    )
+    requested_initial_cursor = (
+        None if not initial_cursor_was_supplied else initial_cursor
+    )
+    if requested_initial_cursor is not None and not isinstance(
+        requested_initial_cursor, str
+    ):
+        raise CheckpointLifecycleError(
+            "polling checkpoint initial cursor must be a string or null"
+        )
+
+    _poll_binding(
+        db,
+        binding_id=capability_binding_id,
+        registry=registry,
+        require_enabled=False,
+    )
+
+    def existing_checkpoint() -> PollingCheckpoint | None:
+        return cast(
+            PollingCheckpoint | None,
+            db.execute(
+                select(PollingCheckpoint).where(
+                    PollingCheckpoint.capability_binding_id == capability_binding_id,
+                    PollingCheckpoint.job_key == normalized_job_key,
+                )
+            ).scalar_one_or_none(),
+        )
+
+    def replay(checkpoint: PollingCheckpoint) -> PollingCheckpointRegistration:
+        if checkpoint.version != 1 or checkpoint.advanced_at is not None:
+            if initial_cursor_was_supplied:
+                raise CheckpointDefinitionConflict(
+                    "polling checkpoint has advanced; its initial cursor is no "
+                    "longer revalidatable, and rewind is not a lifecycle operation"
+                )
+        elif _cursor(checkpoint.cursor_json) != requested_initial_cursor:
+            raise CheckpointDefinitionConflict(
+                "polling checkpoint already has a different initial cursor; "
+                "rewind and replacement are not lifecycle operations"
+            )
+        return PollingCheckpointRegistration(
+            checkpoint=_checkpoint_ref(checkpoint), created=False
+        )
+
+    existing = existing_checkpoint()
+    if existing is not None:
+        return replay(existing)
+
+    checkpoint = PollingCheckpoint(
+        capability_binding_id=capability_binding_id,
+        job_key=normalized_job_key,
+        version=1,
+        cursor_json={"cursor": requested_initial_cursor},
+    )
+    try:
+        with conflict_savepoint(db):
+            db.add(checkpoint)
+            db.flush()
+    except IntegrityError:
+        winner = existing_checkpoint()
+        if winner is None:
+            # Under REPEATABLE READ the outer transaction may retain the
+            # pre-race snapshot. Refuse with a material-safe typed outcome and
+            # let the caller retry the command in a fresh unit of work.
+            raise CheckpointCreationRaced(
+                "a concurrent checkpoint declaration won; retry the same command"
+            ) from None
+        return replay(winner)
+    return PollingCheckpointRegistration(
+        checkpoint=_checkpoint_ref(checkpoint), created=True
+    )
+
+
+def enabled_polling_checkpoint_page(
+    db: Any,
+    *,
+    limit: int,
+    after: UUID | None = None,
+) -> PollingCheckpointPage:
+    """Return one stable page of enabled checkpoints as a scheduling hint.
+
+    The selector owns no claim and no compatibility decision. A second worker
+    may receive the same id, and :func:`poll_once` remains the final manifest,
+    mode, configuration and optimistic-version gate. UUID keyset pagination is
+    deliberate: a permanently stale/failing first checkpoint cannot occupy
+    every bounded pass and starve the rest merely because its cursor never
+    advances.
+    """
+
+    from sqlalchemy import select
+
+    if limit < 1:
+        raise ValueError("polling checkpoint limit must be positive")
+    statement = (
+        select(PollingCheckpoint.id)
+        .join(
+            CapabilityBinding,
+            CapabilityBinding.id == PollingCheckpoint.capability_binding_id,
+        )
+        .join(
+            ConnectorInstallation,
+            ConnectorInstallation.id == CapabilityBinding.installation_id,
+        )
+        .where(
+            CapabilityBinding.state == "enabled",
+            ConnectorInstallation.state == "enabled",
+        )
+        .order_by(PollingCheckpoint.id)
+        .limit(limit + 1)
+    )
+    if after is not None:
+        statement = statement.where(PollingCheckpoint.id > after)
+    selected = tuple(db.scalars(statement).all())
+    checkpoint_ids = selected[:limit]
+    return PollingCheckpointPage(
+        checkpoint_ids=checkpoint_ids,
+        next_after=checkpoint_ids[-1] if len(selected) > limit else None,
+    )
+
+
 def prepare_poll(
     db: Any,
     *,
@@ -160,25 +425,15 @@ def prepare_poll(
     checkpoint = db.get(PollingCheckpoint, checkpoint_id)
     if checkpoint is None:
         raise PollUnavailable("polling checkpoint does not exist")
-    binding = db.get(CapabilityBinding, checkpoint.capability_binding_id)
-    if binding is None:
-        raise PollUnavailable("polling checkpoint has no capability binding")
-    installation = db.get(ConnectorInstallation, binding.installation_id)
-    if installation is None or not _usable(binding, installation):
-        raise PollUnavailable("polling binding or installation is not enabled")
-
     try:
-        registry.require_compatible(installation.connector_key)
-        plugin = registry.plugin(installation.connector_key)
-    except Exception:
-        raise PollUnavailable("poll connector is not installed or compatible") from None
-    if not accepts_manifest_digest(plugin, installation.manifest_digest):
-        raise PollUnavailable("poll connector no longer honours the manifest pin")
-    if ConnectorMode.POLL not in plugin.modes or not isinstance(plugin, PollPlugin):
-        raise PollUnavailable("binding does not resolve to an executable poll mode")
-    capability = plugin.manifest.require_declares(binding.capability_id)
-    if capability.modes is not None and ConnectorMode.POLL not in capability.modes:
-        raise PollUnavailable("binding capability is not mapped to poll mode")
+        binding, installation = _poll_binding(
+            db,
+            binding_id=checkpoint.capability_binding_id,
+            registry=registry,
+            require_enabled=True,
+        )
+    except CheckpointLifecycleError as exc:
+        raise PollUnavailable(str(exc)) from None
 
     revision = (
         db.get(ConnectorConfigRevision, installation.current_config_revision_id)

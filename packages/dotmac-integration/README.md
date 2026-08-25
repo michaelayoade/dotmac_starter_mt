@@ -31,6 +31,8 @@ a15 refuses changed-effect reuse of an outbound idempotency key and contains
 concurrent enqueue uniqueness failures behind typed, material-safe outcomes.
 a16 adds the domain-owned capability payload contract and durably stores its
 validated command result; raw provider response bodies remain unrepresentable.
+It also adds idempotent checkpoint declaration and stable enabled-checkpoint
+pagination, without adding a scheduler or changing the connector SPI.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
@@ -89,6 +91,16 @@ provider-neutral envelope without interpreting the product-owned observation. An
 `InboundDisposition.RECORD_ONLY` closes transport evidence that must never
 enter the product consequence worker. These are engine contracts, not provider
 branches.
+
+POLL scheduling begins from the public module lifecycle, never from assembly SQL.
+`ensure_polling_checkpoint` validates that the pinned binding is POLL-capable,
+creates the `(binding, job_key)` row idempotently inside the caller's transaction,
+and refuses changed or no-longer-provable initial-cursor claims. It deliberately
+offers no delete or rewind. `enabled_polling_checkpoint_page` returns a bounded
+UUID-keyset page covering only enabled bindings on enabled installations; the
+page is a scheduling hint, and `poll_once` remains the compatibility and
+optimistic-version decision. No module-owned per-poll failure/backoff record
+exists yet, so an assembly must not grow a parallel retry ledger around it.
 
 ## Operating the outbound runtime
 
