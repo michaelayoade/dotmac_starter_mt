@@ -1181,7 +1181,11 @@ def redact_delivery(
             ~_active_delivery_hold_exists(),
         )
         .values(
-            payload_json=_delivery_tombstone(delivery, policy=policy, moment=moment)
+            payload_json=_delivery_tombstone(delivery, policy=policy, moment=moment),
+            # A normalized result may contain a checkout URL, account name or
+            # payee reference. It is product content and follows the same
+            # expiry and legal hold as the command that produced it.
+            result_json=None,
         )
         .execution_options(synchronize_session=False)
     )

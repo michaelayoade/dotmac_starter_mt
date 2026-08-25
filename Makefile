@@ -56,6 +56,21 @@ publication-check: ## Report every distribution declaring a version nobody can i
 	poetry run python scripts/declared_publication_sweep.py --check
 publication-baseline: ## Regenerate the declared-but-unpublished ledger (state the reason; commit the diff in the same change)
 	poetry run python scripts/declared_publication_sweep.py --write-baseline
+# A published version's manifest is its contract, and a contract does not move.
+# The `--check` half is deliberately offline and tag-free — it reads the ledger
+# and the working tree, nothing else — which is what lets it sit in `check` and
+# in the cheap CI matrix, where `actions/checkout` fetches no tags. The tag
+# cross-check that stops the ledger being brought into line with a bad edit is
+# `tests/architecture/test_released_manifest_digests.py`, in the `unit` job that
+# already has `fetch-depth: 0`. Same split, same reason, as the publication
+# sweep.
+manifest-digest-check: ## Fail if a PUBLISHED connector version's manifest digest would change
+	poetry run python scripts/released_manifest_sweep.py --check
+manifest-digest-verify: ## Cross-check every recorded digest against its tag (needs full history + tags; not in `check`)
+	poetry run python scripts/released_manifest_sweep.py --verify-tags
+RELEASE_RUN ?=
+manifest-digest-record: ## Record one published tag's manifest digest: make manifest-digest-record TAG=... [RELEASE_RUN=...]
+	poetry run python scripts/released_manifest_sweep.py --record --tag "$(TAG)" --release-run "$(RELEASE_RUN)"
 product-writer-check: ## Require one typed, exact-pinned writer claim for every inventoried product
 	poetry run python scripts/product_writer_check.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
@@ -67,7 +82,7 @@ poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
 	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check product-writer-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + design-system assets
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
@@ -143,6 +158,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
 	publication-check publication-baseline module-catalog module-catalog-check \
+	manifest-digest-check manifest-digest-verify manifest-digest-record \
 	product-writer-check \
 	docker-build docker-dev \
 	bump-version deploy

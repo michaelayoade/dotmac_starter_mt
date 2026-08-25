@@ -12,6 +12,9 @@ from dotmac_inbox import (
     ChannelSpec,
     ConversationConflict,
     Direction,
+    ImportConversation,
+    ImportMessage,
+    ImportReadState,
     InboundIdentity,
     MessageIdScope,
     ReasonSpec,
@@ -20,6 +23,9 @@ from dotmac_inbox import (
     ThreadIdentity,
     Transport,
     create_conversation,
+    import_conversation,
+    import_message,
+    import_read_state,
     mark_conversation_read,
     record_message,
     register_channels,
@@ -335,3 +341,105 @@ def test_read_state_never_moves_back_to_an_older_message(db: Session) -> None:
     assert repeated is state
     assert repeated.last_read_message_id == second.id
     assert repeated.last_read_at == first_at + timedelta(minutes=2)
+
+
+def test_history_import_preserves_identity_timestamps_and_exact_replay(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    created_at = datetime(2025, 1, 2, 8, tzinfo=UTC)
+    updated_at = created_at + timedelta(days=1)
+    first_message_at = created_at + timedelta(minutes=1)
+    resolved_at = first_message_at + timedelta(hours=1)
+    conversation_command = ImportConversation(
+        id=uuid4(),
+        identity=_identity(),
+        status=Status.RESOLVED,
+        reason=None,
+        subject="Historical subject",
+        tags=("adopted",),
+        first_message_at=first_message_at,
+        last_message_at=first_message_at,
+        resolved_at=resolved_at,
+        snoozed_until=None,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+    conversation = import_conversation(
+        db, tenant_id=tenant.id, command=conversation_command
+    )
+    assert conversation.id == conversation_command.id
+    assert conversation.created_at == created_at
+    assert (
+        import_conversation(db, tenant_id=tenant.id, command=conversation_command)
+        is conversation
+    )
+
+    message_command = ImportMessage(
+        id=uuid4(),
+        conversation_id=conversation.id,
+        identity=_identity("historical-message"),
+        direction=Direction.INBOUND,
+        occurred_at=first_message_at,
+        author_id=None,
+        transport_observation_ref="receipt:historical",
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    message = import_message(db, tenant_id=tenant.id, command=message_command)
+    assert message.id == message_command.id
+    assert message.transport_observation_ref == "receipt:historical"
+    assert import_message(db, tenant_id=tenant.id, command=message_command) is message
+    assert conversation.first_message_at == first_message_at
+    assert conversation.last_message_at == first_message_at
+    assert conversation.status == Status.RESOLVED.value
+    assert conversation.resolved_at == resolved_at
+
+    read_command = ImportReadState(
+        id=uuid4(),
+        conversation_id=conversation.id,
+        actor_id=uuid4(),
+        last_read_message_id=message.id,
+        last_read_at=first_message_at,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    state = import_read_state(db, tenant_id=tenant.id, command=read_command)
+    assert state.id == read_command.id
+    assert import_read_state(db, tenant_id=tenant.id, command=read_command) is state
+
+
+def test_history_import_refuses_same_identity_with_different_facts(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    occurred_at = datetime(2025, 1, 2, 8, tzinfo=UTC)
+    command = ImportConversation(
+        id=uuid4(),
+        identity=_identity(),
+        status=Status.OPEN,
+        reason=None,
+        subject="Original",
+        tags=(),
+        first_message_at=None,
+        last_message_at=None,
+        resolved_at=None,
+        snoozed_until=None,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    import_conversation(db, tenant_id=tenant.id, command=command)
+
+    with pytest.raises(ConversationConflict, match="different subject"):
+        import_conversation(
+            db,
+            tenant_id=tenant.id,
+            command=replace(command, subject="Changed"),
+        )
+    with pytest.raises(ConversationConflict, match="already belongs"):
+        import_conversation(
+            db,
+            tenant_id=tenant.id,
+            command=replace(command, id=uuid4()),
+        )

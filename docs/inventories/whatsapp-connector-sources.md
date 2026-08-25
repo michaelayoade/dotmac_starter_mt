@@ -43,7 +43,46 @@ HTTP status. It never stores a provider response body.
 | `test_integration_whatsapp_capability.py`: one enabled typed binding | port to the generic engine/assembly, without a WhatsApp branch |
 | `test_team_inbox_outbound.py`: text/template/media payloads and retry preservation | port at the provider edge; Sub retains its local message/outbox assertions |
 | `test_team_inbox_outbound.py`: 24-hour window, template selection, scheduling and conversation mutation | keep in Sub; these are product decisions |
-| template listing/reading | defer: it is request/response discovery, not an outbound delivery, and the current delivery outcome cannot return arbitrary provider data safely |
+| template listing/reading | deferred 2026-08-23; RESOLVED 2026-08-24 — see below |
+
+### Template catalogue — the deferral, and what closed it (2026-08-24)
+
+The 2026-08-23 row above deferred template listing because "the current
+delivery outcome cannot return arbitrary provider data safely". That premise was
+correct and remains correct: `Outcome` carries a status, an error code, a
+provider reference and an HTTP status, and nothing else. It is a delivery
+receipt, not a response body, and widening it to carry a catalogue would have
+made every connector's result an untyped bag.
+
+`ConnectorMode.POLL` answers it without touching `Outcome`. A poll handler
+returns `InboundEvent` values — the exact triple the engine already records —
+so the catalogue crosses as typed OBSERVATIONS and the product owns a
+rebuildable projection of what is approved. That is ADR-0024's
+"applications compose by synchronizing DATA" applied to a read: the connector
+reports what the provider says, Sub decides what to do about it.
+
+Sub's own capability id `messaging.templates.read.v1`
+(`whatsapp_runtime.py:27`) is kept unchanged — the domain owner names the
+contract, and the connector only claims to implement it.
+
+The send path needs the same fact for a different purpose: to REFUSE. It reads
+the same endpoint filtered to one template name, holds the answer under a
+process-local TTL, and returns a typed terminal outcome. No provider data
+reaches the product on that path, so the original objection does not apply.
+
+**What the inventory found in Sub, and what it did not.** The full findings and
+the two deliberate deviations from Sub's behaviour are recorded in
+`packages/dotmac-connector-whatsapp/EXTRACTION.toml` under `[extraction_notes]`
+rather than duplicated here. In summary: Sub has the catalogue fetch, the
+approval comparison, the BODY-arity derivation, the 300 s TTL and the
+caption/filename rules, all of which are ported. Sub has NO arity validation, no
+per-media-type size table, no MIME-to-media-type consistency check, no
+catalogue pagination, and no test of any of the catalogue paths.
+
+**What stays in Sub.** The 24-hour customer-service window, which template to
+send, the variable values, and the 10 MiB upload-staging ceiling — that last one
+is a product policy about what an operator may attach, not the provider's
+contract, and it does not move.
 
 Two engine gaps are prerequisites, not connector workarounds. A successful
 `Outcome` must carry bounded typed provider evidence into the delivery ledger,

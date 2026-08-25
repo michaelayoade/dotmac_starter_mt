@@ -28,13 +28,22 @@ def test_paystack_adds_poll_without_invalidating_the_published_manifest() -> Non
             lambda request: httpx.Response(200, json={"data": [], "meta": {}})
         )
     )
-    assert plugin.manifest.version == "0.1.0a2"
-    assert tuple(item.version for item in plugin.historical_manifests) == ("0.1.0a1",)
+    assert plugin.manifest.version == "0.1.0a3"
+    # a3, and BOTH published versions retained. The outbound slice changed
+    # the manifest of the already-tagged a2, so a2 is preserved rather than
+    # redefined — `docs/inventories/released-manifest-digests.json` holds the
+    # digest each tag published and the sweep fails if either moves.
+    assert tuple(item.version for item in plugin.historical_manifests) == (
+        "0.1.0a1",
+        "0.1.0a2",
+    )
     assert plugin.historical_manifests[0].capabilities[0].config_schema == {
         "type": "object",
         "additionalProperties": False,
     }
-    assert plugin.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    assert plugin.modes == frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
+    )
     assert plugin.manifest.egress is not None
     assert plugin.manifest.egress.hosts == ("api.paystack.co",)
     assert_plugin_conforms(plugin)
@@ -92,13 +101,16 @@ def test_flutterwave_adds_v4_poll_without_a_v3_fallback() -> None:
             )
         )
     )
-    assert plugin.manifest.version == "0.1.0a2"
-    assert tuple(item.version for item in plugin.historical_manifests) == ("0.1.0a1",)
+    assert plugin.manifest.version == "0.1.0a3"
+    # The a1 ingress-only shape stays first in the window; the published a2
+    # ingress+poll shape joined it when the outbound capabilities landed, so an
+    # installation pinned to either digest still resolves.
+    assert plugin.historical_manifests[0].version == "0.1.0a1"
     assert plugin.historical_manifests[0].capabilities[0].config_schema == {
         "type": "object",
         "additionalProperties": False,
     }
-    assert plugin.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    assert {ConnectorMode.INGRESS, ConnectorMode.POLL} <= plugin.modes
     assert plugin.manifest.egress is not None
     assert plugin.manifest.egress.hosts == (
         "developersandbox-api.flutterwave.com",

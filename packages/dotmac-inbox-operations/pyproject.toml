@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-inbox-operations"
-version = "0.1.0a3"
+version = "0.1.0a5"
 description = "Staffed inbox queues, routing, presence, and assignments"
 authors = ["DotMac"]
 readme = "README.md"

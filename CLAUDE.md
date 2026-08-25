@@ -497,6 +497,17 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     pinnable. Automated only where a machine-readable contract already declares
     an oracle; stated review discipline elsewhere, never an implied guard
     (Governance ADR 0013, accepted 2026-08-22; `AGENTS.md` rule **30**).
+27. A PUBLISHED connector version's manifest digest is frozen — an installation
+    adopts by digest, so editing a tagged version's manifest makes one version
+    name two contracts and every pin against the old digest unidentifiable. The
+    repair is a NEW version keeping the exact published manifest in
+    `historical_manifests`; two manifests sharing one version STRING is the
+    worse shape, not the safe one, because `accepts_manifest_digest` accepts
+    both. `docs/inventories/released-manifest-digests.json` records each
+    published tag's peeled commit and digest; `make manifest-digest-check`
+    compares it with the tree offline and tag-free, and the architecture test
+    re-derives every digest from the tag itself
+    (`AGENTS.md` rule **34**; `tests/architecture/test_released_manifest_digests.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

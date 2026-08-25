@@ -42,6 +42,14 @@ Approvals decides approval; Payables owns the transition after validating a
 non-empty approval reference. Draft editing stops at submission. Approved
 documents are corrected by credit notes, never voided or rewritten.
 
+> **Navigation note, 2026-08-24 (no decision change).** § 3 below leaves the
+> disbursement owner unnamed on purpose. It is named for payouts by ADR-0061 § 1
+> and its Amendment A1 (`PaymentService` in ERP, the sole interim owner) and
+> scoped as a shared module by ADR-0063 (`PaymentInstruction`, gated). This
+> record's § 3 is also the CONTROLLING statement where ADR-0047 § Context said
+> "Finance/Payables owns … disbursement"; see ADR-0047 Amendment A1 for the
+> six-owner split that supersedes that sentence.
+
 ### 3. Payment obligations are not payment instructions
 
 Payables says what is owed, in what currency and by which date. It does not

@@ -378,8 +378,278 @@ specifics) points here and must never fork these rules.
     A remote projection requires a named local reader and reconciler; foreign-key
     compatibility alone is not a reason to keep one. Correlation-only needs use
     an opaque Integrator reference on the local owning record.
+    **One capability id is one contract with one PAYLOAD, and the payload
+    belongs to the owning DOMAIN.** `CapabilityContract` — what the owning
+    business application publishes — carries `command_schema`, `result_schema`,
+    `observation_schema`, a canonical contract digest and deprecation metadata;
+    a connector's `CapabilityDeclaration` may only CLAIM that digest and may
+    never publish a competing schema, because a schema per connector makes drift
+    machine-readable rather than prevented. Enforced at four seams: the command
+    before a delivery row exists (`execution.enqueue_delivery`), digest
+    agreement at composition AND at binding
+    (`capability_registry.require_implements_only_declared`,
+    `require_declared_for_binding`), the result before the claim-guarded settle
+    (`dispatch.settle`), and every observation before the inbox batch commits
+    (`ingress.record_batch`, which the polling path calls). A schema change
+    takes a new `.vN` id — a published version is SUCCEEDED, never redefined,
+    and `install_capability_registry` refuses a reload that redefines one. A
+    contract that has published nothing yet must SAY so, with a
+    `SchemaGrace(reason, retire_after)`; silence is refused at construction, the
+    ungated set is enumerable (`schema_grace_register`) and the window closes.
+    (ADR-0024 §§ 10-12, ADR-0061 A2;
+    `tests/unit/test_integration_capability_contract_gate.py`,
+    `tests/architecture/test_capability_contract_divergence.py`)
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
+
+    **Outbound clauses added 2026-08-24, corrected the same day, and extended
+    the same day with *(i)*–*(k)* and then *(l)*–*(o)* — REVIEW DISCIPLINE, not
+    guards.** Stated here
+    because rule 25 forbids implying enforcement that does not exist: no check
+    in this repository catches any of the following today, and clauses *(j)*,
+    *(k)*, *(m)*, *(n)* and *(o)*
+    additionally concern a repository this one does not contain.
+    Clause *(f)* names the gate that has to be built
+    before most of them can be checked at all; until it exists these are read
+    by reviewers, not by CI, and ADR-0024's "Enforcement and evidence"
+    additions name the missing machinery.
+    *(a)* **One capability, one contract, one payload.**
+    `payments.payout.v1`, `messaging.send.v1` and every other id name a
+    BUSINESS ACT, not a provider endpoint. No provider-named id
+    (`payments.payout.paystack.v1`), no provider-shaped sibling for an act that
+    already has a contract (`payments.transfer.v1`), and no per-connector
+    command dialect behind a shared id — that last one is the branch relocated
+    into whichever product builds the payload.
+    *(b)* **A provider branch in a product is one of six concrete things:** an
+    `if provider == …`/provider enum/provider-keyed behaviour dict; a provider
+    SDK import or hand-written provider HTTP client; a provider credential in
+    product config, env, settings rows or a path the product dereferences; a
+    provider-named route/task/queue/column/setting/flag/table; a provider
+    string inside a business decision (status mapping, currency scale, retry
+    eligibility); or a "which provider is configured?" read on a request path.
+    Each belongs in the connector distribution or the Integrator binding.
+    *(c)* **Connector completeness is Dotmac capability parity** — every
+    capability the ecosystem needs, with interchangeable providers behind the
+    ones that matter — never coverage of a provider's published surface. A
+    withheld surface is DECLARED in the connector's `EXTRACTION.toml`, not
+    merely absent (LinkedIn outbound, Mono writes and Flutterwave transfers are
+    the three in force).
+    *(d)* **A payout is ERP's decision, and the deciding service is NAMED.**
+    Whether a payout happens, to whom, for how much, and whether an ambiguous
+    attempt may be retried are ERP's calls; no connector, engine path,
+    configuration or operator gesture decides them. "ERP's Treasury/payment
+    owner" is a role, not an owner, so the owner is named as the services that
+    hold the decision today: `PaymentService`
+    (`dotmac_erp:app/services/finance/payments/payment_service.py`) owns the
+    payout decision and the transfer lifecycle, and is the SOLE interim owner.
+    `BatchTransferService` is dead code — zero callers, not exported, zero
+    tests — and is NOT an owner; it is a DELETION (clause *(k)*). A shared
+    `dotmac-treasury` distribution or namespace is STILL NOT to be created:
+    rule 22's product-first dossier now exists
+    (`docs/inventories/treasury-payment-execution-sources.md`, on the sibling
+    branch `docs/treasury-product-first-dossier`; its § 12.3 G5 asks for the
+    record in terms), and its answer is ADR-0063 — clause *(j)*. The release
+    condition is no longer "a dossier exists" but "the ERP defect is fixed".
+    *(e)* **Modules own metric DEFINITIONS; assemblies own EXPORTERS.** A shared
+    module declares stable, namespaced metric names and derives values from its
+    own facts at read time; it ships no metrics client, counter registry or
+    `/metrics` route, and no second observability path.
+    *(f)* **The canonical schema belongs to the DOMAIN, not the connector.**
+    The business owner's `CapabilityContract` carries `command_schema`,
+    `result_schema`, `observation_schema`, a canonical contract digest, and
+    deprecation/replacement metadata. A connector's `CapabilityDeclaration`
+    keeps configuration and modes and may only CLAIM the domain contract's
+    digest — it never publishes a competing schema, because a schema published
+    per connector does not prevent drift, it only makes drift machine-readable.
+    The required gate, which is one unit of work and not five: command
+    validation before enqueue; connector digest agreement at composition AND
+    again at binding; result validation before settlement; observation
+    validation before inbox recording; and a schema change taking a new `.vN`
+    capability id rather than redefining a published one. Sensitivity tests are
+    planted for digest mismatch, missing schema, invalid payload and invalid
+    result. None of it exists today.
+    *(g)* **A published contract version is never redefined — it is
+    SUCCEEDED.** `messaging.send.v1` is repaired by succession, not by
+    rewriting: `messaging.direct.send.v2` (provider-neutral direct delivery
+    with a DISCRIMINATED text/template/media content shape),
+    `social.comment.reply.v1` (public Facebook/Instagram comment consequences)
+    and `social.profile.read.v1` (caller-initiated profile observation through
+    REQUEST mode). Sub migrates to the successors; v1 is retained only for a
+    bounded compatibility window and then retired, and both the migration and
+    the retirement are recorded obligations.
+    *(h)* **A capability exposes product MEANING, not provider workflow.**
+    `payments.payout.v1` exposes `submit_payout`, a product payout reference,
+    exact money, a provider-neutral destination, idempotency and correlation.
+    Paystack's recipient creation and Flutterwave's direct-transfer details are
+    internal connector steps: a product that orchestrates "create recipient"
+    then "send transfer" still needs a code release to change a binding, which
+    is the whole thing the binding exists to prevent. The same applies to
+    `payments.intent.v1` and `payments.refund.v1` — provider customer creation,
+    recipient codes and transfer references are normalized RESULTS or connector
+    internals, never separate product-visible provider actions, unless a
+    genuinely independent lifecycle is argued rather than assumed.
+    *(i)* **A capability that names provider workflow is REMOVED, not
+    deprecated.** Applying *(h)*'s test to a shipped id:
+    `payments.customer.v1` (`create_customer | update_customer |
+    read_customer`, `dotmac-connector-paystack`) has **no independent Dotmac
+    business lifecycle** — it is Paystack's `/customer` REST surface with a
+    Dotmac id painted on it, and no product decides "create a customer at a
+    payment provider" as an act of its own. It is REMOVED from the public
+    capability manifest. Instead: the product Customer owner keeps customer
+    identity; `payments.intent.v1` carries the required customer EVIDENCE; the
+    connector creates or resolves any provider-side customer INTERNALLY; the
+    result returns an OPAQUE Integrator correlation where one is needed;
+    saved-instrument charging consumes an opaque PAYMENT-METHOD correlation
+    (the `authorization_code` the connector already takes), never a provider
+    customer code; and customer read/create/update disappear from the manifest.
+    No compatibility window, because no product binds it, so *(g)*'s succession
+    rule is not engaged. A future product needing genuine, independent
+    provider-customer synchronization arrives with its own OWNER, CONSUMER,
+    LIFECYCLE and SCHEMA in an accepted record — today's Paystack
+    synchronization is not preserved merely because it exists. The code removal
+    is part of the payout refactor, gated behind *(f)*'s schema seam and *(h)*'s
+    result seam; ADR-0061 A5 holds the artifact-by-artifact list, including the
+    fact that `delivery._MISALLOCATED`'s import-time bijection check forces the
+    `OPERATIONS` and `ACTIONS_BY_CAPABILITY` deletions into ONE change.
+    *(j)* **Treasury owns the PAYMENT INSTRUCTION, and the extraction is
+    GATED.** The authorized owner is narrow: `PaymentInstruction`
+    (`authorized → submitting → ambiguous | submitted → settled | failed |
+    reversed`), grouped by `PaymentRun`, over TWO rails from the beginning — an
+    Integrator API rail bindable to Paystack or Flutterwave v4, and a manual
+    bank-file rail for AP and payroll. Four invariants carry the weight:
+    **exporting a spreadsheet must not mark an instruction paid** (`submitted`
+    needs operator submission evidence, `settled` needs Banking's settlement
+    observation); **run progress is DERIVED from instruction outcomes and never
+    from a batch-level response**, because provider calls are not atomic — ten
+    transfers can return seven successes, two failures and one ambiguous
+    result; **rail routing is PRE-SUBMISSION only** — the rail is stamped
+    immutably at authorization, an ambiguous result reconciles against the
+    ORIGINAL provider, and rerouting needs a conclusively unsubmitted or
+    terminally failed instruction plus a new authorization, so Paystack ↔
+    Flutterwave interchangeability is safe CONFIGURATION and never
+    cross-provider retry; and **a provider recipient code is never business
+    identity** — Party/People/Supplier owns the payee, Banking or the directory
+    owner owns verified bank details, Treasury records an immutable versioned
+    `PayoutDestinationSnapshot` at authorization, the Integrator holds the
+    provider correlation scoped to `(installation, destination fingerprint)`,
+    changing bank details creates a new destination version requiring
+    reauthorization, and `create_paystack_recipient` is never a product command.
+    **The gate: none of it is built before ERP's `PaymentIntent.status`
+    three-writer violation is fixed** — porting a three-writer state into a
+    shared module would preserve the defect and give every adopter a copy of
+    it. Until then, no `dotmac-treasury` distribution, namespace, `mod_*` short
+    code or migration lineage. `BatchTransferService` is not the port source;
+    `PaymentRun` derives from the live AP/payroll file process and the
+    individual expense-transfer lifecycle.
+    *(k)* **An ERP payout claim reads "Implemented and tested; production
+    enablement unconfirmed."** Verbatim, wherever such a claim is made. The path
+    is gated by `paystack_transfers_enabled`, a `domain_settings` ROW with
+    `default=False`, seeded once from the environment and never re-read;
+    confirming a deployment's value needs an explicitly named target and rule
+    30's `deployment_run` oracle, and **no target has been named**. This blocks
+    NO construction — not the gated Treasury module, not the connectors — and
+    DOES block every claim of production parity, adoption or retirement, in
+    both directions. Relatedly, **`BatchTransferService` is to be DELETED** as
+    security-sensitive dead code: an ungated, SoD-free call path to
+    `PaystackClient.initiate_transfer` that gets no review attention precisely
+    because nothing calls it. Its design intent is preserved, measured, in
+    `docs/inventories/treasury-payment-execution-sources.md`, which is the
+    condition attached to the deletion.
+    *(l)* **A capability that names a BUSINESS ACT is KEPT — and the test is
+    the same one clause *(i)* applies.** `payments.refund.v1` survives it where
+    `payments.customer.v1` failed, and the two outcomes are the test
+    discriminating rather than an inconsistency. The discriminating question:
+    **if the provider vanished tomorrow, would the thing still exist and still
+    need an owner?** A provider-side customer record would not — it is a
+    by-product of a charge. A refund obligation would: someone with authority
+    decided money goes back, for how much, against which original payment, with
+    its own lifecycle, its own evidence and a receivable/revenue consequence.
+    **A provider-side customer record is a by-product of an act; a refund IS the
+    act.** So the capability is retained while its provider-shaped OPERATIONS
+    are removed: ONE command, `request_refund`, carrying exact money (with
+    full-versus-partial DECLARED, never signalled by an absent field), the
+    original-payment correlation, the authorization reference and idempotency
+    identity — provider handles become connector internals, and refund-status
+    reads stay reconciliation internals. **An ambiguous refund is never blindly
+    retried**, and the reason is sharper here than for a payout: Paystack's
+    `/refund` accepts no client reference, so the connector stamps a derived key
+    into `merchant_note` and an ambiguous refund becomes DECIDABLE by reading
+    the provider's refund list — but **decidable is not refused**. Nothing at
+    the provider stands between a re-request and a second refund except that
+    read, so the read is mandatory, no transport ever re-requests, and a
+    re-request is a NEW authorized decision by the refund owner. **Treasury is
+    NOT automatically the refund owner**: a refund reverses a receivable rather
+    than discharging a payable, it is not one of ADR-0063 § 6's twelve closed
+    items, and broadening that list requires separate evidence and its own
+    record. The decision belongs to Billing or another NAMED refund owner, and
+    nothing has named one — "the named refund owner" is the honest phrase until
+    something does.
+    *(m)* **An ambiguous state is SPLIT before it is extracted, and an unprobed
+    row is `ambiguous`.** ERP's `PaymentIntent.status` `PROCESSING` means both
+    "the provider call is running" and "a worker has picked this row up";
+    carrying it into a shared module under a better name would launder the
+    ambiguity into a contract. It becomes `submission_requested` (a durable
+    intent, no provider outcome attempted), `submitted` (conclusively accepted),
+    `ambiguous` (may have landed, reconciliation required), plus terminal
+    `settled` / `failed` / `reversed`. **Worker claim/lease state belongs to the
+    execution engine, not to the domain record** (rule 21 / ADR-0014) — a task
+    that needed somewhere to record a claim and used a business status column is
+    most of why that column has three writers. **The migration rule is the
+    important part:** existing `PROCESSING` rows are PROBED, the probe is
+    READ-ONLY, the worker is QUIESCED for the duration, and **without conclusive
+    provider evidence a row maps to `ambiguous`, never `submitted`.** Assuming
+    success on migration is how a double payment or a silently lost disbursement
+    enters the new module — a row wrongly marked `submitted` is never looked at
+    again, so neither the beneficiary paid twice nor the one not paid at all
+    appears in any queue.
+    *(n)* **Payroll produces `PaymentInstruction` rows, and Treasury never
+    receives a salary component.** Payroll owns calculation, approval and the
+    net-pay obligation; Treasury owns disbursement. One authorized net-pay
+    obligation produces ONE `PaymentInstruction`; a payroll run MAY group them
+    into a `PaymentRun`, which confers no authorization; Treasury's manual rail
+    produces the bank-upload artifact; **exporting the file does not mark
+    payroll paid**; and settlement evidence returns to Payroll as a TYPED
+    OBSERVATION that Payroll's own owner consumes. Treasury receives exactly
+    four things — **net amount, currency, payee/destination reference, payroll
+    obligation reference** — and **never salary components**: not gross, basic,
+    allowances, overtime, bonuses, deductions, tax, pension, loan repayments,
+    garnishments, grade or band, nor anything they can be derived from, nor a
+    breakdown smuggled into a narration field. **This is a PRIVACY boundary as
+    much as an ownership one:** the bank-file rail means the artifact leaves,
+    its audience is payments operations rather than HR, and the export is
+    retained immutably with its digest — so a component that reaches Treasury is
+    archived beyond HR's reach to correct or redact. Relatedly, a payee who
+    cannot be paid is a STATE, never an omission from a spreadsheet.
+    *(o)* **No payout release or enablement passes the authorization blocker.**
+    ERP's module-access scope `finance:access` currently satisfies the guard on
+    `POST /transfers/{intent_id}/initiate`, which executes a real transfer;
+    `payments:read` is referenced by the old helper but is not normally grantable.
+    The
+    weakest admitted credential defines a path's real authorization, which makes
+    every other control on that path decorative; a dedicated ERP security change
+    is implemented on `fix/payout-execute-permission-containment`. Until it
+    lands: no payout capability is enabled in any environment, no payout release
+    is cut, and no claim of payout readiness is made — however much of the rest
+    is finished. This gates RELEASE and ENABLEMENT and is INDEPENDENT of
+    ADR-0063 § 7's gate on CONSTRUCTION; satisfying either does not satisfy the
+    other, and neither changes clause *(k)*'s evidentiary wording in either
+    direction. The ordered dependency it sits inside, canonically ADR-0063 A3:
+    (1) ERP execute-permission containment, (2) ERP authorization-log audit on a
+    NAMED target, (3) delete dead `BatchTransferService`, (4) reduce
+    `PaymentIntent.status` to one writer, (5) split `PROCESSING` from
+    `ambiguous`, (6) add capability request/result schemas, (7) build Treasury
+    `PaymentInstruction` and `PaymentRun`, (8) add expense, AP and payroll
+    producers, (9) complete Paystack and Flutterwave payout bindings, (10) build
+    refund through its named owner, (11) provider sandbox proof, CI and cutover.
+    Steps 1–3 come first because they reduce blast radius and depend on no
+    design decision; step 4's digest/version work may continue in parallel.
+    (ADR-0061 + its THREE 2026-08-24 amendment sets; ADR-0062; ADR-0063 + its
+    2026-08-24 amendment; ADR-0046 Amendment A1;
+    ADR-0042 § 3 + ADR-0047 Amendment A1 — ADR-0042 CONTROLS on disbursement
+    ownership, and the split is six owners: Expenses eligibility, Payables what
+    is owed, Treasury the authorized instruction and its rail, the Integrator
+    authentication/transport/evidence, Banking cash observation and
+    reconciliation, Accounting journal consequences; ADR-0024 §§ 8–12)
 
 29. **Poetry is an exact build input, not a workstation preference.**
     `[tool.poetry].requires-poetry` is the ONE version source; CI's hash-locked
@@ -513,6 +783,42 @@ specifics) points here and must never fork these rules.
     (`scripts/product_writer_check.py`; `make product-writer-check`;
     `tests/architecture/test_product_writer_completeness.py`)
 
+34. **A PUBLISHED version's manifest is its contract, and a contract does not
+    move.** An installation adopts a connector by MANIFEST DIGEST: `mod_intg`
+    stores the digest a binding was enabled against and
+    `accepts_manifest_digest` decides adoptability from it. So the manifest of a
+    version that has a tag is FROZEN. Adding a capability, a mode mapping, a
+    secret binding, an egress host or an SPI floor to an already-published
+    version is not an edit — it makes one version name two contracts, and every
+    installation adopted against the old digest becomes unidentifiable while
+    `accepts_manifest_digest` reports the pin as unknown.
+
+    The repair is a NEW version whose `historical_manifests` carries the exact
+    published manifest, never an edit of the published one and never a version
+    edited down to match. Two manifests sharing one version STRING is the worse
+    shape, not the safe one: `accepts_manifest_digest` accepts both, so nothing
+    can see the collision — `dotmac-connector-flutterwave` and
+    `dotmac-connector-remita` each shipped exactly that, green on every gate,
+    because the version-identity guard compares three version SURFACES and the
+    publication sweep compares a version to a TAG, and neither reads a manifest.
+
+    `docs/inventories/released-manifest-digests.json` records, per published
+    tag, the peeled commit, the release run where the repository can still name
+    it, and the digest that tag published. Two halves, either alone defeatable:
+    `make manifest-digest-check` compares the ledger with the tree — offline,
+    tag-free, in the cheap CI matrix — and the architecture test re-derives every
+    recorded digest from the source THAT TAG published, so doctoring the ledger
+    requires moving a tag on `origin`. Both directions fail (ADR-0018): a
+    published tag with no row, and a row whose tag does not exist or peels
+    elsewhere. Rows only GROW — a publication is a permanent positive fact
+    (rule 30), unlike the publication baseline's absences.
+
+    Scope is the connector lane. Installable modules are UNMONITORED rather than
+    exempt: `ModuleManifest` exposes no digest and nothing adopts a module by
+    one — their published bytes are held by rule 14's released-migration map
+    instead. (`scripts/released_manifest_sweep.py`;
+    `tests/architecture/test_released_manifest_digests.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
@@ -559,8 +865,10 @@ CI remains the merge acceptance owner.
   row in `docs/ARCHITECTURE.md`'s provenance/ownership tables.
 - **Publishing writes a RECORD, not just a tag.** A tag makes that
   distribution's `declared-publication-baseline.json` row false immediately,
-  and its released migrations become bytes that must not change, so five gates
-  fail from the instant of the tag until both are recorded. The release
+  its released migrations become bytes that must not change, and a connector's
+  published manifest digest becomes a row owed to
+  `released-manifest-digests.json` — so the gates fail from the instant of the
+  tag until all of them are recorded. The release
   workflows now open that record themselves
   (`scripts/open_release_record_pr.sh` calling
   `scripts/write_release_record.py`, straight after tagging) — merge that pull

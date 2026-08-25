@@ -53,12 +53,14 @@ import json
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 import pytest
 from dotmac_integration import (
     CapabilityContract,
     CapabilityOwner,
     CapabilityRegistry,
+    SchemaGrace,
 )
 from dotmac_integration.receipt_delivery import (
     ReceiptClaims,
@@ -244,6 +246,14 @@ def test_the_real_claim_derives_source_from_its_installation_not_the_payload(
                 capability_id="conformance.echo.v1",
                 owner=CapabilityOwner(application="sub", module="settlements"),
                 summary="Synthetic settlement observation",
+                # Ungated, and SAYING so. This canary proves RLS, not payload
+                # shape, and ADR-0024 § 10 refuses silence rather than
+                # ungatedness.
+                schema_grace=SchemaGrace(
+                    reason="an isolation canary carrying no payload contract",
+                    retire_after=date(2099, 12, 31),
+                    tracked_by=("tests/test_integration_receipt_delivery_isolation.py"),
+                ),
             )
         ]
     )

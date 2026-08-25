@@ -46,16 +46,28 @@ from dotmac_integration import (
     set_binding_enabled,
     settle,
 )
+from dotmac_integration import module as integration_module
 from dotmac_integration.conformance import (
     FAKE_CAPABILITY,
     fake_manifest,
     fake_plugin,
     fake_registry,
 )
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.models_platform import PlatformAdmin, PlatformAuditEvent
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 OTHER_CAPABILITY = "ticket.observation.v1"
+
+
+@pytest.fixture(autouse=True)
+def _installed_integration_audit_actions() -> None:
+    """Containment transitions write to the kernel's platform ledger, and
+    `write_platform_audit_event` refuses an undeclared action. The standalone
+    module tests install this module's declaration registry rather than route
+    around that refusal."""
+    install_audit_actions(AuditActionRegistry.from_manifests([integration_module]))
 
 
 @pytest.fixture()
@@ -71,6 +83,10 @@ def db() -> Session:
         DeliveryAttempt,
     ):
         model.__table__.create(engine)
+    # The kernel's ONE platform audit ledger — `quarantine` and
+    # `release_quarantine` write to it.
+    PlatformAdmin.__table__.create(engine)
+    PlatformAuditEvent.__table__.create(engine)
     with Session(engine) as session:
         yield session
 

@@ -61,6 +61,20 @@
 # and fall back to `GITHUB_TOKEN` only to push the correct branch before PR
 # creation fails loudly. Until the App identity is installed, that red run plus
 # the one-click URL is the fail-closed bridge.
+#
+# A CONNECTOR release has a THIRD ledger: a published connector's manifest
+# digest is what an installation adopts by, and
+# `docs/inventories/released-manifest-digests.json` holds it immutable. That row
+# is written here too, for the same reason as the other two: a tag with no row
+# fails `make manifest-digest-check` from the instant it lands, and "somebody
+# will remember" has already failed four times.
+#
+# `--manifest-python` names the interpreter that can import the connector's
+# dependencies — the connector lane passes the clean venv it already built to
+# install and conform the PUBLISHED wheel, so the digest is derived by the same
+# interpreter that proved the artifact. Its absence means "not the connector
+# lane", which is why it is a path rather than a boolean: the kernel, module and
+# adapter lanes publish nothing that carries an adopted manifest digest.
 set -uo pipefail
 
 DISTRIBUTION=""
@@ -68,6 +82,8 @@ VERSION=""
 TAG=""
 PACKAGE_DIR=""
 IMPORT_NAME=""
+MANIFEST_PYTHON=""
+RELEASE_RUN=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,6 +92,8 @@ while [ $# -gt 0 ]; do
     --tag)          TAG="$2";          shift 2 ;;
     --package-dir)  PACKAGE_DIR="$2";  shift 2 ;;
     --import-name)  IMPORT_NAME="$2";  shift 2 ;;
+    --manifest-python) MANIFEST_PYTHON="$2"; shift 2 ;;
+    --release-run)  RELEASE_RUN="$2";  shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -93,6 +111,10 @@ if [ -n "${PACKAGE_DIR}" ]; then
   if [ -n "${IMPORT_NAME}" ]; then
     MANUAL="${MANUAL} --import-name ${IMPORT_NAME}"
   fi
+fi
+if [ -n "${MANIFEST_PYTHON}" ]; then
+  MANUAL="${MANUAL}
+  then: make manifest-digest-record TAG=${TAG} RELEASE_RUN=${RELEASE_RUN}"
 fi
 
 give_up() {
@@ -135,6 +157,22 @@ if ! OUTPUT="$(python scripts/write_release_record.py "${ARGS[@]}" 2>&1)"; then
   give_up "the record writer refused (see above)"
 fi
 echo "${OUTPUT}"
+
+# The connector lane's third ledger. Refuses rather than warns, for the same
+# reason `give_up` is loud: a green run with no record is indistinguishable, at
+# a glance, from a green run with one. The writer is idempotent — a row that
+# already matches is a no-op, and a row that DISAGREES refuses rather than
+# overwriting, because a published contract is written once.
+if [ -n "${MANIFEST_PYTHON}" ]; then
+  if ! DIGEST_OUTPUT="$("${MANIFEST_PYTHON}" scripts/released_manifest_sweep.py \
+      --record --tag "${TAG}" --release-run "${RELEASE_RUN}" 2>&1)"; then
+    echo "${DIGEST_OUTPUT}"
+    give_up "the released-manifest digest writer refused (see above)"
+  fi
+  echo "${DIGEST_OUTPUT}"
+  OUTPUT="${OUTPUT}
+${DIGEST_OUTPUT}"
+fi
 
 if git diff --quiet; then
   # A real success, and the ONLY one besides opening the pull request: the

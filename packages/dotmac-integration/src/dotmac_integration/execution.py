@@ -44,10 +44,8 @@ the risk is not a double call but a silently skipped window.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from dotmac_integration.models import (
@@ -57,6 +55,10 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
 from dotmac_integration.retry import Outcome, next_state, retry_delay_seconds
+from dotmac_integration.spi import canonical_digest
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dotmac_integration.capability_registry import CapabilityRegistry
 
 __all__ = [
     "CheckpointConflict",
@@ -121,9 +123,15 @@ def payload_digest(payload: Any) -> str:
     `sort_keys` so two structurally equal payloads digest equally regardless of
     key order — without it, a provider that reorders JSON turns every redelivery
     into an identity collision.
+
+    The implementation moved to :func:`dotmac_integration.spi.canonical_digest`
+    when ADR-0024 § 10.2 needed the same rule for a capability contract's
+    schemas. This name stays because every caller and every stored
+    `payload_digest` column means exactly what it meant before; what would not
+    survive is TWO implementations, which is what that function's docstring
+    argues at length.
     """
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return canonical_digest(payload)
 
 
 # ── Inbox ───────────────────────────────────────────────────────────────────
@@ -228,6 +236,54 @@ def record_receipt_outcome(
 # ── Outbox ──────────────────────────────────────────────────────────────────
 
 
+def _require_valid_command(
+    db: Any,
+    *,
+    capability_binding_id: UUID | None,
+    payload: Any,
+    registry: CapabilityRegistry | None,
+) -> None:
+    """ADR-0024 § 10.4.1 — the command gate, BEFORE the row exists.
+
+    Placed before the insert deliberately, and not merely early in it. A
+    delivery row is a queued EFFECT: once written it is picked up by a
+    dispatcher, counted in the outbox, retried on a curve and eventually
+    dead-lettered. An invalid command that gets a row has already become
+    operational work — somebody has to find it, classify it and clear it — and
+    it reaches a provider before anybody does. Refusing here means the caller
+    that built the bad payload gets the error, synchronously, with nothing
+    persisted.
+
+    ## Why the capability comes from the BINDING and not from a parameter
+
+    A parameter would be a second place the capability of a delivery is stated,
+    and `dispatch.prepare` already reads it from `binding.capability_id`. Two
+    statements can disagree, and the one that would win is the one nobody
+    validated against.
+
+    ## Why an unbound delivery is not refused here
+
+    A delivery with no `capability_binding_id` names no capability, so there is
+    no published contract it could violate. It is also already dead:
+    `dispatch.prepare` refuses it with "names no capability binding; there is
+    nothing to route it to". Refusing it a second time here, with a message
+    about schemas, would explain the wrong problem.
+    """
+    if capability_binding_id is None:
+        return
+    from dotmac_integration.capability_registry import capability_registry
+    from dotmac_integration.models import CapabilityBinding
+
+    binding = db.get(CapabilityBinding, capability_binding_id)
+    if binding is None:
+        # Not this gate's refusal to make. The FK — or `dispatch.prepare` —
+        # owns "that binding does not exist", and inventing a second answer
+        # here would report a missing binding as a payload problem.
+        return
+    declared = registry if registry is not None else capability_registry()
+    declared.get(binding.capability_id).require_command(payload)
+
+
 def enqueue_delivery(
     db: Any,
     *,
@@ -236,6 +292,7 @@ def enqueue_delivery(
     idempotency_key: str,
     payload: Any,
     capability_binding_id: UUID | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> tuple[DeliveryAttempt, bool]:
     """Queue an outbound delivery. Returns `(delivery, is_new)`.
 
@@ -243,12 +300,23 @@ def enqueue_delivery(
     binding and payload identity; a key is not permission to discard changed
     content. Whether the effect RUNS at most once is the kernel's question —
     see this module's docstring.
+
+    `registry` is the declared capability vocabulary. Omitted, the installed one
+    is used, and a runtime that installed none refuses — `capability_registry()`
+    already draws that line, and this is exactly the caller it drew it for: an
+    assembly that dispatches without declaring what its payloads mean.
     """
     from sqlalchemy import select
 
     key = idempotency_key.strip()
     if not key:
         raise ExecutionError("idempotency_key is required to deduplicate enqueue")
+    _require_valid_command(
+        db,
+        capability_binding_id=capability_binding_id,
+        payload=payload,
+        registry=registry,
+    )
     digest = payload_digest(payload)
 
     def replay(existing: DeliveryAttempt) -> tuple[DeliveryAttempt, bool]:

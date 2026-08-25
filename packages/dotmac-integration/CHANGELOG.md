@@ -2,18 +2,17 @@
 
 ## Release state — read this before pinning
 
-**Fourteen versions have been released. Pin `0.1.0a14`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a14`; a14 was published, installed
-back from the private index, registered and tagged from `70459efd` by release
-run `32693378851`.
+**Fifteen versions have been released. Pin `0.1.0a15`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a15`; a15 was published, installed
+back from the private index, registered and tagged from exact revision
+`bd8d2262c26f62041cc22a813916066b9af85c7f`.
 
-`0.1.0a14` is the latest published version. It adds typed outbound provider
-evidence, delivered-payload retention and additive SPI 1.4 capability-to-mode
-declarations.
+`0.1.0a15` is the latest published version. It makes outbound idempotency
+collisions and enqueue races typed, adds repair/reconciliation, runtime safety
+and module-owned metric definitions.
 
-`0.1.0a15` is declared and unreleased. It makes outbound idempotency collisions
-and enqueue races typed: a reused key with a changed event, binding or payload
-is refused, and a uniqueness loser never exposes driver-bound parameters.
+`0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts
+and durably stores a validated normalized result in `ig_0013`.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -75,7 +74,96 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a15 — unreleased
+## 0.1.0a16 — unreleased
+
+### One capability id now means one PAYLOAD, and the domain owns it
+
+ADR-0024 §§ 10-12 and ADR-0061 A2. A capability id was already one contract with
+one owner; its payload was not. `CapabilityDeclaration` carried a config schema
+and `DispatchRequest.payload` was an unvalidated `dict[str, object]` — so
+configuration had a declared contract and commands did not, which is how one id
+grew two disjoint command vocabularies with nothing able to see it.
+
+- `CapabilityContract` — the declaration the owning BUSINESS application
+  publishes — gains `command_schema`, `result_schema`, `observation_schema`, a
+  canonical `contract_digest` over those three plus the id, and
+  `ContractDeprecation` (`replaced_by`, `retire_after`). Schemas are validated
+  at construction, exactly as `config_schema` already was.
+- `CapabilityDeclaration` gains `claims_contract_digest` and NOTHING else. A
+  connector never publishes a schema for a capability it merely implements: if
+  every connector published one, drift would become machine-readable rather than
+  prevented, because two connectors serving one id would declare two
+  individually valid schemas and nothing could prefer either.
+- **Four seams enforce it.** `execution.enqueue_delivery` validates the command
+  before a row exists; `capability_registry.require_implements_only_declared`
+  and `require_declared_for_binding` both check digest agreement — composition
+  and binding, because a distribution can be installed after composition ran;
+  `dispatch.settle` validates the result before the claim-guarded UPDATE; and
+  `ingress.record_batch` validates every observation before the batch commits,
+  which is also the polling path's gate because `record_poll_batch` calls it.
+- **A published version is SUCCEEDED, never redefined.**
+  `install_capability_registry` refuses a reload that gives an already published
+  id a different digest, or that walks a published contract back into a grace; a
+  deprecation must name a successor declared in the same registry; and a
+  contract may not name itself as its own replacement.
+- **Adoption is a declared, dated grace — not an optional field.** A contract
+  that declares neither a schema nor a `SchemaGrace(reason=…, retire_after=…)`
+  is refused at construction. `schema_grace_register` enumerates every ungated
+  capability with its owner and deadline, and `require_no_expired_grace` (run by
+  `require_governable`) refuses once a window has closed.
+- `Outcome` gains `result` — the normalized outcome body ADR-0024 § 12.2 says a
+  provider customer id, recipient code or transfer reference must arrive as. It
+  is validated against the domain's `result_schema` before settlement, which is
+  what distinguishes it from the unstructured evidence mapping
+  `provider_status_code` exists to refuse.
+- New refusal `ingress.ObservationRejected` (503, constant message) answers a
+  provider; the detailed `CapabilityPayloadRejected` reaches every caller that
+  is not answering one. Neither ever repeats the offending value — the summary
+  is a JSON pointer and a failing keyword, because `error_detail` is persisted.
+- `spi.canonical_digest` is now the ONE canonical-JSON hashing rule;
+  `execution.payload_digest` delegates to it and keeps its meaning.
+- Adds `ig_0013_delivery_result`. A validated `Outcome.result` is persisted
+  atomically with settlement rather than discarded after validation, and ages
+  out with the command payload under the same legal hold.
+- **Not repaired here, and deliberately visible:** `messaging.send.v1` still has
+  two connectors with disjoint command vocabularies. ADR-0024 § 11.2 repairs it
+  by SUCCESSION rather than redefinition, so it stays in grace until Sub
+  migrates. `tests/architecture/test_capability_contract_divergence.py` holds
+  that and the four other shared-and-ungated capability ids in a
+  two-directional ratchet.
+
+### Declaring a binding no longer erases how it is selected
+
+- `add_binding` is idempotent by contract, so every activation and reconcile
+  sequence re-declares a binding that already exists. It wrote `scope_json` and
+  `policy_json` unconditionally from parameters that defaulted to `None`, so a
+  re-declaration naming only the capability reset both columns. `policy_json`
+  is what `selection` reads to choose between several bindings enabled for one
+  capability, so losing it stopped outbound dispatch with an ambiguity refusal
+  while every control-plane state column still read `enabled`.
+- Omitting `scope` or `policy` now PRESERVES the stored value; an explicit
+  value — `None` included — is still a write, because "declares no scope" and
+  "is not the selection default" have to stay expressible. The omission marker
+  is `lifecycle.KEEP`, exported so an assembly forwarding an optional field can
+  name it.
+- Adds `set_binding_selection_policy` and `set_binding_scope` as the named
+  owners of those two columns. Neither invalidates activation: selection is
+  read live per dispatch and scope is display-only, so neither was ever
+  validated by the connection check, and returning the installation to `draft`
+  to change one would make relabelling a binding an outage.
+- Enabling stays a lifecycle transition that writes no binding column. That is
+  now asserted statically rather than merely intended
+  (`tests/architecture/test_integration_lifecycle_writers.py`), including that
+  the lifecycle owner cannot name `CapabilityDestinationRevision` at all — a
+  destination is `establish_destination`'s decision and its own append-only
+  table.
+- No schema change: both columns already exist, and no migration slot is
+  consumed.
+
+## 0.1.0a15 — released 2026-08-24
+
+Published, installed back from the private index, registered and tagged from
+exact revision `bd8d2262c26f62041cc22a813916066b9af85c7f`.
 
 ### Outbound enqueue identity and race safety
 
@@ -84,6 +172,99 @@ Nothing in this file is a publication claim except this section.
 - Contains the expected uniqueness race inside a savepoint. A READ COMMITTED
   caller replays the winning row; a stale snapshot receives a typed retry
   instruction whose message cannot carry payload-bound driver parameters.
+
+### Outbound replay, dead-letter repair and ambiguous-outcome reconciliation
+
+- Adds `outbound_repair`, the single owner of whether a stored outbound command
+  may become a live effect again. Every entry point routes through one
+  `classify_repair` decision, so an inspection report can never show a row as
+  repairable that the repair command then refuses.
+- Replays a command by the `(installation, idempotency_key)` a product
+  addressed it with. The re-dispatched request is the row's own stored payload,
+  verified against the digest recorded at enqueue; neither entry point accepts
+  a content parameter, so a replay cannot carry anything the recorded evidence
+  does not describe.
+- A replay of a command that already landed returns the recorded outcome —
+  delivered-at, attempt count and typed provider evidence — and re-dispatches
+  nothing. A command whose stored request was redacted by the retention sweep,
+  lost, or no longer digests to what was recorded is refused by name rather
+  than retried into a live effect.
+- Adds oldest-first, page-bounded dead-letter and ambiguous inspection carrying
+  what was attempted, the binding and installation it was attempted against,
+  the typed provider evidence, the connector's classification, the legal-hold
+  state and whether the request is still verifiable. Derived at read time;
+  no status column and no new table.
+- Resolves an INDETERMINATE attempt against provider evidence in three phases
+  with no session held across the probe. A `landed` verdict closes the command
+  as delivered without re-dispatching it, only a provider-proven `not_landed`
+  returns it to the queue (and still only with verifiable request evidence),
+  and `unknown` leaves it ambiguous with a module-owned marker rather than
+  blindly retrying or blindly failing it. Replaying an ambiguous command
+  through the operator path is refused and pointed at reconciliation.
+- Declares one new audit action, `integration.delivery.reconciled`, carrying
+  the verdict, the previous and resulting state and typed provider evidence.
+  Connector-authored probe text is returned to the caller and persisted
+  nowhere. Requeueing keeps its existing single writer,
+  `integration.delivery.replayed`.
+- `INTEGRATION_DEAD_LETTER_PAGE_SIZE` is the new configuration knob (default
+  100, bounded at 1000). No schema change: the reconciliation trail is the
+  fleet's one platform audit ledger, and the four-state outcome vocabulary
+  stays `retry.OutcomeStatus`.
+### Connector quarantine, a dispatch kill switch and one admission owner
+
+- Adds `admission`, the single authority for "may this worker dispatch right
+  now?". It carries a closed set of reasons, and `dispatch.prepare` consults it
+  BEFORE claiming, so a refusal never strands a leased row.
+- `dispatch.DispatchNotAdmitted` is a third, distinct answer beside `None` (no
+  claim, contention) and `DispatchUnavailable` (a misconfiguration, alert).
+  A deliberate halt no longer reads as a broken configuration.
+- Quarantine is scoped to the INSTALLATION and enforced at dispatch: every
+  capability it serves stops, other installations of the same connector and the
+  same capability are untouched. It removes no queued delivery, breaks no lease
+  and rewrites no retry schedule.
+- Adds `lifecycle.release_quarantine`, the explicit exit. It lands in
+  `disabled`, never `enabled`, so leaving containment cannot skip `enable`'s
+  live connection check. Both directions write a declared platform audit event
+  recording the previous state, the reason and the actor.
+- Adds `ExecutionPolicy.dispatch_enabled`, the deployment-wide kill switch. It
+  refuses admission with no database access at all and leaves every durable row
+  exactly as it found it.
+
+### Provider rate limits and backpressure
+
+- A TERMINAL outcome carrying a configured transient HTTP status (429, 503,
+  502, 504, 500, 408, 425) is reclassified RETRYABLE. The engine branches on the
+  typed `provider_status_code` only, never on a connector's `error_code`, and
+  never promotes `RECONCILIATION_REQUIRED`. Attempt exhaustion still applies.
+- Adds `retry.parse_retry_after`, which reads both RFC 7231 forms
+  (delta-seconds and HTTP-date) so every connector does not reimplement it.
+  An unusable header falls back to the curve instead of failing the outcome.
+- An observed throttle delays that installation's other queued deliveries
+  through one bounded UPDATE in the settle transaction — it only ever moves
+  `next_attempt_at` forward, never touches in-flight or settled rows, and never
+  reaches another installation. The pause is a schedule, never a sleep, so no
+  session is held across provider I/O.
+- Adds `ExecutionPolicy.max_in_flight_per_installation`, the backpressure that
+  applies before a provider complains.
+
+### Operational metrics
+
+- Adds `operations.dispatch_metrics`: queue depth, oldest queued age, end-to-end
+  dispatch latency over a configured window, retry counts, failure counts,
+  expired leases, unprocessed receipts and quarantined installations.
+- Derived at read time beside `health_report`, for the same reason — a stored
+  gauge is a second writer over facts the ledgers already hold.
+- `operations.METRIC_NAMES` is the stable, language-neutral naming contract.
+  The module produces the numbers and introduces no metrics client: the
+  exporter stays with the composing assembly.
+
+### Configuration
+
+- Every threshold added here is a validated `ExecutionPolicy` field with a
+  documented default that reproduces the previous behaviour. Construction
+  refuses a zero concurrency ceiling and refuses a throttling status that is not
+  also retryable — which would delay the queue while dead-lettering the delivery
+  that discovered the limit.
 
 ## 0.1.0a14 — released 2026-08-24
 

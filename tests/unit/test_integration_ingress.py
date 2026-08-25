@@ -1644,8 +1644,18 @@ def test_record_batch_takes_the_tuple_so_there_is_no_loop_to_split(
     """Whole-batch atomicity is STRUCTURAL rather than a convention: there is no
     per-event entry point for a caller to put a transaction boundary inside."""
     parameters = inspect.signature(record_batch).parameters
-    assert list(parameters) == ["db", "prepared", "events"]
+    positional = [
+        name
+        for name, parameter in parameters.items()
+        if parameter.kind is not inspect.Parameter.KEYWORD_ONLY
+    ]
+    assert positional == ["db", "prepared", "events"]
     assert parameters["events"].annotation == "tuple[InboundEvent, ...]"
+    # `registry` (ADR-0024 § 10.4.4's observation gate) is KEYWORD-ONLY and
+    # therefore cannot become a positional a caller mistakes for the batch. The
+    # property this test is about is that there is no per-EVENT entry point, and
+    # a keyword-only input does not create one.
+    assert parameters["registry"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_a_write_failure_becomes_a_typed_refusal_not_a_driver_message(

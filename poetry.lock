@@ -777,7 +777,7 @@ url = "packages/dotmac-compliance-reporting"
 
 [[package]]
 name = "dotmac-connector-flutterwave"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Flutterwave API v4 settlement ingress and reconciliation connector"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -786,7 +786,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a11"
+dotmac-integration = ">=0.1.0a14"
 httpx = ">=0.27,<1.0"
 
 [package.source]
@@ -812,8 +812,8 @@ url = "packages/dotmac-connector-linkedin"
 
 [[package]]
 name = "dotmac-connector-meta-social"
-version = "0.1.0a1"
-description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
+version = "0.1.0a2"
+description = "Facebook and Instagram ingress and delivery connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["dev"]
@@ -821,7 +821,8 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a10"
+dotmac-integration = ">=0.1.0a14"
+httpx = ">=0.27,<1.0"
 
 [package.source]
 type = "directory"
@@ -847,7 +848,7 @@ url = "packages/dotmac-connector-mono"
 
 [[package]]
 name = "dotmac-connector-paystack"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Paystack settlement ingress and reconciliation connector"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -865,7 +866,7 @@ url = "packages/dotmac-connector-paystack"
 
 [[package]]
 name = "dotmac-connector-remita"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Dotmac Integrator connector for Remita RRR status observations"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -874,7 +875,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a11"
+dotmac-integration = ">=0.1.0a14"
 httpx = ">=0.27,<1.0"
 
 [package.source]
@@ -883,7 +884,7 @@ url = "packages/dotmac-connector-remita"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Meta WhatsApp Cloud API ingress and delivery connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1170,7 +1171,7 @@ url = "packages/dotmac-imports"
 
 [[package]]
 name = "dotmac-inbox"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1188,7 +1189,7 @@ url = "packages/dotmac-inbox"
 
 [[package]]
 name = "dotmac-inbox-operations"
-version = "0.1.0a3"
+version = "0.1.0a5"
 description = "Staffed inbox queues, routing, presence, and assignments"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1206,7 +1207,7 @@ url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a15"
+version = "0.1.0a16"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1261,7 +1262,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a95"
+version = "0.1.0a96"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1918,8 +1919,8 @@ url = "packages/dotmac-sites"
 
 [[package]]
 name = "dotmac-subscriptions"
-version = "0.1.0a2"
-description = "DotMac dual-plane recurring commercial contracts and occurrences"
+version = "0.1.0a3"
+description = "DotMac dual-plane recurring contracts and non-cash grants"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]

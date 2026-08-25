@@ -67,64 +67,109 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-connector-flutterwave": {
+      "declared": "0.1.0a3",
+      "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-connector-meta-social": {
+      "declared": "0.1.0a2",
+      "reason": "DECLARED BY THE OUTBOUND MESSAGING SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73), and messaging.send.v1, the per-capability modes, three additional secret bindings, two Graph egress hosts and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 ingress manifest is preserved as INGRESS_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an Integrator pin before that tag exists.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-connector-paystack": {
+      "declared": "0.1.0a3",
+      "reason": "DECLARED BY THE OUTBOUND COMMAND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-paystack-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and the four DELIVERY capability ids, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as SETTLEMENT_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-connector-remita": {
+      "declared": "0.1.0a2",
+      "reason": "DECLARED BY THE RRR ISSUANCE SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-remita-v0.1.0a1 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.reference.issuance.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 manifest is preserved as POLL_ONLY_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an ERP shadow cutover before that tag exists.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-connector-whatsapp": {
+      "declared": "0.1.0a4",
+      "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-customers": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move account/profile authority, or retire Sub's writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-fx-policy": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. ERP is the named intended consumer. Publication makes an immutable artifact available for the separately governed backfill and selection shadow; it does not compose the module, move FX-policy authority, or retire ERP's writer. Money, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
+    "dotmac-inbox": {
+      "declared": "0.1.0a2",
+      "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION. Version a2 adds the typed history-import owner required to replace Sub's temporary direct-mapped-class backfill; source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a2 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-inbox-operations": {
+      "declared": "0.1.0a5",
+      "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a16",
+      "reason": "DECLARED BY THE DOMAIN-OWNED PAYLOAD-CONTRACT AND DURABLE RESULT SLICE, NOT YET RELEASED. a15 IS published (peeled tag dotmac-integration-v0.1.0a15 -> bd8d2262c26f62041cc22a813916066b9af85c7f), so the new CapabilityContract schema/digest surface, Outcome.result and ig_0013 delivery result storage require a new version. It is NOT to be repaired by editing the version down: remove this row only when the module release workflow installs, verifies and tags 0.1.0a16, and never publish a connector that requires the new contract before that tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-kernel": {
-      "declared": "0.1.0a95",
-      "reason": "ALLOCATION RELEASE PENDING THE PROTECTED WORKFLOW. a95 adds one MIGRATION_OWNER_LEDGER row (response_obligations / ro / mod_sla) and changes no behaviour for any existing consumer. dotmac-response-obligations declares it as a floor and is itself unreleasable until this ships. Remove this row in the a95 release-record change; do not edit the declared version down.",
+      "declared": "0.1.0a96",
+      "reason": "MACHINE-ATTRIBUTION RELEASE PENDING THE PROTECTED WORKFLOW. Main already claimed a95 for the response_obligations allocation, so the additive source-application attribution, zero-drop credential rotation and 0028_machine_attribution migration are a96 rather than silently broadening a95. The response-obligations module's >=0.1.0a95 floor remains valid because a96 carries that allocation. Remove this row in the a96 release-record change; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed backfill and zero-drift decision shadow; it does not compose the module, move qualification authority, or retire Sub's writer. Positioning and Network Access remain observation sources. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-response-obligations": {
       "declared": "0.1.0a1",
-      "reason": "NEW SHARED OWNER, NOT RELEASED. The response-time clock extracted product-first from Sub's entity-generic SLA policy/target/clock/breach tables; ERP recomputes the same targets at read time and CRM keeps a third copy. Audit-complete and uncomposed. Remove this row in the a1 release-record change, and only after the Sub cutover decision on whether its SlaBreach lifecycle rows migrate to operational-escalation instances or are archived; do not edit the declared version down.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25, AFTER KERNEL 0.1.0a95 IS RELEASED AND RECORDED. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed breach-lifecycle decision, backfill and clock shadow; it does not compose the module, move response-obligation authority, retire any Sub/ERP/CRM writer, or settle whether legacy SlaBreach rows migrate or are archived. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-sales": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE FIRST SUB ADOPTION. The accepted-quote owner is audit-complete and uncomposed: the assembly does not install it, and it is deliberately absent from the release allowlist. Its kernel floor is 0.1.0a88 \u2014 `sales` won the three-way `sa` arbitration in #321 and the row entered kernel source at a87, which was never dispatched, so a88 is the first installable kernel that can register the lineage. THE KERNEL IS NOT WHAT HOLDS THIS ROW OPEN; adoption is. Publishing before Sub's backfill and shadow would put an installable sales owner beside a product still writing its own quotes. Remove this row in the release change that adds the allowlist entry and records the Sub adoption; never by editing the declared version or the floor down.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. The 0.1.0a88 kernel floor remains exact and installable. Publication makes an immutable artifact available for the separately governed quote backfill and shadow; it does not compose the module, move accepted-quote authority, or retire Sub/CRM writers. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-service-access-policy": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer and Network Access remains the enforcer. Publication makes an immutable artifact available for the separately governed input backfill and desired-state shadow; it does not compose the module, move policy authority, switch Network Access's reader, or retire Sub's writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-services": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill and lifecycle shadow; it does not compose the module, move service-lifecycle authority, or retire Sub's writer. Fulfillment, Network Access, subscriptions and billing stay outside. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
+    },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a3",
+      "reason": "RELEASE PENDING FOR THE PORTED COMPLIMENTARY/SPONSORED LIFECYCLE. a3 adds the su_0003 arrangement and non-cash-grant tables on both declared planes and the product-neutral treatment service ported product-first from dotmac_sub (ADR-0006). It changes nothing an a2 consumer already uses: su_0001 and su_0002 keep their released bytes, and the a2 public surface is unchanged. No adopter pins a3, and Sub still owns its own arrangement writer until the G5/G6 backfill and cutover. Remove this row in the a3 release-record change; never by editing the declared version down.",
+      "state": "declared-unpublished"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
-      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer for the notification-template contract. Publication makes an immutable artifact available for the separately governed seed/shadow and renderer retirement work; it does not compose the module, move template authority, or retire Sub's local renderer. The release authorization also corrects the stale runtime version surface to the already-declared 0.2.0a3. Remove this row only in the a3 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first normalized usage owner is audit-complete and uncomposed; raw AAA, rating, billing and accounting remain separate. Remove only with authorized history backfill, dedupe proof, aggregate shadow and writer cutover.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-usage-rating": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first pre-tax usage-rating owner is audit-complete and uncomposed; invoices, tax, payments and accounting remain separate. Remove only with authorized rule/obligation backfill, amount shadow and sole-writer cutover.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed rule/obligation backfill and amount shadow; it does not compose the module, move usage-rating authority, or retire Sub's writer. Invoices, tax, payments and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     },
     "dotmac-workforce": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub/ERP/CRM-adjudicated workforce scheduling and dispatch owner is audit-complete and uncomposed. Remove only with authorized Sub/ERP backfill and shadow cutovers plus verified CRM decision-copy retirement.",
+      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
     }
   }

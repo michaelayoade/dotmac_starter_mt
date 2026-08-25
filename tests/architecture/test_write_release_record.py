@@ -137,6 +137,32 @@ def _without_tags_after(text: str, distribution: str, tag: str) -> str:
     return text
 
 
+def _unreleased_filenames(text: str, distribution: str) -> set[str]:
+    row = re.search(
+        rf'^    "{re.escape(distribution)}": frozenset\(([^\n]*)\),$',
+        text,
+        re.MULTILINE,
+    )
+    assert row is not None, distribution
+    payload = row.group(1).strip()
+    return set() if not payload else ast.literal_eval(payload)
+
+
+def _with_unreleased_filenames(
+    text: str, distribution: str, filenames: set[str]
+) -> str:
+    row = re.search(
+        rf'^    "{re.escape(distribution)}": frozenset\(([^\n]*)\),$',
+        text,
+        re.MULTILINE,
+    )
+    assert row is not None, distribution
+    values = ", ".join(repr(filename) for filename in sorted(filenames))
+    payload = f"{{{values}}}" if values else ""
+    replacement = f'    "{distribution}": frozenset({payload}),'
+    return text[: row.start()] + replacement + text[row.end() :]
+
+
 def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     """The a14 failure: adding the digest without clearing UNRELEASED is not a
     record, because the same file then reads as immutable and editable at once.
@@ -150,11 +176,13 @@ def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     distribution, commit, digests = _recorded_entry(writer, tag)
     text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
 
-    text = text.replace(
-        '"dotmac-integration": frozenset()',
-        '"dotmac-integration": frozenset({"ig_0012_delivery_evidence.py"})',
+    current_unreleased = _unreleased_filenames(text, distribution)
+    text = _with_unreleased_filenames(
+        text,
+        distribution,
+        current_unreleased | {"ig_0012_delivery_evidence.py"},
     )
-    assert 'frozenset({"ig_0012_delivery_evidence.py"})' in text
+    assert "ig_0012_delivery_evidence.py" in _unreleased_filenames(text, distribution)
     # Reconstruct the state AS OF a14. `add_released_tag` treats every other
     # recorded tag of the distribution as "previously released", without regard
     # to order, so a later tag that re-lists ig_0012 — a15 does, having shipped
@@ -165,8 +193,7 @@ def test_a_partial_incremental_record_retires_the_released_migration() -> None:
     updated, changed = writer.add_released_tag(text, tag, distribution, commit, digests)
 
     assert changed
-    assert f'"{distribution}": frozenset(),' in updated
-    assert 'frozenset({"ig_0012_delivery_evidence.py"})' not in updated
+    assert _unreleased_filenames(updated, distribution) == current_unreleased
 
     unchanged, changed_again = writer.add_released_tag(
         updated, tag, distribution, commit, digests
@@ -180,7 +207,9 @@ def test_a_new_migration_absent_from_unreleased_is_refused() -> None:
     rewrite whatever happens to be present in the editable set."""
     writer = _writer()
     text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
-    assert '"dotmac-integration": frozenset()' in text
+    assert "ig_9999_missing_declaration.py" not in _unreleased_filenames(
+        text, "dotmac-integration"
+    )
     _, _, prior = _recorded_entry(writer, "dotmac-integration-v0.1.0a13")
     digests = {**prior, "ig_9999_missing_declaration.py": "a" * 64}
 

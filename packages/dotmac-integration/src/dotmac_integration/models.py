@@ -674,9 +674,13 @@ class DeliveryAttempt(Base):
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Typed provider evidence only. Arbitrary response bodies deliberately
-    #: have no column: they are content, not retry/correlation evidence.
+    #: stay out of these fields: they are content, not retry/correlation evidence.
     provider_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
     provider_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: The domain-normalized result, validated against the owning capability's
+    #: result schema before settlement. This is product content, not provider
+    #: evidence, and ages out with the outbound payload under the same hold.
+    result_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False

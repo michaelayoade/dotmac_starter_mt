@@ -168,7 +168,159 @@ binding_multiplicity = "Unique on (installation_id, capability_id). Many install
 # discovery, startup and activation. Storing it is what lets a later MODULE
 # upgrade refuse a previously activated binding — the case that bites, where
 # the plugin did not change but the host did.
-open_questions = []
+#
+# REOPENED 2026-08-24 by the outbound leg, and it is one question rather than a
+# list: A CAPABILITY ID IS NOT YET A CONTRACT. `spi.CapabilityDeclaration`
+# carries `capability_id`, `config_schema` and `modes`; `DispatchRequest.payload`
+# is an unvalidated `dict[str, object]`. Configuration has a declared schema and
+# COMMANDS DO NOT, so each connector settled its command shape locally and two
+# shipped ids grew two dialects each — `payments.*` (Paystack's
+# `{"action","params"}` envelope, derived provider reference and connector-owned
+# wire scale, against Flutterwave's and Remita's flat payload, product-minted
+# reference and required `currency_minor_units`) and `messaging.send.v1`
+# (`meta_whatsapp`'s `send_text|send_template|send_media` with `recipient`,
+# against `meta_social`'s `send_direct_message|reply_to_comment` with
+# `recipient_id`+`channel`). ADR-0024 § 8.1 forbids exactly that, and ADR-0061
+# § 3 cannot be satisfied while it holds: ERP cannot move payout traffic between
+# bindings if the payload changes with the binding.
+#
+# This module owns the closure, because the missing thing is a declaration
+# surface, not a connector fix.
+#
+# CORRECTED 2026-08-24, and the superseded statement is kept rather than quietly
+# replaced. The paragraph above originally continued:
+#
+#   "...: a command payload schema on `CapabilityDeclaration`, validated by the
+#   engine BEFORE dispatch rather than by each connector after."
+#
+# That places the schema on the CONNECTOR's declaration, and it is wrong. If
+# every connector publishes its own schema, drift merely becomes
+# MACHINE-READABLE rather than prevented: two connectors serving one capability
+# id would declare two individually valid schemas and the engine would have no
+# ground to prefer either. The canonical schema belongs to the artifact that
+# owns the capability's MEANING — `capability_registry.CapabilityContract`, the
+# business owner's declaration, of which the registry already permits exactly
+# one per id (DuplicateCapabilityDeclaration). ADR-0024 § 10 / ADR-0061 A2.
+#
+# WHAT `CapabilityContract` GAINS: `command_schema`, `result_schema`,
+# `observation_schema`, a canonical contract digest over the canonicalized
+# schemas, and deprecation/replacement metadata (which capability id replaces
+# this one, and the window after which this one is retired).
+#
+# WHAT `spi.CapabilityDeclaration` KEEPS: `capability_id`, `config_schema` and
+# `modes` — connector CONFIGURATION and executable modes, which are genuinely
+# per-connector facts — plus the ability to CLAIM the domain contract's digest.
+# It never publishes a competing schema. A manifest is a claim to implement,
+# never a claim to define, and that now covers the payload as well as the id.
+#
+# THE GATE, as one unit of work and as an OBLIGATION rather than an existing
+# control (none of it exists today):
+#   1. command validation before enqueue           -> execution.enqueue_delivery
+#   2. digest agreement at COMPOSITION             -> capability_registry
+#                                                     .require_implements_only_declared
+#   3. digest agreement again at BINDING           -> capability_registry
+#                                                     .require_declared_for_binding
+#   4. result validation before settlement         -> dispatch.settle
+#   5. observation validation before inbox record  -> ingress.record_batch
+#                                                     (and the polling settle)
+#   6. a schema change takes a NEW `.vN` capability id; a published contract
+#      version is never redefined in place.
+# Sensitivity proofs are PLANTED, not assumed: digest mismatch, missing schema,
+# invalid payload, invalid result — driven by a deliberately divergent fake
+# connector. Steps 2 and 3 are both required for the same reason the SPI already
+# checks its three declarations three times: a distribution can be installed
+# after composition ran, and a binding can be activated long after startup.
+#
+# It remains an SPI minor version plus a registry minor version and a
+# coordinated connector release wave. See ADR-0061 § 5 and its Amendment A2/A3
+# for the ordered sequence.
+open_questions = [
+  "CapabilityContract declares an owner and a summary but no COMMAND, RESULT or OBSERVATION schema and no contract digest, so a capability id is a name rather than a contract on every leg; CapabilityDeclaration has a config schema and nothing to claim against (ADR-0024 § 10, ADR-0061 A2; the superseded framing that put the schema on CapabilityDeclaration is ADR-0024 § 8.4 / ADR-0061 § 4 D5).",
+  "ConnectorMode is a CLOSED union of INGRESS|POLL|DELIVERY with no REQUEST member, so a caller-initiated read that returns a typed observation (social.profile.read.v1) cannot be served at all (ADR-0024 § 11.3).",
+  "DELIVERY has no durable command-response seam: dispatch returns an Outcome carrying only status, error code, provider reference and HTTP status, so a command whose reply is CONTENT rather than evidence has nowhere to land. dotmac-connector-paystack states the consequence exactly - a checkout URL, a resolved bank-account name and a new transfer-recipient code cannot be persisted, and only commands whose reply is pure evidence (charge, refund, transfer) are usable through DELIVERY at all. This blocks any payment-execution owner from completing its own lifecycle through the sanctioned transport, because binding a payee (resolve_bank_account, create_transfer_recipient) is a content reply. A seam must preserve the reply against the same idempotency key without letting a plugin smuggle a response body through untyped evidence - the boundary Outcome.provider_reference and provider_status_code were deliberately typed to hold (docs/inventories/treasury-payment-execution-sources.md § 4, § 12.3 G1).",
+]
+
+# ── ADR-0062 (2026-08-24): this module names its runtime metrics; the assembly
+# exports them ──────────────────────────────────────────────────────────────
+#
+# `operations.METRIC_NAMES` is the published naming contract — thirteen stable,
+# `integration_`-prefixed, unit-suffixed identifiers returned verbatim by
+# `DispatchMetrics.as_metrics()` and pinned as literals in
+# `tests/unit/test_integration_runtime_safety.py`. There is no metrics client,
+# counter registry or `/metrics` route in this package and there must not be
+# one: several assemblies compose this module, and an exporter here would pick
+# their monitoring stack for them and create a second observability path beside
+# the one each deployment already runs. `dotmac_integrator` owns the exporter.
+#
+# Metric names are therefore part of what COMPATIBILITY.md promises: removing or
+# renaming a declared name is a breaking change to the published surface.
+#
+# DIVERGENCE (ADR-0062 § 5 D2): `HealthReport.as_dict()` — same module, same
+# file, same read-time derivation — returns bare dataclass field names
+# (`dead_letter`, `checkpoints_stale`, `receipts_unprocessed`, …) with no
+# declared tuple and no `integration_` prefix. An assembly exporting the health
+# signals, which is the obvious thing to do with an object whose purpose is "is
+# anything silently stuck?", exports six unprefixed, undeclared names. Closing
+# it is a minor version here: give HealthReport its own declared, prefixed name
+# tuple beside METRIC_NAMES, pinned by a literal test the way METRIC_NAMES
+# already is.
+
+# THE PAYLOAD CONTRACT IS THE DOMAIN'S, and this is where that is recorded for a
+# reviewer who reaches this dossier before the ADR. ADR-0024 §§ 10-12 (2026-08-24)
+# and ADR-0061 A2.
+#
+# The defect: a capability id was one contract with one owner, and its PAYLOAD
+# was nothing. `spi.CapabilityDeclaration` carried `config_schema` and
+# `DispatchRequest.payload` was an unvalidated `dict[str, object]` — configuration
+# had a declared contract and commands did not. Two shipped capability families
+# each grew two dialects behind one id with no gate able to see it.
+#
+# The closure is NOT a command schema on the connector's declaration. If every
+# connector published its own schema, two connectors serving one id would publish
+# two individually valid schemas and the engine would have no ground to prefer
+# either — drift becomes machine-readable rather than prevented. The schema
+# therefore lives on `capability_registry.CapabilityContract`, the declaration the
+# owning business application publishes and of which the registry already permits
+# exactly one per id. A connector may only CLAIM its digest.
+capability_payload_contract = "OWNED BY THE DECLARING DOMAIN. CapabilityContract carries command_schema, result_schema, observation_schema, a canonical contract_digest and ContractDeprecation. CapabilityDeclaration carries only claims_contract_digest. Enforced at four seams: enqueue_delivery (command), require_implements_only_declared and require_declared_for_binding (digest agreement, composition AND binding), dispatch.settle (result), ingress.record_batch (observation, shared by the polling path). A schema change takes a new .vN id; install_capability_registry refuses a redefinition."
+
+# ADOPTION IS A DECLARED, DATED GRACE — not a permanent optional field. Every
+# capability in the fleet predates the rule, so fail-closed on day one would
+# break every binding; but an optional `command_schema` is exactly how the defect
+# returns, because nothing would separate "this owner has not published a payload
+# contract" from "nobody has looked at this capability". A contract must declare a
+# schema OR a SchemaGrace with a reason and a retire_after date; silence is
+# refused at construction, the ungated set is enumerable through
+# `schema_grace_register`, and `require_no_expired_grace` closes the window.
+schema_adoption = "Fail closed on SILENCE, not on absence. A CapabilityContract declares at least one payload schema or an explicit SchemaGrace(reason, retire_after); neither is refused. The ungated set is enumerable with owner and deadline; an expired grace refuses at boot."
+
+# WITHHELD, AND SAID OUT LOUD (ADR-0032; ADR-0024 § 9.4 applied to this module).
+# The gate above does not repair what has already shipped, and it is not supposed
+# to: ADR-0024 § 11.2 rules that `messaging.send.v1` is repaired by SUCCESSION
+# (`messaging.direct.send.v2`, `social.comment.reply.v1`,
+# `social.profile.read.v1`) rather than by redefining a published version. Five
+# capability ids are currently served by two connectors each with no domain
+# contract published between them; they are held in a two-directional ratchet at
+# `tests/architecture/test_capability_contract_divergence.py` so the set cannot
+# grow — or silently shrink — without a reviewer seeing it.
+unrepaired_shared_capabilities = "messaging.receive.v1 and messaging.send.v1 (meta_whatsapp, meta_social); payments.intent.v1, payments.refund.v1 and payments.settlement.observation.v1 (paystack, flutterwave). messaging.send.v1 carries the documented divergence: send_text|send_template|send_media with `recipient` against send_direct_message|reply_to_comment with `recipient_id`+`channel`. Repaired by succession, not redefinition."
+
+# NOT BUILT, AND NAMED SO THE ABSENCE IS REVIEWABLE. Two obligations the gate
+# leaves open:
+#
+# 1. A binding does NOT durably pin the contract digest it was activated against.
+#    Redefinition is refused in-process (a changed digest breaks every connector
+#    claim at composition and at binding, and `install_capability_registry`
+#    refuses a reload that redefines), but a coordinated owner+connector change
+#    across a restart is a reviewable two-repository diff rather than a refusal.
+#    A `contract_digest` column on `capability_bindings` is the next ratchet and
+#    was deliberately NOT taken now: with every contract in grace it would be
+#    NULL for every row on day one, which is a control over an empty set.
+# 2. A webhook refusal carries no detail. `ObservationRejected` has a constant
+#    message by the `IngressRefused` contract, and the detailed
+#    `CapabilityPayloadRejected` is currently converted and not otherwise
+#    surfaced on the ingress path.
+contract_gate_gaps = "No durable per-binding contract-digest pin (deferred: every contract is in grace, so the column would be uniformly NULL). No observability seam for an ingress-side observation refusal."
 
 # PAYLOAD RETENTION IS NEW BEHAVIOUR, NOT A PORT — recorded so the product-first
 # rule is answered rather than skipped. Sub keeps every `integration_inbox_event`

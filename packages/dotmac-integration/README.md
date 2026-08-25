@@ -12,7 +12,7 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a14`; `0.1.0a15` is declared and
+**Released: `0.1.0a1` through `0.1.0a15`; `0.1.0a16` is declared and
 unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
@@ -29,6 +29,8 @@ a14 adds typed outbound provider evidence, delivered-payload retention and SPI
 1.4's explicit capability-to-mode mapping.
 a15 refuses changed-effect reuse of an outbound idempotency key and contains
 concurrent enqueue uniqueness failures behind typed, material-safe outcomes.
+a16 adds the domain-owned capability payload contract and durably stores its
+validated command result; raw provider response bodies remain unrepresentable.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
@@ -87,6 +89,61 @@ provider-neutral envelope without interpreting the product-owned observation. An
 `InboundDisposition.RECORD_ONLY` closes transport evidence that must never
 enter the product consequence worker. These are engine contracts, not provider
 branches.
+
+## Operating the outbound runtime
+
+**This module ships no HTTP routes, no login flow and no operator UI.** Its
+manifest declares no `permissions` and no `capabilities` for exactly that
+reason: both exist to gate a route, and there is none here. Every control below
+is a Python call made inside the composing assembly's own transaction.
+
+That matters because it is the thing a runbook gets wrong. **There is no
+`/platform/auth/login` step for operating this queue.** That route is real — it
+is `dotmac_kernel.platform_auth.platform_auth_router`, mounted by the kernel's
+`create_app`, host-gated to `PLATFORM_ROOT_DOMAIN`, and it authenticates a
+`PlatformAdmin` against the STARTER assembly's control plane (see the starter's
+`README.md` and `docs/inventories/starter-surfaces.md`). It is not this module's
+operator flow, and it does not reach this module's tables: the starter assembly
+does not compose `dotmac-integration` at all (`docs/MODULE_CATALOG.md` — "not
+installed here"). Authenticating there and expecting to reach an outbound queue
+authenticates against a deployment that has none.
+
+The real operator surface belongs to the `dotmac_integrator` assembly, which
+composes this module and owns whatever authentication, routes and guards it
+exposes over the calls below. Anything else is that assembly's documentation to
+write, not this package's to assume.
+
+| Operator intent | The one call |
+|---|---|
+| Stop ONE connector consuming the queue | `lifecycle.quarantine(db, installation, reason=…)` |
+| Let it back in | `lifecycle.release_quarantine(db, installation, reason=…)`, then `lifecycle.enable(…)` |
+| Stop the WHOLE deployment dispatching | `ExecutionPolicy(dispatch_enabled=False)` |
+| Bound concurrent provider calls | `ExecutionPolicy(max_in_flight_per_installation=N)` |
+| See what is stuck | `operations.health_report(db)` |
+| See how the queue is behaving | `operations.dispatch_metrics(db)` |
+| Requeue a dead letter | `operations.replay_delivery(db, delivery, reason=…)` |
+| Recover a dead worker's rows | `operations.release_expired_leases(db)` |
+
+Three properties worth knowing before using any of them:
+
+* **quarantine is per INSTALLATION, and it deletes nothing.** It stops every
+  capability that installation serves — a binding is a route into it and a
+  capability is a contract many installations implement, so neither is the unit
+  of distrust. Queued deliveries, leases and retry schedules are left exactly
+  as they were, and both entering and leaving quarantine write a platform audit
+  event. `admission`'s module docstring carries the full reasoning.
+* **the kill switch halts, it does not purge.** `dispatch_enabled=False` refuses
+  admission before anything is claimed; the outbox is untouched and resumes on
+  its own schedule when the switch goes back.
+* **a provider 429 is retryable, never terminal**, and its `Retry-After` wins
+  over the backoff curve. A throttle also delays that installation's other
+  queued deliveries, in the database — the pause is a `next_attempt_at`, never a
+  sleep, so no session is ever held waiting on a provider.
+
+`operations.dispatch_metrics` returns numbers under stable, language-neutral
+names (`operations.METRIC_NAMES`); it does not export them. There is no metrics
+client in this package, deliberately: the exporter belongs to the assembly, the
+same way the HTTP surface does.
 
 ## Certifying a connector
 

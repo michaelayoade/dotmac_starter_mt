@@ -17,6 +17,14 @@ from dotmac_inbox.channels import (
     registered_channels,
     reset_channel_registry_for_tests,
 )
+from dotmac_inbox.history import (
+    ImportConversation,
+    ImportMessage,
+    ImportReadState,
+    import_conversation,
+    import_message,
+    import_read_state,
+)
 from dotmac_inbox.lifecycle import (
     Direction,
     InvalidTransitionError,
@@ -51,7 +59,7 @@ from dotmac_inbox.service import (
 )
 from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "SCHEMA",
@@ -66,6 +74,9 @@ __all__ = [
     "DedupKey",
     "Direction",
     "InboundIdentity",
+    "ImportConversation",
+    "ImportMessage",
+    "ImportReadState",
     "InvalidTransitionError",
     "Message",
     "MessageIdScope",
@@ -81,6 +92,9 @@ __all__ = [
     "create_conversation",
     "dedup_key",
     "is_open",
+    "import_conversation",
+    "import_message",
+    "import_read_state",
     "mark_conversation_read",
     "module",
     "record_message",

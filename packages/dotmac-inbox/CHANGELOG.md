@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0a2 — 2026-08-23 (unreleased)
+
+- Adds typed `import_conversation`, `import_message` and `import_read_state`
+  adoption seams that preserve source UUIDs and timestamps without replaying
+  live lifecycle consequences.
+- Makes only an exact historical replay idempotent. Reusing a source id,
+  canonical thread, message key or actor cursor for different facts fails as a
+  typed conflict.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

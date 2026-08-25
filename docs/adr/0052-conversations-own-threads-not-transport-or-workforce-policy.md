@@ -122,3 +122,26 @@ each application owns its local domain conversation and consequences.
 Rejected because ERP's missing correspondence record is the candidate demand,
 and the product-neutral thread/message/lifecycle mechanism has one qualifying
 source already.
+
+## Amendment — 2026-08-23: adoption preserves identity through an owner seam
+
+The first Sub cutover established that a runtime `create_*` command cannot also
+be the historical adoption contract. Runtime creation correctly mints a new
+identity and may apply live consequences; adoption must keep the product's
+existing UUID because its relations, URLs and saved views already name it.
+
+`dotmac-inbox` therefore owns typed, flush-only history commands for
+conversation, message and read-cursor rows. `dotmac-inbox-operations` owns the
+equivalent commands for the operational rows Sub already identifies. These
+commands preserve source UUIDs and timestamps, validate the module's canonical
+identities and structural invariants, replay only an exact existing row and
+fail closed on same-id/different-fact or natural-identity collisions. They do
+not apply live transition, routing, promotion, release or reopen consequences.
+
+The Sub backfill already in flight is the sole temporary exception while these
+exact package versions are unpublished. It stays bounded to one file, checks
+exact replay and has a version-sensitive gate that forces retirement as soon as
+the released seams are pinned. It is not precedent. Every later adopter uses
+these module-owned seams. Whether the same rule binds every other Dotmac module
+remains a fleet-governance decision; this ADR does not silently widen its own
+scope.

@@ -93,12 +93,12 @@ def test_an_unallowlisted_package_cannot_be_resolved() -> None:
     for impostor in (
         "dotmac-kernel",  # real, but released by its OWN workflow
         "dotmac-ui",  # same
-        # Real packages in `packages/`, deliberately not listed and with no
-        # release workflow of their own. `dotmac-ticketing` used to stand here
-        # and was promoted into the allowlist by the ERP-first ticket adoption
-        # programme, so the proof needs a still-unlisted stand-in or it degrades
-        # into "the gate refuses names that do not exist".
-        "dotmac-template-studio",
+        # A real package in `packages/`, deliberately not listed in the MODULE
+        # lane because it is a stateless protocol adapter. This keeps the proof
+        # grounded in an existing distribution after Template Studio's
+        # supply-only module release was authorized, and proves lane identity
+        # rather than merely proving that invented names fail.
+        "dotmac-app-sync",
         "packages/dotmac-release-catalog",  # a path, not a distribution
         "../../etc/passwd",  # a traversal attempt
         "",  # empty
@@ -149,12 +149,12 @@ def test_inbox_operations_is_release_allowlisted_for_the_sub_cutover() -> None:
     release workflow refuses the distribution and Sub cannot pin immutable
     artifacts for its backfill and shadow phases.
     """
-    result = _resolve("dotmac-inbox-operations", version="0.1.0a3")
+    result = _resolve("dotmac-inbox-operations", version="0.1.0a5")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
     assert emitted["kernel_floor"] == "0.1.0a91"
     assert emitted["db_schema"] == "mod_inbox_ops"
-    assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a3"
+    assert emitted["tag"] == "dotmac-inbox-operations-v0.1.0a5"
 
 
 def test_service_catalog_is_release_allowlisted_for_the_sub_shadow() -> None:

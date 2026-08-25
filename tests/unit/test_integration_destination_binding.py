@@ -31,6 +31,7 @@ import textwrap
 import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,7 @@ from dotmac_integration import (
     LocalScope,
     ProductPortDescriptorInvalid,
     ProductPortDescriptorSnapshot,
+    SchemaGrace,
     UntrustedDestination,
     capability_bindings_for,
     corroborate,
@@ -79,10 +81,22 @@ CAPABILITY = "alpha_domain.receive.v1"
 OWNER_APP = "alpha"
 HOSTILE_APP = "beta"
 
+#: In GRACE, not gated. This module tests destination routing, and a payload
+#: schema here would make every fixture in it depend on a contract shape it
+#: never exercises. ADR-0024 § 10 refuses SILENCE, not ungatedness — so the
+#: right thing for a contract that genuinely has no published payload is to say
+#: so, which is what these fixtures now do.
+SYNTHETIC_GRACE = SchemaGrace(
+    reason="a synthetic routing fixture that carries no payload contract",
+    retire_after=date(2099, 12, 31),
+    tracked_by="tests/unit/test_integration_destination_binding.py",
+)
+
 CONTRACT = CapabilityContract(
     capability_id=CAPABILITY,
     owner=CapabilityOwner(application=OWNER_APP, module="messages"),
     summary="a synthetic inbound contract",
+    schema_grace=SYNTHETIC_GRACE,
 )
 REGISTRY = CapabilityRegistry.from_declarations([CONTRACT])
 
@@ -449,6 +463,7 @@ def test_the_contract_version_comes_from_the_id_so_it_cannot_disagree(
                 capability_id=versioned,
                 owner=CONTRACT.owner,
                 summary="v3 of the same contract",
+                schema_grace=SYNTHETIC_GRACE,
             )
         ]
     )

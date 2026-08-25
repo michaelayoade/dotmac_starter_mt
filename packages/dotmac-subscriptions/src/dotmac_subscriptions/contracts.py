@@ -24,6 +24,7 @@ from dotmac_subscriptions.errors import (
 from dotmac_subscriptions.values import (
     ExactAmount,
     entitlement_projection_fingerprint,
+    non_cash_grant_idempotency_key,
     occurrence_idempotency_key,
     rating_input_fingerprint,
 )
@@ -266,6 +267,105 @@ class CommercialEntitlementProjectionV1:
 
 
 @dataclass(frozen=True, slots=True)
+class NonCashGrantOutputV1:
+    """Exact foregone-revenue evidence for one approved service period.
+
+    This is the ONLY thing an adopter needs to create its own consequences —
+    an entitlement, a billing-anchor move, a sponsor receivable or an internal
+    expense posting.  None of those decisions live here, and none of them are
+    money this module created: `foregone_amount` is revenue deliberately NOT
+    collected against a contracted amount that stayed strictly positive.
+    """
+
+    contract_type: str = field(init=False, default="subscriptions.non_cash_grant")
+    contract_version: int = field(init=False, default=1)
+    grant_id: UUID
+    recorded_at: datetime
+    scope: Scope
+    arrangement_id: UUID
+    subscription_contract_id: UUID
+    authorized_contract_version_id: UUID
+    contract_line_key: UUID
+    recurring_occurrence_id: UUID
+    treatment: str
+    reason_code: str
+    period_start: datetime
+    period_end: datetime
+    currency: str
+    contracted_amount: ExactAmount
+    approved_maximum_amount: ExactAmount
+    foregone_amount: ExactAmount
+    actor: str
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("recorded_at", "period_start", "period_end"):
+            _aware(getattr(self, field_name), field_name)
+        if self.period_end <= self.period_start:
+            raise SubscriptionDataError(
+                "contracts.invalid_grant_period",
+                "A non-cash grant covers a non-empty half-open service period.",
+            )
+        if self.treatment not in {"complimentary", "sponsored"}:
+            raise SubscriptionDataError(
+                "contracts.invalid_treatment",
+                "A grant records only a non-standard treatment; standard "
+                "billing is the absence of an arrangement.",
+            )
+        if not self.reason_code or not self.actor:
+            raise SubscriptionDataError(
+                "contracts.missing_grant_evidence",
+                "A non-cash grant carries its declared reason code and actor.",
+            )
+        if self.contracted_amount.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_contract_price",
+                "A grant proves foregone revenue against a strictly positive "
+                "contracted amount; a zero price conceals it instead.",
+            )
+        if self.approved_maximum_amount.amount <= 0 or self.foregone_amount.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_grant_value",
+                "Approved maximum and foregone amounts must be strictly positive.",
+            )
+        if (
+            self.foregone_amount.amount > self.contracted_amount.amount
+            or self.foregone_amount.amount > self.approved_maximum_amount.amount
+        ):
+            raise SubscriptionDataError(
+                "contracts.grant_exceeds_approval",
+                "A non-cash grant never exceeds the contracted amount or the "
+                "approved recurring ceiling.",
+            )
+        if {
+            self.currency,
+            self.contracted_amount.currency,
+            self.approved_maximum_amount.currency,
+            self.foregone_amount.currency,
+        } != {self.currency}:
+            raise SubscriptionDataError(
+                "contracts.mixed_currency",
+                "Every amount in one grant output must use its declared currency.",
+            )
+        expected_key = non_cash_grant_idempotency_key(
+            scope=self.scope,
+            arrangement_id=self.arrangement_id,
+            recurring_occurrence_id=self.recurring_occurrence_id,
+            contract_line_key=self.contract_line_key,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            currency=self.currency,
+        )
+        if self.idempotency_key != expected_key:
+            raise SubscriptionConflictError(
+                "contracts.idempotency_key_conflict",
+                "Grant idempotency key does not match its natural identity.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class StageResult:
     was_duplicate: bool
 
@@ -276,6 +376,10 @@ class RatedObligationPublisher(Protocol):
 
 class EntitlementProjectionPublisher(Protocol):
     def stage(self, output: CommercialEntitlementProjectionV1) -> StageResult: ...
+
+
+class NonCashGrantPublisher(Protocol):
+    def stage(self, output: NonCashGrantOutputV1) -> StageResult: ...
 
 
 class FakeRatedObligationPublisher:
@@ -322,12 +426,38 @@ class FakeEntitlementProjectionPublisher:
         return StageResult(was_duplicate=False)
 
 
+class FakeNonCashGrantPublisher:
+    """Deterministic fake proving the grant replay contract without a database."""
+
+    def __init__(self) -> None:
+        self._outputs: dict[str, NonCashGrantOutputV1] = {}
+
+    @property
+    def outputs(self) -> tuple[NonCashGrantOutputV1, ...]:
+        return tuple(self._outputs.values())
+
+    def stage(self, output: NonCashGrantOutputV1) -> StageResult:
+        existing = self._outputs.get(output.idempotency_key)
+        if existing is not None:
+            if existing.foregone_amount != output.foregone_amount:
+                raise SubscriptionConflictError(
+                    "publisher.fingerprint_conflict",
+                    "The same grant key was staged with a different amount.",
+                )
+            return StageResult(was_duplicate=True)
+        self._outputs[output.idempotency_key] = output
+        return StageResult(was_duplicate=False)
+
+
 __all__ = [
     "CommercialEntitlementProjectionV1",
     "EntitlementIntent",
     "EntitlementProjectionPublisher",
     "FakeEntitlementProjectionPublisher",
+    "FakeNonCashGrantPublisher",
     "FakeRatedObligationPublisher",
+    "NonCashGrantOutputV1",
+    "NonCashGrantPublisher",
     "RatedObligationOutputV1",
     "RatedObligationPublisher",
     "StageResult",

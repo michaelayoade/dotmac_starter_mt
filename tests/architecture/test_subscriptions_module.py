@@ -23,6 +23,7 @@ PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
 ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
 PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
+TREATMENT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0003_billing_treatments.py"
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -189,8 +190,8 @@ def test_manifest_declares_one_dual_plane_owner() -> None:
         "module_database_roles.v1",
         "idempotency_ledger.v1",
     )
-    assert len(TENANT_TABLES) == 7
-    assert len(PLATFORM_TABLES) == 7
+    assert len(TENANT_TABLES) == 9
+    assert len(PLATFORM_TABLES) == 9
     assert set(TENANT_TABLES).isdisjoint(PLATFORM_TABLES)
     assert module.supported_plane_sets == (
         (ModulePlane.TENANT,),
@@ -390,7 +391,7 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
 
 
 def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    source = ROOT_MIGRATION.read_text()
+    source = ROOT_MIGRATION.read_text() + TREATMENT_MIGRATION.read_text()
 
     assert 'revision = "su_0001_subscriptions"' in source
     assert 'branch_labels = ("subscriptions",)' in source
@@ -432,6 +433,225 @@ def test_offer_pricing_revision_loads_through_alembics_module_loader() -> None:
 
     assert migration.revision == "su_0002_offer_pricing"
     assert migration.down_revision == "su_0001_subscriptions"
+
+
+# ── G2/G3: complimentary and sponsored treatment ─────────────────────────────
+
+
+def test_the_reason_vocabulary_is_a_declared_registry_and_never_an_enum() -> None:
+    """ADR-0008 is fleet-wide: a module-owned vocabulary is a registry.
+
+    An enum would put the seven reasons in this package's source, so a product
+    needing an eighth would need a module release; a CHECK constraint would do
+    the same in the database, costing a migration per consuming product.
+    """
+    from dotmac_subscriptions import PORTED_BILLING_TREATMENT_REASONS
+    from dotmac_subscriptions.models import (
+        SubscriptionBillingArrangement,
+        SubscriptionBillingGrant,
+    )
+
+    assert len(PORTED_BILLING_TREATMENT_REASONS) == 7
+    for source in (SOURCE_ROOT / "lifecycle.py", SOURCE_ROOT / "vocabulary.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if isinstance(node, ast.ClassDef):
+                members = {
+                    child.targets[0].id
+                    for child in node.body
+                    if isinstance(child, ast.Assign)
+                    and len(child.targets) == 1
+                    and isinstance(child.targets[0], ast.Name)
+                }
+                assert not members & set(PORTED_BILLING_TREATMENT_REASONS), node.name
+    for model in (SubscriptionBillingArrangement, SubscriptionBillingGrant):
+        column = model.__table__.columns["reason_code"]
+        assert column.type.python_type is str
+    checks = {
+        constraint.name
+        for constraint in SubscriptionBillingArrangement.__table__.constraints
+        if constraint.name is not None
+    }
+    assert not [name for name in checks if "reason" in name]
+
+
+def test_reason_registry_guard_is_sensitive_to_a_reclosed_vocabulary() -> None:
+    from dotmac_subscriptions import PORTED_BILLING_TREATMENT_REASONS
+
+    closed = (
+        "from enum import Enum\n"
+        "class Reason(Enum):\n"
+        "    internal_service = 'internal_service'\n"
+    )
+    members = {
+        child.targets[0].id
+        for node in ast.walk(ast.parse(closed))
+        if isinstance(node, ast.ClassDef)
+        for child in node.body
+        if isinstance(child, ast.Assign)
+        and len(child.targets) == 1
+        and isinstance(child.targets[0], ast.Name)
+    }
+    assert members & set(PORTED_BILLING_TREATMENT_REASONS)
+
+
+def test_a_treatment_is_never_a_zero_price_anywhere_in_the_schema() -> None:
+    """G3, read straight off the tables.
+
+    The contract line and the offer price both stay strictly positive, and the
+    grant relates the contracted amount, the approved ceiling and the foregone
+    amount in one constraint — so no combination of rows can express "free"
+    without also recording exactly how much was given away.
+    """
+    from dotmac_subscriptions.models import (
+        OfferVersionPrice,
+        PlatformSubscriptionBillingGrant,
+        SubscriptionBillingGrant,
+        SubscriptionContractLine,
+    )
+
+    def _sql(model: object, name: str) -> str:
+        for constraint in model.__table__.constraints:  # type: ignore[attr-defined]
+            if constraint.name == name:
+                return str(constraint.sqltext)
+        raise AssertionError(f"{name} is missing")
+
+    assert "unit_price > 0" in _sql(
+        SubscriptionContractLine, "ck_contract_lines_amounts"
+    )
+    assert "amount > 0" in _sql(OfferVersionPrice, "ck_offer_version_prices_amounts")
+    for model, name in (
+        (SubscriptionBillingGrant, "ck_billing_grants_bounded_non_cash_value"),
+        (
+            PlatformSubscriptionBillingGrant,
+            "ck_platform_billing_grants_bounded_non_cash_value",
+        ),
+    ):
+        sql = _sql(model, name)
+        assert "contracted_amount > 0" in sql
+        assert "foregone_amount > 0" in sql
+        assert "foregone_amount <= contracted_amount" in sql
+        assert "foregone_amount <= approved_maximum_amount" in sql
+
+
+def test_the_grant_tables_carry_no_customer_money_column() -> None:
+    """A grant is non-cash: there is nowhere on it to record a receivable."""
+    from dotmac_subscriptions.models import (
+        PlatformSubscriptionBillingGrant,
+        SubscriptionBillingGrant,
+    )
+
+    forbidden = {
+        "invoice_id",
+        "payment_id",
+        "receivable_id",
+        "amount_funded",
+        "amount_paid",
+        "balance",
+        "outstanding",
+        "settlement_id",
+        "credit_note_id",
+    }
+    for model in (SubscriptionBillingGrant, PlatformSubscriptionBillingGrant):
+        assert not set(model.__table__.columns.keys()) & forbidden
+
+
+def test_the_mandatory_end_date_is_not_nullable_on_either_plane() -> None:
+    from dotmac_subscriptions.models import (
+        PlatformSubscriptionBillingArrangement,
+        SubscriptionBillingArrangement,
+    )
+
+    for model in (
+        SubscriptionBillingArrangement,
+        PlatformSubscriptionBillingArrangement,
+    ):
+        assert model.__table__.columns["ends_at"].nullable is False
+        assert model.__table__.columns["starts_at"].nullable is False
+
+
+def test_treatment_evolves_in_an_additive_dual_plane_revision() -> None:
+    source = TREATMENT_MIGRATION.read_text()
+
+    assert 'revision = "su_0003_billing_treatments"' in source
+    assert 'down_revision = "su_0002_offer_pricing"' in source
+    assert "selected_module_planes" in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "REVOKE ALL PRIVILEGES" in source
+    assert "platform_api" in source
+    assert "foregone_amount <= approved_maximum_amount" in source
+    assert "refuse_immutable_row" in source
+    assert "protect_tenant_treatment_terms" in source
+    assert "protect_platform_treatment_terms" in source
+    for table in (
+        "subscription_billing_arrangements",
+        "subscription_billing_grants",
+        "platform_subscription_billing_arrangements",
+        "platform_subscription_billing_grants",
+    ):
+        assert table in source
+
+
+def test_the_released_a2_revisions_are_untouched_by_this_slice() -> None:
+    """`su_0001` and `su_0002` both shipped in 0.1.0a2; their bytes are history.
+
+    `tests/architecture/test_released_migrations.py` holds the digests; this
+    repeats the claim locally so a reader of THIS file sees why the new
+    behaviour arrived as `su_0003` rather than as an edit.
+    """
+    assert 'down_revision = "su_0001_subscriptions"' in PRICING_MIGRATION.read_text()
+    assert "billing_arrangement" not in ROOT_MIGRATION.read_text()
+    assert "billing_arrangement" not in PRICING_MIGRATION.read_text()
+
+
+def test_treatment_revision_loads_through_alembics_module_loader() -> None:
+    from alembic.util.pyfiles import load_python_file
+
+    migration = load_python_file(
+        str(TREATMENT_MIGRATION.parent),
+        TREATMENT_MIGRATION.name,
+    )
+
+    assert migration.revision == "su_0003_billing_treatments"
+    assert migration.down_revision == "su_0002_offer_pricing"
+
+
+def test_the_treatment_owner_names_no_billing_entitlement_or_accounting_symbol() -> (
+    None
+):
+    """Sub's consequences stay with their owners (extraction dossier, G4).
+
+    The module publishes `NonCashGrantOutputV1` and stops: it never creates an
+    entitlement, moves a billing anchor, suppresses an invoice, or posts a
+    sponsor receivable. Checked over IDENTIFIERS rather than raw text, so the
+    docstring that explains the boundary does not trip the guard describing it.
+    """
+    source = (SOURCE_ROOT / "treatments.py").read_text()
+    tree = ast.parse(source)
+    identifiers = {
+        node.id if isinstance(node, ast.Name) else node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name | ast.Attribute)
+    } | {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef | ast.FunctionDef)
+    }
+    forbidden = {"entitlement", "invoice", "receivable", "posting", "anchor", "payment"}
+
+    assert not _import_roots(source) & (_SIBLINGS | _PRODUCTS)
+    assert not [
+        name for name in identifiers if any(word in name.lower() for word in forbidden)
+    ]
+
+
+def test_the_consequence_guard_is_sensitive_to_a_leaked_owner() -> None:
+    leaked = ast.parse("def create_service_entitlement():\n    pass\n")
+    names = {
+        node.name for node in ast.walk(leaked) if isinstance(node, ast.FunctionDef)
+    }
+
+    assert [name for name in names if "entitlement" in name.lower()]
 
 
 def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:

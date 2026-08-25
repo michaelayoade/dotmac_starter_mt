@@ -59,17 +59,19 @@ The first concrete plugin follows that split exactly:
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Versioned inter-application envelope, authenticated peer/source binding, schema validation, idempotency identity and payload fingerprint | `dotmac-app-sync` | Owns no transport, peer authentication, row, session, application route, domain resolver or consequence; each destination declares the capability schema and implements the atomic receiver |
-| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
-| Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-meta-social` (`meta_social`, INGRESS-only, `messaging.receive.v1`) | Owns no Graph delivery, profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
-| Flutterwave API v4 exact-byte ingress authentication plus OAuth-authenticated paged charge reconciliation, provider-event identity and exact amount/currency translation | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no v3 fallback, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
-| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
+| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes; the WABA message-template catalogue read as typed provider observations; outbound text/template/media sends that refuse before the wire what the provider would reject anyway (unapproved template, variable arity the catalogue does not describe, unsupported MIME type, oversize attachment, a caption or filename the media type cannot carry) | `dotmac-connector-whatsapp` (`meta_whatsapp`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY + `messaging.templates.read.v1` POLL) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation, customer-window decision, template selection or product consequence. The template catalogue is an in-process memo under a configured freshness policy, never persisted and never a second authority on approval |
+| Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes; outbound Messenger/Instagram Direct sends and Facebook/Instagram comment replies, one Graph call per product-decided command, with Graph error codes classified into typed outcomes | `dotmac-connector-meta-social` (`meta_social`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY) | Owns no messaging-window decision, no permission to respond, no profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
+| Flutterwave API v4 exact-byte ingress authentication, OAuth-authenticated paged charge reconciliation, provider-event identity, exact amount/currency translation, and outbound payment-initialization and refund commands | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL on `payments.settlement.observation.v1`, DELIVERY on `payments.intent.v1` and `payments.refund.v1`) | Owns no v3 fallback, transfer/payout surface, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence. Outbound classifies only: a decline is terminal, a timeout after send is reconciliation-required, and the engine's idempotency key rides the provider's own header |
+| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1.** It also still declares `payments.customer.v1` (`create_customer | update_customer | read_customer`) — as built, and RULED OUT: ADR-0061 Amendment A5 REMOVES that capability from the public manifest (no independent Dotmac business lifecycle; it is Paystack's `/customer` REST surface). The code removal is part of the payout refactor, gated behind the capability-schema and result seams; A5 holds the artifact-by-artifact list |
 | Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
 | Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
-| Remita authenticated RRR status polling and provider-neutral response translation | `dotmac-connector-remita` (`remita`, POLL-only, `payments.reference.status.observation.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence |
+| Remita authenticated RRR status polling, provider-neutral response translation, and outbound RRR issuance under the provider SHA-512 request contract | `dotmac-connector-remita` (`remita`, POLL on `payments.reference.status.observation.v1`, DELIVERY on `payments.reference.issuance.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence. Issuance carries the PRODUCT's stable `orderId` and mints none of its own, because Remita accepts no idempotency header and `orderId` is its only natural key |
 | LinkedIn challenge-response, exact-byte webhook authentication and organization-social/lead notification translation | `dotmac-connector-linkedin` (`linkedin`, INGRESS-only, `social.activity.observation.v1` + `marketing.lead.observation.v1`) | Owns no contact, campaign, qualification, assignment, ticket, publication, destination or product consequence; declares deny-all provider egress |
 | Connector installation, binding, product-port descriptor projection, engine-derived ProductObservation source, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no provider header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each typed observation and comparison and returns only closed safe outcomes |
+| Whether a stored outbound command may become a live effect again — replay by product idempotency key, dead-letter inspection and operator repair, and resolution of an INDETERMINATE attempt from provider evidence | `dotmac-integration.outbound_repair` | One decision (`classify_repair`) behind every entry point, so inspection and repair cannot disagree; re-dispatches only the row's own stored request checked against its enqueue digest, never a rebuilt payload; returns the recorded outcome for a landed effect instead of re-sending it; refuses to replay an ambiguous attempt; and owns no queue reset (`operations.replay_delivery`), no at-most-once ledger (`dotmac_kernel.idempotency`), no audit ledger (`dotmac_kernel.audit`), no outcome vocabulary (`retry.OutcomeStatus`) and no table of its own |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **`PaymentService`** (`dotmac_erp:app/services/finance/payments/payment_service.py` — `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal`) — the SOLE interim owner. `BatchTransferService` is dead code (zero callers, not exported, zero tests) and is NOT an owner. ADR-0061 § 1 + Amendment A1 — the owner ADR-0042 § 3 left unnamed, named as services rather than as a role. **Implemented and tested; production enablement unconfirmed** (ADR-0061 A7 — the path is gated by `paystack_transfers_enabled`, which is runtime data, and no deployment target has been named). `BatchTransferService` is to be DELETED as security-sensitive dead code (A7). No `dotmac-treasury` package or namespace exists or may be allocated: ADR-0063 scopes a narrow `PaymentInstruction` owner and gates its construction on ERP's `PaymentIntent.status` three-writer fix | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
 
 External advertising and social-media observations use the same application
 boundary with a separate domain owner. The tenant-only
@@ -125,6 +127,312 @@ plane as their first candidate assembly. The seven newly constructed owners now
 have manifests, independent lineages, catalogue entries and live isolation
 canaries on this integration branch; this is construction, not composition,
 publication or adoption.
+
+### Outbound commands: one capability id, two payload dialects (as built, 2026-08-24)
+
+The connector contract-surface table at the top of this section is the
+ownership register, and it holds on the receiving side. On the SENDING side
+there is a gap, recorded here because `docs/ARCHITECTURE.md` is as-built truth
+and ADR-0061 and ADR-0024 § 8 are decisions the code has not yet reached.
+
+A capability id is supposed to be a contract (ADR-0024 § 8.1). Mechanically it
+is currently only a name: `dotmac_integration.spi.CapabilityDeclaration`
+carries `capability_id`, `config_schema` and `modes`, and
+`DispatchRequest.payload` is an unvalidated `dict[str, object]`. Configuration
+has a declared schema; commands do not. So each connector settled the command
+shape locally, and two shipped ids have two dialects each:
+
+| | `dotmac-connector-paystack` | `dotmac-connector-flutterwave` / `-remita` |
+|---|---|---|
+| envelope | `{"action": <verb>, "params": {…}}`; the verb is checked against `delivery.ACTIONS_BY_CAPABILITY`, so a binding granted intents cannot be talked into a payout | flat, typed per capability; no action verb |
+| provider reference | DERIVED: `operations.provider_reference` = `dmi` + SHA-256 of `DispatchRequest.idempotency_key`. Reading one from the payload is refused | PRODUCT-minted: Flutterwave requires `intent_reference`; Remita carries the product's `orderId` verbatim and mints none |
+| minor units | product sends an exact MAJOR-unit decimal string plus `currency`; the connector applies `PAYSTACK_WIRE_SCALE = 2` itself and accepts no `currency_minor_units` | product MUST send `currency_minor_units`; absence is `currency_minor_units_required` |
+| provider idempotency | the derived value in the provider's own `reference` field, which the provider refuses on reuse | Flutterwave: engine key on `X-Idempotency-Key`. Remita: none exists; `orderId` is the only natural key |
+
+Each refusal is locally explicable. Paystack's wire multiplies by 100 for every
+supported currency **including zero-exponent XOF**, so a product-supplied
+exponent would be a second, contradictory authority on that provider's scale;
+and deriving the reference from the engine key is what makes every attempt of
+one delivery present an identical, provider-refusable key. Flutterwave and
+Remita cannot derive, because their natural key is the product's own and their
+exponent is genuinely currency-dependent.
+
+That is where this section originally stopped, and stopping there was the
+mistake: "both are locally correct" is a description of a stand-off, not a
+resolution, and it quietly licenses the divergence to continue. ADR-0061
+Amendment A3 supersedes it. The payload question is answered **once**, by the
+capability's owning domain, and each connector adapts to that answer
+**internally** — Paystack keeps deriving its provider reference and applying
+its own wire scale, from the contract's stable reference and exact money,
+because those are provider protocol performed inside the connector, and it
+ignores a field it cannot use instead of refusing the command that carries it.
+Neither connector is asked to look like the other.
+
+The declaration surface that makes this possible is the DOMAIN's, not the
+connector's. As built, `dotmac_integration.capability_registry
+.CapabilityContract` — the business owner's declaration, one per capability id,
+which the Integrator validates and never mints — carries `capability_id`,
+`owner` and `summary`, and no schema of any kind. ADR-0024 § 10 extends it with
+`command_schema`, `result_schema`, `observation_schema`, a canonical contract
+digest, and deprecation/replacement metadata; `CapabilityDeclaration` keeps
+config and modes and may only CLAIM that digest. Putting the schema on the
+connector declaration instead would make drift machine-readable rather than
+prevent it — two connectors would publish two individually valid schemas for
+one id and nothing could prefer either.
+
+None of that gate exists today. It comprises command validation before
+`execution.enqueue_delivery`, digest agreement in
+`capability_registry.require_implements_only_declared` (composition) and
+`require_declared_for_binding` (binding), result validation before
+`dispatch.settle`, observation validation before `ingress.record_batch`, and a
+schema change taking a new `.vN` id rather than redefining a published one —
+with planted sensitivity failures for digest mismatch, missing schema, invalid
+payload and invalid result (ADR-0024 §§ 10.4–10.5).
+
+`messaging.send.v1` has the same shape of divergence: `meta_whatsapp` accepts
+`send_text | send_template | send_media` with a `recipient` param, while
+`meta_social` accepts `send_direct_message | reply_to_comment` with
+`recipient_id` plus `channel`. Both declare the same id deliberately — the
+outbound name is not minted per connector — and a product bound to one still
+cannot be re-bound to the other without changing its command.
+
+`messaging.send.v1` is published, so it is repaired by SUCCESSION rather than
+redefined in place (ADR-0024 § 11, ADR-0061 Amendment A4). The canonical
+successors are `messaging.direct.send.v2` (provider-neutral direct delivery
+with a discriminated text/template/media content shape, replacing both
+vocabularies at once), `social.comment.reply.v1` (public Facebook/Instagram
+comment consequences — a different business act) and `social.profile.read.v1`
+(caller-initiated profile observation through a REQUEST mode). Sub migrates to
+them; v1 is kept for a bounded compatibility window and then retired. As built,
+none of the three exists, and `spi.ConnectorMode` is still the closed union
+`INGRESS | POLL | DELIVERY` with no REQUEST member — which is the same gap
+`dotmac-connector-meta-social`'s dossier records for its withheld contact
+profile lookup.
+
+Consequence, stated plainly: **payout traffic cannot be switched between
+providers by changing a binding today.** `payments.payout.v1` has exactly one
+implementation (Paystack), and even with a second one the command shapes
+differ. ADR-0061 § 5 is the ordered list of what must become true before
+interchangeability may be claimed; ADR-0024 § 8.4 records the same gap from the
+contract side.
+
+### Disbursement has six owners, and none of them is a department (2026-08-24)
+
+As built, this repository holds no disbursement code at all: the payout decision
+lives in ERP and the transport lives in `dotmac-integration` plus a connector.
+What it does hold is the ownership register above, and until 2026-08-24 two
+accepted records disagreed about one row of it.
+
+ADR-0047 § Context (2026-08-18) said *"Finance/Payables owns obligations,
+journals, disbursement and settlement"*. ADR-0042 (2026-08-19, one day later,
+and devoted specifically to separating liabilities from payment execution) said
+in its § 3 that Payables *"does not choose a bank account, payment rail,
+provider, batch or execution time and does not perform network I/O"* and that a
+**Treasury/payment owner performs disbursement**. **ADR-0042 controls.**
+ADR-0047's sentence was written to say "not Expenses" and is narrowed to that by
+its own dated Amendment A1; "Finance/Payables" is a department, and a department
+cannot be pointed at in a review — the same error ADR-0061 A1 corrected when it
+replaced "ERP's Treasury/payment owner" with a named service.
+
+| Owner | Decision | Record |
+|---|---|---|
+| Expenses | whether a claim is eligible for reimbursement | ADR-0047 |
+| Payables | what is owed, to whom, in what currency and when | ADR-0042 §§ 1, 3 |
+| Treasury | the authorized payment instruction, rail submission and resolution | ADR-0042 § 3's unnamed owner; named for payouts by ADR-0061 § 1 + A1; scoped by ADR-0063 |
+| Integrator | provider authentication, transport and evidence | ADR-0024 §§ 6–7, ADR-0061 § 1 |
+| Banking | statement/cash observations and reconciliation evidence | ADR-0044 |
+| Accounting | journal and ledger consequences | ADR-0041 |
+
+Six owners, six failure modes, six sets of controls — which is why the compound
+sentence had to be broken up rather than reworded.
+
+**Treasury's scope, and why nothing is being built.** ADR-0063 authorizes a
+narrow shared owner of `PaymentInstruction`
+(`authorized → submitting → ambiguous | submitted → settled | failed |
+reversed`), grouped by `PaymentRun` rather than by a provider batch, over two
+rails from the beginning: an API rail through the Integrator bindable to
+Paystack or Flutterwave v4, and a manual bank-file rail for AP and payroll.
+Three of its invariants are worth restating here because they are the ones a
+future implementer is most likely to violate by accident:
+
+- **Exporting a spreadsheet must not mark an instruction paid.** An export
+  proves a file was produced. `submitted` needs operator submission evidence;
+  `settled` needs Banking's settlement observation.
+- **Run progress is derived from instruction outcomes, never from a batch-level
+  response.** Provider calls are not atomic: ten transfers can return seven
+  successes, two failures and one ambiguous result, and a batch aggregate that
+  believes the batch response marks the unknown one paid.
+- **Rail routing is pre-submission only.** A Paystack timeout may have
+  succeeded; a router that retries it through Flutterwave pays the beneficiary
+  twice. The rail is stamped immutably at authorization, an ambiguous result
+  reconciles against the ORIGINAL provider, and rerouting needs a conclusively
+  unsubmitted or terminally failed instruction plus a new authorization.
+  Paystack ↔ Flutterwave interchangeability is safe CONFIGURATION, not
+  cross-provider retry.
+
+**The gate:** none of it is constructed before ERP's `PaymentIntent.status`
+three-writer violation is fixed in the ERP repository. Extraction copies a
+lifecycle; a lifecycle with three writers has no owner, and porting it would
+make one product's defect a shared module's contract. No `dotmac-treasury`
+distribution, namespace, `mod_*` short code or migration lineage may be
+allocated until then (ADR-0063 § 7, extending ADR-0061 A1).
+
+**Evidentiary wording for ERP payout, required verbatim:
+"Implemented and tested; production enablement unconfirmed."** The path is
+gated by `paystack_transfers_enabled`, which is runtime data; confirming it
+needs an explicitly named deployment target and a `deployment_run` oracle
+(`AGENTS.md` rule 30), and no target has been named. This blocks no
+construction — it blocks any claim of production parity, adoption or
+retirement, in both directions. `BatchTransferService` is to be DELETED as
+security-sensitive dead code now that the product-first dossier
+`docs/inventories/treasury-payment-execution-sources.md` § 1.3 preserves its
+disposition (ADR-0061 A7). That dossier is produced on the sibling branch
+`docs/treasury-product-first-dossier` and is the evidence base for ADR-0063;
+its own § 12.3 G5 asks for that record.
+
+### The money-out leg: what is decided, in what order, and what blocks it (2026-08-24)
+
+Four accepted rulings extend the six-owner split above. None of them is as-built
+in this repository — it holds no disbursement code — so each is marked for what
+it is: a decision recorded where it can be cited, with the as-built facts it
+rests on named.
+
+**`payments.refund.v1` is KEPT, and the reason it survives is the reason
+`payments.customer.v1` did not.** ADR-0061 A5 removed the customer capability
+because it named provider workflow; A8 runs the same test on refund and it
+passes. The discriminating question:
+
+> If the provider vanished tomorrow, would the thing still exist and still need
+> an owner?
+
+A provider-side customer record would not — there was never a Dotmac object,
+only a mirror of `POST/PUT/GET /customer`. A refund obligation would: someone
+with authority decided money goes back, for how much, against which original
+payment, and it would be paid another way. **A provider-side customer record is
+a by-product of an act; a refund IS the act.** So the capability is retained
+while its provider-shaped OPERATIONS are removed: one command, `request_refund`,
+carrying exact money, the original-payment correlation, the authorization
+reference and idempotency identity — and Paystack's transaction handle and
+Flutterwave's charge id become connector internals.
+
+The as-built fact that shapes the refund rule: **Paystack's `/refund` accepts no
+client reference.** There is no field for the engine's idempotency key, so the
+connector stamps a derived key into `merchant_note`
+(`packages/dotmac-connector-paystack/src/dotmac_connector_paystack/
+operations.py:626-630`) and classifies an unanswered send as `AMBIGUOUS`
+(`:368`), resolving it by reading the provider's refund list and matching the
+note (`:68-73`). **That makes an ambiguous refund DECIDABLE; it does not make a
+second refund REFUSED.** A duplicated payout is refusable at the provider
+because its derived reference rides Paystack's own `reference` field; a
+duplicated refund is not. The reconciliation read is therefore mandatory before
+any re-request, no transport ever makes one, and a re-request is a new
+authorized decision. **Treasury is not automatically the refund owner** — a
+refund reverses a receivable rather than discharging a payable, it is not one of
+ADR-0063 § 6's twelve closed items, and extending that list needs its own record
+(ADR-0061 A8, A9).
+
+**ERP splits `PROCESSING` before anything is extracted, and an unprobed row is
+`ambiguous`.** ADR-0063 A1. `PROCESSING` today means both "the provider call is
+running" and "a worker has picked this row up" — the second meaning is why
+`poll_stuck_expense_transfers` writes the column at all — and carrying a state
+that means both into a shared module under a better name would launder the
+ambiguity into a contract. The vocabulary becomes `submission_requested` (a
+durable intent, no provider outcome attempted), `submitted` (conclusively
+accepted), `ambiguous` (may have landed, reconciliation required), and the
+terminal `settled` / `failed` / `reversed`. **Worker claim/lease state moves to
+the execution engine** (ADR-0014's at-most-once owner), which is most of why the
+third writer exists. The migration rule carries the weight: existing
+`PROCESSING` rows are **PROBED**, the probe is read-only, the **worker is
+quiesced** for the duration, and **without conclusive provider evidence a row
+maps to `ambiguous`, never `submitted`** — assuming success on migration is how
+a double payment or a silently lost disbursement enters the new module, because
+a row wrongly marked `submitted` is never looked at again.
+
+**Payroll produces `PaymentInstruction` rows, and Treasury never sees a salary
+component.** ADR-0063 A2 with ADR-0046 A1. One authorized net-pay obligation
+produces one instruction; a run may group them into a `PaymentRun` without
+conferring authorization; Treasury's manual rail produces the bank-upload
+artifact; **exporting the file does not mark payroll paid** (ERP's payroll
+export writes no status today, which is correct and must survive the port); and
+settlement evidence returns to Payroll as a typed observation. Treasury receives
+**net amount, currency, payee/destination reference and payroll obligation
+reference — and nothing else.** Never gross, allowances, deductions, tax,
+pension, garnishments or grade, including in a narration field. That is a
+privacy boundary as much as an ownership one: the bank-file rail means the
+artifact LEAVES, its audience is payments operations rather than HR, and
+ADR-0063 § 2 requires Treasury to retain it immutably — so a component that
+reaches Treasury is digested and archived beyond HR's reach to redact.
+
+**The order, and the one thing that blocks release regardless of it**
+(ADR-0063 A3):
+
+| # | Step | Where |
+|---|---|---|
+| 1 | ERP execute-permission containment | ERP |
+| 2 | ERP authorization-log audit on a named target | ERP |
+| 3 | Delete dead `BatchTransferService` | ERP |
+| 4 | Reduce `PaymentIntent.status` to one writer | ERP |
+| 5 | Split `PROCESSING` from `ambiguous` | ERP |
+| 6 | Add capability request/result schemas | `dotmac-integration` + connectors |
+| 7 | Build Treasury `PaymentInstruction` and `PaymentRun` | new module |
+| 8 | Add expense, AP and payroll producers | ERP → Treasury |
+| 9 | Complete Paystack and Flutterwave payout bindings | connectors |
+| 10 | Build refund through its named owner | Billing / the named owner |
+| 11 | Provider sandbox proof, CI and cutover | all |
+
+Steps 1–3 come first because they reduce blast radius and depend on no design
+decision. Step 4's digest/version work may continue in parallel — it is internal
+to ERP and touches no rail. But:
+
+> **No payout release and no payout enablement passes the authorization
+> blocker.**
+
+The blocker is an as-built ERP fact, not a design concern: **ERP's broad
+module-access scope `finance:access` currently satisfies the guard on
+`POST /transfers/{intent_id}/initiate`, which executes a real transfer.** The
+old helper also names `payments:read`, but that permission is absent from the
+normal token allowlist and seeder, so it is not the live reachability mechanism.
+The
+weakest admitted credential is the one that defines a path's real authorization,
+which makes every other control on that path decorative. A dedicated ERP
+security change is implemented on `fix/payout-execute-permission-containment`.
+This is a gate on RELEASE and ENABLEMENT and is independent of ADR-0063 § 7's
+gate on CONSTRUCTION; satisfying either does not satisfy the other. It changes
+no evidentiary claim in either direction — *"Implemented and tested; production
+enablement unconfirmed"* remains the required wording (ADR-0061 A7), and the
+blocker is a reason enablement must not be sought rather than evidence about
+whether it has happened.
+
+### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
+
+`dotmac-integration` derives two kinds of runtime number from its own ledgers,
+both at read time and neither stored: `operations.health_report` answers "is
+anything silently stuck?" (in-flight leases expired, retryable overdue,
+dead-letter, reconciliation-required, receipts unprocessed, checkpoints stale)
+and `operations.dispatch_metrics` answers "how is the queue behaving?" (depth,
+oldest-queued age, end-to-end latency, retries, failures, quarantined
+installations).
+
+The module ships **no** metrics client, counter registry or `/metrics` route,
+and none of the other 80-odd distributions does either — verified by grep over
+`packages/*/src`. What the module owns is the NAMES:
+`operations.METRIC_NAMES` is a thirteen-entry tuple of stable,
+`integration_`-prefixed, unit-suffixed identifiers that
+`DispatchMetrics.as_metrics()` returns verbatim, pinned as literals by
+`tests/unit/test_integration_runtime_safety.py`. The exporter belongs to the
+deploying assembly (`dotmac_integrator`), which is why one module can be
+composed by several assemblies exporting to different systems without a fork.
+
+Two as-built qualifications:
+
+- `HealthReport.as_dict()` returns bare dataclass field names —
+  `dead_letter`, `checkpoints_stale` and so on — with no declared tuple and no
+  `integration_` prefix. An assembly exporting the health signals therefore
+  exports six unprefixed, undeclared names. ADR-0062 § 5 D2.
+- `dotmac-analytics` and `dotmac-media-observations` also speak of "metrics";
+  those are DOMAIN metrics — persisted, provenance-carrying, repairable facts
+  under ADR-0043 and ADR-0034 — and are a different subject from the runtime
+  numbers above. ADR-0062 § 4.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
@@ -624,9 +932,11 @@ packages/dotmac-service-access-policy/ optional desired-access decision owner
                  uncomposed. Network Access remains the only enforcer.
 packages/dotmac-inbox-operations/ optional staffed-inbox operation owner
   src/dotmac_inbox_operations/   executable routing and decision evidence,
-                 durable FIFO queues, fresh presence/capacity, eligible-agent
-                 assignment and repeatable workflow history; `io` lineage in
-                 `mod_inbox_ops`, tenant-only forced RLS, uncomposed.
+                 durable FIFO queues, four-state chosen availability with a
+                 state-free heartbeat and derived busy, eligible-agent
+                 assignment, and claim/transfer/requeue/escalate as separate
+                 commands; `io` lineage in `mod_inbox_ops`, tenant-only forced
+                 RLS, uncomposed.
 packages/dotmac-response-obligations/ optional response-time clock owner
   src/dotmac_response_obligations/ named policies per product-declared subject
                  type, priority-resolved first-response/next-response/
@@ -739,7 +1049,7 @@ map is
 | `dotmac-documents` | Controlled document identity, immutable exact-content versions, lifecycle, collaboration and acknowledgements | ERP handbook base plus Sub immutable quote delta |
 | `dotmac-expenses` | Requests, claims, receipt meaning, policy evaluation, lifecycle and reimbursement eligibility | ERP expenses behavior |
 | `dotmac-finance` | Fixed-asset accounting books, valuations and immutable balanced consequences | ERP fixed-assets behavior |
-| `dotmac-inbox` | Conversation/message identity and lifecycle, ordering/threading and per-operator read cursors | Sub Team Inbox behavior |
+| `dotmac-inbox` | Conversation/message identity and lifecycle, ordering/threading, per-operator read cursors and typed identity-preserving history adoption | Sub Team Inbox behavior |
 | `dotmac-response-obligations` | Response-time targets, running clocks, itemised paused time and breach observations against an opaque subject | Sub SLA clock behavior; ERP read-time targets and CRM copy are demand |
 | `dotmac-party` | Party business capacities, capacity relationships, memberships, reachability evidence and external-reference provenance | Sub Party-context behavior; kernel Party retains identity |
 | `dotmac-payables` | Supplier invoices/credits, recognized liabilities and payment-obligation lifecycle | ERP AP behavior |
@@ -1617,6 +1927,8 @@ made concrete — every model has exactly one declared owner.
 | `SubscriptionContractVersion` / `PlatformSubscriptionContractVersion` | `mod_subscriptions.subscription_contract_versions` / `platform_subscription_contract_versions` | `dotmac-subscriptions` optional module | Immutable effective-dated cadence, collection timing, proration and rating-policy evidence. Supersession and ending are explicit terminal transitions. |
 | `SubscriptionContractLine` / `PlatformSubscriptionContractLine` | `mod_subscriptions.subscription_contract_lines` / `platform_subscription_contract_lines` | `dotmac-subscriptions` optional module | Stable line lineage with exact price, product-link reference, declared charge/source vocabulary and money-free entitlement intent. |
 | `RecurringChargeOccurrence` / `PlatformRecurringChargeOccurrence` | `mod_subscriptions.recurring_charge_occurrences` / `platform_recurring_charge_occurrences` | `dotmac-subscriptions` optional module | One replayable natural-identity occurrence with exact pre-tax amount, period/coverage and complete rating provenance. It transactionally stages `RatedObligationOutputV1`; an assembly translates that fact to Billing and separately correlates the occurrence ID to Billing's returned ID. Timer generation is provenance, not Billing identity. |
+| `SubscriptionBillingArrangement` / `PlatformSubscriptionBillingArrangement` | `mod_subscriptions.subscription_billing_arrangements` / `platform_subscription_billing_arrangements` | `dotmac-subscriptions` optional module | Effective-dated approval NOT to collect a strictly positive contracted line price. Mandatory end date, positive approved ceiling, snapshotted approval policy, open declared reason code, sponsor/cost-centre evidence and approval/revocation command provenance. Terms are frozen by trigger; `active -> revoked` is the only permitted update, and a new contract version for a contract with an open arrangement is refused. |
+| `SubscriptionBillingGrant` / `PlatformSubscriptionBillingGrant` | `mod_subscriptions.subscription_billing_grants` / `platform_subscription_billing_grants` | `dotmac-subscriptions` optional module | Append-only exact non-cash evidence for one approved service period, bound to one recurring occurrence. One CHECK relates the contracted amount, the approved ceiling and the foregone amount, so a zero-price concealment and an over-cap grant are both unrepresentable. It stages `NonCashGrantOutputV1`; entitlement, billing anchor, invoice suppression and sponsor/expense posting stay with their owners. |
 | `BillingAccount` / `PlatformBillingAccount` | `mod_billing.billing_accounts` / `platform_billing_accounts` | `dotmac-billing` optional module | Per-currency serialization identity only; contains no mutable balance. Tenant/platform counterparts share behavior, never rows. |
 | `RatedObligation` / `PlatformRatedObligation` | `mod_billing.rated_obligations` / `platform_rated_obligations` | `dotmac-billing` optional module | Immutable accepted rated occurrence with opaque subject/service and verified service-period evidence; changed input under one natural key conflicts. A pre-document correction appends exactly one same-account successor; documented obligations use credit notes. Database relationships enforce the account and correction boundary. |
 | `BillingDocument` / `PlatformBillingDocument` | `mod_billing.documents` / `platform_documents` | `dotmac-billing` optional module | Draft/issued invoice and credit-note meaning; issuance freezes number, due-date basis, parties, payment instructions, profile, locale and presentation-asset reference. Coverage is not lifecycle. |
@@ -1701,7 +2013,7 @@ made concrete — every model has exactly one declared owner.
 | `UsageObservation` / `UsageCorrection` / `UsageAggregate` | `mod_usage.usage_observations`, `mod_usage.usage_corrections`, `mod_usage.usage_aggregates` | `dotmac-usage` optional module | Normalized immutable meter facts, append-only corrections and rebuildable projections. Raw AAA remains an upstream collector concern; tariff selection, monetary rating, invoices and ledgers remain outside. |
 | `RatingRule` / `RatedUsageObligation` | `mod_usage_rate.rating_rules`, `mod_usage_rate.rated_usage_obligations` | `dotmac-usage-rating` optional module | Effective meter pricing and immutable pre-tax rated obligations from opaque usage references. Invoice lifecycle, tax, payments, revenue recognition and GL posting remain outside. |
 | `ServiceAccessInput` / `DesiredAccessDecision` | `mod_serviceaccess.service_access_inputs`, `mod_serviceaccess.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
-| `InboxQueue` / `InboxRoutingRule` / `InboxRoutingDecision` / `InboxAgentPresence` / `ConversationAssignment` / `InboxWorkflowEvent` / `InboxQueueEntry` / `InboxRoundRobinCursor` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and teams/skills/shifts/field availability remain with Workforce. The a3 owner executes and records routing, accepts only caller-supplied opaque eligibility, serializes FIFO position and agent capacity decisions, selects the queue winner itself, attempts each queue in a fair cohort, and keeps released assignments plus settled queue entries as history through active-only unique indexes. |
+| `InboxQueue` / `InboxRoutingRule` / `InboxRoutingDecision` / `InboxAgentPresence` / `InboxPresenceEvent` / `ConversationAssignment` / `InboxWorkflowEvent` / `InboxQueueEntry` / `InboxRoundRobinCursor` / `InboxTransferRequest` / `InboxEscalationRequest` / `InboxOfflineDisposition` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and teams/skills/shifts/field availability remain with Workforce. The owner executes and records routing, accepts only caller-supplied opaque eligibility, serializes FIFO position and agent capacity decisions, selects the queue winner itself, attempts each queue in a fair cohort, and keeps released assignments plus settled queue entries as history through active-only unique indexes. Separate typed adoption commands preserve historical operation UUIDs and timestamps without executing live workflow consequences. Availability is a four-state agent choice with a state-free heartbeat and a derived (never stored) busy answer; only AVAILABLE is dispatchable, and claim, cold transfer, warm transfer, requeue and escalation are separate commands whose evidence records the previous and new holder (ADR-0059). |
 | `ResponsePolicy` / `ResponseTarget` / `ResponseClock` / `ResponseClockPause` / `ResponseObservation` | `mod_sla.*` declared tables | `dotmac-response-obligations` optional module | One promise about time on one opaque subject, extracted product-first from Sub's already entity-generic SLA policy/target/clock/breach tables. The stored `due_at` is moved by a resume rather than derived at read time, so the sweep reads the front of an index instead of rescanning, and a PAUSED clock is never swept. Late completion settles as BREACHED, not MET. A breach carries no status: `dotmac-operational-escalations` owns whether it should escalate and who answered, `dotmac-durable-timers` owns scheduling, Messaging owns delivery, and business hours arrive as an `OUTSIDE_BUSINESS_HOURS` pause rather than a second calendar engine (ADR-0060). |
 | `WorkforceTeam` / `WorkforceSkill` / `TeamMembership` / `WorkerSkill` / `WorkforceShift` / `WorkforceAvailability` / `DispatchDecision` | `mod_workforce.*` declared tables | `dotmac-workforce` optional module | Workforce scheduling and dispatch adjudicated from Sub, ERP and CRM. Workers and work are opaque references; People, payroll, attendance consequences, Inbox presence, Work Order lifecycle and route execution remain with their owning systems. |
 | `FXRateType` / `FXRateSource` / `FXSelectionPolicy` / `FXRateObservation` / `FXRateDetermination` | `mod_fx_policy.*` declared tables | `dotmac-fx-policy` optional module | Effective FX observations, source provenance, selection policy and determination evidence extracted ERP-first. Kernel owns Money/ExchangeRate values; Billing, Tax, Accounting and provider adapters retain their distinct decisions and consequences. |
@@ -1752,6 +2064,7 @@ write:
 | Reusable map-frame presentation | `dotmac_ui.components.MAP_FRAME` owns only the inert canvas/state markup, token-native CSS and accessibility contract. A composing product owns the state transition and every provider, tile, viewport, endpoint, poll, location datum, layer, popup, control, fallback and domain decision. The contract is audit-complete with zero product adopters; no product-local owner is retired yet. |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
+| Subscription complimentary/sponsored arrangements and non-cash grants | `dotmac_subscriptions.treatments` is the sole writer on both declared planes through `approve_billing_arrangement`, `revoke_billing_arrangement` and `record_non_cash_grant`. Approval is fingerprint-bound to a preview, replay is resolved before the preview runs, and `resolve_billing_arrangement` answers `standard`, `effective` or `protected_drift` — the last suppresses customer charging while refusing a grant rather than fabricating coverage. Sub keeps its own arrangement writer until ledger items G5/G6 complete the backfill, shadow and cutover; no product is claimed as cut over. |
 | Subscription offers, versions, prices, contracts, lines and recurring occurrences | `dotmac_subscriptions.service` is the sole writer on both declared planes through its typed publish/withdraw, record/end, resolve, generate and acknowledge operations. It uses the caller's session and flushes only. The occurrence and Subscriptions-owned `RatedObligationOutputV1` stage atomically; Billing owns only its distinct `AcceptRatedObligationV1` input, and access/Billing owners are assembly-wired consumers, never sibling imports. No product is claimed as cut over. |
 | Billing obligations, documents, settlements, posting effects, account positions, invoice exposures, official artifact relations and accounting facts | `dotmac_billing.service` is the sole writer on both declared planes through its typed accept/issue/void/credit/allocation/correction/rebuild/artifact-record/artifact-repair operations. It uses the caller's session and flushes only, and every emitted kernel-outbox routing code is declared by its module manifest. Billing owns both aggregate and exposure financial state; Collections receives only an assembly-translated `ReceivableExposureV1`, and ERP receives immutable accounting facts. |
 | Collections policy, cases, arrangements, grace, notice/action request evidence and receipts | `dotmac_collections.service` is the sole writer on both declared planes. A typed `Scope` selects mirrored models and the matching kernel idempotency ledger; `CollectionCaseService.assess` and `process_step_due` reread `ReceivableObservationV1` and fail closed before action. Case transitions stage exact timer schedule/cancel operations through the caller-owned `CollectionsTimer` port. Accepted requests and manifest-declared kernel outbox intents flush atomically; accepted or retryable owner receipts schedule only the next immutable policy step/retry. Replay emits no duplicate. Collections never writes Billing financial state or the owning product's service state, and neither candidate adopter is claimed as cut over. |
@@ -1777,8 +2090,8 @@ write:
 | Usage observations, corrections and aggregates | `dotmac_usage.service` — `record_usage_observation`, `record_usage_correction`, and `project_usage_aggregate` are the only writers. Aggregates are rebuildable from immutable observations and append-only corrections; raw AAA and monetary rating remain separate (ADR-0058). |
 | Rating rules and rated usage obligations | `dotmac_usage_rating.service` — `create_rating_rule` and `rate_usage` are the only writers. Rating creates immutable pre-tax obligations and never writes invoice, tax, payment or accounting state (ADR-0058). |
 | Desired service-access policy | `dotmac_service_access_policy.service` — `record_access_input` and `resolve_desired_access` are the only writers. The module decides desired state; Network Access alone reconciles enforcement (ADR-0058). |
+| Staffed-inbox queues, routing, presence, FIFO admission and assignments | `dotmac_inbox_operations.service` — `create_queue`, `create_routing_rule` and `assign_conversation` are the only writers of queue, rule and assignment state; `dotmac_inbox_operations.presence` is the only writer of agent presence and the only place dispatch eligibility is stated; `dotmac_inbox_operations.transfers` is the only writer of ownership movement and escalation; `dotmac_inbox_operations.sessions` is the only writer of offline dispositions. Inbox retains conversation/message content and Workforce retains shift and field availability (ADR-0058). `admit_to_queue`, `cancel_queue_entry`, `promote_from_queue` and `next_round_robin_agent` join them in a2; promotion goes through `assign_conversation`, so the queue decides order while presence and capacity still decide admissibility. ADR-0059 adds the availability owner and splits ownership movement into `claim_conversation`, `transfer_conversation`, the warm-transfer request/accept/decline/expire pair, `requeue_conversation` and `escalate_conversation` — escalation records only that an agent ASKED and can never reassign, because the record has no target-agent column; `dotmac-operational-escalations` remains the sole owner of whether an escalation exists and who answered it, and the inbox hands it an `EscalationRequested` carrying a shared dedup key (ADR-0059). |
 | Response-time targets, clocks, paused intervals and breach observations | `dotmac_response_obligations.service` — `register_policy`, `set_target`, `start_clock`, `pause_clock`, `resume_clock`, `complete_clock`, `cancel_clock` and `sweep_due_clocks` are the only writers. The subject stays with its own owner and the escalation decision stays with `dotmac-operational-escalations`; the sweep returns typed `EscalationRequested` values and enqueues two declared outbox events rather than deciding or delivering anything (ADR-0060). |
-| Staffed-inbox queues, routing, presence, FIFO admission and assignments | `dotmac_inbox_operations.service` — `create_queue`, `create_routing_rule`, `set_agent_presence`, and `assign_conversation` are the only writers. Inbox retains conversation/message content and Workforce retains shift and field availability (ADR-0058). `admit_to_queue`, `cancel_queue_entry`, `promote_from_queue` and `next_round_robin_agent` join them in a2; promotion goes through `assign_conversation`, so the queue decides order while presence and capacity still decide admissibility. |
 | Workforce teams, skills, schedules, availability and dispatch | `dotmac_workforce.service` is the only writer through its team, skill, membership, certification, shift, availability and dispatch commands. People and Work Orders remain authoritative for worker and work lifecycle (ADR-0058). |
 | FX rate types, sources, policies, observations and determinations | `dotmac_fx_policy.service` is the only writer through catalogue, policy, observation and determination commands. Direct-rate selection precedes inverse fallback; Billing, Tax and Accounting consume the immutable determination but own their snapshots and consequences (ADR-0058). |
 | Service-delivery orders and activation readiness | `dotmac_service_orders.service` — `open_service_order`, `submit_service_order`, `begin_delivery`, `cancel_service_order`, `decide_readiness` and `confirm_activation` are the only writers. Readiness evidence is append-only in the service AND at the ORM, so a caller cannot rewrite a decision after the fact. |
@@ -2037,6 +2350,7 @@ consumer" rule.
 | `...outbox_event_types` (bare codes) | `dotmac_kernel.outbox_event_types.OutboxEventTypeRegistry` | `dotmac_durable_timers.schedule_timer` | before scheduling takes a lock or writes a timer/outbox row (`UndeclaredOutboxEventTypeError`) |
 | `...provisioning_participants` (bare codes) | `dotmac_fulfillment.participants.ParticipantRegistry` | `dotmac_fulfillment.create_run` and `request_attempt` | before a run or attempt can name a participant (`UndeclaredParticipantError`) |
 | `...charge_models` / `...obligation_sources` (bare codes) | `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry` | `dotmac_subscriptions.publish_offer_version`, `record_contract_version` and `generate_recurring_charge` | at command validation, before offer, contract or occurrence rows are written (`SubscriptionDataError` with a `vocabulary.*` reason code) |
+| Non-standard billing treatment reasons (bare codes) | `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry` — the seven ported codes are owned by the module itself, a product adds its own through `BillingTreatmentReasonDeclaration` | `dotmac_subscriptions.preview_billing_arrangement` (and therefore `approve_billing_arrangement`) | at command validation, before an arrangement row is written (`vocabulary.undeclared_billing_treatment_reason`). The column is a plain string with no CHECK, so widening the vocabulary is not a schema change |
 | `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
 | `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
 

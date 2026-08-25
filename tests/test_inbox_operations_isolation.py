@@ -38,6 +38,10 @@ TABLES = (
     "inbox_queue_entries",
     "inbox_round_robin_cursors",
     "inbox_routing_decisions",
+    "inbox_presence_events",
+    "inbox_transfer_requests",
+    "inbox_escalation_requests",
+    "inbox_offline_dispositions",
 )
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -181,6 +185,74 @@ def test_inbox_operation_rows_are_cross_tenant_isolated(
             )
             connection.execute(
                 text(
+                    "INSERT INTO mod_inbox_ops.inbox_presence_events "
+                    "(id, tenant_id, agent_reference, previous_state, state, "
+                    "previous_capacity, assignment_capacity, source, "
+                    "actor_reference, reason, occurred_at) VALUES "
+                    "(:id, :tenant, :agent, 'AWAY', 'AVAILABLE', 2, 2, "
+                    "'MANAGER', :actor, 'covering the desk', now())"
+                ),
+                values
+                | {
+                    "id": uuid.uuid4(),
+                    "agent": f"agent-{index}",
+                    "actor": f"supervisor-{index}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_inbox_ops.inbox_transfer_requests "
+                    "(id, tenant_id, conversation_reference, kind, status, "
+                    "source_assignment_id, from_agent_reference, "
+                    "to_agent_reference, from_queue_id, to_queue_id, reason, "
+                    "requested_by_reference, requested_at, expires_at) VALUES "
+                    "(:id, :tenant, :conversation, 'WARM', 'REQUESTED', "
+                    ":assignment, :agent, :target, :queue, :queue, 'context', "
+                    ":agent, now(), now() + interval '5 minutes')"
+                ),
+                values
+                | {
+                    "id": uuid.uuid4(),
+                    "conversation": f"conversation-{index}",
+                    "agent": f"agent-{index}",
+                    "target": f"target-{index}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_inbox_ops.inbox_escalation_requests "
+                    "(id, tenant_id, conversation_reference, dedup_key, "
+                    "severity, reason, requested_by_reference, notify_reference, "
+                    "assignment_id, requested_at) VALUES "
+                    "(:id, :tenant, :conversation, :dedup, 'HIGH', 'angry', "
+                    ":agent, :lead, :assignment, now())"
+                ),
+                values
+                | {
+                    "id": uuid.uuid4(),
+                    "conversation": f"conversation-{index}",
+                    "dedup": f"escalation-{index}",
+                    "agent": f"agent-{index}",
+                    "lead": f"lead-{index}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_inbox_ops.inbox_offline_dispositions "
+                    "(id, tenant_id, agent_reference, assignment_id, "
+                    "conversation_reference, disposition, status, reason, "
+                    "due_at) VALUES (:id, :tenant, :agent, :assignment, "
+                    ":conversation, 'REQUEUE', 'PENDING', 'signed out', now())"
+                ),
+                values
+                | {
+                    "id": uuid.uuid4(),
+                    "agent": f"agent-{index}",
+                    "conversation": f"conversation-{index}",
+                },
+            )
+            connection.execute(
+                text(
                     "INSERT INTO mod_inbox_ops.inbox_routing_decisions "
                     "(id, tenant_id, decision_reference, conversation_reference, "
                     "channel_code, rule_id, queue_id, queue_entry_id, priority, "
@@ -227,6 +299,21 @@ def test_inbox_operation_rows_are_cross_tenant_isolated(
                 connection.execute(
                     text("DELETE FROM mod_inbox_ops.inbox_routing_decisions")
                 )
+        # Presence transitions and escalation asks are evidence, not state: a
+        # manager override that can be edited afterwards proves nothing.
+        for append_only in (
+            "inbox_presence_events",
+            "inbox_escalation_requests",
+        ):
+            with pytest.raises(DBAPIError, match="append-only"):
+                with app.begin() as connection:
+                    connection.execute(
+                        text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                        {"tenant": str(tenants[0])},
+                    )
+                    connection.execute(
+                        text(f"DELETE FROM mod_inbox_ops.{append_only}")  # noqa: S608
+                    )
     finally:
         app.dispose()
 

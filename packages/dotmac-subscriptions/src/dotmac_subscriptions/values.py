@@ -193,6 +193,80 @@ def occurrence_idempotency_key(
     return f"subscriptions:occurrence:{_digest(payload)}"
 
 
+def billing_arrangement_fingerprint(
+    *,
+    scope: Scope,
+    contract_id: UUID,
+    contract_line_key: UUID,
+    authorized_contract_version_id: UUID,
+    authorized_offer_version_id: UUID,
+    treatment: str,
+    reason_code: str,
+    reason: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    approval_policy_ref: str,
+    approval_policy_version: str,
+    approval_policy_max_days: int,
+    maximum_recurring_amount: ExactAmount,
+    service_interval_unit: IntervalUnit,
+    service_interval_count: int,
+    sponsor_reference: str | None,
+    cost_center: str | None,
+) -> str:
+    """Bind an approval to the exact evidence it was previewed against.
+
+    Confirming with a stale fingerprint is refused, so a price, offer version
+    or cadence that moved between preview and approval cannot be waved through
+    on evidence nobody reviewed.
+    """
+    return _digest(
+        {
+            "scope": scope_segment(scope),
+            "contract_id": str(contract_id),
+            "contract_line_key": str(contract_line_key),
+            "authorized_contract_version_id": str(authorized_contract_version_id),
+            "authorized_offer_version_id": str(authorized_offer_version_id),
+            "treatment": treatment,
+            "reason_code": reason_code,
+            "reason": reason,
+            "starts_at": canonical_instant(starts_at),
+            "ends_at": canonical_instant(ends_at),
+            "approval_policy_ref": approval_policy_ref,
+            "approval_policy_version": approval_policy_version,
+            "approval_policy_max_days": approval_policy_max_days,
+            "maximum_recurring_amount": maximum_recurring_amount.as_wire(),
+            "service_interval_unit": service_interval_unit.value,
+            "service_interval_count": service_interval_count,
+            "sponsor_reference": sponsor_reference,
+            "cost_center": cost_center,
+        }
+    )
+
+
+def non_cash_grant_idempotency_key(
+    *,
+    scope: Scope,
+    arrangement_id: UUID,
+    recurring_occurrence_id: UUID,
+    contract_line_key: UUID,
+    period_start: datetime,
+    period_end: datetime,
+    currency: str,
+) -> str:
+    """One deterministic identity per arrangement, occurrence and exact period."""
+    payload: dict[str, object] = {
+        "scope": scope_segment(scope),
+        "arrangement_id": str(arrangement_id),
+        "recurring_occurrence_id": str(recurring_occurrence_id),
+        "contract_line_key": str(contract_line_key),
+        "period_start": canonical_instant(period_start),
+        "period_end": canonical_instant(period_end),
+        "currency": _currency(currency),
+    }
+    return f"subscriptions:non-cash-grant:{_digest(payload)}"
+
+
 def entitlement_projection_fingerprint(
     *,
     entitlement_codes: tuple[str, ...],
@@ -222,9 +296,11 @@ def entitlement_projection_fingerprint(
 
 __all__ = [
     "ExactAmount",
+    "billing_arrangement_fingerprint",
     "canonical_decimal",
     "canonical_instant",
     "entitlement_projection_fingerprint",
+    "non_cash_grant_idempotency_key",
     "occurrence_idempotency_key",
     "rating_input_fingerprint",
 ]

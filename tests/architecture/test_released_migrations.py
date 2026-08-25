@@ -1208,7 +1208,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0013_delivery_result.py"}),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
@@ -1220,10 +1220,12 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ai-operations": frozenset(),
     "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
-    "dotmac-inbox-operations": frozenset(),
+    # a5's availability/transfer lineage: still editable until the
+    # protected release tags it and its digest is recorded above.
+    "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
-    "dotmac-subscriptions": frozenset(),
+    "dotmac-subscriptions": frozenset({"su_0003_billing_treatments.py"}),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),

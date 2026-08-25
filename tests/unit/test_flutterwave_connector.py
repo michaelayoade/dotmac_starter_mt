@@ -77,17 +77,24 @@ def _charge_completed(**overrides: object) -> dict[str, object]:
 
 def test_manifest_is_the_versioned_v4_ingress_contract() -> None:
     assert MANIFEST.connector_key == "flutterwave"
-    assert MANIFEST.version == __version__ == "0.1.0a2"
-    assert MANIFEST.capability_ids == {CAPABILITY_ID}
-    assert MANIFEST.spi_range.minimum.minor == 3
-    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
+    # a3: the outbound slice changed the manifest of the already-tagged a2,
+    # whose exact contract is retained as INGRESS_POLL_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a3"
+    assert CAPABILITY_ID in MANIFEST.capability_ids
+    # SPI 1.4 for the per-capability mode mapping the outbound leg needs. The
+    # settlement observation itself stays ingress+poll and never delivers.
+    assert MANIFEST.spi_range.minimum.minor == 4
+    observation = next(
+        item for item in MANIFEST.capabilities if item.capability_id == CAPABILITY_ID
+    )
+    assert observation.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
     assert tuple(binding.name for binding in MANIFEST.secret_bindings or ()) == (
         WEBHOOK_SIGNING_SECRET,
         WEBHOOK_SIGNING_PREVIOUS_SECRET,
         "api_client_id",
         "api_client_secret",
     )
-    assert MANIFEST.capabilities[0].config_schema["additionalProperties"] is False
+    assert observation.config_schema["additionalProperties"] is False
     assert MANIFEST.egress is not None
     assert MANIFEST.egress.hosts == (
         "developersandbox-api.flutterwave.com",

@@ -6,6 +6,84 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a96 — 2026-08-25
+
+**A machine credential now says WHOSE it is, and rotates without dropping a
+call.** Continues the a90 machine-credential facility (`0027_machine_credential`)
+rather than replacing it: `machine_auth` keeps its one-SELECT contract, its
+dedicated held key, its no-fallback hashing and its exact scopes.
+
+Migration `0028_machine_attribution` (kernel lineage, revises
+`0027_machine_credential`).
+
+### Added
+
+- `dotmac_kernel.source_applications` — which APPLICATION issued a command,
+  presented a credential, or caused an audit row. An open registered string per
+  ADR-0008, never an enum, so a deployment names its peers without a kernel
+  change. Two separate installed facts, deliberately not conflated: the
+  ACCEPTED-peer registry (`install_source_applications`) and this process's own
+  HOST identity (`install_host_application`). Membership is exact — no prefix,
+  no substring, no wildcard entry.
+- `machine_credentials.source_application`, and `MachinePrincipal.application`.
+  Neither source product records this: Sub identifies its CRM caller by the
+  presence of an `integration:crm` scope, so identity is a side effect of
+  authorization and two keys holding that scope are permanently
+  indistinguishable in the trail.
+- `audit_events.source_application`, resolved by `write_audit_event` from an
+  explicit caller-supplied value or from the host identity, and REFUSED when
+  neither exists. No `"system"`, no `"unknown"`, no NULL going forward.
+- `CommandEnvelope.source_application`, required. An unattributed command
+  raises at construction; `process_once` additionally refuses an issuer this
+  deployment does not declare, before the idempotency ledger is touched.
+- `dotmac_kernel.machine_rotation` — `issue_credential`, `begin_rotation`,
+  `complete_rotation`, `cancel_rotation`, `revoke_credential`. The write side,
+  kept out of `machine_auth` so that module still contains nothing that writes.
+- `SOURCE_APPLICATION` and `ACCEPTED_SOURCE_APPLICATIONS` settings, installed by
+  `create_app`. `SOURCE_APPLICATION` empty means "derive from the assembly
+  spec's name"; when nothing usable can be derived, NO host identity is
+  installed and anything this process originates fails loudly at the audit write
+  instead of recording a guess.
+
+### Changed
+
+- A rotation is a WINDOW, not an overwrite. `next_key_hash` holds the incoming
+  digest; both digests authenticate to the SAME principal with the same scopes
+  and attribution until an explicit `complete_rotation`. Nothing retires the
+  outgoing secret on a timer — `rotation_started_at` is an operational report
+  and is deliberately not an input to any authentication decision. Sub's
+  `rotate_api_key` overwrites `key_hash` in place and its own docstring says the
+  old secret stops working immediately, which for an unattended machine caller
+  is an outage.
+- A credential whose `source_application` is NULL no longer authenticates, with
+  the same opaque message every other refusal uses. The column is nullable for
+  exactly one release so an existing deployment can attribute its rows; open at
+  rest is not open at runtime.
+
+### Inventory correction
+
+The merged inventory recorded Sub as scope-EXACT, on the strength of
+`_api_key_principal`'s docstring ("access is exactly its `scopes`"). The
+ENFORCEMENT disagrees with that docstring: `has_permission` expands the required
+permission through `_wildcard_ancestors` (`network:nas:write` becomes
+`["*", "network:*", "network:nas:*"]`) and matches the key's scopes against the
+expansion, so a key holding `network:*` invokes every capability in the domain
+and a key holding `*` invokes all of them; `_permission_domain_aliases`
+additionally rewrites `customer:` to `subscriber:` and back. Sub is a
+wildcard-and-alias implementation whose comment says otherwise, which is worse
+than one that says so plainly. `docs/inventories/machine-credential-sources.md`
+carries the dated amendment.
+
+### Adopter note
+
+`dotmac_sub` transcribed `machine_credentials` into its own migration `551`
+(`docs/inventories/sub-lineage-dispositions.md`, amendment 2026-08-24), so this
+revision's columns are a follow-up there before it can pin this kernel.
+
+This release composes or adopts no module and performs no product writer
+cutover. Publication, install-back verification and tagging remain the dedicated
+kernel release workflow's responsibility.
+
 ## 0.1.0a95 — 2026-08-24
 
 **Allocate the `response_obligations` database identity.** This additive
