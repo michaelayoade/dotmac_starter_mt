@@ -7,8 +7,10 @@ credential row by `party_id`.
 Drives the SAME cross-tenant admin-portal provisioning/login pattern as
 `tests/test_admin_portal_e2e.py` (provision the tenant's admin via
 `provision_owner` — registration no longer grants admin, Task 2 — then
-web-login via the cookie form, CSRF header bridge captured off the first
-`GET /admin/login`), then edits the admin's OWN party email through
+web-login via the shared `web_login` bridge — the login POST is itself
+CSRF-protected now, and the token it returns is re-issued after the session
+cookie exists because signed tokens are session-bound), then edits the
+admin's OWN party email through
 `POST /admin/parties/{party_id}/edit` (the only writer of `Party.email`
 post-registration — there is no JSON `PATCH /parties/{id}` route yet, see
 `docs/superpowers/phase2-backlog.md`).
@@ -23,12 +25,17 @@ reverse — NEW email succeeds, OLD email 401s, in a single atomic
 
 from __future__ import annotations
 
+from dotmac_kernel.middleware.csrf import CSRF_HEADER
 from dotmac_kernel.models import Party
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tests.conftest import client_for, provision_owner
+
+# One shared browser CSRF bridge for every portal canary — see that
+# module's docstring for the contract it replicates.
+from tests.test_admin_portal_e2e import web_login
 
 PASSWORD = "correct horse battery staple"
 
@@ -45,59 +52,22 @@ def _provision_admin(admin_session: Session, tenant, email: str) -> str:
     return str(party_id)
 
 
-def _web_login(client: TestClient, email: str) -> str:
-    """Real cookie-based web login — `GET /admin/login` (captures the
-    `csrf_token` cookie CSRFMiddleware sets on a safe method) THEN
-    `POST /admin/login` with the credentials, exactly like
-    `test_admin_portal_e2e.py::_web_login`. Returns the csrf token for reuse
-    on every further mutating request on this same client.
-
-    An earlier version of this test only did the GET and never actually
-    authenticated — every subsequent `/admin/parties/{id}/edit` POST 302'd
-    to `/admin/login?next=...` (an UNauthenticated redirect, not the edit
-    succeeding) and silently never touched `Party.email` at all. Caught by
-    inspecting the redirect `Location` header instead of trusting a bare
-    302 status code — this helper now actually logs in, and callers should
-    keep asserting `location` points at the intended page, not just that a
-    3xx came back.
-    """
-    login_page = client.get("/admin/login")
-    assert login_page.status_code == 200
-    csrf_token = login_page.cookies.get("csrf_token")
-    assert csrf_token, "CSRFMiddleware did not set a csrf_token cookie on the login GET"
-
-    login_resp = client.post(
-        "/admin/login",
-        data={"username": email, "password": PASSWORD},
-        headers={"x-csrf-token": csrf_token},
-        follow_redirects=False,
-    )
-    assert login_resp.status_code == 302, login_resp.text
-    assert "access_token" in login_resp.cookies
-    return csrf_token
-
-
-def _json_login(
-    client: TestClient, email: str, *, csrf_token: str | None = None
-) -> int:
+def _json_login(client: TestClient, email: str) -> int:
     """`POST /auth/login` (bearer JSON API — simplest way to probe
     success/failure without threading portal cookies) — returns the status
     code so callers can assert 200 or 401 without unpacking the body.
 
-    `csrf_token`: `CSRFMiddleware` double-submit-checks ANY non-safe method
-    the moment the client carries ANY cookies at all (see
-    `dotmac_kernel.middleware.csrf`), not just requests to `/admin/*` — so once a
-    test client has done a `GET /admin/login` (picking up the `csrf_token`
-    cookie) on its way to editing a party, every subsequent POST on that
-    SAME client — including this plain JSON API call — needs the header too,
-    or it 403s before ever reaching the login logic. Pass the captured token
-    once the client has one; omit it for calls made before any cookie
-    exists.
+    Deliberately carries NO CSRF proof, even once this client holds cookies:
+    applicability is now decided by the declared authentication transport,
+    not by whether a cookie happens to be present. `require_csrf` is
+    attached only to composed browser-surface routes
+    (`dotmac_kernel.web_runtime`), and this bearer route is not one — see
+    `tests/unit/test_csrf_contract.py
+    ::test_bearer_only_api_is_outside_csrf_by_explicit_dependency_shape`.
+    A 403 here would therefore be a real regression in that boundary, not a
+    missing header, so it must not be papered over with one.
     """
-    headers = {"x-csrf-token": csrf_token} if csrf_token else None
-    resp = client.post(
-        "/auth/login", json={"email": email, "password": PASSWORD}, headers=headers
-    )
+    resp = client.post("/auth/login", json={"email": email, "password": PASSWORD})
     return resp.status_code
 
 
@@ -116,7 +86,7 @@ def _edit_party_email(
             "last_name": "User",
             "email": new_email or "",
         },
-        headers={"x-csrf-token": csrf_token},
+        headers={CSRF_HEADER: csrf_token},
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
@@ -139,16 +109,14 @@ def test_login_after_portal_email_change_uses_new_email_old_email_401s(
     # Old email logs in fine before the edit.
     assert _json_login(a, old_email) == 200
 
-    csrf = _web_login(a, old_email)
+    csrf = web_login(a, old_email)
     _edit_party_email(a, csrf, party_id, new_email=new_email)
 
-    # NEW email now logs in ... (csrf_token passed from here on — this same
-    # client picked up the csrf_token cookie via `_web_login` above, so
-    # every subsequent POST needs the header, see `_json_login`'s docstring)
-    assert _json_login(a, new_email, csrf_token=csrf) == 200
+    # NEW email now logs in ...
+    assert _json_login(a, new_email) == 200
     # ... and the OLD email no longer does — no drift between Party.email
     # (what the portal shows/edited) and the login identity.
-    assert _json_login(a, old_email, csrf_token=csrf) == 401
+    assert _json_login(a, old_email) == 401
 
 
 def test_cross_tenant_same_email_login_unaffected(
@@ -186,7 +154,7 @@ def test_nulled_party_email_disables_login(
 
     assert _json_login(a, email) == 200
 
-    csrf = _web_login(a, email)
+    csrf = web_login(a, email)
     _edit_party_email(a, csrf, party_id, new_email=None)
 
-    assert _json_login(a, email, csrf_token=csrf) == 401
+    assert _json_login(a, email) == 401

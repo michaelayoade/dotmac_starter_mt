@@ -333,15 +333,24 @@ def render(
         app = getattr(request, "app", None)
         app_state = getattr(app, "state", None)
         candidate = getattr(app_state, "default_surface_context", None)
-        surface = (
-            candidate
-            if isinstance(candidate, SurfaceContext)
-            else SurfaceContext.empty()
-        )
-    ctx.setdefault("surface", surface)
-    ctx.setdefault("enabled_features", surface.enabled_modules)
-    ctx.setdefault("nav_items", surface.navigation)
-    ctx.setdefault("extra_stylesheets", surface.stylesheets)
+        surface = candidate if isinstance(candidate, SurfaceContext) else None
+    # `surface` itself is always present — `components/sidebar.html` reads
+    # `surface.landing_path` unconditionally — but the surface-DERIVED keys are
+    # injected only when a surface actually exists.
+    #
+    # A per-render context key ALWAYS beats a Jinja env global, so injecting an
+    # empty `SurfaceContext`'s values here is not a fallback: it permanently
+    # shadows `install_surface_globals`, which this module's own docstring
+    # promises stays usable "for a bare FastAPI test app that mounts legacy
+    # routers without the surface runtime". Leaving the keys ABSENT is what lets
+    # the v1 globals resolve for the contract-v1 window. Production is
+    # unaffected: `mount_web_surfaces` sets both the per-request context and
+    # `app.state.default_surface_context`, so `surface` is never None there.
+    ctx.setdefault("surface", surface or SurfaceContext.empty())
+    if surface is not None:
+        ctx.setdefault("enabled_features", surface.enabled_modules)
+        ctx.setdefault("nav_items", surface.navigation)
+        ctx.setdefault("extra_stylesheets", surface.stylesheets)
     ctx.setdefault("csrf_token", getattr(request.state, "csrf_token", ""))
     branding = getattr(request.state, "branding", None)
     if branding is not None:

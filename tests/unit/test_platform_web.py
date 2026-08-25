@@ -12,6 +12,8 @@ import pytest
 from dotmac_kernel import platform_auth
 from dotmac_kernel.config import settings
 from dotmac_kernel.db import get_db, get_platform_db
+from dotmac_kernel.deps import get_db as deps_get_db
+from dotmac_kernel.deps import get_platform_db as deps_get_platform_db
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.flag_models import FeatureFlagOverride
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
@@ -55,8 +57,18 @@ def client(db) -> TestClient:
     app = FastAPI()
     app.include_router(platform_router, prefix="/platform")
     register_error_handlers(app)
+    # FastAPI keys `dependency_overrides` by callable IDENTITY, and
+    # `dotmac_kernel.deps.get_platform_db` is a thin ADAPTER over
+    # `dotmac_kernel.db.get_platform_db`, not a re-export — the two are
+    # different objects (`db.get_platform_db is not deps.get_platform_db`).
+    # The platform routers depend on the `deps` adapter, so overriding only the
+    # `db` original silently misses and the request reaches the real engine.
+    # Both are registered so this fixture keeps working whichever seam a route
+    # is written against.
     app.dependency_overrides[get_platform_db] = lambda: db
+    app.dependency_overrides[deps_get_platform_db] = lambda: db
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[deps_get_db] = lambda: db
     return TestClient(app, follow_redirects=False)
 
 

@@ -164,6 +164,23 @@ def _headers_app(**mw_kwargs) -> TestClient:
         raise HTTPException(status_code=500, detail="handled")
 
     app.add_middleware(SecurityHeadersMiddleware, **mw_kwargs)
+    # Build the stack EAGERLY. Starlette instantiates middleware lazily, on the
+    # first request, so `SecurityHeadersMiddleware.__init__` — and the CSP
+    # override validation it performs — would otherwise run inside the
+    # TestClient transport, where `raise_server_exceptions=False` catches the
+    # `ValueError` and converts it into a synthetic bare 500. A
+    # `pytest.raises` around the request then reports DID NOT RAISE and the CSP
+    # guard looks absent when it is working correctly.
+    #
+    # The flag stays because `test_headers_on_success_and_404_and_handled_500`
+    # needs it. `build_middleware_stack()` does not assign
+    # `self.middleware_stack`, so Starlette still rebuilds on first call and
+    # nothing else about these tests changes.
+    #
+    # This mirrors production: `create_app` validates the override at BOOT
+    # (`app_factory`), not per request, so a construction-time contract belongs
+    # asserted at construction time.
+    app.build_middleware_stack()
     return TestClient(app, raise_server_exceptions=False)
 
 

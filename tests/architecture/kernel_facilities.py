@@ -247,6 +247,15 @@ FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
         "and decided by the same inventory.",
         frozenset(),
     ),
+    "web_deps:require_web_party": (
+        "IDENTITY — the pure authenticated-party seam the facet runtime "
+        "introduced (ADR-0006, 2026-08-25 amendment). It is what "
+        "`require_web_auth` became once the hardcoded `admin` role moved out "
+        "of authentication and into a facet's declared admission permission, "
+        "so it inherits that entry's freeze and is decided by the same "
+        "identity inventory rather than a new one.",
+        frozenset(),
+    ),
 }
 
 #: Facilities that touch storage, have no prerequisite, and are OUT of scope
@@ -260,6 +269,10 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "deps:authenticate_request": "identity seam; the auth tier owns it",
     "deps:authorize_party": "identity seam; the auth tier owns it",
     "platform_auth:require_platform_admin": "platform identity seam",
+    # Same seam, cookie side. It moved from `platform_web` to `platform_auth`
+    # when the platform surface became a declared facet, which is why it reads
+    # as a new entrypoint; no installable module may call it either.
+    "platform_auth:require_platform_web_auth": "platform identity seam",
     "external_identity": "kernel-owned identity binding; no module calls it",
     # Same shape as the two identity seams above: the table is the KERNEL's
     # own (migration 0027), and a module never sees the credential row — it
