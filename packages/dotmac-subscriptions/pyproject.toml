@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "dotmac-subscriptions"
 version = "0.1.0a3"
-description = "DotMac dual-plane recurring contracts and non-cash grants"
+description = "DotMac dual-plane recurring commercial contracts and occurrences"
 authors = ["DotMac"]
 readme = "README.md"
 packages = [{ include = "dotmac_subscriptions", from = "src" }]

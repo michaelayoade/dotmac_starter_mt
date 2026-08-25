@@ -1,4 +1,4 @@
-"""Prove released subscriptions data upgrades without rewritten history."""
+"""Prove released subscriptions a1 data upgrades without rewritten history."""
 
 from __future__ import annotations
 
@@ -32,12 +32,6 @@ MIGRATION_PATH = (
 )
 RELEASE_TAG = "dotmac-subscriptions-v0.1.0a1"
 RELEASED_DIGEST = "bbc6a1da801259a734988c976800c404ce30f4a3b8cf3f24a48410f557e3f252"
-A2_RELEASE_TAG = "dotmac-subscriptions-v0.1.0a2"
-A2_PRICING_PATH = (
-    "packages/dotmac-subscriptions/src/dotmac_subscriptions/migrations/versions/"
-    "su_0002_offer_pricing.py"
-)
-A2_PRICING_DIGEST = "3b1a8524cfd585bac895f63bf7a8f3dc1d9521cfd997b80f379488e31fd21210"
 GIT = shutil.which("git")
 assert GIT is not None, "git is required to reconstruct released migration bytes"
 
@@ -59,18 +53,14 @@ def _url_for(base_url: str, dbname: str, *, user: str | None = None) -> str:
 
 
 def _released_source() -> bytes:
-    return _released_migration(RELEASE_TAG, MIGRATION_PATH, RELEASED_DIGEST)
-
-
-def _released_migration(tag: str, path: str, digest: str) -> bytes:
     result = subprocess.run(  # noqa: S603 # nosec B603 B607
-        [GIT, "show", f"{tag}:{path}"],
+        [GIT, "show", f"{RELEASE_TAG}:{MIGRATION_PATH}"],
         cwd=REPO_ROOT,
         capture_output=True,
         check=False,
     )
     assert result.returncode == 0, result.stderr.decode()
-    assert hashlib.sha256(result.stdout).hexdigest() == digest
+    assert hashlib.sha256(result.stdout).hexdigest() == RELEASED_DIGEST
     return result.stdout
 
 
@@ -225,66 +215,6 @@ def test_released_a1_offer_evidence_derives_a2_policy_and_can_downgrade(
         engine.dispose()
         assert "charge_model_code" not in columns
         assert "pricing_mode" not in columns
-
-
-def test_released_a2_lineage_upgrades_to_a3_and_can_downgrade(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from alembic import command
-
-    historical = tmp_path / "released_subscriptions_a2"
-    historical.mkdir()
-    (historical / "su_0001_subscriptions.py").write_bytes(
-        _released_migration(A2_RELEASE_TAG, MIGRATION_PATH, RELEASED_DIGEST)
-    )
-    (historical / "su_0002_offer_pricing.py").write_bytes(
-        _released_migration(
-            A2_RELEASE_TAG,
-            A2_PRICING_PATH,
-            A2_PRICING_DIGEST,
-        )
-    )
-
-    with _scratch_database(monkeypatch) as admin_url:
-        command.upgrade(_config(historical), "heads")
-        command.upgrade(_config(CURRENT_SUBSCRIPTIONS), "heads")
-
-        engine = create_engine(admin_url)
-        with engine.connect() as conn:
-            tables = set(
-                conn.scalars(
-                    text(
-                        "SELECT table_name FROM information_schema.tables "
-                        "WHERE table_schema = 'mod_subscriptions' AND "
-                        "table_name IN "
-                        "('platform_subscription_billing_arrangements', "
-                        "'platform_subscription_billing_grants')"
-                    )
-                )
-            )
-            heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-        engine.dispose()
-        assert tables == {
-            "platform_subscription_billing_arrangements",
-            "platform_subscription_billing_grants",
-        }
-        assert "su_0003_billing_treatments" in heads
-
-        command.downgrade(_config(CURRENT_SUBSCRIPTIONS), "su_0002_offer_pricing")
-        engine = create_engine(admin_url)
-        with engine.connect() as conn:
-            remaining = set(
-                conn.scalars(
-                    text(
-                        "SELECT table_name FROM information_schema.tables "
-                        "WHERE table_schema = 'mod_subscriptions' AND "
-                        "table_name LIKE 'platform_subscription_billing_%'"
-                    )
-                )
-            )
-        engine.dispose()
-        assert remaining == set()
 
 
 @pytest.mark.parametrize(

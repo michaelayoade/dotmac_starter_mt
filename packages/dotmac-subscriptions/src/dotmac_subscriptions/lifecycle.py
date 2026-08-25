@@ -30,32 +30,31 @@ class OccurrenceState(str, Enum):
     cancelled = "cancelled"
 
 
-class SubscriptionBillingTreatment(str, Enum):
-    """Customer billing treatment; standard is represented by no arrangement."""
+class BillingTreatment(str, Enum):
+    """The two NON-STANDARD treatments an arrangement can record.
 
-    standard = "standard"
+    Standard billing is deliberately absent: it is the ABSENCE of an effective
+    arrangement, not a stored value.  Storing `standard` would make ordinary
+    billing depend on a row existing, and a missing row would then silently
+    read as an approval.
+    """
+
     complimentary = "complimentary"
     sponsored = "sponsored"
 
 
-class BillingTreatmentReason(str, Enum):
-    """Product-first reason vocabulary proven by Sub's live owner."""
-
-    internal_service = "internal_service"
-    staff_benefit = "staff_benefit"
-    partner_service = "partner_service"
-    community_support = "community_support"
-    commercial_concession = "commercial_concession"
-    sponsored_service = "sponsored_service"
-    other_approved = "other_approved"
-
-
-class BillingTreatmentStatus(str, Enum):
+class BillingArrangementStatus(str, Enum):
     active = "active"
     revoked = "revoked"
 
 
-class BillingTreatmentDecisionStatus(str, Enum):
+class BillingArrangementDecisionStatus(str, Enum):
+    """What one contract line's customer-billing answer is right now.
+
+    `protected_drift` is the fail-closed middle: contradictory evidence
+    suppresses customer charging but must never fabricate grant coverage.
+    """
+
     standard = "standard"
     effective = "effective"
     protected_drift = "protected_drift"
@@ -88,6 +87,11 @@ _OCCURRENCE_TRANSITIONS = {
     OccurrenceState.cancelled: frozenset(),
 }
 
+_ARRANGEMENT_TRANSITIONS = {
+    BillingArrangementStatus.active: frozenset({BillingArrangementStatus.revoked}),
+    BillingArrangementStatus.revoked: frozenset(),
+}
+
 _StateT = TypeVar("_StateT", bound=Enum)
 
 
@@ -107,6 +111,14 @@ def require_occurrence_transition(
     _require_transition("occurrence", current, target, _OCCURRENCE_TRANSITIONS)
 
 
+def require_arrangement_transition(
+    current: BillingArrangementStatus, target: BillingArrangementStatus
+) -> None:
+    _require_transition(
+        "billing arrangement", current, target, _ARRANGEMENT_TRANSITIONS
+    )
+
+
 def _require_transition(
     aggregate: str,
     current: _StateT,
@@ -121,13 +133,13 @@ def _require_transition(
 
 
 __all__ = [
-    "BillingTreatmentDecisionStatus",
-    "BillingTreatmentReason",
-    "BillingTreatmentStatus",
+    "BillingArrangementDecisionStatus",
+    "BillingArrangementStatus",
+    "BillingTreatment",
     "ContractVersionState",
     "OccurrenceState",
     "OfferState",
-    "SubscriptionBillingTreatment",
+    "require_arrangement_transition",
     "require_contract_transition",
     "require_occurrence_transition",
     "require_offer_transition",

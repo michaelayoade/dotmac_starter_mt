@@ -202,14 +202,26 @@ class _OccurrenceColumns:
     created_at: Mapped[datetime] = _created_at()
 
 
-class _BillingArrangementColumns:
+class _ArrangementColumns:
+    """Approval evidence for not collecting a POSITIVE contracted amount.
+
+    Nothing here zeroes a price.  `maximum_recurring_amount` is the approved
+    ceiling on what may later be granted, and the contract line keeps its own
+    real, strictly positive `unit_price`.
+    """
+
     contract_line_key: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     treatment: Mapped[str] = mapped_column(String(24), nullable=False)
-    reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    # An OPEN declared vocabulary (ADR-0008): a plain string with no CHECK, so
+    # a product declaring an eighth reason needs no module migration.
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # NOT NULL is the mandatory-end invariant: a permanent exemption cannot be
+    # expressed at all, so reapproval is structural rather than procedural.
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    approval_policy_reference: Mapped[str] = mapped_column(String(200), nullable=False)
+    approval_policy_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     approval_policy_version: Mapped[str] = mapped_column(String(80), nullable=False)
     approval_policy_max_days: Mapped[int] = mapped_column(Integer, nullable=False)
     maximum_recurring_amount: Mapped[Decimal] = mapped_column(
@@ -217,14 +229,18 @@ class _BillingArrangementColumns:
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     scale: Mapped[int] = mapped_column(Integer, nullable=False)
-    cadence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    sponsor_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    cost_center: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    service_interval_unit: Mapped[str] = mapped_column(String(12), nullable=False)
+    service_interval_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    sponsor_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cost_center: Mapped[str | None] = mapped_column(String(120), nullable=True)
     approved_by: Mapped[str] = mapped_column(String(160), nullable=False)
     approved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    correlation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    command_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     revoked_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -237,38 +253,40 @@ class _BillingArrangementColumns:
     revocation_idempotency_key: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
-    command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    correlation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = _created_at()
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
 
 
-class _BillingGrantColumns:
+class _GrantColumns:
+    """Append-only exact non-cash evidence for one approved service period.
+
+    Three amounts, deliberately: `contracted_amount` is what the customer was
+    really billed for (proof no price was hidden at zero), `foregone_amount` is
+    the non-cash value actually granted, and `approved_maximum_amount` is the
+    ceiling snapshotted at approval.  A single CHECK relates all three, so the
+    cap cannot be exceeded and a concealed zero cannot be recorded.  There is
+    no customer-money column at all: a grant never creates a receivable.
+    """
+
     contract_line_key: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     treatment: Mapped[str] = mapped_column(String(24), nullable=False)
-    reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
-    arrangement_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    reference_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    contracted_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    approved_maximum_amount: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False
+    )
+    foregone_amount: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     scale: Mapped[int] = mapped_column(Integer, nullable=False)
     actor: Mapped[str] = mapped_column(String(160), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    recorded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
     command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     correlation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -581,11 +599,11 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
     corrects_occurrence_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
 
 
-class SubscriptionBillingArrangement(Base, _BillingArrangementColumns):
+class SubscriptionBillingArrangement(Base, _ArrangementColumns):
     __tablename__ = "subscription_billing_arrangements"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["tenant_id", "subscription_contract_id"],
+            ["tenant_id", "contract_id"],
             [
                 f"{SCHEMA}.subscription_contracts.tenant_id",
                 f"{SCHEMA}.subscription_contracts.id",
@@ -594,16 +612,7 @@ class SubscriptionBillingArrangement(Base, _BillingArrangementColumns):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "contract_version_id"],
-            [
-                f"{SCHEMA}.subscription_contract_versions.tenant_id",
-                f"{SCHEMA}.subscription_contract_versions.id",
-            ],
-            name="fk_billing_arrangements_version",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id", "contract_version_id", "contract_line_key"],
+            ["tenant_id", "authorized_contract_version_id", "contract_line_key"],
             [
                 f"{SCHEMA}.subscription_contract_lines.tenant_id",
                 f"{SCHEMA}.subscription_contract_lines.contract_version_id",
@@ -613,17 +622,28 @@ class SubscriptionBillingArrangement(Base, _BillingArrangementColumns):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "offer_version_id"],
+            ["tenant_id", "authorized_offer_version_id"],
             [f"{SCHEMA}.offer_versions.tenant_id", f"{SCHEMA}.offer_versions.id"],
             name="fk_billing_arrangements_offer_version",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("tenant_id", "id", name="uq_billing_arrangements_tenant_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "contract_id",
+            "contract_line_key",
+            "starts_at",
+            name="uq_billing_arrangements_start",
+        ),
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_billing_arrangements_idempotency"
+        ),
         UniqueConstraint(
             "tenant_id", "command_id", name="uq_billing_arrangements_command"
         ),
         UniqueConstraint(
-            "tenant_id", "idempotency_key", name="uq_billing_arrangements_idempotency"
+            "tenant_id",
+            "revocation_idempotency_key",
+            name="uq_billing_arrangements_revocation_idempotency",
         ),
         UniqueConstraint(
             "tenant_id",
@@ -631,51 +651,46 @@ class SubscriptionBillingArrangement(Base, _BillingArrangementColumns):
             name="uq_billing_arrangements_revocation_command",
         ),
         UniqueConstraint(
-            "tenant_id",
-            "revocation_idempotency_key",
-            name="uq_billing_arrangements_revocation_idempotency",
+            "tenant_id", "id", name="uq_billing_arrangements_tenant_id_id"
         ),
         CheckConstraint(
             "treatment IN ('complimentary', 'sponsored')",
-            name="ck_billing_arrangements_treatment",
+            name="ck_billing_arrangements_nonstandard",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'revoked')", name="ck_billing_arrangements_status"
         ),
         CheckConstraint("ends_at > starts_at", name="ck_billing_arrangements_period"),
         CheckConstraint(
-            "maximum_recurring_amount > 0", name="ck_billing_arrangements_amount"
+            "maximum_recurring_amount > 0",
+            name="ck_billing_arrangements_positive_value",
+        ),
+        CheckConstraint(
+            "approval_policy_max_days > 0",
+            name="ck_billing_arrangements_approval_policy",
         ),
         CheckConstraint(
             "scale >= 0 AND scale <= 6", name="ck_billing_arrangements_scale"
         ),
         CheckConstraint(
-            "approval_policy_max_days BETWEEN 1 AND 366",
-            name="ck_billing_arrangements_policy_days",
+            "service_interval_count > 0",
+            name="ck_billing_arrangements_interval_count",
         ),
         CheckConstraint(
             "treatment <> 'sponsored' OR sponsor_reference IS NOT NULL "
             "OR cost_center IS NOT NULL",
-            name="ck_billing_arrangements_sponsor",
+            name="ck_billing_arrangements_sponsor_evidence",
         ),
         CheckConstraint(
-            "status IN ('active', 'revoked')", name="ck_billing_arrangements_status"
-        ),
-        CheckConstraint(
-            "(status = 'active' AND revoked_by IS NULL AND revoked_at IS NULL "
-            "AND revocation_reason IS NULL AND revocation_command_id IS NULL "
-            "AND revocation_correlation_id IS NULL "
-            "AND revocation_idempotency_key IS NULL) OR "
-            "(status = 'revoked' AND revoked_by IS NOT NULL "
-            "AND revoked_at IS NOT NULL AND revoked_at >= approved_at "
-            "AND revocation_reason IS NOT NULL "
-            "AND revocation_command_id IS NOT NULL "
-            "AND revocation_correlation_id IS NOT NULL "
-            "AND revocation_idempotency_key IS NOT NULL)",
+            "(status = 'active') = (revoked_at IS NULL)",
             name="ck_billing_arrangements_revocation_evidence",
         ),
         Index(
             "ix_billing_arrangements_effective",
             "tenant_id",
-            "subscription_contract_id",
+            "contract_id",
             "contract_line_key",
+            "status",
             "starts_at",
             "ends_at",
         ),
@@ -685,12 +700,12 @@ class SubscriptionBillingArrangement(Base, _BillingArrangementColumns):
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
     )
-    subscription_contract_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    contract_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    offer_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    contract_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    authorized_contract_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    authorized_offer_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
 
 
-class SubscriptionBillingGrant(Base, _BillingGrantColumns):
+class SubscriptionBillingGrant(Base, _GrantColumns):
     __tablename__ = "subscription_billing_grants"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -703,43 +718,13 @@ class SubscriptionBillingGrant(Base, _BillingGrantColumns):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["tenant_id", "subscription_contract_id"],
-            [
-                f"{SCHEMA}.subscription_contracts.tenant_id",
-                f"{SCHEMA}.subscription_contracts.id",
-            ],
-            name="fk_billing_grants_contract",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id", "contract_version_id", "contract_line_key"],
-            [
-                f"{SCHEMA}.subscription_contract_lines.tenant_id",
-                f"{SCHEMA}.subscription_contract_lines.contract_version_id",
-                f"{SCHEMA}.subscription_contract_lines.contract_line_key",
-            ],
-            name="fk_billing_grants_line",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id", "occurrence_id"],
+            ["tenant_id", "recurring_occurrence_id"],
             [
                 f"{SCHEMA}.recurring_charge_occurrences.tenant_id",
                 f"{SCHEMA}.recurring_charge_occurrences.id",
             ],
             name="fk_billing_grants_occurrence",
             ondelete="RESTRICT",
-        ),
-        UniqueConstraint("tenant_id", "id", name="uq_billing_grants_tenant_id"),
-        UniqueConstraint("tenant_id", "command_id", name="uq_billing_grants_command"),
-        UniqueConstraint(
-            "tenant_id", "idempotency_key", name="uq_billing_grants_idempotency"
-        ),
-        UniqueConstraint(
-            "tenant_id",
-            "arrangement_id",
-            "occurrence_id",
-            name="uq_billing_grants_occurrence",
         ),
         UniqueConstraint(
             "tenant_id",
@@ -748,19 +733,34 @@ class SubscriptionBillingGrant(Base, _BillingGrantColumns):
             "ends_at",
             name="uq_billing_grants_period",
         ),
+        UniqueConstraint(
+            "tenant_id",
+            "recurring_occurrence_id",
+            name="uq_billing_grants_occurrence",
+        ),
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_billing_grants_idempotency"
+        ),
+        UniqueConstraint("tenant_id", "command_id", name="uq_billing_grants_command"),
         CheckConstraint(
             "treatment IN ('complimentary', 'sponsored')",
-            name="ck_billing_grants_treatment",
+            name="ck_billing_grants_nonstandard",
         ),
         CheckConstraint("ends_at > starts_at", name="ck_billing_grants_period"),
-        CheckConstraint("reference_amount > 0", name="ck_billing_grants_amount"),
+        CheckConstraint(
+            "contracted_amount > 0 AND approved_maximum_amount > 0 "
+            "AND foregone_amount > 0 "
+            "AND foregone_amount <= contracted_amount "
+            "AND foregone_amount <= approved_maximum_amount",
+            name="ck_billing_grants_bounded_non_cash_value",
+        ),
         CheckConstraint("scale >= 0 AND scale <= 6", name="ck_billing_grants_scale"),
         Index(
-            "ix_billing_grants_contract_period",
+            "ix_billing_grants_line_period",
             "tenant_id",
-            "subscription_contract_id",
             "contract_line_key",
             "starts_at",
+            "ends_at",
         ),
         schema_table_args(SCHEMA),
     )
@@ -769,9 +769,7 @@ class SubscriptionBillingGrant(Base, _BillingGrantColumns):
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
     )
     arrangement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    occurrence_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    subscription_contract_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    contract_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    recurring_occurrence_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
 
 
 class PlatformOffer(Base, _OfferColumns):
@@ -1031,11 +1029,11 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
     )
 
 
-class PlatformSubscriptionBillingArrangement(Base, _BillingArrangementColumns):
+class PlatformSubscriptionBillingArrangement(Base, _ArrangementColumns):
     __tablename__ = "platform_subscription_billing_arrangements"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["contract_version_id", "contract_line_key"],
+            ["authorized_contract_version_id", "contract_line_key"],
             [
                 f"{SCHEMA}.platform_subscription_contract_lines.contract_version_id",
                 f"{SCHEMA}.platform_subscription_contract_lines.contract_line_key",
@@ -1043,134 +1041,121 @@ class PlatformSubscriptionBillingArrangement(Base, _BillingArrangementColumns):
             name="fk_platform_billing_arrangements_line",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("command_id", name="uq_platform_billing_arrangements_command"),
+        UniqueConstraint(
+            "contract_id",
+            "contract_line_key",
+            "starts_at",
+            name="uq_platform_billing_arrangements_start",
+        ),
         UniqueConstraint(
             "idempotency_key", name="uq_platform_billing_arrangements_idempotency"
+        ),
+        UniqueConstraint("command_id", name="uq_platform_billing_arrangements_command"),
+        UniqueConstraint(
+            "revocation_idempotency_key",
+            name="uq_platform_billing_arrangements_revocation_idempotency",
         ),
         UniqueConstraint(
             "revocation_command_id",
             name="uq_platform_billing_arrangements_revocation_command",
         ),
-        UniqueConstraint(
-            "revocation_idempotency_key",
-            name="uq_platform_billing_arrangements_revocation_idempotency",
-        ),
         CheckConstraint(
             "treatment IN ('complimentary', 'sponsored')",
-            name="ck_platform_billing_arrangements_treatment",
-        ),
-        CheckConstraint(
-            "ends_at > starts_at", name="ck_platform_billing_arrangements_period"
-        ),
-        CheckConstraint(
-            "maximum_recurring_amount > 0",
-            name="ck_platform_billing_arrangements_amount",
-        ),
-        CheckConstraint(
-            "scale >= 0 AND scale <= 6",
-            name="ck_platform_billing_arrangements_scale",
-        ),
-        CheckConstraint(
-            "approval_policy_max_days BETWEEN 1 AND 366",
-            name="ck_platform_billing_arrangements_policy_days",
-        ),
-        CheckConstraint(
-            "treatment <> 'sponsored' OR sponsor_reference IS NOT NULL "
-            "OR cost_center IS NOT NULL",
-            name="ck_platform_billing_arrangements_sponsor",
+            name="ck_platform_billing_arrangements_nonstandard",
         ),
         CheckConstraint(
             "status IN ('active', 'revoked')",
             name="ck_platform_billing_arrangements_status",
         ),
         CheckConstraint(
-            "(status = 'active' AND revoked_by IS NULL AND revoked_at IS NULL "
-            "AND revocation_reason IS NULL AND revocation_command_id IS NULL "
-            "AND revocation_correlation_id IS NULL "
-            "AND revocation_idempotency_key IS NULL) OR "
-            "(status = 'revoked' AND revoked_by IS NOT NULL "
-            "AND revoked_at IS NOT NULL AND revoked_at >= approved_at "
-            "AND revocation_reason IS NOT NULL "
-            "AND revocation_command_id IS NOT NULL "
-            "AND revocation_correlation_id IS NOT NULL "
-            "AND revocation_idempotency_key IS NOT NULL)",
+            "ends_at > starts_at", name="ck_platform_billing_arrangements_period"
+        ),
+        CheckConstraint(
+            "maximum_recurring_amount > 0",
+            name="ck_platform_billing_arrangements_positive_value",
+        ),
+        CheckConstraint(
+            "approval_policy_max_days > 0",
+            name="ck_platform_billing_arrangements_approval_policy",
+        ),
+        CheckConstraint(
+            "scale >= 0 AND scale <= 6", name="ck_platform_billing_arrangements_scale"
+        ),
+        CheckConstraint(
+            "service_interval_count > 0",
+            name="ck_platform_billing_arrangements_interval_count",
+        ),
+        CheckConstraint(
+            "treatment <> 'sponsored' OR sponsor_reference IS NOT NULL "
+            "OR cost_center IS NOT NULL",
+            name="ck_platform_billing_arrangements_sponsor_evidence",
+        ),
+        CheckConstraint(
+            "(status = 'active') = (revoked_at IS NULL)",
             name="ck_platform_billing_arrangements_revocation_evidence",
         ),
         Index(
             "ix_platform_billing_arrangements_effective",
-            "subscription_contract_id",
+            "contract_id",
             "contract_line_key",
+            "status",
             "starts_at",
             "ends_at",
         ),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
-    subscription_contract_id: Mapped[UUID] = mapped_column(
+    contract_id: Mapped[UUID] = mapped_column(
         Uuid(),
         ForeignKey(f"{SCHEMA}.platform_subscription_contracts.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    contract_version_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        ForeignKey(
-            f"{SCHEMA}.platform_subscription_contract_versions.id",
-            ondelete="RESTRICT",
-        ),
-        nullable=False,
-    )
-    offer_version_id: Mapped[UUID] = mapped_column(
+    authorized_contract_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    authorized_offer_version_id: Mapped[UUID] = mapped_column(
         Uuid(),
         ForeignKey(f"{SCHEMA}.platform_offer_versions.id", ondelete="RESTRICT"),
         nullable=False,
     )
 
 
-class PlatformSubscriptionBillingGrant(Base, _BillingGrantColumns):
+class PlatformSubscriptionBillingGrant(Base, _GrantColumns):
     __tablename__ = "platform_subscription_billing_grants"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["contract_version_id", "contract_line_key"],
-            [
-                f"{SCHEMA}.platform_subscription_contract_lines.contract_version_id",
-                f"{SCHEMA}.platform_subscription_contract_lines.contract_line_key",
-            ],
-            name="fk_platform_billing_grants_line",
-            ondelete="RESTRICT",
-        ),
-        UniqueConstraint("command_id", name="uq_platform_billing_grants_command"),
-        UniqueConstraint(
-            "idempotency_key", name="uq_platform_billing_grants_idempotency"
-        ),
-        UniqueConstraint(
-            "arrangement_id",
-            "occurrence_id",
-            name="uq_platform_billing_grants_occurrence",
-        ),
         UniqueConstraint(
             "arrangement_id",
             "starts_at",
             "ends_at",
             name="uq_platform_billing_grants_period",
         ),
+        UniqueConstraint(
+            "recurring_occurrence_id", name="uq_platform_billing_grants_occurrence"
+        ),
+        UniqueConstraint(
+            "idempotency_key", name="uq_platform_billing_grants_idempotency"
+        ),
+        UniqueConstraint("command_id", name="uq_platform_billing_grants_command"),
         CheckConstraint(
             "treatment IN ('complimentary', 'sponsored')",
-            name="ck_platform_billing_grants_treatment",
+            name="ck_platform_billing_grants_nonstandard",
         ),
         CheckConstraint(
             "ends_at > starts_at", name="ck_platform_billing_grants_period"
         ),
         CheckConstraint(
-            "reference_amount > 0", name="ck_platform_billing_grants_amount"
+            "contracted_amount > 0 AND approved_maximum_amount > 0 "
+            "AND foregone_amount > 0 "
+            "AND foregone_amount <= contracted_amount "
+            "AND foregone_amount <= approved_maximum_amount",
+            name="ck_platform_billing_grants_bounded_non_cash_value",
         ),
         CheckConstraint(
             "scale >= 0 AND scale <= 6", name="ck_platform_billing_grants_scale"
         ),
         Index(
-            "ix_platform_billing_grants_contract_period",
-            "subscription_contract_id",
+            "ix_platform_billing_grants_line_period",
             "contract_line_key",
             "starts_at",
+            "ends_at",
         ),
         schema_table_args(SCHEMA),
     )
@@ -1183,20 +1168,13 @@ class PlatformSubscriptionBillingGrant(Base, _BillingGrantColumns):
         ),
         nullable=False,
     )
-    occurrence_id: Mapped[UUID] = mapped_column(
+    recurring_occurrence_id: Mapped[UUID] = mapped_column(
         Uuid(),
         ForeignKey(
-            f"{SCHEMA}.platform_recurring_charge_occurrences.id",
-            ondelete="RESTRICT",
+            f"{SCHEMA}.platform_recurring_charge_occurrences.id", ondelete="RESTRICT"
         ),
         nullable=False,
     )
-    subscription_contract_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        ForeignKey(f"{SCHEMA}.platform_subscription_contracts.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    contract_version_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
 
 
 TENANT_TABLES = (

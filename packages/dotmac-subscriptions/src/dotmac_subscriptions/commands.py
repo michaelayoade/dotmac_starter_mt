@@ -14,14 +14,14 @@ from sqlalchemy.orm import Session
 
 from dotmac_subscriptions.cadence import BillingCadence
 from dotmac_subscriptions.contracts import (
-    BillingArrangementDecision,
     CommercialEntitlementProjectionV1,
     NonCashGrantOutputV1,
     RatedObligationOutputV1,
 )
 from dotmac_subscriptions.lifecycle import (
-    BillingTreatmentReason,
-    SubscriptionBillingTreatment,
+    BillingArrangementDecisionStatus,
+    BillingArrangementStatus,
+    BillingTreatment,
 )
 from dotmac_subscriptions.values import ExactAmount
 
@@ -129,30 +129,73 @@ class GenerateRecurringChargeCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ApprovalPolicySnapshot:
+    """The approval horizon the PRODUCT resolved, snapshotted as evidence.
+
+    The module never reads a product setting to find this (ADR-0009/0011): the
+    adopter resolves its own registered horizon and hands the exact value in,
+    and the arrangement keeps it, so shortening the policy later cannot
+    retroactively invalidate why an existing approval satisfied it.
+    """
+
+    policy_ref: str
+    policy_version: str
+    maximum_days: int
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewBillingArrangementCommand:
     scope: Scope
-    subscription_contract_id: UUID
-    contract_version_id: UUID
     contract_line_key: UUID
-    treatment: SubscriptionBillingTreatment
-    reason_code: BillingTreatmentReason
+    treatment: BillingTreatment
+    reason_code: str
     reason: str
     starts_at: datetime
-    ends_at: datetime
-    approval_policy_reference: str
-    approval_policy_version: str
-    approval_policy_max_days: int
+    ends_at: datetime | None
+    approval_policy: ApprovalPolicySnapshot
     sponsor_reference: str | None
     cost_center: str | None
     evaluated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
+class BillingArrangementPreview:
+    scope: Scope
+    contract_id: UUID
+    contract_line_key: UUID
+    authorized_contract_version_id: UUID
+    authorized_offer_version_id: UUID
+    treatment: BillingTreatment
+    reason_code: str
+    reason: str
+    starts_at: datetime
+    ends_at: datetime
+    approval_policy: ApprovalPolicySnapshot
+    maximum_recurring_amount: ExactAmount
+    service_interval_unit: str
+    service_interval_count: int
+    sponsor_reference: str | None
+    cost_center: str | None
+    evaluated_at: datetime
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class ApproveBillingArrangementCommand:
-    preview: PreviewBillingArrangementCommand
-    preview_fingerprint: str
+    scope: Scope
+    contract_line_key: UUID
+    treatment: BillingTreatment
+    reason_code: str
+    reason: str
+    starts_at: datetime
+    ends_at: datetime | None
+    approval_policy: ApprovalPolicySnapshot
+    sponsor_reference: str | None
+    cost_center: str | None
     approved_by: str
     approved_at: datetime
+    preview_evaluated_at: datetime
+    preview_fingerprint: str
     command_id: UUID
     correlation_id: UUID
     idempotency_key: str
@@ -162,31 +205,75 @@ class ApproveBillingArrangementCommand:
 class RevokeBillingArrangementCommand:
     scope: Scope
     arrangement_id: UUID
+    reason: str
     revoked_by: str
     revoked_at: datetime
-    reason: str
     command_id: UUID
     correlation_id: UUID
     idempotency_key: str
 
 
 @dataclass(frozen=True, slots=True)
+class BillingArrangementResult:
+    arrangement_id: UUID
+    contract_id: UUID
+    contract_line_key: UUID
+    treatment: BillingTreatment
+    status: BillingArrangementStatus
+    starts_at: datetime
+    ends_at: datetime
+    maximum_recurring_amount: ExactAmount
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BillingArrangementDecision:
+    """One customer-billing answer for one contract line at one moment."""
+
+    scope: Scope
+    contract_id: UUID | None
+    contract_line_key: UUID
+    status: BillingArrangementDecisionStatus
+    treatment: BillingTreatment | None = None
+    arrangement_id: UUID | None = None
+    authorized_contract_version_id: UUID | None = None
+    reason_code: str | None = None
+    reason: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    maximum_recurring_amount: ExactAmount | None = None
+    contracted_amount: ExactAmount | None = None
+    drift_reason: str | None = None
+
+    @property
+    def suppress_customer_billing(self) -> bool:
+        return self.status is not BillingArrangementDecisionStatus.standard
+
+    @property
+    def grantable(self) -> bool:
+        return self.status is BillingArrangementDecisionStatus.effective
+
+
+@dataclass(frozen=True, slots=True)
 class RecordNonCashGrantCommand:
     scope: Scope
     arrangement_id: UUID
-    occurrence_id: UUID
-    subscription_contract_id: UUID
-    contract_version_id: UUID
-    contract_line_key: UUID
-    starts_at: datetime
-    ends_at: datetime
-    reference_amount: ExactAmount
+    recurring_occurrence_id: UUID
+    foregone_amount: ExactAmount | None
     actor: str
-    reason: str
     recorded_at: datetime
     command_id: UUID
     correlation_id: UUID
-    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class NonCashGrantResult:
+    grant_id: UUID
+    arrangement_id: UUID
+    contract_line_key: UUID
+    recurring_occurrence_id: UUID
+    replayed: bool
+    staged_output: NonCashGrantOutputV1
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,25 +304,6 @@ class OccurrenceResult:
     occurrence_id: UUID
     replayed: bool
     staged_output: RatedObligationOutputV1
-
-
-@dataclass(frozen=True, slots=True)
-class BillingArrangementResult:
-    arrangement_id: UUID
-    decision: BillingArrangementDecision
-    replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class BillingArrangementRevocationResult:
-    arrangement_id: UUID
-    replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class NonCashGrantResult:
-    output: NonCashGrantOutputV1
-    replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,17 +341,19 @@ class DurableTimerPort(Protocol):
 
 
 __all__ = [
+    "ApprovalPolicySnapshot",
     "ApproveBillingArrangementCommand",
+    "BillingArrangementDecision",
+    "BillingArrangementPreview",
     "BillingArrangementResult",
-    "BillingArrangementRevocationResult",
     "ContractLineInput",
     "ContractVersionResult",
     "DurableTimerPort",
     "EndContractVersionCommand",
     "EndContractVersionResult",
     "GenerateRecurringChargeCommand",
-    "OccurrenceResult",
     "NonCashGrantResult",
+    "OccurrenceResult",
     "OfferPriceInput",
     "OfferPricingMode",
     "PublishOfferVersionCommand",

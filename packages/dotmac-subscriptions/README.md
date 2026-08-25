@@ -6,12 +6,9 @@ planes.
 The module owns stable offers, immutable published offer/price versions,
 stable subscription contracts with immutable effective-dated versions and line
 lineage, calendar cadence and declared proration, and one replayable recurring
-charge occurrence per natural identity. It also owns finite complimentary or
-sponsored arrangements and append-only non-cash grants against exact positive
-rated occurrences. It emits exact pre-tax rated facts, commercial-intent
-projections, and non-cash grant facts. The consuming assembly maps those
-outputs to independently owned Billing, entitlement/access, or Accounting
-services.
+charge occurrence per natural identity. It emits exact pre-tax rated facts and
+commercial-intent projections. The consuming assembly maps those outputs to
+the independently owned Billing or entitlement/access services.
 
 The checked-in Cloud composition canary proves that the Billing mapping
 preserves source identity, the rated service period, collection timing and
@@ -21,9 +18,18 @@ Subscriptions occurrence to the independently minted Billing obligation ID.
 This is conformance evidence only; neither candidate product is claimed as an
 adopter until it pins a released package and retires its local writer.
 
+It also owns complimentary and sponsored treatment of a contract line: an
+effective-dated arrangement recording approval NOT to collect a positive
+contracted amount, and append-only non-cash grants recording exactly how much
+was foregone for one exact service period. A complimentary service is never a
+zero price — the line keeps its real price and the grant carries the evidence.
+The seven ported reasons are an open declared registry, not an enum, so a
+product names its own eighth reason without a module release.
+
 It does not own invoices, tax, FX, receivables, payments, collections policy,
-service state, licences, provider integrations, documents, or the general
-ledger. It imports no sibling module.
+service state, entitlements, billing anchors, sponsor receivables, expense
+postings, licences, provider integrations, documents, or the general ledger. It
+imports no sibling module.
 
 Both persistence planes share one behavior path. Tenant tables carry
 `tenant_id NOT NULL`, composite tenant keys, and forced RLS. Platform tables

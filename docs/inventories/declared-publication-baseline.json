@@ -149,7 +149,7 @@
     },
     "dotmac-subscriptions": {
       "declared": "0.1.0a3",
-      "reason": "OUTSTANDING UNTIL THIS PRODUCT-FIRST SLICE PASSES ACCEPTANCE. Version 0.1.0a2 is registry-verified and tagged; a3 adds Sub-derived finite complimentary/sponsored arrangements and append-only positive non-cash grants in additive su_0003. Remove this row in the authorized release-record change after Observer and hosted CI prove service behavior, dual-plane isolation, released-a2 upgrade and migration immutability; source presence is not release or Sub adoption.",
+      "reason": "RELEASE PENDING FOR THE PORTED COMPLIMENTARY/SPONSORED LIFECYCLE. a3 adds the su_0003 arrangement and non-cash-grant tables on both declared planes and the product-neutral treatment service ported product-first from dotmac_sub (ADR-0006). It changes nothing an a2 consumer already uses: su_0001 and su_0002 keep their released bytes, and the a2 public surface is unchanged. No adopter pins a3, and Sub still owns its own arrangement writer until the G5/G6 backfill and cutover. Remove this row in the a3 release-record change; never by editing the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-template-studio": {

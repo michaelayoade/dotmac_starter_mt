@@ -21,14 +21,10 @@ from dotmac_subscriptions.errors import (
     SubscriptionConflictError,
     SubscriptionDataError,
 )
-from dotmac_subscriptions.lifecycle import (
-    BillingTreatmentDecisionStatus,
-    BillingTreatmentReason,
-    SubscriptionBillingTreatment,
-)
 from dotmac_subscriptions.values import (
     ExactAmount,
     entitlement_projection_fingerprint,
+    non_cash_grant_idempotency_key,
     occurrence_idempotency_key,
     rating_input_fingerprint,
 )
@@ -40,97 +36,6 @@ def _aware(value: datetime, field_name: str) -> None:
             "contracts.naive_datetime",
             f"{field_name} must be timezone-aware.",
         )
-
-
-@dataclass(frozen=True, slots=True)
-class BillingArrangementPreview:
-    subscription_contract_id: UUID
-    contract_version_id: UUID
-    contract_line_key: UUID
-    offer_version_id: UUID
-    treatment: SubscriptionBillingTreatment
-    reason_code: BillingTreatmentReason
-    reason: str
-    starts_at: datetime
-    ends_at: datetime
-    approval_policy_reference: str
-    approval_policy_version: str
-    approval_policy_max_days: int
-    maximum_recurring_amount: ExactAmount
-    cadence_fingerprint: str
-    sponsor_reference: str | None
-    cost_center: str | None
-    evaluated_at: datetime
-    fingerprint: str
-
-
-@dataclass(frozen=True, slots=True)
-class BillingArrangementDecision:
-    scope: Scope
-    subscription_contract_id: UUID
-    contract_version_id: UUID
-    contract_line_key: UUID
-    status: BillingTreatmentDecisionStatus
-    treatment: SubscriptionBillingTreatment
-    arrangement_id: UUID | None
-    reason_code: BillingTreatmentReason | None
-    reason: str | None
-    starts_at: datetime | None
-    ends_at: datetime | None
-    maximum_recurring_amount: ExactAmount | None
-    drift_reason: str | None
-
-    @property
-    def suppress_customer_billing(self) -> bool:
-        return self.status is not BillingTreatmentDecisionStatus.standard
-
-    @property
-    def grantable(self) -> bool:
-        return self.status is BillingTreatmentDecisionStatus.effective
-
-
-@dataclass(frozen=True, slots=True)
-class NonCashGrantOutputV1:
-    contract_type: str = field(init=False, default="subscriptions.non_cash_grant")
-    contract_version: int = field(init=False, default=1)
-    grant_id: UUID
-    arrangement_id: UUID
-    scope: Scope
-    subscription_contract_id: UUID
-    contract_version_id: UUID
-    contract_line_key: UUID
-    occurrence_id: UUID
-    treatment: SubscriptionBillingTreatment
-    reason_code: BillingTreatmentReason
-    arrangement_reason: str
-    starts_at: datetime
-    ends_at: datetime
-    reference_amount: ExactAmount
-    actor: str
-    reason: str
-    recorded_at: datetime
-    command_id: UUID
-    correlation_id: UUID
-    idempotency_key: str
-
-    def __post_init__(self) -> None:
-        for name in ("starts_at", "ends_at", "recorded_at"):
-            _aware(getattr(self, name), name)
-        if self.ends_at <= self.starts_at:
-            raise SubscriptionDataError(
-                "contracts.invalid_grant_period",
-                "A non-cash grant requires a non-empty half-open service period.",
-            )
-        if self.reference_amount.amount <= 0:
-            raise SubscriptionDataError(
-                "contracts.non_positive_grant",
-                "A non-cash grant must preserve a strictly positive foregone amount.",
-            )
-        if self.treatment is SubscriptionBillingTreatment.standard:
-            raise SubscriptionDataError(
-                "contracts.standard_grant",
-                "Standard customer billing cannot create non-cash grant evidence.",
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,6 +267,105 @@ class CommercialEntitlementProjectionV1:
 
 
 @dataclass(frozen=True, slots=True)
+class NonCashGrantOutputV1:
+    """Exact foregone-revenue evidence for one approved service period.
+
+    This is the ONLY thing an adopter needs to create its own consequences —
+    an entitlement, a billing-anchor move, a sponsor receivable or an internal
+    expense posting.  None of those decisions live here, and none of them are
+    money this module created: `foregone_amount` is revenue deliberately NOT
+    collected against a contracted amount that stayed strictly positive.
+    """
+
+    contract_type: str = field(init=False, default="subscriptions.non_cash_grant")
+    contract_version: int = field(init=False, default=1)
+    grant_id: UUID
+    recorded_at: datetime
+    scope: Scope
+    arrangement_id: UUID
+    subscription_contract_id: UUID
+    authorized_contract_version_id: UUID
+    contract_line_key: UUID
+    recurring_occurrence_id: UUID
+    treatment: str
+    reason_code: str
+    period_start: datetime
+    period_end: datetime
+    currency: str
+    contracted_amount: ExactAmount
+    approved_maximum_amount: ExactAmount
+    foregone_amount: ExactAmount
+    actor: str
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("recorded_at", "period_start", "period_end"):
+            _aware(getattr(self, field_name), field_name)
+        if self.period_end <= self.period_start:
+            raise SubscriptionDataError(
+                "contracts.invalid_grant_period",
+                "A non-cash grant covers a non-empty half-open service period.",
+            )
+        if self.treatment not in {"complimentary", "sponsored"}:
+            raise SubscriptionDataError(
+                "contracts.invalid_treatment",
+                "A grant records only a non-standard treatment; standard "
+                "billing is the absence of an arrangement.",
+            )
+        if not self.reason_code or not self.actor:
+            raise SubscriptionDataError(
+                "contracts.missing_grant_evidence",
+                "A non-cash grant carries its declared reason code and actor.",
+            )
+        if self.contracted_amount.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_contract_price",
+                "A grant proves foregone revenue against a strictly positive "
+                "contracted amount; a zero price conceals it instead.",
+            )
+        if self.approved_maximum_amount.amount <= 0 or self.foregone_amount.amount <= 0:
+            raise SubscriptionDataError(
+                "contracts.non_positive_grant_value",
+                "Approved maximum and foregone amounts must be strictly positive.",
+            )
+        if (
+            self.foregone_amount.amount > self.contracted_amount.amount
+            or self.foregone_amount.amount > self.approved_maximum_amount.amount
+        ):
+            raise SubscriptionDataError(
+                "contracts.grant_exceeds_approval",
+                "A non-cash grant never exceeds the contracted amount or the "
+                "approved recurring ceiling.",
+            )
+        if {
+            self.currency,
+            self.contracted_amount.currency,
+            self.approved_maximum_amount.currency,
+            self.foregone_amount.currency,
+        } != {self.currency}:
+            raise SubscriptionDataError(
+                "contracts.mixed_currency",
+                "Every amount in one grant output must use its declared currency.",
+            )
+        expected_key = non_cash_grant_idempotency_key(
+            scope=self.scope,
+            arrangement_id=self.arrangement_id,
+            recurring_occurrence_id=self.recurring_occurrence_id,
+            contract_line_key=self.contract_line_key,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            currency=self.currency,
+        )
+        if self.idempotency_key != expected_key:
+            raise SubscriptionConflictError(
+                "contracts.idempotency_key_conflict",
+                "Grant idempotency key does not match its natural identity.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class StageResult:
     was_duplicate: bool
 
@@ -372,6 +376,10 @@ class RatedObligationPublisher(Protocol):
 
 class EntitlementProjectionPublisher(Protocol):
     def stage(self, output: CommercialEntitlementProjectionV1) -> StageResult: ...
+
+
+class NonCashGrantPublisher(Protocol):
+    def stage(self, output: NonCashGrantOutputV1) -> StageResult: ...
 
 
 class FakeRatedObligationPublisher:
@@ -418,15 +426,38 @@ class FakeEntitlementProjectionPublisher:
         return StageResult(was_duplicate=False)
 
 
+class FakeNonCashGrantPublisher:
+    """Deterministic fake proving the grant replay contract without a database."""
+
+    def __init__(self) -> None:
+        self._outputs: dict[str, NonCashGrantOutputV1] = {}
+
+    @property
+    def outputs(self) -> tuple[NonCashGrantOutputV1, ...]:
+        return tuple(self._outputs.values())
+
+    def stage(self, output: NonCashGrantOutputV1) -> StageResult:
+        existing = self._outputs.get(output.idempotency_key)
+        if existing is not None:
+            if existing.foregone_amount != output.foregone_amount:
+                raise SubscriptionConflictError(
+                    "publisher.fingerprint_conflict",
+                    "The same grant key was staged with a different amount.",
+                )
+            return StageResult(was_duplicate=True)
+        self._outputs[output.idempotency_key] = output
+        return StageResult(was_duplicate=False)
+
+
 __all__ = [
-    "BillingArrangementDecision",
-    "BillingArrangementPreview",
     "CommercialEntitlementProjectionV1",
     "EntitlementIntent",
     "EntitlementProjectionPublisher",
     "FakeEntitlementProjectionPublisher",
+    "FakeNonCashGrantPublisher",
     "FakeRatedObligationPublisher",
     "NonCashGrantOutputV1",
+    "NonCashGrantPublisher",
     "RatedObligationOutputV1",
     "RatedObligationPublisher",
     "StageResult",

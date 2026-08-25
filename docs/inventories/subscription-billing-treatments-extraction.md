@@ -1,11 +1,34 @@
 # Complimentary and sponsored subscription treatment extraction
 
 **As of:** 2026-08-23
-**Status:** product-first audit complete; registry-verified
-`dotmac-subscriptions 0.1.0a2` prerequisite released; separate `0.1.0a3` /
-`su_0003` implementation in progress.
+**Status:** product-first audit complete; the package-side port landed as
+`dotmac-subscriptions 0.1.0a3` / `su_0003`.
 **Qualifying source:** `dotmac_sub` at
 `943bc59f8e4ca0849c7de578bc9dbc17c57b116f`.
+
+## Amendment — 2026-08-25
+
+Two facts in the plan above were wrong by the time the slice was written, and
+they are corrected here rather than edited away:
+
+1. **The revision is `su_0003`, not `su_0002`.** `dotmac-subscriptions 0.1.0a2`
+   shipped TWO migrations, not one: `su_0001_subscriptions` and
+   `su_0002_offer_pricing` are both inside the wheel tagged
+   `dotmac-subscriptions-v0.1.0a2`, so both are released bytes that must not
+   change. The treatment tables therefore arrived additively as
+   `su_0003_billing_treatments`, whose `down_revision` is `su_0002_offer_pricing`.
+2. **The source was re-read at `df970604c23d89546b949d8fb28e5230ca61ade7`**
+   (`dotmac_sub` `origin/dev` at the time of the port), recorded as
+   `revalidation_revisions` in the package dossier. Every ported blob is
+   byte-identical to the audit coordinate above. The single divergence is
+   `app/services/subscription_billing_grants.py`, where Sub moved its
+   billing-anchor update behind `stage_subscription_billing_anchor` — a
+   consequence this extraction deliberately does not port (item G4), so the
+   ported behaviour is unaffected.
+
+Nothing was backfilled and no Sub authority moved: gates 3 to 6 below remain
+open, and Sub is still the only writer of its own arrangement and grant
+tables.
 
 ## Decision
 
@@ -33,9 +56,9 @@ the core invariants:
 - approval and revocation carry actor, reason, command, correlation,
   idempotency and fingerprint evidence;
 - overlapping active arrangements fail closed;
-- a contract-version, line, price, currency, cadence or offer mismatch becomes
-  protected drift: customer charging remains suppressed, but a grant cannot be
-  fabricated; product account identity remains an adopter-side check;
+- a price, currency, cadence, offer or account mismatch becomes protected
+  drift: customer charging remains suppressed, but a grant cannot be
+  fabricated;
 - every grant is positive, bounded by the approved and contracted amount,
   exact-period, idempotent and append-only; and
 - changing commercial terms while an arrangement is open requires revocation
@@ -93,7 +116,7 @@ policy reference/version and maximum-days value. Sub's existing registered
 setting keeps its one-to-366-day bound; the package records and enforces the
 supplied snapshot without reading product settings.
 
-`su_0003` must:
+`su_0002` must:
 
 - create both new tables on every supported selected plane with the existing
   plane's isolation contract;
@@ -101,7 +124,7 @@ supplied snapshot without reading product settings.
 - refuse an overlapping contract-version insertion while an arrangement is
   open, so a plan/price change requires revocation and reapproval;
 - use composite same-plane FKs only; and
-- leave the released `su_0001` and `su_0002` bytes unchanged.
+- leave the released `su_0001` bytes unchanged.
 
 ## Product consequences that do not port
 
@@ -116,8 +139,8 @@ supplied snapshot without reading product settings.
 
 ## Migration and cutover gates
 
-1. Subscriptions a2 was registry-verified and tagged before this slice began.
-   Keep its released migrations byte-identical.
+1. Release and registry-verify subscriptions a2 first. Do not silently widen
+   the unreleased candidate and claim two separately reviewable slices were one.
 2. Implement a3 canary-first from the exact sources above and prove tenant,
    platform and dual-plane isolation plus an a2-to-a3 migration rehearsal.
 3. In Sub, backfill only cases with a provable positive contracted value,

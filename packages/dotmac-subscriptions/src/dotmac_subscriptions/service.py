@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -32,35 +32,24 @@ from dotmac_subscriptions.cadence import (
     ProrationPolicy,
     RateBasis,
     invoice_period,
-    period_containing,
 )
 from dotmac_subscriptions.commands import (
-    ApproveBillingArrangementCommand,
-    BillingArrangementResult,
-    BillingArrangementRevocationResult,
     ContractLineInput,
     ContractVersionResult,
     DurableTimerPort,
     EndContractVersionCommand,
     EndContractVersionResult,
     GenerateRecurringChargeCommand,
-    NonCashGrantResult,
     OccurrenceResult,
     OfferPricingMode,
-    PreviewBillingArrangementCommand,
     PublishOfferVersionCommand,
     PublishOfferVersionResult,
-    RecordNonCashGrantCommand,
     RecordSubscriptionContractVersionCommand,
-    RevokeBillingArrangementCommand,
     WithdrawOfferVersionCommand,
 )
 from dotmac_subscriptions.contracts import (
-    BillingArrangementDecision,
-    BillingArrangementPreview,
     CommercialEntitlementProjectionV1,
     EntitlementIntent,
-    NonCashGrantOutputV1,
     RatedObligationOutputV1,
 )
 from dotmac_subscriptions.engine import (
@@ -73,12 +62,6 @@ from dotmac_subscriptions.errors import (
     SubscriptionDataError,
     SubscriptionStateError,
 )
-from dotmac_subscriptions.lifecycle import (
-    BillingTreatmentDecisionStatus,
-    BillingTreatmentReason,
-    BillingTreatmentStatus,
-    SubscriptionBillingTreatment,
-)
 from dotmac_subscriptions.models import (
     Offer,
     OfferVersion,
@@ -87,14 +70,10 @@ from dotmac_subscriptions.models import (
     PlatformOfferVersion,
     PlatformOfferVersionPrice,
     PlatformRecurringChargeOccurrence,
-    PlatformSubscriptionBillingArrangement,
-    PlatformSubscriptionBillingGrant,
     PlatformSubscriptionContract,
     PlatformSubscriptionContractLine,
     PlatformSubscriptionContractVersion,
     RecurringChargeOccurrence,
-    SubscriptionBillingArrangement,
-    SubscriptionBillingGrant,
     SubscriptionContract,
     SubscriptionContractLine,
     SubscriptionContractVersion,
@@ -112,9 +91,6 @@ if TYPE_CHECKING:
 _PUBLISH_SCOPE = "subscriptions.publish_offer_version"
 _CONTRACT_SCOPE = "subscriptions.record_contract_version"
 _OCCURRENCE_SCOPE = "subscriptions.generate_recurring_charge"
-_ARRANGEMENT_APPROVE_SCOPE = "subscriptions.approve_billing_arrangement"
-_ARRANGEMENT_REVOKE_SCOPE = "subscriptions.revoke_billing_arrangement"
-_GRANT_SCOPE = "subscriptions.record_non_cash_grant"
 
 OfferModel = type[Offer] | type[PlatformOffer]
 OfferVersionModel = type[OfferVersion] | type[PlatformOfferVersion]
@@ -127,10 +103,6 @@ LineModel = type[SubscriptionContractLine] | type[PlatformSubscriptionContractLi
 OccurrenceModel = (
     type[RecurringChargeOccurrence] | type[PlatformRecurringChargeOccurrence]
 )
-ArrangementModel = (
-    type[SubscriptionBillingArrangement] | type[PlatformSubscriptionBillingArrangement]
-)
-GrantModel = type[SubscriptionBillingGrant] | type[PlatformSubscriptionBillingGrant]
 ContractVersionRow = SubscriptionContractVersion | PlatformSubscriptionContractVersion
 LineRow = SubscriptionContractLine | PlatformSubscriptionContractLine
 OfferRow = Offer | PlatformOffer
@@ -138,8 +110,6 @@ OfferVersionRow = OfferVersion | PlatformOfferVersion
 PriceRow = OfferVersionPrice | PlatformOfferVersionPrice
 ContractRow = SubscriptionContract | PlatformSubscriptionContract
 OccurrenceRow = RecurringChargeOccurrence | PlatformRecurringChargeOccurrence
-ArrangementRow = SubscriptionBillingArrangement | PlatformSubscriptionBillingArrangement
-GrantRow = SubscriptionBillingGrant | PlatformSubscriptionBillingGrant
 _SelectT = TypeVar("_SelectT", bound=tuple[object, ...])
 
 
@@ -152,8 +122,6 @@ class _PlaneModels:
     contract_version: ContractVersionModel
     line: LineModel
     occurrence: OccurrenceModel
-    arrangement: ArrangementModel
-    grant: GrantModel
 
 
 class _TenantAwareModel(Protocol):
@@ -168,8 +136,6 @@ _TENANT_MODELS = _PlaneModels(
     SubscriptionContractVersion,
     SubscriptionContractLine,
     RecurringChargeOccurrence,
-    SubscriptionBillingArrangement,
-    SubscriptionBillingGrant,
 )
 _PLATFORM_MODELS = _PlaneModels(
     PlatformOffer,
@@ -179,8 +145,6 @@ _PLATFORM_MODELS = _PlaneModels(
     PlatformSubscriptionContractVersion,
     PlatformSubscriptionContractLine,
     PlatformRecurringChargeOccurrence,
-    PlatformSubscriptionBillingArrangement,
-    PlatformSubscriptionBillingGrant,
 )
 
 
@@ -644,839 +608,6 @@ def _cadence_from(version: ContractVersionRow) -> BillingCadence:
     )
 
 
-def _billing_cadence_fingerprint(version: ContractVersionRow) -> str:
-    cadence = _cadence_from(version)
-    return _fingerprint(
-        {
-            "rate_basis": cadence.rate_basis.value,
-            "rate_unit": cadence.rate_unit.value,
-            "rate_quantity": str(cadence.rate_quantity),
-            "service_interval_unit": cadence.service_interval_unit.value,
-            "service_interval_count": cadence.service_interval_count,
-            "invoice_interval_unit": cadence.invoice_interval_unit.value,
-            "invoice_interval_count": cadence.invoice_interval_count,
-            "collection_timing": cadence.collection_timing.value,
-            "alignment": cadence.alignment.value,
-            "anchor_day": cadence.anchor_day,
-            "end_of_month_rule": cadence.end_of_month_rule.value,
-            "timezone_name": cadence.timezone_name,
-            "proration_policy": cadence.proration_policy.value,
-            "rating_policy_version": version.rating_policy_version,
-        }
-    )
-
-
-def _load_arrangement_inputs(
-    db: Session, command: PreviewBillingArrangementCommand
-) -> tuple[ContractVersionRow, LineRow, OfferVersionRow, _PlaneModels]:
-    plane = _models(command.scope)
-    version = cast(
-        ContractVersionRow | None,
-        db.execute(
-            _scoped(
-                select(plane.contract_version).where(
-                    plane.contract_version.id == command.contract_version_id,
-                    plane.contract_version.contract_id
-                    == command.subscription_contract_id,
-                ),
-                command.scope,
-                plane.contract_version,
-            )
-        ).scalar_one_or_none(),
-    )
-    if version is None:
-        raise SubscriptionDataError(
-            "billing_arrangements.contract_version_not_found",
-            "The exact subscription contract version was not found.",
-        )
-    line = cast(
-        LineRow | None,
-        db.execute(
-            _scoped(
-                select(plane.line).where(
-                    plane.line.contract_version_id == version.id,
-                    plane.line.contract_line_key == command.contract_line_key,
-                ),
-                command.scope,
-                plane.line,
-            )
-        ).scalar_one_or_none(),
-    )
-    if line is None:
-        raise SubscriptionDataError(
-            "billing_arrangements.contract_line_not_found",
-            "The exact subscription contract line was not found.",
-        )
-    offer_version = cast(
-        OfferVersionRow | None,
-        db.execute(
-            _scoped(
-                select(plane.offer_version).where(
-                    plane.offer_version.id == line.offer_version_id,
-                    plane.offer_version.version == line.offer_version,
-                ),
-                command.scope,
-                plane.offer_version,
-            )
-        ).scalar_one_or_none(),
-    )
-    if offer_version is None:
-        raise SubscriptionDataError(
-            "billing_arrangements.offer_version_not_found",
-            "The contract line's immutable offer version was not found.",
-        )
-    return version, line, offer_version, plane
-
-
-def _validate_arrangement_command(command: PreviewBillingArrangementCommand) -> None:
-    for instant, field in (
-        (command.starts_at, "starts_at"),
-        (command.ends_at, "ends_at"),
-        (command.evaluated_at, "evaluated_at"),
-    ):
-        _require_aware(instant, field)
-    if command.treatment is SubscriptionBillingTreatment.standard:
-        raise SubscriptionDataError(
-            "billing_arrangements.standard_treatment",
-            "Standard billing is represented by no arrangement.",
-        )
-    if command.ends_at <= command.starts_at:
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_period",
-            "A billing arrangement requires a non-empty finite period.",
-        )
-    if command.starts_at < command.evaluated_at - timedelta(minutes=5):
-        raise SubscriptionDataError(
-            "billing_arrangements.retroactive",
-            "A billing arrangement must start prospectively.",
-        )
-    if not 1 <= command.approval_policy_max_days <= 366:
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_policy_horizon",
-            "Approval policy maximum days must be between 1 and 366.",
-        )
-    if command.ends_at - command.starts_at > timedelta(
-        days=command.approval_policy_max_days
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.policy_horizon_exceeded",
-            "The billing arrangement exceeds its approval policy horizon.",
-        )
-    required = {
-        "reason": (command.reason, 2000),
-        "approval_policy_reference": (command.approval_policy_reference, 200),
-        "approval_policy_version": (command.approval_policy_version, 80),
-    }
-    for field, (value, limit) in required.items():
-        if not value.strip() or len(value) > limit:
-            raise SubscriptionDataError(
-                "billing_arrangements.invalid_evidence",
-                f"{field} is required and must be at most {limit} characters.",
-            )
-    if command.sponsor_reference is not None and (
-        not command.sponsor_reference.strip() or len(command.sponsor_reference) > 200
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_sponsor",
-            "Sponsor reference must be non-blank and at most 200 characters.",
-        )
-    if command.cost_center is not None and (
-        not command.cost_center.strip() or len(command.cost_center) > 100
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_cost_center",
-            "Cost centre must be non-blank and at most 100 characters.",
-        )
-    if command.treatment is SubscriptionBillingTreatment.sponsored and not (
-        command.sponsor_reference or command.cost_center
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.missing_sponsor_evidence",
-            "Sponsored treatment requires a sponsor reference or cost centre.",
-        )
-
-
-def _arrangement_overlap_exists(
-    db: Session,
-    *,
-    scope: Scope,
-    subscription_contract_id: UUID,
-    contract_line_key: UUID,
-    starts_at: datetime,
-    ends_at: datetime,
-) -> bool:
-    plane = _models(scope)
-    statement = select(plane.arrangement.id).where(
-        plane.arrangement.subscription_contract_id == subscription_contract_id,
-        plane.arrangement.contract_line_key == contract_line_key,
-        plane.arrangement.starts_at < ends_at,
-        plane.arrangement.ends_at > starts_at,
-        or_(
-            plane.arrangement.revoked_at.is_(None),
-            plane.arrangement.revoked_at > starts_at,
-        ),
-    )
-    return (
-        db.execute(
-            _scoped(statement.limit(1), scope, plane.arrangement)
-        ).scalar_one_or_none()
-        is not None
-    )
-
-
-def _preview_billing_arrangement(
-    db: Session,
-    command: PreviewBillingArrangementCommand,
-    *,
-    check_overlap: bool,
-) -> BillingArrangementPreview:
-    _validate_arrangement_command(command)
-    version, line, offer_version, _ = _load_arrangement_inputs(db, command)
-    if version.state != "effective":
-        raise SubscriptionStateError(
-            "billing_arrangements.contract_version_inactive",
-            "Only the effective contract version can receive an arrangement.",
-        )
-    contract_start = _stored_utc(version.starts_at)
-    start = command.starts_at.astimezone(UTC)
-    end = command.ends_at.astimezone(UTC)
-    cadence = _cadence_from(version)
-    _, start_period = period_containing(
-        cadence=cadence,
-        contract_start=contract_start,
-        moment=start,
-    )
-    _, end_period = period_containing(
-        cadence=cadence,
-        contract_start=contract_start,
-        moment=end,
-    )
-    if start_period.starts_at != start or end_period.starts_at != end:
-        raise SubscriptionDataError(
-            "billing_arrangements.unaligned_period",
-            "Arrangement boundaries must align with complete service periods.",
-        )
-    version_end = (
-        _stored_utc(version.declared_ends_at)
-        if version.declared_ends_at is not None
-        else None
-    )
-    if version_end is not None and end > version_end:
-        raise SubscriptionDataError(
-            "billing_arrangements.outside_contract",
-            "The arrangement cannot extend beyond the contracted period.",
-        )
-    if check_overlap and _arrangement_overlap_exists(
-        db,
-        scope=command.scope,
-        subscription_contract_id=command.subscription_contract_id,
-        contract_line_key=command.contract_line_key,
-        starts_at=start,
-        ends_at=end,
-    ):
-        raise SubscriptionConflictError(
-            "billing_arrangements.overlap",
-            "The contract line already has an overlapping billing arrangement.",
-        )
-    maximum = ExactAmount(
-        line.unit_price * line.quantity,
-        line.currency,
-        line.scale,
-    )
-    if maximum.amount <= 0:
-        raise SubscriptionDataError(
-            "billing_arrangements.non_positive_contract_price",
-            "The arrangement requires a strictly positive contracted amount.",
-        )
-    cadence_fingerprint = _billing_cadence_fingerprint(version)
-    facts: dict[str, object] = {
-        "scope": scope_segment(command.scope),
-        "subscription_contract_id": str(command.subscription_contract_id),
-        "contract_version_id": str(command.contract_version_id),
-        "contract_line_key": str(command.contract_line_key),
-        "offer_version_id": str(offer_version.id),
-        "treatment": command.treatment.value,
-        "reason_code": command.reason_code.value,
-        "reason": command.reason.strip(),
-        "starts_at": start.isoformat(),
-        "ends_at": end.isoformat(),
-        "approval_policy_reference": command.approval_policy_reference.strip(),
-        "approval_policy_version": command.approval_policy_version.strip(),
-        "approval_policy_max_days": command.approval_policy_max_days,
-        "maximum_recurring_amount": maximum.as_wire(),
-        "cadence_fingerprint": cadence_fingerprint,
-        "sponsor_reference": (
-            command.sponsor_reference.strip() if command.sponsor_reference else None
-        ),
-        "cost_center": command.cost_center.strip() if command.cost_center else None,
-    }
-    return BillingArrangementPreview(
-        subscription_contract_id=command.subscription_contract_id,
-        contract_version_id=command.contract_version_id,
-        contract_line_key=command.contract_line_key,
-        offer_version_id=offer_version.id,
-        treatment=command.treatment,
-        reason_code=command.reason_code,
-        reason=command.reason.strip(),
-        starts_at=start,
-        ends_at=end,
-        approval_policy_reference=command.approval_policy_reference.strip(),
-        approval_policy_version=command.approval_policy_version.strip(),
-        approval_policy_max_days=command.approval_policy_max_days,
-        maximum_recurring_amount=maximum,
-        cadence_fingerprint=cadence_fingerprint,
-        sponsor_reference=(
-            command.sponsor_reference.strip() if command.sponsor_reference else None
-        ),
-        cost_center=command.cost_center.strip() if command.cost_center else None,
-        evaluated_at=command.evaluated_at.astimezone(UTC),
-        fingerprint=_fingerprint(facts),
-    )
-
-
-def preview_billing_arrangement(
-    db: Session, command: PreviewBillingArrangementCommand
-) -> BillingArrangementPreview:
-    """Preview one finite non-cash treatment against exact contract facts."""
-    return _preview_billing_arrangement(db, command, check_overlap=True)
-
-
-def _standard_billing_decision(
-    *,
-    scope: Scope,
-    subscription_contract_id: UUID,
-    contract_version_id: UUID,
-    contract_line_key: UUID,
-) -> BillingArrangementDecision:
-    return BillingArrangementDecision(
-        scope=scope,
-        subscription_contract_id=subscription_contract_id,
-        contract_version_id=contract_version_id,
-        contract_line_key=contract_line_key,
-        status=BillingTreatmentDecisionStatus.standard,
-        treatment=SubscriptionBillingTreatment.standard,
-        arrangement_id=None,
-        reason_code=None,
-        reason=None,
-        starts_at=None,
-        ends_at=None,
-        maximum_recurring_amount=None,
-        drift_reason=None,
-    )
-
-
-def resolve_billing_arrangement(
-    db: Session,
-    *,
-    scope: Scope,
-    subscription_contract_id: UUID,
-    contract_version_id: UUID,
-    contract_line_key: UUID,
-    effective_at: datetime,
-) -> BillingArrangementDecision:
-    """Resolve one customer-billing decision and fail closed on stored overlap."""
-    _require_aware(effective_at, "effective_at")
-    observed_at = effective_at.astimezone(UTC)
-    plane = _models(scope)
-    arrangements = list(
-        db.execute(
-            _scoped(
-                select(plane.arrangement)
-                .where(
-                    plane.arrangement.subscription_contract_id
-                    == subscription_contract_id,
-                    plane.arrangement.contract_line_key == contract_line_key,
-                    plane.arrangement.starts_at <= observed_at,
-                    plane.arrangement.ends_at > observed_at,
-                    or_(
-                        plane.arrangement.revoked_at.is_(None),
-                        plane.arrangement.revoked_at > observed_at,
-                    ),
-                )
-                .order_by(plane.arrangement.starts_at.desc(), plane.arrangement.id),
-                scope,
-                plane.arrangement,
-            )
-        ).scalars()
-    )
-    if not arrangements:
-        return _standard_billing_decision(
-            scope=scope,
-            subscription_contract_id=subscription_contract_id,
-            contract_version_id=contract_version_id,
-            contract_line_key=contract_line_key,
-        )
-    if len(arrangements) > 1:
-        raise SubscriptionConflictError(
-            "billing_arrangements.overlapping_effective_rows",
-            "Multiple billing arrangements are effective; customer billing is blocked.",
-        )
-    arrangement = cast(ArrangementRow, arrangements[0])
-    version = cast(
-        ContractVersionRow | None,
-        db.execute(
-            _scoped(
-                select(plane.contract_version).where(
-                    plane.contract_version.id == contract_version_id,
-                    plane.contract_version.contract_id == subscription_contract_id,
-                ),
-                scope,
-                plane.contract_version,
-            )
-        ).scalar_one_or_none(),
-    )
-    line = cast(
-        LineRow | None,
-        db.execute(
-            _scoped(
-                select(plane.line).where(
-                    plane.line.contract_version_id == contract_version_id,
-                    plane.line.contract_line_key == contract_line_key,
-                ),
-                scope,
-                plane.line,
-            )
-        ).scalar_one_or_none(),
-    )
-    drift_reason: str | None = None
-    if arrangement.contract_version_id != contract_version_id:
-        drift_reason = "unauthorized_contract_version_change"
-    elif version is None or line is None:
-        drift_reason = "contract_facts_missing"
-    elif arrangement.offer_version_id != line.offer_version_id:
-        drift_reason = "unauthorized_offer_change"
-    elif arrangement.currency != line.currency or arrangement.scale != line.scale:
-        drift_reason = "currency_or_scale_mismatch"
-    elif arrangement.maximum_recurring_amount != line.unit_price * line.quantity:
-        drift_reason = "approved_value_changed"
-    elif arrangement.cadence_fingerprint != _billing_cadence_fingerprint(version):
-        drift_reason = "cadence_changed"
-    return BillingArrangementDecision(
-        scope=scope,
-        subscription_contract_id=subscription_contract_id,
-        contract_version_id=contract_version_id,
-        contract_line_key=contract_line_key,
-        status=(
-            BillingTreatmentDecisionStatus.protected_drift
-            if drift_reason is not None
-            else BillingTreatmentDecisionStatus.effective
-        ),
-        treatment=SubscriptionBillingTreatment(arrangement.treatment),
-        arrangement_id=arrangement.id,
-        reason_code=BillingTreatmentReason(arrangement.reason_code),
-        reason=arrangement.reason,
-        starts_at=_stored_utc(arrangement.starts_at),
-        ends_at=_stored_utc(arrangement.ends_at),
-        maximum_recurring_amount=ExactAmount(
-            arrangement.maximum_recurring_amount,
-            arrangement.currency,
-            arrangement.scale,
-        ),
-        drift_reason=drift_reason,
-    )
-
-
-def approve_billing_arrangement(
-    db: Session, command: ApproveBillingArrangementCommand
-) -> BillingArrangementResult:
-    """Approve one arrangement through the module's idempotent canonical writer."""
-    _require_aware(command.approved_at, "approved_at")
-    if (
-        not command.approved_by.strip()
-        or not command.idempotency_key
-        or len(command.idempotency_key) > 255
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_approval_evidence",
-            "Approver and a bounded idempotency key are required.",
-        )
-    approval_fingerprint = _fingerprint(
-        {
-            "preview_fingerprint": command.preview_fingerprint,
-            "approved_by": command.approved_by.strip(),
-            "approved_at": command.approved_at.astimezone(UTC).isoformat(),
-            "command_id": str(command.command_id),
-            "correlation_id": str(command.correlation_id),
-        }
-    )
-    arrangement_id = uuid4()
-
-    def operation(session: Session) -> dict[str, object]:
-        preview = _preview_billing_arrangement(
-            session, command.preview, check_overlap=False
-        )
-        if preview.fingerprint != command.preview_fingerprint:
-            raise SubscriptionConflictError(
-                "billing_arrangements.stale_preview",
-                "Contract or approval evidence changed; preview the arrangement again.",
-            )
-        if _arrangement_overlap_exists(
-            session,
-            scope=command.preview.scope,
-            subscription_contract_id=preview.subscription_contract_id,
-            contract_line_key=preview.contract_line_key,
-            starts_at=preview.starts_at,
-            ends_at=preview.ends_at,
-        ):
-            raise SubscriptionConflictError(
-                "billing_arrangements.overlap",
-                "The contract line already has an overlapping billing arrangement.",
-            )
-        plane = _models(command.preview.scope)
-        session.add(
-            plane.arrangement(
-                **_scope_values(command.preview.scope),
-                id=arrangement_id,
-                subscription_contract_id=preview.subscription_contract_id,
-                contract_version_id=preview.contract_version_id,
-                contract_line_key=preview.contract_line_key,
-                offer_version_id=preview.offer_version_id,
-                treatment=preview.treatment.value,
-                reason_code=preview.reason_code.value,
-                reason=preview.reason,
-                starts_at=preview.starts_at,
-                ends_at=preview.ends_at,
-                approval_policy_reference=preview.approval_policy_reference,
-                approval_policy_version=preview.approval_policy_version,
-                approval_policy_max_days=preview.approval_policy_max_days,
-                maximum_recurring_amount=preview.maximum_recurring_amount.amount,
-                currency=preview.maximum_recurring_amount.currency,
-                scale=preview.maximum_recurring_amount.scale,
-                cadence_fingerprint=preview.cadence_fingerprint,
-                sponsor_reference=preview.sponsor_reference,
-                cost_center=preview.cost_center,
-                status=BillingTreatmentStatus.active.value,
-                approved_by=command.approved_by.strip(),
-                approved_at=command.approved_at.astimezone(UTC),
-                revoked_by=None,
-                revoked_at=None,
-                revocation_reason=None,
-                revocation_command_id=None,
-                revocation_correlation_id=None,
-                revocation_idempotency_key=None,
-                command_id=command.command_id,
-                correlation_id=command.correlation_id,
-                idempotency_key=command.idempotency_key,
-                content_digest=approval_fingerprint,
-            )
-        )
-        session.flush()
-        return {"arrangement_id": str(arrangement_id)}
-
-    try:
-        outcome = _execute_once(
-            db,
-            scope=command.preview.scope,
-            operation_scope=_ARRANGEMENT_APPROVE_SCOPE,
-            key=command.idempotency_key,
-            fingerprint=approval_fingerprint,
-            correlation_id=command.correlation_id,
-            operation=operation,
-        )
-    except IntegrityError as exc:
-        raise SubscriptionConflictError(
-            "billing_arrangements.database_conflict",
-            "Billing arrangement evidence conflicts with an existing command.",
-        ) from exc
-    stored_id = UUID(str(outcome.result["arrangement_id"]))
-    decision = resolve_billing_arrangement(
-        db,
-        scope=command.preview.scope,
-        subscription_contract_id=command.preview.subscription_contract_id,
-        contract_version_id=command.preview.contract_version_id,
-        contract_line_key=command.preview.contract_line_key,
-        effective_at=command.preview.starts_at,
-    )
-    return BillingArrangementResult(stored_id, decision, outcome.replayed)
-
-
-def revoke_billing_arrangement(
-    db: Session, command: RevokeBillingArrangementCommand
-) -> BillingArrangementRevocationResult:
-    """Prospectively restore standard billing while preserving historical grants."""
-    _require_aware(command.revoked_at, "revoked_at")
-    if (
-        not command.revoked_by.strip()
-        or not command.reason.strip()
-        or not command.idempotency_key
-        or len(command.idempotency_key) > 255
-    ):
-        raise SubscriptionDataError(
-            "billing_arrangements.invalid_revocation_evidence",
-            "Revoker, reason, and a bounded idempotency key are required.",
-        )
-    fingerprint = _fingerprint(
-        {
-            "scope": scope_segment(command.scope),
-            "arrangement_id": str(command.arrangement_id),
-            "revoked_by": command.revoked_by.strip(),
-            "revoked_at": command.revoked_at.astimezone(UTC).isoformat(),
-            "reason": command.reason.strip(),
-            "command_id": str(command.command_id),
-            "correlation_id": str(command.correlation_id),
-        }
-    )
-
-    def operation(session: Session) -> dict[str, object]:
-        plane = _models(command.scope)
-        arrangement = cast(
-            ArrangementRow | None,
-            session.execute(
-                _scoped(
-                    select(plane.arrangement)
-                    .where(plane.arrangement.id == command.arrangement_id)
-                    .with_for_update(),
-                    command.scope,
-                    plane.arrangement,
-                )
-            ).scalar_one_or_none(),
-        )
-        if arrangement is None:
-            raise SubscriptionDataError(
-                "billing_arrangements.not_found",
-                "The billing arrangement was not found.",
-            )
-        if arrangement.status == BillingTreatmentStatus.revoked.value:
-            raise SubscriptionConflictError(
-                "billing_arrangements.already_revoked",
-                "The billing arrangement was already revoked by another command.",
-            )
-        revoked_at = command.revoked_at.astimezone(UTC)
-        if revoked_at < _stored_utc(arrangement.approved_at):
-            raise SubscriptionDataError(
-                "billing_arrangements.revocation_before_approval",
-                "Revocation cannot predate approval.",
-            )
-        arrangement.status = BillingTreatmentStatus.revoked.value
-        arrangement.revoked_by = command.revoked_by.strip()
-        arrangement.revoked_at = revoked_at
-        arrangement.revocation_reason = command.reason.strip()
-        arrangement.revocation_command_id = command.command_id
-        arrangement.revocation_correlation_id = command.correlation_id
-        arrangement.revocation_idempotency_key = command.idempotency_key
-        session.flush()
-        return {"arrangement_id": str(arrangement.id)}
-
-    try:
-        outcome = _execute_once(
-            db,
-            scope=command.scope,
-            operation_scope=_ARRANGEMENT_REVOKE_SCOPE,
-            key=command.idempotency_key,
-            fingerprint=fingerprint,
-            correlation_id=command.correlation_id,
-            operation=operation,
-        )
-    except IntegrityError as exc:
-        raise SubscriptionConflictError(
-            "billing_arrangements.revocation_conflict",
-            "Revocation evidence conflicts with an existing command.",
-        ) from exc
-    return BillingArrangementRevocationResult(
-        UUID(str(outcome.result["arrangement_id"])), outcome.replayed
-    )
-
-
-def _grant_output(scope: Scope, row: GrantRow) -> NonCashGrantOutputV1:
-    return NonCashGrantOutputV1(
-        grant_id=row.id,
-        arrangement_id=row.arrangement_id,
-        scope=scope,
-        subscription_contract_id=row.subscription_contract_id,
-        contract_version_id=row.contract_version_id,
-        contract_line_key=row.contract_line_key,
-        occurrence_id=row.occurrence_id,
-        treatment=SubscriptionBillingTreatment(row.treatment),
-        reason_code=BillingTreatmentReason(row.reason_code),
-        arrangement_reason=row.arrangement_reason,
-        starts_at=_stored_utc(row.starts_at),
-        ends_at=_stored_utc(row.ends_at),
-        reference_amount=ExactAmount(row.reference_amount, row.currency, row.scale),
-        actor=row.actor,
-        reason=row.reason,
-        recorded_at=_stored_utc(row.recorded_at),
-        command_id=row.command_id,
-        correlation_id=row.correlation_id,
-        idempotency_key=row.idempotency_key,
-    )
-
-
-def record_non_cash_grant(
-    db: Session, command: RecordNonCashGrantCommand
-) -> NonCashGrantResult:
-    """Record one append-only grant against an exact positive rated occurrence."""
-    for value, field in (
-        (command.starts_at, "starts_at"),
-        (command.ends_at, "ends_at"),
-        (command.recorded_at, "recorded_at"),
-    ):
-        _require_aware(value, field)
-    if (
-        command.ends_at <= command.starts_at
-        or command.reference_amount.amount <= 0
-        or not command.actor.strip()
-        or not command.reason.strip()
-        or not command.idempotency_key
-        or len(command.idempotency_key) > 255
-    ):
-        raise SubscriptionDataError(
-            "billing_grants.invalid_evidence",
-            "A positive exact period, actor, reason, and idempotency key are required.",
-        )
-    start = command.starts_at.astimezone(UTC)
-    end = command.ends_at.astimezone(UTC)
-    plane = _models(command.scope)
-    fingerprint = _fingerprint(
-        {
-            "scope": scope_segment(command.scope),
-            "arrangement_id": str(command.arrangement_id),
-            "occurrence_id": str(command.occurrence_id),
-            "subscription_contract_id": str(command.subscription_contract_id),
-            "contract_version_id": str(command.contract_version_id),
-            "contract_line_key": str(command.contract_line_key),
-            "starts_at": start.isoformat(),
-            "ends_at": end.isoformat(),
-            "reference_amount": command.reference_amount.as_wire(),
-            "actor": command.actor.strip(),
-            "reason": command.reason.strip(),
-            "recorded_at": command.recorded_at.astimezone(UTC).isoformat(),
-            "command_id": str(command.command_id),
-            "correlation_id": str(command.correlation_id),
-        }
-    )
-    grant_id = uuid4()
-
-    def operation(session: Session) -> dict[str, object]:
-        decision = resolve_billing_arrangement(
-            session,
-            scope=command.scope,
-            subscription_contract_id=command.subscription_contract_id,
-            contract_version_id=command.contract_version_id,
-            contract_line_key=command.contract_line_key,
-            effective_at=command.starts_at,
-        )
-        if not decision.grantable or decision.arrangement_id != command.arrangement_id:
-            raise SubscriptionConflictError(
-                "billing_grants.protected_drift",
-                "Billing-treatment drift blocks grant creation.",
-            )
-        occurrence = cast(
-            OccurrenceRow | None,
-            session.execute(
-                _scoped(
-                    select(plane.occurrence).where(
-                        plane.occurrence.id == command.occurrence_id,
-                        plane.occurrence.contract_id
-                        == command.subscription_contract_id,
-                        plane.occurrence.contract_version_id
-                        == command.contract_version_id,
-                        plane.occurrence.contract_line_key == command.contract_line_key,
-                    ),
-                    command.scope,
-                    plane.occurrence,
-                )
-            ).scalar_one_or_none(),
-        )
-        if occurrence is None:
-            raise SubscriptionDataError(
-                "billing_grants.occurrence_not_found",
-                "The exact recurring charge occurrence was not found.",
-            )
-        occurrence_amount = ExactAmount(
-            occurrence.pre_tax_amount,
-            occurrence.currency,
-            occurrence.amount_scale,
-        )
-        if (
-            _stored_utc(occurrence.period_start) != start
-            or _stored_utc(occurrence.period_end) != end
-            or occurrence_amount != command.reference_amount
-        ):
-            raise SubscriptionConflictError(
-                "billing_grants.occurrence_mismatch",
-                "Grant evidence must exactly match the positive rated occurrence.",
-            )
-        arrangement = cast(
-            ArrangementRow,
-            session.execute(
-                _scoped(
-                    select(plane.arrangement).where(
-                        plane.arrangement.id == command.arrangement_id
-                    ),
-                    command.scope,
-                    plane.arrangement,
-                )
-            ).scalar_one(),
-        )
-        if (
-            start < _stored_utc(arrangement.starts_at)
-            or end > _stored_utc(arrangement.ends_at)
-            or command.reference_amount.currency != arrangement.currency
-            or command.reference_amount.scale != arrangement.scale
-            or command.reference_amount.amount > arrangement.maximum_recurring_amount
-        ):
-            raise SubscriptionConflictError(
-                "billing_grants.approval_exceeded",
-                "The rated occurrence exceeds the approved treatment boundary.",
-            )
-        session.add(
-            plane.grant(
-                **_scope_values(command.scope),
-                id=grant_id,
-                arrangement_id=arrangement.id,
-                occurrence_id=occurrence.id,
-                subscription_contract_id=command.subscription_contract_id,
-                contract_version_id=command.contract_version_id,
-                contract_line_key=command.contract_line_key,
-                treatment=arrangement.treatment,
-                reason_code=arrangement.reason_code,
-                arrangement_reason=arrangement.reason,
-                starts_at=start,
-                ends_at=end,
-                reference_amount=command.reference_amount.amount,
-                currency=command.reference_amount.currency,
-                scale=command.reference_amount.scale,
-                actor=command.actor.strip(),
-                reason=command.reason.strip(),
-                recorded_at=command.recorded_at.astimezone(UTC),
-                command_id=command.command_id,
-                correlation_id=command.correlation_id,
-                idempotency_key=command.idempotency_key,
-                content_digest=fingerprint,
-            )
-        )
-        session.flush()
-        return {"grant_id": str(grant_id)}
-
-    try:
-        outcome = _execute_once(
-            db,
-            scope=command.scope,
-            operation_scope=_GRANT_SCOPE,
-            key=command.idempotency_key,
-            fingerprint=fingerprint,
-            correlation_id=command.correlation_id,
-            operation=operation,
-        )
-    except IntegrityError as exc:
-        raise SubscriptionConflictError(
-            "billing_grants.database_conflict",
-            "Grant evidence conflicts with an existing period or command.",
-        ) from exc
-    stored_id = UUID(str(outcome.result["grant_id"]))
-    stored = cast(
-        GrantRow,
-        db.execute(
-            _scoped(
-                select(plane.grant).where(plane.grant.id == stored_id),
-                command.scope,
-                plane.grant,
-            )
-        ).scalar_one(),
-    )
-    return NonCashGrantResult(_grant_output(command.scope, stored), outcome.replayed)
-
-
 def _projection_identity(
     *,
     scope: Scope,
@@ -1777,30 +908,6 @@ def record_contract_version(
                 raise SubscriptionConflictError(
                     "contracts.non_monotonic_version",
                     "A new version must start after the current version.",
-                )
-            open_arrangement_id = session.execute(
-                _scoped(
-                    select(plane.arrangement.id)
-                    .where(
-                        plane.arrangement.subscription_contract_id == contract.id,
-                        plane.arrangement.contract_version_id == current.id,
-                        plane.arrangement.ends_at > command.starts_at,
-                        or_(
-                            plane.arrangement.revoked_at.is_(None),
-                            plane.arrangement.revoked_at > command.starts_at,
-                        ),
-                    )
-                    .limit(1)
-                    .with_for_update(),
-                    command.scope,
-                    plane.arrangement,
-                )
-            ).scalar_one_or_none()
-            if open_arrangement_id is not None:
-                raise SubscriptionConflictError(
-                    "contracts.open_billing_arrangement",
-                    "Revoke the open billing arrangement before changing "
-                    "contract terms.",
                 )
             current.ends_at = command.starts_at.astimezone(UTC)
             current.state = "superseded"
@@ -2742,7 +1849,6 @@ __all__ = [
     "OfferCatalogPrice",
     "OfferVersionSnapshot",
     "acknowledge_output",
-    "approve_billing_arrangement",
     "cadence_of",
     "effective_version_at",
     "end_contract_version",
@@ -2752,11 +1858,7 @@ __all__ = [
     "occurrences_for_contract",
     "offer_version_snapshot",
     "publish_offer_version",
-    "preview_billing_arrangement",
-    "record_non_cash_grant",
     "record_contract_version",
-    "resolve_billing_arrangement",
-    "revoke_billing_arrangement",
     "unacknowledged_outputs",
     "withdraw_offer_version",
 ]

@@ -6,7 +6,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Barrier
 
@@ -750,165 +750,6 @@ def test_effective_contract_and_emitted_occurrence_are_structurally_immutable(
     engine.dispose()
 
 
-def test_billing_grants_are_append_only_and_open_arrangements_freeze_terms(
-    subscriptions_scratch: tuple[str, str, str],
-) -> None:
-    admin_url, _, _ = subscriptions_scratch
-    _, _, occurrence_id = _run_platform_occurrence_race(admin_url)
-    engine = create_engine(admin_url)
-    arrangement_id = uuid.uuid4()
-    grant_id = uuid.uuid4()
-    with engine.begin() as conn:
-        facts = (
-            conn.execute(
-                text(
-                    "SELECT o.contract_id, o.contract_version_id, "
-                    "o.contract_line_key, l.offer_version_id, o.period_start, "
-                    "o.period_end, o.pre_tax_amount, o.currency, o.amount_scale "
-                    "FROM mod_subscriptions.platform_recurring_charge_occurrences o "
-                    "JOIN mod_subscriptions.platform_subscription_contract_lines l "
-                    "ON l.contract_version_id = o.contract_version_id "
-                    "AND l.contract_line_key = o.contract_line_key "
-                    "WHERE o.id = :occurrence_id"
-                ),
-                {"occurrence_id": occurrence_id},
-            )
-            .mappings()
-            .one()
-        )
-        conn.execute(
-            text(
-                "INSERT INTO "
-                "mod_subscriptions.platform_subscription_billing_arrangements "
-                "(id, subscription_contract_id, contract_version_id, "
-                "contract_line_key, offer_version_id, treatment, reason_code, "
-                "reason, starts_at, ends_at, approval_policy_reference, "
-                "approval_policy_version, approval_policy_max_days, "
-                "maximum_recurring_amount, currency, scale, cadence_fingerprint, "
-                "status, approved_by, approved_at, command_id, correlation_id, "
-                "idempotency_key, content_digest) VALUES "
-                "(:id, :contract_id, :version_id, :line_key, :offer_version_id, "
-                "'complimentary', 'commercial_concession', 'approved canary', "
-                ":starts_at, :ends_at, 'policy:canary', '1', 366, :amount, "
-                ":currency, :scale, :cadence, 'active', 'approver', :starts_at, "
-                ":command_id, :correlation_id, :idempotency_key, :digest)"
-            ),
-            {
-                "id": arrangement_id,
-                "contract_id": facts["contract_id"],
-                "version_id": facts["contract_version_id"],
-                "line_key": facts["contract_line_key"],
-                "offer_version_id": facts["offer_version_id"],
-                "starts_at": facts["period_start"],
-                "ends_at": facts["period_end"],
-                "amount": facts["pre_tax_amount"],
-                "currency": facts["currency"],
-                "scale": facts["amount_scale"],
-                "cadence": "d" * 64,
-                "command_id": uuid.uuid4(),
-                "correlation_id": uuid.uuid4(),
-                "idempotency_key": f"arrangement:{arrangement_id}",
-                "digest": "e" * 64,
-            },
-        )
-        conn.execute(
-            text(
-                "INSERT INTO mod_subscriptions.platform_subscription_billing_grants "
-                "(id, arrangement_id, occurrence_id, subscription_contract_id, "
-                "contract_version_id, contract_line_key, treatment, reason_code, "
-                "arrangement_reason, starts_at, ends_at, reference_amount, "
-                "currency, scale, actor, reason, recorded_at, command_id, "
-                "correlation_id, idempotency_key, content_digest) VALUES "
-                "(:id, :arrangement_id, :occurrence_id, :contract_id, :version_id, "
-                ":line_key, 'complimentary', 'commercial_concession', "
-                "'approved canary', :starts_at, :ends_at, :amount, :currency, "
-                ":scale, 'billing-owner', 'apply approved grant', :starts_at, "
-                ":command_id, :correlation_id, :idempotency_key, :digest)"
-            ),
-            {
-                "id": grant_id,
-                "arrangement_id": arrangement_id,
-                "occurrence_id": occurrence_id,
-                "contract_id": facts["contract_id"],
-                "version_id": facts["contract_version_id"],
-                "line_key": facts["contract_line_key"],
-                "starts_at": facts["period_start"],
-                "ends_at": facts["period_end"],
-                "amount": facts["pre_tax_amount"],
-                "currency": facts["currency"],
-                "scale": facts["amount_scale"],
-                "command_id": uuid.uuid4(),
-                "correlation_id": uuid.uuid4(),
-                "idempotency_key": f"grant:{grant_id}",
-                "digest": "f" * 64,
-            },
-        )
-
-    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
-        conn.execute(
-            text(
-                "UPDATE mod_subscriptions.platform_subscription_billing_grants "
-                "SET reference_amount = reference_amount + 1 WHERE id = :id"
-            ),
-            {"id": grant_id},
-        )
-    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
-        conn.execute(
-            text(
-                "DELETE FROM mod_subscriptions.platform_subscription_billing_grants "
-                "WHERE id = :id"
-            ),
-            {"id": grant_id},
-        )
-    with engine.connect() as conn, pytest.raises(DBAPIError, match="immutable"):
-        conn.execute(
-            text(
-                "UPDATE "
-                "mod_subscriptions.platform_subscription_billing_arrangements "
-                "SET maximum_recurring_amount = maximum_recurring_amount + 1 "
-                "WHERE id = :id"
-            ),
-            {"id": arrangement_id},
-        )
-    with (
-        engine.connect() as conn,
-        pytest.raises(DBAPIError, match="revoke open billing arrangement"),
-    ):
-        conn.execute(
-            text(
-                "INSERT INTO "
-                "mod_subscriptions.platform_subscription_contract_versions "
-                "(id, contract_id, version, state, source_code, source_id, "
-                "source_version, starts_at, currency, rate_basis, rate_unit, "
-                "rate_quantity, service_interval_unit, service_interval_count, "
-                "invoice_interval_unit, invoice_interval_count, collection_timing, "
-                "alignment, end_of_month_rule, timezone_name, proration_policy, "
-                "rating_policy_version, actor, reason, recorded_at, command_id, "
-                "correlation_id, idempotency_key, content_digest) "
-                "SELECT :new_id, contract_id, 2, 'effective', source_code, "
-                "source_id, source_version + 1, :starts_at, currency, rate_basis, "
-                "rate_unit, rate_quantity, service_interval_unit, "
-                "service_interval_count, invoice_interval_unit, "
-                "invoice_interval_count, collection_timing, alignment, "
-                "end_of_month_rule, timezone_name, proration_policy, "
-                "rating_policy_version, 'term-change', 'canary', :starts_at, "
-                ":command_id, :correlation_id, :idempotency_key, :digest "
-                "FROM mod_subscriptions.platform_subscription_contract_versions "
-                "WHERE id = :version_id"
-            ),
-            {
-                "new_id": uuid.uuid4(),
-                "starts_at": facts["period_start"] + timedelta(days=15),
-                "command_id": uuid.uuid4(),
-                "correlation_id": uuid.uuid4(),
-                "idempotency_key": f"contract-change:{uuid.uuid4()}",
-                "digest": "1" * 64,
-                "version_id": facts["contract_version_id"],
-            },
-        )
-    engine.dispose()
-
-
 def test_recording_a_contract_version_does_not_depend_on_autoflush(
     subscriptions_scratch: tuple[str, str, str],
 ) -> None:
@@ -1088,3 +929,553 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
         assert stored == 1
     finally:
         engine.dispose()
+
+
+# ── su_0003: complimentary / sponsored treatment, structurally ───────────────
+#
+# The parametrized RLS, tenant-column, revoke and reachability canaries above
+# already cover the four new tables, because they read `TENANT_TABLES` and
+# `PLATFORM_TABLES`. What follows proves the invariants that only exist because
+# of this slice: the mandatory end, the bounded non-cash value, append-only
+# grant evidence, frozen approval terms, and the refusal to change commercial
+# terms while an approval is open.
+
+
+def _seed_tenant_line(admin_url: str, tenant_id: uuid.UUID) -> dict[str, uuid.UUID]:
+    """Insert one published offer version, contract version, line and occurrence."""
+    ids = {
+        "offer": uuid.uuid4(),
+        "offer_version": uuid.uuid4(),
+        "contract": uuid.uuid4(),
+        "contract_version": uuid.uuid4(),
+        "line": uuid.uuid4(),
+        "line_key": uuid.uuid4(),
+        "occurrence": uuid.uuid4(),
+    }
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO mod_subscriptions.offers "
+                "(id, tenant_id, code, name, status) "
+                "VALUES (:id, :tenant, :code, 'Offer', 'published')"
+            ),
+            {
+                "id": ids["offer"],
+                "tenant": tenant_id,
+                "code": f"o-{uuid.uuid4().hex[:8]}",
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_subscriptions.offer_versions "
+                "(id, tenant_id, offer_id, version, charge_model_code, pricing_mode, "
+                "state, effective_from, source_code, source_id, source_version, "
+                "command_id, content_digest) "
+                "VALUES (:id, :tenant, :offer, 1, 'recurring_access', 'catalog_price', "
+                "'published', :start, 'seed', gen_random_uuid(), 1, "
+                "gen_random_uuid(), :digest)"
+            ),
+            {
+                "id": ids["offer_version"],
+                "tenant": tenant_id,
+                "offer": ids["offer"],
+                "start": start,
+                "digest": "b" * 64,
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_subscriptions.subscription_contracts "
+                "(id, tenant_id, source_code, source_id) "
+                "VALUES (:id, :tenant, 'seed', gen_random_uuid())"
+            ),
+            {"id": ids["contract"], "tenant": tenant_id},
+        )
+        conn.execute(
+            text(_CONTRACT_VERSION_INSERT),
+            {
+                "id": ids["contract_version"],
+                "tenant": tenant_id,
+                "contract": ids["contract"],
+                "start": start,
+                "key": f"seed-{uuid.uuid4().hex}",
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_subscriptions.subscription_contract_lines "
+                "(id, tenant_id, contract_version_id, contract_line_key, "
+                "charge_model_code, source_code, source_id, source_version, "
+                "description, product_link_ref, quantity, unit_price, currency, "
+                "scale, offer_version_id, offer_version, entitlement_codes) "
+                "VALUES (:id, :tenant, :version, :key, 'recurring_access', 'seed', "
+                "gen_random_uuid(), 1, 'Access', 'product:access', 1, 100, 'EUR', "
+                "2, :offer_version, 1, '[]'::jsonb)"
+            ),
+            {
+                "id": ids["line"],
+                "tenant": tenant_id,
+                "version": ids["contract_version"],
+                "key": ids["line_key"],
+                "offer_version": ids["offer_version"],
+            },
+        )
+        conn.execute(
+            text(_OCCURRENCE_INSERT),
+            {
+                "id": ids["occurrence"],
+                "tenant": tenant_id,
+                "contract": ids["contract"],
+                "version": ids["contract_version"],
+                "key": ids["line_key"],
+                "start": start,
+                "end": end,
+                "idempotency": f"occ-{uuid.uuid4().hex}",
+            },
+        )
+    engine.dispose()
+    return ids
+
+
+_CONTRACT_VERSION_INSERT = (
+    "INSERT INTO mod_subscriptions.subscription_contract_versions "
+    "(id, tenant_id, contract_id, version, state, source_code, source_id, "
+    "source_version, starts_at, currency, rate_basis, rate_unit, rate_quantity, "
+    "service_interval_unit, service_interval_count, invoice_interval_unit, "
+    "invoice_interval_count, collection_timing, alignment, end_of_month_rule, "
+    "timezone_name, proration_policy, rating_policy_version, actor, reason, "
+    "recorded_at, command_id, correlation_id, idempotency_key, content_digest) "
+    "VALUES (:id, :tenant, :contract, 1, 'effective', 'seed', gen_random_uuid(), 1, "
+    ":start, 'EUR', 'fixed_per_service_period', 'month', 1, 'month', 1, 'month', 1, "
+    "'advance', 'contract_anniversary', 'clamp_to_month_end', 'UTC', 'none', "
+    "'fixed.v1', 'seed', 'seed', :start, gen_random_uuid(), gen_random_uuid(), "
+    ":key, 'c0ffee')"
+)
+
+_OCCURRENCE_INSERT = (
+    "INSERT INTO mod_subscriptions.recurring_charge_occurrences "
+    "(id, tenant_id, contract_id, contract_version_id, contract_line_key, "
+    "charge_model_code, source_code, source_id, source_version, period_start, "
+    "period_end, currency, pre_tax_amount, amount_scale, rating_coverage_start, "
+    "rating_coverage_end, rating_unit_price, rating_quantity, rating_rate_basis, "
+    "rating_rate_unit, rating_rate_quantity, rating_rate_units, "
+    "rating_proration_policy, rating_proration_factor, rating_timezone_name, "
+    "rating_policy_version, offer_version_ref, request_fingerprint, "
+    "idempotency_key, generation, state, emitted_at, command_id, correlation_id) "
+    "VALUES (:id, :tenant, :contract, :version, :key, 'recurring_access', 'seed', "
+    "gen_random_uuid(), 1, :start, :end, 'EUR', 100, 2, :start, :end, 100, 1, "
+    "'fixed_per_service_period', 'month', 1, 1, 'none', 1, 'UTC', 'fixed.v1', "
+    "'offer:1', :fingerprint, :idempotency, 1, 'emitted', :start, "
+    "gen_random_uuid(), gen_random_uuid())"
+)
+
+#: The same insert as a SECOND draft version of the same contract — the only
+#: way the module can change a price, cadence or offer version at all.
+_NEXT_CONTRACT_VERSION_INSERT = _CONTRACT_VERSION_INSERT.replace(
+    ", 1, 'effective',", ", 2, 'draft',"
+)
+
+_ARRANGEMENT_INSERT = (
+    "INSERT INTO mod_subscriptions.subscription_billing_arrangements "
+    "(id, tenant_id, contract_id, authorized_contract_version_id, "
+    "authorized_offer_version_id, contract_line_key, treatment, reason_code, "
+    "reason, status, starts_at, ends_at, approval_policy_ref, "
+    "approval_policy_version, approval_policy_max_days, maximum_recurring_amount, "
+    "currency, scale, service_interval_unit, service_interval_count, approved_by, "
+    "approved_at, command_id, correlation_id, idempotency_key, command_fingerprint) "
+    "VALUES (:id, :tenant, :contract, :version, :offer_version, :key, "
+    ":treatment, 'internal_service', 'seeded approval', 'active', :start, :end, "
+    "'policy', 'v1', 366, 100, 'EUR', 2, 'month', 1, 'finance', :start, "
+    "gen_random_uuid(), gen_random_uuid(), :idempotency, :fingerprint)"
+)
+
+_GRANT_INSERT = (
+    "INSERT INTO mod_subscriptions.subscription_billing_grants "
+    "(id, tenant_id, arrangement_id, recurring_occurrence_id, contract_line_key, "
+    "treatment, reason_code, starts_at, ends_at, contracted_amount, "
+    "approved_maximum_amount, foregone_amount, currency, scale, actor, reason, "
+    "command_id, correlation_id, idempotency_key, recorded_at) "
+    "VALUES (:id, :tenant, :arrangement, :occurrence, :key, 'complimentary', "
+    "'internal_service', :start, :end, :contracted, :approved, :foregone, 'EUR', "
+    "2, 'finance', 'seeded grant', gen_random_uuid(), gen_random_uuid(), "
+    ":idempotency, :start)"
+)
+
+_START = datetime(2026, 9, 1, tzinfo=UTC)
+_END = datetime(2026, 10, 1, tzinfo=UTC)
+
+
+def _approve(conn, tenant_id: uuid.UUID, ids: dict[str, uuid.UUID]) -> uuid.UUID:
+    arrangement_id = uuid.uuid4()
+    conn.execute(
+        text(_ARRANGEMENT_INSERT),
+        {
+            "id": arrangement_id,
+            "tenant": tenant_id,
+            "contract": ids["contract"],
+            "version": ids["contract_version"],
+            "offer_version": ids["offer_version"],
+            "key": ids["line_key"],
+            "treatment": "complimentary",
+            "start": _START,
+            "end": _END,
+            "idempotency": f"arr-{uuid.uuid4().hex}",
+            "fingerprint": "d" * 64,
+        },
+    )
+    return arrangement_id
+
+
+def test_a_treatment_approved_by_one_tenant_is_invisible_to_another(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, user_url, _ = subscriptions_scratch
+    left, right = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    owner = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with owner.connect() as conn:
+        _approve(conn, left, ids)
+    owner.dispose()
+
+    right_engine = _tenant_engine(user_url, right)
+    with right_engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM "
+                    "mod_subscriptions.subscription_billing_arrangements"
+                )
+            )
+            == 0
+        )
+    right_engine.dispose()
+
+    left_engine = _tenant_engine(user_url, left)
+    with left_engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM "
+                    "mod_subscriptions.subscription_billing_arrangements"
+                )
+            )
+            == 1
+        )
+    left_engine.dispose()
+
+
+def test_an_arrangement_cannot_be_recorded_without_an_end_date(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="ends_at"):
+        conn.execute(
+            text(
+                _ARRANGEMENT_INSERT.replace(":end", "NULL").replace(
+                    ", :end,", ", NULL,"
+                )
+            ),
+            {
+                "id": uuid.uuid4(),
+                "tenant": left,
+                "contract": ids["contract"],
+                "version": ids["contract_version"],
+                "offer_version": ids["offer_version"],
+                "key": ids["line_key"],
+                "treatment": "complimentary",
+                "start": _START,
+                "idempotency": f"arr-{uuid.uuid4().hex}",
+                "fingerprint": "d" * 64,
+            },
+        )
+    engine.dispose()
+
+
+def test_standard_treatment_and_a_permanent_exemption_are_both_unrepresentable(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="nonstandard"):
+        conn.execute(
+            text(_ARRANGEMENT_INSERT),
+            {
+                "id": uuid.uuid4(),
+                "tenant": left,
+                "contract": ids["contract"],
+                "version": ids["contract_version"],
+                "offer_version": ids["offer_version"],
+                "key": ids["line_key"],
+                "treatment": "standard",
+                "start": _START,
+                "end": _END,
+                "idempotency": f"arr-{uuid.uuid4().hex}",
+                "fingerprint": "d" * 64,
+            },
+        )
+    engine.dispose()
+
+
+def test_approved_arrangement_terms_are_frozen_and_only_revocation_updates(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        arrangement_id = _approve(conn, left, ids)
+        with pytest.raises(DBAPIError, match="terms are immutable"):
+            conn.execute(
+                text(
+                    "UPDATE mod_subscriptions.subscription_billing_arrangements "
+                    "SET maximum_recurring_amount = 1 WHERE id = :id"
+                ),
+                {"id": arrangement_id},
+            )
+        with pytest.raises(DBAPIError, match="not a valid revocation"):
+            conn.execute(
+                text(
+                    "UPDATE mod_subscriptions.subscription_billing_arrangements "
+                    "SET status = 'revoked' WHERE id = :id"
+                ),
+                {"id": arrangement_id},
+            )
+        with pytest.raises(DBAPIError, match="cannot be deleted"):
+            conn.execute(
+                text(
+                    "DELETE FROM mod_subscriptions.subscription_billing_arrangements "
+                    "WHERE id = :id"
+                ),
+                {"id": arrangement_id},
+            )
+        conn.execute(
+            text(
+                "UPDATE mod_subscriptions.subscription_billing_arrangements "
+                "SET status = 'revoked', revoked_by = 'finance', revoked_at = now(), "
+                "revocation_reason = 'migrated to a paid plan', "
+                "revocation_command_id = gen_random_uuid(), "
+                "revocation_correlation_id = gen_random_uuid(), "
+                "revocation_idempotency_key = 'rev-1' WHERE id = :id"
+            ),
+            {"id": arrangement_id},
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT status FROM "
+                    "mod_subscriptions.subscription_billing_arrangements "
+                    "WHERE id = :id"
+                ),
+                {"id": arrangement_id},
+            )
+            == "revoked"
+        )
+    engine.dispose()
+
+
+def test_two_open_arrangements_cannot_overlap_on_one_contract_line(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        _approve(conn, left, ids)
+        with pytest.raises(DBAPIError, match="overlap"):
+            conn.execute(
+                text(_ARRANGEMENT_INSERT),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": left,
+                    "contract": ids["contract"],
+                    "version": ids["contract_version"],
+                    "offer_version": ids["offer_version"],
+                    "key": ids["line_key"],
+                    "treatment": "sponsored",
+                    "start": datetime(2026, 9, 15, tzinfo=UTC),
+                    "end": datetime(2026, 11, 1, tzinfo=UTC),
+                    "idempotency": f"arr-{uuid.uuid4().hex}",
+                    "fingerprint": "e" * 64,
+                },
+            )
+    engine.dispose()
+
+
+#: Every way a grant could hide what was really given away:
+#: a zero contracted price conceals the waiver; a zero grant records nothing;
+#: a grant above the contracted amount invents value; and a grant above the
+#: approved ceiling escapes the review the approval exists to force.
+_UNBOUNDED_GRANTS = [
+    (0, 100, 100),
+    (100, 100, 0),
+    (100, 100, 101),
+    (100, 40, 60),
+]
+
+
+@pytest.mark.parametrize(("contracted", "approved", "foregone"), _UNBOUNDED_GRANTS)
+def test_the_grant_check_refuses_every_way_to_hide_foregone_revenue(
+    subscriptions_scratch: tuple[str, str, str],
+    contracted: int,
+    approved: int,
+    foregone: int,
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        arrangement_id = _approve(conn, left, ids)
+        with pytest.raises(DBAPIError, match="bounded_non_cash_value"):
+            conn.execute(
+                text(_GRANT_INSERT),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": left,
+                    "arrangement": arrangement_id,
+                    "occurrence": ids["occurrence"],
+                    "key": ids["line_key"],
+                    "start": _START,
+                    "end": _END,
+                    "contracted": contracted,
+                    "approved": approved,
+                    "foregone": foregone,
+                    "idempotency": f"grant-{uuid.uuid4().hex}",
+                },
+            )
+    engine.dispose()
+
+
+def test_a_recorded_grant_is_append_only(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    grant_id = uuid.uuid4()
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        arrangement_id = _approve(conn, left, ids)
+        conn.execute(
+            text(_GRANT_INSERT),
+            {
+                "id": grant_id,
+                "tenant": left,
+                "arrangement": arrangement_id,
+                "occurrence": ids["occurrence"],
+                "key": ids["line_key"],
+                "start": _START,
+                "end": _END,
+                "contracted": 100,
+                "approved": 100,
+                "foregone": 100,
+                "idempotency": f"grant-{uuid.uuid4().hex}",
+            },
+        )
+        with pytest.raises(DBAPIError, match="immutable"):
+            conn.execute(
+                text(
+                    "UPDATE mod_subscriptions.subscription_billing_grants "
+                    "SET foregone_amount = 1 WHERE id = :id"
+                ),
+                {"id": grant_id},
+            )
+        with pytest.raises(DBAPIError, match="immutable"):
+            conn.execute(
+                text(
+                    "DELETE FROM mod_subscriptions.subscription_billing_grants "
+                    "WHERE id = :id"
+                ),
+                {"id": grant_id},
+            )
+    engine.dispose()
+
+
+def test_commercial_terms_cannot_change_while_a_treatment_is_open(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    """The product-neutral port of Sub's `protect_..._treatment_terms` trigger.
+
+    A new contract version is the ONLY way the module can change a price,
+    cadence or offer version, because `su_0001` already freezes a version's
+    content. So refusing that insert while an approval is open is exactly Sub's
+    invariant: revoke, change the contract, and approve again.
+    """
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        arrangement_id = _approve(conn, left, ids)
+        with pytest.raises(DBAPIError, match="revoke the open billing treatment"):
+            conn.execute(
+                text(_NEXT_CONTRACT_VERSION_INSERT),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": left,
+                    "contract": ids["contract"],
+                    "start": datetime(2026, 10, 1, tzinfo=UTC),
+                    "key": f"seed-{uuid.uuid4().hex}",
+                },
+            )
+        conn.execute(
+            text(
+                "UPDATE mod_subscriptions.subscription_billing_arrangements "
+                "SET status = 'revoked', revoked_by = 'finance', revoked_at = now(), "
+                "revocation_reason = 'plan change', "
+                "revocation_command_id = gen_random_uuid(), "
+                "revocation_correlation_id = gen_random_uuid(), "
+                "revocation_idempotency_key = 'rev-2' WHERE id = :id"
+            ),
+            {"id": arrangement_id},
+        )
+        conn.execute(
+            text(_NEXT_CONTRACT_VERSION_INSERT),
+            {
+                "id": uuid.uuid4(),
+                "tenant": left,
+                "contract": ids["contract"],
+                "start": datetime(2026, 10, 1, tzinfo=UTC),
+                "key": f"seed-{uuid.uuid4().hex}",
+            },
+        )
+    engine.dispose()
+
+
+def test_the_term_freeze_canary_is_sensitive_to_the_trigger(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    """A check over a table nobody can write to would pass for the wrong reason."""
+    admin_url, _, _ = subscriptions_scratch
+    left, _ = _make_tenants(admin_url)
+    ids = _seed_tenant_line(admin_url, left)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        _approve(conn, left, ids)
+        conn.execute(
+            text(
+                "DROP TRIGGER contract_versions_treatment_term_freeze "
+                "ON mod_subscriptions.subscription_contract_versions"
+            )
+        )
+        conn.execute(
+            text(_NEXT_CONTRACT_VERSION_INSERT),
+            {
+                "id": uuid.uuid4(),
+                "tenant": left,
+                "contract": ids["contract"],
+                "start": datetime(2026, 10, 1, tzinfo=UTC),
+                "key": f"seed-{uuid.uuid4().hex}",
+            },
+        )
+    engine.dispose()
