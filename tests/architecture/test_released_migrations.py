@@ -208,6 +208,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-service-catalog"
         / "src/dotmac_service_catalog/migrations/versions"
     ),
+    "dotmac-customers": (
+        REPO_ROOT
+        / "packages/dotmac-customers"
+        / "src/dotmac_customers/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -236,6 +241,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-fulfillment": "fu_*.py",
     "dotmac-tax": "tx_*.py",
     "dotmac-service-catalog": "sc_*.py",
+    "dotmac-customers": "cu_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -261,6 +267,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-fulfillment": "dotmac-fulfillment-v",
     "dotmac-tax": "dotmac-tax-v",
     "dotmac-service-catalog": "dotmac-service-catalog-v",
+    "dotmac-customers": "dotmac-customers-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1145,6 +1152,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-customers ──
+    "dotmac-customers-v0.1.0a1": (
+        "dotmac-customers",
+        "2e2e0eff",
+        {
+            "cu_0001_customer_accounts.py": (
+                "0a6ba209d80c4dabf40e40dd4023b1d08803c92ed904fde95869ad9e480256c9"
+            ),
+        },
+    ),
 }
 
 
@@ -1231,6 +1248,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),
+    "dotmac-customers": frozenset(),
 }
 
 
