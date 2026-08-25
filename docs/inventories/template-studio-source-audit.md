@@ -19,6 +19,14 @@ same-contract, named-owner and cutover gate still applies.
 scope, and the communication capability map)". This document is the evidence; the
 ADR is the decision. Where they disagree, the ADR wins and this file is stale.
 
+> **Implementation follow-through — 2026-08-18.** This document preserves the
+> 2026-08-10 comparison. The notification-only outcome has since been
+> implemented: 0.2.0a1 ported Sub's single-brace renderer with its seven parity
+> tests, and 0.2.0a2 added `(slug, channel)` upsert seeding that never clobbers
+> an existing row and derives defaults from executable `TemplateSeed`
+> declarations. The dossier is therefore `audit-complete`, with zero contract
+> consumers. No ERP or Sub cutover is claimed.
+
 ## Method — what product-first does and does not decide
 
 Product-first extraction is an **implementation-sourcing** rule: when the

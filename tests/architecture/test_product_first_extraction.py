@@ -119,7 +119,6 @@ PRE_RULE_DEBT = {
     # scope at deletion time: the evidence covered tokens and compiled assets.
     # The component slice later reached reuse-proven independently through ERP
     # and Sub; that strengthens the dossier and does not revive this exemption.
-    "dotmac-template-studio": "audit-required",
 }
 
 REQUIRED_TEXT_FIELDS = {
@@ -635,7 +634,13 @@ def test_missing_product_test_proof_is_rejected() -> None:
 def test_a_new_package_cannot_hide_behind_audit_required() -> None:
     """Sensitivity proof: unresolved status is closed debt, not an entry mode."""
     dossier = _load_toml(PACKAGES_DIR / "dotmac-template-studio/EXTRACTION.toml")
-    dossier["package"] = "dotmac-new-module"
+    dossier.update(
+        {
+            "package": "dotmac-new-module",
+            "status": "audit-required",
+            "source_mode": "unresolved",
+        }
+    )
 
     with pytest.raises(ExtractionDossierError, match="PRE_RULE_DEBT"):
         _validate_dossier(

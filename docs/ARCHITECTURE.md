@@ -251,16 +251,18 @@ are the extraction source, product-specific dependencies become typed seams,
 and the first product cutover retires the local owner.
 
 As built, every distribution under `packages/` now carries a machine-checked
-`EXTRACTION.toml` dossier. The non-growing debt map is explicit: the kernel and
-UI package predate the dossier rule, while `dotmac-template-studio` remains
-`audit-required`. Its audit RAN on 2026-08-10
+`EXTRACTION.toml` dossier. The non-growing debt map is explicit: only the kernel
+predates the package-level dossier rule. Template Studio's audit ran on
+2026-08-10
 ([`template-studio-source-audit.md`](inventories/template-studio-source-audit.md))
 and found that ERP's document-template stack and Sub's notification-template
 stack are not one contract: the package's `kind` merge was disqualified, Sub was
 selected as the source for the notification half, and the capability was mapped
-to six owners of which this package is one (ADR-0006 § 5a–5c). The status stays
-`audit-required` because approval needs two contract consumers, which an audit
-cannot produce. The evidence index is
+to six owners of which this package is one (ADR-0006 § 5a–5c). The narrowed
+single-brace renderer, its seven Sub parity tests, and Sub-derived
+upsert-by-identity/never-clobber seeding now ship, so its evidence status is
+`audit-complete`. That says the unit and source are proven; it says no product
+has adopted it. The evidence index is
 [`module-extraction-sources.md`](inventories/module-extraction-sources.md), and
 `tests/architecture/test_product_first_extraction.py` prevents a new package
 from entering with the same unresolved status.
@@ -379,10 +381,11 @@ packages/dotmac-ui/              the design-system package (distribution
                  build (INTERNAL — the deterministic asset generator),
                  static/dotmac-ui/  the COMMITTED compiled stylesheet + manifest
 packages/dotmac-template-studio/ the first optional stateful module (distribution
-  pyproject.toml                 dotmac-template-studio; audit-required until
-  EXTRACTION.toml                two contract consumers exist — ADR-0006 § 5b)
+  pyproject.toml                 dotmac-template-studio; audit-complete with
+  EXTRACTION.toml                zero contract consumers — ADR-0006 § 5b)
   src/dotmac_template_studio/    module manifest, service, API/web adapters,
-                 package templates, models, and its own `ts` Alembic lineage
+                 product-declared seeding, package templates, models, and its
+                 own `ts` Alembic lineage with a public `versions_dir()` locator
 packages/dotmac-application-directory/ a tenant's connected-application
   pyproject.toml                 portfolio, and the permanent owner of the
   EXTRACTION.toml                `ApplicationDescriptor` contract (ADR-0021 §4).

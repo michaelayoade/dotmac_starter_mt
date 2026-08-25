@@ -26,6 +26,17 @@ revision (ADR-0006 D1 amendment).
 
 ## Unreleased
 
+### Readiness
+
+- The product-first dossier now records the completed notification renderer and
+  seeding extraction as `audit-complete`. This is readiness evidence, not an
+  adoption claim: ERP and Sub remain candidates and neither has cut over.
+- Add the fleet-standard `versions_dir()` lineage locator from both
+  `dotmac_template_studio.migrations` and the top-level package. The original
+  `migrations_dir()` remains a compatibility alias.
+- Correct `dotmac_template_studio.__version__` from stale `0.2.0a2` to the
+  distribution and manifest's declared `0.2.0a3`.
+
 ## 0.2.0a2 — 2026-08-10
 
 Seeding — the gap the source audit found and named Sub's implementation as the

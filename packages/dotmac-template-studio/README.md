@@ -95,7 +95,11 @@ enforceable across repositories rather than a convention each product re-states.
 ## Its public surface
 
 `module`, `RenderContext`, `register_contexts()`, `registered_contexts()`,
-`service`, `template_dir()`, `migrations_dir()`, `__version__`.
+`service`, `template_dir()`, `versions_dir()`, `__version__`.
+
+`migrations_dir()` remains an alias for the original unpublished surface. New
+assemblies use `versions_dir()`, the common locator contract for every
+installable module lineage.
 
 Do **not** import `dotmac_template_studio.models` and query it. The tables are an
 implementation detail behind `service`; reaching past it re-creates the

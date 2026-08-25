@@ -29,7 +29,7 @@ and may change without a contract bump.
   registers no context can create no template.
 - `template_dir()` — the packaged Jinja directory for
   `ProductAssemblySpec.packaged_template_dirs`.
-- `migrations_dir()` — the packaged Alembic version location for the assembly's
+- `versions_dir()` — the packaged Alembic version location for the assembly's
   `version_locations`.
 - `service` — the module's own logic, for a product that wants to render a
   template from its own code rather than over HTTP. This is the SUPPORTED way to
@@ -44,8 +44,6 @@ parallel-writer problem the source-of-truth standard exists to prevent.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dotmac_template_studio import service
 from dotmac_template_studio.contexts import (
     RenderContext,
@@ -53,6 +51,7 @@ from dotmac_template_studio.contexts import (
     registered_contexts,
 )
 from dotmac_template_studio.manifest import module
+from dotmac_template_studio.migrations import versions_dir
 from dotmac_template_studio.seeding import (
     SeedOutcome,
     TemplateSeed,
@@ -60,22 +59,14 @@ from dotmac_template_studio.seeding import (
 )
 from dotmac_template_studio.web import template_dir
 
-_PKG_DIR = Path(__file__).resolve().parent
-
-# 0.2.0a1, not 0.1.0a2: § 5b is a BREAKING change to every part of the surface —
+# 0.2.0a1, not 0.1.0a2: § 5b was a BREAKING change to every part of the surface —
 # `kind` is gone, `channel` and `context` are required, and the render route
 # moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
-__version__ = "0.2.0a2"
+__version__ = "0.2.0a3"
 
-
-def migrations_dir() -> Path:
-    """This module's Alembic version location.
-
-    An assembly appends this to `version_locations` — one of exactly two edits
-    that install a module's migrations, the other being its ledger row (which
-    ships in the kernel). Resolved by package path so it works installed.
-    """
-    return _PKG_DIR / "migrations" / "versions"
+# Compatibility for the original, unpublished surface. New consumers use the
+# fleet-standard name; keeping one alias avoids two path implementations.
+migrations_dir = versions_dir
 
 
 __all__ = [
@@ -90,4 +81,5 @@ __all__ = [
     "registered_contexts",
     "service",
     "template_dir",
+    "versions_dir",
 ]

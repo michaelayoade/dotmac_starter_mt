@@ -10,6 +10,7 @@ mode is an assertion, not a guarantee.
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import dotmac_template_studio as template_studio
@@ -41,6 +42,26 @@ def test_the_manifest_matches_its_ledger_allocation() -> None:
 def test_the_registry_accepts_the_declared_module() -> None:
     registry = NamespaceRegistry.from_manifests([MODULE])
     assert LEDGER_ROW in registry.owners()
+
+
+def test_dunder_version_matches_the_distribution_and_manifest() -> None:
+    """The package is not release-allowlisted yet, so the generic releasable-
+    module guard cannot see it. Its three version surfaces must still agree
+    before a future adopter can receive an honest wheel and inventory row.
+    """
+    declared = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-template-studio/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    assert template_studio.__version__ == declared, (
+        f"dotmac_template_studio.__version__ is "
+        f"{template_studio.__version__!r} but the distribution declares "
+        f"{declared!r}"
+    )
+    assert (
+        MODULE.version == declared
+    ), f"manifest version {MODULE.version!r} != distribution {declared!r}"
 
 
 def test_a_module_cannot_invent_an_unallocated_namespace() -> None:

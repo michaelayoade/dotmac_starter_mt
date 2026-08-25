@@ -1,8 +1,8 @@
 schema_version = 1
 package = "dotmac-template-studio"
 classification = "optional-module"
-status = "audit-required"
-source_mode = "unresolved"
+status = "audit-complete"
+source_mode = "product-first"
 owner = "Dotmac template capability"
 # The 2026-08-10 audit found the claimed two-kind contract does not hold: ERP
 # documents and Sub notifications disagree on placeholder syntax, engine class,
@@ -20,6 +20,7 @@ source_paths = [
   "dotmac_sub:app/models/notification.py",
   "dotmac_sub:app/services/web_notifications.py",
   "dotmac_sub:app/services/notification_template_renderer.py",
+  "dotmac_sub:app/services/settings_seed.py",
   "dotmac_starter_mt:packages/dotmac-template-studio/src/dotmac_template_studio",
 ]
 preserved_tests = [
@@ -34,6 +35,7 @@ preserved_tests = [
   # (ADR-0006 5b). The header of that file records what changed in the port and
   # why each change is faithful rather than a weakening.
   "dotmac_starter_mt:tests/unit/test_template_studio_renderer.py",
+  "dotmac_starter_mt:tests/unit/test_template_studio_seeding.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
@@ -41,7 +43,7 @@ inventory_evidence = [
   "docs/inventories/module-extraction-sources.md",
   "docs/inventories/template-studio-source-audit.md",
 ]
-first_cutover = "Sub, on the notification contract only, once the renderer is re-based per ADR-0006 5b. The package cannot receive Sub's rows as built: its double-brace substitution syntax is the syntax Sub rejects at save time after it leaked a literal placeholder to customers."
-shadow_and_drift = "Sub's 7 notification_template_renderer tests are the parity proof; shadow rendering against the live single-brace renderer is required before Sub retires its local writer."
-next_action = "ADR-0006 5b IMPLEMENTED in 0.2.0a1 (2026-08-10): kind=document dropped, renderer re-based on Sub's single-brace allowlisted contract with its 7 tests ported, identity moved to (tenant, slug, channel), RenderContext registry added, migration ts_0002. Remaining to leave PRE_RULE_DEBT and reach `adopted`: add the seeding mechanism (Sub's upsert-by-identity, never-clobber, derived-from-executable-spec), then cut Sub over and retire its local renderer — that cutover is the transition. `reuse-proven` follows when a second consumer moves onto an exact pin. Out of this package by ruling (5c): consent/suppression, channel policy, delivery/outbox and document generation are four separate foundation owners, each needing its own dossier, with consent sequenced before delivery. Do not absorb them here."
+first_cutover = "Sub, on the notification contract only, in a later cohort cutover. The module now carries Sub's single-brace renderer and its upsert-by-(slug, channel), never-clobber seeding contract; Sub remains authoritative until an exact released pin passes shadow rendering and its local renderer and seeder are retired together."
+shadow_and_drift = "Sub's 7 notification_template_renderer tests and Starter's seeding tests are the behavior parity proof. Before authority moves, shadow-render the same live contexts and verify every executable Sub seed maps to one (slug, channel) declaration without changing operator-edited rows."
+next_action = "AUDIT-COMPLETE, NOT RELEASED OR ADOPTED: the 2026-08-10 source audit selected Sub's notification contract; 0.2.0a1 ported the single-brace renderer and seven parity tests, and 0.2.0a2 added upsert-by-identity, never-clobber seeding derived from executable TemplateSeed declarations. Keep the package unreleased until the deferred ERP-module cohort has a cutover window. Before allowlisting, retire the asserted no-DATABASE_URL import exemption by making the kernel engine lazy; a configured-DSN wheel smoke passes, but the standard release verifier intentionally imports with no database configuration. Then publish the exact reviewed version just in time, shadow-render Sub, seed without clobbering edits, switch authority once, and retire Sub's local renderer and seeder in that cutover. `adopted` is earned only then; `reuse-proven` follows after a second real consumer. Consent/suppression, channel policy, delivery/outbox and document generation remain separate owners under ADR-0006 5c and must not be absorbed here."
 local_copy_retirement = "The selected source product must consume the released module and retire or gate its local writer before a second product cutover."
