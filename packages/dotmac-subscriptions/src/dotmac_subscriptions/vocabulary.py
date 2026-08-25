@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from dotmac_kernel.modules import AnyManifest
@@ -65,7 +65,14 @@ class SubscriptionVocabularyRegistry:
 
     charge_models: dict[str, str]
     obligation_sources: dict[str, str]
-    billing_treatment_reasons: dict[str, str]
+    #: DEFAULTED, not required. `0.1.0a2` published this dataclass with exactly
+    #: two fields, so `SubscriptionVocabularyRegistry(charge_models,
+    #: obligation_sources)` is a released construction that must keep working on
+    #: upgrade to `a3`. A registry built that way simply declares no treatment
+    #: reasons, and `require_billing_treatment_reason` refuses every code —
+    #: which is the correct answer for a caller that never opted into
+    #: treatments. `from_manifests` is the way to get the seven ported reasons.
+    billing_treatment_reasons: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_manifests(

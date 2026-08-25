@@ -941,6 +941,26 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
 # terms while an approval is open.
 
 
+#: Fixture-only fingerprints for the direct seed inserts below.
+#:
+#: These canaries deliberately write rows as `app_admin` in raw SQL rather than
+#: through `preview` + `approve`, because most of them exist to attempt a row
+#: the SERVICE would refuse — `treatment = 'standard'`, a NULL `ends_at`, an
+#: overlapping arrangement, a grant above its ceiling — and prove the DATABASE
+#: refuses it too. Going through the service could never reach those inserts.
+#:
+#: Supplying the fingerprint explicitly is therefore right, and is what the
+#: pre-existing occurrence canary in this file already does. Nothing here
+#: asserts on a fingerprint: `command_fingerprint` is the evidence the SERVICE
+#: stale-preview guard compares, and that guard is proved where it lives, in
+#: `tests/unit/test_subscriptions_treatments.py`. What must NOT happen is a
+#: `server_default` on the column to make a missing value disappear — a
+#: defaulted fingerprint is a fabricated one, and it would let a real approval
+#: be stored with no evidence of the preview it confirmed.
+_SEED_FINGERPRINT = "c" * 64
+_SEED_ARRANGEMENT_FINGERPRINT = "d" * 64
+
+
 def _seed_tenant_line(admin_url: str, tenant_id: uuid.UUID) -> dict[str, uuid.UUID]:
     """Insert one published offer version, contract version, line and occurrence."""
     ids = {
@@ -1034,6 +1054,7 @@ def _seed_tenant_line(admin_url: str, tenant_id: uuid.UUID) -> dict[str, uuid.UU
                 "start": start,
                 "end": end,
                 "idempotency": f"occ-{uuid.uuid4().hex}",
+                "fingerprint": _SEED_FINGERPRINT,
             },
         )
     engine.dispose()
@@ -1123,7 +1144,7 @@ def _approve(conn, tenant_id: uuid.UUID, ids: dict[str, uuid.UUID]) -> uuid.UUID
             "start": _START,
             "end": _END,
             "idempotency": f"arr-{uuid.uuid4().hex}",
-            "fingerprint": "d" * 64,
+            "fingerprint": _SEED_ARRANGEMENT_FINGERPRINT,
         },
     )
     return arrangement_id
@@ -1191,7 +1212,7 @@ def test_an_arrangement_cannot_be_recorded_without_an_end_date(
                 "treatment": "complimentary",
                 "start": _START,
                 "idempotency": f"arr-{uuid.uuid4().hex}",
-                "fingerprint": "d" * 64,
+                "fingerprint": _SEED_ARRANGEMENT_FINGERPRINT,
             },
         )
     engine.dispose()
@@ -1218,7 +1239,7 @@ def test_standard_treatment_and_a_permanent_exemption_are_both_unrepresentable(
                 "start": _START,
                 "end": _END,
                 "idempotency": f"arr-{uuid.uuid4().hex}",
-                "fingerprint": "d" * 64,
+                "fingerprint": _SEED_ARRANGEMENT_FINGERPRINT,
             },
         )
     engine.dispose()
