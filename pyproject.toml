@@ -83,6 +83,12 @@ dotmac-integration = { path = "packages/dotmac-integration", develop = true }
 # composed first by Sub and then by Backoffice; the reference assembly does not
 # install its lineage or import it from `app`.
 dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
+# Optional tenant financial owners extracted product-first from ERP. The
+# reference assembly builds and proves them but deliberately composes none of
+# their lineages; authority moves only through each dossier's sealed cutover.
+dotmac-banking = { path = "packages/dotmac-banking", develop = true }
+dotmac-tax = { path = "packages/dotmac-tax", develop = true }
+dotmac-payroll = { path = "packages/dotmac-payroll", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -161,6 +167,9 @@ module = [
     "dotmac_imports.*",
     "dotmac_integration.*",
     "dotmac_campaigns.*",
+    "dotmac_banking.*",
+    "dotmac_tax.*",
+    "dotmac_payroll.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -218,6 +227,9 @@ root_packages = [
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
     "dotmac_campaigns",
+    "dotmac_banking",
+    "dotmac_tax",
+    "dotmac_payroll",
 ]
 
 [[tool.importlinter.contracts]]
@@ -280,6 +292,9 @@ source_modules = [
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_banking",
+    "dotmac_tax",
+    "dotmac_payroll",
 ]
 forbidden_modules = ["app"]
 
@@ -324,6 +339,9 @@ modules = [
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_banking",
+    "dotmac_tax",
+    "dotmac_payroll",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and

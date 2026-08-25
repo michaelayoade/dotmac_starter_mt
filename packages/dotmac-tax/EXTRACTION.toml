@@ -1,0 +1,28 @@
+schema_version = 1
+package = "dotmac-tax"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Tenant tax policy data, effective-dated determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence"
+contract = "Configure authorities, jurisdictions, tax codes, effective rules and progressive bands; determine tax from typed source facts; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport."
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_backoffice", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/models/finance/tax",
+  "dotmac_erp:app/services/finance/tax",
+  "dotmac_erp:app/services/finance/reporting",
+  "dotmac_sub:app/services/tax_accounting.py",
+  "dotmac_starter_mt:packages/dotmac-tax/src/dotmac_tax/service.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_tax_service.py",
+  "dotmac_starter_mt:tests/architecture/test_tax_module.py",
+  "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_backoffice"]
+composition_boundary = "Applications submit typed, deduplicated source facts and consume determinations through local orchestration. Tax imports no billing, payroll, banking or accounting sibling. Official authority APIs and identity validation are Integrator/product adapters; accounting consequences use opaque references outside the module."
+inventory_evidence = ["docs/inventories/tax-sources.md"]
+first_cutover = "ERP is the qualifying policy/reporting source and first decision owner to retire after shared accounting exists. Sub then supplies its billing tax and withholding facts through a versioned product API/outbox contract without losing its operational source-fact ownership. Backoffice is a later exact-pin consumer. No package or table creation is a cutover."
+shadow_and_drift = "Replay source facts against both engines and compare selected rule/version, bases, output/recoverable amounts, configured report boxes, payable totals, obligations and return transitions. Any rule ambiguity or source-version mismatch fails closed; shadow writes neither owner."
+local_copy_retirement = "Seal one policy/determination/reporting writer switch, then remove ERP's fixed TaxType/rate/calendar/report-format decisions and direct filing lifecycle writers. Product source-fact writers remain only for facts they own; country/provider transports remain adapters. No fallback calculator or dual return ledger survives."
+next_action = "Validate policy/accounting seams with finance and legal owners, keep statutory values in governed tenant data, and defer release/composition until the GL dependency plus ERP cutover contract exist. Rebase the provisional kernel allocation/version against concurrent alpha-train work before integration."

@@ -624,6 +624,31 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# Three independent tenant-only financial owners. Their product-first audits
+# keep observations/decisions distinct and use opaque application references at
+# every cross-domain seam. These rows allocate physical identity only: no
+# module is composed, and no ERP authority moves, merely because a row exists.
+BANKING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="banking",
+    prefix="bk",
+    branch_label="banking",
+    db_schema=module_schema("banking"),
+)
+
+TAX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="tax",
+    prefix="tx",
+    branch_label="tax",
+    db_schema=module_schema("tax"),
+)
+
+PAYROLL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payroll",
+    prefix="py",
+    branch_label="payroll",
+    db_schema=module_schema("payroll"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +664,9 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    BANKING_MIGRATION_OWNER,
+    TAX_MIGRATION_OWNER,
+    PAYROLL_MIGRATION_OWNER,
 )
 
 
@@ -972,6 +1000,7 @@ __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "BANKING_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
@@ -983,8 +1012,10 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "PAYROLL_MIGRATION_OWNER",
     "PEOPLE_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
+    "TAX_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
     "MODULE_SCHEMA_PREFIX",

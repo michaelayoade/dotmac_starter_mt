@@ -47,6 +47,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
+| [`dotmac-banking`](../packages/dotmac-banking/README.md) | optional module | [`audit-complete`](../packages/dotmac-banking/EXTRACTION.toml) | [tenant · `mod_banking`](../packages/dotmac-banking/src/dotmac_banking/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_backoffice`, `dotmac_erp` |
 | [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice`, `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
 | [`dotmac-durable-timers`](../packages/dotmac-durable-timers/README.md) | optional module | [`audit-complete`](../packages/dotmac-durable-timers/EXTRACTION.toml) | [tenant+platform · `mod_timers`](../packages/dotmac-durable-timers/src/dotmac_durable_timers/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a72` | — | `dotmac_crm`, `dotmac_sub`, `dotmac_vendor_control_plane` |
@@ -54,10 +55,12 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a9` | `>=0.1.0a68` | `dotmac_integrator` | — |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a72` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a73` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-payroll`](../packages/dotmac-payroll/README.md) | optional module | [`audit-complete`](../packages/dotmac-payroll/EXTRACTION.toml) | [tenant · `mod_payroll`](../packages/dotmac-payroll/src/dotmac_payroll/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_backoffice`, `dotmac_erp` |
 | [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-tax`](../packages/dotmac-tax/README.md) | optional module | [`audit-complete`](../packages/dotmac-tax/EXTRACTION.toml) | [tenant · `mod_tax`](../packages/dotmac-tax/src/dotmac_tax/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_backoffice`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
@@ -91,6 +94,14 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-auth-oidc/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_workspace`.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_workspace`.
+
+### [`dotmac-banking`](../packages/dotmac-banking/README.md)
+
+- **Owner:** Tenant bank-account masters, statement and cash observations, configurable matching decisions, and reconciliation evidence
+- **Contract:** Configure bank institutions and accounts against opaque cash-account references; record source-versioned statement lines and cash-account observations; propose matches from tenant-authored policy; accept exact allocations; and prepare/approve immutable reconciliation snapshots. NOT provider connectivity, credentials, polling, bank-specific formats, payment meaning, collection-account routing, GL accounts, journal entries, fiscal periods, or cash-ledger balances.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-banking/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_erp`.
 
 ### [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md)
 
@@ -164,6 +175,14 @@ and the next gate.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
+### [`dotmac-payroll`](../packages/dotmac-payroll/README.md)
+
+- **Owner:** Tenant payroll component policy, immutable structure revisions, employee calculation evidence, and employee/external liabilities
+- **Contract:** Configure component masters and typed structure rules; assign effective revisions to opaque employee references; calculate source-evidenced gross, deductions, net pay and employer liabilities; enforce run separation of duties; materialize liabilities; and record settlement observations. NOT employee identity/lifecycle, compensation authority, time/attendance, leave, statutory tax policy, bank/payment execution, GL accounts, journal entries, fiscal periods, provider exports, or remittance transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-payroll/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_erp`.
+
 ### [`dotmac-people`](../packages/dotmac-people/README.md)
 
 - **Owner:** Tenant employment directory, positions, temporal assignments, and date-aware reporting resolution
@@ -179,6 +198,14 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-release-catalog/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
 - **Candidate consumers:** —.
+
+### [`dotmac-tax`](../packages/dotmac-tax/README.md)
+
+- **Owner:** Tenant tax policy data, effective-dated determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence
+- **Contract:** Configure authorities, jurisdictions, tax codes, effective rules and progressive bands; determine tax from typed source facts; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-tax/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md)
 

@@ -1,0 +1,29 @@
+schema_version = 1
+package = "dotmac-banking"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Tenant bank-account masters, statement and cash observations, configurable matching decisions, and reconciliation evidence"
+contract = "Configure bank institutions and accounts against opaque cash-account references; record source-versioned statement lines and cash-account observations; propose matches from tenant-authored policy; accept exact allocations; and prepare/approve immutable reconciliation snapshots. NOT provider connectivity, credentials, polling, bank-specific formats, payment meaning, collection-account routing, GL accounts, journal entries, fiscal periods, or cash-ledger balances."
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_backoffice", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/models/finance/banking",
+  "dotmac_erp:app/services/finance/banking",
+  "dotmac_erp:app/schemas/finance/banking.py",
+  "dotmac_sub:app/services/payment_reconciliation.py",
+  "dotmac_sub:app/services/invoice_bank_details.py",
+  "dotmac_starter_mt:packages/dotmac-banking/src/dotmac_banking/service.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_banking_service.py",
+  "dotmac_starter_mt:tests/architecture/test_banking_module.py",
+  "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp", "dotmac_backoffice"]
+composition_boundary = "Each adopter pins the package, runs the bk lineage in its own database, supplies already-authorized typed observations, and maps opaque cash_account_ref values through its accounting adapter. Provider transport remains in Integrator. The module imports neither an assembly, sibling business module, ERP model, nor provider plugin."
+inventory_evidence = ["docs/inventories/banking-sources.md"]
+first_cutover = "ERP is the qualifying source and first authority to retire, after the shared GL/accounting owner exists. Backfill configured account masters and immutable observations, run read-only matching/reconciliation shadow, seal one writer switch, then reduce ERP banking decision writers to zero. Backoffice is a later exact-pin consumer; package creation moves no authority."
+shadow_and_drift = "Compare account identity/currency mappings, statement totals and lines, observation source versions, match allocations, unmatched amounts, closing balances and reconciliation differences. Shadow is read-only and never writes either owner."
+local_copy_retirement = "At sealed cutover, disable ERP statement import, match acceptance and reconciliation decision writers. Provider clients move to Integrator connectors or product adapters, and journal projection calls the accounting owner. Delete legacy rows only after rollback-window and projection-retirement gates; no dual writer or fallback matcher survives."
+next_action = "Keep the package unreleased and uncomposed until the GL/accounting dependency and ERP cutover contract are checked in. Rebase the provisional kernel allocation/version against concurrent alpha-train work before integration."

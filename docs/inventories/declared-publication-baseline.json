@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-banking": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The ERP source audit and candidate package exist, but shared accounting and an ERP sealed statement/matching/reconciliation authority cutover do not. The package is absent from the release allowlist by design. Remove this row only with first-consumer adoption evidence and exact registry verification; do not publish a parallel banking owner beside ERP.",
+      "state": "never-published"
+    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
@@ -77,15 +82,20 @@
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
     },
-    "dotmac-durable-timers": {
+    "dotmac-kernel": {
+      "declared": "0.1.0a73",
+      "reason": "PROVISIONAL 2026-08-19: a73 layers the banking, tax and payroll namespace allocations over published a72. Concurrent assets/finance branches also target this alpha position, so rebase and renumber are required before integration. Delete this row only when the final protected-main kernel artifact is registry-verified and tagged; do not publish this provisional branch number.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-payroll": {
       "declared": "0.1.0a1",
-      "reason": "RELEASE SEQUENCED 2026-08-18: the accepted contract, all ten PostgreSQL proofs, their sensitivity companions, full static/unit/architecture/integration validation and the release allowlist are green at exact candidate a3c82cd266141d80fdd0a128e74cc5b276bc04a4. Publication still waits for this revision to reach protected main and for its exact dotmac-kernel 0.1.0a72 allocation artifact to be published and verified first. Delete this row only in the follow-up release-record change after dotmac-durable-timers 0.1.0a1 is registry-verified and tagged; an allowlist row is not publication evidence.",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The ERP source audit and candidate package exist, but shared accounting, a stable employee-reference seam and an ERP sealed payroll authority cutover do not. The package is absent from the release allowlist by design. Remove this row only with first-consumer adoption evidence and exact registry verification.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a72",
-      "reason": "OUTSTANDING 2026-08-18: a72 is reserved after the open a71 People allocation and allocates mod_timers/dt/durable_timers plus the declared output-routing surface required by the accepted timer dossier. Delete this row only when the exact protected-main a72 artifact is verified and tagged.",
-      "state": "declared-unpublished"
+    "dotmac-tax": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The ERP/Sub source audit and candidate package exist, but policy/legal review, shared accounting and a sealed ERP determination/reporting cutover do not. The package is absent from the release allowlist by design. Remove this row only with first-consumer adoption evidence and exact registry verification; statutory values remain governed data, not a reason to publish early.",
+      "state": "never-published"
     }
   }
 }

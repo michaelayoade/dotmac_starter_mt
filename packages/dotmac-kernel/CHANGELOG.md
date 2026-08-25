@@ -6,6 +6,23 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a73 — UNRELEASED (provisional)
+
+Allocates three independent tenant-only financial module lineages. This alpha
+number is provisional while concurrent asset/finance branches target the same
+train position; integration must rebase and renumber before release.
+
+### Added
+
+- `BANKING_MIGRATION_OWNER`: schema `mod_banking`, prefix `bk`, branch
+  `banking`.
+- `TAX_MIGRATION_OWNER`: schema `mod_tax`, prefix `tx`, branch `tax`.
+- `PAYROLL_MIGRATION_OWNER`: schema `mod_payroll`, prefix `py`, branch
+  `payroll`.
+
+These ledger rows allocate physical identity only. They install no financial
+behavior in the kernel and move no product authority.
+
 ## 0.1.0a72 — UNRELEASED
 
 Allocates the independent durable-timer module lineage and adds the declaration
