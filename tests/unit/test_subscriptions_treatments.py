@@ -205,8 +205,9 @@ def _contract(
     *,
     offer_version_id: UUID,
     contract_id: UUID | None = None,
-    key: str = "contract:treatments:1",
+    line_key: UUID | None = None,
     starts_at: datetime = NOW,
+    key: str = "contract:treatments:1",
 ) -> tuple[UUID, UUID]:
     source_id = uuid4()
     result = record_contract_version(
@@ -223,7 +224,7 @@ def _contract(
             cadence=_cadence(),
             lines=(
                 ContractLineInput(
-                    contract_line_key=None,
+                    contract_line_key=line_key,
                     charge_model_code="recurring_access",
                     source_code="accepted_order_line",
                     source_id=source_id,
@@ -239,7 +240,7 @@ def _contract(
             ),
             actor="order-owner",
             reason="accepted order",
-            recorded_at=NOW,
+            recorded_at=starts_at,
             command_id=uuid4(),
             correlation_id=uuid4(),
             idempotency_key=key,
@@ -270,6 +271,45 @@ def _preview_command(
     return PreviewBillingArrangementCommand(**base)
 
 
+def _approve_command(
+    db: Session,
+    registry: SubscriptionVocabularyRegistry,
+    line_key: UUID,
+    *,
+    key: str = "approve:1",
+    **overrides: object,
+) -> ApproveBillingArrangementCommand:
+    """Preview once, then build the approval that confirms that fingerprint.
+
+    A retry re-submits THIS command; it must not preview again. A second
+    preview is refused by the overlap guard, and correctly so — the approval
+    being previewed already exists — which is exactly why
+    `approve_billing_arrangement` resolves the idempotent replay BEFORE it
+    previews.
+    """
+    preview_command = _preview_command(line_key, **overrides)
+    preview = preview_billing_arrangement(db, preview_command, registry=registry)
+    return ApproveBillingArrangementCommand(
+        scope=PlatformScope(),
+        contract_line_key=line_key,
+        treatment=preview.treatment,
+        reason_code=preview.reason_code,
+        reason=preview.reason,
+        starts_at=preview.starts_at,
+        ends_at=preview.ends_at,
+        approval_policy=POLICY,
+        sponsor_reference=preview.sponsor_reference,
+        cost_center=preview.cost_center,
+        approved_by="finance-owner",
+        approved_at=NOW,
+        preview_evaluated_at=preview.evaluated_at,
+        preview_fingerprint=preview.fingerprint,
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key=key,
+    )
+
+
 def _approve(
     db: Session,
     registry: SubscriptionVocabularyRegistry,
@@ -278,29 +318,9 @@ def _approve(
     key: str = "approve:1",
     **overrides: object,
 ) -> BillingArrangementResult:
-    preview_command = _preview_command(line_key, **overrides)
-    preview = preview_billing_arrangement(db, preview_command, registry=registry)
     return approve_billing_arrangement(
         db,
-        ApproveBillingArrangementCommand(
-            scope=PlatformScope(),
-            contract_line_key=line_key,
-            treatment=preview.treatment,
-            reason_code=preview.reason_code,
-            reason=preview.reason,
-            starts_at=preview.starts_at,
-            ends_at=preview.ends_at,
-            approval_policy=POLICY,
-            sponsor_reference=preview.sponsor_reference,
-            cost_center=preview.cost_center,
-            approved_by="finance-owner",
-            approved_at=NOW,
-            preview_evaluated_at=preview.evaluated_at,
-            preview_fingerprint=preview.fingerprint,
-            command_id=uuid4(),
-            correlation_id=uuid4(),
-            idempotency_key=key,
-        ),
+        _approve_command(db, registry, line_key, key=key, **overrides),
         registry=registry,
     )
 
@@ -464,44 +484,43 @@ def test_approval_replays_on_the_same_key_and_refuses_a_stale_preview(
     db: Session, registry: SubscriptionVocabularyRegistry
 ) -> None:
     _, line_key = _contract(db, registry, offer_version_id=_offer(db, registry))
-    preview = preview_billing_arrangement(
-        db, _preview_command(line_key), registry=registry
-    )
-    command = ApproveBillingArrangementCommand(
-        scope=PlatformScope(),
-        contract_line_key=line_key,
-        treatment=preview.treatment,
-        reason_code=preview.reason_code,
-        reason=preview.reason,
-        starts_at=preview.starts_at,
-        ends_at=preview.ends_at,
-        approval_policy=POLICY,
-        sponsor_reference=preview.sponsor_reference,
-        cost_center=preview.cost_center,
-        approved_by="finance-owner",
-        approved_at=NOW,
-        preview_evaluated_at=preview.evaluated_at,
-        preview_fingerprint=preview.fingerprint,
-        command_id=uuid4(),
-        correlation_id=uuid4(),
-        idempotency_key="approve:1",
-    )
+    # A retry re-submits the SAME approval command. It deliberately does not
+    # preview again: the overlap guard would refuse a second preview, since by
+    # then the arrangement this command created is already open.
+    command = _approve_command(db, registry, line_key)
+    first = approve_billing_arrangement(db, command, registry=registry)
+    second = approve_billing_arrangement(db, command, registry=registry)
+
+    assert first.replayed is False
+    assert second.arrangement_id == first.arrangement_id
+    assert second.replayed is True
+
+    # An unseen key on a window that does NOT overlap, so the preview runs and
+    # the confirmed fingerprint is the only thing that can refuse it.
     with pytest.raises(SubscriptionConflictError, match="evidence changed"):
         approve_billing_arrangement(
             db,
-            replace(
-                command,
+            ApproveBillingArrangementCommand(
+                scope=PlatformScope(),
+                contract_line_key=line_key,
+                treatment=BillingTreatment.complimentary,
+                reason_code="internal_service",
+                reason="Internal monitoring service",
+                starts_at=NOW + timedelta(days=30),
+                ends_at=NOW + timedelta(days=61),
+                approval_policy=POLICY,
+                sponsor_reference=None,
+                cost_center=None,
+                approved_by="finance-owner",
+                approved_at=NOW,
+                preview_evaluated_at=NOW,
                 preview_fingerprint="0" * 64,
+                command_id=uuid4(),
+                correlation_id=uuid4(),
                 idempotency_key="approve:stale",
             ),
             registry=registry,
         )
-
-    first = approve_billing_arrangement(db, command, registry=registry)
-    second = approve_billing_arrangement(db, command, registry=registry)
-
-    assert second.arrangement_id == first.arrangement_id
-    assert second.replayed is True
 
 
 def test_an_overlapping_treatment_on_one_line_fails_closed(
@@ -642,24 +661,33 @@ def test_a_superseding_contract_version_becomes_protected_drift_not_a_grant(
     contract_id = billing_arrangements_for_line(
         db, scope=PlatformScope(), contract_line_key=line_key
     )[0].contract_id
-    dearer = _offer(db, registry, code="access.dearer")
+    replacement = _offer(db, registry, code="access.v2")
+    # Three things this setup has to get right, or it proves something else:
+    # a superseding version must start STRICTLY after the one it replaces
+    # (`contracts.non_monotonic_version`); it must carry the same line lineage
+    # key forward, or the resolver sees a vanished line rather than a moved
+    # one; and it must land INSIDE the approved window, since an `as_of` past
+    # the arrangement's end answers `standard`.
+    superseded_at = NOW + timedelta(days=10)
     _contract(
         db,
         registry,
-        offer_version_id=dearer,
+        offer_version_id=replacement,
         contract_id=contract_id,
+        line_key=line_key,
+        starts_at=superseded_at,
         key="contract:treatments:2",
-        starts_at=NOW + timedelta(days=1),
     )
 
     decision = resolve_billing_arrangement(
         db,
         scope=PlatformScope(),
         contract_line_key=line_key,
-        as_of=NOW + timedelta(days=2),
+        as_of=superseded_at + timedelta(days=1),
     )
 
     assert decision.status is BillingArrangementDecisionStatus.protected_drift
+    assert decision.drift_reason == "unauthorized_contract_version_change"
     assert decision.suppress_customer_billing is True
     assert decision.grantable is False
     assert decision.authorized_contract_version_id == version_id
