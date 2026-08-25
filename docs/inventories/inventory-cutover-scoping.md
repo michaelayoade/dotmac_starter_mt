@@ -493,7 +493,10 @@ The following list is derived from every production reference to
 they retire behind Integrator connector/app-sync bindings. The Inventory module
 exposes provider-neutral commands, queries and outbox evidence only; it never
 imports a CRM/Sub/provider client, names a provider, stores provider
-credentials, or owns retry/checkpoint state.
+credentials, or owns retry/checkpoint state. These ERP direct-sync surfaces are
+retirement paths, **not** an Inventory cutover dependency and not a
+service-guarded exception to preserve. Only provider-neutral evidence and
+correlation survive, and only where a named Integrator consumer exists.
 
 ### 2.4 The Accounting boundary, site by site
 
