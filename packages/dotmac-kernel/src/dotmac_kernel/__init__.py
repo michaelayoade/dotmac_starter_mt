@@ -326,17 +326,17 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.transactions",
         "dotmac_kernel.web_deps",
     }
 )
 
 # ── Deliberately-internal modules ───────────────────────────────────────────
 # Present in the package but NOT part of the public surface — a consumer must
-# not import from these. `_transactions` is the engine-free savepoint mechanic
-# for caller-session kernel services; its public spelling remains
-# `dotmac_kernel.db.conflict_savepoint`. `display` is consumed only within the
-# kernel (by `templating` / `web_deps`); the `settings_resolver` write helpers
-# are the `settings_admin` narrow surface, not general API (see that module).
+# not import from these. `_transactions` implements the engine-free savepoint
+# mechanic exported by `dotmac_kernel.transactions`; `display` is consumed only
+# within the kernel (by `templating` / `web_deps`); the `settings_resolver`
+# write helpers are the `settings_admin` narrow surface, not general API.
 INTERNAL_MODULES: frozenset[str] = frozenset(
     {
         "dotmac_kernel._transactions",

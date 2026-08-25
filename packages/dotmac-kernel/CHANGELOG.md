@@ -18,6 +18,11 @@ Migration `0028_machine_attribution` (kernel lineage, revises
 
 ### Added
 
+- `dotmac_kernel.transactions` — the public engine-free
+  `conflict_savepoint` surface for services that receive an application's
+  caller-owned session. It does not import settings, construct an engine, or
+  own the outer commit/rollback; `dotmac_kernel.db` retains its compatibility
+  re-export for reference-assembly callers.
 - `dotmac_kernel.source_applications` — which APPLICATION issued a command,
   presented a credential, or caused an audit row. An open registered string per
   ADR-0008, never an enum, so a deployment names its peers without a kernel
