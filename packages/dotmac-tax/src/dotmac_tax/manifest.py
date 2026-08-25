@@ -10,7 +10,7 @@ from dotmac_tax.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="tax",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     short_code="tax",
     migration_prefix="tx",

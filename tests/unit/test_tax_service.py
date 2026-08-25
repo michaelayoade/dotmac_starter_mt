@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, date, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -15,6 +16,9 @@ from dotmac_tax import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
     TaxConflict,
+    TaxDeterminationComponentV1,
+    TaxDeterminationLineV1,
+    TaxDeterminationSetV1,
     TaxFact,
     TaxJurisdictionInput,
     TaxRuleBandInput,
@@ -166,6 +170,7 @@ def test_tax_rule_selection_and_rate_are_effective_dated_data(db: Session) -> No
     )
 
     assert result.rule_id == rule.id
+    assert isinstance(result, TaxDetermination)
     assert result.base_amount == Decimal("1000.00")
     assert result.tax_amount == Decimal("100.00")
 
@@ -301,6 +306,40 @@ def test_single_tax_api_replays_published_a1_fingerprint(db: Session) -> None:
         )
     assert db.scalar(select(func.count(TaxDeterminationSet.id))) == 0
 
+    conflicting_set = TaxDeterminationSet(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        jurisdiction_id=jurisdiction.id,
+        occurred_on=fact.occurred_on,
+        fact_kind=fact.fact_kind,
+        recognition_basis_code=fact.recognition_basis_code,
+        transaction_side=fact.transaction_side,
+        source_amount=Decimal("1000.00"),
+        net_amount=Decimal("1000.00"),
+        tax_amount=Decimal("100.00"),
+        gross_amount=Decimal("1100.00"),
+        currency_code="NGN",
+        minor_units=2,
+        source_ref=fact.source_ref,
+        source_version=fact.source_version,
+        source_fingerprint="f" * 64,
+        result_seal_state="sealed",
+        result_fingerprint=f"rv1:{'0' * 64}",
+        evidence_ref=fact.evidence_ref,
+        determined_at=NOW,
+    )
+    db.add(conflicting_set)
+    db.flush()
+
+    for api in (determine_tax, determine_tax_set):
+        with pytest.raises(TaxConflict, match="conflicting determination owners"):
+            api(
+                db,
+                tenant_id=tenant.id,
+                fact=fact,
+                determined_at=NOW,
+            )
+
 
 def test_progressive_bands_are_configured_and_snapshotted(db: Session) -> None:
     tenant = _tenant(db)
@@ -358,6 +397,28 @@ def test_progressive_bands_are_configured_and_snapshotted(db: Session) -> None:
     assert [line.tax_amount for line in result.lines] == [
         Decimal("0.00"),
         Decimal("100.00"),
+    ]
+
+    read_result = determine_tax_set(
+        db,
+        tenant_id=tenant.id,
+        fact=TaxFact(
+            jurisdiction_id=jurisdiction.id,
+            occurred_on=date(2026, 7, 31),
+            fact_kind="employee-income",
+            recognition_basis_code="payroll-finalized",
+            transaction_side="withholding",
+            base_amount=Money.of("1500", NGN),
+            source_ref="payroll:employee-2:2026-07",
+            source_version="1",
+            evidence_ref="payroll-calculation:2",
+        ),
+        determined_at=NOW,
+    )
+    assert [line.sequence for line in read_result.components[0].lines] == [1, 2]
+    assert [line.tax_amount for line in read_result.components[0].lines] == [
+        Money.of("0.00", NGN),
+        Money.of("100.00", NGN),
     ]
 
 
@@ -446,52 +507,224 @@ def test_one_source_fact_produces_multiple_ordered_tax_components(
         == 0
     )
 
+    fact = TaxFact(
+        jurisdiction_id=jurisdiction.id,
+        occurred_on=date(2026, 7, 10),
+        fact_kind="cash-receipt",
+        recognition_basis_code="cash-received",
+        transaction_side="output",
+        base_amount=Money.of("1000", NGN),
+        source_ref="receipt:multi-tax",
+        source_version="1",
+        evidence_ref="settlement:multi-tax",
+    )
+    with pytest.raises(TaxRuleViolation, match="determined_at must be timezone-aware"):
+        determine_tax_set(
+            db,
+            tenant_id=tenant.id,
+            fact=fact,
+            determined_at=NOW.replace(tzinfo=None),
+        )
+    with pytest.raises(TaxRuleViolation, match="determined_at must be timezone-aware"):
+        determine_tax(
+            db,
+            tenant_id=tenant.id,
+            fact=fact,
+            determined_at=NOW.replace(tzinfo=None),
+        )
     result = determine_tax_set(
         db,
         tenant_id=tenant.id,
-        fact=TaxFact(
-            jurisdiction_id=jurisdiction.id,
-            occurred_on=date(2026, 7, 10),
-            fact_kind="cash-receipt",
-            recognition_basis_code="cash-received",
-            transaction_side="output",
-            base_amount=Money.of("1000", NGN),
-            source_ref="receipt:multi-tax",
-            source_version="1",
-            evidence_ref="settlement:multi-tax",
-        ),
+        fact=fact,
         determined_at=NOW,
     )
 
+    assert isinstance(result, TaxDeterminationSetV1)
+    assert result.tenant_id == tenant.id
+    assert result.determination_set_id == result.id
+    assert len(result.source_fingerprint) == 64
+    assert result.result_fingerprint.startswith("rv1:")
+    assert len(result.result_fingerprint) == 68
     assert [component.tax_code_id for component in result.components] == [
         vat_code.id,
         levy_code.id,
     ]
-    assert [component.tax_amount for component in result.components] == [
-        Decimal("75.00"),
-        Decimal("25.00"),
-    ]
-    assert result.net_amount == Decimal("1000.00")
-    assert result.tax_amount == Decimal("100.00")
-    assert result.gross_amount == Decimal("1100.00")
-
-    replay = determine_tax_set(
-        db,
-        tenant_id=tenant.id,
-        fact=TaxFact(
-            jurisdiction_id=jurisdiction.id,
-            occurred_on=date(2026, 7, 10),
-            fact_kind="cash-receipt",
-            recognition_basis_code="cash-received",
-            transaction_side="output",
-            base_amount=Money.of("1000", NGN),
-            source_ref="receipt:multi-tax",
-            source_version="1",
-            evidence_ref="settlement:multi-tax",
-        ),
-        determined_at=NOW,
+    assert all(
+        isinstance(component, TaxDeterminationComponentV1)
+        for component in result.components
     )
-    assert replay.id == result.id
+    assert all(
+        component.determination_set_id == result.determination_set_id
+        for component in result.components
+    )
+    assert len({component.determination_id for component in result.components}) == 2
+    assert [component.tax_amount for component in result.components] == [
+        Money.of("75.00", NGN),
+        Money.of("25.00", NGN),
+    ]
+    assert result.net_amount == Money.of("1000.00", NGN)
+    assert result.tax_amount == Money.of("100.00", NGN)
+    assert result.gross_amount == Money.of("1100.00", NGN)
+    assert isinstance(result.components[0].lines[0], TaxDeterminationLineV1)
+    assert result.components[0].lines[0].taxable_amount == Money.of("1000.00", NGN)
+
+    db.expire_all()
+    with pytest.raises(
+        TaxConflict, match="determination set time must be timezone-aware"
+    ):
+        determine_tax_set(
+            db,
+            tenant_id=tenant.id,
+            fact=fact,
+            determined_at=NOW + timedelta(days=1),
+        )
+
+    persisted = db.get(TaxDeterminationSet, result.id)
+    assert persisted is not None
+    # SQLite discarded the offset on reload. Restore the original typed instant
+    # in memory only, after proving the public projector refuses it, so this
+    # canary can still prove numeric/relationship round-trip fingerprint stability.
+    persisted.determined_at = result.determined_at
+    for persisted_component in persisted.components:
+        persisted_component.determined_at = result.determined_at
+    with db.no_autoflush:
+        replay = determine_tax_set(
+            db,
+            tenant_id=tenant.id,
+            fact=fact,
+            determined_at=NOW + timedelta(days=1),
+        )
+    assert isinstance(replay, TaxDeterminationSetV1)
+    assert replay == result
+
+    # Sensitivity proof: malformed persisted evidence is refused at the public
+    # projector. The defects stay in memory so the fixture database is not
+    # rewritten merely to prove the read boundary fails closed.
+    original_components = list(persisted.components)
+    first = original_components[0]
+    first_line = first.lines[0]
+
+    def assert_replay_refused(pattern: str) -> None:
+        with db.no_autoflush, pytest.raises(TaxConflict, match=pattern):
+            determine_tax_set(
+                db,
+                tenant_id=tenant.id,
+                fact=fact,
+                determined_at=NOW,
+            )
+
+    persisted.components = []
+    assert_replay_refused("at least one component")
+    persisted.components = original_components
+
+    persisted.components = list(reversed(original_components))
+    assert_replay_refused("strict unique ordering")
+    persisted.components = original_components
+
+    original_result_fingerprint = persisted.result_fingerprint
+    assert original_result_fingerprint is not None
+    persisted.result_fingerprint = None
+    assert_replay_refused("predates the rv1 result-content seal")
+    persisted.result_fingerprint = original_result_fingerprint
+
+    original_tax_code_id = first.tax_code_id
+    first.tax_code_id = uuid4()
+    assert_replay_refused("result fingerprint does not match")
+    first.tax_code_id = original_tax_code_id
+
+    duplicate_field_mutations = {
+        "tenant_id": uuid4(),
+        "jurisdiction_id": uuid4(),
+        "occurred_on": fact.occurred_on + timedelta(days=1),
+        "fact_kind": "other-fact",
+        "recognition_basis_code": "other-basis",
+        "transaction_side": "input",
+        "currency_code": "USD",
+        "minor_units": 3,
+        "source_ref": "receipt:other",
+        "source_version": "other-version",
+        "source_fingerprint": "f" * 64,
+        "evidence_ref": "settlement:other",
+        "counterparty_ref": "counterparty:other",
+        "determined_at": NOW + timedelta(hours=1),
+    }
+    assert set(duplicate_field_mutations) == set(tax_service._COMPONENT_SET_FIELDS)
+    for field, changed in duplicate_field_mutations.items():
+        original = getattr(first, field)
+        setattr(first, field, changed)
+        assert_replay_refused(f"component {field.replace('_', ' ')} differs")
+        setattr(first, field, original)
+
+    original_line_tenant_id = first_line.tenant_id
+    first_line.tenant_id = uuid4()
+    assert_replay_refused("line tenant differs")
+    first_line.tenant_id = original_line_tenant_id
+
+    original_line_determination_id = first_line.determination_id
+    first_line.determination_id = uuid4()
+    assert_replay_refused("line belongs to another component")
+    first_line.determination_id = original_line_determination_id
+
+    original_set_determined_at = persisted.determined_at
+    persisted.determined_at = original_set_determined_at.replace(tzinfo=None)
+    assert_replay_refused("determination set time must be timezone-aware")
+    persisted.determined_at = original_set_determined_at
+
+    original_component_determined_at = first.determined_at
+    first.determined_at = original_component_determined_at.replace(tzinfo=None)
+    assert_replay_refused("determination component time must be timezone-aware")
+    first.determined_at = original_component_determined_at
+
+    original_tax = persisted.tax_amount
+    original_gross = persisted.gross_amount
+    persisted.tax_amount = original_tax + Decimal("0.01")
+    persisted.gross_amount = original_gross + Decimal("0.01")
+    assert_replay_refused("total the set tax")
+    persisted.tax_amount = original_tax
+    persisted.gross_amount = original_gross
+
+    original_recoverable = first.recoverable_amount
+    first.recoverable_amount = original_recoverable + Decimal("0.01")
+    assert_replay_refused("recovery split")
+    first.recoverable_amount = original_recoverable
+
+    original_treatment = first.treatment_code
+    first.treatment_code = "exempt"
+    assert_replay_refused("must have zero tax")
+    first.treatment_code = original_treatment
+
+    first.inclusive = True
+    assert_replay_refused("cannot be combined")
+    first.inclusive = False
+
+    original_set_id = first.determination_set_id
+    first.determination_set_id = uuid4()
+    assert_replay_refused("belongs to another set")
+    first.determination_set_id = original_set_id
+
+    line = result.components[0].lines[0]
+    usd = Currency("USD", 2)
+    usd_line = replace(
+        line,
+        taxable_amount=Money.of(line.taxable_amount.amount, usd),
+        tax_amount=Money.of(line.tax_amount.amount, usd),
+    )
+    with pytest.raises(ValueError, match="component currency"):
+        replace(result.components[0], lines=(usd_line,))
+    with pytest.raises(ValueError, match="exact finite Decimal"):
+        replace(line, rate=Decimal("NaN"))
+    foreign_component = replace(result.components[0], determination_set_id=uuid4())
+    with pytest.raises(ValueError, match="another determination set"):
+        replace(
+            result,
+            components=(foreign_component, result.components[1]),
+        )
+    with pytest.raises(ValueError, match="fingerprint is required"):
+        replace(result, source_fingerprint=" ")
+    with pytest.raises(ValueError, match="rv1 SHA-256"):
+        replace(result, result_fingerprint="rv1:not-a-digest")
+    with pytest.raises(ValueError, match="timezone-aware"):
+        replace(result, determined_at=NOW.replace(tzinfo=None))
 
 
 def test_each_configured_tax_code_requires_an_explicit_matching_treatment(
@@ -613,14 +846,14 @@ def test_compound_tax_uses_declared_sequence_and_prior_tax(db: Session) -> None:
     )
 
     assert [component.base_amount for component in result.components] == [
-        Decimal("1000.00"),
-        Decimal("1100.00"),
+        Money.of("1000.00", NGN),
+        Money.of("1100.00", NGN),
     ]
     assert [component.tax_amount for component in result.components] == [
-        Decimal("100.00"),
-        Decimal("22.00"),
+        Money.of("100.00", NGN),
+        Money.of("22.00", NGN),
     ]
-    assert result.gross_amount == Decimal("1122.00")
+    assert result.gross_amount == Money.of("1122.00", NGN)
 
 
 def test_tax_specific_classifications_select_exempt_and_standard_components(
@@ -723,8 +956,8 @@ def test_tax_specific_classifications_select_exempt_and_standard_components(
         "standard_rated",
     ]
     assert result.components[0].party_classification_id == classification.id
-    assert result.components[0].tax_amount == Decimal("0.00")
-    assert result.components[1].tax_amount == Decimal("20.00")
+    assert result.components[0].tax_amount == Money.of("0.00", NGN)
+    assert result.components[1].tax_amount == Money.of("20.00", NGN)
 
 
 def test_party_supply_and_place_classifications_are_snapshotted_per_tax_code(
@@ -877,10 +1110,15 @@ def test_zero_amount_treatments_retain_distinct_legal_identity(db: Session) -> N
         "out_of_scope",
     ]
     assert [component.tax_amount for component in result.components] == [
-        Decimal("0.00"),
-        Decimal("0.00"),
-        Decimal("0.00"),
+        Money.of("0.00", NGN),
+        Money.of("0.00", NGN),
+        Money.of("0.00", NGN),
     ]
+    assert result.reportable_zero_components == result.components
+    assert all(
+        component.is_reportable_zero and not component.has_tax_consequence
+        for component in result.components
+    )
 
 
 def test_classification_source_replays_and_conflicts_by_fingerprint(
@@ -1160,7 +1398,7 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
             recoverable_rate=Decimal("0"),
         ),
     )
-    determine_tax(
+    determine_tax_set(
         db,
         tenant_id=tenant.id,
         fact=TaxFact(
@@ -1224,6 +1462,31 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
     assert values == {"BOX-BASE": Decimal("1000.00"), "BOX-TAX": Decimal("25.00")}
     assert obligation.due_on == date(2026, 8, 18)
     assert report.total_payable == Decimal("25.00")
+
+    determine_tax(
+        db,
+        tenant_id=tenant.id,
+        fact=TaxFact(
+            jurisdiction_id=jurisdiction.id,
+            occurred_on=date(2026, 7, 11),
+            fact_kind="cash-receipt",
+            recognition_basis_code="cash-received",
+            transaction_side="output",
+            base_amount=Money.of("1000", NGN),
+            source_ref="receipt:legacy-report-refusal",
+            source_version="1",
+            evidence_ref="receipt:legacy-report-refusal",
+        ),
+        determined_at=NOW,
+    )
+    with pytest.raises(TaxConflict, match="legacy unsealed determinations cannot feed"):
+        generate_statutory_report(
+            db,
+            tenant_id=tenant.id,
+            obligation_id=obligation.id,
+            generated_by_id=uuid4(),
+            generated_at=NOW,
+        )
 
 
 def test_return_lifecycle_has_separation_and_an_append_only_timeline(

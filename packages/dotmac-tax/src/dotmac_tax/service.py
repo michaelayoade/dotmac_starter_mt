@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from uuid import UUID
+from typing import cast
+from uuid import UUID, uuid4
 
 from dotmac_kernel.money import Currency, Money
 from sqlalchemy import func, select
@@ -16,6 +18,9 @@ from sqlalchemy.orm import Session
 from dotmac_tax.contracts import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
+    TaxDeterminationComponentV1,
+    TaxDeterminationLineV1,
+    TaxDeterminationSetV1,
     TaxFact,
     TaxJurisdictionInput,
     TaxRuleInput,
@@ -119,6 +124,405 @@ def _currency_matches(currency: Currency, code: str, minor_units: int) -> bool:
 
 def _round(value: Decimal, minor_units: int) -> Decimal:
     return value.quantize(Decimal(1).scaleb(-minor_units), rounding=ROUND_HALF_UP)
+
+
+def _require_aware_input(value: datetime) -> None:
+    if not isinstance(value, datetime) or value.utcoffset() is None:
+        raise TaxRuleViolation("determined_at must be timezone-aware")
+
+
+def _require_aware_persisted(value: datetime, label: str) -> datetime:
+    if not isinstance(value, datetime) or value.utcoffset() is None:
+        raise TaxConflict(f"persisted {label} must be timezone-aware")
+    return value
+
+
+def _fixed_decimal(value: Decimal, scale: int, label: str) -> str:
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise TaxConflict(f"persisted {label} must be a finite Decimal")
+    normalized = value.quantize(Decimal(1).scaleb(-scale))
+    if normalized != value:
+        raise TaxConflict(f"persisted {label} exceeds its storage scale")
+    return f"{normalized:.{scale}f}"
+
+
+def _result_value(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        aware = _require_aware_persisted(value, label)
+        return aware.astimezone(UTC).isoformat(timespec="microseconds")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    raise TaxConflict(f"persisted {label} has unsupported result content")
+
+
+def _result_content_fingerprint(row: TaxDeterminationSet) -> str:
+    """Digest the full normalized set/component/line result as ``rv1``."""
+
+    pairs: list[tuple[str, str | None]] = []
+
+    def add(key: str, value: object) -> None:
+        pairs.append((key, _result_value(value, key)))
+
+    def money(key: str, value: Decimal) -> None:
+        pairs.append((key, _fixed_decimal(value, 6, key)))
+
+    add("set.id", row.id)
+    add("set.tenant_id", row.tenant_id)
+    add("set.jurisdiction_id", row.jurisdiction_id)
+    add("set.occurred_on", row.occurred_on)
+    add("set.fact_kind", row.fact_kind)
+    add("set.recognition_basis_code", row.recognition_basis_code)
+    add("set.transaction_side", row.transaction_side)
+    money("set.source_amount", row.source_amount)
+    money("set.net_amount", row.net_amount)
+    money("set.tax_amount", row.tax_amount)
+    money("set.gross_amount", row.gross_amount)
+    add("set.currency_code", row.currency_code)
+    add("set.minor_units", row.minor_units)
+    add("set.source_ref", row.source_ref)
+    add("set.source_version", row.source_version)
+    add("set.source_fingerprint", row.source_fingerprint)
+    add("set.evidence_ref", row.evidence_ref)
+    add("set.counterparty_ref", row.counterparty_ref)
+    add("set.supply_ref", row.supply_ref)
+    add("set.place_ref", row.place_ref)
+    add("set.determined_at", row.determined_at)
+
+    for component_index, component in enumerate(row.components, start=1):
+        prefix = f"component.{component_index}"
+        add(f"{prefix}.id", component.id)
+        add(f"{prefix}.tenant_id", component.tenant_id)
+        add(f"{prefix}.determination_set_id", component.determination_set_id)
+        add(f"{prefix}.component_sequence", component.component_sequence)
+        add(f"{prefix}.jurisdiction_id", component.jurisdiction_id)
+        add(f"{prefix}.tax_code_id", component.tax_code_id)
+        add(f"{prefix}.rule_id", component.rule_id)
+        add(f"{prefix}.rule_version", component.rule_version)
+        add(f"{prefix}.occurred_on", component.occurred_on)
+        add(f"{prefix}.fact_kind", component.fact_kind)
+        add(
+            f"{prefix}.recognition_basis_code",
+            component.recognition_basis_code,
+        )
+        add(f"{prefix}.transaction_side", component.transaction_side)
+        add(f"{prefix}.treatment_code", component.treatment_code)
+        add(f"{prefix}.calculation_base_code", component.calculation_base_code)
+        add(f"{prefix}.inclusive", component.inclusive)
+        add(f"{prefix}.party_category", component.party_category)
+        add(f"{prefix}.supply_category", component.supply_category)
+        add(f"{prefix}.place_code", component.place_code)
+        add(
+            f"{prefix}.party_classification_id",
+            component.party_classification_id,
+        )
+        add(
+            f"{prefix}.supply_classification_id",
+            component.supply_classification_id,
+        )
+        add(
+            f"{prefix}.place_classification_id",
+            component.place_classification_id,
+        )
+        money(f"{prefix}.base_amount", component.base_amount)
+        money(f"{prefix}.tax_amount", component.tax_amount)
+        money(f"{prefix}.recoverable_amount", component.recoverable_amount)
+        money(
+            f"{prefix}.non_recoverable_amount",
+            component.non_recoverable_amount,
+        )
+        add(f"{prefix}.currency_code", component.currency_code)
+        add(f"{prefix}.minor_units", component.minor_units)
+        add(f"{prefix}.source_ref", component.source_ref)
+        add(f"{prefix}.source_version", component.source_version)
+        add(f"{prefix}.source_fingerprint", component.source_fingerprint)
+        add(f"{prefix}.evidence_ref", component.evidence_ref)
+        add(f"{prefix}.counterparty_ref", component.counterparty_ref)
+        add(f"{prefix}.determined_at", component.determined_at)
+        for line_index, line in enumerate(component.lines, start=1):
+            line_prefix = f"{prefix}.line.{line_index}"
+            add(f"{line_prefix}.id", line.id)
+            add(f"{line_prefix}.tenant_id", line.tenant_id)
+            add(f"{line_prefix}.determination_id", line.determination_id)
+            add(f"{line_prefix}.sequence", line.sequence)
+            money(f"{line_prefix}.taxable_amount", line.taxable_amount)
+            pairs.append(
+                (
+                    f"{line_prefix}.rate",
+                    None
+                    if line.rate is None
+                    else _fixed_decimal(line.rate, 8, f"{line_prefix}.rate"),
+                )
+            )
+            money(f"{line_prefix}.tax_amount", line.tax_amount)
+
+    payload = bytearray()
+    for key, value in pairs:
+        key_bytes = key.encode("utf-8")
+        value_bytes = b"\x00" if value is None else value.encode("utf-8")
+        payload.extend(str(len(key_bytes)).encode("ascii"))
+        payload.extend(b":")
+        payload.extend(key_bytes)
+        payload.extend(str(len(value_bytes)).encode("ascii"))
+        payload.extend(b":")
+        payload.extend(value_bytes)
+    return f"rv1:{hashlib.sha256(payload).hexdigest()}"
+
+
+_COMPONENT_SET_FIELDS = (
+    "tenant_id",
+    "jurisdiction_id",
+    "occurred_on",
+    "fact_kind",
+    "recognition_basis_code",
+    "transaction_side",
+    "currency_code",
+    "minor_units",
+    "source_ref",
+    "source_version",
+    "source_fingerprint",
+    "evidence_ref",
+    "counterparty_ref",
+    "determined_at",
+)
+
+
+def _validate_persisted_result_structure(row: TaxDeterminationSet) -> None:
+    _require_aware_persisted(row.determined_at, "determination set time")
+    if not row.components:
+        raise TaxConflict("persisted determination set requires at least one component")
+    sequences = [component.component_sequence for component in row.components]
+    if any(
+        not isinstance(sequence, int) or isinstance(sequence, bool)
+        for sequence in sequences
+    ):
+        raise TaxConflict(
+            "persisted determination components must have strict unique ordering"
+        )
+    component_sequences = cast(list[int], sequences)
+    if component_sequences != sorted(component_sequences) or len(
+        component_sequences
+    ) != len(set(component_sequences)):
+        raise TaxConflict(
+            "persisted determination components must have strict unique ordering"
+        )
+    for component in row.components:
+        if component.determination_set_id != row.id:
+            raise TaxConflict(
+                "persisted determination component belongs to another set"
+            )
+        _require_aware_persisted(
+            component.determined_at, "determination component time"
+        )
+        for field in _COMPONENT_SET_FIELDS:
+            if getattr(component, field) != getattr(row, field):
+                label = field.replace("_", " ")
+                raise TaxConflict(
+                    f"persisted determination component {label} differs from its set"
+                )
+        if not component.lines:
+            raise TaxConflict(
+                "persisted determination component requires at least one line"
+            )
+        line_sequences = [line.sequence for line in component.lines]
+        if (
+            any(
+                not isinstance(sequence, int) or isinstance(sequence, bool)
+                for sequence in line_sequences
+            )
+            or line_sequences != sorted(line_sequences)
+            or len(line_sequences) != len(set(line_sequences))
+        ):
+            raise TaxConflict(
+                "persisted determination lines must have strict unique ordering"
+            )
+        for line in component.lines:
+            if line.tenant_id != row.tenant_id:
+                raise TaxConflict(
+                    "persisted determination line tenant differs from its set"
+                )
+            if line.determination_id != component.id:
+                raise TaxConflict(
+                    "persisted determination line belongs to another component"
+                )
+
+
+def _sealed_result_fingerprint(row: TaxDeterminationSet) -> str:
+    if row.result_seal_state != "sealed":
+        if row.result_seal_state is None:
+            raise TaxConflict(
+                "persisted determination set predates the rv1 result-content "
+                "seal; submit a new source version rather than rewriting evidence"
+            )
+        raise TaxConflict("persisted determination set is not sealed")
+    value = row.result_fingerprint
+    if value is None:
+        raise TaxConflict("persisted sealed determination has no result fingerprint")
+    if (
+        len(value) != 68
+        or not value.startswith("rv1:")
+        or any(character not in "0123456789abcdef" for character in value[4:])
+    ):
+        raise TaxConflict("persisted determination result fingerprint is invalid")
+    return value
+
+
+def _exact_money(
+    amount: Decimal,
+    *,
+    currency: Currency,
+    label: str,
+) -> Money:
+    value = Money(amount=amount, currency=currency)
+    if value.amount != amount:
+        raise TaxConflict(
+            f"persisted {label} exceeds the determination currency's minor units"
+        )
+    return value
+
+
+def _determination_set_contract(row: TaxDeterminationSet) -> TaxDeterminationSetV1:
+    """Project persisted evidence into the public, ORM-free read contract."""
+
+    _validate_persisted_result_structure(row)
+    sealed_fingerprint = _sealed_result_fingerprint(row)
+    currency = Currency(row.currency_code, row.minor_units)
+    components: list[TaxDeterminationComponentV1] = []
+    for component in row.components:
+        if (
+            component.currency_code != currency.code
+            or component.minor_units != currency.minor_units
+        ):
+            raise TaxConflict(
+                "persisted determination component currency differs from its set"
+            )
+        if component.component_sequence is None:
+            raise TaxConflict("persisted determination component has no sequence")
+        if component.determination_set_id is None:
+            raise TaxConflict(
+                "persisted determination component has no determination set"
+            )
+        if component.determination_set_id != row.id:
+            raise TaxConflict(
+                "persisted determination component belongs to another set"
+            )
+        if component.treatment_code is None:
+            raise TaxConflict("persisted determination component has no treatment")
+        if component.calculation_base_code is None:
+            raise TaxConflict(
+                "persisted determination component has no calculation base"
+            )
+        if component.inclusive is None:
+            raise TaxConflict("persisted determination component has no inclusive flag")
+        lines = tuple(
+            TaxDeterminationLineV1(
+                sequence=line.sequence,
+                taxable_amount=_exact_money(
+                    line.taxable_amount,
+                    currency=currency,
+                    label="determination line taxable amount",
+                ),
+                rate=line.rate,
+                tax_amount=_exact_money(
+                    line.tax_amount,
+                    currency=currency,
+                    label="determination line tax amount",
+                ),
+            )
+            for line in component.lines
+        )
+        components.append(
+            TaxDeterminationComponentV1(
+                determination_id=component.id,
+                determination_set_id=component.determination_set_id,
+                component_sequence=component.component_sequence,
+                tax_code_id=component.tax_code_id,
+                rule_id=component.rule_id,
+                rule_version=component.rule_version,
+                treatment_code=component.treatment_code,
+                calculation_base_code=component.calculation_base_code,
+                inclusive=component.inclusive,
+                party_category=component.party_category,
+                supply_category=component.supply_category,
+                place_code=component.place_code,
+                party_classification_id=component.party_classification_id,
+                supply_classification_id=component.supply_classification_id,
+                place_classification_id=component.place_classification_id,
+                base_amount=_exact_money(
+                    component.base_amount,
+                    currency=currency,
+                    label="determination component base amount",
+                ),
+                tax_amount=_exact_money(
+                    component.tax_amount,
+                    currency=currency,
+                    label="determination component tax amount",
+                ),
+                recoverable_amount=_exact_money(
+                    component.recoverable_amount,
+                    currency=currency,
+                    label="determination component recoverable amount",
+                ),
+                non_recoverable_amount=_exact_money(
+                    component.non_recoverable_amount,
+                    currency=currency,
+                    label="determination component non-recoverable amount",
+                ),
+                lines=lines,
+            )
+        )
+    contract = TaxDeterminationSetV1(
+        tenant_id=row.tenant_id,
+        determination_set_id=row.id,
+        jurisdiction_id=row.jurisdiction_id,
+        occurred_on=row.occurred_on,
+        fact_kind=row.fact_kind,
+        recognition_basis_code=row.recognition_basis_code,
+        transaction_side=row.transaction_side,
+        source_amount=_exact_money(
+            row.source_amount,
+            currency=currency,
+            label="determination source amount",
+        ),
+        net_amount=_exact_money(
+            row.net_amount,
+            currency=currency,
+            label="determination net amount",
+        ),
+        tax_amount=_exact_money(
+            row.tax_amount,
+            currency=currency,
+            label="determination tax amount",
+        ),
+        gross_amount=_exact_money(
+            row.gross_amount,
+            currency=currency,
+            label="determination gross amount",
+        ),
+        source_ref=row.source_ref,
+        source_version=row.source_version,
+        source_fingerprint=row.source_fingerprint,
+        result_fingerprint=sealed_fingerprint,
+        evidence_ref=row.evidence_ref,
+        counterparty_ref=row.counterparty_ref,
+        supply_ref=row.supply_ref,
+        place_ref=row.place_ref,
+        determined_at=row.determined_at,
+        components=tuple(components),
+    )
+    expected_fingerprint = _result_content_fingerprint(row)
+    if not hmac.compare_digest(sealed_fingerprint, expected_fingerprint):
+        raise TaxConflict("persisted determination result fingerprint does not match")
+    return contract
 
 
 def _fact_fingerprint(fact: TaxFact, *, source_ref: str, source_version: str) -> str:
@@ -783,13 +1187,14 @@ def _validate_tax_fact(
     return jurisdiction, source_ref, source_version, fingerprint
 
 
-def determine_tax_set(
+def _determine_tax_set_row(
     db: Session,
     *,
     tenant_id: UUID,
     fact: TaxFact,
     determined_at: datetime,
 ) -> TaxDeterminationSet:
+    _require_aware_input(determined_at)
     jurisdiction, source_ref, source_version, fingerprint = _validate_tax_fact(
         db, tenant_id=tenant_id, fact=fact
     )
@@ -832,6 +1237,7 @@ def determine_tax_set(
         raise TaxConflict("tax determination cannot use a retired jurisdiction")
 
     selected_rules = _applicable_rules(db, tenant_id, fact)
+    determination_set_id = uuid4()
     source_amount = _round(fact.base_amount.amount, jurisdiction.minor_units)
     prior_tax = Decimal(0)
     inclusive_tax = Decimal(0)
@@ -850,8 +1256,11 @@ def determine_tax_set(
             tax_amount * rule.recoverable_rate, jurisdiction.minor_units
         )
         non_recoverable = tax_amount - recoverable
+        determination_id = uuid4()
         component = TaxDetermination(
+            id=determination_id,
             tenant_id=tenant_id,
+            determination_set_id=determination_set_id,
             component_sequence=rule.calculation_sequence,
             jurisdiction_id=jurisdiction.id,
             tax_code_id=rule.tax_code_id,
@@ -899,7 +1308,9 @@ def determine_tax_set(
         )
         component.lines.extend(
             TaxDeterminationLine(
+                id=uuid4(),
                 tenant_id=tenant_id,
+                determination_id=determination_id,
                 sequence=sequence,
                 taxable_amount=taxable,
                 rate=rate,
@@ -916,6 +1327,7 @@ def determine_tax_set(
     net_amount = _round(source_amount - inclusive_tax, jurisdiction.minor_units)
     gross_amount = _round(net_amount + tax_amount, jurisdiction.minor_units)
     row = TaxDeterminationSet(
+        id=determination_set_id,
         tenant_id=tenant_id,
         jurisdiction_id=jurisdiction.id,
         occurred_on=fact.occurred_on,
@@ -931,6 +1343,8 @@ def determine_tax_set(
         source_ref=source_ref,
         source_version=source_version,
         source_fingerprint=fingerprint,
+        result_seal_state="building",
+        result_fingerprint=None,
         evidence_ref=_clean(fact.evidence_ref, "evidence reference"),
         counterparty_ref=(
             fact.counterparty_ref.strip() if fact.counterparty_ref else None
@@ -940,9 +1354,36 @@ def determine_tax_set(
         determined_at=determined_at,
     )
     row.components.extend(components)
+    _validate_persisted_result_structure(row)
     db.add(row)
     db.flush()
+    row.result_fingerprint = _result_content_fingerprint(row)
+    row.result_seal_state = "sealed"
+    db.flush()
     return row
+
+
+def determine_tax_set(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    fact: TaxFact,
+    determined_at: datetime,
+) -> TaxDeterminationSetV1:
+    """Determine and return an ORM-free, exact-money result contract."""
+
+    row = _determine_tax_set_row(
+        db,
+        tenant_id=tenant_id,
+        fact=fact,
+        determined_at=determined_at,
+    )
+    try:
+        return _determination_set_contract(row)
+    except TaxConflict:
+        raise
+    except ValueError as exc:
+        raise TaxConflict(f"persisted determination set is invalid: {exc}") from exc
 
 
 def determine_tax(
@@ -952,6 +1393,7 @@ def determine_tax(
     fact: TaxFact,
     determined_at: datetime,
 ) -> TaxDetermination:
+    _require_aware_input(determined_at)
     jurisdiction, source_ref, source_version, fingerprint = _validate_tax_fact(
         db, tenant_id=tenant_id, fact=fact
     )
@@ -963,6 +1405,15 @@ def determine_tax(
             TaxDetermination.determination_set_id.is_(None),
         )
     )
+    existing_set = db.scalar(
+        select(TaxDeterminationSet).where(
+            TaxDeterminationSet.tenant_id == tenant_id,
+            TaxDeterminationSet.source_ref == source_ref,
+            TaxDeterminationSet.source_version == source_version,
+        )
+    )
+    if legacy is not None and existing_set is not None:
+        raise TaxConflict("tax source version has conflicting determination owners")
     if legacy is not None:
         a1_fingerprint = _a1_fact_fingerprint(
             fact, source_ref=source_ref, source_version=source_version
@@ -973,17 +1424,12 @@ def determine_tax(
             or legacy.source_fingerprint != a1_fingerprint
         ):
             raise TaxConflict("tax source version was reused with different facts")
+        _require_aware_persisted(legacy.determined_at, "legacy determination time")
         return legacy
-    existing_set = db.scalar(
-        select(TaxDeterminationSet).where(
-            TaxDeterminationSet.tenant_id == tenant_id,
-            TaxDeterminationSet.source_ref == source_ref,
-            TaxDeterminationSet.source_version == source_version,
-        )
-    )
     if existing_set is not None:
         if existing_set.source_fingerprint != fingerprint:
             raise TaxConflict("tax source version was reused with different facts")
+        _determination_set_contract(existing_set)
         if len(existing_set.components) != 1:
             raise TaxRuleViolation(
                 "multiple tax components require the determine_tax_set API"
@@ -995,7 +1441,7 @@ def determine_tax(
         raise TaxRuleViolation(
             "multiple tax components require the determine_tax_set API"
         )
-    determination_set = determine_tax_set(
+    determination_set = _determine_tax_set_row(
         db,
         tenant_id=tenant_id,
         fact=fact,
@@ -1005,6 +1451,7 @@ def determine_tax(
         raise TaxRuleViolation(
             "multiple tax components require the determine_tax_set API"
         )
+    _determination_set_contract(determination_set)
     return determination_set.components[0]
 
 
@@ -1108,6 +1555,49 @@ def create_filing_obligation(
     return row
 
 
+def _verified_determination_contracts_for_period(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    jurisdiction_id: UUID,
+    period_start: date,
+    period_end: date,
+) -> tuple[TaxDeterminationSetV1, ...]:
+    """Return only sealed evidence for an authoritative report projection."""
+
+    legacy_id = db.scalar(
+        select(TaxDetermination.id)
+        .where(
+            TaxDetermination.tenant_id == tenant_id,
+            TaxDetermination.jurisdiction_id == jurisdiction_id,
+            TaxDetermination.occurred_on >= period_start,
+            TaxDetermination.occurred_on <= period_end,
+            TaxDetermination.determination_set_id.is_(None),
+        )
+        .limit(1)
+    )
+    if legacy_id is not None:
+        raise TaxConflict(
+            "legacy unsealed determinations cannot feed an a3 statutory report; "
+            "submit new source versions through determine_tax_set"
+        )
+    rows = db.scalars(
+        select(TaxDeterminationSet)
+        .where(
+            TaxDeterminationSet.tenant_id == tenant_id,
+            TaxDeterminationSet.jurisdiction_id == jurisdiction_id,
+            TaxDeterminationSet.occurred_on >= period_start,
+            TaxDeterminationSet.occurred_on <= period_end,
+        )
+        .order_by(
+            TaxDeterminationSet.occurred_on,
+            TaxDeterminationSet.source_ref,
+            TaxDeterminationSet.source_version,
+        )
+    ).all()
+    return tuple(_determination_set_contract(row) for row in rows)
+
+
 def generate_statutory_report(
     db: Session,
     *,
@@ -1139,21 +1629,28 @@ def generate_statutory_report(
         )
     )
     version = int(previous or 0) + 1
+    determinations = _verified_determination_contracts_for_period(
+        db,
+        tenant_id=tenant_id,
+        jurisdiction_id=definition.jurisdiction_id,
+        period_start=obligation.period_start,
+        period_end=obligation.period_end,
+    )
+    report_currency = Currency(definition.currency_code, definition.minor_units)
     amounts: dict[str, Decimal] = {}
     for box in definition.boxes:
-        column = getattr(TaxDetermination, box.value_source)
-        raw = db.scalar(
-            select(func.coalesce(func.sum(column), 0)).where(
-                TaxDetermination.tenant_id == tenant_id,
-                TaxDetermination.jurisdiction_id == definition.jurisdiction_id,
-                TaxDetermination.tax_code_id == box.tax_code_id,
-                TaxDetermination.occurred_on >= obligation.period_start,
-                TaxDetermination.occurred_on <= obligation.period_end,
-            )
-        )
-        amounts[box.box_code] = _round(
-            Decimal(raw or 0) * box.multiplier, definition.minor_units
-        )
+        raw = Decimal(0)
+        for determination in determinations:
+            for component in determination.components:
+                if component.tax_code_id != box.tax_code_id:
+                    continue
+                value = getattr(component, box.value_source)
+                if not isinstance(value, Money) or value.currency != report_currency:
+                    raise TaxConflict(
+                        "determination component currency differs from statutory report"
+                    )
+                raw += value.amount
+        amounts[box.box_code] = _round(raw * box.multiplier, definition.minor_units)
     row = StatutoryReport(
         tenant_id=tenant_id,
         definition_id=definition.id,
@@ -1503,6 +2000,7 @@ __all__ = [
     "create_tax_jurisdiction",
     "create_tax_return",
     "determine_tax",
+    "determine_tax_set",
     "file_tax_return",
     "generate_statutory_report",
     "prepare_tax_return",
