@@ -156,3 +156,44 @@ they receive. Their savepoint comes from the kernel-private, engine-free
 transaction mechanic; they do not import the eager `dotmac_kernel.db` runtime.
 That module remains the one public transaction authority and re-exports the
 same `conflict_savepoint` API (ADR-0024 caller-owned-runtime amendment).
+
+## Amendment — 2026-08-25: exact replay precedes mutable-state validation
+
+"Replay first" does not mean "trust first" or "skip validation". The required
+order for an idempotent writer is:
+
+1. authenticate and authorize the caller and tenant/platform scope;
+2. validate and canonicalize the command shape, idempotency key and exact
+   request fingerprint;
+3. look up the idempotency record and compare its stored fingerprint;
+4. return the stored result for an exact replay, or refuse the same key carrying
+   a different fingerprint; then
+5. only for a new request, run mutable-state business preconditions and perform
+   the effect plus ledger write in the same transaction.
+
+The lookup must precede overlap, uniqueness, "already open", availability and
+similar preflight decisions whose answer can change because the first attempt
+succeeded. Otherwise a retry fails against the state it created and the writer
+is not idempotent in practice.
+
+Authentication, authorization, scope isolation, parsing, canonicalization and
+fingerprint-conflict checks are never bypassed by replay. They establish that
+the caller may receive the stored result and that the request is the same one.
+
+The test contract follows the service contract: build one command once and
+submit that same command/key twice. A helper that previews and rebuilds the
+command on its second call tests preflight again, not replay. A fingerprint
+conflict test must use inputs that pass earlier preconditions and assert the
+specific conflict reason.
+
+The reference is
+`dotmac_subscriptions.treatments.approve_billing_arrangement`: it resolves the
+stored arrangement and compares the preview fingerprint before rerunning the
+mutable overlap preview. Its unit canary submits one command twice. The kernel
+owner itself already follows the same sequence: `_validate` →
+lookup/replay-or-conflict → `operation`.
+
+Enforcement:
+`tests/architecture/test_semantic_identity_and_replay.py` proves both reference
+orders structurally and includes a planted operation-before-lookup sensitivity
+case; `tests/unit/test_subscriptions_treatments.py` proves exact replay behavior.
