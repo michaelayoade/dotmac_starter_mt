@@ -10,7 +10,6 @@ import tomllib
 from pathlib import Path
 
 import dotmac_subscriptions
-import pytest
 from dotmac_kernel.namespaces import (
     MIGRATION_OWNER_LEDGER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
@@ -22,11 +21,39 @@ from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
-MIGRATIONS = SOURCE_ROOT / "migrations/versions"
-ROOT_MIGRATION = MIGRATIONS / "su_0001_subscriptions.py"
-PRICING_MIGRATION = MIGRATIONS / "su_0002_offer_pricing.py"
-TREATMENT_MIGRATION = MIGRATIONS / "su_0003_billing_treatments.py"
-SCHEMA = "mod_subscriptions"
+ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
+PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
+TREATMENT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0003_billing_treatments.py"
+
+_TREATMENT_TENANT_TABLES = {
+    "subscription_billing_arrangements",
+    "subscription_billing_grants",
+}
+_TREATMENT_PLATFORM_TABLES = {
+    "platform_subscription_billing_arrangements",
+    "platform_subscription_billing_grants",
+}
+_ROOT_TENANT_TABLES = set(TENANT_TABLES) - _TREATMENT_TENANT_TABLES
+_ROOT_PLATFORM_TABLES = set(PLATFORM_TABLES) - _TREATMENT_PLATFORM_TABLES
+
+_ROOT_IMMUTABLE_TABLES = {
+    "offer_versions",
+    "offer_version_prices",
+    "subscription_contract_versions",
+    "subscription_contract_lines",
+    "recurring_charge_occurrences",
+    "platform_offer_versions",
+    "platform_offer_version_prices",
+    "platform_subscription_contract_versions",
+    "platform_subscription_contract_lines",
+    "platform_recurring_charge_occurrences",
+}
+_TREATMENT_IMMUTABLE_TABLES = {
+    "subscription_billing_arrangements",
+    "subscription_billing_grants",
+    "platform_subscription_billing_arrangements",
+    "platform_subscription_billing_grants",
+}
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -115,6 +142,80 @@ def _timing_shape_violations(source: str) -> set[str]:
             parts = set(re.split(r"[^a-z]+", node.name.lower()))
             if parts & _TIMING_WORDS:
                 violations.add(node.name)
+    return violations
+
+
+def _created_tables(source: str) -> set[str]:
+    tables: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "create_table"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            tables.add(node.args[0].value)
+    return tables
+
+
+def _migration_contract_violations(
+    source: str,
+    *,
+    tenant_tables: set[str],
+    platform_tables: set[str],
+    immutable_tables: set[str],
+) -> set[str]:
+    """Check each table against the revision that creates it.
+
+    Reading a concatenated lineage would let a later migration satisfy a token
+    that the creating migration omitted. Hard rules 11 and 27 require the
+    isolation contract in the SAME migration, so this helper receives one
+    revision at a time and also asserts its exact table-creation coverage.
+    """
+    violations: set[str] = set()
+    expected_tables = tenant_tables | platform_tables
+    created_tables = _created_tables(source)
+    if created_tables != expected_tables:
+        violations.add(
+            "created_tables:"
+            f"expected={sorted(expected_tables)}:actual={sorted(created_tables)}"
+        )
+
+    for table in tenant_tables:
+        qualified = f"mod_subscriptions.{table}"
+        required = {
+            f"ALTER TABLE {qualified} ENABLE ROW LEVEL SECURITY": "enable_rls",
+            f"ALTER TABLE {qualified} FORCE ROW LEVEL SECURITY": "force_rls",
+            f"CREATE POLICY {table}_tenant_isolation ON {qualified}": "policy",
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {qualified} TO app_user": (
+                "tenant_dml"
+            ),
+        }
+        for token, contract in required.items():
+            if token not in source:
+                violations.add(f"{table}:{contract}")
+
+    for table in platform_tables:
+        qualified = f"mod_subscriptions.{table}"
+        required = {
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {qualified} TO platform_api": (
+                "platform_dml"
+            ),
+            f"REVOKE ALL PRIVILEGES ON {qualified} FROM app_user": "tenant_revoke",
+        }
+        for token, contract in required.items():
+            if token not in source:
+                violations.add(f"{table}:{contract}")
+        if f"ALTER TABLE {qualified} ENABLE ROW LEVEL SECURITY" in source:
+            violations.add(f"{table}:platform_rls")
+
+    for table in immutable_tables:
+        token = f"BEFORE UPDATE OR DELETE ON mod_subscriptions.{table}"
+        if token not in source:
+            violations.add(f"{table}:immutability")
+
     return violations
 
 
@@ -393,82 +494,62 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
     assert not violations, violations
 
 
-def _lineage_sources() -> dict[str, str]:
-    """Every revision in the lineage, newest last. Not just the root one."""
-    return {path.name: path.read_text() for path in sorted(MIGRATIONS.glob("su_*.py"))}
+def test_each_migration_declares_its_own_isolation_and_immutability() -> None:
+    root = ROOT_MIGRATION.read_text()
+    treatment = TREATMENT_MIGRATION.read_text()
 
-
-def _revisions_declaring(fragment: str) -> tuple[str, ...]:
-    return tuple(
-        name for name, source in _lineage_sources().items() if fragment in source
+    assert 'revision = "su_0001_subscriptions"' in root
+    assert 'branch_labels = ("subscriptions",)' in root
+    assert "resolve_depends_on" in root
+    assert "require_prerequisites" in root
+    assert not _migration_contract_violations(
+        root,
+        tenant_tables=_ROOT_TENANT_TABLES,
+        platform_tables=_ROOT_PLATFORM_TABLES,
+        immutable_tables=_ROOT_IMMUTABLE_TABLES,
     )
 
-
-def test_the_root_revision_owns_the_lineage_and_its_prerequisites() -> None:
-    """Root-revision identity, which is genuinely scoped to `su_0001`."""
-    source = ROOT_MIGRATION.read_text()
-
-    assert 'revision = "su_0001_subscriptions"' in source
-    assert 'branch_labels = ("subscriptions",)' in source
-    assert "resolve_depends_on" in source
-    assert "require_prerequisites" in source
-    assert "platform_api" in source
-    assert "CREATE TRIGGER" in source
-
-
-def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    """EVERY declared table states its plane's isolation contract, in SOME revision.
-
-    This walks the whole lineage rather than the root revision. Reading only
-    `su_0001` under-covered by construction: a table added by a later revision
-    — `subscription_billing_arrangements` and `subscription_billing_grants` in
-    `su_0003` — could never satisfy a substring search over the root file, so
-    the guard would either fail for the wrong reason or, had the table lists
-    not been checked, silently cover nothing.
-
-    Per table rather than per file: a bare `"ENABLE ROW LEVEL SECURITY" in
-    source` passes on a file that protects one table out of five. Naming the
-    table in the searched fragment is what makes the check discriminate, and
-    the disjointness assertions below hold ADR-0023's dual-plane rule — RLS is
-    the tenant plane's isolation, REVOKE is the control plane's, and neither
-    substitutes for the other.
-    """
-    for table in TENANT_TABLES:
-        assert _revisions_declaring(
-            f"ALTER TABLE {SCHEMA}.{table} ENABLE ROW LEVEL SECURITY"
-        ), table
-        assert _revisions_declaring(
-            f"ALTER TABLE {SCHEMA}.{table} FORCE ROW LEVEL SECURITY"
-        ), table
-        assert not _revisions_declaring(
-            f"REVOKE ALL PRIVILEGES ON {SCHEMA}.{table} FROM app_user"
-        ), table
-    for table in PLATFORM_TABLES:
-        assert _revisions_declaring(
-            f"REVOKE ALL PRIVILEGES ON {SCHEMA}.{table} FROM app_user"
-        ), table
-        assert not _revisions_declaring(
-            f"ALTER TABLE {SCHEMA}.{table} ENABLE ROW LEVEL SECURITY"
-        ), table
-
-
-def test_the_isolation_sweep_would_notice_a_table_nobody_protected() -> None:
-    """Sensitivity proof: the search above discriminates, it does not just pass.
-
-    A guard built on substring search over a growing set of files can go quiet
-    without anyone noticing. This asserts the negative case directly — an
-    undeclared table name finds nothing — and that the sweep actually reads
-    more than the root revision.
-    """
-    assert not _revisions_declaring(
-        f"ALTER TABLE {SCHEMA}.subscription_table_nobody_wrote "
-        "ENABLE ROW LEVEL SECURITY"
+    assert 'revision = "su_0003_billing_treatments"' in treatment
+    assert 'down_revision = "su_0002_offer_pricing"' in treatment
+    assert not _migration_contract_violations(
+        treatment,
+        tenant_tables=_TREATMENT_TENANT_TABLES,
+        platform_tables=_TREATMENT_PLATFORM_TABLES,
+        immutable_tables=_TREATMENT_IMMUTABLE_TABLES,
     )
-    assert len(_lineage_sources()) >= 3
-    assert _revisions_declaring(
-        f"ALTER TABLE {SCHEMA}.subscription_billing_arrangements "
-        "ENABLE ROW LEVEL SECURITY"
-    ) == ("su_0003_billing_treatments.py",)
+    # su_0003 also protects the already-released contract-version tables from
+    # being superseded around an open arrangement. That guard belongs to the
+    # treatment revision that introduced the premise, not to su_0001.
+    assert "contract_versions_treatment_term_freeze" in treatment
+    assert "platform_contract_versions_treatment_term_freeze" in treatment
+
+
+def test_per_revision_migration_guard_is_sensitive() -> None:
+    planted = """
+from alembic import op
+
+def upgrade():
+    op.create_table("tenant_facts")
+    op.create_table("platform_facts")
+"""
+
+    violations = _migration_contract_violations(
+        planted,
+        tenant_tables={"tenant_facts"},
+        platform_tables={"platform_facts"},
+        immutable_tables={"tenant_facts", "platform_facts"},
+    )
+
+    assert violations == {
+        "tenant_facts:enable_rls",
+        "tenant_facts:force_rls",
+        "tenant_facts:policy",
+        "tenant_facts:tenant_dml",
+        "tenant_facts:immutability",
+        "platform_facts:platform_dml",
+        "platform_facts:tenant_revoke",
+        "platform_facts:immutability",
+    }
 
 
 def test_offer_pricing_evolves_in_an_additive_composable_revision() -> None:
