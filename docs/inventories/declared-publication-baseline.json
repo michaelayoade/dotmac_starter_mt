@@ -112,11 +112,6 @@
       "reason": "MACHINE-ATTRIBUTION RELEASE PENDING THE PROTECTED WORKFLOW. Main already claimed a95 for the response_obligations allocation, so the additive source-application attribution, zero-drop credential rotation and 0028_machine_attribution migration are a96 rather than silently broadening a95. The response-obligations module's >=0.1.0a95 floor remains valid because a96 carries that allocation. Remove this row in the a96 release-record change; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-services": {
-      "declared": "0.1.0a1",
-      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill and lifecycle shadow; it does not compose the module, move service-lifecycle authority, or retire Sub's writer. Fulfillment, Network Access, subscriptions and billing stay outside. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
-      "state": "never-published"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer for the notification-template contract. Publication makes an immutable artifact available for the separately governed seed/shadow and renderer retirement work; it does not compose the module, move template authority, or retire Sub's local renderer. The release authorization also corrects the stale runtime version surface to the already-declared 0.2.0a3. Remove this row only in the a3 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
