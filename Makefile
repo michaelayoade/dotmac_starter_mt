@@ -51,6 +51,8 @@ palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the 
 	poetry run python scripts/palette_debt_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
 	poetry run python scripts/external_connector_sweep.py --write-baseline
+guard-proof-baseline: ## Regenerate the ADR-0018 three-leg retrofit backlog (commit the diff in the same change)
+	poetry run python scripts/guard_proof_backlog.py
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
 check: lint lint-imports type-check security migration-gate ui-check format-check ## Lint + types + security + migration composition + design-system asset freshness
@@ -128,5 +130,6 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline \
+	guard-proof-baseline \
 	docker-build docker-dev \
 	bump-version deploy

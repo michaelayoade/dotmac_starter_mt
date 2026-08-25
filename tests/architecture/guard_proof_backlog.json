@@ -1,0 +1,192 @@
+{
+  "_comment": "Frozen ADR-0018 three-leg retrofit backlog for this repository's own architecture guards. Two-directional ratchet: the gate fails if a population rises or falls without this file being regenerated in the same change. Retire an entry by giving the named arm the leg it lacks, then run `make guard-proof-baseline`. Do not hand-edit.",
+  "_legend": {
+    "fixture_only_arms": "<guard>::<detector> -> the fixture proofs that exist. Missing LEG 3: nothing drives this detector over mutated real corpus bytes.",
+    "guards_without_a_firing_proof": "<guard> -> its discovery handles. Missing ALL THREE legs: the guard scans the real tree and nothing anywhere in it plants a violation.",
+    "vacuous_discovery_scopes": "<guard>::<scope>::<call> -> unasserted real-tree discovery. An empty match set is a green run: add one non-emptiness assertion."
+  },
+  "totals": {
+    "fixture_only_arms": 23,
+    "guards_without_a_firing_proof": 22,
+    "vacuous_discovery_scopes": 16
+  },
+  "populations": {
+    "fixture_only_arms": {
+      "tests/architecture/test_ci_runs_canonical_check.py::_check_prerequisites": [
+        "test_the_comparison_detects_a_planted_drift"
+      ],
+      "tests/architecture/test_ci_runs_canonical_check.py::_quality_matrix_targets": [
+        "test_the_comparison_detects_a_planted_drift"
+      ],
+      "tests/architecture/test_fleet_decomposition_matrix.py::_family_rows": [
+        "test_family_row_detector_is_sensitive"
+      ],
+      "tests/architecture/test_fleet_decomposition_matrix.py::_has_destination": [
+        "test_a_settled_module_may_be_named_as_its_distribution",
+        "test_destination_detector_rejects_transitions_and_metadata"
+      ],
+      "tests/architecture/test_fleet_fact_registry.py::_states_without_withdrawing": [
+        "test_withdrawal_detector_is_sensitive"
+      ],
+      "tests/architecture/test_imports_module.py::_function": [
+        "test_an_apply_run_can_only_be_created_by_promotion",
+        "test_processing_entry_points_take_verified_bytes_not_free_form_rows",
+        "test_the_detector_does_fire_on_the_apply_entry_point",
+        "test_the_detector_fires_on_a_function_that_does_hold_one",
+        "test_the_dry_run_entry_point_holds_nothing_that_could_mutate"
+      ],
+      "tests/architecture/test_imports_module.py::_mentions_an_applier": [
+        "test_the_detector_fires_on_a_function_that_does_hold_one"
+      ],
+      "tests/architecture/test_integration_ingress_hygiene.py::_scan_for_providers": [
+        "test_the_provider_scan_bites"
+      ],
+      "tests/architecture/test_integration_ingress_hygiene.py::_without_docstrings": [
+        "test_the_ingress_engine_reads_no_named_header_or_parameter",
+        "test_the_module_installs_no_logger",
+        "test_the_phase_functions_never_commit_or_roll_back"
+      ],
+      "tests/architecture/test_kernel_public_surface.py::find_surface_violations": [
+        "test_checker_flags_private_and_internal_imports"
+      ],
+      "tests/architecture/test_kernel_version_sync.py::_alpha": [
+        "test_a_capability_raised_floor_is_above_its_allocation"
+      ],
+      "tests/architecture/test_manifest_declarations.py::_orphans": [
+        "test_orphan_scan_detects_a_planted_orphan"
+      ],
+      "tests/architecture/test_module_release_allowlist.py::_resolve": [
+        "test_an_unallowlisted_package_cannot_be_resolved",
+        "test_files_is_release_allowlisted_with_its_schema_allocation",
+        "test_ticketing_is_release_allowlisted_with_its_schema_allocation"
+      ],
+      "tests/architecture/test_module_version_sync.py::_disagreements": [
+        "test_a_missing_surface_fails_loudly_rather_than_being_skipped",
+        "test_the_comparison_accepts_an_aligned_module",
+        "test_the_comparison_catches_drift_in_every_position",
+        "test_the_three_version_surfaces_agree"
+      ],
+      "tests/architecture/test_product_vision.py::_missing_vision_contract": [
+        "test_product_vision_contract_detector_is_sensitive"
+      ],
+      "tests/architecture/test_session_authority.py::find_session_authority_violations": [
+        "test_allowlist_is_still_needed",
+        "test_checker_flags_a_violation"
+      ],
+      "tests/architecture/test_test_database_is_loopback_bound.py::_split_mapping": [
+        "test_the_detector_tells_a_bound_publish_from_an_open_one"
+      ],
+      "tests/architecture/test_ui_public_surface.py::find_forbidden_imports": [
+        "test_checker_flags_private_and_undeclared_imports"
+      ],
+      "tests/architecture/test_ui_public_surface.py::find_surface_violations": [
+        "test_checker_flags_private_and_undeclared_imports"
+      ],
+      "tests/architecture/test_web_conventions.py::_SANITIZE_MENTION.search": [
+        "test_safe_filter_only_used_with_a_sanitize_comment_nearby",
+        "test_the_safe_filter_guard_still_bites"
+      ],
+      "tests/architecture/test_web_conventions.py::_flags": [
+        "test_the_safe_filter_guard_still_bites"
+      ],
+      "tests/architecture/test_web_conventions.py::_template_offenders": [
+        "test_timestamp_filter_check_catches_bypass_attempts"
+      ],
+      "tests/architecture/test_workflow_action_pinning.py::_SHA.match": [
+        "test_the_checker_would_catch_a_mutable_tag"
+      ]
+    },
+    "guards_without_a_firing_proof": {
+      "tests/architecture/test_application_directory_module.py": [
+        "_migration_source"
+      ],
+      "tests/architecture/test_approval_workflow_source_audit.py": [
+        "_rows"
+      ],
+      "tests/architecture/test_approvals_module.py": [
+        "_called_attributes",
+        "_imported_names",
+        "_tree"
+      ],
+      "tests/architecture/test_cache_scope.py": [
+        "_python_files"
+      ],
+      "tests/architecture/test_entitlement_allocation_module.py": [
+        "_migration_source"
+      ],
+      "tests/architecture/test_feature_flags.py": [
+        "_referenced_codes"
+      ],
+      "tests/architecture/test_feature_manifests.py": [
+        "_independence_contract_modules"
+      ],
+      "tests/architecture/test_files_module.py": [
+        "<inline>"
+      ],
+      "tests/architecture/test_integration_parity.py": [
+        "_dossier",
+        "_parity"
+      ],
+      "tests/architecture/test_lockfile_path_packages.py": [
+        "_locked_path_packages",
+        "_package_pyproject"
+      ],
+      "tests/architecture/test_no_feature_rollback.py": [
+        "_feature_py_files"
+      ],
+      "tests/architecture/test_party_archetype_names.py": [
+        "<inline>"
+      ],
+      "tests/architecture/test_release_catalog_module.py": [
+        "_migration_source"
+      ],
+      "tests/architecture/test_release_freshness_guard.py": [
+        "_jobs",
+        "_run"
+      ],
+      "tests/architecture/test_root_version_sync.py": [
+        "_pyproject_version",
+        "_version_file_value"
+      ],
+      "tests/architecture/test_secrets_are_held.py": [
+        "_imported_roots"
+      ],
+      "tests/architecture/test_settings_env_is_bootstrap_only.py": [
+        "_functions_touching_env"
+      ],
+      "tests/architecture/test_settings_typed_contract.py": [
+        "_returns"
+      ],
+      "tests/architecture/test_template_studio_module.py": [
+        "_revision_files"
+      ],
+      "tests/architecture/test_thin_wrappers.py": [
+        "_router_files"
+      ],
+      "tests/architecture/test_ticketing_module.py": [
+        "<inline>"
+      ],
+      "tests/architecture/test_vendored_fonts.py": [
+        "_woff2_files"
+      ]
+    },
+    "vacuous_discovery_scopes": {
+      "tests/architecture/test_application_directory_module.py::test_the_module_imports_no_assembly_and_no_other_module::rglob(*.py)": [],
+      "tests/architecture/test_approvals_module.py::test_importing_the_package_never_builds_a_database_engine::rglob(*.py)": [],
+      "tests/architecture/test_approvals_module.py::test_the_module_holds_no_money_currency_or_fx_vocabulary::rglob(*.py)": [],
+      "tests/architecture/test_approvals_module.py::test_the_module_imports_no_consuming_domain::rglob(*.py)": [],
+      "tests/architecture/test_approvals_module.py::test_the_outbox_adapter_is_the_only_file_touching_kernel_messaging::rglob(*.py)": [],
+      "tests/architecture/test_entitlement_allocation_module.py::test_the_module_imports_no_assembly_and_no_sibling_module::rglob(*.py)": [],
+      "tests/architecture/test_entitlement_allocation_module.py::test_the_module_never_reaches_for_the_process_capability_catalogue::rglob(*.py)": [],
+      "tests/architecture/test_feature_flags.py::_referenced_codes::rglob(*.py)": [],
+      "tests/architecture/test_files_module.py::test_package_has_no_web_or_domain_dependencies::rglob(*.py)": [],
+      "tests/architecture/test_kernel_public_surface.py::_iter_app_files::rglob(*.py)": [],
+      "tests/architecture/test_lockfile_path_packages.py::test_every_workspace_package_is_locked::iterdir()": [],
+      "tests/architecture/test_no_feature_rollback.py::_feature_py_files::rglob(*.py)": [],
+      "tests/architecture/test_release_catalog_module.py::test_channels_and_pins_are_not_in_this_release::glob(*.py)": [],
+      "tests/architecture/test_release_catalog_module.py::test_the_module_imports_no_assembly_and_no_sibling_module::rglob(*.py)": [],
+      "tests/architecture/test_session_authority.py::_iter_app_modules::rglob(*.py)": [],
+      "tests/architecture/test_web_conventions.py::_web_py_files::glob(*/web.py)": []
+    }
+  }
+}

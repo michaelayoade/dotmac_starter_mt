@@ -246,9 +246,25 @@ specifics) points here and must never fork these rules.
     its configuration, the configuration is the defect. An existing backlog is
     retired by a TWO-DIRECTIONAL ratchet that fails when the count rises OR
     falls without being lowered, kept distinct from any per-line
-    "reviewed and correct" marker, and carrying a sensitivity proof that the
-    detector still fires. (ADR-0018; `dotmac_erp` reference implementation:
-    `scripts/check_session_context.py` + `session_context_legacy.txt`)
+    "reviewed and correct" marker. **Every detector ARM proves THREE legs**
+    (ADR-0018 amendment 2026-08-15): SENSITIVITY (a representative violation
+    fires), SPECIFICITY (the near-miss stays silent) and LIVENESS (the arm
+    reaches and correctly classifies REAL CORPUS CODE). Liveness is per ARM,
+    never per category — a live direct-call arm conceals an inert factory arm,
+    which is how Governance's factory tracing resolved ZERO spellings across
+    5,626 real sources while reading as precise. For a legitimate ZERO
+    baseline, liveness is proved by an IN-SITU MUTATION of the real repository
+    scan — real discovery, real bytes, real classifier — never by requiring
+    existing debt to exist, and never by a `tmp_path` fixture. A new or
+    modified arm lands with all three; existing two-leg arms are a retrofit
+    programme — and that programme is itself frozen by an exact
+    two-directional backlog (`tests/architecture/test_guard_proof_ratchet.py`
+    + `guard_proof_backlog.json`, `make guard-proof-baseline`): three
+    populations naming every unproved ARM, failing when a population rises OR
+    falls. (ADR-0018; worked example:
+    `tests/architecture/test_presentation_boundary.py`; `dotmac_erp` reference
+    implementation: `scripts/check_session_context.py` +
+    `session_context_legacy.txt`)
 
 26. **Starter-owned templates author colour against `var(--dmui-*)`, never a
     literal palette.** A hardcoded Tailwind palette utility (`bg-slate-700`,
