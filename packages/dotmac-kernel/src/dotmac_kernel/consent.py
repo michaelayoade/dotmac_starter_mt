@@ -59,6 +59,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_kernel import channels as channels_registry
 from dotmac_kernel.consent_models import (
     REASON_UNSUBSCRIBE,
     SCOPE_ALL,
@@ -70,10 +71,6 @@ from dotmac_kernel.consent_models import (
 from dotmac_kernel.db import conflict_savepoint
 
 _DIGITS = re.compile(r"\D+")
-
-#: Channels whose addresses are phone numbers, normalised to digits only.
-#: An open set a product extends — the kernel ships the two it can reason about.
-_NUMERIC_CHANNELS: set[str] = {"sms", "whatsapp"}
 
 _MARKETING_CATEGORIES: set[str] = set()
 
@@ -112,25 +109,61 @@ def is_marketing(category: str | None) -> bool:
 def register_numeric_channels(*channels: str) -> None:
     """Declare channels whose addresses are phone numbers (digits-only form).
 
-    `sms` and `whatsapp` ship registered. A product adding an SMS-like channel
-    registers it here so a suppression cannot be dodged by punctuation.
+    An ADAPTER over `dotmac_kernel.channels`, which owns the channel vocabulary
+    — the same relationship `messaging.process_once` has to `idempotency`. There
+    is one registry; this is the narrow spelling of it that predates the general
+    one, kept working because it is in the published surface.
+
+    Prefer `channels.register_channels(...)`, which declares all four traits at
+    once. This function can only say "phone", so it fills the other three with
+    the values an SMS-like channel has anyway.
     """
     for channel in channels:
         normalised = (channel or "").strip().lower()
         if not normalised:
             raise ConsentError("a numeric channel needs a name")
-        _NUMERIC_CHANNELS.add(normalised)
+        if channels_registry.is_registered(normalised):
+            existing = channels_registry.channel_spec(normalised)
+            if existing.address_form is channels_registry.AddressForm.PHONE:
+                continue
+            raise ConsentError(
+                f"channel {normalised!r} is already declared with "
+                f"address_form={existing.address_form.value!r} by "
+                f"{existing.owner!r}; it cannot also be numeric"
+            )
+        channels_registry.register_channels(
+            [
+                channels_registry.ChannelSpec(
+                    code=normalised,
+                    owner="consent.register_numeric_channels",
+                    address_form=channels_registry.AddressForm.PHONE,
+                    transport=channels_registry.Transport.EXTERNAL,
+                    thread_identity=channels_registry.ThreadIdentity.DERIVED,
+                    message_id_scope=channels_registry.MessageIdScope.ACCOUNT,
+                )
+            ]
+        )
 
 
 def _reset_registries_for_tests(
-    *, marketing: Iterable[str] = (), numeric: Iterable[str] = ("sms", "whatsapp")
+    *, marketing: Iterable[str] = (), numeric: Iterable[str] | None = None
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """Replace both registries wholesale. Tests only — never product code."""
-    previous = (frozenset(_MARKETING_CATEGORIES), frozenset(_NUMERIC_CHANNELS))
+    """Replace both registries wholesale. Tests only — never product code.
+
+    `numeric=None` restores the channel registry's shipped defaults (`sms`,
+    `whatsapp`), which is what this used to hardcode.
+    """
+    previous_numeric = frozenset(
+        spec.code
+        for spec in channels_registry.registered_channels()
+        if spec.address_form is channels_registry.AddressForm.PHONE
+    )
+    previous = (frozenset(_MARKETING_CATEGORIES), previous_numeric)
     _MARKETING_CATEGORIES.clear()
     _MARKETING_CATEGORIES.update(c.strip().lower() for c in marketing)
-    _NUMERIC_CHANNELS.clear()
-    _NUMERIC_CHANNELS.update(c.strip().lower() for c in numeric)
+    channels_registry.reset_registry_for_tests(include_defaults=numeric is None)
+    for code in numeric or ():
+        register_numeric_channels(code)
     return previous
 
 
@@ -151,7 +184,8 @@ def normalize_address(channel: str, address: str | None) -> str:
     value = (address or "").strip()
     if not value:
         return ""
-    if normalize_channel(channel) in _NUMERIC_CHANNELS:
+    form = channels_registry.address_form_for(channel)
+    if form is channels_registry.AddressForm.PHONE:
         return _DIGITS.sub("", value)
     return value.lower()
 

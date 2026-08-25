@@ -494,8 +494,26 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-inbox"
+version = "0.1.0a1"
+description = "DotMac Inbox — a tenant-scoped, trait-driven conversation record: declared channels described by four traits, a closed status vocabulary with product-declared reasons, and a mandatory provider-observation ingress (ADR-0006 M2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a41"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inbox"
+
+[[package]]
 name = "dotmac-kernel"
-version = "0.1.0a39"
+version = "0.1.0a41"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2537,4 +2555,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "5acaf202d524c12d1c6b422e018f6fd2f668555db8bf4d4af23549b6f26f41ca"
+content-hash = "bebeec506b14aebd9567e885482df2f16347f3db43c4c35d5d1a817eb00b9009"

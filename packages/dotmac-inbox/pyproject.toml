@@ -1,0 +1,47 @@
+[tool.poetry]
+name = "dotmac-inbox"
+version = "0.1.0a1"
+description = "DotMac Inbox — a tenant-scoped, trait-driven conversation record: declared channels described by four traits, a closed status vocabulary with product-declared reasons, and a mandatory provider-observation ingress (ADR-0006 M2)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_inbox", from = "src" }]
+include = [
+    # PEP 561 marker — the module's contracts are annotated, and a consuming
+    # assembly's type-checker cannot see them without this.
+    { path = "src/dotmac_inbox/py.typed", format = ["sdist", "wheel"] },
+    # The module's OWN Alembic lineage (prefix `ib`, branch label `inbox`),
+    # composed by a consuming assembly through `version_locations`. No
+    # `__init__` in versions/ (Alembic convention), so it is declared explicitly
+    # as package data.
+    { path = "src/dotmac_inbox/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Floor 3.11 to match the kernel and the products that consume it.
+python = ">=3.11,<3.14"
+# The one runtime dependency, and the direction ADR-0006 § 2 fixes:
+# `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
+# kernel; never on an assembly, and never on another module.
+#
+# The floor is the release that allocates `mod_ibx` in `MIGRATION_OWNER_LEDGER`.
+# An earlier kernel cannot register this module at all —
+# `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` — so
+# this is a hard floor rather than a preference.
+# PROTOTYPE: this floor names a version that is deliberately NOT published
+# (see the kernel CHANGELOG's UNRELEASED section). The module is audit
+# evidence, not an installable release.
+dotmac-kernel = ">=0.1.0a40"
+sqlalchemy = "^2.0"
+
+# No `alembic`: unlike ticketing, this release ships no DDL-emitting helper, so
+# Alembic is only needed to RUN the lineage, which a consuming assembly already
+# has. Adding it here would claim a runtime dependency the package does not have.
+#
+# No `fastapi` and no `pydantic` yet: this release ships the channel trait
+# registry, the lifecycle, the threading/dedup rules and the three tables.
+# Routers and schemas land with the first adopter's surface, so the dependency
+# arrives with the code that needs it rather than ahead of it.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

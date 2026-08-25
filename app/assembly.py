@@ -32,6 +32,7 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import dotmac_inbox
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
@@ -81,6 +82,7 @@ assembly = ProductAssemblySpec(
         *load_manifests(FEATURE_MODULES),
         dotmac_template_studio.module,
         dotmac_ticketing.module,
+        dotmac_inbox.module,
     ],
     web_enabled=settings.web_enabled,
     disabled_modules=frozenset(settings.disabled_feature_set),

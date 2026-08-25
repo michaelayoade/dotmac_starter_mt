@@ -128,9 +128,15 @@ def test_the_real_repo_composes() -> None:
     assert report.ok, report.render()
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
-    assert len(report.revisions) == 28
+    assert len(report.revisions) == 30
     owners = {a["owner"] for a in report.attribution.values()}
-    assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
+    assert owners == {
+        "kernel",
+        "assembly",
+        "template_studio",
+        "ticketing",
+        "inbox",
+    }
 
 
 def test_every_real_revision_is_attributed_to_exactly_one_owner() -> None:
@@ -609,7 +615,7 @@ def test_version_locations_are_read_from_the_alembic_config() -> None:
     """The gate reads the config the deployment actually uses — a location
     added to `alembic.ini` is automatically one the gate must attribute."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    assert len(locations) == 4
+    assert len(locations) == 5
     assert all(location.is_dir() for location in locations)
 
 

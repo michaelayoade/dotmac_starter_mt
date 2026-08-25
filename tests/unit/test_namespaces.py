@@ -174,7 +174,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         assert owner.db_schema is not None
         assert owner.db_schema.startswith("mod_")
         assert not owner.is_legacy
-    assert {owner.owner for owner in modules} == {"template_studio", "ticketing"}
+    assert {owner.owner for owner in modules} == {
+        "template_studio",
+        "ticketing",
+        "inbox",
+    }
 
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:

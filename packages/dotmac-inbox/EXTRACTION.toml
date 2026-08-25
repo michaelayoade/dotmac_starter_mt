@@ -1,0 +1,127 @@
+schema_version = 1
+package = "dotmac-inbox"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "Dotmac inbox conversation record"
+# The 2026-08-11 audit (inbox-sources.md) found ONE implementation, not two.
+# CRM's inbox looks like a second consumer and is not: its eleven `crm_inbox_*`
+# web modules and `crm_presence` are all `partial_capability` rows in Sub's
+# CRM->Sub retirement ledger, under an accepted decision naming Sub the owner.
+# Counting it would repeat the error ticket-sources.md caught.
+#
+# That is materially weaker cross-product demand than tickets had — ERP and the
+# vendor control plane have no inbox and no evident need for one. So the unit
+# was RE-DRAWN rather than lifted: "an omni-channel inbox" is not a module the
+# fleet needs, because most of Sub's 20,521 service lines are transport, ISP
+# identity policy or workforce policy, none of which belongs behind a shared
+# version.
+#
+# What IS shared is smaller and sharper: a conversation record whose threading
+# and deduplication read four declared CHANNEL TRAITS instead of hardcoded sets
+# of channel names. Sub's ten channels and CRM's six reduce to those four traits
+# with no residue — the same kind of evidence "same contract" asks for, one step
+# down from the product level where it was unavailable.
+contract = "A durable, threaded exchange between one tenant and one external party across a declared channel, with an auditable record of every message and the provider fact each one came from. NOT the transport, NOT who the contact turns out to be, NOT routing or workforce policy, NOT delivery state."
+source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt"]
+source_paths = [
+  # Sub is the qualifying source. Not on size — CRM is within 2% on service LOC
+  # and has more routes and more test files — but because it is not being
+  # retired, because its SOT registry already names 25 separate inbox owners
+  # with declared owns/depends_on/inputs, and because it separates observation
+  # from decision where CRM does not.
+  "dotmac_sub:app/models/team_inbox.py",
+  "dotmac_sub:app/services/team_inbox_observations.py",
+  "dotmac_sub:app/services/team_inbox_channel_receive.py",
+  "dotmac_sub:app/services/team_inbox_receive.py",
+  "dotmac_sub:app/services/team_inbox_commands.py",
+  "dotmac_sub:app/services/sot_registry/domains/notifications_communications.py",
+  # CRM is a retirement source, read for the deduplication analysis ONLY. Its
+  # two overlapping partial unique indexes on `crm_messages` are where the
+  # `message_id_scope` trait came from. It is NOT a second consumer and must not
+  # be counted as one.
+  "dotmac_crm:app/models/crm/conversation.py",
+  "dotmac_crm:app/services/crm/inbox/dedup.py",
+  "dotmac_crm:app/services/crm/inbox/handlers/base.py",
+  # ERP has NO inbox — zero conversation models, zero inbound handling (no IMAP,
+  # no parser). It is listed because inventorying it produced the audit's most
+  # useful surprise: its ticket already models email correspondence
+  # (`REPLIED` status, `raised_by_email`, `contact_email`, `contact_phone`) with
+  # nowhere to record the correspondence itself. See `candidate_consumers`.
+  "dotmac_erp:app/models/support/ticket.py",
+  # The vendor control plane has none either, and no evident need.
+  "dotmac_starter_mt:packages/dotmac-inbox/src/dotmac_inbox",
+]
+preserved_tests = [
+  # Sub's behavioural proofs, to be ported WITH the code they prove as each
+  # element lands. The three webhook suites are chosen deliberately: between
+  # them they exercise all three trait combinations that occur in practice
+  # (provider-thread/addressable/global, derived-thread/addressable/account,
+  # derived-thread/opaque/account).
+  "dotmac_sub:tests/test_team_inbox_channel_receive.py",
+  "dotmac_sub:tests/test_team_inbox_receive.py",
+  "dotmac_sub:tests/test_team_inbox_smtp_inbound.py",
+  "dotmac_sub:tests/test_team_inbox_whatsapp_webhook.py",
+  "dotmac_sub:tests/test_team_inbox_meta_social_webhook.py",
+  "dotmac_sub:tests/test_team_inbox_read.py",
+  "dotmac_sub:tests/test_team_inbox_lifecycle_audit.py",
+  # CRM's 122 files are read for duplicate-detection scoring only. They are not
+  # parity proofs for a module the fleet is retiring CRM into.
+  "dotmac_starter_mt:tests/architecture/test_inbox_module.py",
+  "dotmac_starter_mt:tests/unit/test_kernel_channels.py",
+  "dotmac_starter_mt:tests/unit/test_inbox_threading.py",
+  "dotmac_starter_mt:tests/unit/test_inbox_lifecycle.py",
+]
+contract_consumers = []
+# Sub is the obvious one: it holds the only implementation and all the rows.
+#
+# ERP is the non-obvious one, and it is the reason this module is a bet worth
+# making rather than a solution looking for a problem. Its ticket already models
+# email correspondence — a `REPLIED` status no other product has,
+# `raised_by_email`, `contact_email`, `contact_phone` — and it has NO inbound
+# email handling whatsoever: no IMAP, no parser, no message record. The
+# correspondence is modelled as fields on the request, with the correspondence
+# itself nowhere. A conversation record with declared channels and a provider
+# observation ingress is precisely the missing half, and ERP would adopt it
+# WITHOUT any of the transport, ISP identity or workforce policy that the audit
+# excluded — which is the cleanest possible evidence that the unit was drawn in
+# the right place.
+#
+# This is a candidate, not a commitment: nobody has asked ERP to want this.
+candidate_consumers = ["dotmac_sub", "dotmac_erp"]
+inventory_evidence = [
+  "docs/inventories/inbox-sources.md",
+  "docs/inventories/module-extraction-sources.md",
+  "docs/inventories/idempotency-sources.md",
+]
+first_cutover = "UNDECIDED, and that is the honest state. Ticketing could pick a greenfield first adopter because four products need a ticket; here only Sub needs an inbox, so there is no low-risk adopter to prove the lineage on. The two candidates are both unattractive: Sub itself (real rows, real cutover, and its CRM migration already in flight — three moving destinations at once), or waiting for a product that wants one. Choosing under that constraint is a decision for Michael, not an inference this dossier may make. Until it is made the module ships as a contract with a lineage and no adopter, which is exactly what `audit-complete` means."
+shadow_and_drift = "Sub's three channel-receive suites are the parity proofs, and there is one KNOWING divergence to measure before any cutover: Sub deduplicates inbound messages globally on `(channel, external_message_id)` for every channel, whereas this module deduplicates per the channel's declared `message_id_scope`. Declaring WhatsApp or Meta channels as ACCOUNT scope — which is what they are — will ADMIT messages Sub currently rejects as duplicates. That is a correctness fix, but it changes ingest volume and must be measured in shadow rather than discovered as a duplicate-message complaint. The reverse case is CRM's: its narrower partial index REJECTS legitimate mail to a second mailbox, so an import from CRM will find gaps that were never recorded as errors."
+local_copy_retirement = "Sub retires `inbox_conversations`/`inbox_messages` threading and dedup in favour of `thread_key`/`dedup_key`, drops `_OPAQUE_CONTACT_CHANNELS` and `_thread_id` in favour of channel traits, and declares its ten channels. Its `inbox_provider_observations` keeps the durable payload and DELEGATES the at-most-once decision to `dotmac_kernel.idempotency.execute_once` — hard rule 21, non-negotiable, and the reason that table's identity uniqueness is not simply ported as-is. CRM's inbox is retired by its existing CRM->Sub cutover, which should land INTO this module rather than into Sub's local owner — otherwise the fleet gains a third implementation while removing a second. Same instruction ticket-sources.md gave, same reason."
+next_action = "0.1.0a1 ships the channel trait registry, the closed status vocabulary with its reason registry, the threading/dedup rules and the three tables. Before this dossier can leave `audit-complete`: (1) a SECOND consumer must exist — today there is one implementation and zero other consumers, so the contract is asserted rather than proven, and no amount of internal design work substitutes for that; (2) a first cutover must be chosen (see `first_cutover`); (3) routers land, with the `inbox.use` capability and the read/reply/administer permission split declared in the SAME change as the guards that reference them. Do NOT absorb transport, contact resolution, routing, assignment, presence, delivery state, labels, macros, AI intake or the widget — every one of those is product-owned, and the audit's central finding is that absorbing them would make this module Sub under another name."
+prerequisites = [
+  # ALREADY OWNED — an inbox reply is an OutboundMessage on the existing send
+  # path, not a new delivery mechanism. Rebuilding any of these installs a
+  # duplicate permanently, the failure delivery-outbox-sources.md documents
+  # against Sub's notification queue.
+  "dotmac_kernel.messaging: queue, retry, backoff, worker lease, dead-letter",
+  "dotmac_kernel.idempotency: at-most-once (ADR-0014, hard rule 21)",
+  "dotmac_kernel.delivery_providers.send: replay -> consent -> provider -> receipt",
+  "dotmac_kernel.delivery.record_receipt: receipts + the bounce->consent loop",
+  "dotmac_kernel.consent: may we contact this address; marketing vs transactional",
+  "dotmac_kernel.channel_policy: which channels an event goes out on",
+  "dotmac-template-studio: what the message says",
+  "dotmac_kernel.secret_sources + settings_resolver: credentials and configuration",
+  # MISSING — each is its own extraction question with its own dossier, and none
+  # may be absorbed into the conversation record to make it look complete.
+  "dotmac_kernel.inbound + .inbound_models: the inbound seam — CLOSED 2026-08-12 (kernel 0.1.0a41, migration 0022_inbound_seam). `connected_accounts` is where `account_scope` comes from; `inbound_observations` is the durable fact; `admit()` delegates at-most-once to idempotency. An InboundReceiver Protocol and no clients, so SMTP/IMAP/Meta stay product dependencies.",
+  "STILL MISSING attachments/media. The kernel has no blob-storage seam of any kind. Sources: dotmac_sub inbox_media_assets + team_inbox_media.py (538 lines); dotmac_crm crm_message_attachments + three attachment modules.",
+  "STILL MISSING realtime. The starter has ZERO websocket support across the kernel and the assembly; both products push new messages over one. Source: dotmac_sub app/services/team_inbox_realtime.py + app/websocket/.",
+  "STILL MISSING per-operator read state. Named as core in the contract and deliberately NOT shipped in 0.1.0a1. Source: dotmac_sub inbox_conversation_read_states + team_inbox_read_state.py.",
+]
+open_questions = [
+  # Surfaced by this audit, deliberately not answered by it.
+  "RESOLVED 2026-08-12 — the channel vocabulary moved to `dotmac_kernel.channels` (kernel 0.1.0a41). It had been known in three kernel places and validated in none (consent.register_numeric_channels, channel_policy, delivery_providers.OutboundMessage.channel), and a fourth was about to appear here. Modules may not import each other, so no module could be the source for consent/channel_policy/delivery alike. This module is now a pure CONSUMER: it reads thread_identity and message_id_scope and owns neither. The move also corrected a real defect — the original contact_identity (addressable|opaque) collapsed email and phone, which would have lost the numeric distinction and reintroduced the punctuation-dodge bug register_numeric_channels prevents. The trait is now address_form (EMAIL|PHONE|OPAQUE).",
+  "The word 'inbox' is already taken and means something else. `dotmac_kernel.messaging.inbox` is the idempotent COMMAND inbox (process_once uses scope='inbox'), and the kernel ships 20260730_0009_platform_audit_inbox.py. A distribution named `dotmac-inbox` makes 'inbox' denote two unrelated things one import apart. `dotmac-conversations` matches what the module actually contains — the contract sentence never uses the word — at the cost of diverging from what both products call the screen. Decide before it is published, not after.",
+  "Three copies of one mechanism: `dotmac_ticketing.vocabulary`, `dotmac_inbox.lifecycle`, and `dotmac_kernel.settings_resolver` each implement 'a declared, open, product-extensible code registry with an owning module and a required consumer' (the ADR-0008 shape). Three implementations is the condition under which ADR-0006 s5 says stop and name an owner. Modules may not import each other, so the owner would have to be the kernel. Recorded as a decision to make, not made.",
+  "Reply-window policy (WhatsApp's 24-hour session rule, and the template requirement outside it) is real, is enforced in both products, and is arguably a fifth channel trait. It is NOT shipped as one: both implementations tangle it with provider template APIs, so it is not yet clear whether the product-neutral part is a trait or a product policy. Revisit when a second consumer exists.",
+]

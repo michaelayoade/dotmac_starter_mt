@@ -414,10 +414,22 @@ TICKETING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("tkt"),
 )
 
+# `dotmac-inbox` — the third allocated installable module. `ibx` rather than
+# `inbox` because the short code is the permanent physical identity; `ib` leaves
+# the revision-id budget for a readable slug. The row lands in the same change as
+# the module's manifest, as the allocation rule above requires.
+INBOX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox",
+    prefix="ib",
+    branch_label="inbox",
+    db_schema=module_schema("ibx"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
     TICKETING_MIGRATION_OWNER,
+    INBOX_MIGRATION_OWNER,
 )
 
 

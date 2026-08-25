@@ -6,6 +6,75 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## UNRELEASED — prototype, not published
+
+**This is not a release and must not be published.** The work below sits on
+branch `docs/omni-inbox-sources` as **audit evidence** for the fleet
+decomposition matrix, not as a declared kernel owner.
+
+Directive 2026-08-12: *"do not publish a41, do not prioritize the rename, and do
+not declare a kernel owner yet. First place its constituent capabilities in the
+fleet matrix and identify their current authorities, first cutovers, dependencies
+and retirement gates."*
+
+`docs/superpowers/plans/2026-08-12-fleet-decomposition-matrix.md` decomposes this
+work into **eight** separate capabilities (rows I1–I8), several of which do NOT
+belong in the kernel. Treat every "Owner of:" claim in the modules below as a
+**proposal under adjudication**.
+
+### Prototyped (not owned, not released)
+- **`dotmac_kernel.inbound` + `.inbound_models` — an inbound seam.** The
+  communications stack was entirely OUTBOUND; there was no webhook-receiver
+  contract, no model for "this tenant connected this mailbox", and nowhere for
+  per-connector credentials. Two tables (migration `0022_inbound_seam`):
+  `connected_accounts`, the registry every `account_scope` downstream comes from,
+  and `inbound_observations`, the durable normalized provider fact.
+  `admit()` **delegates at-most-once to `idempotency.execute_once`** (scope
+  `"inbound"`) rather than re-deciding it — hard rule 21 — and owns only the
+  payload that makes consequences re-derivable after a parsing fix.
+  `InboundReceiver` is a `Protocol` and the kernel ships **no clients**: SMTP,
+  IMAP and Meta stay product dependencies, exactly as `delivery_providers` does
+  for sending. `verify` is separate from `parse` because a signature is over raw
+  bytes and re-serialising defeats it.
+  `credential_name` holds a NAME resolved through `secret_sources`, never a
+  secret value (ADR-0009).
+- **`dotmac_kernel.channels` — the one channel registry.** The kernel knew about
+  channels in three places and validated them in none:
+  `consent.register_numeric_channels` (a real per-channel behaviour registry, for
+  one facet), `channel_policy` (an open string), and
+  `delivery_providers.OutboundMessage.channel` (a bare `str`). A fourth was about
+  to appear in a module — and modules may not import each other, so no module can
+  be the source for consent, channel policy and delivery alike. One `ChannelSpec`
+  with four traits: `address_form`, `transport`, `thread_identity`,
+  `message_id_scope`.
+- `AddressForm` has **three** values (`EMAIL`/`PHONE`/`OPAQUE`), not two. A
+  two-value addressable/opaque split collapses email and phone and would have
+  lost the numeric distinction — reintroducing the punctuation-dodge bug
+  `register_numeric_channels` exists to prevent.
+
+### Changed
+- `consent.normalize_address` reads `channels.address_form_for` instead of a
+  private `_NUMERIC_CHANNELS` set. `sms` and `whatsapp` ship pre-declared as
+  `PHONE`, and an undeclared channel still lowercases, so **normalisation is
+  byte-identical to a40** for every existing deployment.
+- `consent.register_numeric_channels` is now a thin ADAPTER over the registry —
+  the same relationship `messaging.process_once` has to `idempotency`. It stays
+  in the published surface and keeps working; it can only say "phone", so prefer
+  `channels.register_channels(...)`. Re-declaring a channel as numeric when it is
+  already declared with a different address form now raises rather than silently
+  disagreeing.
+- `consent._reset_registries_for_tests(numeric=...)` now clears the channel
+  registry's defaults when an explicit set is passed, so a caller restoring an
+  exact prior set no longer finds `sms`/`whatsapp` re-added underneath it.
+
+### Added
+- `INBOX_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER` — owner `inbox`, schema
+  `mod_ibx`, migration prefix `ib`, branch label `inbox`. `dotmac-inbox`
+  0.1.0a1 cannot be composed by an earlier kernel:
+  `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` for a
+  stateful module with no ledger row, which is why that package floors on this
+  release rather than merely preferring it.
+
 ## 0.1.0a40 — 2026-08-11
 
 An adoption-demanded database invariant fix. Sub's S7 migration rehearsal found

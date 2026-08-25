@@ -19,6 +19,7 @@ from dotmac_kernel import (
     audit,  # noqa: F401  (register AuditEvent for autogenerate)
     entitlements,  # noqa: F401  (register TenantEntitlementGrant)
     idempotency_models,  # noqa: F401  (register Idempotency/PlatformIdempotencyRecord)
+    inbound_models,  # noqa: F401  (register ConnectedAccount/InboundObservation)
     models_platform,  # noqa: F401  (register PlatformAdmin/PlatformSession)
     settings_models,  # noqa: F401  (register DomainSetting)
 )
