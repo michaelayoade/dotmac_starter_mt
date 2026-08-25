@@ -239,7 +239,7 @@ from dotmac_kernel.source_applications import (
     validate_source_application,
 )
 
-__version__ = "0.1.0a95"
+__version__ = "0.1.0a96"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.

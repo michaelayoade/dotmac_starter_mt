@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased
+## 0.1.0a96 — 2026-08-25
 
 **A machine credential now says WHOSE it is, and rotates without dropping a
 call.** Continues the a90 machine-credential facility (`0027_machine_credential`)

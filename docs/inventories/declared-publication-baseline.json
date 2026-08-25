@@ -108,8 +108,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a95",
-      "reason": "ALLOCATION RELEASE PENDING THE PROTECTED WORKFLOW. a95 adds one MIGRATION_OWNER_LEDGER row (response_obligations / ro / mod_sla) and changes no behaviour for any existing consumer. dotmac-response-obligations declares it as a floor and is itself unreleasable until this ships. Remove this row in the a95 release-record change; do not edit the declared version down.",
+      "declared": "0.1.0a96",
+      "reason": "MACHINE-ATTRIBUTION RELEASE PENDING THE PROTECTED WORKFLOW. Main already claimed a95 for the response_obligations allocation, so the additive source-application attribution, zero-drop credential rotation and 0028_machine_attribution migration are a96 rather than silently broadening a95. The response-obligations module's >=0.1.0a95 floor remains valid because a96 carries that allocation. Remove this row in the a96 release-record change; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-qualification": {
