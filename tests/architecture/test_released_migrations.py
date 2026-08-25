@@ -1381,7 +1381,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
-    "dotmac-tax": frozenset(),
+    "dotmac-tax": frozenset({"tx_0003_result_fingerprint.py"}),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),

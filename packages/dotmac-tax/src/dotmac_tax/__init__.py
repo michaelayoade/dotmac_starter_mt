@@ -3,6 +3,9 @@
 from dotmac_tax.contracts import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
+    TaxDeterminationComponentV1,
+    TaxDeterminationLineV1,
+    TaxDeterminationSetV1,
     TaxFact,
     TaxJurisdictionInput,
     TaxRuleBandInput,
@@ -37,12 +40,15 @@ from dotmac_tax.service import (
     update_tax_jurisdiction,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "StatutoryReportBoxInput",
     "TaxAuthorityInput",
     "TaxConflict",
+    "TaxDeterminationComponentV1",
+    "TaxDeterminationLineV1",
+    "TaxDeterminationSetV1",
     "TaxFact",
     "TaxJurisdictionInput",
     "TaxNotFound",
