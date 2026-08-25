@@ -17,13 +17,19 @@ from dotmac_kernel.middleware.rate_limit import MemoryStore, RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import (
     _STRICT_CSP,
     SecurityHeadersMiddleware,
+    compose_content_security_policy,
 )
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant, UserCredential
+from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest
+
+_TIGHTER_CSP = _STRICT_CSP.replace(
+    "img-src 'self' data: https:", "img-src 'self' data:"
+)
 
 
 def _legacy_pbkdf2_hash(password: str) -> str:
@@ -182,12 +188,12 @@ class TestSecurityHeaders:
 
     def test_csp_override_and_disable(self):
         client = _headers_app(
-            content_security_policy="default-src 'none'",
+            content_security_policy=_TIGHTER_CSP,
             cross_origin_opener_policy="same-origin",
             cross_origin_resource_policy="same-origin",
         )
         headers = client.get("/ok").headers
-        assert headers["content-security-policy"] == "default-src 'none'"
+        assert headers["content-security-policy"] == _TIGHTER_CSP
         assert headers["cross-origin-opener-policy"] == "same-origin"
         assert headers["cross-origin-resource-policy"] == "same-origin"
         off = _headers_app(enabled=False)
@@ -202,6 +208,41 @@ class TestSecurityHeaders:
         # https: appears ONLY as the img-src scheme source for tenant logos.
         assert _STRICT_CSP.count("https:") == 1
         assert "img-src 'self' data: https:" in _STRICT_CSP
+        assert "'unsafe-eval'" not in _STRICT_CSP
+        assert "'unsafe-inline'" not in _STRICT_CSP.split("style-src", 1)[0]
+
+    def test_typed_capabilities_compose_only_closed_security_requirements(self):
+        policy = compose_content_security_policy(
+            (
+                BrowserSecurityRequirement.WORKER_BLOB,
+                BrowserSecurityRequirement.WORKER_SELF,
+                BrowserSecurityRequirement.WORKER_BLOB,
+            )
+        )
+
+        assert policy.endswith("worker-src blob: 'self'")
+        assert "unsafe" not in policy.split("worker-src", 1)[1]
+        assert "http:" not in policy.split("worker-src", 1)[1]
+
+    def test_raw_csp_cannot_replace_active_typed_requirements(self):
+        with pytest.raises(ValueError, match="raw CSP override"):
+            _headers_app(
+                content_security_policy="default-src 'none'",
+                browser_security_requirements=(BrowserSecurityRequirement.WORKER_SELF,),
+            ).get("/ok")
+
+    def test_raw_csp_cannot_weaken_the_baseline_without_typed_requirements(self):
+        weakened = _STRICT_CSP.replace(
+            "script-src 'self'", "script-src 'self' 'unsafe-eval' *"
+        )
+        with pytest.raises(ValueError, match="weaken.*baseline"):
+            _headers_app(
+                content_security_policy=weakened,
+            ).get("/ok")
+
+    def test_raw_csp_must_retain_every_baseline_directive(self):
+        with pytest.raises(ValueError, match="missing required directives"):
+            _headers_app(content_security_policy="default-src 'none'").get("/ok")
 
 
 class TestBoundedRateLimitStore:

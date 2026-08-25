@@ -3,21 +3,17 @@
 Three independent static checks, all belt-and-suspenders alongside runtime
 behavior (nothing here talks to the DB or the app):
 
-1. Every `templates/admin/**/*.html` + `templates/auth/*.html` file either
-   `{% extends %}`s a layout (the full-page templates) or is an
+1. Every legacy admin/auth/platform page and every declared v2 surface-package
+   template either `{% extends %}`s a layout (the full-page templates) or is an
    `_`-prefixed fragment (an htmx partial, never rendered standalone — see
    e.g. `app.features.parties.web.index`'s HX-Request branch). A template
    that is neither is an orphaned convention violation: either it forgot to
    extend a layout, or it's a fragment that should be renamed with the `_`
    prefix so the convention is visible from the filename alone.
-2. No template contains a live `<form ...method="post"...>` tag — every
-   mutation in this app's portal goes through htmx (`hx-post`/`hx-put`/
-   `hx-delete`), because a plain `method="post"` form has no hook point for
-   the CSRF header bridge (`static/js/csrf.js`, see `templates/base.html`'s
-   comment). Jinja/HTML *comments* are allowed to mention the string
-   `method="post"` in prose (several already do, describing the anti-
-   pattern they moved away from) — this check strips comments before
-   scanning so those don't false-positive.
+2. A native `<form method="post">` carries a hidden `csrf_token`. htmx may
+   additionally supply the header through `static/js/csrf.js`, but native HTML
+   is a supported transport rather than a framework violation. Jinja/HTML
+   comments are stripped before scanning so prose cannot satisfy the guard.
 3. `| safe` may appear ONLY when a comment on the same line or one of the
    preceding lines mentions "sanitiz" (sanitize/sanitizer/sanitized).
    **There are ZERO usages today.** The one that existed — the `custom_css`
@@ -27,25 +23,30 @@ behavior (nothing here talks to the DB or the app):
    is the sensitivity proof that it would still fire (ADR-0018: a detector
    with no proof it fires is indistinguishable from a blind one). Keep the
    guard: the rule is about the NEXT `| safe`, not the last one.
-4. Every `app/features/<name>/web.py` imports only `dotmac_kernel.*` and its OWN
+4. Templates contain no inline script block or `on*=` event handler. The CSP
+   grants neither unsafe script mechanism, so these would ship as silently
+   broken controls as well as weakening pressure on the policy.
+5. Every `app/features/<name>/web.py` imports only `dotmac_kernel.*` and its OWN
    feature's `app.features.<name>.*` — belt-and-suspenders alongside the
    import-linter "Features are independent of each other" contract
    (`pyproject.toml`), which covers `router.py` too but is a config file, not
    a test that runs in the fast unit/architecture suite by itself; this
    gives immediate, in-repo feedback without invoking `make lint-imports`.
+6. Every rendered `*_at` timestamp passes through the locale-aware date/time
+   filters.
 
-SCOPE LIMITATION: The template checks cover `admin/**`, `auth/*` and
-`platform/**` only
-(errors/layouts/components unscanned; currently verified clean by the T8
-review). The import scan skips relative imports (import-linter is the
-authoritative parallel contract). A future non-admin portal surface must extend
-`_admin_and_auth_templates()` and the sweep prefix accordingly.
+The security checks scan every template in every root composed by the reference
+assembly, including design-system component data. The full-page/fragment shape
+additionally scans every template package declared by a v2 surface, regardless
+of its directory names. The import scan skips relative imports (import-linter
+is the authoritative parallel contract).
 
 WHERE THE TEMPLATES LIVE. Not in one directory, and no longer in the assembly at
 all. They are PACKAGE DATA in every package that ships a portal surface: the
 kernel's own screens, and each installed module's (ADR-0006 M1 —
-`dotmac-template-studio` is the first). `TEMPLATE_ROOTS` below enumerates them,
-and `test_template_scan_is_not_vacuous` asserts the scan actually found files.
+`dotmac-template-studio` is the first). `TEMPLATE_ROOTS` below is derived from
+the checked-in product assembly and its surface declarations; adding a composed
+module is therefore enrollment, not a second hand-maintained list.
 
 That last test exists because this suite HAD silently gone vacuous: the root
 constant was `PROJECT_ROOT / "templates"`, which stopped existing when the
@@ -63,16 +64,32 @@ from pathlib import Path
 from dotmac_kernel.templating import templates
 from jinja2 import nodes
 
+from app.assembly import assembly
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Every packaged template root a portal surface can ship from. An assembly that
-# adds its own `templates/` directory, or a second installed module, appends its
-# root here — the same edit shape as adding a feature to `FEATURE_MODULES`.
-TEMPLATE_ROOTS: tuple[Path, ...] = (
-    PROJECT_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/templates",
-    PROJECT_ROOT
-    / "packages/dotmac-template-studio/src/dotmac_template_studio/templates",
-)
+
+def _surface_template_roots() -> tuple[Path, ...]:
+    return tuple(
+        surface.templates.root
+        for manifest in assembly.modules
+        for surface in getattr(manifest, "web_surfaces", ())
+        if surface.templates is not None
+    )
+
+
+def _composed_template_roots() -> tuple[Path, ...]:
+    values = [
+        PROJECT_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/templates",
+        *assembly.packaged_template_dirs,
+        *_surface_template_roots(),
+    ]
+    if assembly.assembly_template_dir is not None:
+        values.append(assembly.assembly_template_dir)
+    return tuple(dict.fromkeys(path.resolve() for path in values))
+
+
+TEMPLATE_ROOTS = _composed_template_roots()
 
 
 def _glob_all(pattern: str) -> list[Path]:
@@ -94,6 +111,12 @@ def _admin_and_auth_templates() -> list[Path]:
         _glob_all("admin/**/*.html")
         + _glob_all("auth/*.html")
         + _glob_all("platform/**/*.html")
+    )
+
+
+def _declared_surface_templates() -> list[Path]:
+    return sorted(
+        path for root in _surface_template_roots() for path in root.rglob("*.html")
     )
 
 
@@ -127,6 +150,7 @@ def test_template_scan_is_not_vacuous() -> None:
         "vacuous and every convention check below is passing over nothing"
     )
     assert _template_files(), "no templates found under any TEMPLATE_ROOT"
+    assert _declared_surface_templates(), "no declared v2 surface templates found"
 
 
 def test_every_admin_or_auth_template_extends_a_layout_or_is_a_fragment() -> None:
@@ -144,14 +168,31 @@ def test_every_admin_or_auth_template_extends_a_layout_or_is_a_fragment() -> Non
     )
 
 
+def test_declared_surface_templates_are_full_pages_or_named_fragments() -> None:
+    violations: list[str] = []
+    for path in _declared_surface_templates():
+        if path.name.startswith("_"):
+            continue
+        if "{% extends" not in path.read_text(encoding="utf-8"):
+            violations.append(str(path.relative_to(PROJECT_ROOT)))
+    assert not violations, (
+        "Declared surface template(s) neither extend the facet shell nor use "
+        "the `_` fragment prefix:\n" + "\n".join(violations)
+    )
+
+
 # ---------------------------------------------------------------------------
-# 2. No live `method="post"` form (all mutations are hx-*).
+# 2. Every native POST form carries the hidden CSRF transport.
 # ---------------------------------------------------------------------------
 
 _JINJA_COMMENT = re.compile(r"\{#.*?#\}", re.DOTALL)
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_FORM_TAG = re.compile(r"<form\b[^>]*>", re.IGNORECASE | re.DOTALL)
+_FORM = re.compile(r"<form\b(?P<open>[^>]*)>(?P<body>.*?)</form\s*>", re.I | re.S)
 _METHOD_POST = re.compile(r"""method\s*=\s*["']post["']""", re.IGNORECASE)
+_HIDDEN_CSRF = re.compile(
+    r"<input\b(?=[^>]*\btype\s*=\s*['\"]hidden['\"])(?=[^>]*\bname\s*=\s*['\"]csrf_token['\"])[^>]*>",
+    re.I | re.S,
+)
 
 
 def _blank_out(match: re.Match[str]) -> str:
@@ -171,17 +212,22 @@ def _strip_comments(text: str) -> str:
     return _HTML_COMMENT.sub(_blank_out, _JINJA_COMMENT.sub(_blank_out, text))
 
 
-def test_no_template_uses_a_plain_method_post_form() -> None:
+def test_native_post_forms_carry_hidden_csrf_proof() -> None:
     violations: list[str] = []
-    for path in _admin_and_auth_templates():
+    native_forms: list[str] = []
+    for path in _template_files():
         text = _strip_comments(path.read_text(encoding="utf-8"))
-        for tag in _FORM_TAG.findall(text):
-            if _METHOD_POST.search(tag):
-                violations.append(f"{path.relative_to(PROJECT_ROOT)}: {tag.strip()}")
+        for form in _FORM.finditer(text):
+            if not _METHOD_POST.search(form.group("open")):
+                continue
+            label = str(path.relative_to(PROJECT_ROOT))
+            native_forms.append(label)
+            if not _HIDDEN_CSRF.search(form.group("body")):
+                violations.append(label)
+    assert native_forms, "native POST form CSRF scan is vacuous"
     assert not violations, (
-        'Template(s) use a plain method="post" form — every mutation must '
-        "be hx-post/hx-put/hx-delete instead (see module docstring):\n"
-        + "\n".join(violations)
+        "Native POST form(s) omit the hidden csrf_token transport:\n"
+        + "\n".join(sorted(set(violations)))
     )
 
 
@@ -200,7 +246,7 @@ _NEARBY_LINES = 12
 
 def test_safe_filter_only_used_with_a_sanitize_comment_nearby() -> None:
     violations: list[str] = []
-    for path in _admin_and_auth_templates():
+    for path in _template_files():
         original_text = path.read_text(encoding="utf-8")
         original_lines = original_text.splitlines()
         # Detect REAL `| safe` usages against the comment-stripped text (a
@@ -254,7 +300,38 @@ def test_the_safe_filter_guard_still_bites() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. Every app/features/<name>/web.py imports only dotmac_kernel + its own
+# 4. CSP-compatible authoring: no inline script or event handler.
+# ---------------------------------------------------------------------------
+
+_INLINE_SCRIPT = re.compile(r"<script\b(?![^>]*\bsrc\s*=)[^>]*>", re.I | re.S)
+_INLINE_EVENT = re.compile(r"\son[a-z][a-z0-9_-]*\s*=", re.I)
+
+
+def _inline_script_violation(text: str) -> bool:
+    stripped = _strip_comments(text)
+    return bool(_INLINE_SCRIPT.search(stripped) or _INLINE_EVENT.search(stripped))
+
+
+def test_composed_templates_require_no_unsafe_script_grant() -> None:
+    violations = [
+        str(path.relative_to(PROJECT_ROOT))
+        for path in _template_files()
+        if _inline_script_violation(path.read_text(encoding="utf-8"))
+    ]
+    assert not violations, (
+        "Composed template(s) contain inline script/event handlers that the "
+        "strict CSP refuses:\n" + "\n".join(violations)
+    )
+
+
+def test_inline_script_guard_has_sensitivity_proof() -> None:
+    assert _inline_script_violation("<script>run()</script>")
+    assert _inline_script_violation('<button onclick="run()">run</button>')
+    assert not _inline_script_violation('<script src="/static/app.js"></script>')
+
+
+# ---------------------------------------------------------------------------
+# 5. Every app/features/<name>/web.py imports only dotmac_kernel + its own
 #    feature.
 # ---------------------------------------------------------------------------
 
@@ -320,7 +397,7 @@ def test_web_py_imports_only_its_own_feature_and_core() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. Every `*_at` timestamp render goes through local_datetime/local_date
+# 6. Every `*_at` timestamp render goes through local_datetime/local_date
 #    (Task 2: tenant display settings).
 #
 # AST-based, not a substring match: a prior version of this check scanned

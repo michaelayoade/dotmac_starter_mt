@@ -2,7 +2,7 @@
  * CSRF header bridge.
  *
  * app.core.middleware.csrf.CSRFMiddleware validates the `X-CSRF-Token`
- * HEADER against the `csrf_token` COOKIE (double-submit pattern) — the
+ * HEADER against a signed, session-bound CSRF COOKIE (double-submit pattern) — the
  * cookie is deliberately NOT HttpOnly so this script can read it. This file
  * copies the cookie value onto the header for every mutating request the
  * app's own JS issues.
@@ -14,23 +14,22 @@
  *   - `fetch()` — monkey-patched so hand-written JS (Alpine components,
  *     future custom code) calling fetch() directly also gets the header.
  *
- * NOT covered (by design):
- *   - Plain `<form method="post">` submits. A native form submit has no
- *     hook point for adding a custom header without JS intercepting the
- *     submit and re-issuing the request — which is just hx-post with extra
- *     steps. Every mutating form in these templates MUST use hx-post (or
- *     hx-put/hx-delete) instead of method="post". A bare method="post" form
- *     will 403 with `csrf_failed` since no header is ever attached to it.
+ * Native forms are covered independently by a hidden `csrf_token` field.
  */
 (function () {
-    var COOKIE_NAME = 'csrf_token';
+    var COOKIE_NAMES = ['__Host-csrf_token', 'csrf_token'];
     var HEADER_NAME = 'X-CSRF-Token';
 
     function getCsrfToken() {
-        var match = document.cookie.match(
-            new RegExp('(?:^|; )' + COOKIE_NAME + '=([^;]*)')
-        );
-        return match ? decodeURIComponent(match[1]) : null;
+        for (var i = 0; i < COOKIE_NAMES.length; i += 1) {
+            var match = document.cookie.match(
+                new RegExp('(?:^|; )' + COOKIE_NAMES[i] + '=([^;]*)')
+            );
+            if (match) {
+                return decodeURIComponent(match[1]);
+            }
+        }
+        return null;
     }
 
     // htmx: inject the header on every request htmx issues.

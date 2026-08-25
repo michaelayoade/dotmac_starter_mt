@@ -2,14 +2,11 @@
   Table/list UI macros. Ported from ST:templates/admin/components/
   table_macros.html with one deliberate change: action_buttons()'s delete
   control used to be a `<form method="POST">` carrying a hidden csrf_token
-  input. This app's CSRF defense is the header bridge (static/js/csrf.js
-  reads the `csrf_token` cookie and sets it as the `X-CSRF-Token` header on
-  every htmx request) instead of a form-field double-submit, and templates
-  here use hx-post/hx-put/hx-delete for ALL mutations — never a plain
-  `<form method="post">` (see templates/base.html's csrf.js comment for
-  why that combination doesn't work). So action_buttons() renders delete as
-  an hx-post button with htmx's built-in hx-confirm, no hidden input, no
-  <form> wrapper.
+  input. This macro uses the header half of the shared CSRF transport:
+  static/js/csrf.js reads the signed cookie and sets `X-CSRF-Token` on every
+  htmx request. Native forms elsewhere use the equally supported hidden field.
+  `action_buttons()` therefore remains an hx-post button with htmx's built-in
+  hx-confirm and needs no form wrapper.
 #}
 {% macro icon(name) %}
 {% set icons = {

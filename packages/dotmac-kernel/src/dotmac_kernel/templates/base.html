@@ -20,9 +20,9 @@
          release, a packaged theme), declared by the assembly as
          `ProductAssemblySpec.stylesheets` and installed as this global by
          `dotmac_kernel.templating.install_stylesheets`. The kernel does not
-         know what they are — ADR-0006 § 2's dependency direction runs
-         assembly → dotmac-ui → dotmac-kernel, never the other way, so this is
-         a slot, not a reference. LAST, so a design system's tokens and its
+         know what they are — ADR-0006 § 2 has the assembly independently
+         compose the UI package and kernel, while neither imports the other, so
+         this is a slot, not a reference. LAST, so a design system's tokens and its
          focus-indicator contract win over the compiled utility CSS above on
          equal specificity. Each URL already carries its own cache-busting
          query; they are package-resolved, self-hosted paths, never a CDN. -->
@@ -40,11 +40,8 @@
     <script src="{{ static_asset_url('/static/js/components.js') }}"></script>
     <script defer src="{{ static_asset_url('/static/js/alpine.min.js') }}"></script>
 
-    <!-- CSRF header bridge — see static/js/csrf.js docstring. Loaded early so
-         the htmx:configRequest listener is registered before any htmx call
-         can fire. NOTE: plain `<form method="post">` is NOT covered by this
-         bridge — every mutating form/link in these templates MUST use
-         hx-post/hx-put/hx-delete instead; see csrf.js for why. -->
+    <!-- CSRF header bridge — see static/js/csrf.js. Native forms carry the
+         same signed proof in a hidden csrf_token field. -->
     <script src="{{ static_asset_url('/static/js/csrf.js') }}"></script>
 
     {% block body %}
