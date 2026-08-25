@@ -1,11 +1,34 @@
 # Complimentary and sponsored subscription treatment extraction
 
 **As of:** 2026-08-23
-**Status:** product-first audit complete; implementation waits for the
-registry-verified `dotmac-subscriptions 0.1.0a2` release and begins as a separate
-`0.1.0a3` / `su_0002` slice.
+**Status:** product-first audit complete; the package-side port landed as
+`dotmac-subscriptions 0.1.0a3` / `su_0003`.
 **Qualifying source:** `dotmac_sub` at
 `943bc59f8e4ca0849c7de578bc9dbc17c57b116f`.
+
+## Amendment — 2026-08-25
+
+Two facts in the plan above were wrong by the time the slice was written, and
+they are corrected here rather than edited away:
+
+1. **The revision is `su_0003`, not `su_0002`.** `dotmac-subscriptions 0.1.0a2`
+   shipped TWO migrations, not one: `su_0001_subscriptions` and
+   `su_0002_offer_pricing` are both inside the wheel tagged
+   `dotmac-subscriptions-v0.1.0a2`, so both are released bytes that must not
+   change. The treatment tables therefore arrived additively as
+   `su_0003_billing_treatments`, whose `down_revision` is `su_0002_offer_pricing`.
+2. **The source was re-read at `df970604c23d89546b949d8fb28e5230ca61ade7`**
+   (`dotmac_sub` `origin/dev` at the time of the port), recorded as
+   `revalidation_revisions` in the package dossier. Every ported blob is
+   byte-identical to the audit coordinate above. The single divergence is
+   `app/services/subscription_billing_grants.py`, where Sub moved its
+   billing-anchor update behind `stage_subscription_billing_anchor` — a
+   consequence this extraction deliberately does not port (item G4), so the
+   ported behaviour is unaffected.
+
+Nothing was backfilled and no Sub authority moved: gates 3 to 6 below remain
+open, and Sub is still the only writer of its own arrangement and grant
+tables.
 
 ## Decision
 

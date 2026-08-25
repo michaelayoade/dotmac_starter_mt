@@ -107,6 +107,11 @@
       "reason": "INTENDED FOR THE ADR-0058 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a3",
+      "reason": "RELEASE PENDING FOR THE PORTED COMPLIMENTARY/SPONSORED LIFECYCLE. a3 adds the su_0003 arrangement and non-cash-grant tables on both declared planes and the product-neutral treatment service ported product-first from dotmac_sub (ADR-0006). It changes nothing an a2 consumer already uses: su_0001 and su_0002 keep their released bytes, and the a2 public surface is unchanged. No adopter pins a3, and Sub still owns its own arrangement writer until the G5/G6 backfill and cutover. Remove this row in the a3 release-record change; never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",

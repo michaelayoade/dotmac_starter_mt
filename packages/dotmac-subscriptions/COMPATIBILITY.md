@@ -6,7 +6,7 @@ there are private. `models`, `service`, and migration internals may be imported
 by the package itself but are not separate compatibility surfaces.
 
 The package version in `pyproject.toml`, `dotmac_subscriptions.__version__`, and
-the manifest version move together. The two output contracts have independent
+the manifest version move together. The three output contracts have independent
 wire versions carried both in their type name and `contract_version` field:
 
 - `RatedObligationOutputV1` is the subscriptions-to-assembly pre-tax rating
@@ -16,11 +16,26 @@ wire versions carried both in their type name and `contract_version` field:
 - `CommercialEntitlementProjectionV1` is money-free commercial intent. It is
   never a grant or a product-state command and follows the same versioning
   rule.
+- `NonCashGrantOutputV1` (added in `0.1.0a3`) is exact foregone-revenue
+  evidence for one approved service period: the arrangement, contract line,
+  occurrence, half-open period, treatment, declared reason, the strictly
+  positive contracted amount, the approved ceiling and the foregone amount. It
+  is never customer money and never an entitlement, anchor, invoice
+  suppression or accounting posting — an adopter maps it to those decisions in
+  its own owners. Same versioning rule.
 
 `BillingCadence`, `Interval`, `ExactAmount`, command/result dataclasses, domain
 errors, link helpers, publisher protocols/fakes, `DurableTimerPort`, and the
 query/service names in `__all__` are supported for the current pre-release
-series. Callers supply an explicit `TenantScope` or `PlatformScope`, exact
+series.
+
+`BillingTreatmentReasonDeclaration` and
+`SubscriptionVocabularyRegistry.from_manifests(..., reason_declarations=...)`
+are the supported way to widen the non-standard treatment reason vocabulary.
+The seven codes in `PORTED_BILLING_TREATMENT_REASONS` are owned by this module
+and are never removed; a product declaring an additional code owns it, and one
+code never has two owners. The database column is a plain string on purpose, so
+widening the vocabulary is not a schema change (ADR-0008). Callers supply an explicit `TenantScope` or `PlatformScope`, exact
 decimals, currency, timezone, cadence, provenance, and product link; no product
 or deployment default is part of the contract.
 
