@@ -819,6 +819,36 @@ specifics) points here and must never fork these rules.
     instead. (`scripts/released_manifest_sweep.py`;
     `tests/architecture/test_released_manifest_digests.py`)
 
+35. **A row mutation counter is not semantic content identity.** A generic
+    `version`/`updated_at` may order mutations or guard optimistic concurrency;
+    it does not say which consumer-relevant evidence changed. It therefore may
+    not, by itself, become a semantic `source_version`, idempotency/dedup key,
+    event-content identity, observation fingerprint or strong ETag. Carry an
+    explicit revision/sequence and an algorithm-versioned fingerprint when both
+    are needed. The fingerprint binds the COMPLETE normalized decision evidence
+    including provenance even when the answer is unchanged; length-prefix its
+    fields, canonicalize unordered collections, encode finite money exactly at
+    currency scale, distinguish absence with a typed sentinel, and namespace
+    the algorithm (`cv1:`, `cv2:`). Changing the field set is a CUTOVER: stored
+    submissions replay their stored bytes/version and new submissions use the
+    new algorithm; historical facts are never silently rehashed into duplicate
+    evidence. A counter may back a weak ETag only when "any accepted mutation"
+    is the declared, enforced and sensitivity-tested contract (ADR-0064;
+    `tests/architecture/test_semantic_identity_and_replay.py`).
+
+36. **Exact replay precedes mutable-state validation, after trust and request
+    validation.** The order is authentication/authorization and scope isolation
+    → command/key canonicalization and fingerprint comparison → exact stored
+    replay or key-reuse conflict → mutable overlap/uniqueness/availability
+    preconditions → new effect and idempotency row in one transaction. A retry
+    must not fail its own "already open" guard against the state it created, but
+    replay never bypasses authorization, tenant scope, parsing or fingerprint
+    conflict. A replay test builds ONE command once and submits it twice; a
+    helper that previews and rebuilds the command is testing preflight again,
+    not replay (ADR-0014 amendment 2026-08-25;
+    `tests/architecture/test_semantic_identity_and_replay.py`;
+    `tests/unit/test_subscriptions_treatments.py`).
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
