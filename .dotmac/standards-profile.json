@@ -210,7 +210,7 @@
       "webhook_surface": 0,
       "provider_credential": 0,
       "connector_task": 0,
-      "sync_checkpoint": 1,
+      "sync_checkpoint": 2,
       "delivery_retry": 0
     },
     "conserved_exclusions": [
