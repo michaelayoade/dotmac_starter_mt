@@ -505,6 +505,24 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-analytics"
+version = "0.1.0a1"
+description = "Declared aggregate metric evidence and rebuildable tenant analytics projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-analytics"
+
+[[package]]
 name = "dotmac-application-directory"
 version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
@@ -650,7 +668,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a70"
+version = "0.1.0a74"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2926,4 +2944,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "3ec993d1ed925ce0f3ba25a368f4b96bb91a1d861322d5f2f470bf22522157fd"

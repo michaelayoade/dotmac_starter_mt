@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a74 — 2026-08-18
+
+Allocates the tenant-plane namespace for the product-first analytics metric
+projection module.
+
+### Added
+
+- `ANALYTICS_MIGRATION_OWNER`: owner/branch `analytics`, schema
+  `mod_analytics`, revision prefix `ay`. The allocation adds no analytics
+  behavior to the kernel; it makes the independently released module's
+  physical identity immutable and registerable.
+- The new module's floor is this release. If another pending branch reaches
+  protected `main` with `0.1.0a74` first, this unreleased allocation must be
+  rebased and renumbered before merge; alpha numbers are claimed by merge, not
+  by a working branch.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known

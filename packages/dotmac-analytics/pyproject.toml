@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-analytics"
+version = "0.1.0a1"
+description = "Declared aggregate metric evidence and rebuildable tenant analytics projections"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_analytics", from = "src" }]
+include = [
+    { path = "src/dotmac_analytics/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_analytics/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

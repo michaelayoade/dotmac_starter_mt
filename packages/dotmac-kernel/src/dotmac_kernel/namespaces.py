@@ -585,6 +585,22 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-analytics` — the ELEVENTH allocated installable module. ERP supplies
+# the product-first metric-snapshot/store behavior, but the shared owner has a
+# distinct physical identity because every adopter installs its own tenant
+# lineage. `ay` avoids the `an` abbreviation's ambiguity with application
+# analytics/monitoring and leaves the revision-id budget readable.
+#
+# Tenant plane only. Cross-domain aggregate facts belong to an application's
+# tenants; no named control-plane adopter exists, so a platform plane would be
+# speculative under ADR-0023.
+ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="analytics",
+    prefix="ay",
+    branch_label="analytics",
+    db_schema=module_schema("analytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +613,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    ANALYTICS_MIGRATION_OWNER,
 )
 
 
@@ -927,6 +944,7 @@ class NamespaceRegistry:
 
 
 __all__ = [
+    "ANALYTICS_MIGRATION_OWNER",
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",

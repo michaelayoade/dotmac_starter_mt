@@ -180,7 +180,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # something that arrives unnoticed with a module. `application_directory`
     # (ADR-0021) is the fifth, and the first allocated for an assembly other
     # than this repository's — its consumer is the Tenant Workspace.
-    # `files` is the sixth, allocated to the optional byte-lifecycle owner in
+    # `analytics` is the eleventh, allocated to the tenant-only aggregate
+    # evidence and projection owner in ADR-0036. `files` is the sixth,
+    # allocated to the optional byte-lifecycle owner in
     # ADR-0022, and `imports` the seventh, to the bulk-import run ledger in
     # ADR-0025. `approvals` (ADR-0026) is the ninth, and the first allocated for
     # a capability that is real in BOTH planes in production — ERP approves
@@ -201,6 +203,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "analytics",
     }
 
 

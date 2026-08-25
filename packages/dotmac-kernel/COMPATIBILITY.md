@@ -288,7 +288,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a54`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a74`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -301,6 +301,10 @@ retired prefix is never reused.
 | `application_directory` | `mod_appdir` | `ad` | `application_directory` |
 | `files` | `mod_files` | `fi` | `files` |
 | `imports` | `mod_imports` | `im` | `imports` |
+| `integration` | `mod_intg` | `ig` | `integration` |
+| `approvals` | `mod_approvals` | `ap` | `approvals` |
+| `numbering` | `mod_numbering` | `nu` | `numbering` |
+| `analytics` | `mod_analytics` | `ay` | `analytics` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
