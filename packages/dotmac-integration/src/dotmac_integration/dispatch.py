@@ -44,9 +44,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from dotmac_integration.admission import (
+    AdmissionDecision,
+    admit_installation,
+    admit_runtime,
+    apply_provider_cooldown,
+)
 from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.execution import LostClaim, claim_delivery
 from dotmac_integration.models import (
@@ -61,6 +67,7 @@ from dotmac_integration.retry import (
     OutcomeStatus,
     next_state,
     retry_delay_seconds,
+    throttle_cooldown_seconds,
 )
 from dotmac_integration.spi import (
     ConnectorMode,
@@ -70,8 +77,12 @@ from dotmac_integration.spi import (
     require_capability_mode,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from dotmac_integration.capability_registry import CapabilityRegistry
+
 __all__ = [
     "DispatchError",
+    "DispatchNotAdmitted",
     "DispatchUnavailable",
     "LostClaim",
     "PreparedDispatch",
@@ -103,6 +114,35 @@ class DispatchUnavailable(DispatchError):
                               caller that treated this as contention would idle
                               silently on a misconfiguration.
     """
+
+
+class DispatchNotAdmitted(DispatchError):
+    """The runtime WILL not dispatch this right now — stop, do not alert.
+
+    The third answer, and it is neither of the other two. `DispatchUnavailable`
+    means something is broken; this means something is deliberately switched off
+    — the kill switch, a quarantined installation, or a concurrency ceiling —
+    and it is expected, reversible, and already visible to whoever switched it.
+
+    A caller that folded this into `DispatchUnavailable` would page an on-call
+    engineer every time an operator quarantined a connector. One that folded it
+    into `prepare` returning `None` would make a halted deployment look like a
+    busy one, so the queue-depth graph climbs while every dashboard says the
+    dispatcher is healthy.
+
+    `.decision` carries the closed reason code and, when the refusing rule knows
+    one, how long to wait — so a worker can back off correctly without parsing
+    the message.
+    """
+
+    def __init__(self, decision: AdmissionDecision) -> None:
+        super().__init__(decision.detail or decision.reason)
+        self.decision = decision
+
+    @property
+    def reason(self) -> str:
+        """The closed `admission.ADMISSION_REASONS` code."""
+        return self.decision.reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +181,16 @@ def prepare(
     expires, and the queue reports busy rather than broken — the worst of both.
 
     So everything that can refuse runs against unclaimed state, and the claim is
-    the last thing that happens.
+    the last thing that happens. The admission checks added later obey the same
+    rule: they are refusals, so they run BEFORE the claim, and a halted or
+    quarantined runtime therefore leaves the queue exactly as it found it.
     """
+    # FIRST, and before a single query. A deployment that has been switched off
+    # must not spend a round trip per queued row rediscovering that it is off.
+    halted = admit_runtime(policy)
+    if not halted.admitted:
+        raise DispatchNotAdmitted(halted)
+
     binding = (
         db.get(CapabilityBinding, delivery.capability_binding_id)
         if delivery.capability_binding_id
@@ -161,6 +209,16 @@ def prepare(
     installation = db.get(ConnectorInstallation, binding.installation_id)
     if installation is None:
         raise DispatchUnavailable(f"binding {binding.id} has no installation")
+
+    # BEFORE the `enabled` check below, because a quarantined installation is
+    # also not enabled and the operator is owed the specific answer: "the
+    # platform stopped trusting this", not "this is off". `admit_installation`
+    # deliberately declines every other non-enabled state, so the line below
+    # keeps raising `DispatchUnavailable` exactly as it did.
+    admitted = admit_installation(db, installation, policy=policy, now=now)
+    if not admitted.admitted:
+        raise DispatchNotAdmitted(admitted)
+
     if installation.state != "enabled":
         raise DispatchUnavailable(
             f"installation {installation.name!r} is {installation.state!r}, "
@@ -306,6 +364,53 @@ def invoke(
     return outcome
 
 
+def _require_valid_result(
+    outcome: Outcome,
+    *,
+    prepared: PreparedDispatch,
+    registry: CapabilityRegistry | None,
+) -> None:
+    """ADR-0024 § 10.4.3 — the result gate, BEFORE the claim-guarded UPDATE.
+
+    Before the write, so a connector cannot settle a delivery with a shape no
+    product can read. After that write the attempt is `delivered` and final; a
+    product reading the result would be the first thing to discover the shape
+    was wrong, at which point the outbox says the effect succeeded and there is
+    nothing left to retry.
+
+    ## Only on a SUCCESS
+
+    A failed attempt has no normalized result to publish, and demanding one
+    would refuse to record the failure — turning "the provider returned 500"
+    into a permanently unsettled row with a live lease. `RECONCILIATION_REQUIRED`
+    is the sharpest case: `invoke` produces it for a connector that RAISED, so
+    insisting on a valid result body there would guarantee the one outcome
+    nobody may lose is the one that cannot be written.
+
+    ## The refusal reaches the dispatcher, not the row
+
+    Raising leaves the delivery `in_flight` with its lease. That is correct: the
+    engine has not decided anything about this attempt, and a lease expiry hands
+    it to a worker that will try again. The alternative — recording a
+    connector's malformed result as a terminal state — is the outcome this gate
+    exists to prevent.
+    """
+    if outcome.status is not OutcomeStatus.SUCCEEDED:
+        return
+    from dotmac_integration.capability_registry import capability_registry
+
+    declared = registry if registry is not None else capability_registry()
+    contract = declared.get(prepared.capability_id)
+    if contract.result_schema is None and outcome.result is None:
+        # A capability whose contract publishes no result body, and a connector
+        # that returned none. Nothing disagrees, so nothing is refused — this is
+        # the fire-and-forget delivery shape, where the effect IS the outcome
+        # and there is no normalized body to read. `require_result` would refuse
+        # it for a missing schema, which would be true and useless.
+        return
+    contract.require_result(outcome.result)
+
+
 def settle(
     db: Any,
     delivery: DeliveryAttempt,
@@ -314,6 +419,7 @@ def settle(
     prepared: PreparedDispatch,
     policy: ExecutionPolicy = DEFAULT_POLICY,
     now: datetime | None = None,
+    registry: CapabilityRegistry | None = None,
 ) -> DeliveryAttempt:
     """Record the outcome in ONE conditional UPDATE guarded by the claim.
 
@@ -325,9 +431,21 @@ def settle(
     the WHERE clause, and `rowcount != 1` means this worker no longer holds the
     claim. The database decides, which also removes the naive/aware timestamp
     comparison the previous read-then-compare version needed.
+
+    ## And backpressure, for the same reason it is not somewhere else
+
+    A provider throttle is learned HERE and nowhere else: this is the moment the
+    engine holds both the outcome and a session, immediately after the network
+    call has returned. So the installation-wide cooldown is applied here, AFTER
+    the claim-guarded write succeeds — a worker that lost its lease must not get
+    to delay a queue on the strength of an outcome it was not allowed to record.
+
+    It is still two short statements in one short transaction, and neither waits
+    on anything: the pause is a `next_attempt_at`, not a sleep.
     """
     from sqlalchemy import update
 
+    _require_valid_result(outcome, prepared=prepared, registry=registry)
     moment = now or datetime.now(UTC)
     next_state_value = next_state(
         outcome, attempt_count=prepared.attempt_number, policy=policy
@@ -341,6 +459,11 @@ def settle(
         # the success it actually observed rather than retaining stale facts.
         "provider_reference": outcome.provider_reference,
         "provider_status_code": outcome.provider_status_code,
+        # The schema gate above makes this a domain result, not an arbitrary
+        # provider body. Failed outcomes never publish content.
+        "result_json": (
+            outcome.result if outcome.status is OutcomeStatus.SUCCEEDED else None
+        ),
     }
     if next_state_value == "delivered":
         values.update(
@@ -377,5 +500,19 @@ def settle(
             f"took at attempt {prepared.attempt_number} — the lease expired or "
             "another worker took over. Refusing to overwrite its outcome"
         )
+
+    # Only now — the claim held, so this outcome is this installation's actual
+    # observation rather than a stale worker's opinion of it.
+    if policy.apply_provider_backpressure:
+        cooldown = throttle_cooldown_seconds(outcome, policy=policy)
+        if cooldown is not None:
+            apply_provider_cooldown(
+                db,
+                installation_id=prepared.installation_id,
+                cooldown_seconds=cooldown,
+                now=moment,
+                policy=policy,
+            )
+
     db.refresh(delivery)
     return delivery

@@ -1,6 +1,9 @@
 # ADR-0047: Expenses owns spend evidence and eligibility, not payment
 
-- Status: accepted
+- Status: accepted. Amended 2026-08-24 — see "Amendment — 2026-08-24" at the
+  end of this record. The amendment narrows this record's one over-broad
+  sentence about disbursement and cites ADR-0042 as the controlling record. No
+  earlier text is rewritten.
 - Date: 2026-08-18
 - Scope: `dotmac-expenses`, ERP/CRM/Sub expense decomposition, Backoffice
   composition
@@ -19,6 +22,15 @@ stored bytes. Finance/Payables owns obligations, journals, disbursement and
 settlement. People owns employment/reporting structure. A reusable Expenses
 module cannot absorb those decisions merely because ERP currently calls them
 from one service.
+
+> **Narrowed 2026-08-24 — see Amendment A1.** "Finance/Payables owns
+> obligations, journals, disbursement and settlement" is too broad on two
+> words. ADR-0042 (accepted 2026-08-19, one day after this record, and devoted
+> to exactly this separation) rules that Payables says what is owed and that a
+> **Treasury/payment owner performs disbursement**; journals are Accounting's
+> (ADR-0041) and cash/settlement observation is Banking's (ADR-0044). **ADR-0042
+> controls.** A1 records the authoritative six-owner split. Nothing else in
+> this record changes: Expenses still owns eligibility and never payment.
 
 ## Decision
 
@@ -61,3 +73,62 @@ journal, supplier-invoice or `paid` status.
   Finance imports. The assembly binds those capabilities.
 - A later payment-coverage observation cannot regress or overwrite expense
   lifecycle state; Finance remains the only source of payment truth.
+
+
+## Amendment — 2026-08-24 (accepted correction)
+
+### A1. "Finance/Payables owns … disbursement" is narrowed — ADR-0042 controls
+
+This record's § Context lists the adjacent owners its decision must not absorb,
+and describes one of them as "Finance/Payables owns obligations, journals,
+disbursement and settlement". That sentence was written to say *"not Expenses"*,
+and it does say that correctly. What it also does, read literally, is name
+Payables as the owner of payment EXECUTION.
+
+ADR-0042 — accepted 2026-08-19, one day after this record, and devoted
+specifically to separating a liability from the act of paying it — rules the
+opposite in its § 3: *"Payables says what is owed, in what currency and by which
+date. It does not choose a bank account, payment rail, provider, batch or
+execution time and does not perform network I/O. A Treasury/payment owner
+performs disbursement…"*. Its rejected alternative **"Let Payables execute
+payments"** states the reason: an obligation and a bank movement have different
+controls, security boundaries and failure modes, and combining them puts
+provider I/O inside a domain transaction.
+
+**ADR-0042 controls.** This record's sentence is narrowed to its intended
+meaning — *those decisions are not Expenses'* — and is not authority for
+locating disbursement in Payables. "Finance/Payables" is a department, and a
+department is not an owner (the same error ADR-0061 A1 corrected when it
+replaced "ERP's Treasury/payment owner" with a named service).
+
+The authoritative split, which supersedes the compound sentence:
+
+| Owner | Decision |
+|---|---|
+| **Expenses** (`dotmac-expenses`, this record) | whether a claim is ELIGIBLE for reimbursement |
+| **Payables** (`dotmac-payables`, ADR-0042 §§ 1, 3) | what is OWED — to whom, in what currency, and when |
+| **Treasury** (ADR-0042 § 3's unnamed owner; named for payouts by ADR-0061 § 1 + A1; scoped by ADR-0063) | the AUTHORIZED PAYMENT INSTRUCTION, its rail submission and its resolution |
+| **Integrator** (`dotmac-integration` + a connector, ADR-0024 §§ 6–7, ADR-0061 § 1) | provider AUTHENTICATION, TRANSPORT and EVIDENCE — never whether, to whom or how much |
+| **Banking** (`dotmac-banking`, ADR-0044) | statement/cash OBSERVATIONS and RECONCILIATION EVIDENCE |
+| **Accounting** (`dotmac-accounting`, ADR-0041) | JOURNAL and LEDGER consequences |
+
+Read down the column and the money story is one act per owner: Expenses says
+*may this be reimbursed*, Payables says *this much is owed by this date*,
+Treasury says *pay it, this way, now*, the Integrator says *the provider was
+called and here is what it answered*, Banking says *cash actually moved*, and
+Accounting says *here is what it means to the books*. Six owners, six different
+failure modes, six different sets of controls — which is exactly why the
+compound sentence had to be broken up.
+
+Two consequences that were already true and are now stated:
+
+- Eligibility is still not payment, and a later payment-coverage observation
+  still cannot regress expense lifecycle state (§ Consequences, unchanged).
+  What changes is only WHICH owner the settlement observation comes from:
+  Treasury's disbursement, projected by Payables, evidenced by Banking — not
+  "Finance".
+- `dotmac-expenses` gains no dependency from this amendment. It continues to
+  compose without Finance imports; the assembly still binds the capability.
+
+*Corrects: § Context, third paragraph, third sentence. Cited by: ADR-0061
+Amendment A5. Related: ADR-0041, ADR-0042 § 3, ADR-0044, ADR-0061, ADR-0063.*

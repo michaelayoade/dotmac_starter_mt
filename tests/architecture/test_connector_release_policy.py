@@ -687,11 +687,11 @@ def test_the_real_entry_resolves_through_the_release_command(
         gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a3")
+        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a4")
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_whatsapp" in output
-    assert "tag=dotmac-connector-whatsapp-v0.1.0a3" in output
+    assert "tag=dotmac-connector-whatsapp-v0.1.0a4" in output
 
 
 def test_the_meta_social_entry_resolves_through_the_release_command(
@@ -700,17 +700,19 @@ def test_the_meta_social_entry_resolves_through_the_release_command(
     import argparse
 
     gate = _gate()
+    # The delivery slice raised this connector's floor to the SPI 1.4 release,
+    # so the oracle it resolves against is that tag rather than the a10 one.
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
         argparse.Namespace(
-            distribution="dotmac-connector-meta-social", version="0.1.0a1"
+            distribution="dotmac-connector-meta-social", version="0.1.0a2"
         )
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_social" in output
-    assert "tag=dotmac-connector-meta-social-v0.1.0a1" in output
+    assert "tag=dotmac-connector-meta-social-v0.1.0a2" in output
 
 
 def test_the_paystack_entry_resolves_through_the_release_command(
@@ -719,15 +721,17 @@ def test_the_paystack_entry_resolves_through_the_release_command(
     import argparse
 
     gate = _gate()
+    # a14 rather than a11: the outbound slice declares SPI 1.4, and a floor
+    # naming a release whose SPI cannot admit the connector is not a floor.
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-paystack", version="0.1.0a2")
+        argparse.Namespace(distribution="dotmac-connector-paystack", version="0.1.0a3")
     )
     output = capsys.readouterr().out
     assert "connector_key=paystack" in output
-    assert "tag=dotmac-connector-paystack-v0.1.0a2" in output
+    assert "tag=dotmac-connector-paystack-v0.1.0a3" in output
 
 
 def test_the_flutterwave_entry_resolves_through_the_release_command(
@@ -736,17 +740,21 @@ def test_the_flutterwave_entry_resolves_through_the_release_command(
     import argparse
 
     gate = _gate()
+    # a14, not a11: the outbound slice raised this connector's
+    # `integration_floor` to the SPI 1.4 release, and `_refuse_unpublished_floor`
+    # resolves the floor against THIS tag set — an a11-only oracle refuses a
+    # floor of a14 rather than proving anything about the entry.
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
         argparse.Namespace(
-            distribution="dotmac-connector-flutterwave", version="0.1.0a2"
+            distribution="dotmac-connector-flutterwave", version="0.1.0a3"
         )
     )
     output = capsys.readouterr().out
     assert "connector_key=flutterwave" in output
-    assert "tag=dotmac-connector-flutterwave-v0.1.0a2" in output
+    assert "tag=dotmac-connector-flutterwave-v0.1.0a3" in output
 
 
 def test_the_mono_entry_resolves_through_the_release_command(
@@ -789,15 +797,19 @@ def test_the_remita_entry_resolves_through_the_release_command(
     import argparse
 
     gate = _gate()
+    # a14, not a11: the outbound slice raised this connector's
+    # `integration_floor` to the SPI 1.4 release, and `_refuse_unpublished_floor`
+    # resolves the floor against THIS tag set — an a11-only oracle refuses a
+    # floor of a14 rather than proving anything about the entry.
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a11"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a14"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-remita", version="0.1.0a1")
+        argparse.Namespace(distribution="dotmac-connector-remita", version="0.1.0a2")
     )
     output = capsys.readouterr().out
     assert "connector_key=remita" in output
-    assert "tag=dotmac-connector-remita-v0.1.0a1" in output
+    assert "tag=dotmac-connector-remita-v0.1.0a2" in output
 
 
 def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:

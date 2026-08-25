@@ -37,6 +37,12 @@ jobs:
             migration-gate,
             ui-check,
             module-catalog-check,
+            # Offline and tag-free on purpose: it compares the checked-in
+            # released-manifest ledger with the working tree, so it runs here
+            # where `actions/checkout` fetches no tags. The tag cross-check that
+            # keeps the ledger honest lives in the `unit` job, which has
+            # `fetch-depth: 0`.
+            manifest-digest-check,
             product-writer-check,
             format-check,
           ]

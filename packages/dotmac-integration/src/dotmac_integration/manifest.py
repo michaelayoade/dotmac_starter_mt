@@ -42,7 +42,7 @@ from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a15",
+    version="0.1.0a16",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
@@ -141,6 +141,23 @@ module = ModuleManifest(
         "integration.retention.payloads.redacted",
         "integration.retention.hold.placed",
         "integration.retention.hold.released",
+        # Ambiguous-outcome reconciliation, written by
+        # `dotmac_integration.outbound_repair`. ONE code for all three provider
+        # verdicts, with the verdict in the event's details: landed, not landed
+        # and unknown are one operation whose answer differed, not three
+        # operations. Splitting them would turn "how many commands were
+        # reconciled" into a query over a vocabulary.
+        #
+        # Requeueing has no code of its own here on purpose — `operations`
+        # already writes `integration.delivery.replayed` and stays the single
+        # writer of that fact whether an operator or a reconciler asked for it.
+        "integration.delivery.reconciled",
+        # Containment. Quarantine stops an installation consuming the outbound
+        # queue and answering ingress, so both directions are on the trail: who
+        # stopped trusting it, and who decided it could come back. See
+        # `lifecycle.QUARANTINE_AUDIT_ACTIONS`.
+        "integration.installation.quarantined",
+        "integration.installation.quarantine_released",
     ),
     # ── No capabilities or permissions YET ──────────────────────────────────
     # Both exist to gate a ROUTE, and this slice ships none. A declared code

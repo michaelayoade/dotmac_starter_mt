@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-connector-paystack"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Paystack settlement ingress and reconciliation connector"
 authors = ["DotMac"]
 readme = "README.md"

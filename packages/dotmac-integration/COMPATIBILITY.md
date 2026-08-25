@@ -8,8 +8,8 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a14`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, and a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention |
-| Declared | `0.1.0a15` types outbound idempotency collisions and uniqueness races without changing SPI 1.4 |
+| Released | `0.1.0a1` through **`0.1.0a15`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, and a15 adds typed outbound repair and runtime safety |
+| Declared | `0.1.0a16` adds domain-owned command/result/observation schemas and durable, validated command results without changing SPI 1.4 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the

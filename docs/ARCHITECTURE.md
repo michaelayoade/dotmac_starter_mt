@@ -59,17 +59,19 @@ The first concrete plugin follows that split exactly:
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Versioned inter-application envelope, authenticated peer/source binding, schema validation, idempotency identity and payload fingerprint | `dotmac-app-sync` | Owns no transport, peer authentication, row, session, application route, domain resolver or consequence; each destination declares the capability schema and implements the atomic receiver |
-| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
-| Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-meta-social` (`meta_social`, INGRESS-only, `messaging.receive.v1`) | Owns no Graph delivery, profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
-| Flutterwave API v4 exact-byte ingress authentication plus OAuth-authenticated paged charge reconciliation, provider-event identity and exact amount/currency translation | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no v3 fallback, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
-| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
+| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes; the WABA message-template catalogue read as typed provider observations; outbound text/template/media sends that refuse before the wire what the provider would reject anyway (unapproved template, variable arity the catalogue does not describe, unsupported MIME type, oversize attachment, a caption or filename the media type cannot carry) | `dotmac-connector-whatsapp` (`meta_whatsapp`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY + `messaging.templates.read.v1` POLL) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation, customer-window decision, template selection or product consequence. The template catalogue is an in-process memo under a configured freshness policy, never persisted and never a second authority on approval |
+| Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes; outbound Messenger/Instagram Direct sends and Facebook/Instagram comment replies, one Graph call per product-decided command, with Graph error codes classified into typed outcomes | `dotmac-connector-meta-social` (`meta_social`, `messaging.receive.v1` INGRESS + `messaging.send.v1` DELIVERY) | Owns no messaging-window decision, no permission to respond, no profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
+| Flutterwave API v4 exact-byte ingress authentication, OAuth-authenticated paged charge reconciliation, provider-event identity, exact amount/currency translation, and outbound payment-initialization and refund commands | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL on `payments.settlement.observation.v1`, DELIVERY on `payments.intent.v1` and `payments.refund.v1`) | Owns no v3 fallback, transfer/payout surface, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence. Outbound classifies only: a decline is terminal, a timeout after send is reconciliation-required, and the engine's idempotency key rides the provider's own header |
+| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1.** It also still declares `payments.customer.v1` (`create_customer | update_customer | read_customer`) — as built, and RULED OUT: ADR-0061 Amendment A5 REMOVES that capability from the public manifest (no independent Dotmac business lifecycle; it is Paystack's `/customer` REST surface). The code removal is part of the payout refactor, gated behind the capability-schema and result seams; A5 holds the artifact-by-artifact list |
 | Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
 | Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
-| Remita authenticated RRR status polling and provider-neutral response translation | `dotmac-connector-remita` (`remita`, POLL-only, `payments.reference.status.observation.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence |
+| Remita authenticated RRR status polling, provider-neutral response translation, and outbound RRR issuance under the provider SHA-512 request contract | `dotmac-connector-remita` (`remita`, POLL on `payments.reference.status.observation.v1`, DELIVERY on `payments.reference.issuance.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence. Issuance carries the PRODUCT's stable `orderId` and mints none of its own, because Remita accepts no idempotency header and `orderId` is its only natural key |
 | LinkedIn challenge-response, exact-byte webhook authentication and organization-social/lead notification translation | `dotmac-connector-linkedin` (`linkedin`, INGRESS-only, `social.activity.observation.v1` + `marketing.lead.observation.v1`) | Owns no contact, campaign, qualification, assignment, ticket, publication, destination or product consequence; declares deny-all provider egress |
 | Connector installation, binding, product-port descriptor projection, engine-derived ProductObservation source, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no provider header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each typed observation and comparison and returns only closed safe outcomes |
+| Whether a stored outbound command may become a live effect again — replay by product idempotency key, dead-letter inspection and operator repair, and resolution of an INDETERMINATE attempt from provider evidence | `dotmac-integration.outbound_repair` | One decision (`classify_repair`) behind every entry point, so inspection and repair cannot disagree; re-dispatches only the row's own stored request checked against its enqueue digest, never a rebuilt payload; returns the recorded outcome for a landed effect instead of re-sending it; refuses to replay an ambiguous attempt; and owns no queue reset (`operations.replay_delivery`), no at-most-once ledger (`dotmac_kernel.idempotency`), no audit ledger (`dotmac_kernel.audit`), no outcome vocabulary (`retry.OutcomeStatus`) and no table of its own |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+| Whether a payout happens, to whom, for how much, and whether an ambiguous attempt may be tried again | **`PaymentService`** (`dotmac_erp:app/services/finance/payments/payment_service.py` — `initiate_expense_transfer`, `_recover_transfer_initiation`, `process_successful_transfer`, `mark_transfer_failed`, `poll_transfer_status`, `process_transfer_reversal`) — the SOLE interim owner. `BatchTransferService` is dead code (zero callers, not exported, zero tests) and is NOT an owner. ADR-0061 § 1 + Amendment A1 — the owner ADR-0042 § 3 left unnamed, named as services rather than as a role. **Implemented and tested; production enablement unconfirmed** (ADR-0061 A7 — the path is gated by `paystack_transfers_enabled`, which is runtime data, and no deployment target has been named). `BatchTransferService` is to be DELETED as security-sensitive dead code (A7). No `dotmac-treasury` package or namespace exists or may be allocated: ADR-0063 scopes a narrow `PaymentInstruction` owner and gates its construction on ERP's `PaymentIntent.status` three-writer fix | No connector, no `dotmac-integration` path, no `dotmac_integrator` configuration and no operator gesture inside the Integrator originates, alters, batches, suppresses or re-sends a payout. `outbound_repair.classify_repair`'s refusal to replay an ambiguous money attempt IS this boundary in code |
 
 External advertising and social-media observations use the same application
 boundary with a separate domain owner. The tenant-only
@@ -125,6 +127,312 @@ plane as their first candidate assembly. The seven newly constructed owners now
 have manifests, independent lineages, catalogue entries and live isolation
 canaries on this integration branch; this is construction, not composition,
 publication or adoption.
+
+### Outbound commands: one capability id, two payload dialects (as built, 2026-08-24)
+
+The connector contract-surface table at the top of this section is the
+ownership register, and it holds on the receiving side. On the SENDING side
+there is a gap, recorded here because `docs/ARCHITECTURE.md` is as-built truth
+and ADR-0061 and ADR-0024 § 8 are decisions the code has not yet reached.
+
+A capability id is supposed to be a contract (ADR-0024 § 8.1). Mechanically it
+is currently only a name: `dotmac_integration.spi.CapabilityDeclaration`
+carries `capability_id`, `config_schema` and `modes`, and
+`DispatchRequest.payload` is an unvalidated `dict[str, object]`. Configuration
+has a declared schema; commands do not. So each connector settled the command
+shape locally, and two shipped ids have two dialects each:
+
+| | `dotmac-connector-paystack` | `dotmac-connector-flutterwave` / `-remita` |
+|---|---|---|
+| envelope | `{"action": <verb>, "params": {…}}`; the verb is checked against `delivery.ACTIONS_BY_CAPABILITY`, so a binding granted intents cannot be talked into a payout | flat, typed per capability; no action verb |
+| provider reference | DERIVED: `operations.provider_reference` = `dmi` + SHA-256 of `DispatchRequest.idempotency_key`. Reading one from the payload is refused | PRODUCT-minted: Flutterwave requires `intent_reference`; Remita carries the product's `orderId` verbatim and mints none |
+| minor units | product sends an exact MAJOR-unit decimal string plus `currency`; the connector applies `PAYSTACK_WIRE_SCALE = 2` itself and accepts no `currency_minor_units` | product MUST send `currency_minor_units`; absence is `currency_minor_units_required` |
+| provider idempotency | the derived value in the provider's own `reference` field, which the provider refuses on reuse | Flutterwave: engine key on `X-Idempotency-Key`. Remita: none exists; `orderId` is the only natural key |
+
+Each refusal is locally explicable. Paystack's wire multiplies by 100 for every
+supported currency **including zero-exponent XOF**, so a product-supplied
+exponent would be a second, contradictory authority on that provider's scale;
+and deriving the reference from the engine key is what makes every attempt of
+one delivery present an identical, provider-refusable key. Flutterwave and
+Remita cannot derive, because their natural key is the product's own and their
+exponent is genuinely currency-dependent.
+
+That is where this section originally stopped, and stopping there was the
+mistake: "both are locally correct" is a description of a stand-off, not a
+resolution, and it quietly licenses the divergence to continue. ADR-0061
+Amendment A3 supersedes it. The payload question is answered **once**, by the
+capability's owning domain, and each connector adapts to that answer
+**internally** — Paystack keeps deriving its provider reference and applying
+its own wire scale, from the contract's stable reference and exact money,
+because those are provider protocol performed inside the connector, and it
+ignores a field it cannot use instead of refusing the command that carries it.
+Neither connector is asked to look like the other.
+
+The declaration surface that makes this possible is the DOMAIN's, not the
+connector's. As built, `dotmac_integration.capability_registry
+.CapabilityContract` — the business owner's declaration, one per capability id,
+which the Integrator validates and never mints — carries `capability_id`,
+`owner` and `summary`, and no schema of any kind. ADR-0024 § 10 extends it with
+`command_schema`, `result_schema`, `observation_schema`, a canonical contract
+digest, and deprecation/replacement metadata; `CapabilityDeclaration` keeps
+config and modes and may only CLAIM that digest. Putting the schema on the
+connector declaration instead would make drift machine-readable rather than
+prevent it — two connectors would publish two individually valid schemas for
+one id and nothing could prefer either.
+
+None of that gate exists today. It comprises command validation before
+`execution.enqueue_delivery`, digest agreement in
+`capability_registry.require_implements_only_declared` (composition) and
+`require_declared_for_binding` (binding), result validation before
+`dispatch.settle`, observation validation before `ingress.record_batch`, and a
+schema change taking a new `.vN` id rather than redefining a published one —
+with planted sensitivity failures for digest mismatch, missing schema, invalid
+payload and invalid result (ADR-0024 §§ 10.4–10.5).
+
+`messaging.send.v1` has the same shape of divergence: `meta_whatsapp` accepts
+`send_text | send_template | send_media` with a `recipient` param, while
+`meta_social` accepts `send_direct_message | reply_to_comment` with
+`recipient_id` plus `channel`. Both declare the same id deliberately — the
+outbound name is not minted per connector — and a product bound to one still
+cannot be re-bound to the other without changing its command.
+
+`messaging.send.v1` is published, so it is repaired by SUCCESSION rather than
+redefined in place (ADR-0024 § 11, ADR-0061 Amendment A4). The canonical
+successors are `messaging.direct.send.v2` (provider-neutral direct delivery
+with a discriminated text/template/media content shape, replacing both
+vocabularies at once), `social.comment.reply.v1` (public Facebook/Instagram
+comment consequences — a different business act) and `social.profile.read.v1`
+(caller-initiated profile observation through a REQUEST mode). Sub migrates to
+them; v1 is kept for a bounded compatibility window and then retired. As built,
+none of the three exists, and `spi.ConnectorMode` is still the closed union
+`INGRESS | POLL | DELIVERY` with no REQUEST member — which is the same gap
+`dotmac-connector-meta-social`'s dossier records for its withheld contact
+profile lookup.
+
+Consequence, stated plainly: **payout traffic cannot be switched between
+providers by changing a binding today.** `payments.payout.v1` has exactly one
+implementation (Paystack), and even with a second one the command shapes
+differ. ADR-0061 § 5 is the ordered list of what must become true before
+interchangeability may be claimed; ADR-0024 § 8.4 records the same gap from the
+contract side.
+
+### Disbursement has six owners, and none of them is a department (2026-08-24)
+
+As built, this repository holds no disbursement code at all: the payout decision
+lives in ERP and the transport lives in `dotmac-integration` plus a connector.
+What it does hold is the ownership register above, and until 2026-08-24 two
+accepted records disagreed about one row of it.
+
+ADR-0047 § Context (2026-08-18) said *"Finance/Payables owns obligations,
+journals, disbursement and settlement"*. ADR-0042 (2026-08-19, one day later,
+and devoted specifically to separating liabilities from payment execution) said
+in its § 3 that Payables *"does not choose a bank account, payment rail,
+provider, batch or execution time and does not perform network I/O"* and that a
+**Treasury/payment owner performs disbursement**. **ADR-0042 controls.**
+ADR-0047's sentence was written to say "not Expenses" and is narrowed to that by
+its own dated Amendment A1; "Finance/Payables" is a department, and a department
+cannot be pointed at in a review — the same error ADR-0061 A1 corrected when it
+replaced "ERP's Treasury/payment owner" with a named service.
+
+| Owner | Decision | Record |
+|---|---|---|
+| Expenses | whether a claim is eligible for reimbursement | ADR-0047 |
+| Payables | what is owed, to whom, in what currency and when | ADR-0042 §§ 1, 3 |
+| Treasury | the authorized payment instruction, rail submission and resolution | ADR-0042 § 3's unnamed owner; named for payouts by ADR-0061 § 1 + A1; scoped by ADR-0063 |
+| Integrator | provider authentication, transport and evidence | ADR-0024 §§ 6–7, ADR-0061 § 1 |
+| Banking | statement/cash observations and reconciliation evidence | ADR-0044 |
+| Accounting | journal and ledger consequences | ADR-0041 |
+
+Six owners, six failure modes, six sets of controls — which is why the compound
+sentence had to be broken up rather than reworded.
+
+**Treasury's scope, and why nothing is being built.** ADR-0063 authorizes a
+narrow shared owner of `PaymentInstruction`
+(`authorized → submitting → ambiguous | submitted → settled | failed |
+reversed`), grouped by `PaymentRun` rather than by a provider batch, over two
+rails from the beginning: an API rail through the Integrator bindable to
+Paystack or Flutterwave v4, and a manual bank-file rail for AP and payroll.
+Three of its invariants are worth restating here because they are the ones a
+future implementer is most likely to violate by accident:
+
+- **Exporting a spreadsheet must not mark an instruction paid.** An export
+  proves a file was produced. `submitted` needs operator submission evidence;
+  `settled` needs Banking's settlement observation.
+- **Run progress is derived from instruction outcomes, never from a batch-level
+  response.** Provider calls are not atomic: ten transfers can return seven
+  successes, two failures and one ambiguous result, and a batch aggregate that
+  believes the batch response marks the unknown one paid.
+- **Rail routing is pre-submission only.** A Paystack timeout may have
+  succeeded; a router that retries it through Flutterwave pays the beneficiary
+  twice. The rail is stamped immutably at authorization, an ambiguous result
+  reconciles against the ORIGINAL provider, and rerouting needs a conclusively
+  unsubmitted or terminally failed instruction plus a new authorization.
+  Paystack ↔ Flutterwave interchangeability is safe CONFIGURATION, not
+  cross-provider retry.
+
+**The gate:** none of it is constructed before ERP's `PaymentIntent.status`
+three-writer violation is fixed in the ERP repository. Extraction copies a
+lifecycle; a lifecycle with three writers has no owner, and porting it would
+make one product's defect a shared module's contract. No `dotmac-treasury`
+distribution, namespace, `mod_*` short code or migration lineage may be
+allocated until then (ADR-0063 § 7, extending ADR-0061 A1).
+
+**Evidentiary wording for ERP payout, required verbatim:
+"Implemented and tested; production enablement unconfirmed."** The path is
+gated by `paystack_transfers_enabled`, which is runtime data; confirming it
+needs an explicitly named deployment target and a `deployment_run` oracle
+(`AGENTS.md` rule 30), and no target has been named. This blocks no
+construction — it blocks any claim of production parity, adoption or
+retirement, in both directions. `BatchTransferService` is to be DELETED as
+security-sensitive dead code now that the product-first dossier
+`docs/inventories/treasury-payment-execution-sources.md` § 1.3 preserves its
+disposition (ADR-0061 A7). That dossier is produced on the sibling branch
+`docs/treasury-product-first-dossier` and is the evidence base for ADR-0063;
+its own § 12.3 G5 asks for that record.
+
+### The money-out leg: what is decided, in what order, and what blocks it (2026-08-24)
+
+Four accepted rulings extend the six-owner split above. None of them is as-built
+in this repository — it holds no disbursement code — so each is marked for what
+it is: a decision recorded where it can be cited, with the as-built facts it
+rests on named.
+
+**`payments.refund.v1` is KEPT, and the reason it survives is the reason
+`payments.customer.v1` did not.** ADR-0061 A5 removed the customer capability
+because it named provider workflow; A8 runs the same test on refund and it
+passes. The discriminating question:
+
+> If the provider vanished tomorrow, would the thing still exist and still need
+> an owner?
+
+A provider-side customer record would not — there was never a Dotmac object,
+only a mirror of `POST/PUT/GET /customer`. A refund obligation would: someone
+with authority decided money goes back, for how much, against which original
+payment, and it would be paid another way. **A provider-side customer record is
+a by-product of an act; a refund IS the act.** So the capability is retained
+while its provider-shaped OPERATIONS are removed: one command, `request_refund`,
+carrying exact money, the original-payment correlation, the authorization
+reference and idempotency identity — and Paystack's transaction handle and
+Flutterwave's charge id become connector internals.
+
+The as-built fact that shapes the refund rule: **Paystack's `/refund` accepts no
+client reference.** There is no field for the engine's idempotency key, so the
+connector stamps a derived key into `merchant_note`
+(`packages/dotmac-connector-paystack/src/dotmac_connector_paystack/
+operations.py:626-630`) and classifies an unanswered send as `AMBIGUOUS`
+(`:368`), resolving it by reading the provider's refund list and matching the
+note (`:68-73`). **That makes an ambiguous refund DECIDABLE; it does not make a
+second refund REFUSED.** A duplicated payout is refusable at the provider
+because its derived reference rides Paystack's own `reference` field; a
+duplicated refund is not. The reconciliation read is therefore mandatory before
+any re-request, no transport ever makes one, and a re-request is a new
+authorized decision. **Treasury is not automatically the refund owner** — a
+refund reverses a receivable rather than discharging a payable, it is not one of
+ADR-0063 § 6's twelve closed items, and extending that list needs its own record
+(ADR-0061 A8, A9).
+
+**ERP splits `PROCESSING` before anything is extracted, and an unprobed row is
+`ambiguous`.** ADR-0063 A1. `PROCESSING` today means both "the provider call is
+running" and "a worker has picked this row up" — the second meaning is why
+`poll_stuck_expense_transfers` writes the column at all — and carrying a state
+that means both into a shared module under a better name would launder the
+ambiguity into a contract. The vocabulary becomes `submission_requested` (a
+durable intent, no provider outcome attempted), `submitted` (conclusively
+accepted), `ambiguous` (may have landed, reconciliation required), and the
+terminal `settled` / `failed` / `reversed`. **Worker claim/lease state moves to
+the execution engine** (ADR-0014's at-most-once owner), which is most of why the
+third writer exists. The migration rule carries the weight: existing
+`PROCESSING` rows are **PROBED**, the probe is read-only, the **worker is
+quiesced** for the duration, and **without conclusive provider evidence a row
+maps to `ambiguous`, never `submitted`** — assuming success on migration is how
+a double payment or a silently lost disbursement enters the new module, because
+a row wrongly marked `submitted` is never looked at again.
+
+**Payroll produces `PaymentInstruction` rows, and Treasury never sees a salary
+component.** ADR-0063 A2 with ADR-0046 A1. One authorized net-pay obligation
+produces one instruction; a run may group them into a `PaymentRun` without
+conferring authorization; Treasury's manual rail produces the bank-upload
+artifact; **exporting the file does not mark payroll paid** (ERP's payroll
+export writes no status today, which is correct and must survive the port); and
+settlement evidence returns to Payroll as a typed observation. Treasury receives
+**net amount, currency, payee/destination reference and payroll obligation
+reference — and nothing else.** Never gross, allowances, deductions, tax,
+pension, garnishments or grade, including in a narration field. That is a
+privacy boundary as much as an ownership one: the bank-file rail means the
+artifact LEAVES, its audience is payments operations rather than HR, and
+ADR-0063 § 2 requires Treasury to retain it immutably — so a component that
+reaches Treasury is digested and archived beyond HR's reach to redact.
+
+**The order, and the one thing that blocks release regardless of it**
+(ADR-0063 A3):
+
+| # | Step | Where |
+|---|---|---|
+| 1 | ERP execute-permission containment | ERP |
+| 2 | ERP authorization-log audit on a named target | ERP |
+| 3 | Delete dead `BatchTransferService` | ERP |
+| 4 | Reduce `PaymentIntent.status` to one writer | ERP |
+| 5 | Split `PROCESSING` from `ambiguous` | ERP |
+| 6 | Add capability request/result schemas | `dotmac-integration` + connectors |
+| 7 | Build Treasury `PaymentInstruction` and `PaymentRun` | new module |
+| 8 | Add expense, AP and payroll producers | ERP → Treasury |
+| 9 | Complete Paystack and Flutterwave payout bindings | connectors |
+| 10 | Build refund through its named owner | Billing / the named owner |
+| 11 | Provider sandbox proof, CI and cutover | all |
+
+Steps 1–3 come first because they reduce blast radius and depend on no design
+decision. Step 4's digest/version work may continue in parallel — it is internal
+to ERP and touches no rail. But:
+
+> **No payout release and no payout enablement passes the authorization
+> blocker.**
+
+The blocker is an as-built ERP fact, not a design concern: **ERP's broad
+module-access scope `finance:access` currently satisfies the guard on
+`POST /transfers/{intent_id}/initiate`, which executes a real transfer.** The
+old helper also names `payments:read`, but that permission is absent from the
+normal token allowlist and seeder, so it is not the live reachability mechanism.
+The
+weakest admitted credential is the one that defines a path's real authorization,
+which makes every other control on that path decorative. A dedicated ERP
+security change is implemented on `fix/payout-execute-permission-containment`.
+This is a gate on RELEASE and ENABLEMENT and is independent of ADR-0063 § 7's
+gate on CONSTRUCTION; satisfying either does not satisfy the other. It changes
+no evidentiary claim in either direction — *"Implemented and tested; production
+enablement unconfirmed"* remains the required wording (ADR-0061 A7), and the
+blocker is a reason enablement must not be sought rather than evidence about
+whether it has happened.
+
+### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
+
+`dotmac-integration` derives two kinds of runtime number from its own ledgers,
+both at read time and neither stored: `operations.health_report` answers "is
+anything silently stuck?" (in-flight leases expired, retryable overdue,
+dead-letter, reconciliation-required, receipts unprocessed, checkpoints stale)
+and `operations.dispatch_metrics` answers "how is the queue behaving?" (depth,
+oldest-queued age, end-to-end latency, retries, failures, quarantined
+installations).
+
+The module ships **no** metrics client, counter registry or `/metrics` route,
+and none of the other 80-odd distributions does either — verified by grep over
+`packages/*/src`. What the module owns is the NAMES:
+`operations.METRIC_NAMES` is a thirteen-entry tuple of stable,
+`integration_`-prefixed, unit-suffixed identifiers that
+`DispatchMetrics.as_metrics()` returns verbatim, pinned as literals by
+`tests/unit/test_integration_runtime_safety.py`. The exporter belongs to the
+deploying assembly (`dotmac_integrator`), which is why one module can be
+composed by several assemblies exporting to different systems without a fork.
+
+Two as-built qualifications:
+
+- `HealthReport.as_dict()` returns bare dataclass field names —
+  `dead_letter`, `checkpoints_stale` and so on — with no declared tuple and no
+  `integration_` prefix. An assembly exporting the health signals therefore
+  exports six unprefixed, undeclared names. ADR-0062 § 5 D2.
+- `dotmac-analytics` and `dotmac-media-observations` also speak of "metrics";
+  those are DOMAIN metrics — persisted, provenance-carrying, repairable facts
+  under ADR-0043 and ADR-0034 — and are a different subject from the runtime
+  numbers above. ADR-0062 § 4.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 

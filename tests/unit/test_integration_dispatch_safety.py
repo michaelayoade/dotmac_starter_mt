@@ -52,8 +52,12 @@ def test_provider_evidence_belongs_to_the_outbound_ledger_only() -> None:
     delivery_columns = {column.name for column in DeliveryAttempt.__table__.columns}
     receipt_columns = {column.name for column in InboxReceipt.__table__.columns}
 
-    assert {"provider_reference", "provider_status_code"} <= delivery_columns
-    assert {"provider_reference", "provider_status_code"}.isdisjoint(receipt_columns)
+    assert {"provider_reference", "provider_status_code", "result_json"} <= (
+        delivery_columns
+    )
+    assert {"provider_reference", "provider_status_code", "result_json"}.isdisjoint(
+        receipt_columns
+    )
     assert "ck_delivery_attempts_provider_status" in {
         constraint.name for constraint in DeliveryAttempt.__table__.constraints
     }

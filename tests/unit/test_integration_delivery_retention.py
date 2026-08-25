@@ -90,6 +90,7 @@ def delivery(db: Session) -> DeliveryAttempt:
     queued.delivered_at = OLD
     queued.provider_reference = "wamid.outbound-1"
     queued.provider_status_code = 200
+    queued.result_json = {"accepted_reference": "product-result-1"}
     db.flush()
     return queued
 
@@ -110,6 +111,7 @@ def test_redaction_keeps_dedupe_and_provider_evidence(
 
     assert is_delivery_redacted(delivery)
     assert delivery.payload_json[REDACTION_MARKER]["key_count"] == len(PAYLOAD)
+    assert delivery.result_json is None, "normalized result content must age out too"
     assert {
         "id": delivery.id,
         "idempotency_key": delivery.idempotency_key,

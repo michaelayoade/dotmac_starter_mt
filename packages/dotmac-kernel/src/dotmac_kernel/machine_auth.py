@@ -40,7 +40,33 @@ scopes; the principal carries no roles, so there is no administrator shortcut;
   loads the `Person`. A machine is not a person wearing a service label, and a
   facility that insists otherwise cannot express the Integrator.
 * *No wildcard, and no implicit administrator.* There is no scope that means
-  "all", and an empty `scopes` list authorizes NOTHING.
+  "all", and an empty `scopes` list authorizes NOTHING. Amended 2026-08-24:
+  the inventory recorded Sub as scope-EXACT on the strength of
+  `_api_key_principal`'s docstring ("access is exactly its scopes"). Re-reading
+  the ENFORCEMENT, that is not what happens. `has_permission` expands the
+  required permission through `_wildcard_ancestors` — `network:nas:write`
+  becomes `["*", "network:*", "network:nas:*"]` — and matches the key's scopes
+  against the expansion, so a key holding `network:*` invokes every capability
+  in the domain and a key holding `*` invokes all of them. `_permission_domain_
+  aliases` additionally rewrites `customer:` to `subscriber:` and back. Sub is
+  therefore a wildcard-and-alias implementation whose docstring says otherwise,
+  which is worse than one that says so plainly: a reviewer checking the comment
+  is told the control exists. No expansion happens here, on either side.
+* *No anonymous machine.* Neither source records WHICH APPLICATION a key
+  belongs to. Sub identifies its CRM caller by the presence of an
+  `integration:crm` scope (`app/api/crm.py::require_crm_service_auth`), which
+  makes identity a side effect of authorization: issue that scope to a second
+  key and the two callers are indistinguishable in the trail forever. Here
+  `source_application` is its own column and its own question, an unattributed
+  credential does not authenticate at all, and `MachinePrincipal.application`
+  is non-optional.
+* *No downtime rotation.* Sub's `rotate_api_key` overwrites `key_hash` in
+  place and its docstring states that the old secret stops working
+  immediately. For an unattended machine caller that is an outage with a
+  deploy in the middle of it. Here a rotation is a WINDOW: `next_key_hash`
+  holds the incoming digest, both digests authenticate to the same principal,
+  and the outgoing one is retired by an explicit `complete_rotation` — never
+  by a clock. See `dotmac_kernel.machine_rotation`.
 
 ## Transaction contract
 
@@ -58,6 +84,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
+import sqlalchemy as sa
 from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -117,19 +144,43 @@ class MachinePrincipal:
     No roles field, and that absence is the design: a role is a bundle somebody
     can widen later, and the whole point of a machine credential is that its
     authority is enumerated where it was granted.
+
+    `application` is the SOURCE APPLICATION — which fleet peer this is, not just
+    that it is a machine. It is non-optional on the principal even though the
+    column is nullable for one release, because `authenticate_machine` refuses a
+    credential that cannot answer it: a principal that exists without an
+    attribution is exactly the anonymous machine this facility is meant to
+    abolish.
     """
 
     credential_id: UUID
     tenant_id: UUID
     label: str
+    application: str
     scopes: frozenset[str]
 
     def has_scope(self, scope: str) -> bool:
-        """Exact membership. No wildcard, and empty authorizes nothing.
+        """EXACT membership. No wildcard, no prefix, no substring, no case fold.
 
-        The inverse of ERP's `has_scope`, which returns True for every scope
-        when the list is empty. An unscoped credential here can do nothing at
-        all, which is the only safe reading of "we never said what this may do".
+        Set containment, and the single most load-bearing line in this module.
+        Each rejected alternative was a real behaviour in a source:
+
+        * *Empty means everything* — ERP's `has_scope` returns True for every
+          scope when the list is empty. Here an empty set authorizes nothing,
+          which is the only safe reading of "we never said what this may do".
+        * *Wildcard ancestors* — Sub's enforcement expands the REQUIRED
+          permission to `["*", "network:*", "network:nas:*"]` and matches the
+          key's scopes against that set, so a key holding `network:*` invokes
+          every capability in the domain and a key holding `*` invokes all of
+          them. Its own docstring says access is "exactly its scopes"; the
+          enforcement disagrees with the docstring. There is no such expansion
+          here, and there is no scope string that means "all".
+        * *Aliases* — Sub also rewrites `customer:` to `subscriber:` and back,
+          so one grant satisfies two names. Convenient, and it makes the
+          question "what can this key do" unanswerable from the row.
+
+        A credential scoped to one capability therefore cannot invoke another,
+        including a capability whose name merely contains or extends its own.
         """
         return scope in self.scopes
 
@@ -162,9 +213,22 @@ def authenticate_machine(
     a cross-tenant disclosure.
     """
     moment = now or datetime.now(UTC)
+    digest = hash_machine_key(raw_key)
     credential = db.execute(
         select(MachineCredential).where(
-            MachineCredential.key_hash == hash_machine_key(raw_key),
+            # EITHER live digest authenticates. This is the whole rotation
+            # window: during it the outgoing and incoming secrets both resolve
+            # to the SAME row, so the caller gets the same principal, the same
+            # scopes and the same attribution whichever one it happens to send.
+            # Sub's `rotate_api_key` overwrites `key_hash` in place — its own
+            # docstring says "the old secret stops working immediately" — so
+            # every caller still holding the previous key fails until somebody
+            # redeploys it. For an unattended machine caller that is a
+            # self-inflicted outage, and it is the reason this column exists.
+            sa.or_(
+                MachineCredential.key_hash == digest,
+                MachineCredential.next_key_hash == digest,
+            ),
             MachineCredential.is_active.is_(True),
             MachineCredential.revoked_at.is_(None),
         )
@@ -177,10 +241,20 @@ def authenticate_machine(
     if credential is None or _has_expired(credential.expires_at, moment):
         raise UnauthorizedError("machine credential is not valid")
 
+    # An UNATTRIBUTED credential does not authenticate. `source_application` is
+    # nullable at the schema for exactly one release, so an existing deployment
+    # can name the owner of each row before the NOT NULL lands — and this is
+    # what stops that open column from being an open door meanwhile. The
+    # refusal is deliberately the same opaque message as every other one: which
+    # of a tenant's rows are still un-attributed is that tenant's business.
+    if credential.source_application is None:
+        raise UnauthorizedError("machine credential is not valid")
+
     return MachinePrincipal(
         credential_id=credential.id,
         tenant_id=credential.tenant_id,
         label=credential.label,
+        application=credential.source_application,
         scopes=frozenset(credential.scopes or ()),
     )
 
@@ -190,6 +264,12 @@ def require_machine_scope(scope: str):
 
     Takes the scope at construction, so the route DECLARES what it needs and a
     reader sees the requirement beside the path rather than inside the handler.
+
+    Admission is `principal.has_scope(scope)` — EXACT set membership, with no
+    expansion of either side. A route requiring `"licence:descriptor:read"` is
+    not satisfied by `"licence:descriptor"`, `"licence:*"`, `"*"`, or
+    `"licence:descriptor:read:extra"`. See `MachinePrincipal.has_scope` for
+    which source behaviour each of those refusals is departing from.
     """
     if not scope or scope.strip() != scope:
         raise ValueError(f"scope {scope!r} must be a non-empty, trimmed key")
@@ -211,6 +291,12 @@ def require_machine_scope(scope: str):
                 f"scope {scope!r}"
             )
         request.state.machine_principal = principal
+        # The attribution, published on the request for anything downstream that
+        # records what happened. A handler writing an audit row passes
+        # `source_application=request.state.source_application` rather than
+        # re-deriving it, and a handler issuing a CommandEnvelope passes the
+        # same value — so one request cannot be attributed two ways.
+        request.state.source_application = principal.application
         return principal
 
     return dependency

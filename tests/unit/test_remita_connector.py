@@ -30,12 +30,21 @@ def _plugin(handler) -> RemitaPlugin:
     return RemitaPlugin(transport=httpx.MockTransport(handler))
 
 
-def test_manifest_is_poll_only_and_declares_both_fixed_provider_hosts() -> None:
+def test_manifest_keeps_status_poll_only_and_both_fixed_provider_hosts() -> None:
+    """The STATUS capability stays poll-only. Issuance is a separate capability
+    in DELIVERY mode and is pinned in `test_remita_outbound.py`; this test is
+    about the status leg not quietly acquiring a second mode."""
     plugin = _plugin(lambda request: httpx.Response(200, json={"status": "00"}))
     assert MANIFEST.connector_key == "remita"
-    assert MANIFEST.version == __version__ == "0.1.0a1"
-    assert MANIFEST.capability_ids == {CAPABILITY_ID}
-    assert plugin.modes == frozenset({ConnectorMode.POLL})
+    # a2: the issuance slice changed the manifest of the already-tagged a1,
+    # whose exact contract is retained as POLL_ONLY_MANIFEST.
+    assert MANIFEST.version == __version__ == "0.1.0a2"
+    assert CAPABILITY_ID in MANIFEST.capability_ids
+    status_capability = next(
+        item for item in MANIFEST.capabilities if item.capability_id == CAPABILITY_ID
+    )
+    assert status_capability.modes == frozenset({ConnectorMode.POLL})
+    assert ConnectorMode.INGRESS not in plugin.modes
     assert tuple(item.name for item in MANIFEST.secret_bindings or ()) == (API_KEY,)
     assert MANIFEST.egress is not None
     assert MANIFEST.egress.hosts == ("demo.remita.net", "login.remita.net")

@@ -14,6 +14,7 @@ the source.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import date
 
 import pytest
 from dotmac_integration import (
@@ -25,6 +26,7 @@ from dotmac_integration import (
     CapabilityRegistryNotInstalled,
     DuplicateCapabilityDeclaration,
     OrphanCapabilityError,
+    SchemaGrace,
     UnknownCapabilityError,
     capability_registry,
     contract_from_declaration,
@@ -49,9 +51,23 @@ RECEIVE = "alpha_domain.receive.v1"
 EMIT = "alpha_domain.emit.v1"
 
 
+#: Every contract in this file is UNGATED and says so. The three governance
+#: refusals this module proves are about ownership, not payload shape, and
+#: ADR-0024 § 10 refuses a contract that is SILENT about its payload rather than
+#: one that has none. The payload gate has its own file.
+SYNTHETIC_GRACE = SchemaGrace(
+    reason="a synthetic ownership fixture that publishes no payload contract",
+    retire_after=date(2099, 12, 31),
+    tracked_by="tests/unit/test_integration_capability_registry.py",
+)
+
+
 def _contract(capability_id: str, owner: CapabilityOwner = OWNER) -> CapabilityContract:
     return CapabilityContract(
-        capability_id=capability_id, owner=owner, summary="a synthetic contract"
+        capability_id=capability_id,
+        owner=owner,
+        summary="a synthetic contract",
+        schema_grace=SYNTHETIC_GRACE,
     )
 
 
@@ -93,7 +109,12 @@ def test_the_version_is_read_out_of_the_id_so_the_two_cannot_disagree() -> None:
 
 def test_a_contract_nobody_can_describe_is_refused() -> None:
     with pytest.raises(CapabilityRegistryError, match="no summary"):
-        CapabilityContract(capability_id=RECEIVE, owner=OWNER, summary="   ")
+        CapabilityContract(
+            capability_id=RECEIVE,
+            owner=OWNER,
+            summary="   ",
+            schema_grace=SYNTHETIC_GRACE,
+        )
 
 
 def test_an_owner_key_must_be_a_key_not_a_label() -> None:
@@ -115,7 +136,10 @@ def test_an_owner_may_publish_its_spi_declaration_directly() -> None:
     # So the id is stated ONCE, in the shape connector authors already read.
     declaration = CapabilityDeclaration(capability_id=RECEIVE)
     contract = contract_from_declaration(
-        declaration, owner=OWNER, summary="inbound messages"
+        declaration,
+        owner=OWNER,
+        summary="inbound messages",
+        schema_grace=SYNTHETIC_GRACE,
     )
     assert contract.capability_id == declaration.capability_id
     assert contract.owner is OWNER

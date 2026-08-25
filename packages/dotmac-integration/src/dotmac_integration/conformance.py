@@ -30,8 +30,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, cast
 
+from dotmac_integration.capability_registry import (
+    CapabilityContract,
+    CapabilityOwner,
+    CapabilityRegistry,
+    SchemaGrace,
+)
 from dotmac_integration.discovery import ConnectorRegistry, discover
 from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
@@ -57,10 +64,14 @@ from dotmac_integration.spi import (
 
 __all__ = [
     "FAKE_CAPABILITY",
+    "FAKE_GRACE_RETIRE_AFTER",
+    "FAKE_OWNER",
     "ConformanceFailure",
     "FakePlugin",
     "assert_connector_conforms",
     "assert_plugin_conforms",
+    "fake_capability_registry",
+    "fake_contract",
     "fake_manifest",
     "fake_plugin",
     "fake_registry",
@@ -75,21 +86,95 @@ class ConformanceFailure(AssertionError):
     """A connector manifest does not satisfy the SPI contract."""
 
 
+#: The synthetic owner of the kit's synthetic capability. Like `FAKE_CAPABILITY`
+#: it names no application in the fleet, so a kit contract can never be mistaken
+#: for one an owning application published.
+FAKE_OWNER: CapabilityOwner = CapabilityOwner(application="conformance", module="fake")
+
+#: The kit's grace deadline, pinned far enough out that a fixture is never
+#: dated by the calendar. A test that needs an EXPIRED grace passes its own
+#: date — one that expires by accident proves nothing about the guard.
+FAKE_GRACE_RETIRE_AFTER: date = date(2099, 12, 31)
+
+
+def fake_contract(
+    *,
+    capability_id: str = FAKE_CAPABILITY,
+    summary: str = "a synthetic contract owned by the conformance kit",
+    command_schema: dict[str, object] | None = None,
+    result_schema: dict[str, object] | None = None,
+    observation_schema: dict[str, object] | None = None,
+    owner: CapabilityOwner = FAKE_OWNER,
+) -> CapabilityContract:
+    """A domain contract for the kit's capability. UNGATED unless told otherwise.
+
+    Defaults to a `SchemaGrace`, because that is the state every capability in
+    the fleet is in on the day ADR-0024 § 10 lands, and a kit whose default was
+    a published schema would let a connector author's first experience of the
+    gate be a failure they cannot reproduce in production.
+
+    Pass any schema to get a GATED contract — at which point the manifest that
+    implements it must claim `contract.contract_digest`, which is exactly what
+    the negative fixtures exercise.
+    """
+    gated = any(
+        schema is not None
+        for schema in (command_schema, result_schema, observation_schema)
+    )
+    return CapabilityContract(
+        capability_id=capability_id,
+        owner=owner,
+        summary=summary,
+        command_schema=command_schema,
+        result_schema=result_schema,
+        observation_schema=observation_schema,
+        schema_grace=(
+            None
+            if gated
+            else SchemaGrace(
+                reason=(
+                    "the conformance kit's synthetic capability names no business "
+                    "contract, so it has no owning domain to publish one"
+                ),
+                retire_after=FAKE_GRACE_RETIRE_AFTER,
+                tracked_by="dotmac_integration.conformance",
+            )
+        ),
+    )
+
+
+def fake_capability_registry(
+    *contracts: CapabilityContract,
+) -> CapabilityRegistry:
+    """The kit's declared vocabulary — the fake contract unless given others."""
+    return CapabilityRegistry.from_declarations(contracts or (fake_contract(),))
+
+
 def fake_manifest(
     *,
     connector_key: str = "conformance_fake",
     version: str = "1.0.0",
     spi_range: str | None = None,
     capabilities: Sequence[str] = (FAKE_CAPABILITY,),
+    claims_contract_digest: str | None = None,
 ) -> ConnectorManifest:
-    """A valid manifest, with every knob a negative test needs to break."""
+    """A valid manifest, with every knob a negative test needs to break.
+
+    `claims_contract_digest` is applied to every capability. `None` — the
+    default — is a connector that claims nothing, which is correct against an
+    ungated contract and is itself a refusal against a gated one; both are
+    fixtures the gate needs.
+    """
     default_range = f">={CURRENT_SPI_VERSION},<{CURRENT_SPI_VERSION.major + 1}.0"
     return ConnectorManifest(
         connector_key=connector_key,
         version=version,
         spi_range=SpiRange.parse(spi_range or default_range),
         capabilities=tuple(
-            CapabilityDeclaration(capability_id=c) for c in capabilities
+            CapabilityDeclaration(
+                capability_id=c, claims_contract_digest=claims_contract_digest
+            )
+            for c in capabilities
         ),
         secret_bindings=(),
         egress=EgressDeclaration(),

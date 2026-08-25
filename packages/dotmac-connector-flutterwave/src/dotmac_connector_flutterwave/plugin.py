@@ -32,6 +32,13 @@ from dotmac_integration.spi import (
     VerificationResult,
 )
 
+from dotmac_connector_flutterwave.outbound import (
+    INTENT_CAPABILITY_ID,
+    OUTBOUND_CONFIG_SCHEMA,
+    REFUND_CAPABILITY_ID,
+    FlutterwaveDeliveryHandler,
+    outbound_connection_fault,
+)
 from dotmac_connector_flutterwave.polling import (
     IDENTITY_HOST,
     LIVE_HOST,
@@ -42,7 +49,15 @@ from dotmac_connector_flutterwave.polling import (
 CONNECTOR_KEY: Final = "flutterwave"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
-CURRENT_VERSION: Final = "0.1.0a2"
+# 0.1.0a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 ->
+# 656ecebb05f24c11acda69a069d6fbe60d319f56). The outbound slice adds two
+# DELIVERY capabilities, per-capability modes and an SPI 1.4 floor, all of them
+# inside the manifest digest an installation adopts by — so the two manifests
+# below need two DIFFERENT version constants. Sharing one made the plugin carry
+# two contracts under the name `0.1.0a2`, which is worse than a plain in-place
+# edit: `accepts_manifest_digest` accepted both, so the collision was invisible.
+INGRESS_POLL_VERSION: Final = "0.1.0a2"
+CURRENT_VERSION: Final = "0.1.0a3"
 
 HMAC_SHA256: Final = "hmac_sha256"
 SIGNATURE_HEADER: Final = "flutterwave-signature"
@@ -91,9 +106,12 @@ LEGACY_MANIFEST: Final = ConnectorManifest(
     egress=EgressDeclaration(),
 )
 
-MANIFEST: Final = ConnectorManifest(
+# The exact published SPI-1.3 ingress+poll contract. It stays discoverable so
+# an installed observation-only revision is adopted deliberately rather than
+# becoming an unknown digest.
+INGRESS_POLL_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
-    version=CURRENT_VERSION,
+    version=INGRESS_POLL_VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
     secret_bindings=(
@@ -117,6 +135,69 @@ MANIFEST: Final = ConnectorManifest(
             description="Flutterwave v4 OAuth client secret for reconciliation.",
         ),
     ),
+    egress=EgressDeclaration(hosts=(SANDBOX_HOST, LIVE_HOST, IDENTITY_HOST)),
+)
+
+MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=CURRENT_VERSION,
+    # SPI 1.4 for the per-capability mode mapping below. Without it a
+    # conformance run would call the ingress factory for a delivery-only
+    # capability, which is exactly the ambiguity `CapabilityDeclaration.modes`
+    # was added to remove.
+    spi_range=SpiRange.parse(">=1.4,<2.0"),
+    capabilities=(
+        CapabilityDeclaration(
+            CAPABILITY_ID,
+            CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL}),
+        ),
+        CapabilityDeclaration(
+            INTENT_CAPABILITY_ID,
+            OUTBOUND_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.DELIVERY}),
+        ),
+        CapabilityDeclaration(
+            REFUND_CAPABILITY_ID,
+            OUTBOUND_CONFIG_SCHEMA,
+            modes=frozenset({ConnectorMode.DELIVERY}),
+        ),
+    ),
+    secret_bindings=(
+        # Still REQUIRED, unchanged from the published contract. An installation
+        # that initializes a charge is the same one that receives the charge's
+        # webhook, and relaxing this to serve an imagined outbound-only
+        # deployment would let an ingress binding be enabled with nothing to
+        # verify against.
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary v4 HMAC-SHA256 exact-byte webhook signing key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook authentication material during rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=API_CLIENT_ID,
+            required=False,
+            description=(
+                "Flutterwave v4 OAuth client identifier for reconciliation and "
+                "outbound commands."
+            ),
+        ),
+        SecretBindingDeclaration(
+            name=API_CLIENT_SECRET,
+            required=False,
+            description=(
+                "Flutterwave v4 OAuth client secret for reconciliation and "
+                "outbound commands."
+            ),
+        ),
+    ),
+    # Unchanged: outbound commands reach the SAME three v4 hosts the poll leg
+    # already reaches. An outbound capability that widened egress would be a
+    # new reachability decision hiding inside a feature.
     egress=EgressDeclaration(hosts=(SANDBOX_HOST, LIVE_HOST, IDENTITY_HOST)),
 )
 
@@ -478,18 +559,31 @@ class FlutterwaveConnector:
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
     timeout_seconds: float = 30.0
     manifest: ConnectorManifest = MANIFEST
-    historical_manifests: tuple[ConnectorManifest, ...] = (LEGACY_MANIFEST,)
+    historical_manifests: tuple[ConnectorManifest, ...] = (
+        LEGACY_MANIFEST,
+        INGRESS_POLL_MANIFEST,
+    )
     modes: frozenset[ConnectorMode] = frozenset(
-        {ConnectorMode.INGRESS, ConnectorMode.POLL}
+        {ConnectorMode.INGRESS, ConnectorMode.POLL, ConnectorMode.DELIVERY}
     )
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         self.manifest.require_declares(capability_id)
+        if capability_id != CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not an ingress capability")
         return FlutterwaveIngressHandler()
 
     def poll_handler_for(self, capability_id: str) -> PollHandler:
         self.manifest.require_declares(capability_id)
+        if capability_id != CAPABILITY_ID:
+            raise ValueError(f"{capability_id!r} is not a poll capability")
         return FlutterwavePollHandler(_poll_event, self.transport, self.timeout_seconds)
+
+    def handler_for(self, capability_id: str) -> FlutterwaveDeliveryHandler:
+        self.manifest.require_declares(capability_id)
+        if capability_id not in {INTENT_CAPABILITY_ID, REFUND_CAPABILITY_ID}:
+            raise ValueError(f"{capability_id!r} is not a delivery capability")
+        return FlutterwaveDeliveryHandler(self.transport, self.timeout_seconds)
 
     def validate_connection(
         self,
@@ -504,6 +598,15 @@ class FlutterwaveConnector:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         if _material(secrets, WEBHOOK_SIGNING_SECRET) is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
+        if "timeout_seconds" in config:
+            # An outbound binding: `timeout_seconds` is required by
+            # OUTBOUND_CONFIG_SCHEMA and forbidden by the observation schema's
+            # `additionalProperties: false`, so its presence is unambiguous.
+            # Checked STATICALLY: validating a connection must never initialize
+            # a payment to find out whether it could have.
+            fault = outbound_connection_fault(config, secrets)
+            if fault is not None:
+                return (Diagnostic(ok=False, code=fault),)
         return ()
 
 

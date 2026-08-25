@@ -180,3 +180,92 @@ The more careful cutover, and the steps are not optional:
    deadline.** The legacy verifier stays in ERP for that window and never enters
    the kernel; the kernel has one scheme and no fallback, which is the whole
    point of extracting it.
+
+## Amendment — 2026-08-24: Sub is NOT scope-exact, and two more gaps
+
+Three findings from a second read of `dotmac_sub@5c56b64a2`, taken before
+designing the attribution and rotation slice. The first CORRECTS this document.
+
+### 1. Correction — Sub's enforcement contradicts Sub's docstring
+
+The table above lists, under "The compatible precedent, from Sub":
+
+> Access is EXACTLY the key's `scopes` ... "and the docstring says so
+> explicitly"
+
+The docstring does. The ENFORCEMENT does not. `_api_key_principal` only
+populates `auth["scopes"]`; the decision is `has_permission`, which expands the
+REQUIRED permission before matching:
+
+```python
+def _wildcard_ancestors(permission_key: str) -> list[str]:
+    """``network:nas:write`` -> ``["*", "network:*", "network:nas:*"]``."""
+```
+
+A key holding `network:*` therefore satisfies every requirement in that domain,
+and a key holding `*` satisfies all of them. `_permission_domain_aliases`
+additionally rewrites `customer:` to `subscriber:` and back, so one grant
+satisfies two names.
+
+This matters more than an ordinary divergence because of WHERE it hides. ERP's
+empty-means-everything is written in the function a reviewer reads and is
+labelled "grandfathered". Sub's wildcard is a property of a different function
+in a different file, while the function a reviewer does read states the opposite
+in prose. A reviewer who checked the comment was told the control existed.
+
+The earlier claim was made from that docstring. It was wrong, and the row above
+is left in place with this amendment beneath it rather than edited, because a
+correction that erases what it corrected teaches nobody what to re-check.
+
+**Consequence for adoption:** Sub's cutover is not "scope semantics already
+match, only the digests change". Every Sub key whose scopes contain a `*`
+segment, or whose access depends on a `customer:`/`subscriber:` alias, has
+authority the kernel facility does not reproduce. Each needs explicit leaf
+scopes assigned by an owner before reissuance, and translating a wildcard into
+"all current permissions" is refused for exactly the reason ERP's empty list may
+not be — it carries the defect through the extraction wearing a kernel badge.
+
+### 2. Neither product records WHICH APPLICATION a credential belongs to
+
+`ApiKey` has `subscriber_id`, `system_user_id`, `person_id` and `label`; ERP's
+requires a `person_id`. None of them names the calling APPLICATION.
+
+Sub's CRM route shows what fills the gap in practice
+(`app/api/crm.py::require_crm_service_auth`): the caller is identified by
+holding the `integration:crm` scope. Identity is a side effect of
+authorization, so issuing that scope to a second key makes the two callers
+permanently indistinguishable in the trail — and narrowing what the CRM caller
+may do silently changes who it is.
+
+Sub's command envelope has the same shape one layer up:
+`app/services/owner_commands.py::CommandContext.actor` is a free-text `str`, and
+`CommandContext.system(actor=...)` takes whatever a call site hands it.
+Attribution as a comment — unvalidated, unenumerated, not queryable across.
+
+### 3. Rotation drops calls by construction
+
+`web_system_api_key_mutations.rotate_api_key`:
+
+> Generates a fresh ``secrets.token_urlsafe`` secret, re-hashes via
+> ``hash_api_key`` and overwrites ``key_hash`` — the old secret stops working
+> immediately.
+
+Accurate, and stated as a feature. For a human with a UI open it is an
+inconvenience; for the unattended machine callers the table exists to serve, the
+window in which a caller may migrate is zero, and the operator who rotated
+usually learns about it from the other application's error rate.
+
+There is no second-digest column, no window, and nothing that would let a caller
+pick up a new key at its own pace.
+
+### What the kernel facility owes, additionally
+
+- a `source_application` on the credential, the principal, every outbound
+  command and every audit row — its own field, never inferred from a scope;
+- refusal, not defaulting, when a command or an audit row cannot be attributed;
+- a rotation WINDOW: two digests live at once, retired by an explicit step and
+  never by a clock.
+
+Delivered by migration `0028_machine_attribution` and
+`dotmac_kernel.machine_rotation` / `dotmac_kernel.source_applications`
+(unreleased at the time of writing).

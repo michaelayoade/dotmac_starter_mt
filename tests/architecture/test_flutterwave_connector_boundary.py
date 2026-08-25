@@ -83,6 +83,30 @@ def test_connector_package_is_not_composed_into_the_starter_runtime() -> None:
     assert "dotmac-connector-flutterwave" in dev_dependencies
 
 
+def test_the_declared_capability_set_is_a_reviewed_diff() -> None:
+    """The outbound ratchet. Flutterwave v4 has a transfers/payouts surface and
+    this connector deliberately does not carry it: no product consumer exists,
+    and an outbound money-movement command whose first execution is also its
+    first review must not arrive quietly. Pinning the SET means adding one is a
+    line in a diff a reviewer has to approve."""
+    assert MANIFEST.capability_ids == {
+        "payments.settlement.observation.v1",
+        "payments.intent.v1",
+        "payments.refund.v1",
+    }
+
+
+def test_no_outbound_path_constant_targets_api_v3() -> None:
+    """SENSITIVITY for "v4 only". The ingress leg has no URL to check, so a
+    version fallback could only ever appear as a path or host constant on the
+    poll or outbound legs."""
+    for path in sorted(SOURCE.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert not node.value.startswith("/v3"), path
+                assert "flutterwave.com/v3" not in node.value, path
+
+
 def test_product_first_evidence_is_immutable() -> None:
     dossier = tomllib.loads((PACKAGE / "EXTRACTION.toml").read_text(encoding="utf-8"))
     assert dossier["source_mode"] == "product-first"
@@ -90,3 +114,10 @@ def test_product_first_evidence_is_immutable() -> None:
     assert all("@" in item and ":" in item for item in dossier["source_paths"])
     assert dossier["contract_consumers"] == []
     assert dossier["status"] == "audit-complete"
+    # Product-first for the OUTBOUND leg means recording what was and was not
+    # ported. There is no v4 client in the fleet, so the dossier has to say what
+    # it carried across instead of implying a port that did not happen.
+    assert dossier["ported_behaviour"]
+    assert dossier["port_deltas"]
+    assert dossier["provider_idempotency"]
+    assert dossier["withheld_capabilities"]
