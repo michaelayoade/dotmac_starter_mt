@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 import dotmac_subscriptions
+import pytest
 from dotmac_kernel.namespaces import (
     MIGRATION_OWNER_LEDGER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
@@ -21,9 +22,11 @@ from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-subscriptions"
 SOURCE_ROOT = PACKAGE_ROOT / "src/dotmac_subscriptions"
-ROOT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0001_subscriptions.py"
-PRICING_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0002_offer_pricing.py"
-TREATMENT_MIGRATION = SOURCE_ROOT / "migrations/versions/su_0003_billing_treatments.py"
+MIGRATIONS = SOURCE_ROOT / "migrations/versions"
+ROOT_MIGRATION = MIGRATIONS / "su_0001_subscriptions.py"
+PRICING_MIGRATION = MIGRATIONS / "su_0002_offer_pricing.py"
+TREATMENT_MIGRATION = MIGRATIONS / "su_0003_billing_treatments.py"
+SCHEMA = "mod_subscriptions"
 
 _SIBLINGS = {
     "dotmac_billing",
@@ -390,22 +393,82 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
     assert not violations, violations
 
 
-def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    source = ROOT_MIGRATION.read_text() + TREATMENT_MIGRATION.read_text()
+def _lineage_sources() -> dict[str, str]:
+    """Every revision in the lineage, newest last. Not just the root one."""
+    return {path.name: path.read_text() for path in sorted(MIGRATIONS.glob("su_*.py"))}
+
+
+def _revisions_declaring(fragment: str) -> tuple[str, ...]:
+    return tuple(
+        name for name, source in _lineage_sources().items() if fragment in source
+    )
+
+
+def test_the_root_revision_owns_the_lineage_and_its_prerequisites() -> None:
+    """Root-revision identity, which is genuinely scoped to `su_0001`."""
+    source = ROOT_MIGRATION.read_text()
 
     assert 'revision = "su_0001_subscriptions"' in source
     assert 'branch_labels = ("subscriptions",)' in source
     assert "resolve_depends_on" in source
     assert "require_prerequisites" in source
-    assert "ENABLE ROW LEVEL SECURITY" in source
-    assert "FORCE ROW LEVEL SECURITY" in source
-    assert "REVOKE ALL PRIVILEGES" in source
     assert "platform_api" in source
     assert "CREATE TRIGGER" in source
+
+
+def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
+    """EVERY declared table states its plane's isolation contract, in SOME revision.
+
+    This walks the whole lineage rather than the root revision. Reading only
+    `su_0001` under-covered by construction: a table added by a later revision
+    — `subscription_billing_arrangements` and `subscription_billing_grants` in
+    `su_0003` — could never satisfy a substring search over the root file, so
+    the guard would either fail for the wrong reason or, had the table lists
+    not been checked, silently cover nothing.
+
+    Per table rather than per file: a bare `"ENABLE ROW LEVEL SECURITY" in
+    source` passes on a file that protects one table out of five. Naming the
+    table in the searched fragment is what makes the check discriminate, and
+    the disjointness assertions below hold ADR-0023's dual-plane rule — RLS is
+    the tenant plane's isolation, REVOKE is the control plane's, and neither
+    substitutes for the other.
+    """
     for table in TENANT_TABLES:
-        assert table in source
+        assert _revisions_declaring(
+            f"ALTER TABLE {SCHEMA}.{table} ENABLE ROW LEVEL SECURITY"
+        ), table
+        assert _revisions_declaring(
+            f"ALTER TABLE {SCHEMA}.{table} FORCE ROW LEVEL SECURITY"
+        ), table
+        assert not _revisions_declaring(
+            f"REVOKE ALL PRIVILEGES ON {SCHEMA}.{table} FROM app_user"
+        ), table
     for table in PLATFORM_TABLES:
-        assert table in source
+        assert _revisions_declaring(
+            f"REVOKE ALL PRIVILEGES ON {SCHEMA}.{table} FROM app_user"
+        ), table
+        assert not _revisions_declaring(
+            f"ALTER TABLE {SCHEMA}.{table} ENABLE ROW LEVEL SECURITY"
+        ), table
+
+
+def test_the_isolation_sweep_would_notice_a_table_nobody_protected() -> None:
+    """Sensitivity proof: the search above discriminates, it does not just pass.
+
+    A guard built on substring search over a growing set of files can go quiet
+    without anyone noticing. This asserts the negative case directly — an
+    undeclared table name finds nothing — and that the sweep actually reads
+    more than the root revision.
+    """
+    assert not _revisions_declaring(
+        f"ALTER TABLE {SCHEMA}.subscription_table_nobody_wrote "
+        "ENABLE ROW LEVEL SECURITY"
+    )
+    assert len(_lineage_sources()) >= 3
+    assert _revisions_declaring(
+        f"ALTER TABLE {SCHEMA}.subscription_billing_arrangements "
+        "ENABLE ROW LEVEL SECURITY"
+    ) == ("su_0003_billing_treatments.py",)
 
 
 def test_offer_pricing_evolves_in_an_additive_composable_revision() -> None:
@@ -436,6 +499,33 @@ def test_offer_pricing_revision_loads_through_alembics_module_loader() -> None:
 
 
 # ── G2/G3: complimentary and sponsored treatment ─────────────────────────────
+
+
+def test_the_registry_still_constructs_the_way_0_1_0a2_published_it() -> None:
+    """`a3` added a field to a RELEASED dataclass; it must not become required.
+
+    `0.1.0a2` published `SubscriptionVocabularyRegistry` with exactly two
+    fields, so `SubscriptionVocabularyRegistry(charge_models,
+    obligation_sources)` is a construction that exists in consumers today. A
+    third REQUIRED field breaks every one of them on upgrade — a breaking
+    change, which a pre-release series does not make silently. Defaulted, the
+    registry simply declares no treatment reasons, and asking it for one is
+    refused rather than answered wrongly.
+    """
+    from dotmac_subscriptions import (
+        SubscriptionDataError,
+        SubscriptionVocabularyRegistry,
+    )
+
+    released = SubscriptionVocabularyRegistry(
+        {"recurring_access": "product"}, {"accepted_order_line": "product"}
+    )
+
+    assert released.billing_treatment_reasons == {}
+    assert released.require_charge_model("recurring_access") == "product"
+    with pytest.raises(SubscriptionDataError):
+        released.require_billing_treatment_reason("internal_service")
+    assert SubscriptionVocabularyRegistry.from_manifests(()).billing_treatment_reasons
 
 
 def test_the_reason_vocabulary_is_a_declared_registry_and_never_an_enum() -> None:

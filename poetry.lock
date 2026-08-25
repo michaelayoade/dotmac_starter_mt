@@ -1920,7 +1920,7 @@ url = "packages/dotmac-sites"
 [[package]]
 name = "dotmac-subscriptions"
 version = "0.1.0a3"
-description = "DotMac dual-plane recurring contracts and non-cash grants"
+description = "DotMac dual-plane recurring commercial contracts and occurrences"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]

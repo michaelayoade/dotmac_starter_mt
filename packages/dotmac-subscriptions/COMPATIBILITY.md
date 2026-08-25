@@ -35,7 +35,21 @@ are the supported way to widen the non-standard treatment reason vocabulary.
 The seven codes in `PORTED_BILLING_TREATMENT_REASONS` are owned by this module
 and are never removed; a product declaring an additional code owns it, and one
 code never has two owners. The database column is a plain string on purpose, so
-widening the vocabulary is not a schema change (ADR-0008). Callers supply an explicit `TenantScope` or `PlatformScope`, exact
+widening the vocabulary is not a schema change (ADR-0008).
+
+`SubscriptionVocabularyRegistry` gained a THIRD field,
+`billing_treatment_reasons`, in `0.1.0a3`. It is **defaulted, not required**:
+`0.1.0a2` published the dataclass with two fields, so
+`SubscriptionVocabularyRegistry(charge_models, obligation_sources)` — positional
+or keyword — is a released construction and keeps working unchanged on upgrade.
+A registry built that way declares no treatment reasons, so
+`require_billing_treatment_reason` refuses every code, which is the correct
+answer for a caller that never opted into treatments; `from_manifests` is the
+supported way to obtain the seven ported reasons. Adding a REQUIRED constructor
+argument to an already-released dataclass is a breaking change and is not done
+inside a pre-release series.
+
+Callers supply an explicit `TenantScope` or `PlatformScope`, exact
 decimals, currency, timezone, cadence, provenance, and product link; no product
 or deployment default is part of the contract.
 
