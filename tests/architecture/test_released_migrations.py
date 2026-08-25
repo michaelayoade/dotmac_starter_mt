@@ -213,6 +213,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-customers"
         / "src/dotmac_customers/migrations/versions"
     ),
+    "dotmac-fx-policy": (
+        REPO_ROOT
+        / "packages/dotmac-fx-policy"
+        / "src/dotmac_fx_policy/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -242,6 +247,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-tax": "tx_*.py",
     "dotmac-service-catalog": "sc_*.py",
     "dotmac-customers": "cu_*.py",
+    "dotmac-fx-policy": "fx_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -268,6 +274,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-tax": "dotmac-tax-v",
     "dotmac-service-catalog": "dotmac-service-catalog-v",
     "dotmac-customers": "dotmac-customers-v",
+    "dotmac-fx-policy": "dotmac-fx-policy-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1162,6 +1169,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-fx-policy ──
+    "dotmac-fx-policy-v0.1.0a1": (
+        "dotmac-fx-policy",
+        "a0901915",
+        {
+            "fx_0001_fx_policy.py": (
+                "e8e89ed213ff468efba088b20b4dce0e81940d7abbfeb2bff580330948d9b134"
+            ),
+        },
+    ),
 }
 
 
@@ -1249,6 +1266,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
+    "dotmac-fx-policy": frozenset(),
 }
 
 
