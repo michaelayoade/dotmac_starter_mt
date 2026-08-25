@@ -19,9 +19,16 @@ from typing import cast
 
 import pytest
 from dotmac_kernel import (
+    BrowserCapabilityProvision,
+    BrowserCapabilityRequirement,
+    BrowserSecurityRequirement,
+    ModuleManifest,
     NavItem,
     ProductAssemblySpec,
     ProductSecurityPolicy,
+    TemplateRef,
+    WebFacetMount,
+    WebSurfaceContribution,
     create_app,
 )
 from dotmac_kernel.app_factory import (
@@ -32,7 +39,7 @@ from dotmac_kernel.app_factory import (
 from dotmac_kernel.deps import require_capability, require_permission
 from dotmac_kernel.features import FeatureManifest
 from dotmac_kernel.modules import UNVERSIONED
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
@@ -139,6 +146,57 @@ def test_security_headers_middleware_is_wired():
         resp = client.get("/health")
     assert resp.headers["x-content-type-options"] == "nosniff"
     assert "content-security-policy" in resp.headers
+
+
+def test_active_browser_capability_composes_typed_csp() -> None:
+    router = APIRouter()
+
+    @router.get("/", name="index")
+    def index() -> dict[str, bool]:
+        return {"ok": True}
+
+    module = ModuleManifest(
+        code="worker_ui",
+        version="1.0.0",
+        web_surfaces=(
+            WebSurfaceContribution(
+                code="portal",
+                facet="customer",
+                routers=(router,),
+                supported_ui_contract_versions=frozenset({1}),
+                browser_capabilities=(
+                    BrowserCapabilityRequirement("worker_runtime", 1),
+                ),
+            ),
+        ),
+    )
+    app = create_app(
+        ProductAssemblySpec(
+            name="typed-csp",
+            modules=(module,),
+            platform_surface_enabled=False,
+            ui_contract_version=1,
+            web_facets=(
+                WebFacetMount(
+                    code="customer",
+                    url_prefix="/portal",
+                    shell=TemplateRef("base.html"),
+                ),
+            ),
+            browser_capabilities=(
+                BrowserCapabilityProvision(
+                    "worker_runtime",
+                    1,
+                    frozenset({BrowserSecurityRequirement.WORKER_SELF}),
+                ),
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert "worker-src 'self'" in response.headers["content-security-policy"]
 
 
 def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch):
@@ -448,6 +506,7 @@ def test_mixed_feature_and_module_assembly_boots():
                 ModuleManifest(
                     code="modern",
                     version="1.2.0",
+                    contract_version=1,
                     dependencies=("legacy",),
                     api_routers=[modern_api],
                     web_routers=[modern_web],
@@ -489,7 +548,11 @@ def test_module_manifest_routers_mount_like_feature_routers():
         return {}
 
     manifest = ModuleManifest(
-        code="modtest", version="1.0.0", api_routers=[api], web_routers=[web]
+        code="modtest",
+        version="1.0.0",
+        contract_version=1,
+        api_routers=[api],
+        web_routers=[web],
     )
     paths = _paths(create_app(ProductAssemblySpec(name="m", modules=[manifest])))
     assert {"/mod-api", "/admin/mod-web"} <= paths

@@ -2,12 +2,10 @@
   New-template form. Context: `contexts`, `error`, `form` — see
   dotmac_template_studio.web.template_create_form.
 
-  `hx-post`, never `<form method="post">`: CSRFMiddleware validates the
-  `X-CSRF-Token` HEADER against the `csrf_token` cookie, and a plain form has no
-  hook to attach a header. `static/js/csrf.js` bridges the two for every htmx
-  request. Token-styled — see index.html's header comment.
+  Both supported CSRF transports are present: htmx supplies the header and the
+  hidden field preserves a safe native-form fallback.
 #}
-{% extends "layouts/admin.html" %}
+{% extends surface.shell or "layouts/admin.html" %}
 
 {% block admin_content %}
 <div style="max-width:40rem;">
@@ -24,10 +22,12 @@
   </div>
   {% endif %}
 
-  <form hx-post="/admin/templates" hx-swap="none"
+  <form method="post" action="{{ surface_url('create') }}"
+        hx-post="{{ surface_url('create') }}" hx-swap="none"
         style="display:flex; flex-direction:column; gap:var(--dmui-space-md);
                border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
                background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
                   font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
       Send context
@@ -99,7 +99,7 @@
                      cursor:pointer;">
         Create
       </button>
-      <a href="/admin/templates"
+      <a href="{{ surface_url('list') }}"
          style="border-radius:var(--dmui-radius-lg); border:1px solid var(--dmui-border-default);
                 padding:var(--dmui-space-xs) var(--dmui-space-md);
                 font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);

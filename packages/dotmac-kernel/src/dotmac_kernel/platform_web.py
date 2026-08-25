@@ -46,7 +46,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.capabilities import active_capabilities
 from dotmac_kernel.config import settings
-from dotmac_kernel.db import get_platform_db
+from dotmac_kernel.deps import get_platform_db
 from dotmac_kernel.entitlements import TenantEntitlementGrant, grant_entitlement
 from dotmac_kernel.exceptions import NotFoundError, UnauthorizedError
 from dotmac_kernel.flag_models import FeatureFlagOverride
@@ -54,58 +54,55 @@ from dotmac_kernel.flags import active_flags
 from dotmac_kernel.models import Tenant
 from dotmac_kernel.models_platform import PlatformAdmin
 from dotmac_kernel.platform_auth import (
-    authenticate_platform_request,
+    PLATFORM_COOKIE,
+    PLATFORM_COOKIE_AUTHENTICATION,
+    PLATFORM_LOGIN_PATH,
     require_platform_host,
+    require_platform_web_auth,
 )
 from dotmac_kernel.platform_auth import (
     login as platform_login,
 )
+from dotmac_kernel.platform_auth import (
+    logout as revoke_platform_session,
+)
 from dotmac_kernel.templating import render
-from dotmac_kernel.web_deps import WebAuthRedirect, is_secure_request
+from dotmac_kernel.web_deps import is_secure_request
+from dotmac_kernel.web_surfaces import (
+    BrowserSessionPolicy,
+    LocalizedText,
+    WebNavItem,
+    WebSurfaceContribution,
+    WebSurfaceError,
+    current_session_policy,
+    surface_path,
+)
 
-router = APIRouter(prefix="/platform", tags=["platform-web"])
+router = APIRouter(tags=["platform-web"])
 
-PLATFORM_COOKIE = "platform_access_token"  # nosec B105 -- a name
-LOGIN_PATH = "/platform/login"
+LOGIN_PATH = PLATFORM_LOGIN_PATH
 
 
-def require_platform_web_auth(
-    request: Request,
-    db: Session = Depends(get_platform_db),
-) -> PlatformAdmin:
-    """Cookie guard for `/platform/*`.
-
-    Reads the platform cookie and hands the token to
-    `authenticate_platform_request` — the SAME validation seam the bearer guard
-    uses, exactly as `require_web_auth` reuses `authenticate_request` for the
-    tenant plane. Any tightening of platform token validation lands once and
-    both surfaces get it; re-implementing it here is how the two would drift.
-
-    Host-exact first, so the surface 404s off the platform host before any
-    authentication is attempted — it does not exist there, and saying
-    "unauthorized" would confirm that it does.
-    """
-    require_platform_host(request)
-    token = request.cookies.get(PLATFORM_COOKIE)
-    if not token:
-        raise WebAuthRedirect(next_url=request.url.path, login_path=LOGIN_PATH)
-    admin = authenticate_platform_request(request, db, token=token)
-    if admin is None:
-        raise WebAuthRedirect(next_url=request.url.path, login_path=LOGIN_PATH)
-    return admin
+def _session_policy(request: Request) -> BrowserSessionPolicy:
+    try:
+        return current_session_policy(request)
+    except WebSurfaceError:
+        return BrowserSessionPolicy(
+            cookie_name=PLATFORM_COOKIE, cookie_path="/platform"
+        )
 
 
 # ── Login / logout ──────────────────────────────────────────────────────────
 
 
-@router.get("/login")
+@router.get("/login", name="login_form")
 def login_form(
     request: Request, _host: None = Depends(require_platform_host)
 ) -> HTMLResponse:
     return render(request, "platform/login.html", {"error": None})
 
 
-@router.post("/login", response_model=None)
+@router.post("/login", response_model=None, name="login_submit")
 async def login_submit(
     request: Request,
     db: Session = Depends(get_platform_db),
@@ -134,38 +131,45 @@ async def login_submit(
             "platform/login.html",
             {"error": "Invalid email or password"},
         )
-    response = RedirectResponse(url="/platform", status_code=302)
+    destination = surface_path(request, "inventory")
+    response = RedirectResponse(url=destination, status_code=302)
+    session = _session_policy(request)
     response.set_cookie(
-        key=PLATFORM_COOKIE,
+        key=session.cookie_name,
         value=token,
-        httponly=True,
-        secure=is_secure_request(request),
-        samesite="lax",
-        path="/platform",
+        httponly=session.http_only,
+        secure=is_secure_request(request)
+        or (settings.is_production and session.secure_in_production),
+        samesite=session.same_site,
+        path=session.cookie_path,
         max_age=settings.jwt_ttl_seconds,
     )
-    response.headers["HX-Redirect"] = "/platform"
+    response.headers["HX-Redirect"] = destination
     return response
 
 
-@router.post("/logout", response_model=None)
+@router.post("/logout", response_model=None, name="logout")
 def logout(
     request: Request,
+    db: Session = Depends(get_platform_db),
     admin: PlatformAdmin = Depends(require_platform_web_auth),
 ) -> Response:
     """POST, never GET — a GET logout is a CSRF-exempt safe method any
     third-party page could trigger with an `<img src=...>`, which is the exact
     bug the tenant portal's `POST /admin/logout` fixed (F7)."""
-    response = RedirectResponse(url=LOGIN_PATH, status_code=302)
-    response.delete_cookie(PLATFORM_COOKIE, path="/platform")
-    response.headers["HX-Redirect"] = LOGIN_PATH
+    destination = surface_path(request, "login_form")
+    session = _session_policy(request)
+    revoke_platform_session(db, token=request.cookies.get(session.cookie_name))
+    response = RedirectResponse(url=destination, status_code=302)
+    response.delete_cookie(session.cookie_name, path=session.cookie_path)
+    response.headers["HX-Redirect"] = destination
     return response
 
 
 # ── Module inventory ────────────────────────────────────────────────────────
 
 
-@router.get("")
+@router.get("", name="inventory")
 def inventory(
     request: Request,
     admin: PlatformAdmin = Depends(require_platform_web_auth),
@@ -190,7 +194,7 @@ def inventory(
 # ── Feature flags ───────────────────────────────────────────────────────────
 
 
-@router.get("/flags")
+@router.get("/flags", name="flags")
 def flags_index(
     request: Request,
     db: Session = Depends(get_platform_db),
@@ -223,7 +227,7 @@ def _flags_context(db: Session) -> dict[str, object]:
     }
 
 
-@router.post("/flags/{code}", response_model=None)
+@router.post("/flags/{code}", response_model=None, name="set_flag")
 async def set_flag(
     request: Request,
     code: str,
@@ -298,7 +302,7 @@ def _set_tenant_context(db: Session, tenant_id: UUID) -> None:
     ).scalar_one()
 
 
-@router.get("/entitlements")
+@router.get("/entitlements", name="entitlements")
 def entitlements_index(
     request: Request,
     db: Session = Depends(get_platform_db),
@@ -337,7 +341,7 @@ def _tenant_grants_context(db: Session, tenant: Tenant) -> dict[str, object]:
     }
 
 
-@router.get("/entitlements/{tenant_id}")
+@router.get("/entitlements/{tenant_id}", name="tenant_entitlements")
 def tenant_entitlements(
     request: Request,
     tenant_id: UUID,
@@ -352,7 +356,11 @@ def tenant_entitlements(
     )
 
 
-@router.post("/entitlements/{tenant_id}/{code}", response_model=None)
+@router.post(
+    "/entitlements/{tenant_id}/{code}",
+    response_model=None,
+    name="set_entitlement",
+)
 async def set_entitlement(
     request: Request,
     tenant_id: UUID,
@@ -385,3 +393,43 @@ async def set_entitlement(
         "platform/_tenant_entitlements_table.html",
         _tenant_grants_context(db, tenant),
     )
+
+
+PLATFORM_WEB_SURFACE = WebSurfaceContribution(
+    code="control_plane",
+    facet="platform_admin",
+    routers=(router,),
+    navigation=(
+        WebNavItem(
+            code="platform.modules",
+            region="primary",
+            label=LocalizedText("platform.modules", "Modules"),
+            route_name="inventory",
+            order=10,
+        ),
+        WebNavItem(
+            code="platform.flags",
+            region="primary",
+            label=LocalizedText("platform.flags", "Feature flags"),
+            route_name="flags",
+            order=20,
+        ),
+        WebNavItem(
+            code="platform.entitlements",
+            region="primary",
+            label=LocalizedText("platform.entitlements", "Entitlements"),
+            route_name="entitlements",
+            order=30,
+        ),
+    ),
+    supported_ui_contract_versions=frozenset({1}),
+)
+
+
+__all__ = [
+    "PLATFORM_COOKIE",
+    "PLATFORM_COOKIE_AUTHENTICATION",
+    "PLATFORM_WEB_SURFACE",
+    "require_platform_web_auth",
+    "router",
+]

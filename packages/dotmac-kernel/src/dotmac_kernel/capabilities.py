@@ -24,15 +24,14 @@ from dataclasses import dataclass
 from typing import Final
 
 from dotmac_kernel.modules import AnyManifest
+from dotmac_kernel.route_metadata import CAPABILITY_CODE_ATTR
+
 
 # The attribute `require_capability` stamps on the dependency callable it
 # returns, so `create_app` can walk a mounted route's dependency tree and read
 # back which capability codes that route actually references. The mirror of
 # `permissions.PERMISSION_CODE_ATTR`, and the reason an undeclared code is a
 # BOOT failure rather than a silent permanent 403.
-CAPABILITY_CODE_ATTR: Final[str] = "dotmac_capability_code"
-
-
 @dataclass(frozen=True, slots=True)
 class CapabilitySpec:
     """One capability a module DECLARES it owns.

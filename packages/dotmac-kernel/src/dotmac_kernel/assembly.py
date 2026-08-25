@@ -30,6 +30,11 @@ from dotmac_kernel.planes import (
     ModulePlaneSelection,
     validate_module_plane_selections,
 )
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserCapabilityProvision,
+    WebFacetMount,
+)
 
 StartupCheck = Callable[[], Sequence[str]]
 StartupHook = Callable[[], None | Awaitable[None]]
@@ -43,7 +48,9 @@ class ProductSecurityPolicy:
     This value declares only the policy that genuinely varies by product:
     content sources and cross-origin isolation. Environment configuration wins
     over ``content_security_policy`` so an operator can tighten or replace a
-    product default without mutating the assembly.
+    product default without mutating the assembly. This raw compatibility seam
+    is refused when an active browser capability has typed CSP requirements;
+    otherwise it could silently discard a module's declared security needs.
     """
 
     content_security_policy: str = ""
@@ -141,6 +148,15 @@ class ProductAssemblySpec:
     platform_surface_enabled: bool = True
     # Whole-portal surface switch — mount the admin/HTML surface or run API-only.
     web_enabled: bool = True
+    # Interactive-browser composition (ADR-0006, 2026-08-25 amendment).  The
+    # assembly chooses one exact design-system generation without importing it
+    # from the kernel, declares audience facets, binds authentication providers,
+    # and supplies versioned browser capabilities.  API-only assemblies leave
+    # all four empty/None.
+    ui_contract_version: int | None = None
+    web_facets: Sequence[WebFacetMount] = ()
+    authentication_profiles: Sequence[AuthenticationProfileBinding] = ()
+    browser_capabilities: Sequence[BrowserCapabilityProvision] = ()
     # Product-specific configuration checks. Each returns human-readable
     # errors and follows the kernel's existing environment policy: warnings in
     # development, fatal startup errors in production.
@@ -209,6 +225,13 @@ class ProductAssemblySpec:
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
         object.__setattr__(self, "startup_checks", tuple(self.startup_checks))
         object.__setattr__(self, "startup_hooks", tuple(self.startup_hooks))
+        object.__setattr__(self, "web_facets", tuple(self.web_facets))
+        object.__setattr__(
+            self, "authentication_profiles", tuple(self.authentication_profiles)
+        )
+        object.__setattr__(
+            self, "browser_capabilities", tuple(self.browser_capabilities)
+        )
         object.__setattr__(
             self, "packaged_static_dirs", tuple(self.packaged_static_dirs)
         )

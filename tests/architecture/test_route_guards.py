@@ -108,7 +108,9 @@ def test_every_route_has_a_guard() -> None:
 #     the REAL enforcement comes from its own `Depends(require_user_auth)`
 #     sub-dependency. Listed here for documentation/future-proofing.
 #   - "require_web_auth" (dotmac_kernel.web_deps): cookie-based web-portal guard
-#     — requires a valid session cookie AND the "admin" role.
+#     — contract-v1 party/roles adapter over the cookie authentication seam.
+#   - "require_web_party" / "require_web_permission": the v2 cookie
+#     authentication and granular permission bindings used by web facets.
 #   - "require_platform_admin" (dotmac_kernel.platform_auth): THE platform guard
 #     (control-plane security Task 1) — host must equal the platform root
 #     domain exactly, bearer token must be a live platform session with
@@ -124,6 +126,8 @@ AUTH_GUARD_NAMES = {
     "require_permission",
     "require_capability",
     "require_web_auth",
+    "require_web_party",
+    "require_web_permission",
     "require_platform_admin",
     # The PLATFORM portal's cookie guard (step 6), the platform-plane analogue
     # of `require_web_auth`. It proves an authenticated `PlatformAdmin` through

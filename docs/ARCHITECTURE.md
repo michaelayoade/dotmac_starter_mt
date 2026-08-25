@@ -1111,14 +1111,14 @@ import each other (import-linter contract). Cross-feature references are
 FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRoleGrant` refers
 to `parties` via a composite FK, not by importing `app.features.parties`.
 
-The package dependency direction is one-way and enforced (ADR-0006 § 2):
-`assembly → module → dotmac-ui → dotmac-kernel`. The kernel imports neither
-`app` nor `dotmac_ui`; `dotmac_ui` imports neither of those, and at 0.1.0a1
-imports no kernel either — deliberately stronger than the ADR requires, because
-that is what lets `dotmac_erp` (which has adopted no kernel at all) consume the
-design system without adopting anything else. Three import-linter contracts hold
-it, and `tests/architecture/test_ui_public_surface.py` additionally forbids
-`dotmac_ui` importing a web framework, an ORM, or a templating engine.
+The package dependency graph is one-way and enforced (ADR-0006 § 2, corrected
+2026-08-25): the assembly independently imports the kernel, selected modules and
+`dotmac-ui`; a module may import the kernel; `dotmac-ui` imports none of them and
+has only Python as a runtime dependency. The kernel imports neither `app` nor
+`dotmac_ui`. This is what lets `dotmac_erp` consume the design system without
+adopting the kernel. Three import-linter contracts hold it, and
+`tests/architecture/test_ui_public_surface.py` additionally forbids `dotmac_ui`
+importing a web framework, ORM, or templating engine.
 
 ### Model placement: core vs. feature
 
@@ -1354,44 +1354,76 @@ Tests: one per flag/consumer (`tests/unit/test_custom_fields_service.py`,
 `tests/unit/test_custom_fields_web.py`) plus the detail/form
 non-double-render pin.
 
-## Capability model: manifest-driven surfaces (2b.1-T1, findings F1 + F5)
+## Capability model: manifest-driven surfaces (ADR-0006 web-facet runtime)
 
-Before this task, `FeatureManifest` had one router list; whether a route was
-a JSON endpoint or an HTML admin screen was a fact only the router itself
-knew, and the sidebar was a hand-maintained list in
-`templates/components/sidebar.html` with no link back to what was actually
-mounted — `DISABLED_FEATURES=web` looked like an API-only switch but wasn't
-(the other ~30 `/admin` routes stayed up), and a disabled feature could
-leave a dead nav link or an embedded fragment 404ing inside another
-feature's page. The fix makes the manifest the single, queryable source of
-truth for a feature's surfaces:
+There are two explicit module-contract generations during the migration window:
 
-- `FeatureManifest.routers` — JSON API routes. Mounted for every ENABLED
-  feature, always; `web_enabled` has no say here (this is what makes
-  API-only mode possible without also killing the API).
-- `FeatureManifest.web_routers` — HTML/HTMX admin-portal routes (the
-  feature's `web.py`). Mounted for an enabled feature ONLY when
-  `web_enabled` is `True`. `auth`'s login/logout router lives here too
-  (not in `routers`) — cookie auth has no meaning without a web surface to
-  authenticate into.
-- `FeatureManifest.nav: Sequence[NavItem]` — the sidebar entries this
-  feature contributes. `NavItem(label, path, feature="")` — `feature` is
-  left blank by the declaring `feature.py` and stamped in by the registry
-  when collecting nav items across manifests, so a feature never repeats
-  its own name.
+- Contract 1 is `FeatureManifest.web_routers` / `ModuleManifest.web_routers`
+  plus path-based `nav`. `ModuleManifest.from_feature` selects this generation
+  for every legacy feature that still declares either field. The compatibility
+  adapter synthesizes only the `staff_admin` surface and preserves its existing
+  absolute paths.
+- Contract 2 is `ModuleManifest.web_surfaces: Sequence[WebSurfaceContribution]`.
+  A contribution owns facet-relative named routers, route-derived navigation,
+  namespaced templates/static data, supported UI contract generations and
+  required browser capabilities. A contract-2 manifest cannot also author the
+  legacy fields.
 
-`dotmac_kernel.features.mount_features(app, *, manifests, disabled, web_enabled)`
-mounts each enabled manifest's `routers` unconditionally, then its
-`web_routers` only `if web_enabled`. `app.main` calls
-`dotmac_kernel.templating.install_surface_globals(manifests, disabled,
-web_enabled)` once at startup (config is process-static, so this is safe)
-to set two Jinja globals every template can read: `enabled_features:
-frozenset[str]` (every feature name that is actually mounted — the general
-"is this feature on" question, not specifically a web concept) and
-`nav_items: tuple[NavItem, ...]` (`()` when `web_enabled` is `False` — there
-is no sidebar to populate). `templates/components/sidebar.html` renders
-from `nav_items` — there is no parallel hardcoded link list to keep in
-sync.
+The assembly owns `WebFacetMount`: audience code, URL prefix, shell, named
+authentication profile, optional admission permission, navigation regions,
+approved pre-auth entry routes and the named login route. `WebSurfaceRegistry`
+validates the complete graph before mounting: unknown facets/profiles,
+incompatible UI versions, browser capabilities, overlapping prefixes, cookie
+scope, route/nav/namespace collisions and unresolved entry/login routes all stop
+startup.
+
+Browser capabilities also carry their security consequences. The assembly's
+provider may declare only the closed `BrowserSecurityRequirement` vocabulary;
+the registry unions requirements from capabilities actually used by enabled
+surfaces, and the security-header owner deterministically composes those into
+the baseline CSP. Raw module directives/origins are not a contract surface, and
+a raw assembly/operator CSP cannot replace an active typed requirement. The
+baseline uses the vendored Alpine CSP build and therefore grants neither
+`script-src 'unsafe-inline'` nor `'unsafe-eval'`.
+
+Template security governance consumes the same composition declaration: the
+architecture sweep derives roots from `ProductAssemblySpec`, its installed
+presentation-package directories and every v2 surface's `TemplatePackage`.
+Hidden native-form CSRF proof and `| safe` discipline therefore apply to every
+composed template, while every non-fragment v2 surface template must extend a
+facet shell. A new audience or module cannot escape by choosing a directory
+name outside `admin/**`.
+
+The contract-v2 Template Studio canary projects SQLAlchemy rows into its
+existing Pydantic `TemplateRead` / `VersionRead` contracts before rendering.
+Templates therefore traverse detached scalar read models rather than a live ORM
+graph. Contract-v1 screens have not yet been migrated and remain explicitly
+unmonitored for this requirement.
+
+The shared tenant and platform shells expose a skip link and focusable main
+landmark. Tenant navigation publishes active-page state; its small-screen drawer
+publishes expanded state, traps focus while open, restores focus when dismissed
+and renders a separate visible sidebar copy. Platform navigation publishes
+active-page state and wraps on narrow screens. These are reusable shell
+behaviours, not a WCAG conformance claim: page-level keyboard, reflow, contrast
+and assistive-technology evidence still belongs to composed browser journeys.
+
+`mount_features` now mounts enabled API routers only. `mount_web_surfaces` mounts
+both contract generations through one adapter, qualifies every route name as
+`web:<facet>:<module>:<surface>:<local>`, attaches CSRF, authenticates through the
+facet profile, applies tenant facet admission through `authorize_party`, and
+then leaves every route's granular permission/capability dependencies intact.
+Navigation reads those same stamped decisions; hiding a link never authorizes a
+request.
+
+Every composed request receives an immutable `SurfaceContext` with its facet,
+surface, URL prefix, enabled-module set, filtered navigation, stylesheets and
+selected UI contract. `render()` injects it per request. `install_surface_globals` and
+`install_stylesheets` remain contract-1 helpers, but `create_app` resets their
+fallbacks instead of installing an assembly as mutable process-global UI state.
+Login `next` values are same-origin and, for a composed request, confined to
+that context's facet prefix; one portal cannot use another as an arbitrary
+post-login destination.
 
 **Two independent on/off switches — do not conflate them:**
 
@@ -1413,7 +1445,8 @@ sync.
 fragment must never point at a route that might not be mounted. Two
 enforcement mechanisms:
 
-1. **Nav↔routes coherence test** —
+1. **Nav↔routes coherence** — contract 2 validates named GET routes and their
+   regions at startup. The contract-1
    `tests/architecture/test_feature_manifests.py
    ::test_nav_items_paths_exist_in_web_routers` fails the build if any
    manifest's `NavItem.path` doesn't correspond to a route actually mounted
@@ -1432,7 +1465,8 @@ enforcement mechanisms:
    on `enabled_features`, never assume a feature is mounted.
 
 Every feature that has portal pages puts them in that feature's own
-`web.py` (never `router.py`), mounted under `/admin/...`. Every `web.py`
+`web.py` (never `router.py`). Contract-1 routers retain `/admin/...`; contract-2
+routers are facet-relative and the assembly supplies the prefix. Every `web.py`
 route calls the SAME `service.py` functions its JSON sibling calls (e.g.
 `parties/web.py`'s edit form and `PATCH`-equivalent both call
 `parties_service.update_person_party`) — one write-owner per resource, two
@@ -1570,16 +1604,13 @@ validation lands once and covers both surfaces:
    uses for the JSON API) and, on success, setting an `access_token` cookie
    (`HttpOnly`, `SameSite=Lax`, `Secure` iff `is_secure_request()`) instead
    of returning the token in a JSON body.
-2. **Every portal page** depends on `dotmac_kernel.web_deps.require_web_auth`,
-   which: reads the `access_token` COOKIE (no header fallback — cookie-only
-   is deliberate, this dependency is web-only) → calls
-   `authenticate_request(request, db, token=token)` (the shared seam) →
-   additionally requires the `"admin"` role (every portal page is
-   admin-only in this phase; no other portal-facing role exists yet,
-   see the phase 3 note below) → returns `{"party", "roles"}` or raises
-   `WebAuthRedirect` (a 302 to `/admin/login?next=...`, registered as a
-   dedicated exception handler in `dotmac_kernel.errors`) — a portal auth
-   failure is ALWAYS a redirect, never a bare 401/403 JSON body.
+2. **Every composed portal page** receives the facet's declared authentication
+   profile. The tenant profile binds `require_web_party`, which reads the
+   `access_token` cookie and calls the shared `authenticate_request` seam but
+   decides no authorization. `staff_admin` then requires the declared
+   `web.portal.staff.access` admission permission; each v2 module route keeps
+   its own granular permission guard. Contract-v1 `require_web_auth` remains a
+   party/roles mapping adapter and no longer hardcodes `"admin"`.
 3. **Logout** (`POST /admin/logout` — was `GET /admin/logout` until 2b.1-T5,
    finding F7: a bare `<a href="/admin/logout">` is a CSRF-exempt safe
    method, so a third-party page could force a victim's logout just by
@@ -1590,24 +1621,27 @@ validation lands once and covers both surfaces:
    re-submitting the revoked cookie value and getting redirected again, not
    authenticated.
 
-Phase 3 TODO (tracked in the backlog): `require_web_auth` hardcodes the
-`"admin"` role; loosen this per-route once non-admin portal surfaces exist.
+### CSRF browser-route contract
 
-### CSRF header-bridge contract
+`CSRFMiddleware` issues and rotates a signed, expiring double-submit token bound
+to the current declared browser-session cookies. It does not infer protection
+from a path or from whether a request happens to contain cookies.
+`mount_web_surfaces` explicitly adds `require_csrf` to every composed browser
+route; that dependency validates every unsafe method, including pre-auth login
+and logout, while bearer-only API routes receive no CSRF dependency. Proof may
+arrive through `X-CSRF-Token` (the htmx/`fetch` bridge in `static/js/csrf.js`)
+or a native form's hidden `csrf_token` field. Both must match the signed cookie
+and are compared in constant time.
 
-`dotmac_kernel.middleware.csrf.CSRFMiddleware` validates a double-submit pair:
-the `X-CSRF-Token` HEADER must match the `csrf_token` COOKIE (deliberately
-NOT `HttpOnly`, so client JS can read it). `static/js/csrf.js` is the
-bridge — it copies the cookie onto that header for every htmx request
-(`htmx:configRequest` listener) and every `fetch()` call (monkey-patched),
-so every mutating form in these templates uses `hx-post`/`hx-put`/
-`hx-delete`, never a bare `<form method="post">` (which has no hook to
-attach a custom header and would 403 with `csrf_failed`) —
-`tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`
-enforces this. `tests/test_admin_portal_e2e.py` replicates the same bridge
-server-side (capture the `csrf_token` cookie from a safe `GET`, send it back
-as the `X-CSRF-Token` header on the following `POST`) rather than bypassing
-CSRF for the test.
+Development uses the host-only `csrf_token` cookie. Production fails startup if
+CSRF is disabled or `CSRF_SECRET` is a sentinel, shorter than 32 bytes, or reused
+as the JWT/session-hash secret, and emits the
+`Secure; Path=/; SameSite=Lax` `__Host-csrf_token` cookie. A change to an
+`access_token` or `platform_access_token` session binding invalidates the old
+proof and the next safe request rotates it. An explicitly cross-site
+`Origin`/`Referer` or `Sec-Fetch-Site` is rejected as defence in depth; absence
+of those optional headers is not treated as proof, so the signed token remains
+the authority. The cookie also carries `Max-Age` equal to the signed token TTL.
 
 ### Branding pipeline: static config + per-tenant DB override
 
@@ -2185,12 +2219,12 @@ order):
 5. **RateLimitMiddleware** — tenant/client-ip/route-template-keyed budget
    check against the bounded store (`dotmac_kernel/middleware/rate_limit.py`;
    unmatched paths collapse into fixed hash buckets — see `docs/SECURITY.md`).
-6. **CSRFMiddleware** — double-submit cookie/header check for
-   browser-cookie flows.
+6. **CSRFMiddleware** — issues/rotates signed browser tokens; each composed
+   route's explicit `require_csrf` dependency validates unsafe requests.
 
 After middleware, `register_error_handlers(app)` installs the exception
-handlers, `/health` is registered directly on `app`, and
-`mount_features(...)` mounts each enabled feature's routers last.
+handlers, `/health` is registered directly, `mount_features(...)` mounts enabled
+API routers, and `mount_web_surfaces(...)` mounts the validated browser graph.
 
 ### Health bypass
 
@@ -2437,7 +2471,12 @@ reaches the decision a bearer header reaches).
 
 `web_deps.require_web_auth`'s hardcoded `"admin"` role is UNCHANGED and remains
 the phase-3 item its docstring records — this seam is what a fix will be built
-on, not the fix itself.
+on, not the fix itself. ADR-0006's 2026-08-25 amendment now decides the SHAPE of
+that fix: authentication (a facet-declared profile) separates from facet
+admission (a declared permission evaluated here) from route authorization (the
+module's own guards), and the role leaves the authentication layer entirely. Not
+implemented — see that amendment and
+`docs/inventories/facet-composition-blast-radius-2026-08-25.md`.
 
 ### Release-bound product manifests
 
@@ -2545,25 +2584,25 @@ the strict rules; no existing revision was renamed.
    (`name`, `routers`, `web_routers`, `nav`, `core: bool`,
    `enabled_by_default: bool` — see "Capability model" above for the
    `web_routers`/`nav` fields).
-3. `dotmac_kernel.features.mount_features(app, manifests=registry.enabled_order(disabled), disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
-   mounts each enabled manifest's `routers` via `app.include_router(...)`
-   unconditionally, then its `web_routers` ONLY `if web_enabled`, skipping
-   the whole manifest if its name is in `DISABLED_FEATURES` or its
-   `enabled_by_default` is `False`. `app/main.py` separately gates the
-   `/static` `StaticFiles` mount on the same `settings.web_enabled` flag,
-   and calls `install_surface_globals(manifests, disabled, web_enabled)` to
-   populate the `enabled_features`/`nav_items` Jinja globals once, at
-   startup (see "Capability model" above).
-4. Mount failures in a `core: True` feature re-raise (fails startup); a
+3. `create_app` builds `WebSurfaceRegistry` from the enabled module order and
+   the assembly's facets/profiles/UI/browser-capability declarations before any
+   browser route mounts. It composes the namespaced template loader, validates
+   facet shells immediately, and resets contract-1 process globals.
+4. `mount_features(..., web_enabled=False)` mounts enabled API routers. When
+   `WEB_ENABLED=true`, the assembly/static mounts are added and
+   `mount_web_surfaces` mounts every legacy-adapted and contract-2 browser route
+   with request-scoped state. `WEB_ENABLED=false` omits the entire browser graph
+   and static assets while leaving APIs intact.
+5. Mount failures in a `core: True` feature re-raise (fails startup); a
    failure in a non-core feature is logged and skipped (fault isolation) —
    the app still boots without it.
-5. `tests/architecture/test_feature_manifests.py` guarantees every package
+6. `tests/architecture/test_feature_manifests.py` guarantees every package
    under `app/features/` on disk is registered in `FEATURE_MODULES` and that
    each manifest's `name` matches its package name — so a feature can never
    silently go unmounted or be mounted twice under a different name. The
    same test module's `test_nav_items_paths_exist_in_web_routers` guarantees
    nav↔route coherence (see "Capability model" above).
-6. Separately, still inside `lifespan` and gated by `settings.seed_on_startup`,
+7. Separately, still inside `lifespan` and gated by `settings.seed_on_startup`,
    each enabled manifest's optional `seed` hook is dispatched via
    `asyncio.to_thread` (it does sync DB I/O); a seed is DEFERRED and
    NON-FATAL — a failure is caught, logged (`Feature %s seed skipped: %s`),

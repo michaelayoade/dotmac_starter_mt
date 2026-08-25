@@ -3,7 +3,7 @@
   Read-only by design — see `platform_web.inventory` for why enable/disable is
   a deployment decision rather than a button.
 #}
-{% extends "layouts/platform.html" %}
+{% extends surface.shell or "layouts/platform.html" %}
 
 {% block platform_content %}
 <div style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);

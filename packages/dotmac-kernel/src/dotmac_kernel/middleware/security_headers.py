@@ -16,11 +16,9 @@ The Content-Security-Policy default (`_STRICT_CSP`) is computed from this
 codebase's ACTUAL asset inventory (Task 5 required the inventory first —
 see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
 
-- `script-src 'self' 'unsafe-eval'`: every script is a local /static file
-  (htmx, Alpine, components.js, csrf.js — the old inline toast bridge in
-  base.html was MOVED into components.js so 'unsafe-inline' is not needed).
-  'unsafe-eval' is required by the standard Alpine.js build, which compiles
-  `x-data`/`x-show` expressions with `new Function`.
+- `script-src 'self'`: every script is a local /static file (htmx, the Alpine
+  CSP build, components.js, csrf.js). No inline handler or evaluated string is
+  needed, so neither unsafe script grant is present.
 - `style-src 'self' 'unsafe-inline'`: Tailwind + vendored fonts.css are
   local. 'unsafe-inline' is NOT for tenant CSS -- tenant-supplied `custom_css`
   was retired on 2026-08-13 (ADR-0006 D8) and no response carries a
@@ -44,21 +42,55 @@ fronting proxy owns these headers instead.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-_STRICT_CSP = (
-    "default-src 'self'; "
-    "script-src 'self' 'unsafe-eval'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data: https:; "
-    "font-src 'self'; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "frame-ancestors 'none'; "
-    "base-uri 'self'; "
-    "form-action 'self'"
+from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
+
+_CSP_BASELINE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("default-src", ("'self'",)),
+    ("script-src", ("'self'",)),
+    ("style-src", ("'self'", "'unsafe-inline'")),
+    ("img-src", ("'self'", "data:", "https:")),
+    ("font-src", ("'self'",)),
+    ("connect-src", ("'self'",)),
+    ("object-src", ("'none'",)),
+    ("frame-ancestors", ("'none'",)),
+    ("base-uri", ("'self'",)),
+    ("form-action", ("'self'",)),
 )
+
+_CSP_REQUIREMENT_SOURCES: dict[BrowserSecurityRequirement, tuple[str, str]] = {
+    BrowserSecurityRequirement.WORKER_SELF: ("worker-src", "'self'"),
+    BrowserSecurityRequirement.WORKER_BLOB: ("worker-src", "blob:"),
+    BrowserSecurityRequirement.MEDIA_SELF: ("media-src", "'self'"),
+    BrowserSecurityRequirement.MEDIA_BLOB: ("media-src", "blob:"),
+    BrowserSecurityRequirement.FRAME_SELF: ("frame-src", "'self'"),
+}
+
+
+def compose_content_security_policy(
+    requirements: Iterable[BrowserSecurityRequirement] = (),
+) -> str:
+    """Resolve the deterministic CSP for active, typed browser capabilities."""
+
+    directives = {name: list(sources) for name, sources in _CSP_BASELINE}
+    for requirement in sorted(
+        (BrowserSecurityRequirement(value) for value in requirements),
+        key=str,
+    ):
+        directive, source = _CSP_REQUIREMENT_SOURCES[requirement]
+        values = directives.setdefault(directive, [])
+        if source not in values:
+            values.append(source)
+    return "; ".join(
+        f"{directive} {' '.join(sources)}" for directive, sources in directives.items()
+    )
+
+
+_STRICT_CSP = compose_content_security_policy()
 
 _HSTS = "max-age=63072000; includeSubDomains"
 
@@ -78,12 +110,21 @@ class SecurityHeadersMiddleware:
         *,
         enabled: bool = True,
         content_security_policy: str = "",
+        browser_security_requirements: Iterable[BrowserSecurityRequirement] = (),
         cross_origin_opener_policy: str = "",
         cross_origin_resource_policy: str = "",
     ) -> None:
         self.app = app
         self.enabled = enabled
-        self.csp = content_security_policy or _STRICT_CSP
+        requirements = frozenset(browser_security_requirements)
+        if content_security_policy and requirements:
+            raise ValueError(
+                "a raw CSP override cannot replace active typed browser-security "
+                "requirements"
+            )
+        self.csp = content_security_policy or compose_content_security_policy(
+            requirements
+        )
         self.cross_origin_opener_policy = cross_origin_opener_policy
         self.cross_origin_resource_policy = cross_origin_resource_policy
 
@@ -137,4 +178,5 @@ class SecurityHeadersMiddleware:
 
 __all__ = [
     "SecurityHeadersMiddleware",
+    "compose_content_security_policy",
 ]

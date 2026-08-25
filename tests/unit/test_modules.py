@@ -59,6 +59,7 @@ def test_manifest_normalizes_sequences_to_tuples() -> None:
     manifest = ModuleManifest(
         code="inventory",
         version="1.4.0",
+        contract_version=1,
         dependencies=["parties"],
         api_routers=[APIRouter()],
         nav=[NavItem("Inventory", "/admin/inventory")],
@@ -72,7 +73,7 @@ def test_manifest_normalizes_sequences_to_tuples() -> None:
     assert manifest.capabilities == ("inventory.use",)
     assert manifest.charge_models == ("inventory.recurring",)
     assert manifest.obligation_sources == ("inventory.accepted_order",)
-    assert manifest.contract_version == KERNEL_MODULE_CONTRACT_VERSION
+    assert manifest.contract_version == 1
 
 
 def test_manifest_requires_code_and_version() -> None:
@@ -131,7 +132,7 @@ def test_from_feature_carries_every_field_across() -> None:
     # NOT invent either.
     assert adapted.version == UNVERSIONED
     assert adapted.dependencies == ()
-    assert adapted.contract_version == KERNEL_MODULE_CONTRACT_VERSION
+    assert adapted.contract_version == 1
 
 
 def test_from_feature_accepts_enrichment_without_touching_the_package() -> None:

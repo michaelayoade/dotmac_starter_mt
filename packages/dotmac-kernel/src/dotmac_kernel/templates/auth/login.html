@@ -1,13 +1,9 @@
 {#
   Admin portal login page. Ported from ST:templates/admin/login.html,
-  adapted: no `request.state.csrf_form` hidden input (this app's CSRF
-  defense is the header bridge, static/js/csrf.js) and `hx-post` instead of
-  `method="POST"` (a plain method="post" form has no hook point to attach
-  the X-CSRF-Token header — see templates/base.html's csrf.js comment). The
-  csrf_token cookie is set by CSRFMiddleware on this page's own GET request
-  (a safe method), so the bridge already has a token to send by the time
-  this form's hx-post fires — no chicken-and-egg problem despite this page
-  being pre-auth.
+  adapted with both supported CSRF transports: the hidden `csrf_token` makes
+  the native POST safe and `static/js/csrf.js` supplies the same proof as a
+  header for htmx. CSRFMiddleware sets the signed cookie on this page's own
+  safe GET, so the pre-auth form has a proof before its first submit.
 
   `hx-select`/`hx-target`/`hx-swap` all point at `#login-card`: the server
   always renders this template as a FULL page (extends base.html), so on a
@@ -40,12 +36,13 @@
             </div>
             {% endif %}
 
-            <form hx-post="/admin/login"
+            <form method="post" action="{{ surface.login_path or '/admin/login' }}" hx-post="{{ surface.login_path or '/admin/login' }}"
                   hx-select="#login-card"
                   hx-target="#login-card"
                   hx-swap="outerHTML"
                   class="space-y-4">
-                <input type="hidden" name="next" value="{{ next_url if next_url else '/admin' }}" />
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="next" value="{{ next_url if next_url else (surface.landing_path or '/admin') }}" />
                 <div>
                     <label for="username" class="block text-sm font-medium text-[var(--dmui-text-secondary)] mb-1">Email</label>
                     <input type="text" id="username" name="username" required autofocus autocomplete="username"

@@ -2,13 +2,13 @@
 with HTML content negotiation for browser clients.
 
 `envelope()`/`_envelope` build the ONE error body shape used everywhere in
-the app — these FastAPI handlers, and the hand-built ASGI middleware
-responses (tenant resolver, rate limit, CSRF). `_negotiate()` is the single
+the app — these FastAPI handlers and the hand-built ASGI middleware responses
+(tenant resolver and rate limit). `_negotiate()` is the single
 place that decides JSON vs. branded HTML for that envelope; every handler
 below routes through it rather than constructing its own `JSONResponse`, so
-adding a new error type can never accidentally skip HTML negotiation. CSRF
-middleware (`dotmac_kernel.middleware.csrf`) imports `_negotiate` directly since
-it runs as raw ASGI, outside FastAPI's exception-handler machinery.
+adding a new error type can never accidentally skip HTML negotiation. CSRF is
+an explicit FastAPI dependency and raises its exact exception into this same
+handler layer.
 
 Negotiation rule (deliberately simple — see module docstring in the task
 brief): a request "prefers HTML" iff `"text/html" in Accept-header`. HTMX
@@ -169,21 +169,15 @@ def register_error_handlers(app: FastAPI) -> None:
     # (see the backlog entry "Lazy engine construction in dotmac_kernel.db" in
     # docs/superpowers/phase2-backlog.md — this deferred import works around
     # that same eager-construction issue rather than fixing it at the root).
-    # `dotmac_kernel.errors` is imported very early and at plain module scope by
-    # `dotmac_kernel.middleware.csrf` (for `_negotiate`/`envelope`) — which in
-    # turn is imported at COLLECTION time (before any test fixture, autouse
-    # or not, has run) by `tests/test_security_middleware.py`'s top-level
-    # `from dotmac_kernel.middleware.csrf import ...`. A module-level import here
-    # would transitively build `dotmac_kernel.db`'s engine against whatever
-    # `DATABASE_URL` happens to be set at collection time (the hermetic
-    # placeholder from `tests/conftest.py`) — permanently, since Python
-    # caches the module — breaking every later test that relies on
-    # `tests/conftest.py::_set_database_url`'s per-test `monkeypatch.setenv`
-    # to point `dotmac_kernel.db` at the real test Postgres. Deferring the import
-    # to here means it only resolves when `register_error_handlers(app)` is
-    # actually CALLED (inside a fixture, after the monkeypatch has run), not
-    # merely when this module is imported.
+    # Deferring the import means the eager database engine in `web_deps` is only
+    # resolved when an application is constructed, rather than when this
+    # otherwise database-free response module is imported.
+    from dotmac_kernel.middleware.csrf import CSRFValidationError
     from dotmac_kernel.web_deps import WebAuthRedirect
+
+    @app.exception_handler(CSRFValidationError)
+    async def _csrf_failed(request: Request, exc: CSRFValidationError) -> Response:
+        return _negotiate(request, 403, _envelope("csrf_failed", "CSRF check failed"))
 
     @app.exception_handler(WebAuthRedirect)
     async def _web_auth_redirect(request: Request, exc: WebAuthRedirect) -> Response:
@@ -194,8 +188,17 @@ def register_error_handlers(app: FastAPI) -> None:
         # what `next_url` can be when it originates from a user-supplied
         # `next` query param, but this handler quotes unconditionally since
         # `request.url.path` (the other caller) also needs safe encoding.
+        login_path = exc.login_path
+        if login_path is None:
+            route_name = getattr(request.scope.get("route"), "name", "")
+            if isinstance(route_name, str) and route_name.startswith("web:"):
+                parts = route_name.split(":", 4)
+                registry = getattr(request.app.state, "web_surface_registry", None)
+                if len(parts) == 5 and registry is not None:
+                    login_path = registry.login_path(request, parts[1])
+        login_path = login_path or "/admin/login"
         return RedirectResponse(
-            url=f"{exc.login_path}?next={quote(exc.next_url, safe='')}",
+            url=f"{login_path}?next={quote(exc.next_url, safe='')}",
             status_code=302,
         )
 

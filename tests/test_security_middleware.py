@@ -13,13 +13,13 @@ from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 
 
-def test_csrf_sets_cookie_on_safe_request_and_blocks_cookie_post_without_header():
+def test_csrf_middleware_does_not_classify_or_issue_for_an_unmarked_route():
     app = CSRFMiddleware(_ok_app)
 
     get_response = _run(app, method="GET", path="/form")
     assert get_response["status"] == 200
     csrf_cookie = _cookie_value(get_response, CSRF_COOKIE)
-    assert csrf_cookie is not None
+    assert csrf_cookie is None
 
     post_response = _run(
         app,
@@ -27,22 +27,7 @@ def test_csrf_sets_cookie_on_safe_request_and_blocks_cookie_post_without_header(
         path="/form",
         headers=[(b"cookie", f"{CSRF_COOKIE}={csrf_cookie}".encode())],
     )
-    assert post_response["status"] == 403
-
-
-def test_csrf_allows_matching_double_submit_token():
-    app = CSRFMiddleware(_ok_app)
-
-    response = _run(
-        app,
-        method="POST",
-        path="/form",
-        headers=[
-            (b"cookie", f"{CSRF_COOKIE}=known-token".encode()),
-            (b"x-csrf-token", b"known-token"),
-        ],
-    )
-    assert response["status"] == 200
+    assert post_response["status"] == 200
 
 
 def test_rate_limit_key_isolated_by_path():
@@ -76,65 +61,6 @@ def test_rate_limit_response_uses_error_envelope_and_retry_after():
     assert body["message"] == "Rate limit exceeded"
     assert "request_id" in body
     assert "detail" not in body
-
-
-def test_csrf_failure_response_uses_error_envelope():
-    app = CSRFMiddleware(_ok_app)
-
-    response = _run(
-        app,
-        method="POST",
-        path="/form",
-        headers=[(b"cookie", f"{CSRF_COOKIE}=token".encode())],
-    )
-    assert response["status"] == 403
-    body = _body_json(response)
-    assert body["code"] == "csrf_failed"
-    assert body["message"] == "CSRF check failed"
-    assert "request_id" in body
-    assert "detail" not in body
-
-
-def test_csrf_failure_html_negotiation_renders_branded_csrf_page():
-    """Same negotiation as dotmac_kernel.errors._negotiate: a browser (Accept:
-    text/html) gets the branded errors/csrf.html page, not the JSON envelope
-    -- proving the middleware routes through the same decision point rather
-    than hand-building its own response."""
-    app = CSRFMiddleware(_ok_app)
-
-    response = _run(
-        app,
-        method="POST",
-        path="/form",
-        headers=[
-            (b"cookie", f"{CSRF_COOKIE}=token".encode()),
-            (b"accept", b"text/html"),
-        ],
-    )
-    assert response["status"] == 403
-    content_type = next(v for k, v in response["headers"] if k == b"content-type")
-    assert content_type.startswith(b"text/html")
-    body = b"".join(
-        m.get("body", b"")
-        for m in response["messages"]
-        if m["type"] == "http.response.body"
-    )
-    assert b"Session expired" in body
-
-
-def test_csrf_failure_json_default_unaffected_by_negotiation():
-    """No Accept header (the existing test's shape) still gets plain JSON --
-    negotiation must not change the default/API-client behavior."""
-    app = CSRFMiddleware(_ok_app)
-
-    response = _run(
-        app,
-        method="POST",
-        path="/form",
-        headers=[(b"cookie", f"{CSRF_COOKIE}=token".encode())],
-    )
-    content_type = next(v for k, v in response["headers"] if k == b"content-type")
-    assert content_type.startswith(b"application/json")
 
 
 def test_observability_generates_request_id_by_default():

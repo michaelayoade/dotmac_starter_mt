@@ -1,13 +1,10 @@
 """Task 8, deliverable 3: per-route non-admin sweep (security-review follow-up).
 
-An authenticated but NON-admin person-party cookie must get a 302 (never
-200 or 500) on every MUTATING `/admin/*` route. `require_web_auth`
-(`dotmac_kernel.web_deps`) requires the "admin" role today — that requirement was
-previously proven for exactly one route
-(`tests/unit/test_web_login.py::test_dashboard_rejects_non_admin_party`,
-`GET /admin`). This file generalizes that proof to EVERY mutating admin
-route, parametrized, so a future route that forgets to sit behind
-`require_web_auth` (or sits behind something weaker) fails immediately
+An authenticated but NON-admitted person-party cookie must get a 403 (never
+200 or 500) on every MUTATING composed staff route. Facet admission uses the
+declared `web.portal.staff.access` permission — the requirement was
+This file proves that boundary for every mutating staff route, parametrized, so
+a future route that escapes the facet admission dependency fails immediately
 instead of silently allowing a non-admin party to reach a mutation.
 
 Routes are enumerated from the REAL production app (`app.main.app.routes`)
@@ -16,10 +13,8 @@ swept automatically. `POST /admin/login` is skipped: it is genuinely
 pre-auth (see `tests/architecture/test_route_guards.py`'s
 `MUTATING_ALLOWLIST` for the same route, same reasoning).
 
-SCOPE LIMITATION: The `/admin` path-prefix enumeration assumption means a
-future non-admin portal surface escapes this sweep entirely until its routes
-are added to `_admin_mutating_routes()` — extend the prefix pattern in the
-same task that adds such a surface.
+This is the `staff_admin` journey canary. Other facets require their own actor
+journey because they intentionally bind different profiles and permissions.
 
 Requests are executed against a purpose-built minimal app (same pattern as
 `tests/unit/test_web_login.py`'s `web_client` fixture) that mounts every
@@ -40,15 +35,34 @@ import re
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.models import AuthSession, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.permissions import (
+    PermissionCatalogue,
+    PermissionSpec,
+    install_permissions,
+)
 from dotmac_kernel.security import hash_token, issue_access_token
+from dotmac_kernel.web_deps import TENANT_COOKIE_AUTHENTICATION
+from dotmac_kernel.web_runtime import mount_web_surfaces
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserCapabilityProvision,
+    BrowserSessionPolicy,
+    NavigationRegion,
+    TemplateRef,
+    WebFacetMount,
+    WebRouteRef,
+    WebSurfaceRegistry,
+)
 
 # Installed MODULE web routers are swept too — the sweep enumerates from the
 # production app, so a module route omitted here would 404 on this minimal
 # app and read as a failure rather than as a missing mount.
-from dotmac_template_studio.web import router as template_studio_web_router
+from dotmac_template_studio import module as template_studio_module
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -68,16 +82,8 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # ("POST", "/admin/login") entry — same route, same "can't require login to
 # reach the login form" reasoning.
 #
-# ("POST", "/admin/logout") is ALSO skipped (F7): this sweep's assertion is
-# "a non-admin cookie gets a 302 to /admin/login because require_web_auth's
-# admin-role check rejected it before the route body ran". Logout carries
-# NO such check by design (`app.features.auth.web`'s module docstring —
-# session self-termination must not require role/auth-tier) and its own
-# success path ALSO redirects to `/admin/login` with a 302 — so a non-admin
-# cookie would coincidentally satisfy this test's literal assertions for an
-# entirely unrelated reason (it logged out successfully, not "was blocked").
-# Skipping it explicitly keeps this sweep honest: it only proves what it
-# says it proves for routes that are actually guarded by `require_web_auth`.
+# Logout is an assembly-approved entry route: session self-termination needs
+# CSRF but deliberately does not require facet admission.
 _SKIP = {("POST", "/admin/login"), ("POST", "/admin/logout")}
 
 _DUMMY_UUID = "00000000-0000-0000-0000-000000000000"
@@ -172,13 +178,65 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
     """
     app = FastAPI()
     register_error_handlers(app)
-    app.include_router(auth_web_router)
-    app.include_router(web_router)
-    app.include_router(parties_web_router)
-    app.include_router(rbac_web_router)
-    app.include_router(settings_web_router)
-    app.include_router(custom_fields_web_router)
-    app.include_router(template_studio_web_router)
+    manifests = (
+        ModuleManifest(
+            code="portal_access",
+            version="1",
+            permissions=(PermissionSpec("web.portal.staff.access"),),
+        ),
+        *(
+            ModuleManifest(
+                code=code,
+                version="1",
+                contract_version=1,
+                web_routers=(router,),
+            )
+            for code, router in (
+                ("auth", auth_web_router),
+                ("web", web_router),
+                ("parties", parties_web_router),
+                ("rbac", rbac_web_router),
+                ("settings", settings_web_router),
+                ("custom_fields", custom_fields_web_router),
+            )
+        ),
+        template_studio_module,
+    )
+    install_permissions(PermissionCatalogue.from_manifests(manifests))
+    install_capabilities(CapabilityCatalogue.from_manifests(manifests))
+    registry = WebSurfaceRegistry(
+        manifests=manifests,
+        facets=(
+            WebFacetMount(
+                code="staff_admin",
+                url_prefix="/admin",
+                shell=TemplateRef("layouts/admin.html"),
+                authentication_profile="staff_session",
+                admission_permission="web.portal.staff.access",
+                navigation_regions=(NavigationRegion("primary"),),
+                entry_routes=(
+                    WebRouteRef("auth", "legacy", "login_page"),
+                    WebRouteRef("auth", "legacy", "login_submit"),
+                    WebRouteRef("auth", "legacy", "logout"),
+                ),
+                login_route=WebRouteRef("auth", "legacy", "login_page"),
+            ),
+        ),
+        authentication_profiles=(
+            AuthenticationProfileBinding(
+                code="staff_session",
+                provider=TENANT_COOKIE_AUTHENTICATION,
+                session=BrowserSessionPolicy(cookie_name="access_token"),
+            ),
+        ),
+        browser_capabilities=(BrowserCapabilityProvision("htmx", 2),),
+        ui_contract_version=1,
+    )
+    mount_web_surfaces(
+        app,
+        registry=registry,
+        enabled_modules=frozenset(manifest.code for manifest in manifests),
+    )
 
     @app.middleware("http")
     async def _inject_tenant(request: Request, call_next):
@@ -193,7 +251,7 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
 
 
 @pytest.mark.parametrize(("method", "path"), _admin_mutating_routes())
-def test_non_admin_cookie_gets_redirected_not_200_or_500(
+def test_non_admitted_cookie_gets_403_not_200_or_500(
     sweep_client: TestClient,
     non_admin_cookie: str,
     method: str,
@@ -205,12 +263,11 @@ def test_non_admin_cookie_gets_redirected_not_200_or_500(
         cookies={"access_token": non_admin_cookie},
         follow_redirects=False,
     )
-    assert resp.status_code == 302, (
+    assert resp.status_code == 403, (
         f"{method} {path} returned {resp.status_code} for a non-admin party "
-        "cookie (expected 302 — require_web_auth's admin-role check must "
-        "reject this before the route body ever runs)"
+        "cookie (expected 403 — facet admission must reject this before the "
+        "route body ever runs)"
     )
-    assert resp.headers.get("location", "").startswith("/admin/login")
 
 
 def test_sweep_covers_at_least_one_route_per_admin_feature() -> None:
@@ -227,6 +284,7 @@ def test_sweep_covers_at_least_one_route_per_admin_feature() -> None:
         "/admin/role-grants",
         "/admin/settings",
         "/admin/custom-fields",
+        "/admin/templates",
     }
     seen = {
         prefix for prefix in prefixes for _, path in routes if path.startswith(prefix)

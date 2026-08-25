@@ -26,7 +26,6 @@ code declared and never used fails the build rather than rotting.
 from __future__ import annotations
 
 from dotmac_kernel.capabilities import CapabilitySpec
-from dotmac_kernel.features import NavItem
 from dotmac_kernel.flags import FeatureFlagSpec
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
@@ -34,16 +33,41 @@ from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
+from dotmac_kernel.web_surfaces import (
+    BrowserCapabilityRequirement,
+    LocalizedText,
+    TemplatePackage,
+    WebNavItem,
+    WebSurfaceContribution,
+)
 
 from dotmac_template_studio.router import router as api_router
 from dotmac_template_studio.web import router as web_router
+from dotmac_template_studio.web import template_dir
 
 module = ModuleManifest(
     code="template_studio",
-    version="0.2.0a3",
+    version="0.2.0a4",
     api_routers=[api_router],
-    web_routers=[web_router],
-    nav=[NavItem("Templates", "/admin/templates")],
+    web_surfaces=(
+        WebSurfaceContribution(
+            code="staff",
+            facet="staff_admin",
+            routers=(web_router,),
+            navigation=(
+                WebNavItem(
+                    code="template_studio.templates",
+                    region="primary",
+                    label=LocalizedText("template_studio.templates.nav", "Templates"),
+                    route_name="list",
+                    order=40,
+                ),
+            ),
+            templates=TemplatePackage(namespace="template_studio", root=template_dir()),
+            supported_ui_contract_versions=frozenset({1}),
+            browser_capabilities=(BrowserCapabilityRequirement("htmx", 2),),
+        ),
+    ),
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="tstudio",
     migration_prefix="ts",

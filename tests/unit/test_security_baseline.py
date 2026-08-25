@@ -17,8 +17,10 @@ from dotmac_kernel.middleware.rate_limit import MemoryStore, RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import (
     _STRICT_CSP,
     SecurityHeadersMiddleware,
+    compose_content_security_policy,
 )
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant, UserCredential
+from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -202,6 +204,28 @@ class TestSecurityHeaders:
         # https: appears ONLY as the img-src scheme source for tenant logos.
         assert _STRICT_CSP.count("https:") == 1
         assert "img-src 'self' data: https:" in _STRICT_CSP
+        assert "'unsafe-eval'" not in _STRICT_CSP
+        assert "'unsafe-inline'" not in _STRICT_CSP.split("style-src", 1)[0]
+
+    def test_typed_capabilities_compose_only_closed_security_requirements(self):
+        policy = compose_content_security_policy(
+            (
+                BrowserSecurityRequirement.WORKER_BLOB,
+                BrowserSecurityRequirement.WORKER_SELF,
+                BrowserSecurityRequirement.WORKER_BLOB,
+            )
+        )
+
+        assert policy.endswith("worker-src blob: 'self'")
+        assert "unsafe" not in policy.split("worker-src", 1)[1]
+        assert "http:" not in policy.split("worker-src", 1)[1]
+
+    def test_raw_csp_cannot_replace_active_typed_requirements(self):
+        with pytest.raises(ValueError, match="raw CSP override"):
+            _headers_app(
+                content_security_policy="default-src 'none'",
+                browser_security_requirements=(BrowserSecurityRequirement.WORKER_SELF,),
+            ).get("/ok")
 
 
 class TestBoundedRateLimitStore:

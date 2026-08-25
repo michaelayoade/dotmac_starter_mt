@@ -57,16 +57,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from dotmac_kernel.route_metadata import PERMISSION_CODE_ATTR
+
 if TYPE_CHECKING:  # avoids a runtime cycle: `features` imports this module
     from dotmac_kernel.modules import AnyManifest
+
 
 # The attribute `dotmac_kernel.deps.require_permission` stamps on the dependency
 # callable it returns, carrying the referenced code. `create_app` reads it back
 # off every mounted route to prove the reference is declared. Kernel-internal:
 # a route declares its permission by CALLING the guard, never by setting this.
-PERMISSION_CODE_ATTR: Final[str] = "dotmac_permission_code"
-
-
 class DuplicatePermissionError(ValueError):
     """Two modules declared the same permission code — there is no single owner."""
 
@@ -205,6 +205,7 @@ def active_permissions() -> PermissionCatalogue:
 
 __all__ = [
     "DuplicatePermissionError",
+    "PERMISSION_CODE_ATTR",
     "PermissionCatalogue",
     "PermissionSpec",
     "UndeclaredPermissionError",

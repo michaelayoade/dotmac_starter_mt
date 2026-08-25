@@ -1,7 +1,7 @@
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.exceptions import ConflictError, NotFoundError, UnauthorizedError
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -232,14 +232,14 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
     """CSRF middleware (outside ExceptionMiddleware) also gets JSON fallback."""
 
     from dotmac_kernel import errors as errors_module
-    from dotmac_kernel.middleware.csrf import CSRFMiddleware
+    from dotmac_kernel.middleware.csrf import CSRFMiddleware, require_csrf
 
     app = FastAPI()
     register_error_handlers(app)
     app.add_middleware(ObservabilityMiddleware)
     app.add_middleware(CSRFMiddleware, enabled=True)
 
-    @app.post("/form")
+    @app.post("/form", dependencies=[Depends(require_csrf)])
     def form():
         return {"ok": True}
 
@@ -250,11 +250,8 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
     monkeypatch.setattr(errors_module, "render_error", broken_render_error)
 
     client = TestClient(app, raise_server_exceptions=False)
-    # CSRF check will fail (no csrf token in header), triggering _negotiate.
-    # We need to set a cookie so the middleware runs the CSRF check.
-    resp = client.post(
-        "/form", headers={"Accept": "text/html"}, cookies={"other_cookie": "value"}
-    )
+    # The explicit browser-route dependency fails even with no cookies.
+    resp = client.post("/form", headers={"Accept": "text/html"})
 
     # Should get JSON 403 with csrf_failed code, not HTML or 500
     assert resp.status_code == 403

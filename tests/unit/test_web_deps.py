@@ -53,7 +53,7 @@ def admin_party(db: Session, tenant_row: Tenant) -> Party:
 
 @pytest.fixture()
 def plain_party(db: Session, tenant_row: Tenant) -> Party:
-    """Person-type party with NO role grant — proves non-admin rejection."""
+    """Person-type party with no role grant — authentication still succeeds."""
     party = Party(
         tenant_id=tenant_row.id,
         party_type=PartyType.person,
@@ -132,14 +132,15 @@ def test_garbled_cookie_redirects_never_500(web_app_client: TestClient) -> None:
     assert resp.status_code == 302
 
 
-def test_non_admin_person_redirected(
+def test_contract_v1_adapter_authenticates_non_admin_without_authorizing(
     web_app_client: TestClient, db: Session, tenant_row: Tenant, plain_party: Party
 ) -> None:
     token = _issue_session_token(db, tenant_row, plain_party)
     resp = web_app_client.get(
         "/admin-ish", cookies={"access_token": token}, follow_redirects=False
     )
-    assert resp.status_code == 302
+    assert resp.status_code == 200
+    assert resp.json()["roles"] == []
 
 
 def test_org_party_token_redirected_never_500(

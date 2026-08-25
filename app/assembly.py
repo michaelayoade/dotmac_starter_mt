@@ -6,9 +6,9 @@ composes, plus the deployment-driven surface switches read from the environment.
 `app/main.py` builds `app` from this spec via `dotmac_kernel.create_app`.
 
 **`dotmac-ui` adoption (ADR-0006 U1, and the D5 consumer boundary).** The
-assembly — not the kernel — composes the shared design system, because the
-dependency direction is `assembly → module → dotmac-ui → dotmac-kernel` and the
-kernel may never reach forward to a presentation package. Three declarations
+assembly — not the kernel — composes the shared design system. The assembly
+independently imports modules, `dotmac-ui` and the kernel; modules may import the
+kernel, while `dotmac-ui` imports none of them. Three declarations
 compose it:
 
 - `packaged_static_dirs` layers `dotmac_ui`'s packaged assets into the existing
@@ -44,6 +44,21 @@ from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
+from dotmac_kernel.platform_auth import (
+    PLATFORM_COOKIE,
+    PLATFORM_COOKIE_AUTHENTICATION,
+)
+from dotmac_kernel.web_deps import TENANT_COOKIE_AUTHENTICATION
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserCapabilityProvision,
+    BrowserSecurityPlane,
+    BrowserSessionPolicy,
+    NavigationRegion,
+    TemplateRef,
+    WebFacetMount,
+    WebRouteRef,
+)
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
@@ -91,8 +106,8 @@ assembly = ProductAssemblySpec(
     # isinstance-checks the latter) and must NOT go in `FEATURE_MODULES` —
     # that list is the assembly's own packages, and an architecture test holds
     # it byte-for-byte equal to the features independence contract. The
-    # assembly importing a module directly is the legal direction: `assembly →
-    # module → dotmac-ui → dotmac-kernel`.
+    # assembly importing a module directly is the legal direction; neither the
+    # module nor `dotmac-ui` imports this assembly or one another.
     modules=[
         *load_manifests(FEATURE_MODULES),
         dotmac_template_studio.module,
@@ -109,18 +124,66 @@ assembly = ProductAssemblySpec(
         ),
     ),
     web_enabled=settings.web_enabled,
+    ui_contract_version=dotmac_ui.UI_CONTRACT_VERSION,
+    web_facets=(
+        WebFacetMount(
+            code="staff_admin",
+            url_prefix="/admin",
+            # Jinja template declaration, not subprocess shell execution.
+            shell=TemplateRef("layouts/admin.html"),  # nosec B604
+            authentication_profile="tenant_staff_session",
+            admission_permission="web.portal.staff.access",
+            navigation_regions=(NavigationRegion("primary"),),
+            entry_routes=(
+                WebRouteRef("auth", "legacy", "login_page"),
+                WebRouteRef("auth", "legacy", "login_submit"),
+                WebRouteRef("auth", "legacy", "logout"),
+                WebRouteRef("presentation", "legacy", "brand_stylesheet"),
+            ),
+            login_route=WebRouteRef("auth", "legacy", "login_page"),
+            landing_route=WebRouteRef("web", "legacy", "dashboard"),
+            logout_route=WebRouteRef("auth", "legacy", "logout"),
+        ),
+        WebFacetMount(
+            code="platform_admin",
+            url_prefix="/platform",
+            # Jinja template declaration, not subprocess shell execution.
+            shell=TemplateRef("layouts/platform.html"),  # nosec B604
+            authentication_profile="platform_operator_session",
+            navigation_regions=(NavigationRegion("primary"),),
+            entry_routes=(
+                WebRouteRef("kernel_platform", "control_plane", "login_form"),
+                WebRouteRef("kernel_platform", "control_plane", "login_submit"),
+            ),
+            login_route=WebRouteRef("kernel_platform", "control_plane", "login_form"),
+            landing_route=WebRouteRef("kernel_platform", "control_plane", "inventory"),
+            logout_route=WebRouteRef("kernel_platform", "control_plane", "logout"),
+        ),
+    ),
+    authentication_profiles=(
+        AuthenticationProfileBinding(
+            code="tenant_staff_session",
+            provider=TENANT_COOKIE_AUTHENTICATION,
+            session=BrowserSessionPolicy(cookie_name="access_token", cookie_path="/"),
+            security_plane=BrowserSecurityPlane.TENANT,
+        ),
+        AuthenticationProfileBinding(
+            code="platform_operator_session",
+            provider=PLATFORM_COOKIE_AUTHENTICATION,
+            session=BrowserSessionPolicy(
+                cookie_name=PLATFORM_COOKIE, cookie_path="/platform"
+            ),
+            security_plane=BrowserSecurityPlane.PLATFORM,
+        ),
+    ),
+    browser_capabilities=(BrowserCapabilityProvision("htmx", 2),),
     disabled_modules=_DISABLED_MODULES,
     packaged_static_dirs=(dotmac_ui.static_dir(),),
-    # An installed module's admin screens are package data outside this
-    # assembly's template root — see `ProductAssemblySpec.packaged_template_dirs`.
-    # The design system's component library rides the SAME anonymous slot: its
-    # templates are inert data (dotmac-ui imports no Jinja), and every one is
-    # addressed `dotmac_ui/components/...`, so it cannot shadow a module's or
-    # the kernel's own templates whatever the layer order.
-    packaged_template_dirs=(
-        dotmac_template_studio.template_dir(),
-        dotmac_ui.template_dir(),
-    ),
+    # Template Studio declares its own namespaced package through its v2 web
+    # surface. This legacy presentation-package slot now carries only the design
+    # system's inert component data; every component is addressed
+    # `dotmac_ui/components/...`.
+    packaged_template_dirs=(dotmac_ui.template_dir(),),
     # Fixed cascade: product CSS (base.html), dotmac-ui defaults, then runtime
     # brand data. The dynamic route is assembly-owned and deliberately outside
     # Template Studio: that module authors notification content; it owns no

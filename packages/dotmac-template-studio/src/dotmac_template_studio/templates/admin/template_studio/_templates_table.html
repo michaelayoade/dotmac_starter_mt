@@ -19,7 +19,7 @@
       {% for template in templates %}
       <tr style="border-top:1px solid var(--dmui-border-subtle);">
         <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
-          <a href="/admin/templates/{{ template.id }}"
+          <a href="{{ surface_url('detail', template_id=template.id) }}"
              style="color:var(--dmui-action-primary-default); text-decoration:none; font-weight:var(--dmui-font-weight-medium);">
             {{ template.name }}
           </a>
