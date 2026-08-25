@@ -1259,6 +1259,50 @@
         ]
       }
     },
+    "dotmac-response-obligations": {
+      "$comment": [
+        "Response-time promises on an opaque subject: targets, running clocks,",
+        "itemised paused time with a required reason, and append-only warning",
+        "and breach observations. Product-first from Sub's sla_policies /",
+        "sla_targets / sla_clocks / sla_breaches, which already carried",
+        "entity_type on both policy and clock; ERP recomputes targets at read",
+        "time and CRM keeps a third copy. Durable Timers schedules the sweeps,",
+        "Operational Escalations decides the consequence, Messaging delivers.",
+        "The breach is a FACT here and carries no status, because whether it",
+        "should escalate is the escalation owner's decision for every subject.",
+        "Sub is the named first adopter; authorization to publish is not",
+        "evidence that cutover occurred.",
+        "Kernel a95 allocates mod_sla / ro / response_obligations."
+      ],
+      "package_dir": "packages/dotmac-response-obligations",
+      "import_name": "dotmac_response_obligations",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a95",
+      "db_schema": "mod_sla",
+      "tag_prefix": "dotmac-response-obligations-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_response_obligations/py.typed",
+          "dotmac_response_obligations/contracts.py",
+          "dotmac_response_obligations/manifest.py",
+          "dotmac_response_obligations/migrations/__init__.py",
+          "dotmac_response_obligations/migrations/versions/ro_0001_response_obligations.py",
+          "dotmac_response_obligations/models.py",
+          "dotmac_response_obligations/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-inbox-operations": {
       "$comment": [
         "Staffed inbox queues, executable routing decisions, agent presence,",

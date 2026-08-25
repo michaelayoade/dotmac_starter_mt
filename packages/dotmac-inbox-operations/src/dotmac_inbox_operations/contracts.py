@@ -173,8 +173,13 @@ class ImportQueueEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class ImportRoundRobinCursor:
-    """Identity-preserving historical rotation snapshot."""
+class ImportRoundRobinRotation:
+    """Identity-preserving historical state for local queue rotation.
+
+    This is not a cursor over an external feed. The adopter supplies the
+    already-authoritative local rotation position; Integrator retains every
+    transport checkpoint.
+    """
 
     id: UUID
     queue_id: UUID
@@ -612,7 +617,7 @@ __all__ = [
     "ImportAgentPresence",
     "ImportConversationAssignment",
     "ImportQueueEntry",
-    "ImportRoundRobinCursor",
+    "ImportRoundRobinRotation",
     "InboxOperationsError",
     "OfflineDisposition",
     "OfflineDispositionsSettled",

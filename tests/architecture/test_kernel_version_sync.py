@@ -131,6 +131,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-usage-rating": "0.1.0a91",
     "dotmac-service-access-policy": "0.1.0a91",
     "dotmac-inbox-operations": "0.1.0a91",
+    "dotmac-response-obligations": "0.1.0a95",
     "dotmac-workforce": "0.1.0a91",
     "dotmac-fx-policy": "0.1.0a91",
     "dotmac-service-orders": "0.1.0a91",

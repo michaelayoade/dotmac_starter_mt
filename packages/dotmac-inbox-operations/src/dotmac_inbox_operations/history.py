@@ -24,7 +24,7 @@ from dotmac_inbox_operations.contracts import (
     ImportAgentPresence,
     ImportConversationAssignment,
     ImportQueueEntry,
-    ImportRoundRobinCursor,
+    ImportRoundRobinRotation,
     QueueEntryStatus,
 )
 from dotmac_inbox_operations.models import (
@@ -320,9 +320,10 @@ def import_queue_entry(
     )
 
 
-def import_round_robin_cursor(
-    db: Session, *, scope: TenantScope, command: ImportRoundRobinCursor
+def import_round_robin_rotation(
+    db: Session, *, scope: TenantScope, command: ImportRoundRobinRotation
 ) -> InboxRoundRobinCursor:
+    """Adopt local queue-rotation state without owning a feed checkpoint."""
     tenant_id = _tenant(scope)
     _queue_exists(db, tenant_id, command.queue_id)
     if command.rotation_count < 0:
@@ -352,7 +353,7 @@ def import_round_robin_cursor(
         )
         if by_id is not None:
             return _require_same(
-                by_id, identity=f"cursor id {command.id}", expected=expected
+                by_id, identity=f"rotation id {command.id}", expected=expected
             )
         by_queue = db.scalar(
             select(InboxRoundRobinCursor).where(
@@ -361,7 +362,7 @@ def import_round_robin_cursor(
             )
         )
         if by_queue is not None:
-            raise Conflict(f"historical queue cursor already has id {by_queue.id}")
+            raise Conflict(f"historical queue rotation already has id {by_queue.id}")
         return None
 
     existing = replay()
@@ -371,7 +372,7 @@ def import_round_robin_cursor(
         db,
         row=InboxRoundRobinCursor(**expected),
         replay=replay,
-        conflict_label="round-robin cursor",
+        conflict_label="round-robin rotation",
     )
 
 
@@ -379,5 +380,5 @@ __all__ = [
     "import_agent_presence",
     "import_conversation_assignment",
     "import_queue_entry",
-    "import_round_robin_cursor",
+    "import_round_robin_rotation",
 ]

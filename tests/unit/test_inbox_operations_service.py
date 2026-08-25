@@ -18,7 +18,7 @@ from dotmac_inbox_operations.contracts import (
     ImportAgentPresence,
     ImportConversationAssignment,
     ImportQueueEntry,
-    ImportRoundRobinCursor,
+    ImportRoundRobinRotation,
     PresenceState,
     PromoteFromQueue,
     QueueEligibility,
@@ -31,7 +31,7 @@ from dotmac_inbox_operations.history import (
     import_agent_presence,
     import_conversation_assignment,
     import_queue_entry,
-    import_round_robin_cursor,
+    import_round_robin_rotation,
 )
 from dotmac_inbox_operations.models import (
     TENANT_TABLES,
@@ -672,7 +672,7 @@ def test_history_import_preserves_operational_ids_and_exact_replay(
     assert entry.id == entry_command.id
     assert import_queue_entry(db, scope=scope, command=entry_command) is entry
 
-    cursor_command = ImportRoundRobinCursor(
+    rotation_command = ImportRoundRobinRotation(
         id=uuid.uuid4(),
         queue_id=queue.id,
         last_assigned_agent_reference="agent:historical",
@@ -680,9 +680,11 @@ def test_history_import_preserves_operational_ids_and_exact_replay(
         created_at=created_at,
         updated_at=updated_at,
     )
-    cursor = import_round_robin_cursor(db, scope=scope, command=cursor_command)
-    assert cursor.id == cursor_command.id
-    assert import_round_robin_cursor(db, scope=scope, command=cursor_command) is cursor
+    cursor = import_round_robin_rotation(db, scope=scope, command=rotation_command)
+    assert cursor.id == rotation_command.id
+    assert (
+        import_round_robin_rotation(db, scope=scope, command=rotation_command) is cursor
+    )
     assert db.get(InboxAgentPresence, presence.id) is presence
     assert db.get(InboxQueueEntry, entry.id) is entry
     assert db.get(InboxRoundRobinCursor, cursor.id) is cursor
