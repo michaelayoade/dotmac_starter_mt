@@ -1024,12 +1024,13 @@ tagline, primary colour) — and even those disagree on runtime meaning (§6.2).
 
 ## 3.4 The CSP consequence — literal policy strings
 
-**starter** — `packages/dotmac-kernel/src/dotmac_kernel/middleware/security_headers.py:46-57`,
-emitted on every response at :105, overridable by `CONTENT_SECURITY_POLICY`
+**starter** — `packages/dotmac-kernel/src/dotmac_kernel/middleware/security_headers.py`,
+emitted on every response, with a tightening-only `CONTENT_SECURITY_POLICY`
+compatibility value
 (`config.py:39`, `.env.example:62`), disableable by `SECURITY_HEADERS_ENABLED`:
 
 ```
-default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 ```
 
 Two directives exist *because of* tenant branding, stated in the module
@@ -1043,8 +1044,8 @@ docstring and `docs/SECURITY.md:46-74`:
 So **retiring tenant custom CSS + external logo URLs is exactly what buys back
 `style-src 'self'` and `img-src 'self' data:`**. (`'unsafe-inline'` would still
 be needed for Alpine's `x-show` inline-style toggling unless that is also
-changed; `'unsafe-eval'` is Alpine's expression compiler, unrelated to
-branding.) Pinned by
+changed.) The 2026-08-25 correction records that Starter already vendors
+Alpine's CSP build, so the stale `'unsafe-eval'` grant was removed. Pinned by
 `tests/unit/test_security_baseline.py::test_strict_csp_has_no_external_origins`.
 
 **ERP** — `app/middleware/csp.py` + `app/main.py:378-379`. Nothing sets a CSP

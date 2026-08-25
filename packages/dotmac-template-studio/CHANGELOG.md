@@ -5,6 +5,22 @@ follows [Semantic Versioning](https://semver.org). Pre-1.0 (`0.x`, incl. this
 alpha) the surface is still settling — a `0.MINOR` bump may carry breaking
 changes, each called out here.
 
+## 0.2.0a4 — 2026-08-25
+
+Adopts module contract generation 2 for the staff browser surface.
+
+### Changed
+
+- Declares a `staff_admin` `WebSurfaceContribution` with named routes,
+  namespaced templates, UI-contract compatibility, htmx capability requirement
+  and route-derived navigation.
+- Routes are facet-prefix-relative and use the shared cookie permission guard;
+  templates resolve sibling URLs by route name instead of hardcoding `/admin`.
+- Templates receive the existing typed `TemplateRead` / `VersionRead`
+  projections rather than live SQLAlchemy rows.
+- Native forms carry the same signed CSRF proof as the htmx header transport.
+- Kernel floor raised to `>=0.1.0a97`, which introduced this contract.
+
 ## 0.2.0a3 — 2026-08-13
 
 Declares the database EFFECTS this lineage needs instead of naming a foreign

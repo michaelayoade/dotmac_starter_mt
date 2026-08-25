@@ -1262,7 +1262,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a96"
+version = "0.1.0a97"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1991,7 +1991,7 @@ url = "packages/dotmac-tax"
 
 [[package]]
 name = "dotmac-template-studio"
-version = "0.2.0a3"
+version = "0.2.0a4"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2000,7 +2000,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a56"
+dotmac-kernel = ">=0.1.0a97"
 fastapi = ">=0.111,<0.116"
 pydantic = ">=2.7.4,<3.0"
 sqlalchemy = "^2.0"

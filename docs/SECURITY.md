@@ -35,9 +35,9 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 
 | Control | Status | Evidence / notes |
 |---|---|---|
-| CSRF | **Met** | Double-submit cookie + header bridge; every mutating template form is hx-*; `tests/test_security_middleware.py`, `tests/architecture/test_web_conventions.py` |
+| CSRF | **Met** | Explicit dependency on every composed browser route; missing middleware fails loudly; signed, expiring, session-bound double-submit token; header and hidden-form transports; pre-auth no-cookie denial; explicit cross-site Origin/Referer and Fetch Metadata rejection; production `__Host-` cookie plus strong/dedicated-secret canaries in `tests/unit/test_csrf_contract.py` |
 | Security response headers | **Met** | `SecurityHeadersMiddleware` (outermost): nosniff, DENY, referrer-policy, permissions-policy, HSTS-on-TLS, CSP; `tests/unit/test_security_baseline.py::TestSecurityHeaders`. Known limit: the last-resort unhandled-exception 500 (ServerErrorMiddleware) bypasses user middleware and carries no headers |
-| Content-Security-Policy | **Met** | Computed-strict default (below); overridable via `CONTENT_SECURITY_POLICY` |
+| Content-Security-Policy | **Met** | Computed-strict default with no unsafe script grant; closed typed capability composition; raw `CONTENT_SECURITY_POLICY` must retain every baseline directive and may only remove sources, even when no typed requirement is active (below) |
 | Rate limiting | **Met (single-process)** | Bounded LRU store, route-template keys, hash-bucketed unmatched paths (`tests/unit/test_security_baseline.py::TestBoundedRateLimitStore`). Multi-process deployments must swap the store (seam below) |
 | Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`) and there are **zero** usages — tenant-supplied `custom_css` was retired 2026-08-13 (ADR-0006 D8), so no response carries tenant-authored CSS |
 | Runtime brand stylesheet | **Met** | Public pre-auth GET accepts a resolved tenant or the exact platform root (empty default CSS); unknown hosts fail closed; generated declarations only; `private, no-store` + `Vary: Host`; no brand inputs in logs; unit route/fallback proofs plus the Postgres two-tenant canary in `tests/test_branding_portal_e2e.py` |
@@ -47,22 +47,20 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 ## Content-Security-Policy rationale
 
 The default CSP is computed from this codebase's actual asset inventory
-(audited 2026-07-30, control-plane security Task 5):
+(audited 2026-07-30 and corrected 2026-08-25):
 
 ```
-default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline';
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 img-src 'self' data: https:; font-src 'self'; connect-src 'self';
 object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 ```
 
-- Every script is a local `/static` file (htmx, Alpine, components.js,
-  csrf.js). The one inline `<script>` block base.html used to carry was
-  moved into `components.js` precisely so `script-src` needs no
-  `'unsafe-inline'`.
-- `'unsafe-eval'` is required by the standard Alpine.js build (`new
-  Function` expression compilation). Swapping to Alpine's CSP build would
-  remove it at the cost of rewriting `x-data` expressions — tracked as a
-  nice-to-have, not a gap.
+- Every script is a local `/static` file (htmx, Alpine's CSP build,
+  components.js, csrf.js). Inline blocks and event handlers have been moved to
+  `components.js`, and the vendored Alpine build does not evaluate expression
+  strings, so `script-src` needs neither `'unsafe-inline'` nor
+  `'unsafe-eval'`. The composed-template architecture sweep includes a
+  sensitivity-tested guard against either inline authoring pattern returning.
 - Fonts are **vendored** (`static/fonts/`, latin subsets) per the
   cross-Dotmac no-CDN standard — no `fonts.googleapis.com`/
   `fonts.gstatic.com` origins anywhere.
@@ -72,6 +70,16 @@ object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
   (the platform screens set `var(--dmui-*)` that way) and Alpine's `x-show`
   toggling. Recovering `style-src 'self'` needs those converted first and is a
   separate slice.
+- Active module requirements reach CSP only through the assembly's versioned
+  `BrowserCapabilityProvision.security_requirements`. That closed vocabulary
+  can add only reviewed same-origin/blob worker, media and frame mechanics;
+  modules cannot inject raw directives, hosts, wildcards, inline script or
+  eval. Unused providers do not widen policy. A legacy raw product/operator CSP
+  override is refused whenever an active typed requirement would otherwise be
+  lost. With no active typed requirement it is still a tightening seam only:
+  every baseline directive remains, sources may be removed or replaced by
+  `'none'`, and a partial policy, new directive or new source fails application
+  construction.
 - Runtime branding is a same-origin `<link>` to `/branding/theme.css`, not an
   inline tenant `<style>` block. The route requires a resolved tenant scope
   even though it is pre-auth (the login page needs it), with one explicit

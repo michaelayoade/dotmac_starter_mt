@@ -4,9 +4,9 @@
 **Date:** 2026-08-02
 **Extends:** ADR-0003 (composable deployment profiles), ADR-0002 (starter
 consolidation), ADR-0001 (multi-tenancy)
-**Owns:** the package split, the module/theme/brand/facet terminology, the brand
-precedence chain, and the extraction rule for the white-label foundation
-programme (F0)
+**Owns:** the package split, the module/theme/brand/facet terminology and the
+facet runtime contract (2026-08-25 amendment), the brand precedence chain, and
+the extraction rule for the white-label foundation programme (F0)
 **Does not own:** module/plugin mechanics (the module control-plane directive),
 deployment/commercial authority (ADR-0003), artifact distribution (ADR-0005)
 
@@ -117,6 +117,14 @@ product assemblies     exact pins + selected modules + theme/brand + provider
 ```text
 assembly → module → dotmac-ui → dotmac-kernel
 ```
+
+> **Dependency correction — 2026-08-25.** The linear diagram above is
+> superseded by the enforced graph: the assembly independently imports selected
+> modules, `dotmac-ui` and the kernel; a module may import the kernel;
+> `dotmac-ui` imports none of them and has only Python as a runtime dependency.
+> In particular, neither a module nor `dotmac-ui` imports the other. This note
+> preserves the historical text while reconciling it with the import-linter
+> contracts and AGENTS.md rule 16.
 
 - The kernel never imports `dotmac-ui`, a module, a theme, or an assembly.
 - `dotmac-ui` never imports a module or reads a database. It renders what it is
@@ -1235,6 +1243,513 @@ Recording the split matters more than closing it. A reader who believes all six
 are enforced will skip the five that are not, which is exactly how a shadow
 becomes permanent while every check stays green.
 
+### Decision amendment — 2026-08-25 (the web facet runtime contract)
+
+§ 1 named **product facet** as the concept the codebase was missing, and then
+nothing implemented it. That was correct at F0 — the ADR states plainly that it
+changes no runtime behaviour — but the deferral has now outlived its usefulness:
+installable modules are beginning to grow screens, and every additional
+`web_routers`/`nav` declaration made under the implicit "admin" assumption is one
+more thing a later audience dimension has to break. This amendment settles the
+runtime contract so the kernel API can be committed once.
+
+It decides authority and shape only. It does not implement, and it does not
+schedule. The measured characterization behind it is
+`docs/inventories/facet-composition-blast-radius-2026-08-25.md`.
+
+#### What was measured first
+
+A facility is not introduced here on reasoning alone. The findings that changed
+this amendment's shape:
+
+- **The audience split already exists in production, authored per product.**
+  `dotmac_sub` serves five audience template trees (`admin`, `customer`,
+  `reseller`, `vendor`, `public`) behind three guards — `require_web_auth`,
+  `require_admin_web_auth`, `require_vendor_web_auth`. `dotmac_erp` has its own
+  `require_web_auth` and a parallel tree set. This is the duplication § 1
+  predicted, now measurable.
+- **The pure authentication seam already exists, hand-rolled.**
+  `dotmac_workspace.web_auth.require_workspace_auth` reads a cookie name and
+  login path from its own `session_contract`, delegates to the shared
+  `authenticate_request`, returns a `Party`, and decides no authorization at all.
+  That is the authentication profile § 5 names, already running.
+- **Sub's admission check is default-deny on principal TYPE, not on a role**
+  (`STAFF_PRINCIPAL_TYPES = {"system_user"}`), with per-route
+  `require_permission` explicitly retained on top. § 5's three-layer split is
+  therefore extracted from a running implementation, not invented here.
+- **The CSRF trigger is wrong in a way a prefix rule would not have found.**
+  `CSRFMiddleware` is application-wide and prefix-independent — correct — but
+  enforces only when `request.cookies` is non-empty, so a cross-site pre-auth
+  `POST` arriving without cookies is not checked at all. See § 6.
+- **Mutation transport is already divergent across the fleet.** The starter bans
+  native `method="post"` forms and bridges htmx/`fetch` to a header; Sub's
+  templates carry 488 native `method="post"` occurrences across 228 files with
+  hidden-input CSRF. A reusable module screen cannot silently assume one
+  product's bridge.
+
+Per the product-first rule (§ "Decision amendment — 2026-08-08") this satisfies
+the inventory obligation before a kernel facility is added. Per the
+single-consumer correction it does **not** require a second consumer to justify
+the module-owned surface itself: a second consumer proves reuse and constrains
+generalisation; it does not decide whether a coherent capability belongs to its
+module.
+
+#### 0. Scope: this is an interactive-browser contract, and it says so in its name
+
+The runtime this amendment defines is **`WebFacetMount`** — an interactive,
+same-origin, server-rendered browser surface. The name carries the scope so a
+later reader cannot mistake breadth for generality.
+
+§ 1's facet vocabulary is wider than that: it also names email, document,
+public/signup and API-only surfaces, and native mobile sits alongside them.
+**Those are not this runtime, and must not be forced into it.** Route prefixes,
+shells, navigation regions and cookie authentication profiles are meaningless for
+a rendered invoice PDF, a transactional email, or a Flutter client. A single
+abstraction spanning them would be a false one — it would have to grow a mode
+flag per channel, which is the `if deployment_mode == ...` shape ADR-0003 already
+forbids.
+
+Each non-web channel gets its own contract **when a real implementation justifies
+one**, and shares what is genuinely shared: domain and API contracts, policy
+decisions, semantic design tokens, brand data and localization. Not a rendering
+runtime.
+
+Facet codes stay an open manifest-declared vocabulary (ADR-0008), never a closed
+kernel enum. A product names `field_tech` or `wholesale` without a kernel change.
+
+#### 1. Four owners, and none may hold another's declaration
+
+| Layer | Owns |
+|---|---|
+| `dotmac-ui` | semantic design tokens, visual primitives, layout/navigation primitives, accessibility behaviour, published component contracts |
+| Domain module | its domain screens and fragments beside its capability: typed render models, commands, permissions, domain language, action availability |
+| Web facet | audience shell, authentication context, admission policy, navigation regions, URL namespace |
+| Assembly / profile | selects modules and facets; supplies prefixes, brand, theme, deployment policy |
+
+The assembly selects and positions; the module supplies. **An assembly that
+reproduces a module's navigation, screens or domain policy is a defect** under
+§ 5's extraction rule, not a variation.
+
+Cross-module UI interaction uses typed links, htmx-fetched fragments or declared
+ports — never a module-to-module Python import. That rule is unchanged; this
+amendment only extends it across facets.
+
+**Template shadowing is replaced by declared slots.** Today an assembly's template
+directory shadows any packaged template by name and layer order. That is an
+invisible fork: a module ships a screen, an assembly silently replaces it, and no
+gate observes the divergence. An override must instead name a **declared,
+versioned extension slot** — slot name, owning module, compatibility range, and a
+migration test. Anything else is unmonitored rather than permitted.
+
+#### 2. The two runtime records
+
+**`WebFacetMount` is assembly/profile-owned** and declares exactly: `code`,
+`url_prefix`, `shell`, `authentication_profile`, optional
+`admission_permission`, `navigation_regions`, and assembly-approved
+`entry_routes`, plus optional named `login_route`, `landing_route` and
+`logout_route`. Login must name an entry; login/landing are parameterless GETs
+and logout is a parameterless POST. The collision-free route namespace is
+derived from facet, module, surface and local route names; it is not another
+authorable string. Shell chrome and redirects resolve these references at
+request time; neither the module nor the kernel authors the facet prefix.
+
+**`WebSurfaceContribution` is module-owned** and declares exactly: `code`, the
+target `facet`, relative `routers`, stable named-route `navigation` with region,
+group and order, optional namespaced `templates` and `static_assets`, the set of
+`supported_ui_contract_versions`, and required `browser_capabilities`.
+Permissions and entitlements are derived from the target route's stamped
+dependencies, so navigation and route enforcement cannot declare two answers.
+The assembly selects one exact `ui_contract_version` for the process.
+
+A module never names a prefix, a host, a brand, or another module's facet.
+
+**Startup fails** — a boot-time refusal in the shape `create_app` already uses for
+undeclared permission and capability codes, never a runtime 500 — on: an unknown
+facet code; an incompatible UI contract range; a route-name collision; a
+navigation-ID collision; a template or static namespace collision; an unresolved
+browser capability; a navigation entry naming a route that is not mounted; a
+surface declaring routers or templates that are absent; or an invalid
+authorization binding.
+
+#### 3. Surface state is request-scoped, never a process-global
+
+`dotmac_kernel.templating` holds one module-scope `Jinja2Templates`, and
+`install_surface_globals`/`install_stylesheets` write `nav_items`,
+`enabled_features`, `extra_stylesheets` and `brand` into `templates.env.globals`.
+Two facets in one process cannot have different navigation, stylesheet cascade or
+brand under that mechanism.
+
+Per-request state is carried by an **immutable `SurfaceContext`**. There is no
+process-global "current portal", and no mutable environment state standing in for
+one. The existing `request.state.branding` / `request.state.display` memoization
+is the precedent to follow rather than a thing to work around.
+
+**Any cache key touching UI state includes** the facet, the tenant/platform
+scope, the identity, the locale, the brand and the UI-contract version. A cache
+shared across two facets is a cross-audience leak with a performance
+justification.
+
+This is the load-bearing engineering change, and it is larger than the contract
+types themselves. Route-name navigation is its visible half, not its whole.
+
+#### 4. Navigation references named routes, not paths
+
+`NavItem` carries a path string today, and
+`test_nav_items_paths_exist_in_web_routers` proves the path resolves. Once an
+assembly owns the mount prefix, a module-authored absolute path is wrong by
+construction: the module cannot know where its own surface was mounted.
+Navigation, breadcrumbs and redirects therefore reference **named routes**,
+resolved per facet at render time.
+
+Navigation filtering and route authorization consume the **same declared
+permissions**, and remain **independently enforced**. Hiding a navigation item or
+a button is never authorization — it is a courtesy on top of a guard that must
+refuse the request on its own.
+
+#### 5. Authentication, admission, and authorization are three decisions
+
+The load-bearing ruling. **A raw role such as `"admin"` must not live on
+`WebFacetMount`.** Roles are configurable bindings; permissions express decisions.
+Putting a role on the facet would relocate the hardcoding in
+`packages/dotmac-kernel/src/dotmac_kernel/web_deps.py:151` (inside
+`require_web_auth`, declared `:93`) rather than remove it, and would hand a
+presentation-layer object an authorization decision § 1 forbids it to hold. A
+guard callable on a manifest is the same mistake wearing a different type.
+
+| Layer | Question | Owner | Refusal |
+|---|---|---|---|
+| **Authentication** | who are you? | the facet's named **authentication profile** — staff session, tenant session, customer session, public | redirect |
+| **Facet admission** | may you reach this audience surface at all? | a **declared permission**, evaluated through the existing seam | 403, never a redirect |
+| **Route and action authorization** | may you do this specific thing? | the **module** — every route keeps its granular guard; row visibility and permitted actions stay module service decisions | 403 |
+
+`docs/ARCHITECTURE.md` § "The permission seam is authentication-neutral" already
+supplies layer 2's mechanism: `authorize_party` takes an already-established
+party and reads no header, no cookie and no session, and `permission_guard` is
+the route-level factory both the bearer and cookie flows go through. **Separate
+portal-role work is therefore not a prerequisite.** Designing a role taxonomy
+before real facets have established which permissions they need inverts the
+order.
+
+`require_web_party` is the pure authenticated-party seam. `require_web_auth`
+remains the contract-v1 party/roles mapping adapter, while current admin entry is
+preserved by `web.portal.staff.access` on the `staff_admin` facet.
+
+Facets supply **context** — resolved principal, audience, brand, display settings
+— and never decide domain authorization.
+
+The authentication profile also owns **session mechanics**: cookie name, scope,
+`Secure`, `HttpOnly`, `SameSite`, path/host, rotation on login and logout,
+session-fixation protection, idle and absolute expiry, revocation, tenant-switch
+behaviour, and whether any session is shared across facets.
+
+#### 6. CSRF follows the declared transport, not a path prefix
+
+**Ruling: CSRF applicability is derived from the declared authentication
+transport, never from a route prefix and never from the incidental presence of
+cookies on a request.**
+
+The as-built middleware is application-wide and does not inspect `/admin`, so a
+new facet prefix does not silently escape it — that part is already right. What is
+wrong is the trigger. `CSRFMiddleware` enforces only when `request.cookies` is
+non-empty, so that bearer APIs pass. "This request carried some cookie" is not
+the same question as "this endpoint participates in a browser session", and the
+gap between them is a pre-auth mutation: a cross-site `POST /admin/login` under
+`SameSite=lax` arrives with no cookies at all, so the check does not run. Login
+CSRF is a real class, not a hypothetical one, and it is not addressed by
+`SameSite` alone.
+
+The contract:
+
+- Every cookie-capable browser facet requires CSRF on **every unsafe operation**,
+  including the pre-auth ones — login, registration, recovery completion — and
+  logout.
+- Bearer-only API routes are excluded by **explicit surface classification**. A
+  route that accepts cookies is not bearer-only.
+- CSRF is **not a per-facet presentation option**. A facet cannot turn it off as
+  branding or configuration, and a module cannot choose its own posture.
+- Prefer a **synchronizer token bound to the session** (pre-authenticated or
+  authenticated). Where double-submit remains, the token is **signed and
+  session-bound** rather than a bare random pair.
+- The published transport contract supports **both a request header and a hidden
+  form field**, so a native HTML form and an htmx/`fetch` client reach the same
+  validator. htmx must not become an accidental invariant of the framework: the
+  fleet is already split, and a reusable module screen cannot depend on one
+  product's bridge.
+- Tokens are compared in constant time and never logged.
+- Cookie `Secure`, `SameSite`, host/path scope, rotation and expiry are declared,
+  and a production configuration that weakens them **fails closed**.
+- `Origin`, `Referer` and Fetch Metadata checks are defence in depth, layered on
+  top rather than substituted for a token.
+- OIDC `state`/`nonce`/PKCE, webhook signatures and bearer tokens are **separate
+  protections**, not CSRF exemptions inferred from a path. An OIDC callback is not
+  exempt merely because it is a GET; its state is browser-bound and single-use.
+- Every exemption states a machine-checkable premise and carries a sensitivity
+  proof (ADR-0018).
+
+This belongs to the kernel and the authentication profile — not to
+`SurfaceContribution`.
+
+#### 7. The rest of the browser security contract binds to every facet
+
+A new audience must not escape a control through an unmonitored prefix. Bound to
+the facet, not to `/admin`:
+
+- **CSP composed from typed browser capabilities.** A module declares what it
+  needs; it never appends a raw policy string. Self-hosted assets and
+  nonce/hash-approved scripts; no implicit inline-script expansion.
+- Trusted hosts, CORS, clickjacking protection, referrer policy, safe-redirect
+  handling (the existing `safe_next_url` shape), and cache-control on
+  authenticated pages.
+- Output escapes by default. User HTML, SVG, filenames, downloads and uploaded
+  content are hostile inputs with explicit sanitization and content-disposition
+  rules — the `| safe` discipline generalised.
+- No secrets, session credentials, sensitive identifiers or customer data in
+  URLs, browser storage, analytics or client logs.
+- Tenant-context isolation and rate-limit classification apply per facet.
+
+#### 8. Accessibility is a whole-surface requirement
+
+`dotmac-ui` already publishes `ACCESSIBILITY_TARGET = "WCAG 2.2 Level AA"`; this
+amendment binds it to composed surfaces rather than to components alone.
+
+Every critical browser journey targets **WCAG 2.2 AA**, in every responsive
+variation. Native HTML semantics come before ARIA. Coverage includes keyboard
+operation, focus order and restoration, skip links, landmarks, headings, label
+and error association, status announcements, target size, zoom and reflow, high
+contrast, reduced motion, and alternatives to drag interactions.
+
+Each published component names the criteria it satisfies and the tests that prove
+it. **Component-level checks do not establish page-level conformance** — a facet
+is conformant only under browser-level journey tests of the composed page, which
+is what `dotmac-ui`'s own compatibility document already concedes.
+
+#### 9. Reusable interaction semantics
+
+Declared surface states: initial, loading, ready, empty, validation error,
+forbidden, not found, conflict, rate-limited, stale, partial, retryable failure.
+A screen implements the ones that mean something for it; nothing is required to
+render a meaningless state.
+
+Consistent handling for 403, 404, 409, 422, 429 and server failures, carrying a
+request ID and safe retry guidance. Client-side duplicate-submit prevention is
+usability only — **server idempotency remains authoritative** (ADR-0014).
+Concurrency-sensitive forms carry a version and show an explicit conflict/reload
+workflow. Long-running work uses an explicit job/status contract.
+
+**An htmx or JavaScript failure must never downgrade an unsafe mutation into a
+GET.** That is the F7 logout defect generalised into a standing rule.
+
+#### 10. Navigation and data surfaces
+
+Search, filters, sort and pagination live in canonical URL state. Lists have
+stable sorting with deterministic tie-breakers, truthful counts, declared
+pagination semantics, accessible sort state and result announcements.
+
+Templates consume **typed render models**. They do not traverse lazy ORM
+relationships and do not make policy decisions — the thin-adapter rule (ADR-0010)
+extended to the template layer.
+
+#### 11. Brand and localization are independent axes
+
+Visual brand, legal entity, support identity, locale, timezone and currency are
+separate decisions and are resolved separately.
+
+No reusable component hardcodes a currency, `Africa/Lagos`, an English string, an
+address format or a phone-number presentation. `lang`, `dir`, pluralization, RTL,
+long-string and text-expansion behaviour are declared.
+
+Branding uses typed semantic values and managed same-origin assets — never
+tenant-supplied raw CSS, JavaScript, templates or unsanitized SVG (the
+2026-08-13 amendment's D8 ruling, unchanged). Runtime brand contrast is validated,
+and brand caches are isolated by tenant **and facet**.
+
+#### 12. Client runtime and assets
+
+Module assets are namespaced and digest-addressed. **A consumer needs no npm, no
+Tailwind and no frontend build to use a module surface** (D3, unchanged).
+
+A component must not silently depend on htmx, Alpine or any other runtime. Where
+JavaScript is genuinely necessary, the module declares a **versioned browser
+capability** and the assembly resolves exactly one compatible implementation. Two
+modules shipping conflicting copies of a browser framework is a composition
+failure the gate must catch, not a packaging detail.
+
+#### 13. Performance and observability
+
+Per-facet budgets for assets, requests, queries and render time. Low-bandwidth
+and small-screen conditions are tested; maps, charts and other heavy surfaces
+lazy-load. N+1 detection sits at the service/read-model boundary.
+
+For public and customer journeys the default field target is the Core Web Vitals
+"good" threshold at the 75th percentile: LCP ≤ 2.5 s, INP ≤ 200 ms, CLS ≤ 0.1.
+
+Telemetry emits facet, module, route, result class, request ID and UI-contract
+version — never form bodies, secrets or customer data. Analytics records
+observations only and never becomes an owner of an authorization or business
+decision (ADR-0043, ADR-0055).
+
+#### 14. Native mobile is a separate reusable layer, and nothing is extracted yet
+
+A mobile application is an **independent client assembly**, not a
+`WebFacetMount`. It owns its navigation, local persistence, platform lifecycle,
+device integrations and release packaging. Server modules remain authoritative
+for permissions, entitlements, prices, workflow transitions and every other
+domain decision — a mobile client is a consumer of decisions, never a second
+decider. This is ADR-0024's rule applied to a client rather than a service.
+
+Reuse is adopted in this order, and not out of it:
+
+1. versioned APIs, authentication, and domain command/error contracts;
+2. semantic design-token, brand and localization exports;
+3. a shared mobile shell and typed device-service ports;
+4. adopted widgets and screen patterns.
+
+**No `dotmac-mobile-ui` or shared Flutter framework is authorized by this
+amendment.** Sub already runs two Flutter applications — `mobile/`
+(`dotmac_portal`, customer self-care) and `field_mobile/` (`dotmac_field`, field
+technician / vendor) — and a product-first source-and-test inventory of them, and
+of any counterpart in another product, comes before any extraction. Two
+applications **inside one product** can establish candidate semantics; under the
+2026-08-12 amendment they do not by themselves meet the independent-product bar
+for `reuse-proven`.
+
+Where mobile theming does arrive, Flutter theme artifacts are **generated from
+the canonical semantic tokens**. There is no second hand-maintained colour system,
+and `dotmac-ui` never acquires a Flutter dependency.
+
+Build-time application branding is distinct from runtime tenant branding.
+Application IDs, signing identity, deep-link schemes and store identity are not
+ordinary theme values and do not travel through `BrandProfile`.
+
+The mobile contract must also state: secure credential storage; logout and wipe;
+tenant-partitioned caches; push-token lifecycle; safe deep links; minimal
+notification payloads; OIDC Authorization Code with PKCE for native
+authentication (a WebView using session cookies falls under § 6's browser
+contract instead); offline data as an **encrypted, rebuildable projection** whose
+queued mutations carry idempotency keys, ordering, conflict policy, expiry and
+reconciliation; and typed ports for camera, location, files, notifications,
+biometrics and background execution with denial, revocation and degraded-mode
+behaviour. Biometrics unlock locally held credentials and never constitute an
+independent domain identity decision.
+
+Required test classes: unit, widget/golden, integration, offline/retry,
+deep-link, background/foreground, tenant isolation, brand, locale, accessibility
+and low-bandwidth.
+
+PWA and service-worker support is a **separate question** from native mobile. Sub
+ships a brand-driven web manifest and no service worker today; adding one
+requires explicit cache versioning, sensitive-data exclusions, and eviction on
+logout and tenant switch.
+
+#### 15. Compatibility, adoption and enforcement
+
+The two version axes stay independent (§ 1). A `SurfaceContribution` declares the
+UI contract range its markup is valid against; the assembly declares the contract
+it composes; `create_app` refuses a mismatch. Deprecation windows and failure
+behaviour are stated, not implied.
+
+Components are extracted **product-first and adoption-led**. Two templates that
+look alike is not a candidate; § 5's extraction rule and the 2026-08-12
+evidence ladder are unchanged by this amendment.
+
+**Enforcement is manifest-driven, not glob-driven.** Today
+`tests/architecture/test_web_conventions.py` scans a hand-maintained
+`TEMPLATE_ROOTS` list under `admin/**`, `auth/*` and `platform/**`, and the
+non-admin sweep is scoped to the `/admin` prefix. A facet contract multiplies both
+roots and prefixes, so the gates must enumerate **declared facets** and fail on an
+unenumerated one. Every guard ships a sensitivity canary; this file's own history
+is why — `TEMPLATE_ROOTS` was once `PROJECT_ROOT / "templates"`, which stopped
+existing when templates moved into the kernel package, and four checks went on
+passing while scanning nothing.
+
+Each authentication profile gets **real-browser canaries**: login, navigation,
+read, create/edit, destructive mutation, CSRF, permission denial, conflict, error
+recovery, logout. Exercised across multiple tenants, brands, locales, RTL,
+light/dark, responsive sizes, and keyboard/screen-reader operation.
+
+A **synthetic second facet** is legitimate for proving generic runtime mechanics.
+It is not evidence of reuse: presentation components become `reuse-proven` only
+through real product adoption.
+
+#### 16. Migration
+
+`web_routers`/`nav` becomes a compatibility adapter onto an assembly-declared
+`staff_admin` facet, for one migration window, with a stated deprecation and
+removal gate. The kernel never synthesizes that facet: legacy routes require an
+explicit authentication profile and admission permission, so an upgrade cannot
+silently replace the former admin gate with a public or authentication-only
+surface. A `ModuleManifest` omitting `contract_version` while using the legacy
+fields infers contract 1; an explicitly named contract is never rewritten. The
+adapter is preserved for `staff_admin` only — never extended to a second facet,
+which would make the adapter permanent by making it useful.
+
+The kernel's pre-existing platform UI is the narrow exception during this same
+migration window. When `platform_surface_enabled=True` and the assembly has no
+`platform_admin` declaration, the kernel supplies that one facet with its
+existing platform-admin cookie provider and route references. This preserves an
+already-secured audience; it is not available to modules and never infers a
+tenant permission. An explicit assembly facet replaces the compatibility one.
+
+Template Studio is the canary: it is the only installable module contributing a
+surface today, so it is the whole migration and the whole risk. A second audience
+facet in a real assembly is what proves the model; a synthetic one only proves the
+mechanics.
+
+#### Non-goals
+
+No universal schema-to-page generator. No closed list of facet codes. No raw
+roles or guard callables in manifests. No authorization based on hidden UI. No
+per-module frontend framework. No arbitrary assembly template shadowing. No
+speculative mobile component library. No attempt to reuse one rendering runtime
+across web, Flutter, email and documents. And explicitly not remote
+microfrontends — this stays server-rendered Jinja/HTMX composition.
+
+#### Ownership and enforcement matrix
+
+Every requirement above names an owner and an enforcement point. Where the
+enforcement column says *none yet*, the requirement is **unmonitored rather than
+exempt** (ADR-0018) and the implementation branch owes it a gate.
+
+| Requirement | Owner | Enforcement point | Exists today? |
+|---|---|---|---|
+| Facet codes declared, not enumerated | assembly manifest | registry validation at `create_app` | implemented; canary added |
+| `WebFacetMount` shape | assembly/profile | startup validation | implemented; canary added |
+| `WebSurfaceContribution` shape | module manifest | startup validation | implemented; canary added |
+| Prefix/route-name/nav-ID/namespace collisions | kernel | startup validation | implemented; canaries added |
+| UI contract compatibility | `dotmac-ui` + kernel | startup validation | implemented; canary added |
+| Surface state request-scoped | kernel | runtime context + architecture test | implemented; architecture canary added |
+| Navigation by route name | kernel | route registry canary | implemented for v2; v1 adapter bounded |
+| Shell/login/landing/logout by route reference | facet + kernel | startup method validation + template canary | implemented for v2; v1 fallbacks bounded |
+| Module template namespace cannot be shadowed | kernel loader | loader precedence canary | implemented for v2; no override slots published yet |
+| Authentication profile | facet | typed provider construction | implemented for tenant and platform profiles |
+| Facet admission by permission | kernel seam | `authorize_party` + boot-time code check | implemented for `staff_admin` |
+| Route authorization | module | route-guard test + composed non-admission sweep | exists; composed staff canary added |
+| CSRF by transport | kernel | explicit route dependency + canary | implemented; runtime canary added |
+| Native POST carries hidden CSRF proof | kernel | `test_web_conventions.py` | implemented across declared template roots |
+| CSP from typed capabilities | kernel | composition + test | implemented with a closed requirement vocabulary; raw overrides cannot replace active requirements and may only tighten the full baseline when none are active |
+| WCAG 2.2 AA per journey | `dotmac-ui` + facet | browser journey tests | target declared, page tests absent |
+| Typed render models in templates | module | extended thin-adapter test | implemented for the v2 Template Studio canary; legacy surfaces remain unmonitored |
+| Brand/locale independence | kernel resolver | contrast + isolation tests | partial |
+| One browser runtime per assembly | assembly | capability resolution at startup | implemented for declared capabilities |
+| Per-facet budgets / CWV | assembly | performance canary | none yet |
+| Mobile as separate assembly | product | dossier + extraction gate | none yet |
+| Manifest-driven governance sweep | kernel tests | sensitivity canary | implemented for composed template roots and v2 surface packages |
+
+#### Unresolved, with owners
+
+These are named rather than decided, so they are not lost between this ADR and
+the implementation branch:
+
+1. **Whether `dotmac_workspace`'s hand-rolled profile is ported as-is or
+   generalised** when the authentication profile becomes a kernel type.
+2. **The mobile source-and-test inventory** across Sub's two Flutter apps and any
+   counterpart elsewhere, before any shared mobile package is named.
+
+The reference assembly's real `platform_admin` facet is the second audience
+canary for the runtime mechanics. It does not prove that a module surface is
+portable across products; that still requires the independent-product adoption
+evidence in § 15.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
@@ -1248,8 +1763,26 @@ becomes permanent while every check stays green.
 - The two version axes (module contract, UI contract) mean two compatibility
   matrices to maintain. That is the cost of letting the UI system evolve without
   a fleet-wide module re-declaration.
-- Nothing in this ADR is implemented by it. It changes no runtime behaviour; it
-  constrains what the following steps may build.
+- The ADR text alone is not implementation evidence. The 2026-08-25 facet
+  implementation that followed it supplies the runtime and canaries recorded in
+  the enforcement matrix; rows still marked partial or `none yet` remain open.
+- The facet implementation replaces process-static surface state for composed
+  v2 requests and removes `require_web_auth`'s hardcoded role from facet
+  admission. The v1 adapter remains bounded to `staff_admin` for the migration
+  window.
+- The amendment also identified a live security defect rather than only a design
+  gap: CSRF used to mean "the request carried some cookie", which missed a
+  pre-auth cross-site POST. The independent kernel fix now derives protection
+  from the composed browser route and validates signed, session-bound proof on
+  every unsafe operation, including login and logout.
+- At amendment time its enforcement matrix was deliberately mostly "none yet".
+  The matrix now records the implementation evidence that followed, while the
+  remaining `none yet`/partial rows stay unmonitored rather than exempt under
+  ADR-0018. Naming a requirement creates an obligation; changing a row requires
+  a real gate or canary, not prose.
+- The mobile section commits to no mobile code. It exists to stop `WebFacetMount`
+  being stretched into a channel-agnostic abstraction later, which is cheaper to
+  prevent now than to unpick after two adopters.
 
 ## References
 
@@ -1259,4 +1792,6 @@ becomes permanent while every check stays green.
 - `docs/inventories/module-extraction-sources.md` (the product-first dossier index)
 - `docs/inventories/template-studio-source-audit.md` (evidence for the 2026-08-10
   amendment)
+- `docs/inventories/facet-composition-blast-radius-2026-08-25.md` (evidence for
+  the 2026-08-25 facet amendment)
 - `packages/dotmac-kernel/COMPATIBILITY.md` (kernel public surface + versioning)

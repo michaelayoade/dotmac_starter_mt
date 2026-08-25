@@ -416,9 +416,10 @@ default theme surface (`--color-slate-*`, `--color-green-*`, `--color-red-*`, `-
 `Alpine.data('toastStore')` (add/remove/isSuccess/isError/isWarning/isInfo), `Alpine.data('userMenu')`,
 `Alpine.data('sidebarToggle')`. It also exposes `window.showToast(message, type, duration)` and bridges
 the `HX-Trigger: {"showToast": …}` response header onto the `show-toast` window event. There are **no
-inline `<script>` blocks in any template** — CSP is `script-src 'self' 'unsafe-eval'` with no
-`unsafe-inline`; `font-src 'self'` and `connect-src 'self'` (no external origins at all, per the
-no-CDN standard).
+inline `<script>` blocks or event handlers in any template** — the 2026-08-25
+correction uses the vendored Alpine CSP build, so CSP is `script-src 'self'`
+with neither unsafe grant; `font-src 'self'` and `connect-src 'self'` remain
+same-origin per the no-CDN standard.
 
 ---
 

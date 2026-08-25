@@ -6,6 +6,75 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a97 — 2026-08-25
+
+### Added
+
+- The versioned `WebFacetMount` / `WebSurfaceContribution` browser-composition
+  contract, with assembly-bound authentication profiles, admission permissions,
+  named-route navigation, exact UI compatibility, namespaced package data and
+  browser-capability validation.
+- Request-scoped `SurfaceContext` and a single mounting runtime that qualifies
+  route names, filters tenant navigation through the same permission and
+  entitlement decisions as routes, resolves facet shell/login/landing/logout
+  references, confines post-login redirects to the active facet, and preserves
+  contract-v1 `web_routers` / `nav` through a bounded
+  adapter.
+- Signed, expiring and browser-session-bound CSRF tokens with both header and
+  hidden-form transports. Cookie-browser CSRF is now an explicit route
+  dependency rather than a URL-prefix or "some cookie exists" heuristic.
+- Closed `BrowserSecurityRequirement` declarations on browser-capability
+  providers and deterministic CSP composition from requirements used by
+  enabled surfaces only.
+
+### Changed
+
+- The module contract advances to generation 2; generation 1 remains supported
+  for the legacy browser declaration during migration. An omitted version now
+  infers generation 1 when legacy `web_routers`/`nav` are present, while v2 and
+  headless declarations infer the current generation; explicit versions remain
+  authoritative.
+- Legacy browser declarations require an assembly-declared `staff_admin` facet
+  with both authentication and admission permission. The compatibility adapter
+  no longer synthesizes an unsecured fallback. The kernel's pre-existing,
+  already-secured platform UI retains a bounded compatibility facet when an
+  assembly has not yet declared `platform_admin`; an explicit facet takes
+  precedence.
+- A disabled dashboard feature no longer leaves the staff facet pointing at its
+  absent landing route; `DISABLED_FEATURES=web` drops the dashboard without
+  failing application construction.
+- Template security and full-page/fragment governance now derive their roots
+  from the composed assembly and v2 surface packages instead of a fixed list of
+  admin-directory globs.
+- Shared staff/platform shells add skip links and main landmarks; the staff
+  mobile drawer now renders a visible sidebar, exposes its expanded state,
+  traps/restores focus and supports Escape/backdrop dismissal instead of
+  inheriting the desktop-only hidden class. Platform header groups wrap on
+  narrow screens.
+- `require_web_party` owns cookie authentication only. Broad portal entry is a
+  declared facet permission and granular operations remain module route guards;
+  `require_web_auth` is retained as the generation-1 party/roles adapter.
+
+### Security
+
+- Pre-auth unsafe browser operations, including login, now require CSRF proof
+  even when the request carries no cookies. Production requires a dedicated
+  `CSRF_SECRET` of at least 32 bytes, refuses `CSRF_ENABLED=false`, and emits a Secure
+  expiring `__Host-csrf_token` cookie. Explicit cross-site Origin/Referer and
+  Fetch Metadata are rejected as defence in depth.
+- The vendored Alpine CSP build no longer receives the stale `'unsafe-eval'`
+  grant; inline error-page event handlers moved into the self-hosted JS bundle.
+  A raw CSP override cannot discard active typed capability requirements.
+- Browser platform logout now revokes its server-side `PlatformSession` before
+  clearing the assembly-declared cookie.
+- `require_csrf` now treats missing `CSRFMiddleware` state as a configuration
+  error instead of silently disabling validation. The composed-route
+  architecture canary also fails if it scans zero unsafe browser routes.
+- Raw CSP compatibility values must retain every computed baseline directive
+  and may only remove sources even when no typed browser requirement is active;
+  partial policies, new directives and widened sources fail application
+  construction.
+
 ## 0.1.0a96 — 2026-08-25
 
 **A machine credential now says WHOSE it is, and rotates without dropping a
