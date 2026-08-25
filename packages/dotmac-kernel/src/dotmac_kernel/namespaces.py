@@ -585,6 +585,18 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-web-analytics` — tenant-only first-party website observations. The
+# fleet audit found no real platform-plane adopter, so the allocation names one
+# stateful module schema and the manifest declares only tenant tables. `wa`
+# leaves the revision-id budget readable; `webanalytics` is explicit in catalog
+# dumps without tying the physical identity to any adopter website.
+WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="web_analytics",
+    prefix="wa",
+    branch_label="web_analytics",
+    db_schema=module_schema("webanalytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +609,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    WEB_ANALYTICS_MIGRATION_OWNER,
 )
 
 
@@ -941,6 +954,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "TICKETING_MIGRATION_OWNER",
+    "WEB_ANALYTICS_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
     "MODULE_SCHEMA_PREFIX",

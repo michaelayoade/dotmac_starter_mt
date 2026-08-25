@@ -650,7 +650,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a70"
+version = "0.1.0a71"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -763,6 +763,24 @@ develop = true
 [package.source]
 type = "directory"
 url = "packages/dotmac-ui"
+
+[[package]]
+name = "dotmac-web-analytics"
+version = "0.1.0a1"
+description = "Privacy-first first-party website observations and deterministic analytical projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-web-analytics"
 
 [[package]]
 name = "email-validator"
@@ -2926,4 +2944,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "82322b4795f53a6f6f39d0c63ec4ba58263b0e0da986685b33ba6095e771b3af"

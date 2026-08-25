@@ -6,6 +6,14 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a71 — unreleased
+
+### Added
+
+- Allocates the immutable `web_analytics` module identity: schema
+  `mod_webanalytics`, migration prefix `wa`, and branch label `web_analytics`.
+  The allocation is tenant-only and contains no adopter website identity.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
