@@ -182,9 +182,7 @@ def test_a_partial_incremental_record_retires_the_released_migration() -> None:
         distribution,
         current_unreleased | {"ig_0012_delivery_evidence.py"},
     )
-    assert "ig_0012_delivery_evidence.py" in _unreleased_filenames(
-        text, distribution
-    )
+    assert "ig_0012_delivery_evidence.py" in _unreleased_filenames(text, distribution)
     # Reconstruct the state AS OF a14. `add_released_tag` treats every other
     # recorded tag of the distribution as "previously released", without regard
     # to order, so a later tag that re-lists ig_0012 — a15 does, having shipped
