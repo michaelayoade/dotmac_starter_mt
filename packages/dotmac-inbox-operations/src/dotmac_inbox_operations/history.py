@@ -24,7 +24,7 @@ from dotmac_inbox_operations.contracts import (
     ImportAgentPresence,
     ImportConversationAssignment,
     ImportQueueEntry,
-    ImportRoundRobinCursor,
+    ImportRoundRobinRotation,
     QueueEntryStatus,
 )
 from dotmac_inbox_operations.models import (
@@ -320,8 +320,8 @@ def import_queue_entry(
     )
 
 
-def import_round_robin_cursor(
-    db: Session, *, scope: TenantScope, command: ImportRoundRobinCursor
+def import_round_robin_rotation(
+    db: Session, *, scope: TenantScope, command: ImportRoundRobinRotation
 ) -> InboxRoundRobinCursor:
     tenant_id = _tenant(scope)
     _queue_exists(db, tenant_id, command.queue_id)
@@ -379,5 +379,5 @@ __all__ = [
     "import_agent_presence",
     "import_conversation_assignment",
     "import_queue_entry",
-    "import_round_robin_cursor",
+    "import_round_robin_rotation",
 ]

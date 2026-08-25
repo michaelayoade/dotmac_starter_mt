@@ -173,7 +173,7 @@ class ImportQueueEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class ImportRoundRobinCursor:
+class ImportRoundRobinRotation:
     """Identity-preserving historical rotation snapshot."""
 
     id: UUID
@@ -612,7 +612,7 @@ __all__ = [
     "ImportAgentPresence",
     "ImportConversationAssignment",
     "ImportQueueEntry",
-    "ImportRoundRobinCursor",
+    "ImportRoundRobinRotation",
     "InboxOperationsError",
     "OfflineDisposition",
     "OfflineDispositionsSettled",

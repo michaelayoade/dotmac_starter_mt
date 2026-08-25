@@ -24,7 +24,7 @@ from dotmac_inbox_operations.contracts import (
     ImportAgentPresence,
     ImportConversationAssignment,
     ImportQueueEntry,
-    ImportRoundRobinCursor,
+    ImportRoundRobinRotation,
     InboxOperationsError,
     OfflineDisposition,
     OfflineDispositionsSettled,
@@ -50,7 +50,7 @@ from dotmac_inbox_operations.history import (
     import_agent_presence,
     import_conversation_assignment,
     import_queue_entry,
-    import_round_robin_cursor,
+    import_round_robin_rotation,
 )
 from dotmac_inbox_operations.manifest import module
 from dotmac_inbox_operations.migrations import versions_dir
@@ -128,7 +128,7 @@ __all__ = [
     "ImportAgentPresence",
     "ImportConversationAssignment",
     "ImportQueueEntry",
-    "ImportRoundRobinCursor",
+    "ImportRoundRobinRotation",
     "InboxAgentPresence",
     "InboxEscalationRequest",
     "InboxOfflineDisposition",
@@ -178,7 +178,7 @@ __all__ = [
     "import_agent_presence",
     "import_conversation_assignment",
     "import_queue_entry",
-    "import_round_robin_cursor",
+    "import_round_robin_rotation",
     "module",
     "next_round_robin_agent",
     "override_agent_presence",
