@@ -218,6 +218,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-fx-policy"
         / "src/dotmac_fx_policy/migrations/versions"
     ),
+    "dotmac-qualification": (
+        REPO_ROOT
+        / "packages/dotmac-qualification"
+        / "src/dotmac_qualification/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -248,6 +253,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-service-catalog": "sc_*.py",
     "dotmac-customers": "cu_*.py",
     "dotmac-fx-policy": "fx_*.py",
+    "dotmac-qualification": "qu_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -275,6 +281,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-service-catalog": "dotmac-service-catalog-v",
     "dotmac-customers": "dotmac-customers-v",
     "dotmac-fx-policy": "dotmac-fx-policy-v",
+    "dotmac-qualification": "dotmac-qualification-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1194,6 +1201,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-qualification ──
+    "dotmac-qualification-v0.1.0a1": (
+        "dotmac-qualification",
+        "39222359",
+        {
+            "qu_0001_qualification_evidence.py": (
+                "85afb29ec41ab7dde076ddd3e6d64e1b959563ee8ea54ac776a5ff295e5ef930"
+            ),
+        },
+    ),
 }
 
 
@@ -1282,6 +1299,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-service-catalog": frozenset(),
     "dotmac-customers": frozenset(),
     "dotmac-fx-policy": frozenset(),
+    "dotmac-qualification": frozenset(),
 }
 
 
