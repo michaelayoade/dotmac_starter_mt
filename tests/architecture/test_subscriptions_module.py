@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 import dotmac_subscriptions
+import pytest
 from dotmac_kernel.namespaces import (
     MIGRATION_OWNER_LEDGER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
@@ -669,3 +670,30 @@ def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     ]
     assert len(dossier["source_paths"]) >= 11
     assert len(dossier["preserved_tests"]) >= 14
+
+
+def test_the_registry_still_constructs_the_way_0_1_0a2_published_it() -> None:
+    """`a3` added a field to a RELEASED dataclass; it must not become required.
+
+    `0.1.0a2` published `SubscriptionVocabularyRegistry` with exactly two
+    fields, so `SubscriptionVocabularyRegistry(charge_models,
+    obligation_sources)` is a construction that exists in consumers today. A
+    third REQUIRED field breaks every one of them on upgrade — a breaking
+    change, which a pre-release series does not make silently. Defaulted, the
+    registry simply declares no treatment reasons, and asking it for one is
+    refused rather than answered wrongly.
+    """
+    from dotmac_subscriptions import (
+        SubscriptionDataError,
+        SubscriptionVocabularyRegistry,
+    )
+
+    released = SubscriptionVocabularyRegistry(
+        {"recurring_access": "product"}, {"accepted_order_line": "product"}
+    )
+
+    assert released.billing_treatment_reasons == {}
+    assert released.require_charge_model("recurring_access") == "product"
+    with pytest.raises(SubscriptionDataError):
+        released.require_billing_treatment_reason("internal_service")
+    assert SubscriptionVocabularyRegistry.from_manifests(()).billing_treatment_reasons
