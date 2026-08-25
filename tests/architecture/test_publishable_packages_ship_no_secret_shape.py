@@ -176,16 +176,14 @@ def test_the_complement_reaches_the_packages_the_allowlists_do_not() -> None:
     # what forced the question, which is the guard working rather than the guard
     # being in the way. Its own message asked for another unlisted package, so:
     #
-    # `dotmac-template-studio` is the durable one. It is not merely unlisted
-    # pending a decision — NO lane can release it: it cannot be imported without
-    # a database (`test_packages_import_without_a_database.py` exempts it, with
-    # the premise asserted), so every release smoke would refuse it. A package
-    # that cannot be published is exactly the kind that quietly stops being
-    # scanned, which is what this complement exists to prevent.
-    assert "dotmac-template-studio" in unlisted, (
-        "dotmac-template-studio joined a release allowlist — that would mean the "
-        "lazy-engine work landed. Re-aim this proof at whatever is still "
-        "unlisted, or the complement stops proving anything"
+    # `dotmac-app-sync` is the current real complement member. It remains out of
+    # the adapter lane until the destination-owned pilot proof in its dossier
+    # exists. Template Studio used to stand here, but its supply-only module
+    # release was authorized on 2026-08-25; a moving example is deliberate,
+    # because the assertion failing is what keeps the complement honest.
+    assert "dotmac-app-sync" in unlisted, (
+        "dotmac-app-sync joined a release allowlist — re-aim this proof at "
+        "whatever is still unlisted, or the complement stops proving anything"
     )
     assert len(unlisted) >= 3, sorted(unlisted)
 

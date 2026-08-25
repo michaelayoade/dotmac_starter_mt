@@ -1270,8 +1270,9 @@
         "Operational Escalations decides the consequence, Messaging delivers.",
         "The breach is a FACT here and carries no status, because whether it",
         "should escalate is the escalation owner's decision for every subject.",
-        "Sub is the named first adopter; authorization to publish is not",
-        "evidence that cutover occurred.",
+        "Sub is the named first adopter. Michael authorized the supply-only",
+        "release on 2026-08-25; publication is not evidence that cutover",
+        "occurred or that the legacy breach-lifecycle decision was settled.",
         "Kernel a95 allocates mod_sla / ro / response_obligations."
       ],
       "package_dir": "packages/dotmac-response-obligations",
@@ -1289,6 +1290,372 @@
           "dotmac_response_obligations/migrations/versions/ro_0001_response_obligations.py",
           "dotmac_response_obligations/models.py",
           "dotmac_response_obligations/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-customers": {
+      "$comment": [
+        "Tenant customer account identity, narrow profile, lifecycle and typed",
+        "Party references. Sub is the named intended consumer. Michael",
+        "authorized the supply-only release on 2026-08-25; publication does",
+        "not compose the module, move authority or retire Sub's writer."
+      ],
+      "package_dir": "packages/dotmac-customers",
+      "import_name": "dotmac_customers",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_customers",
+      "tag_prefix": "dotmac-customers-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_customers/py.typed",
+          "dotmac_customers/contracts.py",
+          "dotmac_customers/manifest.py",
+          "dotmac_customers/migrations/__init__.py",
+          "dotmac_customers/migrations/versions/cu_0001_customer_accounts.py",
+          "dotmac_customers/models.py",
+          "dotmac_customers/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-fx-policy": {
+      "$comment": [
+        "Effective FX observations, source provenance, selection policy and",
+        "determination evidence. ERP is the named intended consumer. Michael",
+        "authorized the supply-only release on 2026-08-25; publication does",
+        "not compose the module, move authority or retire ERP's writer."
+      ],
+      "package_dir": "packages/dotmac-fx-policy",
+      "import_name": "dotmac_fx_policy",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_fx_policy",
+      "tag_prefix": "dotmac-fx-policy-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_fx_policy/py.typed",
+          "dotmac_fx_policy/contracts.py",
+          "dotmac_fx_policy/manifest.py",
+          "dotmac_fx_policy/migrations/__init__.py",
+          "dotmac_fx_policy/migrations/versions/fx_0001_fx_policy.py",
+          "dotmac_fx_policy/models.py",
+          "dotmac_fx_policy/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-qualification": {
+      "$comment": [
+        "Time-bounded service eligibility evidence and qualification decisions.",
+        "Sub is the named intended consumer. Michael authorized the supply-only",
+        "release on 2026-08-25; publication does not compose the module, move",
+        "authority or retire Sub's writer."
+      ],
+      "package_dir": "packages/dotmac-qualification",
+      "import_name": "dotmac_qualification",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_qual",
+      "tag_prefix": "dotmac-qualification-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_qualification/py.typed",
+          "dotmac_qualification/contracts.py",
+          "dotmac_qualification/manifest.py",
+          "dotmac_qualification/migrations/__init__.py",
+          "dotmac_qualification/migrations/versions/qu_0001_qualification_evidence.py",
+          "dotmac_qualification/models.py",
+          "dotmac_qualification/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-sales": {
+      "$comment": [
+        "Commercial intent through immutable accepted-Quote handoff. Sub is",
+        "the named intended consumer. Michael authorized the supply-only",
+        "release on 2026-08-25; publication does not compose the module, move",
+        "authority or retire Sub/CRM writers."
+      ],
+      "package_dir": "packages/dotmac-sales",
+      "import_name": "dotmac_sales",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a88",
+      "db_schema": "mod_sales",
+      "tag_prefix": "dotmac-sales-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_sales/py.typed",
+          "dotmac_sales/contracts.py",
+          "dotmac_sales/manifest.py",
+          "dotmac_sales/migrations/__init__.py",
+          "dotmac_sales/migrations/versions/sa_0001_sales.py",
+          "dotmac_sales/models.py",
+          "dotmac_sales/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-service-access-policy": {
+      "$comment": [
+        "Per-service desired access decisions; Network Access remains the",
+        "enforcer. Sub is the named intended consumer. Michael authorized the",
+        "supply-only release on 2026-08-25; publication does not compose the",
+        "module, move authority, switch the enforcer's reader or retire a writer."
+      ],
+      "package_dir": "packages/dotmac-service-access-policy",
+      "import_name": "dotmac_service_access_policy",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_serviceaccess",
+      "tag_prefix": "dotmac-service-access-policy-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_service_access_policy/py.typed",
+          "dotmac_service_access_policy/contracts.py",
+          "dotmac_service_access_policy/manifest.py",
+          "dotmac_service_access_policy/migrations/__init__.py",
+          "dotmac_service_access_policy/migrations/versions/sap_0001_access_policy.py",
+          "dotmac_service_access_policy/models.py",
+          "dotmac_service_access_policy/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-services": {
+      "$comment": [
+        "Tenant service-instance identity and lifecycle transitions. Sub is",
+        "the named intended consumer. Michael authorized the supply-only",
+        "release on 2026-08-25; publication does not compose the module, move",
+        "authority or retire Sub's writer."
+      ],
+      "package_dir": "packages/dotmac-services",
+      "import_name": "dotmac_services",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_services",
+      "tag_prefix": "dotmac-services-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_services/py.typed",
+          "dotmac_services/contracts.py",
+          "dotmac_services/manifest.py",
+          "dotmac_services/migrations/__init__.py",
+          "dotmac_services/migrations/versions/se_0001_service_lifecycle.py",
+          "dotmac_services/models.py",
+          "dotmac_services/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-template-studio": {
+      "$comment": [
+        "Tenant notification-template authoring and rendering. Sub is the",
+        "named intended consumer. Michael authorized the supply-only release",
+        "on 2026-08-25; publication does not compose the module, move template",
+        "authority or retire Sub's renderer."
+      ],
+      "package_dir": "packages/dotmac-template-studio",
+      "import_name": "dotmac_template_studio",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a56",
+      "db_schema": "mod_tstudio",
+      "tag_prefix": "dotmac-template-studio-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_template_studio/py.typed",
+          "dotmac_template_studio/contexts.py",
+          "dotmac_template_studio/manifest.py",
+          "dotmac_template_studio/migrations/versions/ts_0001_templates.py",
+          "dotmac_template_studio/migrations/versions/ts_0002_notification_identity.py",
+          "dotmac_template_studio/models.py",
+          "dotmac_template_studio/schemas.py",
+          "dotmac_template_studio/seeding.py",
+          "dotmac_template_studio/service.py",
+          "dotmac_template_studio/templates/admin/template_studio/index.html",
+          "dotmac_template_studio/web.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "fastapi",
+          "pydantic",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-usage": {
+      "$comment": [
+        "Normalized service-usage facts, corrections and rebuildable aggregates.",
+        "Sub is the named intended consumer. Michael authorized the supply-only",
+        "release on 2026-08-25; publication does not compose the module, move",
+        "authority or retire Sub's writer."
+      ],
+      "package_dir": "packages/dotmac-usage",
+      "import_name": "dotmac_usage",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_usage",
+      "tag_prefix": "dotmac-usage-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_usage/py.typed",
+          "dotmac_usage/contracts.py",
+          "dotmac_usage/manifest.py",
+          "dotmac_usage/migrations/__init__.py",
+          "dotmac_usage/migrations/versions/us_0001_usage_facts.py",
+          "dotmac_usage/models.py",
+          "dotmac_usage/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-usage-rating": {
+      "$comment": [
+        "Effective usage-rating rules and immutable pre-tax obligations. Sub",
+        "is the named intended consumer. Michael authorized the supply-only",
+        "release on 2026-08-25; publication does not compose the module, move",
+        "authority or retire Sub's writer."
+      ],
+      "package_dir": "packages/dotmac-usage-rating",
+      "import_name": "dotmac_usage_rating",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_usage_rate",
+      "tag_prefix": "dotmac-usage-rating-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_usage_rating/py.typed",
+          "dotmac_usage_rating/contracts.py",
+          "dotmac_usage_rating/manifest.py",
+          "dotmac_usage_rating/migrations/__init__.py",
+          "dotmac_usage_rating/migrations/versions/ur_0001_usage_rating.py",
+          "dotmac_usage_rating/models.py",
+          "dotmac_usage_rating/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-workforce": {
+      "$comment": [
+        "Workforce teams, skills, shifts, availability, capacity and dispatch",
+        "decisions. Sub is first intended consumer; ERP and CRM follow under",
+        "the dossier. Michael authorized the supply-only release on 2026-08-25;",
+        "publication does not compose the module, move authority or retire writers."
+      ],
+      "package_dir": "packages/dotmac-workforce",
+      "import_name": "dotmac_workforce",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a91",
+      "db_schema": "mod_workforce",
+      "tag_prefix": "dotmac-workforce-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_workforce/py.typed",
+          "dotmac_workforce/contracts.py",
+          "dotmac_workforce/manifest.py",
+          "dotmac_workforce/migrations/__init__.py",
+          "dotmac_workforce/migrations/versions/wf_0001_workforce.py",
+          "dotmac_workforce/models.py",
+          "dotmac_workforce/service.py"
         ],
         "forbidden_prefixes": [
           "app/",

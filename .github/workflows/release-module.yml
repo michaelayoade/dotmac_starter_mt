@@ -94,6 +94,16 @@ on:
           - dotmac-numbering
           - dotmac-operational-escalations
           - dotmac-response-obligations
+          - dotmac-customers
+          - dotmac-fx-policy
+          - dotmac-qualification
+          - dotmac-sales
+          - dotmac-service-access-policy
+          - dotmac-services
+          - dotmac-template-studio
+          - dotmac-usage
+          - dotmac-usage-rating
+          - dotmac-workforce
           - dotmac-party
           - dotmac-payables
           - dotmac-payments
