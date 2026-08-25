@@ -216,9 +216,9 @@
     "conserved_exclusions": [
       {
         "path": "tests/unit/test_whatsapp_connector.py",
-        "symbol": "<module>",
+        "symbol": "test_the_catalogue_poll_follows_the_cursor_and_types_every_row",
         "category": "outbound_transport",
-        "fingerprint": "05e7df6596d0e08a6e900a8574f388344e6e387afa6c4cc06f0369b14656f586"
+        "fingerprint": "73d8d950aca5d1de24c6b270bf8bf9bc871d4579e9ce1debdfb6041e8b6e243d"
       }
     ]
   }
