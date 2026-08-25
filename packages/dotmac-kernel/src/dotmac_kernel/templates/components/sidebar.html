@@ -22,9 +22,9 @@
   generic icon; a richer per-feature icon would mean extending `NavItem`,
   out of scope for this task.
 #}
-<aside class="fixed top-0 left-0 z-40 h-full w-64 border-r border-[var(--dmui-border-default)] bg-[var(--dmui-surface-primary)] hidden lg:block overflow-y-auto" aria-label="Primary">
+<aside class="fixed top-0 left-0 z-40 h-full w-64 border-r border-[var(--dmui-border-default)] bg-[var(--dmui-surface-primary)] overflow-y-auto {{ '' if mobile_sidebar is defined and mobile_sidebar else 'hidden lg:block' }}" aria-label="Primary">
     <div class="px-4 py-5 border-b border-[var(--dmui-border-default)]">
-        <a href="/admin" class="flex items-center gap-3">
+        <a href="{{ surface.landing_path or '/admin' }}" class="flex items-center gap-3">
             <div class="h-9 w-9 rounded-lg bg-[var(--dmui-action-primary-default)] flex items-center justify-center text-[var(--dmui-action-primary-on)] font-bold text-sm">
                 {{ brand.mark if brand and brand.mark else "A" }}
             </div>
@@ -33,7 +33,7 @@
     </div>
     <nav class="px-3 py-4 space-y-1" aria-label="Admin navigation">
         {% for item in nav_items %}
-        {% set is_active = request.url.path == item.path or (item.path != "/admin" and request.url.path.startswith(item.path ~ "/")) %}
+        {% set is_active = request.url.path == item.path or (item.path != surface.landing_path and request.url.path.startswith(item.path ~ "/")) %}
         <a href="{{ item.path }}"
            {% if is_active %}aria-current="page"{% endif %}
            class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition

@@ -1,5 +1,5 @@
 {# Feature flags page shell. Context: `flags`. #}
-{% extends "layouts/platform.html" %}
+{% extends surface.shell or "layouts/platform.html" %}
 
 {% block platform_content %}
 <p style="color:var(--dmui-text-secondary); font-size:var(--dmui-font-size-sm);
