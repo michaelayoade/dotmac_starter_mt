@@ -118,6 +118,7 @@ dotmac-service-orders = { path = "packages/dotmac-service-orders", develop = tru
 dotmac-payments = { path = "packages/dotmac-payments", develop = true }
 dotmac-service-changes = { path = "packages/dotmac-service-changes", develop = true }
 dotmac-operational-escalations = { path = "packages/dotmac-operational-escalations", develop = true }
+dotmac-response-obligations = { path = "packages/dotmac-response-obligations", develop = true }
 # Tenant-only stock-ledger and traceability owner (ADR-0036). The network
 # suite reuses this owner for equipment while it is stocked; deployment does
 # not turn Network Inventory into a second quantity or valuation writer.
@@ -310,6 +311,7 @@ module = [
     "dotmac_payments.*",
     "dotmac_service_changes.*",
     "dotmac_operational_escalations.*",
+    "dotmac_response_obligations.*",
     "dotmac_inventory.*",
     "dotmac_assets.*",
     "dotmac_ipam.*",
@@ -432,6 +434,7 @@ root_packages = [
     "dotmac_payments",
     "dotmac_service_changes",
     "dotmac_operational_escalations",
+    "dotmac_response_obligations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -565,6 +568,7 @@ source_modules = [
     "dotmac_payments",
     "dotmac_service_changes",
     "dotmac_operational_escalations",
+    "dotmac_response_obligations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -692,6 +696,7 @@ modules = [
     "dotmac_payments",
     "dotmac_service_changes",
     "dotmac_operational_escalations",
+    "dotmac_response_obligations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -802,6 +807,7 @@ forbidden_modules = [
     "dotmac_payments",
     "dotmac_service_changes",
     "dotmac_operational_escalations",
+    "dotmac_response_obligations",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
