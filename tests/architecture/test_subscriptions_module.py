@@ -391,7 +391,7 @@ def test_package_has_no_calendar_day_count_shortcuts() -> None:
 
 
 def test_migration_declares_both_isolation_contracts_and_immutability() -> None:
-    source = ROOT_MIGRATION.read_text()
+    source = ROOT_MIGRATION.read_text() + TREATMENT_MIGRATION.read_text()
 
     assert 'revision = "su_0001_subscriptions"' in source
     assert 'branch_labels = ("subscriptions",)' in source

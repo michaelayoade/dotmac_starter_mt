@@ -811,6 +811,7 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
     registry = SubscriptionVocabularyRegistry(
         charge_models={"recurring.flat": "A flat recurring charge"},
         obligation_sources={"service": "A provisioned service"},
+        billing_treatment_reasons={},
     )
 
     class _Timer:
@@ -1033,6 +1034,7 @@ def _seed_tenant_line(admin_url: str, tenant_id: uuid.UUID) -> dict[str, uuid.UU
                 "key": ids["line_key"],
                 "start": start,
                 "end": end,
+                "fingerprint": "e" * 64,
                 "idempotency": f"occ-{uuid.uuid4().hex}",
             },
         )
