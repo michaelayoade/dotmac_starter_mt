@@ -624,6 +624,18 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-procurement` — the tenant-only buyer decision owner accepted by
+# ADR-0038. It owns requisitions, sourcing, awards and purchase commitments,
+# while product assemblies keep supplier identity, budgets, approvals,
+# inventory and accounts payable behind typed fact seams. No platform plane is
+# allocated: the product audit found no named control-plane purchaser.
+PROCUREMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="procurement",
+    prefix="pc",
+    branch_label="procurement",
+    db_schema=module_schema("procurement"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +651,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    PROCUREMENT_MIGRATION_OWNER,
 )
 
 
@@ -984,6 +997,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "PROCUREMENT_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

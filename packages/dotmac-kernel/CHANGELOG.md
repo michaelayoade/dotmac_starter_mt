@@ -6,6 +6,19 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a73 — UNRELEASED
+
+Allocates the independent tenant-only procurement lineage accepted by
+ADR-0038. This is a namespace release, not new kernel behaviour.
+
+### Added
+
+- `PROCUREMENT_MIGRATION_OWNER`: schema `mod_procurement`, revision prefix
+  `pc`, branch label `procurement`. The module owns buyer-side requisition,
+  sourcing, award and purchase-commitment decisions; supplier identity,
+  budgets, approvals, Inventory and Accounts Payable remain typed external
+  facts.
+
 ## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration
