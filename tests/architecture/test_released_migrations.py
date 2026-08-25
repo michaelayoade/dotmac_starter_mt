@@ -231,6 +231,11 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-sales": (
         REPO_ROOT / "packages/dotmac-sales" / "src/dotmac_sales/migrations/versions"
     ),
+    "dotmac-service-access-policy": (
+        REPO_ROOT
+        / "packages/dotmac-service-access-policy"
+        / "src/dotmac_service_access_policy/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -264,6 +269,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-qualification": "qu_*.py",
     "dotmac-response-obligations": "ro_*.py",
     "dotmac-sales": "sa_*.py",
+    "dotmac-service-access-policy": "sap_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -294,6 +300,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-qualification": "dotmac-qualification-v",
     "dotmac-response-obligations": "dotmac-response-obligations-v",
     "dotmac-sales": "dotmac-sales-v",
+    "dotmac-service-access-policy": "dotmac-service-access-policy-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1243,6 +1250,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-service-access-policy ──
+    "dotmac-service-access-policy-v0.1.0a1": (
+        "dotmac-service-access-policy",
+        "1029354b",
+        {
+            "sap_0001_access_policy.py": (
+                "7dc2cb8f39891bc2b963a77771cf33f8ce3f5c5d5010007a445af4ed7dccec54"
+            ),
+        },
+    ),
 }
 
 
@@ -1334,6 +1351,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-qualification": frozenset(),
     "dotmac-response-obligations": frozenset(),
     "dotmac-sales": frozenset(),
+    "dotmac-service-access-policy": frozenset(),
 }
 
 
