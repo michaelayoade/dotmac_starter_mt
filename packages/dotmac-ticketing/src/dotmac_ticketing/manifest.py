@@ -48,7 +48,7 @@ from dotmac_kernel.prerequisites import (
 
 module = ModuleManifest(
     code="ticketing",
-    version="0.1.0a4",
+    version="0.1.0a5",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="tkt",

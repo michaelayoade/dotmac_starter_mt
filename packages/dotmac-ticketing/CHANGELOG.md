@@ -1,5 +1,22 @@
 # Changelog — dotmac-ticketing
 
+## 0.1.0a5 — UNRELEASED
+
+Completes module-composition readiness without changing the ticket lifecycle,
+storage planes or authority.
+
+### Added
+
+- Exposes the installed Alembic lineage through the fleet-standard top-level
+  `versions_dir()` locator. A consuming assembly no longer has to derive the
+  revisions directory from package internals.
+
+### Unchanged
+
+- The module remains `audit-complete` with zero contract consumers. ERP's
+  tenant-plane authority switch is deferred to the complete six-module cohort;
+  declaring a5 is not adoption and does not authorize piecemeal composition.
+
 ## 0.1.0a4 — 2026-08-14
 
 Moves this module off a3's implicit plane selector onto ADR-0028's explicit

@@ -147,12 +147,12 @@ def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
     kernel can even import. The floor is always the highest capability the
     module actually consumes.
     """
-    result = _resolve("dotmac-ticketing", version="0.1.0a4")
+    result = _resolve("dotmac-ticketing", version="0.1.0a5")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
     assert emitted["kernel_floor"] == "0.1.0a61"
     assert emitted["db_schema"] == "mod_tkt"
-    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a4"
+    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a5"
 
 
 def test_only_ticketing_may_require_alembic_at_runtime() -> None:

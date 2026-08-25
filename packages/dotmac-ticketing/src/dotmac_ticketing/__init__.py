@@ -70,6 +70,7 @@ from dotmac_ticketing.linking import (
     link_tenant_subject,
 )
 from dotmac_ticketing.manifest import module
+from dotmac_ticketing.migrations import versions_dir
 from dotmac_ticketing.models import (
     PLATFORM_TABLES,
     SCHEMA,
@@ -88,7 +89,7 @@ from dotmac_ticketing.vocabulary import (
     validate_reason,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
     "CORE_REASONS",
@@ -119,4 +120,5 @@ __all__ = [
     "registered_reasons",
     "sla_clock_runs",
     "validate_reason",
+    "versions_dir",
 ]

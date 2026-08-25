@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-ticketing"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "DotMac Ticketing — a product-neutral ticket lifecycle: closed standard status vocabulary, product-declared reasons, product-owned subject links (ADR-0006 M2)"
 authors = ["DotMac"]
 readme = "README.md"

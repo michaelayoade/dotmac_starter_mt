@@ -104,9 +104,10 @@ migration that calls either helper.
 
 ## Status
 
-`0.1.0a1` ships the lifecycle, the vocabulary registry, four tables across two
-planes and both linking helpers. Routers, schemas and admin screens land with
-the first adopter's surface.
+`0.1.0a5` ships the lifecycle, the vocabulary registry, four tables across two
+planes, both linking helpers and a public `versions_dir()` locator for assembly
+composition. Routers, schemas and admin screens land with the first adopter's
+surface.
 
 **First adopter: ERP** (Michael's 2026-08-13 direction; ADR-0017's ticketing
 amendment). It is where the duplication actually costs something, so the

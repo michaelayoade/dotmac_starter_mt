@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-ticketing": {
+      "declared": "0.1.0a5",
+      "reason": "OUTSTANDING module-readiness release: a5 adds the public versions_dir() locator required for an assembly to compose the installed ticketing lineage without reaching into package internals. The verified a4 tag remains the latest installable version until the module release workflow publishes, installs and tags these exact a5 bytes. Publication still does not switch ERP authority or advance the dossier beyond audit-complete; remove this row only when dotmac-ticketing-v0.1.0a5 exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-integration": {
       "declared": "0.1.0a9",
       "reason": "Outstanding release owed to the Integrator: a9 adds the ruled 180-day replay-evidence sweep and ig_0011, which preserves released legal-hold history before the first receipt-delete path. The implementation PR deliberately records this state rather than pretending the existing a8 tag contains it. This is NOT to be repaired by editing the version down. Remove this row only after the release workflow installs and verifies dotmac-integration==0.1.0a9 and creates dotmac-integration-v0.1.0a9.",
