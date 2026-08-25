@@ -6,6 +6,14 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a72 — 2026-08-18
+
+### Added
+
+- `EXPENSES_MIGRATION_OWNER`: tenant schema `mod_expenses`, revision prefix
+  `ex`, and branch label `expenses` for the independently installable
+  `dotmac-expenses` lineage accepted by ADR-0040.
+
 ## 0.1.0a71 — 2026-08-18
 
 Allocates the independent tenant-only people and campaigns lineages, names and

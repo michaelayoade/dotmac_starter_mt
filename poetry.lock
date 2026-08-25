@@ -612,6 +612,24 @@ type = "directory"
 url = "packages/dotmac-entitlement-allocation"
 
 [[package]]
+name = "dotmac-expenses"
+version = "0.1.0a1"
+description = "Tenant expense requests, claims, receipt evidence, policy evaluation and reimbursement eligibility"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a72"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-expenses"
+
+[[package]]
 name = "dotmac-files"
 version = "0.1.0a3"
 description = "DotMac dual-plane stored-object lifecycle and validation"
@@ -668,7 +686,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a71"
+version = "0.1.0a72"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2962,4 +2980,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "5d21d4da47145203e863597bcb66287406b7bc367cf738a8144cd2ee7f90422b"
+content-hash = "52902e09cf7691a18b379bb1b0bdcbab18ea31032315bbc9f9f984c19d2f9963"

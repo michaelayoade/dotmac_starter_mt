@@ -192,7 +192,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `people` is the eleventh: a tenant-only employment directory that links
     # to, and never duplicates, the kernel Party-person catalogue.
     # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
-    # audit found no real named platform consumer.
+    # audit found no real named platform consumer. `expenses` (ADR-0040) is the
+    # thirteenth; reimbursement eligibility ends at a Finance handoff, never a
+    # payment state or a second ledger.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -207,6 +209,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "approvals",
         "people",
         "campaigns",
+        "expenses",
     }
 
 

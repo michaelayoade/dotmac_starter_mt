@@ -613,6 +613,17 @@ CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("campaigns"),
 )
 
+# `dotmac-expenses` — the tenant-only owner of spend requests, claims, receipt
+# meaning, policy evaluations and reimbursement eligibility (ADR-0040). `ex`
+# is distinct from the existing entitlement-allocation `ea` prefix and leaves
+# its first revision comfortably inside Alembic's 32-character id budget.
+EXPENSES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="expenses",
+    prefix="ex",
+    branch_label="expenses",
+    db_schema=module_schema("expenses"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -627,6 +638,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     NUMBERING_MIGRATION_OWNER,
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
+    EXPENSES_MIGRATION_OWNER,
 )
 
 
@@ -961,6 +973,7 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "EXPENSES_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
