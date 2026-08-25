@@ -92,11 +92,6 @@
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
-    "dotmac-customers": {
-      "declared": "0.1.0a1",
-      "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move account/profile authority, or retire Sub's writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
-      "state": "never-published"
-    },
     "dotmac-fx-policy": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. ERP is the named intended consumer. Publication makes an immutable artifact available for the separately governed backfill and selection shadow; it does not compose the module, move FX-policy authority, or retire ERP's writer. Money, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
