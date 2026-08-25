@@ -10,10 +10,15 @@ import pytest
 from dotmac_inbox_operations.contracts import (
     AdmitToQueue,
     AssignConversation,
+    AssignmentStatus,
     Conflict,
     CreateQueue,
     CreateRoutingRule,
     DispatchQueues,
+    ImportAgentPresence,
+    ImportConversationAssignment,
+    ImportQueueEntry,
+    ImportRoundRobinRotation,
     PresenceState,
     PromoteFromQueue,
     QueueEligibility,
@@ -22,10 +27,18 @@ from dotmac_inbox_operations.contracts import (
     RouteConversation,
     SetAgentPresence,
 )
+from dotmac_inbox_operations.history import (
+    import_agent_presence,
+    import_conversation_assignment,
+    import_queue_entry,
+    import_round_robin_rotation,
+)
 from dotmac_inbox_operations.models import (
     TENANT_TABLES,
     ConversationAssignment,
+    InboxAgentPresence,
     InboxQueueEntry,
+    InboxRoundRobinCursor,
     InboxRoutingDecision,
 )
 from dotmac_inbox_operations.service import (
@@ -80,7 +93,9 @@ def test_queue_routing_presence_and_assignment_share_one_owner(db: Session) -> N
     set_agent_presence(
         db,
         scope=scope,
-        command=SetAgentPresence("party:agent-1", PresenceState.AVAILABLE, 1, NOW),
+        command=SetAgentPresence(
+            "party:agent-1", PresenceState.AVAILABLE, 1, NOW, "party:agent-1"
+        ),
     )
     assignment = assign_conversation(
         db,
@@ -104,7 +119,9 @@ def test_agent_capacity_and_conversation_uniqueness_are_enforced(db: Session) ->
     set_agent_presence(
         db,
         scope=scope,
-        command=SetAgentPresence("party:agent-2", PresenceState.AVAILABLE, 1, NOW),
+        command=SetAgentPresence(
+            "party:agent-2", PresenceState.AVAILABLE, 1, NOW, "party:agent-2"
+        ),
     )
     command = AssignConversation(
         "conversation:2",
@@ -137,7 +154,7 @@ def _available(db: Session, scope: TenantScope, *agents: str) -> None:
         set_agent_presence(
             db,
             scope=scope,
-            command=SetAgentPresence(agent, PresenceState.AVAILABLE, 5, NOW),
+            command=SetAgentPresence(agent, PresenceState.AVAILABLE, 5, NOW, agent),
         )
 
 
@@ -147,12 +164,12 @@ def test_stale_presence_observation_cannot_overwrite_newer_state(db: Session) ->
     set_agent_presence(
         db,
         scope=scope,
-        command=SetAgentPresence("agent-1", PresenceState.AWAY, 2, newer),
+        command=SetAgentPresence("agent-1", PresenceState.AWAY, 2, newer, "agent-1"),
     )
     row = set_agent_presence(
         db,
         scope=scope,
-        command=SetAgentPresence("agent-1", PresenceState.AVAILABLE, 5, NOW),
+        command=SetAgentPresence("agent-1", PresenceState.AVAILABLE, 5, NOW, "agent-1"),
     )
     assert row.state is PresenceState.AWAY
     assert row.assignment_capacity == 2
@@ -323,7 +340,7 @@ def test_rotation_wraps_and_survives_a_departed_agent(db: Session) -> None:
     set_agent_presence(
         db,
         scope=scope,
-        command=SetAgentPresence("agent-2", PresenceState.OFFLINE, 5, NOW),
+        command=SetAgentPresence("agent-2", PresenceState.OFFLINE, 5, NOW, "agent-2"),
     )
     # The remembered agent is gone; rotation restarts rather than returning None.
     assert (
@@ -597,3 +614,145 @@ def test_fair_dispatch_does_not_let_a_blocked_queue_hide_an_assignable_one(
     )
 
     assert [row.conversation_reference for row in assignments] == ["newer"]
+
+
+def test_history_import_preserves_operational_ids_and_exact_replay(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    queue = create_queue(db, scope=scope, command=CreateQueue("history", "History"))
+    created_at = NOW - timedelta(days=2)
+    updated_at = NOW - timedelta(days=1)
+
+    presence_command = ImportAgentPresence(
+        id=uuid.uuid4(),
+        agent_reference="agent:historical",
+        state=PresenceState.AWAY,
+        assignment_capacity=4,
+        observed_at=NOW,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    presence = import_agent_presence(db, scope=scope, command=presence_command)
+    assert presence.id == presence_command.id
+    assert import_agent_presence(db, scope=scope, command=presence_command) is presence
+
+    assignment_command = ImportConversationAssignment(
+        id=uuid.uuid4(),
+        conversation_reference="conversation:historical",
+        queue_id=queue.id,
+        agent_reference="agent:historical",
+        status=AssignmentStatus.RELEASED,
+        assigned_at=NOW - timedelta(hours=2),
+        released_at=NOW - timedelta(hours=1),
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    assignment = import_conversation_assignment(
+        db, scope=scope, command=assignment_command
+    )
+    assert assignment.id == assignment_command.id
+    assert (
+        import_conversation_assignment(db, scope=scope, command=assignment_command)
+        is assignment
+    )
+
+    entry_command = ImportQueueEntry(
+        id=uuid.uuid4(),
+        queue_id=queue.id,
+        conversation_reference="conversation:historical",
+        queue_position=7,
+        status=QueueEntryStatus.PROMOTED,
+        entered_at=NOW - timedelta(hours=3),
+        settled_at=NOW - timedelta(hours=2),
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    entry = import_queue_entry(db, scope=scope, command=entry_command)
+    assert entry.id == entry_command.id
+    assert import_queue_entry(db, scope=scope, command=entry_command) is entry
+
+    cursor_command = ImportRoundRobinRotation(
+        id=uuid.uuid4(),
+        queue_id=queue.id,
+        last_assigned_agent_reference="agent:historical",
+        rotation_count=9,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    cursor = import_round_robin_rotation(db, scope=scope, command=cursor_command)
+    assert cursor.id == cursor_command.id
+    assert import_round_robin_rotation(db, scope=scope, command=cursor_command) is cursor
+    assert db.get(InboxAgentPresence, presence.id) is presence
+    assert db.get(InboxQueueEntry, entry.id) is entry
+    assert db.get(InboxRoundRobinCursor, cursor.id) is cursor
+
+
+def test_history_import_refuses_same_operational_id_with_different_facts(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    command = ImportAgentPresence(
+        id=uuid.uuid4(),
+        agent_reference="agent:historical-conflict",
+        state=PresenceState.AWAY,
+        assignment_capacity=4,
+        observed_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    import_agent_presence(db, scope=scope, command=command)
+
+    with pytest.raises(Conflict, match="different assignment_capacity"):
+        import_agent_presence(
+            db,
+            scope=scope,
+            command=ImportAgentPresence(
+                id=command.id,
+                agent_reference=command.agent_reference,
+                state=command.state,
+                assignment_capacity=5,
+                observed_at=command.observed_at,
+                created_at=command.created_at,
+                updated_at=command.updated_at,
+            ),
+        )
+
+
+def test_history_import_refuses_incoherent_terminal_timestamps(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    queue = create_queue(db, scope=scope, command=CreateQueue("invalid", "Invalid"))
+
+    with pytest.raises(Conflict, match="requires released_at"):
+        import_conversation_assignment(
+            db,
+            scope=scope,
+            command=ImportConversationAssignment(
+                id=uuid.uuid4(),
+                conversation_reference="conversation:invalid",
+                queue_id=queue.id,
+                agent_reference="agent:invalid",
+                status=AssignmentStatus.RELEASED,
+                assigned_at=NOW,
+                released_at=None,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+        )
+
+    with pytest.raises(Conflict, match="queued history cannot carry settled_at"):
+        import_queue_entry(
+            db,
+            scope=scope,
+            command=ImportQueueEntry(
+                id=uuid.uuid4(),
+                queue_id=queue.id,
+                conversation_reference="conversation:invalid",
+                queue_position=1,
+                status=QueueEntryStatus.QUEUED,
+                entered_at=NOW,
+                settled_at=NOW,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+        )

@@ -1237,6 +1237,7 @@
         "required": [
           "dotmac_inbox/py.typed",
           "dotmac_inbox/channels.py",
+          "dotmac_inbox/history.py",
           "dotmac_inbox/lifecycle.py",
           "dotmac_inbox/manifest.py",
           "dotmac_inbox/migrations/__init__.py",
@@ -1323,13 +1324,19 @@
         "required": [
           "dotmac_inbox_operations/py.typed",
           "dotmac_inbox_operations/contracts.py",
+          "dotmac_inbox_operations/history.py",
           "dotmac_inbox_operations/manifest.py",
           "dotmac_inbox_operations/migrations/__init__.py",
           "dotmac_inbox_operations/migrations/versions/io_0001_inbox_operations.py",
           "dotmac_inbox_operations/migrations/versions/io_0002_queue_admission.py",
           "dotmac_inbox_operations/migrations/versions/io_0003_operational_safety.py",
+          "dotmac_inbox_operations/migrations/versions/io_0004_availability_transfers.py",
           "dotmac_inbox_operations/models.py",
-          "dotmac_inbox_operations/service.py"
+          "dotmac_inbox_operations/presence.py",
+          "dotmac_inbox_operations/service.py",
+          "dotmac_inbox_operations/sessions.py",
+          "dotmac_inbox_operations/transfers.py",
+          "dotmac_inbox_operations/validation.py"
         ],
         "forbidden_prefixes": [
           "app/",

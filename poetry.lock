@@ -1170,7 +1170,7 @@ url = "packages/dotmac-imports"
 
 [[package]]
 name = "dotmac-inbox"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1188,7 +1188,7 @@ url = "packages/dotmac-inbox"
 
 [[package]]
 name = "dotmac-inbox-operations"
-version = "0.1.0a3"
+version = "0.1.0a5"
 description = "Staffed inbox queues, routing, presence, and assignments"
 optional = false
 python-versions = ">=3.11,<3.14"

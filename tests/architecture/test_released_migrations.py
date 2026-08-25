@@ -1220,7 +1220,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ai-operations": frozenset(),
     "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
-    "dotmac-inbox-operations": frozenset(),
+    # a5's availability/transfer lineage: still editable until the
+    # protected release tags it and its digest is recorded above.
+    "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),

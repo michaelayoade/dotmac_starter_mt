@@ -18,17 +18,14 @@ from dotmac_inbox_operations.contracts import (
     CreateQueue,
     CreateRoutingRule,
     DispatchQueues,
-    PresenceState,
     PromoteFromQueue,
     QueueEntryStatus,
     ReleaseConversation,
     RouteConversation,
     RoutedConversation,
-    SetAgentPresence,
 )
 from dotmac_inbox_operations.models import (
     ConversationAssignment,
-    InboxAgentPresence,
     InboxQueue,
     InboxQueueEntry,
     InboxRoundRobinCursor,
@@ -36,42 +33,23 @@ from dotmac_inbox_operations.models import (
     InboxRoutingRule,
     InboxWorkflowEvent,
 )
+from dotmac_inbox_operations.presence import (
+    available_agents,
+    refuse_undispatchable,
+)
+from dotmac_inbox_operations.presence import (
+    set_agent_presence as set_agent_presence,
+)
+from dotmac_inbox_operations.validation import (
+    aware,
+    eligible_references,
+    required_text,
+    tenant_of,
+    utc_instant,
+)
 
 
-def _tenant(scope: TenantScope) -> UUID:
-    if not isinstance(scope, TenantScope):
-        raise TypeError("dotmac-inbox-operations requires TenantScope")
-    return scope.tenant_id
-
-
-def _required(value: str, field: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field} must not be empty")
-    return normalized
-
-
-def _aware(value: datetime, field: str) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field} must be timezone-aware")
-    return value
-
-
-def _utc_instant(value: datetime) -> datetime:
-    """Normalize SQLite's timezone-naive round trip for portable unit canaries."""
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
-def _eligible_references(values: tuple[str, ...]) -> tuple[str, ...]:
-    normalized = tuple(
-        sorted({_required(value, "agent reference") for value in values})
-    )
-    if not normalized:
-        raise Conflict("queue eligibility must name at least one agent")
-    return normalized
-
-
-def _queue(
+def require_queue(
     db: Session, tenant_id: UUID, queue_id: UUID, *, lock: bool = False
 ) -> InboxQueue:
     statement = select(InboxQueue).where(
@@ -89,9 +67,9 @@ def create_queue(
     db: Session, *, scope: TenantScope, command: CreateQueue
 ) -> InboxQueue:
     row = InboxQueue(
-        tenant_id=_tenant(scope),
-        code=_required(command.code, "queue code"),
-        name=_required(command.name, "queue name"),
+        tenant_id=tenant_of(scope),
+        code=required_text(command.code, "queue code"),
+        name=required_text(command.name, "queue name"),
         active=True,
     )
     db.add(row)
@@ -102,14 +80,14 @@ def create_queue(
 def create_routing_rule(
     db: Session, *, scope: TenantScope, command: CreateRoutingRule
 ) -> InboxRoutingRule:
-    tenant_id = _tenant(scope)
-    queue = _queue(db, tenant_id, command.queue_id)
+    tenant_id = tenant_of(scope)
+    queue = require_queue(db, tenant_id, command.queue_id)
     if command.priority < 0:
         raise Conflict("routing priority must not be negative")
     row = InboxRoutingRule(
         tenant_id=tenant_id,
         queue_id=queue.id,
-        channel_code=_required(command.channel_code, "channel code").lower(),
+        channel_code=required_text(command.channel_code, "channel code").lower(),
         priority=command.priority,
         active=True,
     )
@@ -163,13 +141,15 @@ def route_conversation(
     db: Session, *, scope: TenantScope, command: RouteConversation
 ) -> RoutedConversation:
     """Resolve, admit and record one idempotent routing decision atomically."""
-    tenant_id = _tenant(scope)
-    decision_reference = _required(
+    tenant_id = tenant_of(scope)
+    decision_reference = required_text(
         command.decision_reference, "routing decision reference"
     )
-    conversation = _required(command.conversation_reference, "conversation reference")
-    channel = _required(command.channel_code, "channel code").lower()
-    decided_at = _aware(command.routed_at, "routed_at")
+    conversation = required_text(
+        command.conversation_reference, "conversation reference"
+    )
+    channel = required_text(command.channel_code, "channel code").lower()
+    decided_at = aware(command.routed_at, "routed_at")
     existing = _routing_decision(db, tenant_id, decision_reference)
     if existing is not None:
         _require_same_routing_request(
@@ -242,67 +222,21 @@ def route_conversation(
     return _routed_result(db, tenant_id, decision)
 
 
-def set_agent_presence(
-    db: Session, *, scope: TenantScope, command: SetAgentPresence
-) -> InboxAgentPresence:
-    tenant_id = _tenant(scope)
-    agent = _required(command.agent_reference, "agent reference")
-    observed_at = _aware(command.observed_at, "observed_at")
-    if command.assignment_capacity < 0:
-        raise Conflict("assignment capacity must not be negative")
-    row = db.scalar(
-        select(InboxAgentPresence)
-        .where(
-            InboxAgentPresence.tenant_id == tenant_id,
-            InboxAgentPresence.agent_reference == agent,
-        )
-        .with_for_update()
-    )
-    if row is None:
-        candidate = InboxAgentPresence(
-            tenant_id=tenant_id,
-            agent_reference=agent,
-            state=command.state,
-            assignment_capacity=command.assignment_capacity,
-            observed_at=observed_at,
-        )
-        from dotmac_kernel.db import conflict_savepoint
-
-        try:
-            with conflict_savepoint(db):
-                db.add(candidate)
-                db.flush()
-        except IntegrityError as exc:
-            row = db.scalar(
-                select(InboxAgentPresence)
-                .where(
-                    InboxAgentPresence.tenant_id == tenant_id,
-                    InboxAgentPresence.agent_reference == agent,
-                )
-                .with_for_update()
-            )
-            if row is None:  # pragma: no cover - database invariant defense
-                raise Conflict("agent presence conflicted outside the tenant") from exc
-        else:
-            row = candidate
-    if _utc_instant(observed_at) >= _utc_instant(row.observed_at):
-        row.state = command.state
-        row.assignment_capacity = command.assignment_capacity
-        row.observed_at = observed_at
-    db.flush()
-    return row
-
-
-def _active_assignment(
-    db: Session, tenant_id: UUID, conversation_reference: str
+def active_assignment(
+    db: Session,
+    tenant_id: UUID,
+    conversation_reference: str,
+    *,
+    lock: bool = False,
 ) -> ConversationAssignment | None:
-    return db.scalar(
-        select(ConversationAssignment).where(
-            ConversationAssignment.tenant_id == tenant_id,
-            ConversationAssignment.conversation_reference == conversation_reference,
-            ConversationAssignment.status == AssignmentStatus.ASSIGNED,
-        )
+    statement = select(ConversationAssignment).where(
+        ConversationAssignment.tenant_id == tenant_id,
+        ConversationAssignment.conversation_reference == conversation_reference,
+        ConversationAssignment.status == AssignmentStatus.ASSIGNED,
     )
+    if lock:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def _cursor(
@@ -317,55 +251,6 @@ def _cursor(
     return db.scalar(statement)
 
 
-def _available_agents(
-    db: Session,
-    *,
-    tenant_id: UUID,
-    eligible_agent_references: tuple[str, ...],
-    presence_fresh_after: datetime,
-    lock: bool,
-) -> list[str]:
-    eligible = _eligible_references(eligible_agent_references)
-    fresh_after = _aware(presence_fresh_after, "presence_fresh_after")
-    statement = (
-        select(InboxAgentPresence)
-        .where(
-            InboxAgentPresence.tenant_id == tenant_id,
-            InboxAgentPresence.agent_reference.in_(eligible),
-            InboxAgentPresence.state == PresenceState.AVAILABLE,
-            InboxAgentPresence.observed_at >= fresh_after,
-            InboxAgentPresence.assignment_capacity > 0,
-        )
-        .order_by(InboxAgentPresence.agent_reference)
-    )
-    if lock:
-        statement = statement.with_for_update()
-    presences = list(db.scalars(statement))
-    if not presences:
-        return []
-    references = tuple(row.agent_reference for row in presences)
-    counts = db.execute(
-        select(
-            ConversationAssignment.agent_reference,
-            func.count(ConversationAssignment.id),
-        )
-        .where(
-            ConversationAssignment.tenant_id == tenant_id,
-            ConversationAssignment.agent_reference.in_(references),
-            ConversationAssignment.status == AssignmentStatus.ASSIGNED,
-        )
-        .group_by(ConversationAssignment.agent_reference)
-    )
-    assigned_counts: dict[str, int] = {}
-    for agent_reference, count in counts:
-        assigned_counts[agent_reference] = count
-    return [
-        row.agent_reference
-        for row in presences
-        if assigned_counts.get(row.agent_reference, 0) < row.assignment_capacity
-    ]
-
-
 def _rotated_agent(
     available: list[str], cursor: InboxRoundRobinCursor | None
 ) -> str | None:
@@ -376,7 +261,7 @@ def _rotated_agent(
     return available[start % len(available)]
 
 
-def _insert_assignment(
+def insert_assignment(
     db: Session,
     *,
     tenant_id: UUID,
@@ -385,6 +270,8 @@ def _insert_assignment(
     agent_reference: str,
     assigned_at: datetime,
     reason: str,
+    event_type: str = "ASSIGNED",
+    actor_reference: str | None = None,
 ) -> ConversationAssignment:
     row = ConversationAssignment(
         tenant_id=tenant_id,
@@ -404,14 +291,15 @@ def _insert_assignment(
                 InboxWorkflowEvent(
                     tenant_id=tenant_id,
                     assignment_id=row.id,
-                    event_type="ASSIGNED",
+                    event_type=event_type,
                     occurred_at=assigned_at,
                     reason=reason,
+                    actor_reference=actor_reference,
                 )
             )
             db.flush()
     except IntegrityError as exc:
-        if _active_assignment(db, tenant_id, conversation_reference) is not None:
+        if active_assignment(db, tenant_id, conversation_reference) is not None:
             raise Conflict("conversation is already assigned") from exc
         raise Conflict("assignment conflicted with operational state") from exc
     return row
@@ -421,17 +309,19 @@ def assign_conversation(
     db: Session, *, scope: TenantScope, command: AssignConversation
 ) -> ConversationAssignment:
     """Assign eligible work while serializing capacity on the presence row."""
-    tenant_id = _tenant(scope)
-    conversation = _required(command.conversation_reference, "conversation reference")
-    agent = _required(command.agent_reference, "agent reference")
-    assigned_at = _aware(command.assigned_at, "assigned_at")
-    eligible = _eligible_references(command.eligible_agent_references)
+    tenant_id = tenant_of(scope)
+    conversation = required_text(
+        command.conversation_reference, "conversation reference"
+    )
+    agent = required_text(command.agent_reference, "agent reference")
+    assigned_at = aware(command.assigned_at, "assigned_at")
+    eligible = eligible_references(command.eligible_agent_references)
     if agent not in eligible:
         raise Conflict("agent is not eligible for the queue")
-    if _active_assignment(db, tenant_id, conversation) is not None:
+    if active_assignment(db, tenant_id, conversation) is not None:
         raise Conflict("conversation is already assigned")
-    queue = _queue(db, tenant_id, command.queue_id)
-    available = _available_agents(
+    queue = require_queue(db, tenant_id, command.queue_id)
+    available = available_agents(
         db,
         tenant_id=tenant_id,
         eligible_agent_references=eligible,
@@ -439,20 +329,13 @@ def assign_conversation(
         lock=True,
     )
     if agent not in available:
-        presence = db.scalar(
-            select(InboxAgentPresence).where(
-                InboxAgentPresence.tenant_id == tenant_id,
-                InboxAgentPresence.agent_reference == agent,
-            )
+        refuse_undispatchable(
+            db,
+            tenant_id=tenant_id,
+            agent_reference=agent,
+            presence_fresh_after=command.presence_fresh_after,
         )
-        if presence is None or _utc_instant(presence.observed_at) < _utc_instant(
-            command.presence_fresh_after
-        ):
-            raise Conflict("agent presence is missing or not fresh")
-        if presence.state != PresenceState.AVAILABLE:
-            raise Conflict("agent is not available for inbox assignment")
-        raise Conflict("agent assignment capacity is exhausted")
-    return _insert_assignment(
+    return insert_assignment(
         db,
         tenant_id=tenant_id,
         conversation_reference=conversation,
@@ -466,9 +349,9 @@ def assign_conversation(
 def release_conversation(
     db: Session, *, scope: TenantScope, command: ReleaseConversation
 ) -> ConversationAssignment:
-    tenant_id = _tenant(scope)
-    released_at = _aware(command.released_at, "released_at")
-    reason = _required(command.reason, "release reason")
+    tenant_id = tenant_of(scope)
+    released_at = aware(command.released_at, "released_at")
+    reason = required_text(command.reason, "release reason")
     row = db.scalar(
         select(ConversationAssignment)
         .where(
@@ -481,7 +364,7 @@ def release_conversation(
         raise Conflict("assignment was not found in the tenant")
     if row.status != AssignmentStatus.ASSIGNED:
         raise Conflict("only an active assignment can be released")
-    if _utc_instant(released_at) < _utc_instant(row.assigned_at):
+    if utc_instant(released_at) < utc_instant(row.assigned_at):
         raise Conflict("release cannot precede assignment")
     row.status = AssignmentStatus.RELEASED
     row.released_at = released_at
@@ -492,6 +375,7 @@ def release_conversation(
             event_type="RELEASED",
             occurred_at=released_at,
             reason=reason,
+            actor_reference=command.actor_reference,
         )
     )
     db.flush()
@@ -502,9 +386,11 @@ def admit_to_queue(
     db: Session, *, scope: TenantScope, command: AdmitToQueue
 ) -> InboxQueueEntry:
     """Admit active work idempotently and allocate position under a queue lock."""
-    tenant_id = _tenant(scope)
-    queue = _queue(db, tenant_id, command.queue_id, lock=True)
-    conversation = _required(command.conversation_reference, "conversation reference")
+    tenant_id = tenant_of(scope)
+    queue = require_queue(db, tenant_id, command.queue_id, lock=True)
+    conversation = required_text(
+        command.conversation_reference, "conversation reference"
+    )
     existing = db.scalar(
         select(InboxQueueEntry)
         .where(
@@ -531,7 +417,7 @@ def admit_to_queue(
         queue_position=(highest or 0) + 1,
         status=QueueEntryStatus.QUEUED,
         entered_at=(
-            _aware(command.entered_at, "entered_at")
+            aware(command.entered_at, "entered_at")
             if command.entered_at is not None
             else datetime.now(UTC)
         ),
@@ -563,7 +449,7 @@ def admit_to_queue(
 def cancel_queue_entry(
     db: Session, *, scope: TenantScope, entry_id: UUID
 ) -> InboxQueueEntry:
-    tenant_id = _tenant(scope)
+    tenant_id = tenant_of(scope)
     row = db.scalar(
         select(InboxQueueEntry)
         .where(InboxQueueEntry.tenant_id == tenant_id, InboxQueueEntry.id == entry_id)
@@ -588,10 +474,10 @@ def next_round_robin_agent(
     presence_fresh_after: datetime,
 ) -> str | None:
     """Inspect the next capacity-safe eligible turn without advancing it."""
-    tenant_id = _tenant(scope)
-    _queue(db, tenant_id, queue_id)
+    tenant_id = tenant_of(scope)
+    require_queue(db, tenant_id, queue_id)
     cursor = _cursor(db, tenant_id, queue_id, lock=False)
-    available = _available_agents(
+    available = available_agents(
         db,
         tenant_id=tenant_id,
         eligible_agent_references=eligible_agent_references,
@@ -607,8 +493,8 @@ def _promote_optional(
     scope: TenantScope,
     command: PromoteFromQueue,
 ) -> ConversationAssignment | None:
-    tenant_id = _tenant(scope)
-    queue = _queue(db, tenant_id, command.queue_id, lock=True)
+    tenant_id = tenant_of(scope)
+    queue = require_queue(db, tenant_id, command.queue_id, lock=True)
     front = db.scalar(
         select(InboxQueueEntry)
         .where(
@@ -623,7 +509,7 @@ def _promote_optional(
     if front is None:
         return None
     cursor = _cursor(db, tenant_id, queue.id, lock=True)
-    available = _available_agents(
+    available = available_agents(
         db,
         tenant_id=tenant_id,
         eligible_agent_references=command.eligible_agent_references,
@@ -634,11 +520,11 @@ def _promote_optional(
     if agent is None:
         return None
     promoted_at = (
-        _aware(command.promoted_at, "promoted_at")
+        aware(command.promoted_at, "promoted_at")
         if command.promoted_at is not None
         else datetime.now(UTC)
     )
-    assignment = _insert_assignment(
+    assignment = insert_assignment(
         db,
         tenant_id=tenant_id,
         conversation_reference=front.conversation_reference,
@@ -678,8 +564,8 @@ def dispatch_queues_fairly(
     db: Session, *, scope: TenantScope, command: DispatchQueues
 ) -> tuple[ConversationAssignment, ...]:
     """Attempt one promotion from every queue in the supplied scheduler cohort."""
-    dispatched_at = _aware(command.dispatched_at, "dispatched_at")
-    fresh_after = _aware(command.presence_fresh_after, "presence_fresh_after")
+    dispatched_at = aware(command.dispatched_at, "dispatched_at")
+    fresh_after = aware(command.presence_fresh_after, "presence_fresh_after")
     queue_ids = [candidate.queue_id for candidate in command.queues]
     if len(queue_ids) != len(set(queue_ids)):
         raise ValueError("dispatch queue candidates must be unique")
@@ -688,7 +574,7 @@ def dispatch_queues_fairly(
             db.scalars(
                 select(InboxQueue)
                 .where(
-                    InboxQueue.tenant_id == _tenant(scope),
+                    InboxQueue.tenant_id == tenant_of(scope),
                     InboxQueue.id.in_(queue_ids),
                     InboxQueue.active.is_(True),
                 )
