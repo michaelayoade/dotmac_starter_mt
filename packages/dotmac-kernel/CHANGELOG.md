@@ -6,6 +6,18 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a71 — UNRELEASED
+
+Allocates the permanent database identity for the product-first physical work
+execution module.
+
+### Added
+
+- `WORK_ORDERS_MIGRATION_OWNER`: owner `work_orders`, schema
+  `mod_workorders`, revision prefix `wo`, and Alembic branch `work_orders`.
+  The allocation lands with the module manifest and first lineage; no empty
+  namespace is reserved ahead of code.
+
 ## 0.1.0a70 — UNRELEASED
 
 Removes the tenant-audit actor compatibility derivation after every known

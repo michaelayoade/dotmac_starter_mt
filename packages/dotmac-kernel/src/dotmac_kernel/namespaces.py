@@ -585,6 +585,19 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-work-orders` — the ELEVENTH allocated installable module. The source
+# is Sub's authoritative physical-execution aggregate; CRM's matching tables
+# are a retiring duplicate, not a second owner. `workorders` is deliberately
+# explicit in catalog dumps, while the two-character `wo` prefix leaves the
+# revision-id budget for readable migration slugs. Tenant plane only: no
+# control-plane product currently executes physical work through this contract.
+WORK_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="work_orders",
+    prefix="wo",
+    branch_label="work_orders",
+    db_schema=module_schema("workorders"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +610,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    WORK_ORDERS_MIGRATION_OWNER,
 )
 
 
@@ -940,6 +954,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "WORK_ORDERS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
