@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from dotmac_media_observations import (
@@ -36,8 +37,13 @@ from dotmac_media_observations import (
     record_entity,
     record_metric,
 )
-from dotmac_media_observations.models import APPEND_ONLY_TABLES, TENANT_TABLES
-from sqlalchemy import create_engine, text
+from dotmac_media_observations.models import (
+    APPEND_ONLY_TABLES,
+    TENANT_TABLES,
+    MetricDefinition,
+    NodeDefinition,
+)
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -385,6 +391,156 @@ def test_concurrent_duplicate_ingest_returns_one_fact_and_two_receipts(
             ).scalar_one()
         assert observation_count == 1
         assert receipt_count == 2
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("declaration_kind", "same_content"),
+    (
+        ("node", True),
+        ("node", False),
+        ("metric", True),
+        ("metric", False),
+    ),
+)
+def test_concurrent_declarations_converge_or_conflict_without_losing_tenant_scope(
+    migrated_media_database: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    declaration_kind: str,
+    same_content: bool,
+) -> None:
+    admin_url, app_user_url = migrated_media_database
+    tenant_id, _ = _seed_tenants(admin_url)
+    engine = create_engine(app_user_url)
+    barrier = threading.Barrier(2)
+    counter_lock = threading.Lock()
+    identity_reads = 0
+    if declaration_kind == "node":
+        target_table_name = "node_definitions"
+        visible_count = select(func.count()).select_from(NodeDefinition)
+        identity_count = visible_count.where(
+            NodeDefinition.tenant_id == tenant_id,
+            NodeDefinition.code == "concurrent_campaign",
+            NodeDefinition.version == 1,
+        )
+    else:
+        target_table_name = "metric_definitions"
+        visible_count = select(func.count()).select_from(MetricDefinition)
+        identity_count = visible_count.where(
+            MetricDefinition.tenant_id == tenant_id,
+            MetricDefinition.code == "concurrent_spend",
+            MetricDefinition.version == 1,
+        )
+    original_scalar = Session.scalar
+
+    def synchronized_scalar(
+        session: Session, statement: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        nonlocal identity_reads
+        result = original_scalar(session, statement, *args, **kwargs)
+        tables = {
+            getattr(table, "name", None)
+            for table in getattr(statement, "get_final_froms", lambda: ())()
+        }
+        if target_table_name not in tables:
+            return result
+        with counter_lock:
+            wait_here = identity_reads < 2
+            identity_reads += 1
+        if wait_here:
+            barrier.wait(timeout=30)
+        return result
+
+    monkeypatch.setattr(Session, "scalar", synchronized_scalar)
+
+    def declare(worker: int) -> dict[str, object]:
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_id)},
+            )
+            session.execute(text("SET LOCAL lock_timeout = '15s'"))
+            session.execute(text("SET LOCAL statement_timeout = '30s'"))
+            label = (
+                "Concurrent declaration"
+                if same_content or worker == 0
+                else "Changed concurrent declaration"
+            )
+            try:
+                if declaration_kind == "node":
+                    row_id = declare_node_type(
+                        session,
+                        NodeTypeDeclaration(
+                            tenant_id=tenant_id,
+                            code="concurrent_campaign",
+                            version=1,
+                            label=label,
+                            traits={"aggregate": True},
+                            declared_by="postgres-concurrency-canary",
+                            declared_at=T0,
+                        ),
+                    ).id
+                else:
+                    row_id = declare_metric(
+                        session,
+                        MetricDefinitionDeclaration(
+                            tenant_id=tenant_id,
+                            code="concurrent_spend",
+                            version=1,
+                            label=label,
+                            value_type=MetricValueType.MONEY,
+                            unit="currency",
+                            semantic=MetricSemantic.SPEND,
+                            declared_by="postgres-concurrency-canary",
+                            declared_at=T0,
+                        ),
+                    ).id
+            except ObservationConflict as exc:
+                scope = session.execute(
+                    text("SELECT app_current_tenant_id()")
+                ).scalar_one()
+                readable = session.scalar(visible_count)
+                session.rollback()
+                return {
+                    "outcome": "conflict",
+                    "code": exc.report.code,
+                    "tenant_scope_intact": (
+                        str(scope) == str(tenant_id) and readable is not None
+                    ),
+                }
+            session.commit()
+            return {"outcome": "declared", "id": row_id}
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(declare, worker) for worker in range(2)]
+            results = [future.result(timeout=90) for future in futures]
+
+        if same_content:
+            assert [result["outcome"] for result in results] == [
+                "declared",
+                "declared",
+            ]
+            assert len({result["id"] for result in results}) == 1
+        else:
+            assert sorted(str(result["outcome"]) for result in results) == [
+                "conflict",
+                "declared",
+            ]
+            conflict = next(
+                result for result in results if result["outcome"] == "conflict"
+            )
+            assert conflict["code"] == "declaration_identity_conflict"
+            assert conflict["tenant_scope_intact"] is True
+
+        with Session(engine) as session:
+            session.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_id)},
+            )
+            count = session.scalar(identity_count)
+            assert count == 1
     finally:
         engine.dispose()
 

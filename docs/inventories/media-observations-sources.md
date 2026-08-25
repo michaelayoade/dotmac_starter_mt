@@ -1,6 +1,6 @@
 # Media-observations product-first source dossier
 
-**Audit date:** 2026-08-18  
+**Audit date:** 2026-08-18
 **Decision:** [ADR-0033](../adr/0033-media-observations-own-provider-reports-not-attribution.md)
 **Package dossier:**
 [`packages/dotmac-media-observations/EXTRACTION.toml`](../../packages/dotmac-media-observations/EXTRACTION.toml)
@@ -54,7 +54,7 @@ on Observer as recorded above.
 |---|---|
 | Product-first source, ownership, tenant-only scope and paused adoption | This dossier, ADR-0033 and `EXTRACTION.toml`; `test_dossier_keeps_adoption_paused_and_attribution_outside`; manifest/allocation assertions in `tests/architecture/test_media_observations_module.py`. |
 | `tenant_id NOT NULL`, tenant-composite identity, internal tenant FKs, forced RLS and append-only online storage | Static migration/model assertions plus `test_every_table_exists_with_forced_rls`, `test_online_role_sees_only_its_tenant` and `test_append_only_grants_and_trigger_refuse_mutation_for_admin` in `tests/test_media_observations_isolation.py`. |
-| Replay idempotency, changed-fingerprint conflict, transport receipts, concurrent duplicate ingest, restatements and deterministic out-of-order projections | Replay/conflict/restatement/out-of-order unit canaries in `tests/unit/test_media_observations.py`; real PostgreSQL arbitration in `test_concurrent_duplicate_ingest_returns_one_fact_and_two_receipts`. |
+| Replay idempotency, changed-fingerprint conflict, transport receipts, concurrent duplicate ingest, concurrent declaration convergence/conflict, restatements and deterministic out-of-order projections | Replay/conflict/restatement/out-of-order unit canaries in `tests/unit/test_media_observations.py`; real PostgreSQL arbitration in `test_concurrent_duplicate_ingest_returns_one_fact_and_two_receipts` and online-role declaration arbitration in `test_concurrent_declarations_converge_or_conflict_without_losing_tenant_scope`. |
 | Aware source/receipt times, half-open periods, exact integral counts, exact money/currency/minor units and explicit ratio provenance | Timestamp/period/value unit canaries in `tests/unit/test_media_observations.py`; PostgreSQL exact-money, non-overlap and integral-column canaries in `tests/test_media_observations_isolation.py`. |
 | Missing parents, cycles, provider archive/deletion, hierarchy/metric drift and projection rebuild/repair | Hierarchy parity, orphan/cycle, deletion-state and rebuild-repair canaries in `tests/unit/test_media_observations.py`. |
 | Complete read provenance, typed invalid/unsupported/conflict reporting and normalized analytics facts | Period-read, analytics-payload and typed-rejection canaries in `tests/unit/test_media_observations.py`. |
@@ -170,7 +170,7 @@ extraction.
 
 ## Integrator and connector boundary
 
-`dotmac-integration` SPI 1.2 is the generic connector contract. Its capability
+`dotmac-integration` SPI 1.3 is the generic connector contract. Its capability
 registry states the division explicitly: the business module declares what a
 capability means, Integration validates and binds it, and a connector plugin
 implements it. `dotmac_integrator` is the independent thin assembly that pins

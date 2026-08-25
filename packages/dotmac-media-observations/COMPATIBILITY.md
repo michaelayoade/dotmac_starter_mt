@@ -34,6 +34,11 @@ public recording functions enforce that rule, including commands whose
 `restates_observation_id` is set directly. Period-metric read windows use aware
 `[start,end)` instants and reject naive or reversed bounds.
 
+Concurrent node and metric declarations are idempotent for the same exact
+declaration fingerprint. Reuse of the same code/version with changed content is
+a typed conflict, and either outcome preserves the caller-owned outer
+transaction and its tenant scope.
+
 Metric decimals must be exactly representable by `NUMERIC(38,18)` and integral
 values by signed 64-bit storage. Generic normalized entity properties use a
 private tagged JSON representation so public reads restore Decimal values without

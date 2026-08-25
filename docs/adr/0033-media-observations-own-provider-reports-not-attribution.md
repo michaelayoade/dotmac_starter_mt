@@ -1,8 +1,8 @@
 # ADR-0033: Media observations own provider reports, not attribution
 
-**Status:** Accepted  
-**Date:** 2026-08-18  
-**Decision owner:** Michael  
+**Status:** Accepted
+**Date:** 2026-08-18
+**Decision owner:** Michael
 **Source dossier:**
 [`media-observations-sources.md`](../inventories/media-observations-sources.md)
 
@@ -139,7 +139,7 @@ dereferences them.
 
 The package publishes a provider-free normalized-observation conformance kit.
 It does not import `dotmac-integration`; an authorized connector separately
-conforms to Integration SPI 1.2 and this domain contract. No real media connector
+conforms to Integration SPI 1.3 and this domain contract. No real media connector
 is certified until Michael names the plugin and its exact release.
 
 ### 8. Adoption is paused, not implied

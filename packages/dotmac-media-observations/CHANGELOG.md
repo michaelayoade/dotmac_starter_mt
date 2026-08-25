@@ -32,6 +32,10 @@
 
 ### Fixed
 
+- Concurrent node and metric declarations now arbitrate inside the kernel-owned
+  savepoint: identical content converges on the stored declaration, changed
+  fingerprints raise a typed conflict, and the caller's tenant transaction
+  remains usable.
 - Every public recording path now validates that a restatement retains its
   installation, source system and entity, hierarchy-child or metric-period
   subject; callers cannot bypass that boundary by setting the link directly.

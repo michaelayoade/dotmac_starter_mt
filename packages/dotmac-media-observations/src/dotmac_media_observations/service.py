@@ -111,19 +111,42 @@ def declare_node_type(db: Session, command: NodeTypeDeclaration) -> NodeDefiniti
         declared_by=command.declared_by,
         declared_at=_utc(command.declared_at),
     )
-    db.add(definition)
+    # Lazy by design: importing dotmac_kernel.db constructs configured engines,
+    # while this package's contracts and clean wheel must import without a DB URL.
+    from dotmac_kernel.db import conflict_savepoint
+
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(definition)
+            db.flush()
     except IntegrityError as exc:
-        raise ObservationConflict(
-            ObservationRejection(
-                code="declaration_identity_conflict",
-                message=(
-                    f"node declaration {command.code!r} v{command.version} "
-                    "conflicts with concurrent stored evidence"
-                ),
+        existing = db.scalar(
+            select(NodeDefinition).where(
+                NodeDefinition.tenant_id == command.tenant_id,
+                NodeDefinition.code == command.code,
+                NodeDefinition.version == command.version,
             )
-        ) from exc
+        )
+        if existing is None:
+            raise ObservationConflict(
+                ObservationRejection(
+                    code="declaration_identity_conflict",
+                    message=(
+                        f"node declaration {command.code!r} v{command.version} "
+                        "conflicts with concurrent stored evidence"
+                    ),
+                )
+            ) from exc
+        try:
+            _require_same_definition(
+                existing.definition_fingerprint,
+                fingerprint,
+                code=command.code,
+                version=command.version,
+            )
+        except ObservationConflict as conflict:
+            raise conflict from exc
+        return existing
     return definition
 
 
@@ -170,19 +193,42 @@ def declare_metric(
         declared_by=command.declared_by,
         declared_at=_utc(command.declared_at),
     )
-    db.add(definition)
+    # See declare_node_type: the mutation belongs inside the savepoint and the
+    # kernel DB import stays lazy so pure package imports remain environment-free.
+    from dotmac_kernel.db import conflict_savepoint
+
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(definition)
+            db.flush()
     except IntegrityError as exc:
-        raise ObservationConflict(
-            ObservationRejection(
-                code="declaration_identity_conflict",
-                message=(
-                    f"metric declaration {command.code!r} v{command.version} "
-                    "conflicts with concurrent stored evidence"
-                ),
+        existing = db.scalar(
+            select(MetricDefinition).where(
+                MetricDefinition.tenant_id == command.tenant_id,
+                MetricDefinition.code == command.code,
+                MetricDefinition.version == command.version,
             )
-        ) from exc
+        )
+        if existing is None:
+            raise ObservationConflict(
+                ObservationRejection(
+                    code="declaration_identity_conflict",
+                    message=(
+                        f"metric declaration {command.code!r} v{command.version} "
+                        "conflicts with concurrent stored evidence"
+                    ),
+                )
+            ) from exc
+        try:
+            _require_same_definition(
+                existing.definition_fingerprint,
+                fingerprint,
+                code=command.code,
+                version=command.version,
+            )
+        except ObservationConflict as conflict:
+            raise conflict from exc
+        return existing
     return definition
 
 
