@@ -345,6 +345,14 @@ class TaxDeterminationSet(Base):
             "minor_units BETWEEN 0 AND 6",
             name="ck_tax_determination_sets_minor_units",
         ),
+        CheckConstraint(
+            "(result_seal_state IS NULL AND result_fingerprint IS NULL) OR "
+            "(result_seal_state = 'building' AND result_fingerprint IS NULL) OR "
+            "(result_seal_state = 'sealed' "
+            "AND length(result_fingerprint) = 68 "
+            "AND substr(result_fingerprint, 1, 4) = 'rv1:')",
+            name="ck_tax_determination_sets_result_seal",
+        ),
         Index(
             "ix_tax_determination_sets_period",
             "tenant_id",
@@ -372,6 +380,11 @@ class TaxDeterminationSet(Base):
     source_ref: Mapped[str] = mapped_column(String(240), nullable=False)
     source_version: Mapped[str] = mapped_column(String(100), nullable=False)
     source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Both columns remain nullable only to preserve immutable a2 rows. tx_0003
+    # gives new rows one transaction-local building -> sealed transition; its
+    # deferred trigger prevents a building row from surviving commit.
+    result_seal_state: Mapped[str | None] = mapped_column(String(16))
+    result_fingerprint: Mapped[str | None] = mapped_column(String(68))
     evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
     counterparty_ref: Mapped[str | None] = mapped_column(String(240))
     supply_ref: Mapped[str | None] = mapped_column(String(240))
