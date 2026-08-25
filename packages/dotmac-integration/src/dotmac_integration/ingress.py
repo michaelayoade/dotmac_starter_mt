@@ -139,6 +139,7 @@ import re
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Final
 from uuid import UUID
@@ -159,6 +160,7 @@ from dotmac_integration.selection import _usable
 from dotmac_integration.spi import (
     Acknowledgement,
     ConnectorMode,
+    InboundDisposition,
     InboundEvent,
     IngressHandler,
     IngressPlugin,
@@ -1064,6 +1066,13 @@ def record_batch(
                 # blanket copy.
                 headers=None,
             )
+            if is_new and event.disposition is InboundDisposition.RECORD_ONLY:
+                receipt.state = "processed"
+                receipt.processed_at = datetime.now(UTC)
+                receipt.consequence_json = {
+                    "kind": "record_only",
+                    "event_type": event.event_type,
+                }
             # Read INSIDE the transaction that produced it. `receipt.id` is
             # populated by the flush `receive_verified` already performed, so
             # this issues no further SQL — and the tuple that leaves this

@@ -94,7 +94,7 @@ jobs:
       # clobbered.
       - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
-      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
+      - run: poetry run pytest tests/unit tests/architecture packages/dotmac-connector-whatsapp/tests -q --cov=app --cov=dotmac_kernel --cov-report=term
 
   integration:
     runs-on: ubuntu-latest

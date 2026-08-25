@@ -81,23 +81,20 @@ guards say so:
 Both carry sensitivity proofs. A comment saying "we don't read scope_json"
 survives the edit that starts reading it; a test does not.
 
-## Durability, honestly stated
+## Durability
 
-The binding is durable because it is derived from the
-:class:`~dotmac_integration.models.ConnectorConfigRevision` — an **immutable,
-digested, operator-established** row that `dispatch.prepare` already pins at
-claim time. Nothing on this path can be changed by a provider, and nothing can
-change mid-flight.
-
-It is deliberately NOT yet its own `capability_destinations` table. That would
-require adding to `models.PLATFORM_TABLES` and a new lineage revision, which
-belong to the owner of the persistence surface. The shape is designed so that
-promotion is a storage change behind :func:`resolve_destination` and not a
-contract change: no caller learns where the row lives.
+`capability_destination_revisions` is append-only control-plane state. The
+product descriptor reconciler adds a revision only when the authenticated
+descriptor digest changes; earlier receipts therefore retain the provenance
+they were prepared against instead of observing a mutable map. Provider input
+is absent from both establishment and reconciliation.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -125,10 +122,14 @@ __all__ = [
     "DestinationProfile",
     "DestinationProfileMissing",
     "LocalScope",
+    "ProductPortDescriptorInvalid",
+    "ProductPortDescriptorSnapshot",
     "UntrustedDestination",
     "corroborate",
     "destination_client",
     "install_destination_profiles",
+    "product_port_descriptor_digest",
+    "reconcile_product_port_descriptor",
     "require_corroborated",
     "require_profile",
     "establish_destination",
@@ -163,6 +164,10 @@ class DestinationProfileMissing(DestinationBindingError):
     """The assembly supplied no authenticated client for this application."""
 
 
+class ProductPortDescriptorInvalid(DestinationBindingError):
+    """A product declaration is malformed, dishonest, or for another route."""
+
+
 @dataclass(frozen=True, slots=True)
 class LocalScope:
     """The DESTINATION's own name for the stream — carried, never interpreted.
@@ -191,6 +196,25 @@ class LocalScope:
 
 
 @dataclass(frozen=True, slots=True)
+class ProductPortDescriptorSnapshot:
+    """Authenticated product-owned port facts, stored as one immutable unit."""
+
+    schema_version: str
+    application: str
+    owner_module: str
+    capability_id: str
+    capability_summary: str
+    contract_version: int
+    destination_binding_id: UUID
+    delivery_path: str
+    mirror_path: str
+    destination_scope: LocalScope
+    activation_state: str
+    source_revision: str
+    descriptor_digest: str
+
+
+@dataclass(frozen=True, slots=True)
 class DestinationBinding:
     """The trusted answer to "where does this land?".
 
@@ -211,9 +235,170 @@ class DestinationBinding:
     scope: LocalScope
     contract_version: int
     destination_revision_id: UUID
+    product_port: ProductPortDescriptorSnapshot | None = None
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"{self.application}/{self.scope} @{self.capability_id}"
+
+
+_DESCRIPTOR_SCHEMA = "dotmac.io/product-port-descriptor/v1"
+_DESCRIPTOR_STATES = frozenset(
+    {"configured_disabled", "enabled", "quarantined", "retired"}
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _descriptor_document(
+    descriptor: ProductPortDescriptorSnapshot,
+) -> dict[str, object]:
+    return {
+        "schema_version": descriptor.schema_version,
+        "application": descriptor.application,
+        "owner_module": descriptor.owner_module,
+        "capability_id": descriptor.capability_id,
+        "capability_summary": descriptor.capability_summary,
+        "contract_version": descriptor.contract_version,
+        "destination_binding_id": descriptor.destination_binding_id,
+        "delivery_path": descriptor.delivery_path,
+        "mirror_path": descriptor.mirror_path,
+        "destination_scope": {
+            "kind": descriptor.destination_scope.kind,
+            "ref": descriptor.destination_scope.ref,
+        },
+        "activation_state": descriptor.activation_state,
+        "source_revision": descriptor.source_revision,
+    }
+
+
+def product_port_descriptor_digest(
+    descriptor: ProductPortDescriptorSnapshot,
+) -> str:
+    """The product and reconciler's canonical descriptor digest."""
+
+    material = json.dumps(
+        _descriptor_document(descriptor),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _require_relative_product_path(path: str, *, field: str) -> None:
+    segments = path.split("/")
+    if (
+        not path.startswith("/")
+        or path.startswith("//")
+        or "\\" in path
+        or "?" in path
+        or "#" in path
+        or any(segment in {".", ".."} for segment in segments)
+    ):
+        raise ProductPortDescriptorInvalid(
+            f"{field} must be a same-origin absolute path without traversal, "
+            "query, or fragment"
+        )
+
+
+def _require_valid_descriptor(descriptor: ProductPortDescriptorSnapshot) -> None:
+    if descriptor.schema_version != _DESCRIPTOR_SCHEMA:
+        raise ProductPortDescriptorInvalid(
+            f"unsupported product-port descriptor {descriptor.schema_version!r}"
+        )
+    if not descriptor.owner_module.strip():
+        raise ProductPortDescriptorInvalid("descriptor owner_module is required")
+    if not descriptor.capability_summary.strip():
+        raise ProductPortDescriptorInvalid("descriptor capability_summary is required")
+    if descriptor.contract_version < 1:
+        raise ProductPortDescriptorInvalid(
+            "descriptor contract_version must be positive"
+        )
+    if descriptor.activation_state not in _DESCRIPTOR_STATES:
+        raise ProductPortDescriptorInvalid(
+            f"unknown descriptor activation state {descriptor.activation_state!r}"
+        )
+    if not _SHA256_RE.fullmatch(descriptor.source_revision):
+        raise ProductPortDescriptorInvalid(
+            "descriptor source_revision must be 64 lowercase hex characters"
+        )
+    _require_relative_product_path(descriptor.delivery_path, field="delivery_path")
+    _require_relative_product_path(descriptor.mirror_path, field="mirror_path")
+    computed = product_port_descriptor_digest(descriptor)
+    if descriptor.descriptor_digest != computed:
+        raise ProductPortDescriptorInvalid(
+            "descriptor_digest does not cover the published product-port facts"
+        )
+
+
+def _product_port_snapshot(
+    row: CapabilityDestinationRevision,
+) -> ProductPortDescriptorSnapshot | None:
+    if row.descriptor_digest is None:
+        return None
+    values = (
+        row.descriptor_schema_version,
+        row.descriptor_owner_module,
+        row.descriptor_capability_summary,
+        row.product_binding_id,
+        row.delivery_path,
+        row.mirror_path,
+        row.product_activation_state,
+        row.descriptor_source_revision,
+    )
+    if any(value is None for value in values):  # database constraint in production
+        raise ProductPortDescriptorInvalid(
+            f"destination revision {row.id} holds an incomplete descriptor snapshot"
+        )
+    return ProductPortDescriptorSnapshot(
+        schema_version=str(row.descriptor_schema_version),
+        application=row.application,
+        owner_module=str(row.descriptor_owner_module),
+        capability_id="",  # filled from the binding by `_destination_binding`
+        capability_summary=str(row.descriptor_capability_summary),
+        contract_version=row.contract_version,
+        destination_binding_id=row.product_binding_id,  # type: ignore[arg-type]
+        delivery_path=str(row.delivery_path),
+        mirror_path=str(row.mirror_path),
+        destination_scope=LocalScope(kind=row.scope_kind, ref=row.scope_ref),
+        activation_state=str(row.product_activation_state),
+        source_revision=str(row.descriptor_source_revision),
+        descriptor_digest=row.descriptor_digest,
+    )
+
+
+def _destination_binding(
+    *,
+    binding: CapabilityBinding,
+    contract: CapabilityContract,
+    established: CapabilityDestinationRevision,
+) -> DestinationBinding:
+    snapshot = _product_port_snapshot(established)
+    if snapshot is not None:
+        snapshot = ProductPortDescriptorSnapshot(
+            schema_version=snapshot.schema_version,
+            application=snapshot.application,
+            owner_module=snapshot.owner_module,
+            capability_id=binding.capability_id,
+            capability_summary=snapshot.capability_summary,
+            contract_version=snapshot.contract_version,
+            destination_binding_id=snapshot.destination_binding_id,
+            delivery_path=snapshot.delivery_path,
+            mirror_path=snapshot.mirror_path,
+            destination_scope=snapshot.destination_scope,
+            activation_state=snapshot.activation_state,
+            source_revision=snapshot.source_revision,
+            descriptor_digest=snapshot.descriptor_digest,
+        )
+        _require_valid_descriptor(snapshot)
+    return DestinationBinding(
+        capability_binding_id=binding.id,
+        capability_id=binding.capability_id,
+        application=established.application,
+        scope=LocalScope(kind=established.scope_kind, ref=established.scope_ref),
+        contract_version=contract.contract_version,
+        destination_revision_id=established.id,
+        product_port=snapshot,
+    )
 
 
 # ── Resolution: durable state in, destination out. No payload anywhere. ─────
@@ -351,6 +536,101 @@ def establish_destination(
     )
 
 
+def reconcile_product_port_descriptor(
+    db: Any,
+    *,
+    capability_binding_id: UUID,
+    descriptor: ProductPortDescriptorSnapshot,
+    registry: CapabilityRegistry,
+    reconciled_by: str | None = None,
+) -> DestinationBinding:
+    """Idempotently project one authenticated product declaration.
+
+    Network retrieval is deliberately absent. The thin assembly reads and
+    authenticates the product endpoint, then gives this transaction a frozen
+    value. Re-running repairs a missing or stale projection; an identical digest
+    appends nothing.
+    """
+
+    from sqlalchemy import func, select
+
+    _require_valid_descriptor(descriptor)
+    binding = db.get(CapabilityBinding, capability_binding_id)
+    if binding is None:
+        raise DestinationNotBound(
+            f"capability binding {capability_binding_id} does not exist; there "
+            "is nothing to reconcile"
+        )
+    installation = db.get(ConnectorInstallation, binding.installation_id)
+    if installation is None:  # pragma: no cover - FK makes this unreachable
+        raise DestinationNotBound(
+            f"capability binding {capability_binding_id} has no installation"
+        )
+    contract = require_declared_for_binding(
+        registry,
+        capability_id=binding.capability_id,
+        connector_key=installation.connector_key,
+    )
+    if descriptor.capability_id != binding.capability_id:
+        raise ProductPortDescriptorInvalid(
+            f"descriptor declares {descriptor.capability_id!r}, but binding "
+            f"{binding.id} carries {binding.capability_id!r}"
+        )
+    if descriptor.application != contract.owner.application:
+        raise ProductPortDescriptorInvalid(
+            f"descriptor application {descriptor.application!r} is not the "
+            f"declared owner {contract.owner.application!r}"
+        )
+    if descriptor.contract_version != contract.contract_version:
+        raise ProductPortDescriptorInvalid(
+            f"descriptor contract version {descriptor.contract_version} does "
+            f"not match {binding.capability_id!r}"
+        )
+
+    current = db.execute(
+        select(CapabilityDestinationRevision)
+        .where(CapabilityDestinationRevision.capability_binding_id == binding.id)
+        .order_by(CapabilityDestinationRevision.revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if (
+        current is not None
+        and current.descriptor_digest == descriptor.descriptor_digest
+    ):
+        return _destination_binding(
+            binding=binding, contract=contract, established=current
+        )
+
+    highest = db.execute(
+        select(func.max(CapabilityDestinationRevision.revision)).where(
+            CapabilityDestinationRevision.capability_binding_id == binding.id
+        )
+    ).scalar()
+    row = CapabilityDestinationRevision(
+        id=uuid4(),
+        capability_binding_id=binding.id,
+        revision=(highest or 0) + 1,
+        application=descriptor.application,
+        scope_kind=descriptor.destination_scope.kind,
+        scope_ref=descriptor.destination_scope.ref,
+        contract_version=descriptor.contract_version,
+        descriptor_schema_version=descriptor.schema_version,
+        descriptor_owner_module=descriptor.owner_module,
+        descriptor_capability_summary=descriptor.capability_summary,
+        product_binding_id=descriptor.destination_binding_id,
+        delivery_path=descriptor.delivery_path,
+        mirror_path=descriptor.mirror_path,
+        product_activation_state=descriptor.activation_state,
+        descriptor_source_revision=descriptor.source_revision,
+        descriptor_digest=descriptor.descriptor_digest,
+        established_by=reconciled_by,
+        reason="reconcile authenticated product-port descriptor",
+    )
+    db.add(row)
+    db.flush()
+    return _destination_binding(binding=binding, contract=contract, established=row)
+
+
 def resolve_destination(
     db: Any,
     *,
@@ -407,13 +687,8 @@ def resolve_destination(
     established = _current_destination(db, binding.id)
     _require_declared_owner(contract, established.application)
 
-    return DestinationBinding(
-        capability_binding_id=binding.id,
-        capability_id=binding.capability_id,
-        application=established.application,
-        scope=LocalScope(kind=established.scope_kind, ref=established.scope_ref),
-        contract_version=contract.contract_version,
-        destination_revision_id=established.id,
+    return _destination_binding(
+        binding=binding, contract=contract, established=established
     )
 
 

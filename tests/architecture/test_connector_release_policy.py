@@ -14,12 +14,14 @@ Three layers, as in the module and adapter lanes, and each fails differently:
 2. `conformance` checks statically what can be checked before installation.
 3. `verify-wheel` runs the shipped SPI kit against the INSTALLED bytes.
 
-**The lane is shut.** `connectors` is `{}` and no connector distribution exists,
-so every proof below plants a synthetic entry rather than pointing at a real
-package. That is deliberate: absence is the safety mechanism, and a guard tested
-only against the entries that happen to exist stops being a guard the moment the
-first one is added. It also means these tests cannot rot into "the lane is
-empty, so everything passes".
+**The lane is shut.** `connectors` is `{}` and no connector distribution is
+publishable. Source packages that are complete before their Integration floor
+exists are named separately in `held_connectors`; a held row is evidence for
+why source exists and never release authority. Every executable release proof
+below still plants a synthetic entry rather than pointing at a real package.
+That is deliberate: absence from `connectors` is the safety mechanism, and a
+guard tested only against entries that happen to exist stops being a guard when
+the first one is added.
 
 **The classification is a shared floor, not the separator.** A connector's
 `EXTRACTION.toml` declares `stateless-protocol-adapter` — the same as an
@@ -689,7 +691,7 @@ def test_the_three_lanes_do_not_overlap() -> None:
     assert not adapters & connectors
 
 
-def test_no_first_party_connector_package_exists_unlisted() -> None:
+def test_no_first_party_connector_package_exists_unaccounted_for() -> None:
     """The path prefix is also a discovery rule. A package under
     `packages/dotmac-connector-*` that is NOT in the allowlist is either a
     connector someone forgot to list or one deliberately held back — and the
@@ -701,8 +703,40 @@ def test_no_first_party_connector_package_exists_unlisted() -> None:
         if path.is_dir()
     }
     listed = set(_policy()["connectors"])
-    assert on_disk - listed == set(), (
-        f"connector packages exist but are unlisted: {sorted(on_disk - listed)}. "
-        "List them in .github/release-connectors.json with their proof, or "
-        "record why they are held back — absence must be a decision, not a gap"
+    held = set(_policy().get("held_connectors", {}))
+    assert not listed & held, "a connector cannot be held and publishable"
+    assert on_disk == listed | held, (
+        "connector package inventory differs from the release decision: "
+        f"on_disk={sorted(on_disk)}, publishable={sorted(listed)}, "
+        f"held={sorted(held)}"
     )
+
+
+def test_a_held_connector_is_blocked_by_a_real_unpublished_floor() -> None:
+    """A held row states an enforceable premise, or it is an exemption.
+
+    The moment the named Integration floor is published, this proof fails and
+    forces one complete decision: promote the package to `connectors`, or
+    remove it. A stale held row may not become a permanent side lane.
+    """
+    policy = _policy()
+    held = policy.get("held_connectors", {})
+    tags = set(_gate().git_tags(PROJECT_ROOT))
+    for distribution, entry in held.items():
+        assert set(entry) == {
+            "package_dir",
+            "integration_floor",
+            "reason",
+            "unblock",
+        }, distribution
+        package = PROJECT_ROOT / entry["package_dir"]
+        declared = tomllib.loads(
+            (package / "pyproject.toml").read_text(encoding="utf-8")
+        )["tool"]["poetry"]
+        assert declared["name"] == distribution
+        assert entry["reason"].strip() and entry["unblock"].strip()
+        floor_tag = f"dotmac-integration-v{entry['integration_floor']}"
+        assert floor_tag not in tags, (
+            f"{distribution}: held premise expired because {floor_tag} exists; "
+            "promote it to the reviewed connectors allowlist or remove it"
+        )

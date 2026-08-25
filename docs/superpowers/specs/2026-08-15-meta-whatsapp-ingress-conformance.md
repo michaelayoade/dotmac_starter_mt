@@ -1,15 +1,19 @@
 # Meta/WhatsApp ingress — capability contract and conformance specification
 
 **Date:** 2026-08-15
-**Status:** Specification only. **No connector is authorized.**
+**Status:** Accepted contract; implementation present, release held on
+`dotmac-integration==0.1.0a6` publication.
 **Authority:** [ADR-0030](../../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
-§ 6 permits *connector dossiers, capability contracts and conformance
-specifications*; it blocks connector implementation. This document and the
-corpus under `tests/fixtures/meta_whatsapp/` are the permitted artefacts.
+§ 6 originally permitted only dossiers, capability contracts and conformance
+specifications. Its 2026-08-17 amendment authorizes the exact connector named
+here; no other provider, mode or capability is implied.
 **Evidence:**
 [`whatsapp-connector-sources.md`](../../inventories/whatsapp-connector-sources.md),
 [`whatsapp-connector-dossier.md`](../../inventories/whatsapp-connector-dossier.md)
-**Executable form:** `tests/unit/test_meta_whatsapp_ingress_conformance.py`
+**Executable forms:** `tests/unit/test_meta_whatsapp_ingress_conformance.py`
+proves the corpus and
+`packages/dotmac-connector-whatsapp/tests/test_connector.py` proves the
+implementation against that same corpus.
 **Also governed by:** [ADR-0024](../../adr/0024-apps-compose-by-synchronizing-data.md)
 §§ 6–7 (a connector translates wire formats and does provider I/O; it never
 imports product code, opens a product database, decides business state, or
@@ -17,10 +21,9 @@ implements its own retry/checkpoint engine) and
 [ADR-0009](../../adr/0009-secrets-are-held-not-dereferenced.md) (a secret is
 held, never dereferenced on a request path).
 
-This is not a plan to build a connector. It is the set of obligations a
-connector must discharge *before* anyone agrees it works — written now, while
-there is no implementation to rationalise around, so the acceptance criteria
-cannot be quietly relaxed to match whatever gets built.
+This is the acceptance contract, written before the implementation so its
+criteria could not be relaxed to match whatever got built. The implementation
+does not supersede it; the package test executes this corpus directly.
 
 Every requirement below carries an id (`WAI-n`) and names the test that binds
 it. A requirement with no test is a preference; this document has none of those.

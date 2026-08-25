@@ -277,7 +277,8 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: `ig_0008` moves when integration's `0.1.0a5` is tagged, and `ea_0002` plus
+#: `ig_0008` and `ig_0009` move when integration's next version is tagged, and
+#: `ea_0002` plus
 #: `ea_0003` when allocation's `0.1.0a5` is. Each move is the same commit that
 #: removes its
 #: distribution's row from `docs/inventories/declared-publication-baseline
@@ -285,7 +286,12 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: whole reason "released" is read from tags and not from a version number
 #: somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset({"ig_0008_platform_audit_log.py"}),
+    "dotmac-integration": frozenset(
+        {
+            "ig_0008_platform_audit_log.py",
+            "ig_0009_product_port_descriptors.py",
+        }
+    ),
     "dotmac-entitlement-allocation": frozenset(
         {"ea_0002_idempotency_ledger.py", "ea_0003_platform_audit_log.py"}
     ),

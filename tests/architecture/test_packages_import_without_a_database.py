@@ -80,6 +80,15 @@ def _import_without_database_url(source: str) -> subprocess.CompletedProcess[str
     # REMOVED, not blanked: a parseable-but-empty DSN could let a lazy engine
     # succeed and hide the defect this test exists to catch.
     env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+    source_roots = [
+        str(package / "src")
+        for package in sorted(PACKAGES_DIR.iterdir())
+        if (package / "src").is_dir()
+    ]
+    inherited = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [*source_roots, *([inherited] if inherited else [])]
+    )
     return subprocess.run(  # noqa: S603
         [sys.executable, "-c", source],
         capture_output=True,

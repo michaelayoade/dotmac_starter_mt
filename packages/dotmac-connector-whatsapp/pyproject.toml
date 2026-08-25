@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "dotmac-connector-whatsapp"
+version = "0.1.0a1"
+description = "Ingress-only Meta WhatsApp connector for the Dotmac Integrator SPI"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_whatsapp", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_whatsapp/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a6 owns record-only evidence and carries provider_event_id from the durable
+# receipt into product delivery. Flooring earlier would split identity between
+# this connector's payload and the engine row.
+dotmac-integration = ">=0.1.0a6"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+meta_whatsapp = "dotmac_connector_whatsapp:PLUGIN"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.15.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

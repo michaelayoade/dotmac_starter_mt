@@ -126,11 +126,15 @@ from dotmac_integration.destination_binding import (
     DestinationProfile,
     DestinationProfileMissing,
     LocalScope,
+    ProductPortDescriptorInvalid,
+    ProductPortDescriptorSnapshot,
     UntrustedDestination,
     corroborate,
     destination_client,
     establish_destination,
     install_destination_profiles,
+    product_port_descriptor_digest,
+    reconcile_product_port_descriptor,
     require_corroborated,
     require_profile,
     resolve_destination,
@@ -314,6 +318,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     Diagnostic,
     DispatchRequest,
+    InboundDisposition,
     InboundEvent,
     IngressHandler,
     IngressPlugin,
@@ -333,7 +338,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -350,6 +355,7 @@ __all__ = [
     "EndpointUnknown",
     "EventIdentityCollision",
     "HandlerUnavailable",
+    "InboundDisposition",
     "InboundEvent",
     "IngressCode",
     "IngressError",
@@ -396,6 +402,8 @@ __all__ = [
     "DestinationProfileMissing",
     "DuplicateCapabilityDeclaration",
     "LocalScope",
+    "ProductPortDescriptorInvalid",
+    "ProductPortDescriptorSnapshot",
     "OrphanCapabilityError",
     "UnknownCapabilityError",
     "UntrustedDestination",
@@ -405,6 +413,8 @@ __all__ = [
     "destination_client",
     "install_capability_registry",
     "install_destination_profiles",
+    "product_port_descriptor_digest",
+    "reconcile_product_port_descriptor",
     "require_corroborated",
     "require_declared_for_binding",
     "require_governable",

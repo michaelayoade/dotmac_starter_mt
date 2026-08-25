@@ -160,13 +160,11 @@ class TransportFailure(DeliveryError):
         self.error_code = error_code
 
 
-# ── The trusted destination (Team 3's contract, structurally) ───────────────
+# ── The trusted destination, read through the delivery seam ─────────────────
 #
-# Named here as PROTOCOLS rather than imported, because
-# `dotmac_integration.destination_binding` is not merged yet. Team 3's frozen
-# `LocalScope` and `DestinationBinding` satisfy these structurally, so the
-# import becomes a one-line change and no field name is guessed twice. The
-# protocols also state exactly which fields delivery is entitled to read.
+# Protocols keep this engine entitled only to the routing fields it consumes;
+# `destination_binding.DestinationBinding` satisfies them structurally. The
+# persistence owner may add provenance fields without widening delivery.
 
 
 @runtime_checkable
@@ -250,6 +248,7 @@ class ReceiptClaim:
     attempt: int
     leased_until: datetime
     destination: TrustedDestination
+    provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
     correlation_id: str
@@ -282,6 +281,7 @@ class ProductRequest:
     request_fingerprint: str
     correlation_id: str
     receipt_id: UUID
+    provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
 
@@ -426,6 +426,7 @@ def idempotency_key_for(*, receipt_id: UUID, destination: TrustedDestination) ->
 def request_fingerprint_for(
     *,
     destination: TrustedDestination,
+    provider_event_id: str,
     event_type: str,
     observation: Mapping[str, object],
 ) -> str:
@@ -448,6 +449,7 @@ def request_fingerprint_for(
                 "ref": destination.scope.ref,
             },
             "contract_version": destination.contract_version,
+            "provider_event_id": provider_event_id,
             "event_type": event_type,
             "observation": observation,
         }
@@ -473,7 +475,7 @@ def require_stable_fingerprint(stored: str | None, computed: str) -> None:
 def build_product_request(claim: ReceiptClaim) -> ProductRequest:
     """Assemble the outbound request from the CLAIM, and only from the claim.
 
-    **This signature is the security property**, in the same sense Team 3's
+    **This signature is the security property**, in the same sense as
     `resolve_destination` is: there is no payload parameter, no header map and
     no application name among its inputs, so no provider-influenced value can
     select or redirect a destination. Everything addressing the product comes
@@ -484,6 +486,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
     """
     fingerprint = request_fingerprint_for(
         destination=claim.destination,
+        provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
     )
@@ -497,6 +500,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
         request_fingerprint=fingerprint,
         correlation_id=claim.correlation_id,
         receipt_id=claim.receipt_id,
+        provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
     )
@@ -613,8 +617,8 @@ def claim_statement(
         f"AND state NOT IN ({_TERMINAL_SQL}) "
         f"AND (leased_until IS NULL OR leased_until < {clock}) "
         f"AND (next_attempt_at IS NULL OR next_attempt_at <= {clock}) "
-        "RETURNING attempt_count, leased_until, event_type, payload_json, "
-        "correlation_id, delivery_fingerprint, capability_binding_id"
+        "RETURNING attempt_count, leased_until, provider_event_id, event_type, "
+        "payload_json, correlation_id, delivery_fingerprint, capability_binding_id"
     )
 
 
@@ -732,6 +736,7 @@ class ReceiptClaims:
             attempt=row.attempt_count,
             leased_until=row.leased_until,
             destination=destination,
+            provider_event_id=row.provider_event_id,
             event_type=row.event_type,
             observation=row.payload_json or {},
             # A receipt with no correlation id of its own is still traceable by

@@ -52,12 +52,12 @@ Here it is ENFORCED rather than only written down. `resolve` refuses an
 after `verify-registry` has installed the exact published version from the index.
 
 This bites today, and that is the point rather than an inconvenience:
-`dotmac-integration` declares `0.1.0a2` while only `0.1.0a1` is tagged. So the
-first connector may floor at `a1` — inheriting a published module whose
-`run_effect_once` raises `TypeError` on its first call — or wait for `a2` to be
-released. It may NOT floor at `a2`, because nothing can install `a2`. A gate
-that let it would produce a wheel whose dependency resolution fails for every
-consumer, discovered at install time by someone who did not write it.
+`dotmac-integration` has published through `0.1.0a4` and currently declares
+`0.1.0a6` (`a5` was never tagged). The first connector consumes a6-only durable
+identity and record-only contracts. It may NOT floor at `a6` until that tag
+exists, because nothing can install it. A gate that let it through would
+produce a wheel whose dependency resolution fails for every consumer,
+discovered at install time by someone who did not write it.
 
 Stdlib only, deliberately: `resolve` and `conformance` run before anything is
 installed. `verify-wheel` runs after, and is the only subcommand that imports

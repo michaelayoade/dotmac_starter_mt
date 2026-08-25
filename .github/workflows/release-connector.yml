@@ -10,10 +10,12 @@ name: Release connector
 #
 # THE ALLOWLIST IS THE LOCK, NOT THIS FILE
 #
-# `.github/release-connectors.json` lists NO connectors, so every dispatch of
-# this workflow fails at the gate. That empty object is the authorization
-# boundary. The existence of this workflow is not authorization and must not be
-# read as any — merging it grants nobody the ability to publish anything.
+# `.github/release-connectors.json` lists NO publishable connectors, so every
+# dispatch of this workflow fails at the gate. Its separate `held_connectors`
+# inventory records source that is waiting on a real release floor and grants
+# no authority. The empty `connectors` object is the authorization boundary.
+# The existence of this workflow is not authorization and must not be read as
+# any — merging it grants nobody the ability to publish anything.
 #
 # It is merged now, shut, because publish permissions, freshness checks and
 # artifact handling are a different review from the first provider
@@ -87,8 +89,8 @@ on:
       connector:
         description: >-
           Which allowlisted connector plugin to publish. The lane is currently
-          SHUT — `.github/release-connectors.json` lists none, so every value
-          fails at the gate.
+          SHUT — `.github/release-connectors.json` lists no publishable entry,
+          so every value fails at the gate. Held source is not an option.
         required: true
         type: string
       version:

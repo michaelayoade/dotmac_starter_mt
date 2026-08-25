@@ -1,8 +1,8 @@
-"""The Meta/WhatsApp ingress conformance kit — executable, connector-free.
+"""The Meta/WhatsApp ingress conformance kit — executable acceptance corpus.
 
-ADR-0030 § 6 permits connector **dossiers, capability contracts and conformance
-specifications**, and blocks connector implementation. This module is the third
-of those: it turns
+ADR-0030 § 6 originally permitted connector **dossiers, capability contracts
+and conformance specifications** while blocking implementation. Its 2026-08-17
+amendment authorizes the exact connector. This module turns
 `docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md` into
 assertions that run today, against a corpus of real Meta request bodies ported
 from `dotmac_sub`, with no connector installed and no network.
@@ -23,9 +23,10 @@ connector cannot satisfy by accident:
   request-digest identity anti-pattern (`meta:{sha256(raw_body)}`, live in Sub
   today) failing in front of the reader.
 
-When the gate in ADR-0030 § 6 opens and a connector distribution is named, its
-`normalize` runs against this same manifest and must produce exactly the
-declared observations. Nothing here needs to change for that to happen.
+The connector's own test suite now runs `normalize` against this same manifest
+and requires the declared observations exactly. The oracle here remains
+connector-independent so an implementation defect cannot redefine its expected
+answer.
 
 ## The reference oracle
 
@@ -41,12 +42,19 @@ import hashlib
 import hmac
 import json
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "meta_whatsapp"
+CONNECTOR_PROJECT = (
+    Path(__file__).resolve().parents[2]
+    / "packages"
+    / "dotmac-connector-whatsapp"
+    / "pyproject.toml"
+)
 MANIFEST: dict[str, Any] = json.loads(
     (FIXTURE_ROOT / "manifest.json").read_text(encoding="utf-8")
 )
@@ -216,21 +224,15 @@ def test_the_authorized_coordinates_are_exact():
     assert MANIFEST["import_package"] == MANIFEST["distribution"].replace("-", "_")
 
 
-def test_the_declared_spi_range_excludes_every_published_integration():
-    """Why this connector cannot be released yet, as arithmetic.
-
-    The connector lane requires an `integration_floor` naming a PUBLISHED
-    `dotmac-integration`. SPI 1.1 arrived in source 0.1.0a2, which is declared
-    and unpublished; the only published release is 0.1.0a1, which implements
-    SPI 1.0. A range of `>=1.1,<2.0` therefore admits no published release, so
-    there is no floor to name — the connector waits for the final alpha rather
-    than flooring on a1.
-    """
+def test_the_connector_waits_for_the_exact_unpublished_a6_floor():
+    """SPI compatibility alone cannot substitute for consumed module behaviour."""
     minimum, below = MANIFEST["spi_range"].lstrip(">=").split(",<")
     assert tuple(int(p) for p in minimum.split(".")) == (1, 1)
     assert tuple(int(p) for p in below.split(".")) == (2, 0)
-    # SPI 1.0 — what the one published release implements — is excluded.
-    assert (1, 0) < (1, 1), "a1's SPI is below the declared minimum"
+    project = tomllib.loads(CONNECTOR_PROJECT.read_text(encoding="utf-8"))
+    assert project["tool"]["poetry"]["dependencies"]["dotmac-integration"] == (
+        ">=0.1.0a6"
+    )
 
 
 def test_no_fixture_carries_credential_shaped_material():

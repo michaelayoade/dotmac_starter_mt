@@ -544,6 +544,26 @@ architecture, not a new business module. It must:
 Until an installation passes connection validation with materialized secrets, a
 connector is not operationally complete regardless of test coverage.
 
+#### Decision amendment — 2026-08-17: first ingress connector authorized
+
+Michael authorizes exactly one connector distribution:
+`dotmac-connector-whatsapp` (import package `dotmac_connector_whatsapp`,
+connector key `meta_whatsapp`). It is an ingress-only
+`stateless-protocol-adapter`, declares only `messaging.receive.v1`, targets SPI
+`>=1.1,<2.0`, and uses the `connector-plugin` release profile. This is not a
+wildcard authorization for Meta Social, outbound WhatsApp, another provider, or
+another capability.
+
+The prerequisite is now real: the independently deployed Integrator installs a
+held `SecretSource`, validates material before enablement, refreshes explicitly,
+keeps the prior working set on refresh failure, and never gives a connector a
+store client. Implementation must port the qualifying Sub WhatsApp ingress
+surface named in `docs/inventories/whatsapp-connector-sources.md`, preserve raw
+body signature verification, keep handshake eligibility separate from POST
+delivery eligibility, emit provider-neutral observations, and leave all inbox
+decisions with Sub. Publication remains gated on a released Integration version
+containing every SPI and persistence contract the connector consumes.
+
 ### 7. Application adoption matrix
 
 “Shared module” means one versioned distribution installed locally by each

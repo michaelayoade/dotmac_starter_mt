@@ -8,18 +8,17 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | **`0.1.0a1`** only (tag `dotmac-integration-v0.1.0a1`), implementing **SPI 1.0** |
-| On `main`, unreleased | `0.1.0a2`, implementing **SPI 1.1** |
+| Released | **`0.1.0a1` through `0.1.0a4`**; SPI 1.0 in `a1`, **SPI 1.1 since `a2`** |
+| On `main`, unreleased | `0.1.0a6` (`a5` was never tagged), still implementing **SPI 1.1** |
 
-`0.1.0a2` has no tag and is not on the index, and **SPI 1.1 is unpublished**. No
-connector anywhere has been built against anything but SPI 1.0, so the only
-compatibility obligation this contract carries is to 1.0's delivery connectors.
-That obligation is discharged by a test, not by this sentence — see
-"SPI 1.0 still works" below.
+SPI 1.1 is a published contract. Its additive ingress disposition in `a6`
+defaults to `deliver`, so existing 1.1 connectors keep their behaviour. SPI 1.0
+delivery connectors remain supported too; that obligation is discharged by a
+test, not by this sentence — see "SPI 1.0 still works" below.
 
-There was never a published SPI 1.1 or 1.2. Two drafts existed on an abandoned
-branch and are collapsed into the single SPI 1.1 described here; version 1.2 is
-unused and available.
+There was never a published SPI 1.2. Two drafts existed on an abandoned branch
+and were collapsed into the single SPI 1.1 published in `0.1.0a2`; version 1.2
+is unused and available.
 
 ## Two version axes, and only one of them is this package's version
 

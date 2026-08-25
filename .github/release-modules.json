@@ -284,6 +284,9 @@
         "nothing, so a wheel that dropped either would install a module whose",
         "prerequisite is declared and never verified — exactly the states a4",
         "and a5 exist to end.",
+        "ig_0009 is the immutable product-port snapshot used by the named",
+        "reconciler; dropping it would leave the assembly with authenticated",
+        "provenance it has nowhere durable to record.",
         "",
         "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
         "ships no link helper that emits DDL into a consuming product's",
@@ -317,7 +320,8 @@
           "dotmac_integration/migrations/versions/ig_0005_receipt_delivery.py",
           "dotmac_integration/migrations/versions/ig_0006_retention.py",
           "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
-          "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py"
+          "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py",
+          "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py"
         ],
         "forbidden_prefixes": [
           "app/",

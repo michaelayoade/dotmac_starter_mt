@@ -140,6 +140,7 @@ module = [
     "dotmac_numbering.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
+    "dotmac_connector_whatsapp.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
 ]
@@ -168,7 +169,7 @@ exclude_dirs = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-pythonpath = ["."]
+pythonpath = [".", "packages/dotmac-connector-whatsapp/src"]
 markers = [
     # Not deselected by default — CI must run these. The marker exists so a
     # developer chasing a fast loop can `-m 'not slow'` deliberately, rather
@@ -191,6 +192,7 @@ root_packages = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_integration",
+    "dotmac_connector_whatsapp",
     "dotmac_auth_oidc",
 ]
 
@@ -251,8 +253,30 @@ source_modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_auth_oidc",
+    "dotmac_connector_whatsapp",
 ]
 forbidden_modules = ["app"]
+
+[[tool.importlinter.contracts]]
+name = "The WhatsApp connector may import only the Integration SPI"
+type = "forbidden"
+source_modules = ["dotmac_connector_whatsapp"]
+allow_indirect_imports = true
+forbidden_modules = [
+    "app",
+    "dotmac_kernel",
+    "dotmac_ui",
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+    "dotmac_application_directory",
+    "dotmac_files",
+    "dotmac_imports",
+    "dotmac_approvals",
+    "dotmac_numbering",
+    "dotmac_auth_oidc",
+]
 
 # The second module makes this contract bite. A module composes with another
 # through the assembly, an htmx-fetched fragment or a service call — never an

@@ -97,8 +97,10 @@
     "     resolved by an installer, so it is not a floor at all.' Here it is",
     "     enforced rather than only written down: `resolve` refuses an",
     "     `integration_floor` with no release tag. This bites TODAY —",
-    "     `dotmac-integration` declares 0.1.0a2 and has published 0.1.0a1, so a",
-    "     connector may currently floor at a1 or wait, and may not floor at a2.",
+    "     `dotmac-integration` has published through 0.1.0a4 and currently",
+    "     declares 0.1.0a6 (`a5` was never tagged). The first connector consumes",
+    "     a6-only receipt identity and record-only contracts, so it must wait and",
+    "     may not pretend a6 is installable before its verified release tag exists.",
     "  5. NO SECRET SHAPE, no persistence, and no private retry/checkpoint",
     "     engine. A connector holds a reference to credential material (ADR-0024",
     "     section 7); it never holds the value, it declares no tables, and it does",
@@ -128,7 +130,11 @@
     "",
     "## Why it is empty",
     "",
-    "No connector distribution exists yet. ABSENCE IS THE SAFETY MECHANISM — the",
+    "No connector distribution is publishable yet. ABSENCE FROM `connectors` IS",
+    "THE SAFETY MECHANISM — the first authorized source package is recorded in",
+    "`held_connectors` until its exact Integration floor has been published.",
+    "A held row is evidence for why source exists; it is never release authority.",
+    "The",
     "rule ADR-0026 section 8 set for `dotmac-approvals` and PR #180 applied to",
     "`dotmac-auth-oidc`: the release entry lands WITH the proof, never ahead of",
     "it.",
@@ -169,6 +175,14 @@
     "entry_point_group": "dotmac_integration.connectors",
     "classification": "stateless-protocol-adapter",
     "package_dir_prefix": "packages/dotmac-connector-"
+  },
+  "held_connectors": {
+    "dotmac-connector-whatsapp": {
+      "package_dir": "packages/dotmac-connector-whatsapp",
+      "integration_floor": "0.1.0a6",
+      "reason": "The connector consumes record-only disposition and durable provider-event identity first delivered by dotmac-integration 0.1.0a6; that version is not published yet.",
+      "unblock": "Publish and verify dotmac-integration 0.1.0a6, then replace this held row with the complete reviewed connectors allowlist entry in the same change that turns the workflow input into an exact choice."
+    }
   },
   "connectors": {}
 }

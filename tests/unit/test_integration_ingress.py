@@ -53,6 +53,7 @@ from dotmac_integration import (
     EndpointUnknown,
     EventSubscription,
     HandlerUnavailable,
+    InboundDisposition,
     InboundEvent,
     InboxReceipt,
     IngressCode,
@@ -1418,6 +1419,61 @@ def test_a_redelivered_batch_is_a_200_of_duplicates(db: Session) -> None:
         )
     assert (outcome.recorded, outcome.duplicates) == (0, 1)
     assert db.query(InboxReceipt).count() == 1
+
+
+def test_record_only_evidence_is_closed_without_entering_product_delivery(
+    db: Session,
+) -> None:
+    event = InboundEvent(
+        provider_event_id="malformed-entry-1",
+        event_type="whatsapp.entry.malformed.v1",
+        payload={"reason_code": "entry_not_object", "locator": "/entry/0"},
+        disposition=InboundDisposition.RECORD_ONLY,
+    )
+    registry = registry_for(IngressFake(events=(event,)))
+    _, _, key = build(db, registry)
+
+    outcome = receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+    )
+
+    assert (outcome.recorded, outcome.duplicates) == (1, 0)
+    receipt = db.query(InboxReceipt).one()
+    assert receipt.state == "processed"
+    assert receipt.processed_at is not None
+    assert receipt.consequence_json == {
+        "kind": "record_only",
+        "event_type": "whatsapp.entry.malformed.v1",
+    }
+
+
+def test_record_only_redelivery_does_not_reopen_the_closed_receipt(db: Session) -> None:
+    event = InboundEvent(
+        provider_event_id="provider-error-1",
+        event_type="whatsapp.error.v1",
+        payload={"reason_code": "provider_error"},
+        disposition=InboundDisposition.RECORD_ONLY,
+    )
+    registry = registry_for(IngressFake(events=(event,)))
+    _, _, key = build(db, registry)
+
+    for _ in range(2):
+        outcome = receive(
+            Uow(db),
+            endpoint=address(key),
+            request=delivery_request(),
+            registry=registry,
+            resolve_secrets=resolver(),
+        )
+
+    assert (outcome.recorded, outcome.duplicates) == (0, 1)
+    receipt = db.query(InboxReceipt).one()
+    assert receipt.state == "processed"
+    assert receipt.attempt_count == 0
 
 
 def test_one_collision_rolls_back_the_whole_batch(db: Session) -> None:

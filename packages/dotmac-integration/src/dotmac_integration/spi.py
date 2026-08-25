@@ -65,15 +65,13 @@ an ``Enum`` with members cannot be subclassed, ``ConnectorMode("invented")``
 raises, and :data:`MODE_PROTOCOLS` is a read-only mapping asserted exhaustive at
 import.
 
-## SPI 1.1 is not published, and neither was anything after 1.0
+## SPI 1.1 is published and remains backward compatible with 1.0
 
-The only release of ``dotmac-integration`` on the index is ``0.1.0a1`` (tag
-``dotmac-integration-v0.1.0a1``), which implements SPI 1.0. ``0.1.0a2`` is
-declared in ``pyproject.toml`` and was never tagged or published; SPI 1.1 ships
-unreleased alongside it. There is consequently **no plugin anywhere built
-against anything but SPI 1.0**, and the only compatibility obligation this
-contract carries is to 1.0's delivery connectors — which is a claim held by a
-test with a real 1.0 fixture connector, not by this paragraph.
+``dotmac-integration`` ``0.1.0a1`` implements SPI 1.0; released versions from
+``0.1.0a2`` implement SPI 1.1. The additive ingress disposition introduced in
+the current source defaults to ``deliver`` and does not change any existing
+connector. SPI 1.0 delivery connectors remain admitted — a claim held by a test
+with a real 1.0 fixture connector, not by this paragraph.
 """
 
 from __future__ import annotations
@@ -97,6 +95,7 @@ __all__ = [
     "DeliveryPlugin",
     "Diagnostic",
     "DispatchRequest",
+    "InboundDisposition",
     "InboundEvent",
     "IngressHandler",
     "IngressPlugin",
@@ -404,6 +403,19 @@ class DispatchRequest:
     idempotency_key: str
 
 
+class InboundDisposition(str, Enum):
+    """Whether a verified provider fact is eligible for product delivery.
+
+    Provider errors, malformed entries and unsupported wire types remain
+    durable transport evidence without becoming product-domain observations.
+    ``RECORD_ONLY`` lets the generic engine close those receipts after writing
+    them; no connector-specific worker or payload convention is involved.
+    """
+
+    DELIVER = "deliver"
+    RECORD_ONLY = "record_only"
+
+
 @dataclass(frozen=True, slots=True)
 class InboundEvent:
     """One normalized provider fact, ready to be recorded.
@@ -415,6 +427,7 @@ class InboundEvent:
     provider_event_id: str
     event_type: str
     payload: dict[str, object]
+    disposition: InboundDisposition = InboundDisposition.DELIVER
 
 
 @dataclass(frozen=True, slots=True, repr=False)

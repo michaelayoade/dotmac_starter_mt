@@ -23,7 +23,7 @@ help: ## Show this help
 lint: ## Ruff lint
 	poetry run ruff check .
 lint-imports: ## Import boundary contracts
-	poetry run lint-imports
+	PYTHONPATH=packages/dotmac-connector-whatsapp/src poetry run lint-imports
 format: ## Ruff format
 	poetry run ruff format .
 KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
@@ -35,11 +35,12 @@ FILES_SRC ?= packages/dotmac-files/src/dotmac_files
 IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
 APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
 INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
+WHATSAPP_CONNECTOR_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
 OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(WHATSAPP_CONNECTOR_SRC) $(OIDC_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(WHATSAPP_CONNECTOR_SRC) $(OIDC_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
@@ -68,7 +69,7 @@ check: lint lint-imports type-check security migration-gate ui-check module-cata
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
-	poetry run pytest tests/unit tests/architecture -q
+	poetry run pytest tests/unit tests/architecture packages/dotmac-connector-whatsapp/tests -q
 test-integration: ## Postgres RLS tests (needs test-db-up)
 	TEST_DATABASE_URL=postgresql+psycopg://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_PLATFORM_DATABASE_URL=postgresql+psycopg://$(TEST_DB_PLATFORM_USER):$(TEST_DB_PLATFORM_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \

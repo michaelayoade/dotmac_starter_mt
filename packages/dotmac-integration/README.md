@@ -12,10 +12,10 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` only** (tag `dotmac-integration-v0.1.0a1`), implementing
-SPI 1.0. `0.1.0a2` and the **SPI 1.1** it carries are on `main` and
-**unreleased** — no tag, nothing on the index. See `CHANGELOG.md`, which is the
-authority on what has and has not shipped.
+**Released: `0.1.0a1` through `0.1.0a4`. Pin `0.1.0a4` until the next release.**
+SPI 1.0 shipped in `a1`; SPI 1.1 has been published since `a2`. `0.1.0a6` is the
+current unreleased source version (`a5` was never tagged). See `CHANGELOG.md`,
+which is the authority on what has and has not shipped.
 
 ## Where to read what
 

@@ -42,6 +42,35 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a6 — UNRELEASED
+
+`0.1.0a5` was never tagged. This version carries its platform-audit
+prerequisite work forward and completes the provider-neutral ingress path.
+
+### Product-owned destination provenance
+
+- `ig_0009_product_port_descriptors` adds one group-complete immutable
+  descriptor snapshot to each destination revision: product binding id,
+  capability owner and summary, same-origin paths, activation state, source
+  revision and canonical digest.
+- `reconcile_product_port_descriptor` is the only writer. An identical digest
+  is idempotent; a changed product declaration appends a revision rather than
+  overwriting the fact used by an earlier receipt.
+- The snapshot is optional during migration and required by the assembly before
+  product delivery. Missing provenance therefore fails closed without making a
+  rolling upgrade impossible.
+
+### Durable provider identity and record-only observations
+
+- `ReceiptClaim` and `ProductRequest` now carry `provider_event_id` from the
+  receipt row. Connectors no longer repeat or reconstruct the identity the
+  ingress engine already owns.
+- `InboundEvent.disposition` distinguishes deliverable observations from
+  `record_only` provider evidence. A record-only receipt closes durably with a
+  typed consequence and a provider redelivery cannot reopen it.
+- `InboundDisposition` is additive to SPI 1.1; existing connectors default to
+  `deliver` and retain their behaviour.
+
 ## 0.1.0a5 — UNRELEASED
 
 ### `platform_audit_log.v1` is declared and verified at deploy

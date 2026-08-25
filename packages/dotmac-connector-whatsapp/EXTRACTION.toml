@@ -1,0 +1,35 @@
+schema_version = 1
+package = "dotmac-connector-whatsapp"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Meta WhatsApp ingress wire translation"
+contract = "Verify Meta's exact raw request, answer its subscription handshake, and normalize messages/statuses into messaging.receive.v1. NOT receipt persistence, retry, checkpoints, destination routing, inbox decisions, or outbound WhatsApp."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_starter_mt",
+]
+source_paths = [
+  "dotmac_sub:app/api/inbox_webhooks.py",
+  "dotmac_sub:app/services/integrations/connectors/whatsapp_runtime.py",
+  "dotmac_sub:app/services/integrations/whatsapp_capability.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_team_inbox_whatsapp_webhook.py",
+  "dotmac_starter_mt:packages/dotmac-connector-whatsapp/tests/test_connector.py",
+]
+inventory_evidence = [
+  "docs/inventories/whatsapp-connector-sources.md",
+  "docs/inventories/external-connector-sources.md",
+  "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator", "dotmac_sub"]
+first_cutover = "Sub's existing Meta WhatsApp messaging.receive.v1 receiver, mirror first."
+shadow_and_drift = "Install the product-owned descriptor in mirror mode; compare normalized message/status envelopes and identity outcomes until zero unexplained drift. A mirror pass claims and settles nothing."
+local_copy_retirement = "After callback cutover and drift acceptance, remove Sub's /webhooks/whatsapp/meta GET/POST adapter, signing/verify material readers and direct retry path; lower the external-connector ratchet in the same change. Sub keeps the provider-neutral Integrator observation port and all inbox decisions."
+next_action = "Release dotmac-integration 0.1.0a6, add this exact package to release-connectors.json with integration_floor 0.1.0a6, publish 0.1.0a1, exact-pin it in dotmac_integrator, then run the named mirror/cutover gates."

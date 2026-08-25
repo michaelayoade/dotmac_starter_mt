@@ -1,7 +1,10 @@
 # WhatsApp/Meta ingress connector — extraction dossier
 
-Dated 2026-08-15. **Pre-registered**: this is an `EXTRACTION.toml` written
-before the package it describes is allowed to exist.
+Dated 2026-08-15. **Pre-registered at creation; implemented 2026-08-17.** This
+was the `EXTRACTION.toml` contract before the package was allowed to exist. The
+authoritative current copy now lives at
+`packages/dotmac-connector-whatsapp/EXTRACTION.toml`; this record preserves the
+pre-implementation reasoning.
 
 [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
 § 6 blocks connector implementation and permits *dossiers, capability contracts
@@ -22,7 +25,16 @@ over the corpus in `tests/fixtures/meta_whatsapp/`.
 
 ---
 
-## 0. Authorization state — read this before writing any code
+## Current state — 2026-08-17
+
+ADR-0030's dated amendment authorizes the exact coordinates below. The
+Integrator secret resolver and ingress edge are implemented, Integration is
+released through a4, and the connector implementation passes the fixture
+corpus. Publication remains mechanically held until a6 — the first release
+carrying durable provider identity and record-only evidence — has been
+published and verified. The original gate snapshot follows as history.
+
+## 0. Original authorization state — 2026-08-15 snapshot
 
 | Gate | State on 2026-08-15 |
 |---|---|

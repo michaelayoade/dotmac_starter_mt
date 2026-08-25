@@ -770,6 +770,81 @@ def test_a_route_is_not_reachable_by_the_tenant_application_role(
     )
 
 
+def test_a_product_descriptor_snapshot_is_group_complete_in_postgres(
+    migrated_scratch: tuple[str, str], request: pytest.FixtureRequest
+) -> None:
+    """A partial provenance record must be impossible through direct SQL.
+
+    Unit tests prove the reconciler's decision. This proves the database cannot
+    retain a digest without the facts it claims to cover — the failure shape a
+    different writer or interrupted manual repair would otherwise create.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    revision_id = uuid.uuid4()
+    product_binding_id = uuid.uuid4()
+    with engine.begin() as conn:
+        _, binding_id = _installation_and_binding(conn, request)
+        with pytest.raises(IntegrityError):
+            with conn.begin_nested():
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_intg.capability_destination_revisions ("
+                        "id, capability_binding_id, revision, application, "
+                        "scope_kind, scope_ref, contract_version, descriptor_digest) "
+                        "VALUES (:id, :binding, 1, 'sub', 'inbox', 'support', 1, "
+                        ":digest)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "binding": binding_id,
+                        "digest": "a" * 64,
+                    },
+                )
+
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.capability_destination_revisions ("
+                "id, capability_binding_id, revision, application, scope_kind, "
+                "scope_ref, contract_version, descriptor_schema_version, "
+                "descriptor_owner_module, descriptor_capability_summary, "
+                "product_binding_id, delivery_path, mirror_path, "
+                "product_activation_state, descriptor_source_revision, "
+                "descriptor_digest) VALUES ("
+                ":id, :binding, 1, 'sub', 'inbox', 'support', 1, :schema, "
+                ":owner, :summary, :product_binding, :delivery, :mirror, "
+                "'configured_disabled', :source_revision, :digest)"
+            ),
+            {
+                "id": revision_id,
+                "binding": binding_id,
+                "schema": "dotmac.io/product-port-descriptor/v1",
+                "owner": "communications.team_inbox_integrator_envelope",
+                "summary": "Inbound provider observations",
+                "product_binding": product_binding_id,
+                "delivery": f"/api/v1/integration/observations/{product_binding_id}",
+                "mirror": (
+                    f"/api/v1/integration/observations/{product_binding_id}/mirror"
+                ),
+                "source_revision": "b" * 64,
+                "digest": "c" * 64,
+            },
+        )
+        persisted = conn.execute(
+            text(
+                "SELECT product_binding_id, product_activation_state "
+                "FROM mod_intg.capability_destination_revisions WHERE id=:id"
+            ),
+            {"id": revision_id},
+        ).one()
+    engine.dispose()
+
+    assert persisted.product_binding_id == product_binding_id
+    assert persisted.product_activation_state == "configured_disabled"
+
+
 def test_the_unique_index_is_the_one_the_mint_retry_depends_on(
     migrated_scratch: tuple[str, str],
 ) -> None:

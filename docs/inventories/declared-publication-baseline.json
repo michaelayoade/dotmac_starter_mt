@@ -68,9 +68,14 @@
       "reason": "AWAITING REVIEW AND DISPATCH. a68 names and verifies platform_audit_log.v1 and hardens public.platform_audit_events to an append-only online-role posture. It must be published before either consumer version can be released. Remove this row only in the change that verifies and tags dotmac-kernel-v0.1.0a68."
     },
     "dotmac-integration": {
-      "declared": "0.1.0a5",
+      "declared": "0.1.0a6",
       "state": "declared-unpublished",
-      "reason": "AWAITING KERNEL a68 AND REVIEW. a5 declares platform_audit_log.v1 and verifies it in the new DDL-free ig_0008 revision. Its floor is >=0.1.0a68, so release must follow the verified kernel publication. This is NOT to be repaired by editing the version down. Remove this row only in the change that verifies and tags dotmac-integration-v0.1.0a5."
+      "reason": "AWAITING KERNEL a68, MERGE AND REVIEW. a6 carries a5's platform_audit_log.v1 prerequisite plus ig_0009 product-owned descriptor snapshots, durable provider-event identity and record-only ingress evidence. Its floor is >=0.1.0a68, so release must follow the verified kernel publication. This is NOT to be repaired by editing the version down. Remove this row only in the change that verifies and tags dotmac-integration-v0.1.0a6."
+    },
+    "dotmac-connector-whatsapp": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "INTENTIONALLY HELD. The authorized source implementation consumes dotmac-integration>=0.1.0a6, which is not published yet. It is recorded under release-connectors.json held_connectors and cannot be dispatched through the release workflow. After a6 is verified and tagged, replace the held row with the complete reviewed allowlist entry, publish this version once, and remove this ledger row in that release change; never lower its Integration floor to make the resolver pass."
     },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
