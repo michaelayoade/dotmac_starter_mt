@@ -5,6 +5,38 @@ package follows [Semantic Versioning](https://semver.org). Pre-1.0 (`0.x`, incl.
 this alpha) the surface is still settling — a `0.MINOR` bump may carry breaking
 changes, each called out here.
 
+## Release state — read this before pinning
+
+`0.1.0a1` is published. Its peeled tag
+`dotmac-commercial-agreements-v0.1.0a1` resolves to exact revision
+`fead57bc93d6551450f5e6ae1c9de1296e27b0ae`.
+
+`0.1.0a2` is declared and unreleased. Source presence is not registry evidence;
+Vendor remains authoritative on its exact a1 pin until a2 has passed the
+protected release workflow and Vendor deliberately adopts that immutable
+artifact.
+
+## 0.1.0a2 — 2026-08-25 (unreleased)
+
+### Added
+
+- `AgreementPeriod.end_exclusive` and `AgreementView.end_exclusive`, both
+  derived from the stored inclusive `expiry_date` by the one public
+  `derive_end_exclusive` rule. No date column or lifecycle transition changed.
+- `list_agreements`, a read-only, bounded UUID-keyset reader over the complete
+  platform agreement estate. It returns frozen `AgreementPage` and
+  `AgreementView` values with eagerly materialized promised lines, never ORM
+  rows or lazy loaders.
+
+### Compatibility
+
+- `expiry_date` remains inclusive exactly as it was in a1: the agreement is in
+  term through that date and becomes expiry-eligible on `end_exclusive`.
+- `date.max` remains a valid stored inclusive expiry. Asking for an exclusive
+  boundary beyond it raises typed `AgreementBoundaryError`; it does not wrap or
+  silently become open-ended.
+- There is no schema or migration change in this release.
+
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of the vendor control plane's

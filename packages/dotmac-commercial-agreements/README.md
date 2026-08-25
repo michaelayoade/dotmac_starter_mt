@@ -56,7 +56,7 @@ from dotmac_commercial_agreements import (
     AgreementPeriod, ApprovalEvidence, ActivationEvidence,
     CommercialTerms, DraftCommand, LineInput,
     ProposeCommand, ApproveCommand, ActivateCommand,
-    open_draft, propose, approve, activate,
+    open_draft, propose, approve, activate, list_agreements,
 )
 
 view = open_draft(
@@ -86,7 +86,42 @@ view = approve(db, ApproveCommand("cmd-3", view.id, ApprovalEvidence(
     policy_code="commercial.oem", policy_version=3,
     decision_ref="apr-9f2…", content_digest=view.content_hash, decided_at=...,
 )))
+
+# expiry_date remains inclusive; this is the first date outside the term.
+assert view.end_exclusive == date(2027, 9, 1)
+
+# Enumerate the owner estate without leaking ORM rows or using moving offsets.
+page = list_agreements(db, limit=100)
+while page.items:
+    consume(page.items)
+    if page.next_after is None:
+        break
+    page = list_agreements(db, after=page.next_after, limit=100)
 ```
+
+## Period boundary
+
+`expiry_date` is inclusive and remains so for compatibility with a1 and the
+existing lifecycle guard: an agreement ending on 31 August is live throughout
+31 August. `AgreementPeriod.end_exclusive` and `AgreementView.end_exclusive`
+derive 1 September for consumers using half-open ranges. The inclusive value is
+the stored authority; `end_exclusive` is derived and adds no column or writer.
+
+`date.max` can still be stored as an inclusive expiry. Since the following date
+cannot be represented, deriving its exclusive boundary raises
+`AgreementBoundaryError` rather than wrapping or turning a finite agreement
+into an open-ended one.
+
+## Estate inspection
+
+`list_agreements` is the public owner read for bounded full-estate inspection.
+It orders by agreement UUID, accepts the preceding page's `next_after`, probes
+at most one row beyond the requested limit, and caps pages at
+`MAX_AGREEMENT_PAGE_SIZE`. The result contains frozen values with their lines
+already materialized; it carries no session, ORM row, or lazy loader. The
+cursor is a traversal boundary, not a snapshot watermark: a backfill that races
+new writes still needs an assembly-owned sealed-watermark/parity gate before
+cutover.
 
 ## Composition
 
@@ -114,6 +149,7 @@ silently mis-parsing.
 
 ## Status
 
-**Built and validated, not adopted.** No product runs it yet. See
-`EXTRACTION.toml`'s `first_cutover` for what adoption requires, including the
-data-bearing migration obligations the vendor cutover owes.
+**a1 is published and adopted by the Vendor control plane; a2 is source-only
+and unreleased.** The a2 reader and derived boundary do not move authority,
+change Vendor's exact pin, or claim that Vendor has adopted them. See
+`EXTRACTION.toml` for the immutable a1 adoption evidence and next gate.
