@@ -734,14 +734,9 @@ class WebSurfaceRegistry:
         facet_values = list(facets)
         has_legacy = any(manifest.web_routers for manifest in manifests)
         if has_legacy and not facet_values:
-            facet_values.append(
-                WebFacetMount(
-                    code="staff_admin",
-                    url_prefix="/admin",
-                    # Jinja template declaration, not subprocess shell execution.
-                    shell=TemplateRef("layouts/admin.html"),  # nosec B604
-                    navigation_regions=(NavigationRegion("primary"),),
-                )
+            raise UnknownFacetError(
+                "legacy web modules require the assembly to explicitly declare "
+                "a secured staff_admin facet"
             )
         self._facets = self._unique_facets(facet_values)
         self._profiles = self._unique_profiles(authentication_profiles)
@@ -776,15 +771,27 @@ class WebSurfaceRegistry:
 
         surfaces: list[RegisteredWebSurface] = []
         staff = self._facets.get("staff_admin")
+        if has_legacy:
+            if staff is None:
+                raise UnknownFacetError(
+                    "legacy web modules require an explicit staff_admin facet"
+                )
+            if (
+                staff.authentication_profile is None
+                or staff.admission_permission is None
+            ):
+                raise WebSurfaceError(
+                    "legacy staff_admin composition requires both an "
+                    "authentication profile and an admission permission; the "
+                    "compatibility adapter never infers an authorization policy"
+                )
         for manifest in manifests:
             if manifest.web_surfaces:
                 for contribution in manifest.web_surfaces:
                     surfaces.append(self._register_new(manifest.code, contribution))
             if manifest.web_routers:
-                if staff is None:
-                    raise UnknownFacetError(
-                        f"legacy web module {manifest.code!r} requires staff_admin"
-                    )
+                if staff is None:  # pragma: no cover - guarded once above
+                    raise UnknownFacetError("legacy web module requires staff_admin")
                 surfaces.append(_legacy_surface(manifest, staff, ui_contract_version))
         for owner, contribution in built_in_surfaces:
             _validate_code(owner, field_name="built-in surface owner")

@@ -30,7 +30,19 @@ here.
 ### Changed
 
 - The module contract advances to generation 2; generation 1 remains supported
-  for the legacy browser declaration during migration.
+  for the legacy browser declaration during migration. An omitted version now
+  infers generation 1 when legacy `web_routers`/`nav` are present, while v2 and
+  headless declarations infer the current generation; explicit versions remain
+  authoritative.
+- Legacy browser declarations require an assembly-declared `staff_admin` facet
+  with both authentication and admission permission. The compatibility adapter
+  no longer synthesizes an unsecured fallback. The kernel's pre-existing,
+  already-secured platform UI retains a bounded compatibility facet when an
+  assembly has not yet declared `platform_admin`; an explicit facet takes
+  precedence.
+- A disabled dashboard feature no longer leaves the staff facet pointing at its
+  absent landing route; `DISABLED_FEATURES=web` drops the dashboard without
+  failing application construction.
 - Template security and full-page/fragment governance now derive their roots
   from the composed assembly and v2 surface packages instead of a fixed list of
   admin-directory globs.
@@ -55,6 +67,13 @@ here.
   A raw CSP override cannot discard active typed capability requirements.
 - Browser platform logout now revokes its server-side `PlatformSession` before
   clearing the assembly-declared cookie.
+- `require_csrf` now treats missing `CSRFMiddleware` state as a configuration
+  error instead of silently disabling validation. The composed-route
+  architecture canary also fails if it scans zero unsafe browser routes.
+- Raw CSP compatibility values must retain every computed baseline directive
+  and may only remove sources even when no typed browser requirement is active;
+  partial policies, new directives and widened sources fail application
+  construction.
 
 ## 0.1.0a96 — 2026-08-25
 

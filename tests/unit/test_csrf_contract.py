@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from dotmac_kernel.config import Settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.middleware.csrf import (
@@ -38,6 +39,18 @@ def _app(*, production: bool = False) -> FastAPI:
         session_cookie_names=("access_token",),
     )
     return app
+
+
+def test_protected_route_fails_loudly_without_csrf_middleware() -> None:
+    app = FastAPI()
+
+    @app.get("/form", dependencies=(Depends(require_csrf),))
+    def form() -> dict[str, bool]:
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        with pytest.raises(RuntimeError, match="CSRFMiddleware"):
+            client.get("/form")
 
 
 def test_pre_auth_unsafe_request_without_any_cookie_is_rejected() -> None:

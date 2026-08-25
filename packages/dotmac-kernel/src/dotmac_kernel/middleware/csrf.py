@@ -217,12 +217,19 @@ async def require_csrf(request: Request) -> None:
     """Validate header or hidden-form proof on every unsafe browser request."""
 
     request.state.csrf_required = True
-    if request.method in SAFE_METHODS or not getattr(
-        request.state, "csrf_enabled", False
-    ):
+    enabled = getattr(request.state, "csrf_enabled", None)
+    if not isinstance(enabled, bool):
+        raise RuntimeError(
+            "CSRF-protected route requires CSRFMiddleware in the application stack"
+        )
+    if not enabled:
         return
     signer = getattr(request.state, "csrf_signer", None)
-    cookie_name = getattr(request.state, "csrf_cookie_name", CSRF_COOKIE)
+    cookie_name = getattr(request.state, "csrf_cookie_name", None)
+    if not isinstance(signer, CSRFTokenSigner) or not isinstance(cookie_name, str):
+        raise RuntimeError("CSRFMiddleware did not install its validation state")
+    if request.method in SAFE_METHODS:
+        return
     cookie_token = request.cookies.get(cookie_name)
     supplied = request.headers.get(CSRF_HEADER)
     if supplied is None:
@@ -230,8 +237,7 @@ async def require_csrf(request: Request) -> None:
         value = form.get(CSRF_FORM_FIELD)
         supplied = str(value) if value is not None else None
     if (
-        signer is None
-        or not cookie_token
+        not cookie_token
         or not supplied
         or not _valid_request_provenance(request)
         or not hmac.compare_digest(cookie_token, supplied)

@@ -96,8 +96,11 @@ if TYPE_CHECKING:
 KERNEL_MODULE_CONTRACT_VERSION: Final[int] = 2
 # Contract 1 is the bounded compatibility generation for absolute
 # ``web_routers`` + path-based ``nav``.  Contract 2 replaces that anonymous
-# surface with typed ``web_surfaces``.  Both load during the migration window;
-# new manifests default to 2 and may not author the legacy shape.
+# surface with typed ``web_surfaces``.  Both load during the migration window.
+# An omitted version is inferred from the authored shape: legacy browser fields
+# mean 1, while v2 surfaces and headless manifests mean the current generation.
+# This private sentinel never survives ``ModuleManifest.__post_init__``.
+_INFER_MODULE_CONTRACT_VERSION: Final[int] = -1
 SUPPORTED_MODULE_CONTRACT_VERSIONS: Final[frozenset[int]] = frozenset({1, 2})
 
 # The version recorded for a module adapted from a `FeatureManifest`, which
@@ -146,7 +149,7 @@ class ModuleManifest:
 
     code: str
     version: str
-    contract_version: int = KERNEL_MODULE_CONTRACT_VERSION
+    contract_version: int = _INFER_MODULE_CONTRACT_VERSION
     # Module codes that must be installed (and, at mount time, enabled) for this
     # module to work. Edges, not imports: modules still never import each other.
     dependencies: Sequence[str] = field(default_factory=tuple)
@@ -257,6 +260,12 @@ class ModuleManifest:
         if not self.version:
             raise ModuleRegistryError(
                 f"module {self.code!r} requires a non-empty `version`"
+            )
+        if self.contract_version == _INFER_MODULE_CONTRACT_VERSION:
+            object.__setattr__(
+                self,
+                "contract_version",
+                1 if self.web_routers or self.nav else KERNEL_MODULE_CONTRACT_VERSION,
             )
         for name in (
             "dependencies",

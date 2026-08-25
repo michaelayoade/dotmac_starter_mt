@@ -19,10 +19,13 @@ from typing import cast
 
 import pytest
 from dotmac_kernel import (
+    AuthenticationProfileBinding,
     BrowserCapabilityProvision,
     BrowserCapabilityRequirement,
     BrowserSecurityRequirement,
+    BrowserSessionPolicy,
     ModuleManifest,
+    NavigationRegion,
     NavItem,
     ProductAssemblySpec,
     ProductSecurityPolicy,
@@ -38,11 +41,18 @@ from dotmac_kernel.app_factory import (
 )
 from dotmac_kernel.deps import require_capability, require_permission
 from dotmac_kernel.features import FeatureManifest
+from dotmac_kernel.middleware.security_headers import _STRICT_CSP
 from dotmac_kernel.modules import UNVERSIONED
+from dotmac_kernel.permissions import PermissionSpec
+from dotmac_kernel.web_deps import TENANT_COOKIE_AUTHENTICATION
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
+
+_TIGHTER_CSP = _STRICT_CSP.replace(
+    "img-src 'self' data: https:", "img-src 'self' data:"
+)
 
 
 def _paths(app) -> set[str]:
@@ -51,6 +61,33 @@ def _paths(app) -> set[str]:
 
 def _has_static_mount(app) -> bool:
     return any(isinstance(r, Mount) and r.path == "/static" for r in app.routes)
+
+
+def _secured_legacy_web_kwargs(
+    permission: str = "web.portal.staff.access",
+) -> dict[str, object]:
+    """Explicit security context required by the contract-v1 web adapter."""
+
+    return {
+        "ui_contract_version": 1,
+        "web_facets": (
+            WebFacetMount(
+                code="staff_admin",
+                url_prefix="/admin",
+                shell=TemplateRef("layouts/admin.html"),
+                authentication_profile="staff_session",
+                admission_permission=permission,
+                navigation_regions=(NavigationRegion("primary"),),
+            ),
+        ),
+        "authentication_profiles": (
+            AuthenticationProfileBinding(
+                code="staff_session",
+                provider=TENANT_COOKIE_AUTHENTICATION,
+                session=BrowserSessionPolicy(cookie_name="access_token"),
+            ),
+        ),
+    }
 
 
 def test_spec_is_frozen_and_collections_immutable():
@@ -81,6 +118,11 @@ def test_empty_assembly_boots_to_kernel_surface_only():
     # Platform AUTH is always present (kernel surface, mounted directly).
     assert "/platform/auth/login" in paths
     assert "/platform/auth/logout" in paths
+    # The pre-facet secured platform UI remains available through the bounded
+    # kernel compatibility facet; an upgrade must not silently remove it.
+    assert "/platform" in paths
+    platform_facet = app.state.web_surface_registry.facet("platform_admin")
+    assert platform_facet.authentication_profile == "kernel_platform_session"
     # No feature routes at all — including /platform/tenants, which is the
     # `tenants` FEATURE (assembly), not the kernel platform surface.
     assert "/platform/tenants" not in paths
@@ -122,16 +164,41 @@ def test_web_enabled_false_drops_web_but_keeps_json_api():
     assert any(p.startswith("/parties") for p in paths)
 
     web_app = create_app(
-        ProductAssemblySpec(name="web", modules=manifest_modules, web_enabled=True)
+        ProductAssemblySpec(
+            name="web",
+            modules=manifest_modules,
+            web_enabled=True,
+            **_secured_legacy_web_kwargs(),
+        )
     )
     assert _has_static_mount(web_app)
+
+
+def test_legacy_web_module_without_a_secured_staff_facet_fails_the_boot():
+    router = APIRouter(prefix="/admin")
+
+    @router.get("/legacy")
+    def legacy() -> dict[str, bool]:
+        return {"ok": True}
+
+    manifest = ModuleManifest(
+        code="legacy",
+        version="1.0.0",
+        web_routers=(router,),
+    )
+
+    with pytest.raises(ValueError, match="explicit staff_admin facet"):
+        create_app(ProductAssemblySpec(name="unsafe-legacy", modules=(manifest,)))
 
 
 def test_disabled_module_routes_are_absent():
     modules = _reference_modules()
     app = create_app(
         ProductAssemblySpec(
-            name="d", modules=modules, disabled_modules=frozenset({"parties"})
+            name="d",
+            modules=modules,
+            disabled_modules=frozenset({"parties"}),
+            **_secured_legacy_web_kwargs(),
         )
     )
     paths = _paths(app)
@@ -207,7 +274,7 @@ def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch)
         ProductAssemblySpec(
             name="secured-product",
             security_policy=ProductSecurityPolicy(
-                content_security_policy="default-src 'none'",
+                content_security_policy=_TIGHTER_CSP,
                 cross_origin_opener_policy="same-origin",
                 cross_origin_resource_policy="same-origin",
             ),
@@ -217,7 +284,7 @@ def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch)
     with TestClient(app) as client:
         response = client.get("/health")
 
-    assert response.headers["content-security-policy"] == "default-src 'none'"
+    assert response.headers["content-security-policy"] == _TIGHTER_CSP
     assert response.headers["cross-origin-opener-policy"] == "same-origin"
     assert response.headers["cross-origin-resource-policy"] == "same-origin"
 
@@ -225,20 +292,29 @@ def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch)
 def test_environment_csp_overrides_the_product_default(monkeypatch):
     from dotmac_kernel.app_factory import settings
 
-    monkeypatch.setattr(settings, "content_security_policy", "script-src 'self'")
+    monkeypatch.setattr(settings, "content_security_policy", _TIGHTER_CSP)
     app = create_app(
         ProductAssemblySpec(
             name="secured-product",
-            security_policy=ProductSecurityPolicy(
-                content_security_policy="default-src 'none'"
-            ),
+            security_policy=ProductSecurityPolicy(content_security_policy=_STRICT_CSP),
         )
     )
 
     with TestClient(app) as client:
         response = client.get("/health")
 
-    assert response.headers["content-security-policy"] == "script-src 'self'"
+    assert response.headers["content-security-policy"] == _TIGHTER_CSP
+
+
+def test_create_app_rejects_an_unsafe_partial_raw_csp(monkeypatch):
+    from dotmac_kernel.app_factory import settings
+
+    monkeypatch.setattr(
+        settings, "content_security_policy", "script-src 'unsafe-eval' *"
+    )
+
+    with pytest.raises(ValueError, match="raw CSP override"):
+        create_app(ProductAssemblySpec(name="unsafe-csp"))
 
 
 def test_product_security_policy_rejects_header_injection():
@@ -414,7 +490,9 @@ def test_health_does_not_disclose_the_module_inventory():
     """Public `/health` is liveness ONLY. Exposing what is installed there
     would hand an unauthenticated caller a deployment fingerprint; the
     inventory is reached through app state / an authenticated surface."""
-    app = create_app(ProductAssemblySpec(name="h", modules=_reference_modules()))
+    app = create_app(
+        ProductAssemblySpec(name="h", modules=_reference_modules(), web_enabled=False)
+    )
     with TestClient(app) as client:
         body = client.get("/health").json()
     assert body == {"status": "ok"}
@@ -424,7 +502,10 @@ def test_disabled_module_is_installed_but_not_enabled_in_the_inventory():
     modules = _reference_modules()
     app = create_app(
         ProductAssemblySpec(
-            name="d", modules=modules, disabled_modules=frozenset({"parties"})
+            name="d",
+            modules=modules,
+            disabled_modules=frozenset({"parties"}),
+            web_enabled=False,
         )
     )
     by_code = {e.code: e for e in app.state.module_inventory}
@@ -506,13 +587,14 @@ def test_mixed_feature_and_module_assembly_boots():
                 ModuleManifest(
                     code="modern",
                     version="1.2.0",
-                    contract_version=1,
                     dependencies=("legacy",),
                     api_routers=[modern_api],
                     web_routers=[modern_web],
                     nav=[NavItem("Modern", "/admin/modern")],
+                    permissions=(PermissionSpec("mixed.portal.access"),),
                 ),
             ],
+            **_secured_legacy_web_kwargs("mixed.portal.access"),
         )
     )
     with TestClient(app) as client:
@@ -550,11 +632,19 @@ def test_module_manifest_routers_mount_like_feature_routers():
     manifest = ModuleManifest(
         code="modtest",
         version="1.0.0",
-        contract_version=1,
         api_routers=[api],
         web_routers=[web],
+        permissions=(PermissionSpec("modtest.portal.access"),),
     )
-    paths = _paths(create_app(ProductAssemblySpec(name="m", modules=[manifest])))
+    paths = _paths(
+        create_app(
+            ProductAssemblySpec(
+                name="m",
+                modules=[manifest],
+                **_secured_legacy_web_kwargs("modtest.portal.access"),
+            )
+        )
+    )
     assert {"/mod-api", "/admin/mod-web"} <= paths
 
     api_only = _paths(

@@ -1673,10 +1673,22 @@ through real product adoption.
 
 #### 16. Migration
 
-`web_routers`/`nav` becomes a compatibility adapter onto a default `staff_admin`
-facet, for one migration window, with a stated deprecation and removal gate. It
-is preserved for `staff_admin` only — never extended to a second facet, which
-would make the adapter permanent by making it useful.
+`web_routers`/`nav` becomes a compatibility adapter onto an assembly-declared
+`staff_admin` facet, for one migration window, with a stated deprecation and
+removal gate. The kernel never synthesizes that facet: legacy routes require an
+explicit authentication profile and admission permission, so an upgrade cannot
+silently replace the former admin gate with a public or authentication-only
+surface. A `ModuleManifest` omitting `contract_version` while using the legacy
+fields infers contract 1; an explicitly named contract is never rewritten. The
+adapter is preserved for `staff_admin` only — never extended to a second facet,
+which would make the adapter permanent by making it useful.
+
+The kernel's pre-existing platform UI is the narrow exception during this same
+migration window. When `platform_surface_enabled=True` and the assembly has no
+`platform_admin` declaration, the kernel supplies that one facet with its
+existing platform-admin cookie provider and route references. This preserves an
+already-secured audience; it is not available to modules and never infers a
+tenant permission. An explicit assembly facet replaces the compatibility one.
 
 Template Studio is the canary: it is the only installable module contributing a
 surface today, so it is the whole migration and the whole risk. A second audience
@@ -1714,7 +1726,7 @@ exempt** (ADR-0018) and the implementation branch owes it a gate.
 | Route authorization | module | route-guard test + composed non-admission sweep | exists; composed staff canary added |
 | CSRF by transport | kernel | explicit route dependency + canary | implemented; runtime canary added |
 | Native POST carries hidden CSRF proof | kernel | `test_web_conventions.py` | implemented across declared template roots |
-| CSP from typed capabilities | kernel | composition + test | implemented with a closed requirement vocabulary; raw overrides cannot replace active requirements |
+| CSP from typed capabilities | kernel | composition + test | implemented with a closed requirement vocabulary; raw overrides cannot replace active requirements and may only tighten the full baseline when none are active |
 | WCAG 2.2 AA per journey | `dotmac-ui` + facet | browser journey tests | target declared, page tests absent |
 | Typed render models in templates | module | extended thin-adapter test | implemented for the v2 Template Studio canary; legacy surfaces remain unmonitored |
 | Brand/locale independence | kernel resolver | contrast + isolation tests | partial |

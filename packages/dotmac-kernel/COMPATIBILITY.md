@@ -199,7 +199,16 @@ it never grants entitlement and it never deploys anything.
   independent facts, and only the latter gates loading.
   Contract generation 2 declares browser UI through `web_surfaces`; generation
   1's absolute `web_routers` / path-based `nav` remains a supported, bounded
-  compatibility shape and cannot be mixed with generation 2.
+  compatibility shape and cannot be mixed with generation 2. When
+  `contract_version` is omitted, the manifest infers generation 1 from legacy
+  `web_routers`/`nav`; v2 surfaces and headless manifests infer the current
+  generation. An explicitly declared generation is never rewritten.
+
+  The legacy browser adapter has no implicit authorization fallback. An
+  assembly composing any generation-1 browser router must explicitly declare a
+  `staff_admin` facet with both an authentication profile and an admission
+  permission. Missing any of those refuses application construction rather
+  than silently broadening `/admin` access.
 - **`ModuleRegistry(manifests)`** — construction IS validation, fail-closed on
   all four:
   - a duplicate `code` → `DuplicateModuleError`;
@@ -668,21 +677,28 @@ assembly's own templates/static OVER the kernel's (first-match-wins, via `use_as
 and `LayeredStaticFiles`).
 
 `platform_surface_enabled` is independent of `web_enabled`: the former decides
-whether the online kernel platform control plane exists at all, while the
-latter decides whether HTML/static surfaces are mounted. Product configuration
-checks and initialization belong in `startup_checks` / `startup_hooks`, not in
-a wrapper that mutates kernel settings before `create_app`; checks warn in
-development and fail startup in production, then sync or async hooks run in
-declaration order inside the lifespan and any exception fails startup.
+whether the online kernel platform authentication/control-plane routes exist at
+all, while the latter decides whether HTML/static surfaces are mounted. The new
+contract-v2 platform UI contribution uses the assembly's `platform_admin` facet
+when declared. During the migration window, an assembly without one receives a
+bounded kernel compatibility facet wired to the existing platform-admin cookie
+provider, preserving the formerly direct platform UI without inferring tenant
+authorization. Product configuration checks and initialization belong in
+`startup_checks` / `startup_hooks`, not in a wrapper that mutates kernel settings
+before `create_app`; checks warn in development and fail startup in production,
+then sync or async hooks run in declaration order inside the lifespan and any
+exception fails startup.
 
 `security_policy=ProductSecurityPolicy(...)` supplies product-owned CSP, COOP,
 and CORP defaults to the one kernel-owned security-header middleware. An
-operator's `CONTENT_SECURITY_POLICY` value wins over the product CSP. Policy
-values must be single, Latin-1 HTTP header values and reject CR/LF injection.
-The raw CSP compatibility seam is refused if an enabled surface uses a browser
-capability with typed `BrowserSecurityRequirement`s. Only active capability
-providers contribute those requirements; unused providers cannot widen CSP,
-and modules cannot contribute directives or origins.
+operator's `CONTENT_SECURITY_POLICY` value wins over the product CSP only after
+validation against the computed strict baseline. Policy values must be single,
+Latin-1 HTTP header values, retain every baseline directive, and may only remove
+sources; partial policies, new directives, new sources and CR/LF injection fail
+application construction. The raw seam is refused entirely if an enabled
+surface uses a browser capability with typed `BrowserSecurityRequirement`s.
+Only active capability providers contribute those requirements; unused
+providers cannot widen CSP, and modules cannot contribute directives or origins.
 
 **Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
 `stylesheets` are the two slots an assembly fills to adopt an installed

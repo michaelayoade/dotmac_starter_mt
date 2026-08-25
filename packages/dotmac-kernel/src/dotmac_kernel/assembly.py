@@ -47,10 +47,11 @@ class ProductSecurityPolicy:
     The kernel still owns the middleware and its invariant baseline headers.
     This value declares only the policy that genuinely varies by product:
     content sources and cross-origin isolation. Environment configuration wins
-    over ``content_security_policy`` so an operator can tighten or replace a
-    product default without mutating the assembly. This raw compatibility seam
-    is refused when an active browser capability has typed CSP requirements;
-    otherwise it could silently discard a module's declared security needs.
+    over ``content_security_policy`` so an operator can tighten a product
+    default without mutating the assembly. A raw CSP must retain every computed
+    baseline directive and may only remove sources; it is refused entirely when
+    an active browser capability has typed CSP requirements. New mechanics use
+    the typed capability vocabulary, never a raw policy string.
     """
 
     content_security_policy: str = ""

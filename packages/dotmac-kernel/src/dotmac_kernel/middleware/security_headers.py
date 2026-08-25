@@ -35,9 +35,11 @@ see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
   (mirrors X-Frame-Options DENY), `base-uri 'self'`, `form-action 'self'`,
   `connect-src 'self'` (htmx XHR is same-origin).
 
-Operators override via the `CONTENT_SECURITY_POLICY` env knob (everything
-by config); `SECURITY_HEADERS_ENABLED=false` disables the middleware when a
-fronting proxy owns these headers instead.
+Operators may tighten this baseline through the `CONTENT_SECURITY_POLICY` env
+compatibility knob: every baseline directive must remain and sources may only
+be removed. Partial or wider policies fail application construction, even when
+no typed capability happens to be active. `SECURITY_HEADERS_ENABLED=false`
+disables the middleware when a fronting proxy owns these headers instead.
 """
 
 from __future__ import annotations
@@ -95,6 +97,76 @@ _STRICT_CSP = compose_content_security_policy()
 _HSTS = "max-age=63072000; includeSubDomains"
 
 
+def _parse_content_security_policy(policy: str) -> dict[str, tuple[str, ...]]:
+    directives: dict[str, tuple[str, ...]] = {}
+    if "\r" in policy or "\n" in policy:
+        raise ValueError("CSP override must be one HTTP header value")
+    for raw_directive in policy.split(";"):
+        parts = raw_directive.split()
+        if not parts:
+            continue
+        name = parts[0].lower()
+        sources = tuple(parts[1:])
+        if not sources:
+            raise ValueError(f"CSP override directive {name!r} has no sources")
+        if name in directives:
+            raise ValueError(f"CSP override repeats directive {name!r}")
+        if len(set(sources)) != len(sources):
+            raise ValueError(f"CSP override repeats a source in {name!r}")
+        if "'none'" in sources and sources != ("'none'",):
+            raise ValueError(f"CSP override mixes 'none' with sources in {name!r}")
+        directives[name] = sources
+    if not directives:
+        raise ValueError("CSP override must declare a policy")
+    return directives
+
+
+def _validate_content_security_policy_override(
+    policy: str,
+    requirements: Iterable[BrowserSecurityRequirement] = (),
+) -> None:
+    """Allow a raw compatibility policy only when it tightens the baseline.
+
+    Raw policy is intentionally a bounded compatibility seam, not a second CSP
+    composition language.  It must retain every baseline directive, may remove
+    allowed sources (or replace them with ``'none'``), and may add neither a
+    directive nor a source.  Browser capabilities that need new mechanics use
+    the typed requirement vocabulary instead.
+    """
+
+    if not policy:
+        return
+    typed_requirements = frozenset(
+        BrowserSecurityRequirement(value) for value in requirements
+    )
+    if typed_requirements:
+        raise ValueError(
+            "a raw CSP override cannot replace active typed browser-security "
+            "requirements"
+        )
+    baseline = _parse_content_security_policy(_STRICT_CSP)
+    candidate = _parse_content_security_policy(policy)
+    missing = sorted(set(baseline) - set(candidate))
+    if missing:
+        raise ValueError(
+            "raw CSP override is missing required directives: " + ", ".join(missing)
+        )
+    extra = sorted(set(candidate) - set(baseline))
+    if extra:
+        raise ValueError(
+            "raw CSP override adds untyped directives: " + ", ".join(extra)
+        )
+    for directive, sources in candidate.items():
+        if sources == ("'none'",):
+            continue
+        unexpected = sorted(set(sources) - set(baseline[directive]))
+        if unexpected:
+            raise ValueError(
+                "raw CSP override would weaken the computed baseline at "
+                f"{directive!r}: {', '.join(unexpected)}"
+            )
+
+
 def _is_secure_request(request: Request) -> bool:
     """Same signal `CSRFMiddleware`/auth cookies use: direct TLS or a
     trusted proxy's x-forwarded-proto."""
@@ -117,11 +189,9 @@ class SecurityHeadersMiddleware:
         self.app = app
         self.enabled = enabled
         requirements = frozenset(browser_security_requirements)
-        if content_security_policy and requirements:
-            raise ValueError(
-                "a raw CSP override cannot replace active typed browser-security "
-                "requirements"
-            )
+        _validate_content_security_policy_override(
+            content_security_policy, requirements
+        )
         self.csp = content_security_policy or compose_content_security_policy(
             requirements
         )

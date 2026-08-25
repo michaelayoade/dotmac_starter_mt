@@ -64,6 +64,23 @@ from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
 
 
+def _staff_landing_route(disabled_modules: frozenset[str]) -> WebRouteRef | None:
+    """The staff facet's landing route, or None when its owner is disabled.
+
+    Same shape, and the same reason, as `_presentation_stylesheets` below: a
+    facet may only reference a route this exact assembly actually mounts. The
+    `web` feature is `core=False`, so `DISABLED_FEATURES=web` removes it from
+    the enabled set `create_app` builds the surface registry from — and an
+    unconditional `landing_route` pointing at its dashboard would then fail
+    route resolution and take the whole boot down, instead of dropping the one
+    route the switch is documented to drop
+    (`tests/unit/test_web_surface.py::test_disabled_features_web_still_leaves_other_admin_routes_mounted`).
+    """
+    if "web" in disabled_modules:
+        return None
+    return WebRouteRef("web", "legacy", "dashboard")
+
+
 def _presentation_stylesheets(disabled_modules: frozenset[str]) -> tuple[str, ...]:
     """The links whose routes/assets this exact assembly actually mounts."""
     dynamic = () if "presentation" in disabled_modules else (BRAND_STYLESHEET_URL,)
@@ -141,7 +158,7 @@ assembly = ProductAssemblySpec(
                 WebRouteRef("presentation", "legacy", "brand_stylesheet"),
             ),
             login_route=WebRouteRef("auth", "legacy", "login_page"),
-            landing_route=WebRouteRef("web", "legacy", "dashboard"),
+            landing_route=_staff_landing_route(_DISABLED_MODULES),
             logout_route=WebRouteRef("auth", "legacy", "logout"),
         ),
         WebFacetMount(

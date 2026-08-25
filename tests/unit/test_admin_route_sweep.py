@@ -38,6 +38,7 @@ import pytest
 from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.models import AuthSession, Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import (
@@ -178,6 +179,14 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
     """
     app = FastAPI()
     register_error_handlers(app)
+    # This isolated admission test deliberately disables CSRF, but still
+    # installs its middleware. ``require_csrf`` fails loudly when the middleware
+    # is absent, so a test app cannot acquire an accidental security bypass.
+    app.add_middleware(
+        CSRFMiddleware,
+        enabled=False,
+        secret="admin-route-sweep-csrf-not-a-deployment-secret",
+    )
     manifests = (
         ModuleManifest(
             code="portal_access",

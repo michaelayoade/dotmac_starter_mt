@@ -47,7 +47,10 @@ from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
-from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
+from dotmac_kernel.middleware.security_headers import (
+    SecurityHeadersMiddleware,
+    _validate_content_security_policy_override,
+)
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
 from dotmac_kernel.outbox_event_types import (
@@ -60,7 +63,11 @@ from dotmac_kernel.permissions import (
     UndeclaredPermissionError,
     install_permissions,
 )
-from dotmac_kernel.platform_auth import platform_auth_router
+from dotmac_kernel.platform_auth import (
+    PLATFORM_COOKIE,
+    PLATFORM_COOKIE_AUTHENTICATION,
+    platform_auth_router,
+)
 from dotmac_kernel.platform_web import PLATFORM_WEB_SURFACE
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
@@ -87,9 +94,40 @@ from dotmac_kernel.templating import (
     validate_template_names,
 )
 from dotmac_kernel.web_runtime import mount_web_surfaces
-from dotmac_kernel.web_surfaces import WebSurfaceRegistry
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserSecurityPlane,
+    BrowserSessionPolicy,
+    NavigationRegion,
+    TemplateRef,
+    WebFacetMount,
+    WebRouteRef,
+    WebSurfaceRegistry,
+)
 
 logger = logging.getLogger(__name__)
+
+_PLATFORM_COMPATIBILITY_PROFILE = AuthenticationProfileBinding(
+    code="kernel_platform_session",
+    provider=PLATFORM_COOKIE_AUTHENTICATION,
+    session=BrowserSessionPolicy(cookie_name=PLATFORM_COOKIE, cookie_path="/platform"),
+    security_plane=BrowserSecurityPlane.PLATFORM,
+)
+_PLATFORM_COMPATIBILITY_FACET = WebFacetMount(
+    code="platform_admin",
+    url_prefix="/platform",
+    # Jinja template declaration, not subprocess shell execution.
+    shell=TemplateRef("layouts/platform.html"),  # nosec B604
+    authentication_profile=_PLATFORM_COMPATIBILITY_PROFILE.code,
+    navigation_regions=(NavigationRegion("primary"),),
+    entry_routes=(
+        WebRouteRef("kernel_platform", "control_plane", "login_form"),
+        WebRouteRef("kernel_platform", "control_plane", "login_submit"),
+    ),
+    login_route=WebRouteRef("kernel_platform", "control_plane", "login_form"),
+    landing_route=WebRouteRef("kernel_platform", "control_plane", "inventory"),
+    logout_route=WebRouteRef("kernel_platform", "control_plane", "logout"),
+)
 
 
 class LayeredStaticFiles(StaticFiles):
@@ -508,16 +546,34 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     capability_catalogue = CapabilityCatalogue.from_manifests(manifests)
     install_capabilities(capability_catalogue)
 
+    effective_facets = tuple(spec.web_facets) if web_enabled else ()
+    effective_profiles = tuple(spec.authentication_profiles) if web_enabled else ()
+    effective_ui_contract_version = spec.ui_contract_version if web_enabled else None
+    platform_facet_declared = any(
+        facet.code == "platform_admin" for facet in effective_facets
+    )
+    platform_web_enabled = web_enabled and spec.platform_surface_enabled
+    if platform_web_enabled and not platform_facet_declared:
+        # Before facet composition, ``platform_surface_enabled=True`` mounted
+        # the kernel's secured platform UI for every HTML assembly. Preserve
+        # that exact audience and guard during the migration window. Unlike the
+        # forbidden staff fallback, this profile does not invent authorization:
+        # its provider is the existing platform-admin identity boundary.
+        effective_facets = (*effective_facets, _PLATFORM_COMPATIBILITY_FACET)
+        effective_profiles = (
+            *effective_profiles,
+            _PLATFORM_COMPATIBILITY_PROFILE,
+        )
+        if effective_ui_contract_version is None:
+            effective_ui_contract_version = 1
     surface_registry = WebSurfaceRegistry(
         manifests=enabled_manifests if web_enabled else (),
-        facets=spec.web_facets if web_enabled else (),
-        authentication_profiles=(spec.authentication_profiles if web_enabled else ()),
+        facets=effective_facets,
+        authentication_profiles=effective_profiles,
         browser_capabilities=spec.browser_capabilities if web_enabled else (),
-        ui_contract_version=spec.ui_contract_version if web_enabled else None,
+        ui_contract_version=effective_ui_contract_version,
         built_in_surfaces=(
-            (("kernel_platform", PLATFORM_WEB_SURFACE),)
-            if web_enabled and spec.platform_surface_enabled
-            else ()
+            (("kernel_platform", PLATFORM_WEB_SURFACE),) if platform_web_enabled else ()
         ),
     )
     for facet in surface_registry.facets:
@@ -624,14 +680,20 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         ObservabilityMiddleware,
         trust_inbound_request_id=settings.trust_inbound_request_id,
     )
+    configured_csp = (
+        settings.content_security_policy or spec.security_policy.content_security_policy
+    )
+    # Validate synchronously during construction. Starlette instantiates its
+    # middleware stack lazily, which is too late for a security-policy error:
+    # the first production request must not be the CSP configuration canary.
+    _validate_content_security_policy_override(
+        configured_csp, surface_registry.browser_security_requirements
+    )
     # OUTERMOST: security headers + CSP on every response.
     app.add_middleware(
         SecurityHeadersMiddleware,
         enabled=settings.security_headers_enabled,
-        content_security_policy=(
-            settings.content_security_policy
-            or spec.security_policy.content_security_policy
-        ),
+        content_security_policy=configured_csp,
         browser_security_requirements=(surface_registry.browser_security_requirements),
         cross_origin_opener_policy=(spec.security_policy.cross_origin_opener_policy),
         cross_origin_resource_policy=(

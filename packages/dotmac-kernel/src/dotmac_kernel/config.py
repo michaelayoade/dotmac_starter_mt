@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     rate_limit_redis_url: str = ""
     # Security response headers (Task 5). Disable only when a fronting
     # proxy owns these headers. Empty CSP = the computed strict default in
-    # dotmac_kernel/middleware/security_headers.py.
+    # dotmac_kernel/middleware/security_headers.py. A non-empty compatibility
+    # value may only tighten that baseline; weakening or partial policies fail
+    # application construction.
     security_headers_enabled: bool = True
     content_security_policy: str = ""
     trust_inbound_request_id: bool = False

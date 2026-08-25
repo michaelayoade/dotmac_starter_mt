@@ -1025,7 +1025,8 @@ tagline, primary colour) — and even those disagree on runtime meaning (§6.2).
 ## 3.4 The CSP consequence — literal policy strings
 
 **starter** — `packages/dotmac-kernel/src/dotmac_kernel/middleware/security_headers.py`,
-emitted on every response, overridable by `CONTENT_SECURITY_POLICY`
+emitted on every response, with a tightening-only `CONTENT_SECURITY_POLICY`
+compatibility value
 (`config.py:39`, `.env.example:62`), disableable by `SECURITY_HEADERS_ENABLED`:
 
 ```

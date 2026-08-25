@@ -1360,9 +1360,13 @@ There are two explicit module-contract generations during the migration window:
 
 - Contract 1 is `FeatureManifest.web_routers` / `ModuleManifest.web_routers`
   plus path-based `nav`. `ModuleManifest.from_feature` selects this generation
-  for every legacy feature that still declares either field. The compatibility
-  adapter synthesizes only the `staff_admin` surface and preserves its existing
-  absolute paths.
+  for every legacy feature that still declares either field. An omitted
+  `ModuleManifest.contract_version` makes the same inference, so an existing
+  downstream legacy manifest does not become generation 2 merely by upgrading
+  the kernel. The compatibility adapter preserves absolute paths but synthesizes
+  no facet or authorization policy: the assembly must explicitly declare a
+  `staff_admin` facet with authentication and admission permission, or startup
+  fails.
 - Contract 2 is `ModuleManifest.web_surfaces: Sequence[WebSurfaceContribution]`.
   A contribution owns facet-relative named routers, route-derived navigation,
   namespaced templates/static data, supported UI contract generations and
@@ -1377,14 +1381,26 @@ incompatible UI versions, browser capabilities, overlapping prefixes, cookie
 scope, route/nav/namespace collisions and unresolved entry/login routes all stop
 startup.
 
+The kernel's contract-v2 platform contribution uses an assembly-declared
+`platform_admin` facet when one exists. During the migration window only, an
+assembly with `platform_surface_enabled=True` and no such declaration receives
+a kernel-owned compatibility facet bound to the existing platform-admin cookie
+provider. That reproduces the pre-facet platform UI and its exact identity
+boundary; it does not infer tenant permissions or provide a general facet
+default. `platform_surface_enabled=False` still removes both platform auth and
+UI routes.
+
 Browser capabilities also carry their security consequences. The assembly's
 provider may declare only the closed `BrowserSecurityRequirement` vocabulary;
 the registry unions requirements from capabilities actually used by enabled
 surfaces, and the security-header owner deterministically composes those into
 the baseline CSP. Raw module directives/origins are not a contract surface, and
-a raw assembly/operator CSP cannot replace an active typed requirement. The
-baseline uses the vendored Alpine CSP build and therefore grants neither
-`script-src 'unsafe-inline'` nor `'unsafe-eval'`.
+a raw assembly/operator CSP cannot replace an active typed requirement. Even
+when the active requirement set is empty, a raw compatibility policy must retain
+every strict-baseline directive and may only remove sources; a partial or wider
+policy fails application construction. The baseline uses the vendored Alpine
+CSP build and therefore grants neither `script-src 'unsafe-inline'` nor
+`'unsafe-eval'`.
 
 Template security governance consumes the same composition declaration: the
 architecture sweep derives roots from `ProductAssemblySpec`, its installed
@@ -1631,7 +1647,9 @@ route; that dependency validates every unsafe method, including pre-auth login
 and logout, while bearer-only API routes receive no CSRF dependency. Proof may
 arrive through `X-CSRF-Token` (the htmx/`fetch` bridge in `static/js/csrf.js`)
 or a native form's hidden `csrf_token` field. Both must match the signed cookie
-and are compared in constant time.
+and are compared in constant time. A protected route reached without
+`CSRFMiddleware` fails loudly on safe and unsafe methods; absence of middleware
+state is a configuration error, never an implicit CSRF disable switch.
 
 Development uses the host-only `csrf_token` cookie. Production fails startup if
 CSRF is disabled or `CSRF_SECRET` is a sentinel, shorter than 32 bytes, or reused
@@ -2208,7 +2226,8 @@ order):
    the Content-Security-Policy. Only a last-resort UNHANDLED-exception 500
    (Starlette's `ServerErrorMiddleware`, which wraps all user middleware)
    escapes it. Knobs: `SECURITY_HEADERS_ENABLED`, `CONTENT_SECURITY_POLICY`
-   (empty → the computed-strict default; see `docs/SECURITY.md`).
+   (empty → the computed-strict default; a non-empty value may only tighten the
+   complete baseline; see `docs/SECURITY.md`).
 2. **ObservabilityMiddleware** — assigns/propagates a request ID
    (`TRUST_INBOUND_REQUEST_ID` gates whether an inbound `X-Request-ID` is
    trusted or a fresh one is generated) and emits structured request logs.

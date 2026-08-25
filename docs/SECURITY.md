@@ -35,9 +35,9 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 
 | Control | Status | Evidence / notes |
 |---|---|---|
-| CSRF | **Met** | Explicit dependency on every composed browser route; signed, expiring, session-bound double-submit token; header and hidden-form transports; pre-auth no-cookie denial; explicit cross-site Origin/Referer and Fetch Metadata rejection; production `__Host-` cookie plus strong/dedicated-secret canaries in `tests/unit/test_csrf_contract.py` |
+| CSRF | **Met** | Explicit dependency on every composed browser route; missing middleware fails loudly; signed, expiring, session-bound double-submit token; header and hidden-form transports; pre-auth no-cookie denial; explicit cross-site Origin/Referer and Fetch Metadata rejection; production `__Host-` cookie plus strong/dedicated-secret canaries in `tests/unit/test_csrf_contract.py` |
 | Security response headers | **Met** | `SecurityHeadersMiddleware` (outermost): nosniff, DENY, referrer-policy, permissions-policy, HSTS-on-TLS, CSP; `tests/unit/test_security_baseline.py::TestSecurityHeaders`. Known limit: the last-resort unhandled-exception 500 (ServerErrorMiddleware) bypasses user middleware and carries no headers |
-| Content-Security-Policy | **Met** | Computed-strict default with no unsafe script grant; closed typed capability composition; raw `CONTENT_SECURITY_POLICY` compatibility override cannot replace an active typed requirement (below) |
+| Content-Security-Policy | **Met** | Computed-strict default with no unsafe script grant; closed typed capability composition; raw `CONTENT_SECURITY_POLICY` must retain every baseline directive and may only remove sources, even when no typed requirement is active (below) |
 | Rate limiting | **Met (single-process)** | Bounded LRU store, route-template keys, hash-bucketed unmatched paths (`tests/unit/test_security_baseline.py::TestBoundedRateLimitStore`). Multi-process deployments must swap the store (seam below) |
 | Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`) and there are **zero** usages — tenant-supplied `custom_css` was retired 2026-08-13 (ADR-0006 D8), so no response carries tenant-authored CSS |
 | Runtime brand stylesheet | **Met** | Public pre-auth GET accepts a resolved tenant or the exact platform root (empty default CSS); unknown hosts fail closed; generated declarations only; `private, no-store` + `Vary: Host`; no brand inputs in logs; unit route/fallback proofs plus the Postgres two-tenant canary in `tests/test_branding_portal_e2e.py` |
@@ -76,7 +76,10 @@ object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
   modules cannot inject raw directives, hosts, wildcards, inline script or
   eval. Unused providers do not widen policy. A legacy raw product/operator CSP
   override is refused whenever an active typed requirement would otherwise be
-  lost.
+  lost. With no active typed requirement it is still a tightening seam only:
+  every baseline directive remains, sources may be removed or replaced by
+  `'none'`, and a partial policy, new directive or new source fails application
+  construction.
 - Runtime branding is a same-origin `<link>` to `/branding/theme.css`, not an
   inline tenant `<style>` block. The route requires a resolved tenant scope
   even though it is pre-auth (the login page needs it), with one explicit

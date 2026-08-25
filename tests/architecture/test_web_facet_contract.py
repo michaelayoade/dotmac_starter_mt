@@ -26,13 +26,16 @@ def _dependency_has_attribute(dependant: object, attribute: str) -> bool:
 
 def test_every_composed_unsafe_browser_route_has_explicit_csrf_dependency() -> None:
     missing: list[str] = []
+    checked: list[str] = []
     for route in app.routes:
         if not isinstance(route, APIRoute) or not route.name.startswith("web:"):
             continue
         if not MUTATING.intersection(route.methods or set()):
             continue
+        checked.append(f"{sorted(route.methods or set())} {route.path}")
         if not _dependency_has_attribute(route.dependant, CSRF_PROTECTED_ATTR):
             missing.append(f"{sorted(route.methods or set())} {route.path}")
+    assert checked, "Reference assembly exposes no composed unsafe browser routes"
     assert not missing, "Composed unsafe routes without CSRF: " + ", ".join(missing)
 
 

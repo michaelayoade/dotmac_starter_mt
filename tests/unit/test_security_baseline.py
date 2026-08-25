@@ -27,6 +27,10 @@ from fastapi.testclient import TestClient
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest
 
+_TIGHTER_CSP = _STRICT_CSP.replace(
+    "img-src 'self' data: https:", "img-src 'self' data:"
+)
+
 
 def _legacy_pbkdf2_hash(password: str) -> str:
     """The exact pre-Task-5 stdlib format, reproduced for upgrade tests."""
@@ -184,12 +188,12 @@ class TestSecurityHeaders:
 
     def test_csp_override_and_disable(self):
         client = _headers_app(
-            content_security_policy="default-src 'none'",
+            content_security_policy=_TIGHTER_CSP,
             cross_origin_opener_policy="same-origin",
             cross_origin_resource_policy="same-origin",
         )
         headers = client.get("/ok").headers
-        assert headers["content-security-policy"] == "default-src 'none'"
+        assert headers["content-security-policy"] == _TIGHTER_CSP
         assert headers["cross-origin-opener-policy"] == "same-origin"
         assert headers["cross-origin-resource-policy"] == "same-origin"
         off = _headers_app(enabled=False)
@@ -226,6 +230,19 @@ class TestSecurityHeaders:
                 content_security_policy="default-src 'none'",
                 browser_security_requirements=(BrowserSecurityRequirement.WORKER_SELF,),
             ).get("/ok")
+
+    def test_raw_csp_cannot_weaken_the_baseline_without_typed_requirements(self):
+        weakened = _STRICT_CSP.replace(
+            "script-src 'self'", "script-src 'self' 'unsafe-eval' *"
+        )
+        with pytest.raises(ValueError, match="weaken.*baseline"):
+            _headers_app(
+                content_security_policy=weakened,
+            ).get("/ok")
+
+    def test_raw_csp_must_retain_every_baseline_directive(self):
+        with pytest.raises(ValueError, match="missing required directives"):
+            _headers_app(content_security_policy="default-src 'none'").get("/ok")
 
 
 class TestBoundedRateLimitStore:

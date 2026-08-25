@@ -48,12 +48,14 @@ def _facet(
     entry_routes: tuple[WebRouteRef, ...] = (),
     landing_route: WebRouteRef | None = None,
     logout_route: WebRouteRef | None = None,
+    admission_permission: str | None = None,
 ) -> WebFacetMount:
     return WebFacetMount(
         code="staff_admin",
         url_prefix="/staff",
         shell=TemplateRef("layouts/admin.html"),
         authentication_profile="staff_session",
+        admission_permission=admission_permission,
         navigation_regions=(NavigationRegion("primary"),),
         entry_routes=entry_routes,
         login_route=entry_routes[0] if entry_routes else None,
@@ -97,13 +99,26 @@ def _registry(
     )
 
 
-def test_module_contract_v2_refuses_the_legacy_web_shape() -> None:
+def test_unnamed_legacy_web_shape_infers_contract_v1() -> None:
+    router = APIRouter()
+
+    manifest = ModuleManifest(
+        code="legacy-without-version",
+        version="1.0.0",
+        web_routers=(router,),
+    )
+
+    assert manifest.contract_version == 1
+
+
+def test_explicit_module_contract_v2_refuses_the_legacy_web_shape() -> None:
     router = APIRouter()
 
     with pytest.raises(ModuleRegistryError, match="contract 2.*web_surfaces"):
         ModuleManifest(
             code="legacy-on-v2",
             version="1.0.0",
+            contract_version=2,
             web_routers=(router,),
         )
 
@@ -121,12 +136,72 @@ def test_v1_legacy_web_shape_remains_adaptable_during_the_window() -> None:
         contract_version=1,
         web_routers=(router,),
     )
-    registry = _registry(manifest)
+    registry = _registry(
+        manifest,
+        facet=_facet(admission_permission="legacy.portal.access"),
+    )
 
     surface = registry.surfaces[0]
     assert surface.legacy is True
     assert surface.owner == "legacy"
     assert surface.contribution.facet == "staff_admin"
+
+
+def test_legacy_web_shape_requires_an_explicit_staff_facet() -> None:
+    router = APIRouter(prefix="/admin")
+
+    @router.get("/legacy")
+    def legacy() -> dict[str, bool]:
+        return {"ok": True}
+
+    manifest = ModuleManifest(
+        code="legacy",
+        version="1.0.0",
+        web_routers=(router,),
+    )
+
+    with pytest.raises(UnknownFacetError, match="explicit.*staff_admin"):
+        WebSurfaceRegistry(manifests=(manifest,), ui_contract_version=1)
+
+
+@pytest.mark.parametrize(
+    ("authentication_profile", "admission_permission"),
+    (
+        (None, "legacy.portal.access"),
+        ("staff_session", None),
+    ),
+)
+def test_legacy_staff_facet_requires_authentication_and_admission(
+    authentication_profile: str | None,
+    admission_permission: str | None,
+) -> None:
+    router = APIRouter(prefix="/admin")
+
+    @router.get("/legacy")
+    def legacy() -> dict[str, bool]:
+        return {"ok": True}
+
+    manifest = ModuleManifest(
+        code="legacy",
+        version="1.0.0",
+        web_routers=(router,),
+    )
+    unsecured = WebFacetMount(
+        code="staff_admin",
+        url_prefix="/admin",
+        shell=TemplateRef("layouts/admin.html"),
+        authentication_profile=authentication_profile,
+        admission_permission=admission_permission,
+        navigation_regions=(NavigationRegion("primary"),),
+    )
+
+    with pytest.raises(WebSurfaceError, match="authentication.*admission"):
+        WebSurfaceRegistry(
+            manifests=(manifest,),
+            facets=(unsecured,),
+            authentication_profiles=(_profile(),),
+            ui_contract_version=1,
+        )
 
 
 def test_a_module_cannot_mix_legacy_and_v2_web_declarations() -> None:
