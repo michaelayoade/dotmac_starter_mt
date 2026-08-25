@@ -2707,6 +2707,48 @@ idempotency and delivery with a valid caller-owned session while the kernel
 `DATABASE_URL` is deliberately unparsable. This proves a service invocation
 cannot accidentally construct a second configured runtime.
 
+## Semantic identity and exact replay ordering (ADR-0064 / ADR-0014)
+
+The kernel and module contracts distinguish three identities that are easy to
+collapse incorrectly:
+
+| Identity | Answers | Canonical shape |
+|---|---|---|
+| mutation revision | which accepted mutation came later? | explicit sequence or optimistic-concurrency token |
+| semantic content identity | is this the same complete normalized evidence? | algorithm-versioned fingerprint (`cv1:…`) |
+| idempotency identity | has this operation key already produced an effect? | `(scope, key)` plus the separately stored request fingerprint |
+
+A generic ORM `version` or `updated_at` is only the first row. It cannot become
+the second or third merely by being copied into a field with a stronger name.
+When an inter-application fact needs ordering and semantic equality, it carries
+both explicitly. A digest-field change creates a new algorithm namespace and a
+named cutover; persisted old submissions replay their stored bytes/version
+rather than being recomputed into duplicate evidence.
+
+At-most-once writers establish trust before replay and replay before mutable
+business preconditions:
+
+`authenticate/authorize → canonicalize/fingerprint → replay-or-conflict → mutable preflight → effect + ledger`
+
+The replay position matters because overlap, uniqueness and "already open"
+checks observe the state the first success created. Re-running those checks on
+an exact retry makes the operation reject itself. Authorization, tenant scope,
+command validity and fingerprint conflict remain before replay so a stored
+result is neither leaked nor returned for a different request.
+
+As built, `dotmac_kernel.idempotency.execute_once` and its platform peer validate
+the key, resolve replay/conflict, and only then call the operation.
+`dotmac_subscriptions.treatments.approve_billing_arrangement` likewise resolves
+and fingerprint-checks the stored arrangement before rerunning its overlap
+preview. The architecture guard checks both orders and rejects direct
+`.version`/`.updated_at` flows into semantic identity sinks; the treatment unit
+canary builds one command once and submits it twice.
+
+Enforcement:
+`tests/architecture/test_semantic_identity_and_replay.py`,
+`tests/unit/test_subscriptions_treatments.py`; encoding and cutover contract:
+ADR-0064; transaction/result-replay contract: ADR-0014.
+
 ## External-identity login: the decision and the session are one locked step (kernel `0.1.0a64`)
 
 `dotmac_kernel.external_identity` exposes two entry points that answer the same
