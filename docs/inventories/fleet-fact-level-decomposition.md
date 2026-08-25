@@ -76,7 +76,8 @@ unowned facts.
 
 | Family | Tables (CRM ↔ Sub in every case) |
 |---|---|
-| field-workforce (9) | `availability_blocks`, `eta_updates`, `field_map_asset_location_provenance`, `field_tech_location_pings`, `installation_project_notes`, `shifts`, `skills`, `technician_skills`, `work_links` |
+| positioning (1) | `field_tech_location_pings` |
+| field-workforce (8) | `availability_blocks`, `eta_updates`, `field_map_asset_location_provenance`, `installation_project_notes`, `shifts`, `skills`, `technician_skills`, `work_links` |
 | outside-plant (6) | `buildout_milestones`, `buildout_requests`, `buildout_updates`, `olt_power_units`, `olt_sfp_modules`, `wireless_masts` |
 | geospatial-qualification (3) | `coverage_areas`, `geo_layers`, `service_qualifications` |
 | sales-agreements (3) | `contract_signatures`, `document_sequences`, `legal_documents` |

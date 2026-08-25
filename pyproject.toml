@@ -57,6 +57,9 @@ dotmac-application-directory = { path = "packages/dotmac-application-directory",
 # builds and proves the package but deliberately does not compose its schema in
 # the reference assembly; the first product adopter owns that cutover.
 dotmac-files = { path = "packages/dotmac-files", develop = true }
+# Optional tenant-plane position evidence owner (ADR-0032). Products compose
+# it with product-owned opaque subject links and keep every consequence.
+dotmac-positioning = { path = "packages/dotmac-positioning", develop = true }
 # Optional bulk-import run ledger (ADR-0025). Same posture as the two above:
 # built and proven here, composed by the first product adopter.
 dotmac-imports = { path = "packages/dotmac-imports", develop = true }

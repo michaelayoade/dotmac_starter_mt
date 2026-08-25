@@ -53,6 +53,17 @@ The first concrete plugin follows that split exactly:
 | Connector installation, binding, product-port descriptor projection, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each comparison and returns only closed safe outcomes |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+| Position observations and projections | `dotmac-positioning` (ADR-0032; optional tenant-plane module, Sub first cutover) | Products own consequences: Sub retains technicians, work orders, dispatch and customer-sharing policy; ERP retains vehicles, fleet lifecycle and attendance decisions; plant/GIS owners retain their geometry; Integrator connectors retain provider transport; map UI owns presentation only |
+
+Positioning is a local module installation, never a fleet-wide tracking
+database. It owns provider-neutral observation identity and provenance,
+current/trail projections, collection grants, caller-selected retention and
+neutral geofence facts over explicitly product-selected opaque fence ids. The
+consuming product owns the opaque
+subject-to-tracked-unit relation and every business decision made from those
+facts. The accepted source and retirement evidence is
+[`positioning-sources.md`](inventories/positioning-sources.md). The package is
+built and tested here but remains audit-complete with zero contract consumers.
 
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
@@ -432,6 +443,17 @@ packages/dotmac-imports/         optional bulk-import run ledger
                  TESTED HERE, NOT COMPOSED by this reference assembly. The
                  domain owns the field vocabulary, validation and mutation;
                  `dotmac-files` owns the bytes the run reads.
+packages/dotmac-positioning/     optional tracked-unit position evidence owner
+  pyproject.toml                 distribution dotmac-positioning; audit-complete,
+  EXTRACTION.toml                with Sub first and ERP second as candidate
+                                 cutovers (ADR-0032); neither is counted yet
+  src/dotmac_positioning/        typed evidence and projection contracts,
+                 tenant models, transaction-neutral service, manifest, and
+                 independent `po` lineage in schema `mod_pos`. Tenant plane
+                 only, with forced RLS on all nine tables. BUILT AND TESTED
+                 HERE, NOT COMPOSED by this reference assembly. Products own
+                 subject links, authorization, policy defaults, business
+                 consequences, provider transports and map presentation.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1267,6 +1289,15 @@ made concrete — every model has exactly one declared owner.
 | `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
 | `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
 | `ImportRunRow` | `mod_imports.import_run_rows` | `dotmac-imports` optional module | One minimised outcome per input line — `ok | error | skipped`, a canonical row fingerprint, bounded typed safe error detail, and the domain applier's opaque result. Mapped row values and raw exception text are not retained. Carries NO foreign key into a domain table: Sub's shared row table welded `payment_id` into the ledger, and the reference runs the other way here (ADR-0025 § 3). |
+| `TrackedUnit` | `mod_pos.tracked_units` | `dotmac-positioning` optional module | Opaque tenant-local identity for something whose position may be observed. The product-owned subject link stays outside the module; no technician, vehicle or polymorphic subject column exists (ADR-0032). |
+| `SourceIdentity` | `mod_pos.source_identities` | `dotmac-positioning` optional module | Immutable provider-neutral `(source, source_unit_ref)` identity used to serialize assignments and namespace client observation IDs without naming a vendor or product subject. |
+| `SourceAssignment` | `mod_pos.source_assignments` | `dotmac-positioning` optional module | Time-bounded provider-neutral source identity assignment to one tracked unit. Provider accounts, credentials, polling and webhook transport remain Integrator connector concerns. |
+| `CollectionGrant` | `mod_pos.collection_grants` | `dotmac-positioning` optional module | Server-enforced, purpose-bound collection window supplied by product policy. It authorizes evidence collection only; disclosure and business consequences remain product-owned. |
+| `PositionObservation` | `mod_pos.position_observations` | `dotmac-positioning` optional module | Immutable replay-safe evidence with separate client identity, fingerprint, source, opaque context, device capture time, server receipt time, coordinates and accuracy. Product-specific status is deliberately absent. |
+| `CurrentPosition` | `mod_pos.current_positions` | `dotmac-positioning` optional module | Rebuildable one-row projection that advances deterministically without letting late evidence roll the position backward. It is not a disclosure decision or unbounded history store. |
+| `Geofence` | `mod_pos.geofences` | `dotmac-positioning` optional module | Product-neutral circle or polygon geometry only; a consuming product owns the meaning, labels, activation policy and consequences associated with its opaque geofence id. |
+| `GeofenceState` | `mod_pos.geofence_states` | `dotmac-positioning` optional module | Rebuildable per-unit/per-fence inside/outside evaluation state used to detect a transition, not a workflow or attendance state. Only product-selected opaque fence ids are evaluated; ingest never applies every tenant fence implicitly. |
+| `GeofenceFact` | `mod_pos.geofence_facts` | `dotmac-positioning` optional module | Deduplicated neutral entry/exit fact tied to one observation. Sub or ERP may decide a work/attendance consequence in its own owning service; this row never does. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

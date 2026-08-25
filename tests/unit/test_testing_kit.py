@@ -27,9 +27,33 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
+from dotmac_kernel.testing.harness import _sqlite_schema_layout
 
 
 # ── harness ──────────────────────────────────────────────────────────────────
+def test_sqlite_harness_packs_an_eleventh_disjoint_module_schema() -> None:
+    schema_tables = {
+        f"mod_m{index}": frozenset({f"table_{index}"}) for index in range(11)
+    }
+
+    attached, translations = _sqlite_schema_layout(
+        schema_tables,
+        max_attached=10,
+    )
+
+    assert len(attached) == 10
+    assert translations == {"mod_m9": "mod_m0"}
+
+
+def test_sqlite_harness_refuses_to_merge_colliding_schema_tables() -> None:
+    schema_tables = {
+        f"mod_m{index}": frozenset({"shared_table"}) for index in range(11)
+    }
+
+    with pytest.raises(RuntimeError, match="table-name collision"):
+        _sqlite_schema_layout(schema_tables, max_attached=10)
+
+
 def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test

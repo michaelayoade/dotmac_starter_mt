@@ -11,10 +11,11 @@ before Dotmac creates or extends a shared distribution, which product code and
 tests must be reviewed as the possible implementation source?
 
 `packages/*/EXTRACTION.toml` is the machine-checked summary. This document keeps
-the evidence readable and records why a package is approved, historical debt,
-or blocked on an audit. A candidate row is not permission to extract it; the
-original two-consumer, same-contract, named-owner, and cutover gate still
-applies.
+the evidence readable and records why a package is audit-complete, adopted,
+reuse-proven, historical debt, or blocked on an audit. A candidate row is not
+permission to extract it: the same-contract, named-owner and cutover gates still
+apply. ADR-0006's 2026-08-12 amendment makes a second consumer evidence of
+reuse, not a prerequisite for a deliberately drawn shared module.
 
 ## Qualification and extraction procedure
 
@@ -30,8 +31,10 @@ For each candidate:
 4. Cut the source product over first. Shadow or reconcile old and new decisions,
    then remove or gate the local implementation so the extracted package becomes
    the one owner.
-5. Move a second independent consumer on an exact released pin. Do not call the
-   extraction complete before both consumers exercise the same contract.
+5. Record evidence truthfully: zero consumers is `audit-complete`, one real
+   cutover is `adopted`, and two independent consumers on exact released pins is
+   `reuse-proven`. Do not count a fork, reference assembly or installed-but-unused
+   package as adoption.
 
 "Copy" in this procedure means a traceable one-time move/port. It does not mean
 vendoring a product directory unchanged, preserving a product import in the
@@ -46,6 +49,7 @@ shared package, or maintaining two implementations.
 | `dotmac-template-studio` | **Audit run 2026-08-10; still not an approved reusable owner** | The package's two-kind merge does not hold — ERP documents and Sub notifications disagree on syntax, engine class, identity and missing-variable policy, and the package is a third design adopted by neither. But the *capability* is real and mostly already built: the audit maps it to six owners, of which this package is one. Sub is the qualifying source for the notification renderer. Full evidence in [`template-studio-source-audit.md`](template-studio-source-audit.md). Accepted as ADR-0006 amendment 2026-08-10 (§ 5a–5c). Next slice: narrow this package to "what the message says" and re-base its renderer on Sub's single-brace contract. Separately: open dossiers for consent/suppression, channel policy, delivery/outbox and document generation — consent before delivery. |
 | `dotmac-files` | **Audit-complete; zero contract consumers** | Sub supplies the strongest provider/staged-lifecycle source; ERP supplies the production S3 owner and broad document/image checks; CRM supplies content-spoofing canaries. ADR-0023 adds a separate declared platform table over the same persistence-free physical engine for Vendor CP artifacts. Domain meaning and imports remain excluded. Full evidence in [`files-sources.md`](files-sources.md); ownership is ADR-0022. | ERP then Academy prove tenant adoption after ERP E8 and local-owner retirement. Vendor CP is candidate cutover 3 through `PlatformScope()` and a licensing-owned exact-bundle relation. The platform declaration needs `platform_tables`, introduced in kernel source at a53; because a53–a55 were not published, a56 is the earliest installable compatible kernel, and a56 is this module's declared floor. No candidate is counted yet. |
 | `dotmac-imports` | **Audit-complete; zero contract consumers** | Neither source has the whole capability: ERP's `finance/import_export/base.py` is the tabular front end (CSV/XLS/XLSX decoding, alias resolution, auto-map, preview, 23 concrete importers, 3,311 lines of tests) with no durable record of any run; Sub's `import_runs`/`import_run_rows` is the durable record with the weaker parser. CRM carries a byte-equivalent fork of Sub's row loader. Academy's `content_import` is markdown authoring, not tabular import, and Vendor CP has none. Full evidence in [`imports-sources.md`](imports-sources.md); ownership is accepted in ADR-0025 through a named owner-directed ADR-0017 exception. | Keep unreleased until the first real cutover is ready. After the Sub lineage gate and ERP E8/files prerequisites, ERP's customer-master CSV importer goes first with row-for-row dry-run parity; publish kernel a50/imports just in time. Then Sub retires `import_runs.py`; CRM deletes its forked loader. Spreadsheet extras arrive with ERP parity tests. Export stays unowned and undossiered. |
+| `dotmac-positioning` | **Audit-complete package; zero contract consumers** | Sub is the qualifying source for position ingest/current/trails and first cutover; CRM is the same retiring lineage but supplies mandatory freshness/retention/privacy parity; ERP has GPS placeholders and attendance geometry, making it the concrete second candidate rather than a source. Full evidence in [`positioning-sources.md`](positioning-sources.md); ownership is ADR-0032; the machine-checked dossier is `packages/dotmac-positioning/EXTRACTION.toml`. | Validate the tenant lineage on PostgreSQL, then compose the same exact contract in Sub, shadow and retire its local writer. ERP follows through a product-owned vehicle link. Shared map UI waits for both real consumers. |
 
 ## Template Studio source audit
 

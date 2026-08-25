@@ -95,6 +95,15 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"event_outbox|event_handler_|durable_timer|idempotency|"
         r"batch_operations|recurring_|.*_dead_letter$)",
     ),
+    # ADR-0032: position observations and their rebuildable current projection
+    # are shared mechanics. Keep this deliberately exact: map asset coordinates,
+    # GIS geometry and vehicle lifecycle remain with their product owners. This
+    # must precede the broader CRM-agent and field prefixes below.
+    (
+        "positioning",
+        r"^(field_tech_location_pings|field_tech_presence|"
+        r"crm_agent_location_pings)$",
+    ),
     (
         "engagement-inbox",
         r"^(inbox_|team_inbox_|crm_conversation|crm_messages|"
@@ -118,8 +127,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         "field-workforce",
         r"^(field_|technician|shift|skill|availability_|dispatch_|eta_|"
         r"work_order|work_link|work_log|work_outcome|installation_|"
-        r"install_appointments|crew_|cost_rates|time_entry|"
-        r"crm_agent_location)",
+        r"install_appointments|crew_|cost_rates|time_entry)",
     ),
     (
         "outside-plant",

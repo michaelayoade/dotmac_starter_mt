@@ -650,7 +650,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a70"
+version = "0.1.0a71"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -692,6 +692,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-numbering"
+
+[[package]]
+name = "dotmac-positioning"
+version = "0.1.0a1"
+description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-positioning"
 
 [[package]]
 name = "dotmac-release-catalog"
@@ -2926,4 +2944,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "0cc29f5a184a863a21c642ba6112793ac0d5b6ceb06fd8b53ef690ba91136272"

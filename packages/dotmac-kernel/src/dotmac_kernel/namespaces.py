@@ -585,6 +585,17 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-positioning` — the ELEVENTH allocated installable module. Position
+# evidence is reusable tenant-plane mechanics; subject links and consequences
+# stay in each product (ADR-0032). `pos` keeps catalog names compact and clear,
+# while `po` leaves the revision-id budget for readable migration slugs.
+POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="positioning",
+    prefix="po",
+    branch_label="positioning",
+    db_schema=module_schema("pos"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +608,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    POSITIONING_MIGRATION_OWNER,
 )
 
 

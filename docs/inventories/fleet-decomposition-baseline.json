@@ -79,7 +79,7 @@
     "engagement-inbox": {
       "aliased": 9,
       "collisions": 0,
-      "dotmac_crm": 28,
+      "dotmac_crm": 27,
       "dotmac_erp": 0,
       "dotmac_sub": 29,
       "dotmac_vendor_control_plane": 0
@@ -102,10 +102,10 @@
     },
     "field-workforce": {
       "aliased": 0,
-      "collisions": 15,
-      "dotmac_crm": 26,
+      "collisions": 13,
+      "dotmac_crm": 24,
       "dotmac_erp": 10,
-      "dotmac_sub": 38,
+      "dotmac_sub": 36,
       "dotmac_vendor_control_plane": 0
     },
     "finance-ledger": {
@@ -210,6 +210,14 @@
       "dotmac_crm": 0,
       "dotmac_erp": 101,
       "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 0
+    },
+    "positioning": {
+      "aliased": 0,
+      "collisions": 2,
+      "dotmac_crm": 3,
+      "dotmac_erp": 0,
+      "dotmac_sub": 2,
       "dotmac_vendor_control_plane": 0
     },
     "projects-tasks": {

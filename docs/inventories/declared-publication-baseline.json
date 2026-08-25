@@ -62,9 +62,19 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-kernel": {
+      "declared": "0.1.0a71",
+      "reason": "OUTSTANDING release prerequisite for ADR-0032: a71 allocates the immutable tenant-only positioning namespace, revision prefix and branch label on top of a70's audit-actor contract. The declared version is intentionally ahead of the verified tag until the dedicated kernel workflow proves and publishes these exact bytes. Remove this row only in the release-record change that creates dotmac-kernel-v0.1.0a71; do not point dotmac-positioning at an earlier artifact, which does not contain the allocation.",
+      "state": "declared-unpublished"
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "state": "never-published"
+    },
+    "dotmac-positioning": {
+      "declared": "0.1.0a1",
+      "reason": "Intended audit-complete state under ADR-0032: Sub is the qualifying source and first cutover, ERP is the concrete second candidate, and CRM is retirement evidence rather than adoption. The package is deliberately absent from every release lane until its PostgreSQL proof is green and Sub's composed-lineage shadow slice is ready. Keep 0.1.0a1 declared so the reviewed package, changelog, catalogue and lock describe one contract; add it to the release lane and publish the compatible kernel allocation just in time for Sub adoption, never by counting Starter as a consumer.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

@@ -19,6 +19,7 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -33,15 +34,74 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 
-def _module_schemas() -> tuple[str, ...]:
-    """Every distinct non-default schema bound to a table in `Base.metadata`.
+def _module_schema_tables() -> dict[str, frozenset[str]]:
+    """Tables grouped by non-default schema in `Base.metadata`.
 
     Read off the metadata rather than off `MIGRATION_OWNER_LEDGER` on purpose:
     the harness must attach exactly what the caller actually imported, and it
     must not care whether a schema belongs to an installed module, so it never
     needs to import one.
     """
-    return tuple(sorted({t.schema for t in Base.metadata.tables.values() if t.schema}))
+    grouped: dict[str, set[str]] = {}
+    for table in Base.metadata.tables.values():
+        if table.schema:
+            grouped.setdefault(table.schema, set()).add(table.name)
+    return {schema: frozenset(names) for schema, names in sorted(grouped.items())}
+
+
+def _sqlite_attached_limit() -> int:
+    """Return this interpreter's real SQLite attachment limit."""
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        return connection.getlimit(sqlite3.SQLITE_LIMIT_ATTACHED)
+    finally:
+        connection.close()
+
+
+def _sqlite_schema_layout(
+    schema_tables: dict[str, frozenset[str]],
+    *,
+    max_attached: int,
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Fit qualified module schemas within SQLite's finite attachment slots.
+
+    Every schema keeps its own attached alias while slots remain. Overflow
+    schemas may share an existing alias only when their table names are
+    disjoint, so no table can shadow another.
+    """
+
+    if schema_tables and max_attached < 1:
+        raise RuntimeError("SQLite provides no attached-database slots")
+
+    aliases: list[str] = []
+    group_table_names: list[set[str]] = []
+    translations: dict[str, str] = {}
+    for schema, table_names in sorted(schema_tables.items()):
+        if len(aliases) < max_attached:
+            aliases.append(schema)
+            group_table_names.append(set(table_names))
+            continue
+
+        compatible = [
+            index
+            for index, existing_names in enumerate(group_table_names)
+            if not table_names.intersection(existing_names)
+        ]
+        if not compatible:
+            raise RuntimeError(
+                "SQLite's attached-database limit cannot represent the imported "
+                f"module schemas without a table-name collision: {schema}"
+            )
+        target_index = min(
+            compatible,
+            key=lambda index: (len(group_table_names[index]), aliases[index]),
+        )
+        alias = aliases[target_index]
+        translations[schema] = alias
+        group_table_names[target_index].update(table_names)
+
+    return tuple(aliases), translations
 
 
 def create_test_engine() -> Engine:
@@ -54,27 +114,32 @@ def create_test_engine() -> Engine:
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
     plain SQLite rejects because it has no schemas. Each such schema is
-    therefore ATTACHed as its own in-memory database before `create_all`, on
-    every connection.
+    therefore ATTACHed as an in-memory database before `create_all`, on every
+    connection.
 
-    ATTACH rather than a `schema_translate_map`: translating the schema away
-    would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
-    runs, quietly hiding exactly the qualification defects D1's gate exists to
-    catch. Attaching keeps the emitted SQL identical to production's.
+    SQLite normally permits only ten attachments. Above that limit, schemas
+    whose table names are disjoint share an attached database through a narrow
+    `schema_translate_map`. SQL remains qualified; only the test database alias
+    changes. The namespace gate and PostgreSQL integration lane remain the
+    proof of each exact production schema name.
     """
+    attached_schemas, schema_translations = _sqlite_schema_layout(
+        _module_schema_tables(),
+        max_attached=_sqlite_attached_limit(),
+    )
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
+        execution_options={"schema_translate_map": schema_translations},
     )
-    schemas = _module_schemas()
-    if schemas:
+    if attached_schemas:
 
         @event.listens_for(engine, "connect")
         def _attach_module_schemas(dbapi_connection: object, _record: object) -> None:
             cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
             try:
-                for schema in schemas:
+                for schema in attached_schemas:
                     # Identifier-quoted, and the names are `mod_<short_code>`
                     # already validated by `namespaces.validate_schema` — this
                     # is defence in depth, not the only check.

@@ -6,6 +6,27 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a71 — UNRELEASED
+
+Allocates the immutable database identity for the product-first
+`dotmac-positioning` optional tenant module.
+
+### Added
+
+- `POSITIONING_MIGRATION_OWNER`, assigning module code `positioning` to schema
+  `mod_pos`, revision prefix `po`, and branch label `positioning`.
+- The allocation is physical identity only. It adds no positioning behavior to
+  the kernel and does not compose the optional module into any application.
+
+### Fixed
+
+- The supported SQLite assembly-test harness now packs table-disjoint overflow
+  schemas into qualified attachment aliases after the interpreter's finite
+  attached-database limit is reached. Adding an eleventh stateful module no
+  longer prevents the unit suite from creating its shared engine; table-name
+  collisions still fail closed, while exact production schema names remain
+  enforced by the namespace and PostgreSQL gates.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
