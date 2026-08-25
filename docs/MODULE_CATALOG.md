@@ -44,6 +44,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
+| [`dotmac-accounting`](../packages/dotmac-accounting/README.md) | optional module | [`audit-complete`](../packages/dotmac-accounting/EXTRACTION.toml) | [tenant · `mod_accounting`](../packages/dotmac-accounting/src/dotmac_accounting/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_erp` |
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
@@ -54,8 +55,9 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a9` | `>=0.1.0a68` | `dotmac_integrator` | — |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a72` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a73` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-payables`](../packages/dotmac-payables/README.md) | optional module | [`audit-complete`](../packages/dotmac-payables/EXTRACTION.toml) | [tenant · `mod_payables`](../packages/dotmac-payables/src/dotmac_payables/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_erp` |
 | [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
@@ -67,6 +69,14 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 The dossier linked from each entry remains authoritative for source
 paths, parity tests, first cutover, drift proof, local-copy retirement
 and the next gate.
+
+### [`dotmac-accounting`](../packages/dotmac-accounting/README.md)
+
+- **Owner:** Tenant chart, fiscal periods, accounting dimensions, balanced journal posting, reversal and immutable ledger evidence
+- **Contract:** Configure a tenant chart, fiscal years/periods and open accounting dimensions; create draft journals from typed source facts; decide balanced posting against an admissible period and posting accounts; append immutable ledger/dimension evidence; correct with a linked opposite-side reversal; close, reopen with explicit authority, and irreversibly lock periods while appending transition evidence. NOT receivables/payables documents, supplier/customer identity, procurement, assets, inventory, tax calculation/filing, banking/payment execution, budgets, exchange-rate sourcing, numbering, approvals, report presentation, or provider I/O.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-accounting/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`.
 
 ### [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md)
 
@@ -163,6 +173,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-numbering/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-payables`](../packages/dotmac-payables/README.md)
+
+- **Owner:** Tenant supplier invoice, credit-note, liability and payment-obligation lifecycle
+- **Contract:** Create, submit, approve and void draft supplier invoices/credit notes from opaque supplier/procurement evidence; recognize approved liabilities/credits; materialize due-date obligations; apply supplier credit without double-recognizing it; accept deduplicated external settlement observations; produce typed balanced accounting consequences and record immutable accounting receipts. NOT supplier identity/compliance/bank details, procurement commitments/receipts, tax policy, inventory valuation, approval decisions, numbering, journal posting, bank/payment execution, provider I/O or retry.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-payables/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`.
 
 ### [`dotmac-people`](../packages/dotmac-people/README.md)
 

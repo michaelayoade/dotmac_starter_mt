@@ -80,7 +80,9 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # newer capability, move its row to CAPABILITY_RAISED_FLOORS while retaining
 # the allocation release as evidence there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    "dotmac-accounting": "0.1.0a73",
     "dotmac-campaigns": "0.1.0a71",
+    "dotmac-payables": "0.1.0a73",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in

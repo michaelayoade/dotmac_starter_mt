@@ -624,6 +624,26 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-accounting` — tenant chart, fiscal-period and immutable journal
+# ledger authority accepted by ADR-0041. The physical name is intentionally
+# explicit in catalog dumps; `ac` keeps the independent lineage readable.
+ACCOUNTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="accounting",
+    prefix="ac",
+    branch_label="accounting",
+    db_schema=module_schema("accounting"),
+)
+
+# `dotmac-payables` — tenant supplier-liability and payment-obligation owner
+# accepted by ADR-0042. `ap` is already permanently allocated to Approvals, so
+# this lineage uses `pa`; prefixes are identities, not abbreviations to recycle.
+PAYABLES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payables",
+    prefix="pa",
+    branch_label="payables",
+    db_schema=module_schema("payables"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +659,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    ACCOUNTING_MIGRATION_OWNER,
+    PAYABLES_MIGRATION_OWNER,
 )
 
 
@@ -969,6 +991,7 @@ class NamespaceRegistry:
 
 
 __all__ = [
+    "ACCOUNTING_MIGRATION_OWNER",
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
@@ -984,6 +1007,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "PAYABLES_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

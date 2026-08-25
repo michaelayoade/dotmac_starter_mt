@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-accounting": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. ERP remains the live general-ledger authority. ADR-0041 and the extraction dossier require an exact-pin ERP shadow, parity reconciliation and writer ratchet before this candidate owner may be published or activated. Remove this row only in the release change that records the sealed first-adopter cutover; publishing earlier would create a parallel accounting writer.",
+      "state": "never-published"
+    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
@@ -72,19 +77,19 @@
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
     },
+    "dotmac-payables": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. ERP remains the live supplier-liability authority. ADR-0042 and the extraction dossier require Accounting to cut over first, then an exact-pin Payables shadow, parity reconciliation and AP writer ratchet before publication or activation. Remove this row only with that sealed first-adopter evidence; publishing earlier would create a parallel liability owner.",
+      "state": "never-published"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
     },
-    "dotmac-durable-timers": {
-      "declared": "0.1.0a1",
-      "reason": "RELEASE SEQUENCED 2026-08-18: the accepted contract, all ten PostgreSQL proofs, their sensitivity companions, full static/unit/architecture/integration validation and the release allowlist are green at exact candidate a3c82cd266141d80fdd0a128e74cc5b276bc04a4. Publication still waits for this revision to reach protected main and for its exact dotmac-kernel 0.1.0a72 allocation artifact to be published and verified first. Delete this row only in the follow-up release-record change after dotmac-durable-timers 0.1.0a1 is registry-verified and tagged; an allowlist row is not publication evidence.",
-      "state": "never-published"
-    },
     "dotmac-kernel": {
-      "declared": "0.1.0a72",
-      "reason": "OUTSTANDING 2026-08-18: a72 is reserved after the open a71 People allocation and allocates mod_timers/dt/durable_timers plus the declared output-routing surface required by the accepted timer dossier. Delete this row only when the exact protected-main a72 artifact is verified and tagged.",
+      "declared": "0.1.0a73",
+      "reason": "OUTSTANDING 2026-08-19: the declared head retains a72's durable-timer allocation/output-routing surface and adds the mod_accounting/ac/accounting and mod_payables/pa/payables identities required by ADR-0041/0042. Delete this row only when the exact protected-main a73 artifact is verified and tagged; Accounting and Payables cannot publish before that kernel floor.",
       "state": "declared-unpublished"
     }
   }

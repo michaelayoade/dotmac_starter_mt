@@ -6,7 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a72 — UNRELEASED
+## 0.1.0a73 — UNRELEASED
+
+Allocates the independent tenant-only Accounting and Payables lineages. The
+kernel gains no finance behavior: it records the permanent physical identities
+that their manifests and migrations must match.
+
+### Added
+
+- `ACCOUNTING_MIGRATION_OWNER`: schema `mod_accounting`, revision prefix `ac`,
+  branch label `accounting` (ADR-0041).
+- `PAYABLES_MIGRATION_OWNER`: schema `mod_payables`, revision prefix `pa`,
+  branch label `payables` (ADR-0042). Prefix `ap` remains owned by Approvals.
+
+## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration
 surface its output routing contract requires. This is an allocation and a

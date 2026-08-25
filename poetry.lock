@@ -505,6 +505,24 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-accounting"
+version = "0.1.0a1"
+description = "Tenant chart, fiscal-period and immutable balanced-ledger authority"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-accounting"
+
+[[package]]
 name = "dotmac-application-directory"
 version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
@@ -686,7 +704,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a72"
+version = "0.1.0a73"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -728,6 +746,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-numbering"
+
+[[package]]
+name = "dotmac-payables"
+version = "0.1.0a1"
+description = "Tenant supplier-liability and payment-obligation authority"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-payables"
 
 [[package]]
 name = "dotmac-people"
@@ -2980,4 +3016,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "ed99a2e87bb4b5046cb3d62c0f98fd4c7b4326fd52f5a0321088fcef6a7a3e02"
+content-hash = "5f899188c667b702fe3765dd6c355ae6df82e742abb1f52665a5670d3dc14ff3"
