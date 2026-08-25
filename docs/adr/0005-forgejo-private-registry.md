@@ -122,6 +122,25 @@ fail-closed operational path until the two restricted identities and ruleset
 settings are installed and verified. The a91/a93 approval exceptions and the
 a92/a93 record evidence are retained in `docs/CONTROL_EXCEPTIONS.md`.
 
+### Provisioning record — 2026-08-24
+
+As observed at 2026-08-24 22:35 UTC, private App
+`dotmac-release-recorder-328160` has selected-repository access to
+`michaelayoade/dotmac_starter_mt` only and declares metadata read, contents
+write and pull-requests write. A direct proof authenticated a newly generated
+key, minted an unrestricted installation token, enumerated exactly Starter and
+revoked the token.
+
+The key's canonical pointer is
+`bao://secret/dotmac/github/release-recorder#private_key`. Its GitHub
+projection is protected environment `registry-release`: variable
+`RELEASE_RECORDER_CLIENT_ID` and secret `RELEASE_RECORDER_PRIVATE_KEY`.
+Repository-level inputs and the previous App key remain a temporary rollback,
+not a second authority; the release captain removes both only after one
+legitimate release opens its App-authored record PR and triggers required CI
+without manual intervention. Because GitHub settings are mutable external
+state, the release captain refreshes this observation before that dispatch.
+
 ## Follow-ups
 
 1. Stand up per `deploy/forgejo/RUNBOOK.md`; publish + verify `dotmac-kernel
