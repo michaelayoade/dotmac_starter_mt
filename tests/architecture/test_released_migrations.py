@@ -1076,6 +1076,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-subscriptions ──
+    "dotmac-subscriptions-v0.1.0a3": (
+        "dotmac-subscriptions",
+        "ad6c5824",
+        {
+            "su_0001_subscriptions.py": (
+                "bbc6a1da801259a734988c976800c404ce30f4a3b8cf3f24a48410f557e3f252"
+            ),
+            "su_0002_offer_pricing.py": (
+                "3b1a8524cfd585bac895f63bf7a8f3dc1d9521cfd997b80f379488e31fd21210"
+            ),
+            "su_0003_billing_treatments.py": (
+                "ccdb960c3ed40f852d913a640d12903b86acad481e95c3a87f59ce7e69e129dc"
+            ),
+        },
+    ),
     "dotmac-subscriptions-v0.1.0a2": (
         "dotmac-subscriptions",
         "f91253d5",
@@ -1259,7 +1274,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
-    "dotmac-subscriptions": frozenset({"su_0003_billing_treatments.py"}),
+    "dotmac-subscriptions": frozenset(),
     "dotmac-billing": frozenset(),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
