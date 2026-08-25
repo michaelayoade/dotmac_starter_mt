@@ -26,7 +26,7 @@ from dotmac_integration import (
     PollContractError,
     PollingAttemptFailure,
     PollingCheckpoint,
-    PollingCheckpointRegistration,
+    PollingJobRegistration,
     advance_checkpoint,
     ensure_polling_checkpoint,
     invoke_poll,
@@ -160,7 +160,7 @@ def test_checkpoint_registration_is_idempotent_and_detached(engine: Engine) -> N
         )
         db.commit()
 
-    assert isinstance(first, PollingCheckpointRegistration)
+    assert isinstance(first, PollingJobRegistration)
     assert first.created is True
     assert replay.created is False
     assert replay.checkpoint == first.checkpoint

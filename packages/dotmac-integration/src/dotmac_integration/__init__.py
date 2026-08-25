@@ -92,9 +92,9 @@ of.
 
 :mod:`dotmac_integration.poll_schedule` closes it without adding a scheduler.
 The checkpoint carries the current retry state, a never-rewritten table carries
-the per-attempt history, and :func:`due_polling_jobs` is the sole bounded KEYSET selection
-a worker loops over. The engine owns the FLOOR ("not before"), never the
-CADENCE ("every N seconds"), and it never dead-letters a poll job — a provider
+the per-attempt history, and :func:`due_polling_jobs` is the sole bounded
+KEYSET selection a worker loops over. The engine owns the FLOOR ("not before"),
+never the CADENCE ("every N seconds"), and it never dead-letters a poll job — a provider
 stream nobody is reading fails silently, so the curve saturates and the job
 stays selectable. Backoff itself is not redefined: it delegates to
 :func:`dotmac_integration.retry.retry_delay_seconds`, the one owner of the
@@ -370,11 +370,11 @@ from dotmac_integration.polling import (
     PollContractError,
     PollError,
     PollHandlerUnavailable,
+    PollingJobRef,
+    PollingJobRegistration,
     PollResult,
     PollSecretsUnavailable,
     PollUnavailable,
-    PollingCheckpointRef,
-    PollingCheckpointRegistration,
     PreparedPoll,
     ensure_polling_checkpoint,
     invoke_poll,
@@ -839,8 +839,8 @@ __all__ = [
     "PollResult",
     "PollSecretsUnavailable",
     "PollUnavailable",
-    "PollingCheckpointRef",
-    "PollingCheckpointRegistration",
+    "PollingJobRef",
+    "PollingJobRegistration",
     "PreparedPoll",
     "ensure_polling_checkpoint",
     "invoke_poll",

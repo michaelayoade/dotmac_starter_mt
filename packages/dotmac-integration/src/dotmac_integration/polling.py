@@ -61,8 +61,8 @@ __all__ = [
     "PollResult",
     "PollSecretsUnavailable",
     "PollUnavailable",
-    "PollingCheckpointRef",
-    "PollingCheckpointRegistration",
+    "PollingJobRef",
+    "PollingJobRegistration",
     "PreparedPoll",
     "ensure_polling_checkpoint",
     "invoke_poll",
@@ -173,8 +173,13 @@ class PollResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PollingCheckpointRef:
-    """A detached checkpoint value safe to return beyond the transaction."""
+class PollingJobRef:
+    """A detached polling-job value safe to return beyond the transaction.
+
+    This is not another durable checkpoint declaration. The persisted cursor
+    and retry state remain the ``PollingCheckpoint`` row; this value merely
+    reports the declaration result after the caller-owned transaction ends.
+    """
 
     id: UUID
     capability_binding_id: UUID
@@ -184,10 +189,10 @@ class PollingCheckpointRef:
 
 
 @dataclass(frozen=True, slots=True)
-class PollingCheckpointRegistration:
+class PollingJobRegistration:
     """The result of declaring one polling job."""
 
-    checkpoint: PollingCheckpointRef
+    checkpoint: PollingJobRef
     created: bool
 
 
@@ -204,8 +209,8 @@ def _cursor(value: dict[str, object] | None) -> str | None:
     return cursor
 
 
-def _checkpoint_ref(checkpoint: PollingCheckpoint) -> PollingCheckpointRef:
-    return PollingCheckpointRef(
+def _checkpoint_ref(checkpoint: PollingCheckpoint) -> PollingJobRef:
+    return PollingJobRef(
         id=checkpoint.id,
         capability_binding_id=checkpoint.capability_binding_id,
         job_key=checkpoint.job_key,
@@ -269,7 +274,7 @@ def ensure_polling_checkpoint(
     initial_cursor: str | None | _InitialCursorUnspecified = (
         _INITIAL_CURSOR_UNSPECIFIED
     ),
-) -> PollingCheckpointRegistration:
+) -> PollingJobRegistration:
     """Declare one polling job without offering a second selector or rewind.
 
     ``poll_schedule.due_polling_jobs`` is the sole scheduling selector. This
@@ -325,7 +330,7 @@ def ensure_polling_checkpoint(
             ).scalar_one_or_none(),
         )
 
-    def replay(checkpoint: PollingCheckpoint) -> PollingCheckpointRegistration:
+    def replay(checkpoint: PollingCheckpoint) -> PollingJobRegistration:
         if checkpoint.version != 1 or checkpoint.advanced_at is not None:
             if initial_cursor_was_supplied:
                 raise CheckpointDefinitionConflict(
@@ -337,7 +342,7 @@ def ensure_polling_checkpoint(
                 "polling checkpoint already has a different initial cursor; "
                 "rewind and replacement are not lifecycle operations"
             )
-        return PollingCheckpointRegistration(
+        return PollingJobRegistration(
             checkpoint=_checkpoint_ref(checkpoint), created=False
         )
 
@@ -362,9 +367,7 @@ def ensure_polling_checkpoint(
                 "a concurrent checkpoint declaration won; retry the same command"
             ) from None
         return replay(winner)
-    return PollingCheckpointRegistration(
-        checkpoint=_checkpoint_ref(checkpoint), created=True
-    )
+    return PollingJobRegistration(checkpoint=_checkpoint_ref(checkpoint), created=True)
 
 
 def prepare_poll(
