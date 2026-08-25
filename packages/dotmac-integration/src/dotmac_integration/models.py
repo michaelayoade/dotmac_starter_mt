@@ -691,12 +691,45 @@ class DeliveryAttempt(Base):
 
 
 class PollingCheckpoint(Base):
-    """Where a polling job got to, with an OPTIMISTIC LOCK.
+    """Where a polling job got to, with an OPTIMISTIC LOCK and its RETRY STATE.
 
-    `version` is the whole point. Two workers advancing one cursor without it
-    silently lose events: the slower write wins and the window between the two
-    cursors is never polled again. A conditional update on `version` turns that
-    into a refusal the caller can retry.
+    `version` is the whole point of the first half. Two workers advancing one
+    cursor without it silently lose events: the slower write wins and the window
+    between the two cursors is never polled again. A conditional update on
+    `version` turns that into a refusal the caller can retry.
+
+    The second half is the retry state, and it lives on THIS row rather than in
+    a scheduler because the alternative is a parallel ledger. Before it existed,
+    a poll that failed left nothing behind: the engine could not say how many
+    times in a row this job had failed, when it might safely be tried again, or
+    what kind of failure it was — so every assembly that ran a poll worker had
+    to invent its own attempt counter and its own backoff, which is two answers
+    to one question and a second writer of a decision this module owns.
+
+    Four invariants hold these columns together, each of them checkable:
+
+    * `attempt_count` counts CONSECUTIVE failures since the last success, not
+      lifetime attempts. A success resets it to zero, so it reads as "how deep
+      into the backoff curve is this job right now", which is the question a
+      retry decision actually asks.
+    * `next_attempt_at` is NOT NULL and means "not before". It is a FLOOR, never
+      a cadence: the engine refuses to say "poll every five minutes", because a
+      polling interval is a deployment's decision about a provider and inventing
+      one here would put a schedule in a library. A success sets it to the
+      moment of that success, which makes the ordering `(next_attempt_at, id)`
+      a least-recently-polled queue for healthy jobs and a backoff queue for
+      failing ones — with one index and no second concept.
+    * failure bookkeeping NEVER touches `version`. The version is a claim about
+      the CURSOR, and a failed attempt moved no cursor; bumping it would make a
+      concurrent in-flight settle raise `CheckpointConflict` for a race that did
+      not happen.
+    * `last_failure_code` and `last_failure_at` are written and cleared
+      together. A code with no time (or a time with no code) is a half-written
+      record that reads as evidence, so the check constraint refuses it.
+
+    The per-attempt history lives in
+    :class:`dotmac_integration.poll_schedule.PollingAttemptFailure`; these
+    columns are the CURRENT state that a selection query can index.
     """
 
     __tablename__ = "polling_checkpoints"
@@ -707,6 +740,18 @@ class PollingCheckpoint(Base):
             name="uq_polling_checkpoints_binding_job",
         ),
         CheckConstraint("version >= 1", name="ck_polling_checkpoints_version"),
+        CheckConstraint(
+            "attempt_count >= 0", name="ck_polling_checkpoints_attempt_count"
+        ),
+        CheckConstraint(
+            "(last_failure_code IS NULL) = (last_failure_at IS NULL)",
+            name="ck_polling_checkpoints_failure_pairing",
+        ),
+        # The keyset ordering key, indexed as a pair rather than as two
+        # separate indexes: the selection walks `(next_attempt_at, id)` as one
+        # tuple, and a single-column index on the timestamp would leave the
+        # tiebreak to a sort.
+        Index("ix_polling_checkpoints_due", "next_attempt_at", "id"),
         schema_table_args(SCHEMA),
     )
 
@@ -726,3 +771,31 @@ class PollingCheckpoint(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
+
+    # ── Retry state (owned by `dotmac_integration.poll_schedule`) ───────────
+    #: Consecutive FAILED attempts since the last success. Reset to 0 by
+    #: `record_poll_success`, incremented under a row lock by
+    #: `record_poll_failure`. The backoff curve reads this and nothing else.
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    #: The floor: this job is not eligible before this moment. NOT NULL so the
+    #: keyset ordering key is total — a nullable column would need a COALESCE in
+    #: every comparison, and a COALESCE in a keyset predicate is how a page
+    #: boundary silently stops using the index.
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_failure_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: One of `poll_schedule.POLL_FAILURE_CODES` — this ENGINE's closed
+    #: vocabulary, never a connector's `error_code` and never a message. See
+    #: that module for why there is no free-text column here at all.
+    last_failure_code: Mapped[str | None] = mapped_column(String(40), nullable=True)

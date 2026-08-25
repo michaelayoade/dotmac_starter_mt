@@ -29,8 +29,11 @@ a14 adds typed outbound provider evidence, delivered-payload retention and SPI
 1.4's explicit capability-to-mode mapping.
 a15 refuses changed-effect reuse of an outbound idempotency key and contains
 concurrent enqueue uniqueness failures behind typed, material-safe outcomes.
-a16 adds the domain-owned capability payload contract and durably stores its
-validated command result; raw provider response bodies remain unrepresentable.
+a16 adds the domain-owned capability payload contract, durably stores its
+validated command result, and gives polling one module-owned lifecycle,
+due-job selector, retry state and bounded failure-history sweep; raw provider
+response bodies remain unrepresentable. The module chooses no polling cadence
+and no failure-retention period.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

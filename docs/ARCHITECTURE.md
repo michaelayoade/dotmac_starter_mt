@@ -65,6 +65,7 @@ The first concrete plugin follows that split exactly:
 | Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation; and outbound payment-initialization/charge, refund, payout and customer commands, each behind its own bound capability so an observation binding never carries command authority | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL on `payments.settlement.observation.v1`; DELIVERY on `payments.intent.v1`, `payments.refund.v1`, `payments.payout.v1` and `payments.customer.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger, refund warrant, payout decision or product consequence. Outbound derives the provider reference from the engine's idempotency key and never reads one from the payload; a send whose answer never arrived is reported AMBIGUOUS with its reference as evidence, never retried. **Today the only `payments.payout.v1` binding in the fleet — see ADR-0061 § 4 D1.** It also still declares `payments.customer.v1` (`create_customer | update_customer | read_customer`) — as built, and RULED OUT: ADR-0061 Amendment A5 REMOVES that capability from the public manifest (no independent Dotmac business lifecycle; it is Paystack's `/customer` REST surface). The code removal is part of the payout refactor, gated behind the capability-schema and result seams; A5 holds the artifact-by-artifact list |
 | Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
 | Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
+| Whether a polling job may be attempted now, how far into the backoff curve it is, and what its attempts have done — declaration lifecycle, retry state, never-rewritten per-attempt failure evidence, bounded retention sweep and the sole bounded keyset selection a worker loops over | `dotmac-integration.poll_schedule` plus the `polling.ensure_polling_checkpoint` lifecycle seam | Owns the FLOOR (`next_attempt_at` = not before), never the CADENCE — a polling interval stays a deployment's decision. Never dead-letters a poll job (the curve saturates and the job stays selectable; stopping one is `lifecycle.disable`). Never touches the checkpoint's optimistic `version`, which remains `execution.advance_checkpoint`'s claim about the cursor. Owns no backoff formula (`retry.retry_delay_seconds`), no lease (the selection claims nothing), no connector vocabulary (eight engine-owned failure codes, and the evidence table has no free-text column), and no retention period; the product supplies the cutoff to the typed sweep |
 | Remita authenticated RRR status polling, provider-neutral response translation, and outbound RRR issuance under the provider SHA-512 request contract | `dotmac-connector-remita` (`remita`, POLL on `payments.reference.status.observation.v1`, DELIVERY on `payments.reference.issuance.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence. Issuance carries the PRODUCT's stable `orderId` and mints none of its own, because Remita accepts no idempotency header and `orderId` is its only natural key |
 | LinkedIn challenge-response, exact-byte webhook authentication and organization-social/lead notification translation | `dotmac-connector-linkedin` (`linkedin`, INGRESS-only, `social.activity.observation.v1` + `marketing.lead.observation.v1`) | Owns no contact, campaign, qualification, assignment, ticket, publication, destination or product consequence; declares deny-all provider egress |
 | Connector installation, binding, product-port descriptor projection, engine-derived ProductObservation source, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no provider header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each typed observation and comparison and returns only closed safe outcomes |
@@ -402,6 +403,64 @@ no evidentiary claim in either direction — *"Implemented and tested; productio
 enablement unconfirmed"* remains the required wording (ADR-0061 A7), and the
 blocker is a reason enablement must not be sought rather than evidence about
 whether it has happened.
+
+### Durable polling evidence: the module owns the retry loop, not the assembly
+
+`dotmac-integration`'s POLL engine always recorded a success — receipts plus an
+advanced cursor. It recorded nothing about a failure, so three questions a poll
+worker must answer every cycle had no durable answer: how many times in a row
+has this job failed, when may it be tried again, and what kind of failure was
+it? An assembly answers them regardless. Answering them in the assembly means an
+attempt counter in a worker's memory, a backoff constant in its loop, sometimes
+a retry table in its own schema — a parallel retry ledger, and a second writer
+of a decision the module already owned half of through the checkpoint's
+optimistic `version`.
+
+`dotmac_integration.poll_schedule` is the named owner. `PollingCheckpoint`
+carries the current retry state (`attempt_count`, `next_attempt_at`,
+`last_success_at`, `last_failure_at`, `last_failure_code`);
+`mod_intg.polling_attempt_failures` is the never-rewritten per-attempt history;
+`ensure_polling_checkpoint` owns declaration without rewind; and
+`due_polling_jobs` is the sole bounded keyset selection a worker loops over.
+The assembly gains a wake-up cadence and supplies an approved retention cutoff,
+but it gains no second selector, retry ledger or deletion mechanism.
+
+Five boundaries make it a shared engine rather than one deployment's scheduler:
+
+- **floor, not cadence.** `next_attempt_at` means *not before*. A polling
+  interval is a deployment's decision about one provider — a nightly bulk export
+  and a live tail do not share one — so the module refuses to hold it.
+- **no dead-letter.** A failing outbound delivery is eventually dead-lettered;
+  a failing poll is not. A poll job that stops has no symptom but facts that
+  stop arriving. The curve saturates at `ExecutionPolicy.max_backoff_seconds`
+  and the job stays selectable; suppressing one keeps its existing owner
+  (`lifecycle.disable` on the binding or installation, with its audit trail).
+- **the cursor's version is untouched by failure bookkeeping.** `version` is a
+  claim about the CURSOR; a failed attempt moved no cursor, and bumping it would
+  make a concurrent in-flight settle lose a race that never happened.
+- **one backoff owner.** `poll_backoff_seconds` delegates to
+  `retry.retry_delay_seconds`, the same curve the outbox uses.
+- **no provider or connector vocabulary reaches storage.** Eight engine-owned
+  failure codes, closed by a database check constraint, and an evidence table
+  with no free-text column at all — the same rule `test_integration_error_text`
+  has to enforce by scanning elsewhere, enforced here by there being nowhere to
+  break it.
+
+Selection claims nothing on purpose. Two workers may read the same page; the
+checkpoint's optimistic `version` decides which settles and the loser records a
+`checkpoint_conflict`. A lease would be a second claim over a row that already
+has a stronger one. Ordering by `(next_attempt_at, id)` makes healthy jobs
+round-robin — a success stamps the floor with the moment of the success — and
+pushes failing ones behind their own backoff, so an early permanently broken
+checkpoint cannot starve the ones created after it. Keyset rather than offset
+paging is what keeps that true across a multi-page walk, because the rows a
+worker polls are the rows whose offsets would shift under it.
+
+Failure evidence is finite only through
+`poll_schedule.prune_poll_failure_history`. The module owns that bounded,
+oldest-first deletion path, while the adopting product supplies the mandatory
+timezone-aware cutoff. There is no module default, environment read or hidden
+TTL, so installing the package cannot silently choose a retention posture.
 
 ### Runtime metrics: the module names them, the assembly exports them (ADR-0062)
 

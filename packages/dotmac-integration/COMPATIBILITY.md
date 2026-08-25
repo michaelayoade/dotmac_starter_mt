@@ -9,7 +9,7 @@ document is the bug.
 | | |
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a15`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, and a15 adds typed outbound repair and runtime safety |
-| Declared | `0.1.0a16` adds domain-owned command/result/observation schemas and durable, validated command results without changing SPI 1.4 |
+| Declared | `0.1.0a16` adds domain-owned command/result/observation schemas, durable validated command results, and durable polling attempt/failure/backoff evidence — none of which changes SPI 1.4 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -242,6 +242,53 @@ is a fact about the range rather than about nothing being checked.
 This is why SPI 1.1 and 1.2 are minors. A major would have excluded every honest
 `>=1.0,<2.0` delivery connector in order to protect a compatibility promise
 nothing ever consumed.
+
+## Polling evidence is an ENGINE contract, not an SPI one
+
+`0.1.0a16` gives the poll loop durable retry state, a never-rewritten failure
+history and a bounded keyset selection (`dotmac_integration.poll_schedule`). A
+connector sees none of it. `PollHandler.poll` is unchanged — same parameters,
+same return shape, same "raise to signal failure" — so no connector needs
+recompiling, re-certifying or re-pinning, and the SPI version does not move.
+
+What changed is what the ENGINE does around that call, and the three properties
+a consumer may rely on:
+
+* **the vocabulary is closed and it is the engine's.** Every persisted failure
+  is one of eight `POLL_FAILURE_CODES` derived from this package's own exception
+  types. A connector's `error_code` never reaches it, and neither does an
+  exception message: the evidence table has no free-text column, which is the
+  strongest form of that promise available — a rule enforced by the absence of a
+  place to break it. The single bounded exception is a connector exception's
+  TYPE NAME, sanitized to a bare Python identifier at the raise site and
+  re-checked at the write;
+* **the engine owns the FLOOR, never the CADENCE.** `next_attempt_at` means
+  *not before*. This package will not grow a polling interval: that is a
+  deployment's decision about one provider, and a library that chose it would be
+  shipping a schedule. A worker wakes on its own cadence and asks
+  `due_polling_jobs` what is eligible;
+* **a poll job is never dead-lettered.** A failing outbound delivery eventually
+  is. A failing poll must not be, because a provider stream nobody is reading
+  has no symptom but missing facts. The backoff curve saturates at
+  `ExecutionPolicy.max_backoff_seconds` and the job stays selectable forever.
+  Stopping a poll stays a lifecycle gesture with an audit trail: disable the
+  binding or the installation.
+
+`due_polling_jobs` selects and claims nothing. Two workers may see the same
+page; the checkpoint's optimistic `version` decides which one settles, and the
+loser records a `checkpoint_conflict` rather than losing a batch. Adding a lease
+would be a second claim over a row that already has a stronger one.
+
+Backoff is not redefined here — `poll_backoff_seconds` delegates to
+`retry.retry_delay_seconds`, which stays the one owner of the curve for the
+outbox and the poll loop alike.
+
+`ensure_polling_checkpoint` is the declaration lifecycle; it does not list
+work. `due_polling_jobs` is the sole scheduling selector. Failure-history
+deletion is likewise one typed bounded operation,
+`prune_poll_failure_history`, and requires a timezone-aware cutoff supplied by
+the adopting product. Neither a cadence nor a retention duration is part of
+this package's compatibility contract.
 
 ## What would force a major (2.0)
 

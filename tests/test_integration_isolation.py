@@ -34,6 +34,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -522,6 +523,102 @@ def test_only_one_session_can_advance_a_checkpoint(
     assert (won, lost) == (1, 0)
 
 
+def test_two_concurrent_checkpoint_declarations_converge_on_one_row(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The declaration lifecycle contains its SELECT-then-INSERT race."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dotmac_integration import (
+        CapabilityBinding,
+        ConnectorInstallation,
+        ConnectorRegistry,
+        ensure_polling_checkpoint,
+    )
+    from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    plugin = fake_plugin()
+    registry = ConnectorRegistry((plugin,))
+    installation_id, binding_id = uuid.uuid4(), uuid.uuid4()
+    setup = create_engine(admin_url)
+    with Session(setup) as db:
+        db.add(
+            ConnectorInstallation(
+                id=installation_id,
+                connector_key=plugin.manifest.connector_key,
+                connector_version=plugin.manifest.version,
+                spi_range=str(plugin.manifest.spi_range),
+                manifest_digest=plugin.manifest.digest,
+                name=f"{request.node.name}-{uuid.uuid4().hex[:8]}",
+                state="enabled",
+            )
+        )
+        db.flush()
+        db.add(
+            CapabilityBinding(
+                id=binding_id,
+                installation_id=installation_id,
+                capability_id=FAKE_CAPABILITY,
+                state="enabled",
+            )
+        )
+        db.commit()
+    setup.dispose()
+
+    engine = create_engine(admin_url)
+    rendezvous = threading.Barrier(2, timeout=20.0)
+
+    def synchronize_first_checkpoint_read(  # type: ignore[no-untyped-def]
+        conn, cursor, statement, parameters, context, executemany
+    ) -> None:
+        if (
+            "FROM mod_intg.polling_checkpoints" in statement
+            and "job_key" in statement
+            and not conn.info.get("checkpoint_declaration_synchronized")
+        ):
+            conn.info["checkpoint_declaration_synchronized"] = True
+            rendezvous.wait()
+
+    event.listen(engine, "before_cursor_execute", synchronize_first_checkpoint_read)
+
+    def declare():  # type: ignore[no-untyped-def]
+        with Session(engine) as db:
+            result = ensure_polling_checkpoint(
+                db,
+                capability_binding_id=binding_id,
+                job_key="concurrent-live-tail",
+                initial_cursor="origin",
+                registry=registry,
+            )
+            db.commit()
+            return result
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = (pool.submit(declare), pool.submit(declare))
+            results = tuple(future.result(timeout=20.0) for future in futures)
+    finally:
+        event.remove(engine, "before_cursor_execute", synchronize_first_checkpoint_read)
+
+    assert sorted(result.created for result in results) == [False, True]
+    assert len({result.checkpoint.id for result in results}) == 1
+    with engine.connect() as conn:
+        surviving = conn.execute(
+            text(
+                "SELECT count(*) FROM mod_intg.polling_checkpoints "
+                "WHERE capability_binding_id = :binding AND job_key = :job_key"
+            ),
+            {"binding": binding_id, "job_key": "concurrent-live-tail"},
+        ).scalar_one()
+    engine.dispose()
+    assert surviving == 1
+
+
 def test_only_one_session_can_settle_a_delivery(
     migrated_scratch: tuple[str, str],
     request: pytest.FixtureRequest,
@@ -754,11 +851,12 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 11
+    assert len(module.platform_tables) == 12
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
     assert "delivery_legal_holds" in module.platform_tables
     assert "shadow_comparison_evidence" in module.platform_tables
+    assert "polling_attempt_failures" in module.platform_tables
     assert module.tables == ()
 
     admin_url, _ = migrated_scratch
@@ -1527,3 +1625,597 @@ def test_the_refusals_above_are_not_refusing_everything(
     admin_url, _ = migrated_scratch
     with _broken(admin_url, "DROP TABLE mod_intg.receipt_legal_holds CASCADE") as conn:
         require_prerequisites(conn, _ledger_requires())
+
+
+# ── Durable polling evidence, against the real database ─────────────────────
+#
+# The SQLite unit suite (`tests/unit/test_integration_poll_schedule.py`) proves
+# the logic. Four of this feature's claims are not logic and cannot be proved
+# there: the attempt counter is serialized by a row lock SQLite does not take,
+# the crash path depends on two distinguishable transactions, the starvation
+# property is about a keyset walk over rows that change under it, and the
+# backoff floor is compared by the DATABASE. Those four live here.
+
+
+#: The floor every polling canary starts from unless it says otherwise: an
+#: hour in the past, so the job is already due without depending on the clock
+#: ticking during the test.
+_PAST_FLOOR = datetime(2026, 8, 25, 8, 0, tzinfo=UTC)
+
+
+def _polling_checkpoint(
+    conn: Connection,
+    request: pytest.FixtureRequest,
+    *,
+    job_key: str = "live-tail",
+    next_attempt_at: datetime | None = None,
+) -> uuid.UUID:
+    """One enabled installation, binding and checkpoint, with a stated floor.
+
+    The floor is a BOUND PARAMETER rather than an interpolated SQL fragment.
+    Not a lint appeasement: a `timestamptz` sent as a parameter is the same
+    round trip the module's own writes make, so a canary that passed here while
+    the real path mishandled the timezone would be impossible.
+    """
+    _, binding_id = _installation_and_binding(conn, request)
+    checkpoint_id = uuid.uuid4()
+    conn.execute(
+        text(
+            "INSERT INTO mod_intg.polling_checkpoints ("
+            "id, capability_binding_id, job_key, version, next_attempt_at) "
+            "VALUES (:id, :binding, :job, 1, :floor)"
+        ),
+        {
+            "id": checkpoint_id,
+            "binding": binding_id,
+            "job": job_key,
+            "floor": next_attempt_at or _PAST_FLOOR,
+        },
+    )
+    return checkpoint_id
+
+
+def test_the_checkpoint_floor_is_not_null_and_defaults_to_now(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The keyset ordering key must be TOTAL, or paging silently loses rows.
+
+    A nullable floor would need a COALESCE in every comparison — and a COALESCE
+    inside a keyset predicate is how a page boundary quietly stops using the
+    index it was built for.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        column = conn.execute(
+            text(
+                "SELECT is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_schema='mod_intg' AND table_name='polling_checkpoints' "
+                "AND column_name='next_attempt_at'"
+            )
+        ).one()
+        # A checkpoint created without naming a floor is due immediately, which
+        # is the only safe default: a new poll job that waited would be a poll
+        # job nobody scheduled.
+        _, binding_id = _installation_and_binding(conn, request)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.polling_checkpoints ("
+                "id, capability_binding_id, job_key, version) VALUES ("
+                ":id, :binding, 'defaulted', 1)"
+            ),
+            {"id": uuid.uuid4(), "binding": binding_id},
+        )
+        defaulted = conn.execute(
+            text(
+                "SELECT count(*) FROM mod_intg.polling_checkpoints "
+                "WHERE job_key = 'defaulted' AND next_attempt_at IS NULL"
+            )
+        ).scalar_one()
+    engine.dispose()
+
+    assert column.is_nullable == "NO"
+    assert column.column_default is not None
+    assert defaulted == 0
+
+    with pytest.raises(Exception, match="null value|not-null"):
+        broken = create_engine(admin_url)
+        try:
+            with broken.begin() as conn:
+                _, binding_id = _installation_and_binding(conn, request)
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_intg.polling_checkpoints ("
+                        "id, capability_binding_id, job_key, version, "
+                        "next_attempt_at) VALUES (:id, :binding, 'nulled', 1, NULL)"
+                    ),
+                    {"id": uuid.uuid4(), "binding": binding_id},
+                )
+        finally:
+            broken.dispose()
+
+
+def test_two_workers_recording_a_failure_cannot_both_be_the_first_attempt(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The concurrency claim, and the reason `record_poll_failure` locks.
+
+    Incrementing `attempt_count` is a read-modify-write. Unserialised, two
+    workers both read 0, both write 1, and the second failure of a pair is
+    recorded as a first — resetting the backoff curve every time two workers
+    collide, which is exactly when backing off matters most.
+
+    Proved WITHOUT threads, and deliberately: session B is given a short
+    `lock_timeout` and must fail to acquire the row while A holds it. A test
+    that merely ran two sequential transactions would pass with no lock at all.
+    """
+    from dotmac_integration import PollContractError, record_poll_failure
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        checkpoint_id = _polling_checkpoint(conn, request)
+    setup.dispose()
+
+    first, second = create_engine(admin_url), create_engine(admin_url)
+    try:
+        with Session(first) as a:
+            record_poll_failure(
+                a, checkpoint_id=checkpoint_id, error=PollContractError("a")
+            )
+            # A holds the row lock; it has NOT committed.
+            with Session(second) as b:
+                b.execute(text("SET LOCAL lock_timeout = '750ms'"))
+                with pytest.raises(Exception, match="lock timeout|LockNotAvailable"):
+                    record_poll_failure(
+                        b, checkpoint_id=checkpoint_id, error=PollContractError("b")
+                    )
+                b.rollback()
+            a.commit()
+
+        with Session(second) as b:
+            recorded = record_poll_failure(
+                b, checkpoint_id=checkpoint_id, error=PollContractError("b")
+            )
+            b.commit()
+    finally:
+        first.dispose()
+        second.dispose()
+
+    # The serialized outcome: 1 then 2, never 1 then 1.
+    assert recorded.attempt_number == 2
+
+    audit = create_engine(admin_url)
+    with audit.connect() as conn:
+        numbers = [
+            row[0]
+            for row in conn.execute(
+                text(
+                    "SELECT attempt_number FROM mod_intg.polling_attempt_failures "
+                    "WHERE checkpoint_id = :id ORDER BY id"
+                ),
+                {"id": checkpoint_id},
+            )
+        ]
+    audit.dispose()
+    assert numbers == [1, 2]
+
+
+def test_a_worker_that_dies_before_committing_leaves_the_job_eligible(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """Crash/retry: the failure bookkeeping is one transaction or none of it.
+
+    An advanced floor with no evidence row is the state this feature exists to
+    end. An evidence row with no advanced floor is worse: the job is selected
+    again immediately and appends an identical row on every pass — an unbounded
+    log that is also a hot loop against a provider already refusing.
+
+    So a crashed worker must leave BOTH untouched, and the job must still be
+    selected. Degrading toward more polling is the only safe direction; a
+    polling job that silently stops has no symptom but missing facts.
+    """
+    from dotmac_integration import (
+        PollContractError,
+        due_polling_jobs,
+        record_poll_failure,
+        retry_state,
+    )
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            checkpoint_id = _polling_checkpoint(conn, request, job_key="crashy")
+
+        with Session(engine) as crashing:
+            record_poll_failure(
+                crashing, checkpoint_id=checkpoint_id, error=PollContractError("x")
+            )
+            # The worker dies here. No commit.
+            crashing.rollback()
+
+        with Session(engine) as db:
+            state = retry_state(db, checkpoint_id=checkpoint_id)
+            orphans = db.execute(
+                text(
+                    "SELECT count(*) FROM mod_intg.polling_attempt_failures "
+                    "WHERE checkpoint_id = :id"
+                ),
+                {"id": checkpoint_id},
+            ).scalar_one()
+            eligible = {job.checkpoint_id for job in due_polling_jobs(db, limit=1000)}
+
+        assert state.attempt_count == 0
+        assert state.last_failure_code is None
+        assert orphans == 0
+        assert checkpoint_id in eligible
+
+        # And the retry that follows is attempt ONE, not attempt two: the
+        # crashed attempt left no counter behind to inherit.
+        with Session(engine) as db:
+            recorded = record_poll_failure(
+                db, checkpoint_id=checkpoint_id, error=PollContractError("x")
+            )
+            db.commit()
+        assert recorded.attempt_number == 1
+    finally:
+        engine.dispose()
+
+
+def test_backoff_grows_and_then_saturates_against_the_database_clock(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The floor is compared by PostgreSQL, not by Python.
+
+    The unit suite proves the curve. What it cannot prove is that the stored
+    `timestamptz` floor and the selection's `<=` agree — a column written in
+    local time, or a comparison against a naive value, produces a job that is
+    permanently due or permanently starved, and both look like a working query.
+    """
+    from dotmac_integration import (
+        DEFAULT_POLICY,
+        ExecutionPolicy,
+        PollContractError,
+        due_polling_jobs,
+        record_poll_failure,
+    )
+    from sqlalchemy.orm import Session
+
+    policy = ExecutionPolicy(base_delay_seconds=60, max_backoff_seconds=3_600)
+    start = datetime(2026, 8, 25, 9, 0, tzinfo=UTC)
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            checkpoint_id = _polling_checkpoint(conn, request, job_key="backoff")
+
+        delays: list[int] = []
+        with Session(engine) as db:
+            for index in range(9):
+                recorded = record_poll_failure(
+                    db,
+                    checkpoint_id=checkpoint_id,
+                    error=PollContractError("x"),
+                    now=start + timedelta(seconds=index),
+                    policy=policy,
+                )
+                delays.append(recorded.retry_in_seconds)
+                last = recorded
+            db.commit()
+
+        assert delays[:3] == [60, 120, 240]
+        assert delays == sorted(delays)
+        assert delays[-1] == policy.max_backoff_seconds, "the ceiling never applied"
+        assert last.next_attempt_at.tzinfo is not None
+
+        # The boundary, judged by the database's own comparison.
+        with Session(engine) as db:
+            just_before = {
+                job.checkpoint_id
+                for job in due_polling_jobs(
+                    db, now=last.next_attempt_at - timedelta(seconds=1), limit=1000
+                )
+            }
+            exactly_at = {
+                job.checkpoint_id
+                for job in due_polling_jobs(db, now=last.next_attempt_at, limit=1000)
+            }
+        assert checkpoint_id not in just_before
+        assert checkpoint_id in exactly_at
+        assert DEFAULT_POLICY.max_backoff_seconds >= policy.max_backoff_seconds
+    finally:
+        engine.dispose()
+
+
+def test_a_permanently_failing_checkpoint_cannot_starve_a_keyset_walk(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """Starvation, proved over a MULTI-PAGE walk of rows that change under it.
+
+    This is the case an offset-paged selection gets wrong and a keyset one gets
+    right, and it is not observable in a single-page test: the walk polls each
+    row it is handed, which rewrites that row's floor, which is exactly the
+    mutation that shifts every offset behind it. An offset walk would skip real
+    work here — silently, and preferentially the rows just behind a busy one.
+
+    The oldest checkpoint is the permanently failing one, so it starts at the
+    FRONT of the queue. Its own backoff must move it out of the way.
+    """
+    from dotmac_integration import (
+        PollContractError,
+        due_polling_jobs,
+        record_poll_failure,
+        record_poll_success,
+    )
+    from sqlalchemy.orm import Session
+
+    now = datetime(2026, 8, 25, 10, 0, tzinfo=UTC)
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        healthy: list[uuid.UUID] = []
+        with engine.begin() as conn:
+            stuck = _polling_checkpoint(
+                conn, request, job_key="stuck", next_attempt_at=_PAST_FLOOR
+            )
+            for index in range(7):
+                healthy.append(
+                    _polling_checkpoint(
+                        conn,
+                        request,
+                        job_key=f"healthy-{index:02d}",
+                        next_attempt_at=_PAST_FLOOR + timedelta(minutes=index + 1),
+                    )
+                )
+
+        with Session(engine) as db:
+            for _ in range(6):
+                record_poll_failure(
+                    db,
+                    checkpoint_id=stuck,
+                    error=PollContractError("always"),
+                    now=now - timedelta(minutes=30),
+                )
+            db.commit()
+
+        seen: list[uuid.UUID] = []
+        after = None
+        with Session(engine) as db:
+            while True:
+                page = due_polling_jobs(db, now=now, limit=2, after=after)
+                if not page:
+                    break
+                for job in page:
+                    seen.append(job.checkpoint_id)
+                    # The worker polls it. The floor moves; the walk must not.
+                    record_poll_success(
+                        db,
+                        checkpoint_id=job.checkpoint_id,
+                        now=now + timedelta(seconds=1),
+                    )
+                after = page[-1].page_key
+            db.commit()
+    finally:
+        engine.dispose()
+
+    assert stuck not in seen, "a job under backoff was polled anyway"
+    # Every healthy job exactly once: nothing skipped by a shifting page
+    # boundary, nothing served twice by a re-stamped row.
+    assert sorted(map(str, seen)) == sorted(map(str, healthy))
+    assert len(set(seen)) == len(seen)
+
+
+def test_the_failure_vocabulary_is_enforced_by_the_database(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """A code the classifier could invent must be refused where it is stored.
+
+    The Python tuple, the ORM constraint and the migration are three copies of
+    one vocabulary. This is the copy that decides, and it must be the one that
+    holds when the other two drift.
+    """
+    from dotmac_integration import POLL_FAILURE_CODES
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    insert = text(
+        "INSERT INTO mod_intg.polling_attempt_failures ("
+        "checkpoint_id, attempt_number, checkpoint_version, failure_code, "
+        "retry_in_seconds, next_attempt_at) VALUES ("
+        ":id, 1, 1, :code, 60, now() + interval '60 seconds')"
+    )
+    try:
+        with engine.begin() as conn:
+            checkpoint_id = _polling_checkpoint(conn, request, job_key="vocabulary")
+
+        # The accepted half, so the refusal below is about the CODE and not
+        # about the statement being wrong in some other way.
+        for code in POLL_FAILURE_CODES:
+            with engine.begin() as conn:
+                conn.execute(insert, {"id": checkpoint_id, "code": code})
+
+        with pytest.raises(Exception, match="ck_polling_attempt_failures_code"):
+            with engine.begin() as conn:
+                conn.execute(
+                    insert, {"id": checkpoint_id, "code": "crm_customer_name_rejected"}
+                )
+
+        # And an attempt number below one, which would read as a zeroth attempt.
+        with pytest.raises(Exception, match="ck_polling_attempt_failures_attempt"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_intg.polling_attempt_failures ("
+                        "checkpoint_id, attempt_number, checkpoint_version, "
+                        "failure_code, retry_in_seconds, next_attempt_at) VALUES ("
+                        ":id, 0, 1, 'settlement_failed', 60, now())"
+                    ),
+                    {"id": checkpoint_id},
+                )
+    finally:
+        engine.dispose()
+
+
+def test_half_written_failure_state_is_refused_on_the_checkpoint(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """A code with no time, or a time with no code, still reads as evidence."""
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            checkpoint_id = _polling_checkpoint(conn, request, job_key="pairing")
+
+        # Written out rather than looped over a fragment: each half must be
+        # refused ON ITS OWN, and a loop over interpolated SQL would be the
+        # statement construction this suite otherwise never does.
+        code_without_time = text(
+            "UPDATE mod_intg.polling_checkpoints SET "
+            "last_failure_code = 'contract_violated' WHERE id = :id"
+        )
+        time_without_code = text(
+            "UPDATE mod_intg.polling_checkpoints SET "
+            "last_failure_at = now() WHERE id = :id"
+        )
+        for statement in (code_without_time, time_without_code):
+            with pytest.raises(
+                Exception, match="ck_polling_checkpoints_failure_pairing"
+            ):
+                with engine.begin() as conn:
+                    conn.execute(statement, {"id": checkpoint_id})
+
+        # Both together is accepted — the sensitivity half, without which the
+        # constraint could be refusing every update and still pass above.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE mod_intg.polling_checkpoints SET "
+                    "last_failure_code = 'contract_violated', "
+                    "last_failure_at = now() WHERE id = :id"
+                ),
+                {"id": checkpoint_id},
+            )
+    finally:
+        engine.dispose()
+
+
+def test_polling_evidence_is_append_only_except_for_typed_retention(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Evidence is never rewritten; bounded retention may delete old rows.
+
+    UPDATE remains refused. DELETE exists for the module-owned bounded sweep,
+    whose cutoff is supplied by product policy. The sequence is a SECOND
+    privilege object, so table INSERT alone is not enough for a real append.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+
+        def _table(role: str, privilege: str) -> bool:
+            return bool(
+                conn.execute(
+                    text(
+                        "SELECT has_table_privilege(CAST(:r AS text), "
+                        "'mod_intg.polling_attempt_failures', CAST(:p AS text))"
+                    ),
+                    {"r": role, "p": privilege},
+                ).scalar_one()
+            )
+
+        def _sequence(role: str) -> bool:
+            return bool(
+                conn.execute(
+                    text(
+                        "SELECT has_sequence_privilege(CAST(:r AS text), "
+                        "'mod_intg.polling_attempt_failures_id_seq', 'USAGE')"
+                    ),
+                    {"r": role},
+                ).scalar_one()
+            )
+
+        platform = {
+            privilege: _table("platform_api", privilege)
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE")
+        }
+        tenant = {
+            privilege: _table("app_user", privilege)
+            for privilege in (
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            )
+        }
+        platform_sequence = _sequence("platform_api")
+        tenant_sequence = _sequence("app_user")
+    engine.dispose()
+
+    assert platform["SELECT"] and platform["INSERT"] and platform["DELETE"]
+    assert not platform["UPDATE"], "evidence must not be rewritable"
+    assert not platform["TRUNCATE"]
+    assert platform_sequence, "INSERT without sequence USAGE fails on first append"
+    assert not any(tenant.values()), f"app_user reaches the platform plane: {tenant}"
+    assert not tenant_sequence
+
+
+def test_deleting_a_checkpoint_takes_its_failure_history_with_it(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The history is ABOUT the job; an orphan of a deleted job is unreadable.
+
+    Deliberately unlike `receipt_legal_holds`, where the record of who forbade a
+    deletion must outlive what it protected. Nothing here is a legal instrument
+    — it is diagnostic state for a checkpoint that no longer exists.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            checkpoint_id = _polling_checkpoint(conn, request, job_key="cascade")
+            conn.execute(
+                text(
+                    "INSERT INTO mod_intg.polling_attempt_failures ("
+                    "checkpoint_id, attempt_number, checkpoint_version, "
+                    "failure_code, retry_in_seconds, next_attempt_at) VALUES ("
+                    ":id, 1, 1, 'connector_raised', 60, now())"
+                ),
+                {"id": checkpoint_id},
+            )
+        with engine.begin() as conn:
+            before = conn.execute(
+                text(
+                    "SELECT count(*) FROM mod_intg.polling_attempt_failures "
+                    "WHERE checkpoint_id = :id"
+                ),
+                {"id": checkpoint_id},
+            ).scalar_one()
+            conn.execute(
+                text("DELETE FROM mod_intg.polling_checkpoints WHERE id = :id"),
+                {"id": checkpoint_id},
+            )
+            after = conn.execute(
+                text(
+                    "SELECT count(*) FROM mod_intg.polling_attempt_failures "
+                    "WHERE checkpoint_id = :id"
+                ),
+                {"id": checkpoint_id},
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert (before, after) == (1, 0)
