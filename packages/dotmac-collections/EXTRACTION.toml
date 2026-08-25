@@ -74,6 +74,9 @@ preserved_tests = [
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac_vendor_control_plane"]
+publication_evidence.kind = "peeled_tag"
+publication_evidence.tag = "dotmac-collections-v0.1.0a1"
+publication_evidence.peeled_commit = "6ecf518a6985b8bf4b163eccb3de2fef171ecccc"
 inventory_evidence = [
   "docs/inventories/collections-sources.md",
   "docs/inventories/collections-extraction-dossier.md",
@@ -87,7 +90,7 @@ inventory_evidence = [
 first_cutover = "dotmac_sub tenant plane after total writer classification, backfill, shadow comparison, reconciliation and a one-writer authority watermark. Vendor Control Plane is the candidate second cutover on the already-declared platform plane, only after its real adapters and platform isolation canaries pass; neither candidate is a proven consumer yet."
 shadow_and_drift = "Compare live Sub and module shadow decisions for the complete candidate cohort by exact subject, reason, currency, source version, case state, pinned policy/step, next-action instant and timer generation, suppression, arrangement/grace scope, requested consequence and owner receipt. Every mismatch is classified; no unexplained bucket passes. During Billing's coupled authority switch, an unavailable receivables read blocks only the case and emits no consequence."
 local_copy_retirement = "Retire Sub's dunning_runner, DunningWorkflow, prepaid_balance_sweep/planner, transitional cycle/timer columns, direct credential and invoice/overlap writes, hardcoded notice path and both local case implementations only after shadow parity and rollback proof. Each displaced writer stays behind a sensitivity-proven two-directional ratchet whose baseline is lowered in the same change. Historical rows may remain read-only; no product-local copy of the extracted engine may survive."
-next_action = "The repaired peer contract and all three persistence selections landed on main through PR 381 after direct CI run 32659107095 and pull-request CI run 32660183336 passed for head revision 3b9c122940e162d0bf918d42d98c7a1288be483b. Kernel a89 remains the honest minimum. Next prepare the Sub Billing-reader, Durable-Timers and consequence-owner adapters plus backfill, full-cohort shadow comparison, reconciliation, rollback and two-directional retirement ratchets without switching authority or deleting legacy data. Separately compose Vendor Control Plane's platform selection and prove its adapters before claiming adoption or requesting release authorization."
+next_action = "Exact tagged-release evidence is recorded: annotated tag dotmac-collections-v0.1.0a1 peels to 6ecf518a6985b8bf4b163eccb3de2fef171ecccc. This does not claim a registry verification run or adoption: status remains audit-complete, contract_consumers remains empty, and no candidate has composed or cut over a persistence plane. Next Sub prepares the Billing reader, Durable Timers and consequence-owner adapters plus backfill, full-cohort shadow comparison, reconciliation, rollback and two-directional retirement ratchets without switching authority or deleting legacy data. Vendor Control Plane remains the candidate second cutover for Collections."
 
 [[product_writers]]
 product = "dotmac_sub"
