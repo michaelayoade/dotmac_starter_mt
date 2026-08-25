@@ -62,6 +62,7 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+<<<<<<< HEAD
     "dotmac-sales": {
       "declared": "0.1.0a1",
       "reason": "INTENDED while extraction validation and the first Sub adoption are still open. The package is audit-complete, deliberately absent from the release allowlist, and cannot be promised to consumers until the non-overlapping sales namespace allocation ships in the next kernel alpha and the full unit and PostgreSQL canaries are green. Publish just in time for the Sub backfill and shadow phase; remove this row in the same change as the verified dotmac-sales-v0.1.0a1 tag. Do not edit the declared version down or add an allowlist row merely to silence this gate.",
@@ -72,6 +73,8 @@
       "reason": "OUTSTANDING: the audit actor contract now requires every non-system writer to supply the canonical (actor_type, actor_id) pair; actor_party_id remains enrichment and no longer manufactures either member. Starter's nine remaining callers and Workspace's two external callers have been migrated before this declaration. Publish a70 only after the exact-head Observer and GitHub PostgreSQL gates prove the new contract and the generic all-caller AST ratchet; then remove this row in the release-record change.",
       "state": "declared-unpublished"
     },
+=======
+>>>>>>> agent/dotmac-sales-extraction-refresh
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
