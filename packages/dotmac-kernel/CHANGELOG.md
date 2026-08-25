@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a72 — 2026-08-18
+
+Allocates the independent tenant-only fixed-asset accounting lineage.
+
+### Added
+
+- `FINANCE_MIGRATION_OWNER`: schema `mod_finance`, revision prefix `fn`, branch
+  label `finance`. The allocation is for asset books and immutable balanced
+  accounting consequences; it does not move physical asset lifecycle, journal,
+  chart-of-accounts or fiscal-period ownership into the kernel.
+
 ## 0.1.0a71 — 2026-08-18
 
 Allocates the independent tenant-only people and campaigns lineages, names and

@@ -613,6 +613,17 @@ CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("campaigns"),
 )
 
+# `dotmac-finance` — the tenant-only owner of fixed-asset books and their
+# accounting consequences. Physical asset identity and lifecycle remain with
+# `dotmac-assets`; account and fiscal-period identifiers are opaque assembly
+# references, so this allocation does not create a cross-module database edge.
+FINANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="finance",
+    prefix="fn",
+    branch_label="finance",
+    db_schema=module_schema("finance"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -627,6 +638,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     NUMBERING_MIGRATION_OWNER,
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
+    FINANCE_MIGRATION_OWNER,
 )
 
 
@@ -961,6 +973,7 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "FINANCE_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

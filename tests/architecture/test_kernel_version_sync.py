@@ -74,13 +74,14 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# People and campaigns consume no kernel feature newer than their allocation
+# People, campaigns and finance consume no kernel feature newer than their allocation
 # release. Their required Party-person or consent/idempotency/outbox facilities
 # are present in a71, so the allocation itself is the floor. If either adopts a
 # newer capability, move its row to CAPABILITY_RAISED_FLOORS while retaining
 # the allocation release as evidence there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-campaigns": "0.1.0a71",
+    "dotmac-finance": "0.1.0a72",
     "dotmac-people": "0.1.0a71",
 }
 

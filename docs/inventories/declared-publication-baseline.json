@@ -67,10 +67,20 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-finance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL ERP CUTOVER. ADR-0038 and the product-first dossier make ERP the first authority transition because ERP is the only qualifying source. The candidate is audit-complete but has no composed consumer, no Observer evidence for an exact committed revision, and no backfill/shadow/authority-switch rehearsal. It is deliberately absent from the release allowlist so publication cannot create a parallel owner beside ERP. Remove this row only in the release change that records the sealed ERP cutover and verified exact kernel/finance artifacts; do not edit the declared version down.",
+      "state": "never-published"
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a72",
+      "reason": "OUTSTANDING ONLY WITH THE FINANCE SLICE. The a72 source allocates mod_finance/fn/finance and is not a standalone kernel release request. It remains untagged while the finance candidate is uncommitted and lacks Observer evidence; publishing the allocation before its module/canaries are accepted would create an installable namespace with no admitted consumer. Remove this row if the finance change is abandoned, or in the coordinated release change after exact-revision validation and any required rebase/renumber against concurrent kernel allocations.",
+      "state": "declared-unpublished"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
