@@ -624,6 +624,17 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-digital-media` — the tenant-only reusable media identity, immutable
+# revision, rights and rendition-provenance owner accepted by ADR-0033.
+# `digitalmedia` distinguishes the DAM catalogue from physical `assets` and
+# external advertising `media_observations`; `dm` keeps revision ids readable.
+DIGITAL_MEDIA_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="digital_media",
+    prefix="dm",
+    branch_label="digital_media",
+    db_schema=module_schema("digitalmedia"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +650,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    DIGITAL_MEDIA_MIGRATION_OWNER,
 )
 
 
@@ -973,6 +985,7 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "DIGITAL_MEDIA_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

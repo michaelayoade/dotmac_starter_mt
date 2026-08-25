@@ -6,6 +6,19 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a74 — 2026-08-19
+
+Allocates the independent tenant-only Digital Media module lineage. This is a
+physical namespace allocation only; the kernel does not gain media, rights,
+rendering or provider behavior.
+
+### Added
+
+- `DIGITAL_MEDIA_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_digitalmedia`, revision prefix `dm`, branch label `digital_media`.
+- Public namespace export for assemblies and migration gates validating the
+  `dotmac-digital-media` manifest.
+
 ## 0.1.0a73 — 2026-08-19
 
 Makes caller-session kernel services safe for independently assembled products.

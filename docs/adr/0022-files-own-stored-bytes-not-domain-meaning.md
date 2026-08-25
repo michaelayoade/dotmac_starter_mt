@@ -58,6 +58,25 @@ prefix. Provider-specific SDK and wire mapping remain in the consuming
 assembly's `StorageProvider` adapter. `dotmac-files` contains no product or
 provider branch.
 
+## Amendment, 2026-08-19: explicit record declaration transfers retention authority
+
+Section 2's original statement that every attaching domain always owns legal
+hold and retention is narrowed. The source domain owns attachment meaning,
+access and retention until it explicitly declares an exact immutable artifact
+as a managed record. From declaration onward, `dotmac-records` is the sole
+writer of retention, legal hold, preservation and disposition state for that
+exact version. The source domain retains business meaning and must consult the
+Records decision before requesting deletion; `dotmac-files` performs physical
+deletion only after the authorized owner asks it to.
+
+Declaration does not transfer an invoice, employee, contract, ticket, work
+order, document or reusable media asset into Records. It freezes an evidence
+snapshot containing the source owner/type/id/version and, when bytes exist, the
+opaque Files UUID/checksum. A corrected artifact is a new record linked by
+supersession. Without this amendment a shared Records module would become a
+second retention authority beside every domain, which is prohibited by the
+single-owner rule.
+
 ## Context
 
 Starter has `python-multipart` because its web assembly can decode form bodies,

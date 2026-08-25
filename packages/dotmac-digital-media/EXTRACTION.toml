@@ -1,0 +1,65 @@
+schema_version = 1
+package = "dotmac-digital-media"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Reusable media asset identity, immutable revisions, rights enforcement and rendition provenance"
+contract = "Create stable tenant media assets and immutable source revisions bound to opaque file UUID/checksum evidence; record descriptive and technical metadata observations; organize assets in libraries, collections and classifications; version rights and deterministically evaluate territory/channel/purpose/window restrictions; track exact-source derived renditions, review/access evidence and consumer-owned usage references; answer Records-aware source disposition. NOT bytes, provider transport/extraction/transcoding, editorial context, document embeds, publication outcomes, advertising metrics, consent validity, search or record retention/hold/disposition."
+source_repositories = [
+  "dotmac_mkt",
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_backoffice",
+  "dotmac-academy",
+  "dotmac_academy_app",
+  "dotmac_workspace",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+source_revisions = [
+  "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d",
+  "dotmac_erp:0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf",
+  "dotmac_sub:91c1ec477b3af37931424bced856a16bbc2c6d3f",
+  "dotmac_crm:c64b5aa0f7902b52e7ef73cf26f3f88687ed849d",
+  "dotmac_backoffice:fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d",
+  "dotmac-academy:71b87b2abfb1dc5c1db540faca257004a8c2bf9c",
+  "dotmac_academy_app:40423a07a4eaa6172a36997f3276cb7a79dda343",
+  "dotmac_workspace:c72fe304d3c8b2a2741d111379e4c4ab0af5da57",
+  "dotmac_vendor_control_plane:e6b2bbee815cf9fd3ce99ceed0ff3a1f5763f057",
+  "dotmac_integrator:783baf23cbf5129ef18763f97f646f684e6db3a3",
+  "dotmac_starter_mt:2790c8d1fd03e189d075aafc16874bc88a854f3e",
+]
+source_paths = [
+  "dotmac_mkt:app/models/asset.py",
+  "dotmac_mkt:app/services/asset_service.py",
+  "dotmac_mkt:app/services/post_asset_service.py",
+  "dotmac_mkt:app/models/post.py",
+  "dotmac_mkt:app/models/campaign.py",
+  "dotmac_erp:app/services/file_upload.py",
+  "dotmac_erp:app/services/storage.py",
+  "dotmac_erp:app/services/branding_assets.py",
+  "dotmac_sub:app/services/team_inbox_media.py",
+  "dotmac_sub:app/services/file_storage.py",
+  "dotmac_crm:app/services/public_media.py",
+  "dotmac_crm:app/services/upload_validation.py",
+]
+preserved_tests = [
+  "dotmac_mkt:tests/test_marketing_models.py",
+  "dotmac_mkt:tests/test_marketing_services.py",
+  "dotmac_starter_mt:tests/unit/test_digital_media.py",
+  "dotmac_starter_mt:tests/architecture/test_digital_media_module.py",
+  "dotmac_starter_mt:tests/test_digital_media_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_backoffice", "dotmac_sub", "dotmac_academy_app"]
+inventory_evidence = [
+  "docs/inventories/digital-media-sources.md",
+  "docs/adr/0033-digital-media-owns-reusable-assets-rights-and-renditions.md",
+]
+composition_boundary = "Each adopter installs its own tenant-only dm lineage and owns only its local Digital Media rows. The module imports the kernel but no sibling/product/provider. Files, approvals, durable timers, content, documents, publishing and records synchronize typed opaque references/observations through the adopting assembly or versioned application APIs; no shared database, ORM or cross-module foreign key exists."
+first_cutover = "Backoffice is cutover 1 because it is the selected adopter for the parked marketing surface and has no competing DAM. Pin an exact released package, compose its own tenant plane, classify/backfill every selected Mkt Asset and creative relation, verify opaque file UUID/checksum parity, shadow reads, switch the reusable-asset writer and retire Mkt's asset service. Content rewrites only contextual creative references to exact media revisions. Sub and Academy are later independent adopters."
+shadow_and_drift = "For each selected Mkt Asset compare stable id mapping, kind, title/description/default alt text, creator credits, exact opaque file UUID/checksum and every Campaign/Post contextual relation. For new revision/rights/rendition behavior compare deterministic command fingerprints, current pointers, rights decisions and rendition source/output digests against the module itself; no source parity is claimed where the inventory found no owner. Require zero unexplained drift before the writer switch and keep an idempotent reconciler after cutover."
+local_copy_retirement = "Delete Mkt's reusable Asset writer and raw reusable-file identity only after Backoffice's sealed authority cutover and rollback window. Keep Content-owned role/order/caption/context alt text, but migrate its raw file_ref to exact media-revision references and prohibit new raw file refs. ERP/Sub/CRM attachment services retire nothing merely because the DAM exists; a domain slice moves only when explicitly selected and reconciled. No mirrored DAM writer or permanent compatibility fork remains."
+next_action = "Keep the package uncomposed, unallowlisted and unpublished. After review, resolve the parallel a74/ADR-0033 merge ordering by rebasing to the next free coordinates if necessary, obtain separate publication authorization, then complete Backoffice's exact-pin composition, Mkt shadow/cutover and writer retirement before naming a contract consumer."

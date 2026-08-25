@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-digital-media"
+version = "0.1.0a1"
+description = "Reusable media asset identity, immutable revisions, rights and rendition provenance"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_digital_media", from = "src" }]
+include = [
+  { path = "src/dotmac_digital_media/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_digital_media/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a74 first publishes the digitalmedia/dm/digital_media namespace allocation.
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

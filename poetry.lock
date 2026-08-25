@@ -594,6 +594,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-digital-media"
+version = "0.1.0a1"
+description = "Reusable media asset identity, immutable revisions, rights and rendition provenance"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-digital-media"
+
+[[package]]
 name = "dotmac-durable-timers"
 version = "0.1.0a1"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
@@ -686,7 +704,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a73"
+version = "0.1.0a74"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2980,4 +2998,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "ed99a2e87bb4b5046cb3d62c0f98fd4c7b4326fd52f5a0321088fcef6a7a3e02"
+content-hash = "4667ad478a47dedd7c15793ac2781a1e9132b4a2a4079d5532572220926d51cb"
