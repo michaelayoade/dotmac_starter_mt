@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 import dotmac_subscriptions
+import pytest
 from dotmac_kernel.namespaces import (
     MIGRATION_OWNER_LEDGER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
