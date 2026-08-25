@@ -59,6 +59,44 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`reuse-proven`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
 
+## Deferred product cutover cohorts
+
+The machine-checked [`module-adoption-cohorts.toml`](../docs/module-adoption-cohorts.toml) owns programme
+membership only. Modules may mature and publish independently; the
+product still owns exact pins, readiness evidence and deployment.
+An `accumulating` cohort is explicitly **not** authorization to deploy
+or switch any writer.
+
+### `erp-shared-module-authority-v1`
+
+- **Product:** `dotmac_erp`.
+- **State:** `accumulating`.
+- **Cutover policy:** `single-production-promotion`; partial activation is forbidden.
+- **Activation threshold:** all `6` registered members.
+- **Entry gate:** Every member has a published compatible release; ERP has one tenant and transaction authority; every member-specific inventory, backfill, parity and retirement gate is green; and the ERP assembly declares the complete cohort with exact pins and migration bindings.
+- **Completion gate:** One ERP production promotion composes all six members, applies one ERP-owned authority-switch revision after every selected module head, retires every displaced local writer, and records production plus dossier adoption evidence for the cohort together.
+- **Rollback boundary:** Before the authority-switch transaction commits, the whole cohort rolls back. After commit the change is forward-only. No earlier deployment may switch one member's authority independently.
+
+| Distribution | Target plane | Current package evidence | Exact-plane readiness |
+|---|---|---|---|
+| [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | `tenant` | `adopted` | declared as a selectable installation set |
+| [`dotmac-files`](../packages/dotmac-files/README.md) | `tenant` | `audit-complete` | **blocked — atomic lineage also installs `platform`** |
+| [`dotmac-imports`](../packages/dotmac-imports/README.md) | `tenant` | `audit-complete` | declared — atomic target-only lineage |
+| [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | `tenant` | `audit-complete` | declared as a selectable installation set |
+| [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | `tenant` | `audit-required` | declared — atomic target-only lineage |
+| [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | `tenant` | `audit-complete` | declared as a selectable installation set |
+
+**Explicit exclusions**
+
+- `dotmac-application-directory` — Workspace owns the connected-application portfolio. ERP is a launch target, not a second directory owner.
+- `dotmac-entitlement-allocation` — Vendor CP owns commercial allocation. ERP consumes licence or entitlement projections over a typed boundary rather than composing mod_ealloc.
+- `dotmac-release-catalog` — Vendor or OEM control planes own release evidence. ERP is a product data plane and app_user is deliberately isolated from mod_rel.
+
+**Coordinated retirement-only work**
+
+- `dotmac-auth-oidc` — ERP's dormant OIDC implementation is deleted; it was never production-used, so deletion is cleanup rather than a module cutover or second-consumer proof.
+
+
 ## Contracts and ownership
 
 The dossier linked from each entry remains authoritative for source

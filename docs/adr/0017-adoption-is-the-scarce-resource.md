@@ -8,6 +8,42 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-18: ERP module work accumulates before one authority cutover
+
+ERP's shared modules may be audited, implemented, tested, published and adapted
+independently. They do **not** switch authority independently. The first ERP
+stateful-module authority cutover is one deferred production promotion after a
+closed cohort is ready.
+
+The machine source is
+[`../module-adoption-cohorts.toml`](../module-adoption-cohorts.toml). Its first
+cohort has six tenant-plane members: `dotmac-approvals`, `dotmac-files`,
+`dotmac-imports`, `dotmac-numbering`, `dotmac-template-studio` and
+`dotmac-ticketing`. Its activation threshold equals all six members and
+`partial_activation = false`. A two-directional gate derives the expected set
+from the live dossiers: adding an ERP stateful candidate without assigning it,
+or deleting a candidate while leaving it registered, fails the build. Lowering
+the threshold below the member count also fails.
+
+This is **not a cutover now** and is not runtime composition. While the cohort
+is `accumulating`, Starter owns only programme membership. Each dossier still
+owns its source, parity and retirement obligations; ERP will own exact released
+pins, migration bindings, data-bearing readiness evidence, the authority-switch
+revision and production evidence. The later promotion must compose the whole
+cohort, run every preflight before the irreversible step and retire every
+displaced local writer together. Before that transaction commits the whole
+cohort rolls back; afterwards recovery is forward-only.
+
+Four adjacent contracts stay deliberately outside the count. Application
+Directory remains Workspace's application-portfolio authority, so ERP is a
+launch target rather than a second directory owner. Release Catalog and
+Entitlement Allocation remain Vendor/OEM control-plane authorities; ERP
+receives their facts through typed application boundaries. ERP's dormant OIDC
+copy is retirement-only work: deleting an implementation that never ran in
+production is neither a stateful module cutover nor reuse evidence. Kernel and
+UI remain foundation adoption tracks rather than members of a domain-authority
+cohort.
+
 ## Amendment, 2026-08-14: the lineage gate splits by plane, and two facilities get owners
 
 Decided after the commercial-module evidence batch, whose P11 dashboard is

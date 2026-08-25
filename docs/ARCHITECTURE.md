@@ -283,6 +283,19 @@ its exact installed pins: `ModuleRegistry.inventory_payload()` reports that
 deployment-local composition, while the repository catalogue only answers what
 reusable distributions exist here and what their evidence currently proves.
 
+[`module-adoption-cohorts.toml`](module-adoption-cohorts.toml) owns a different
+fact: which independently maturing modules must later move authority in one
+coordinated product promotion. It is not a second runtime module registry and
+does not carry versions, bindings or readiness claims. The first entry closes
+over every stateful optional module whose dossier names `dotmac_erp` as an
+unproven candidate: Approvals, Files, Imports, Numbering, Template Studio and
+Ticketing. Its threshold equals all six and partial activation is forbidden.
+`scripts/module_catalog.py` validates that exact set in both directions and the
+generated catalogue shows current package evidence and exact-plane blockers.
+ERP will remain the source of truth for its eventual pins, composed migrations,
+authority-switch transaction and production evidence; an `accumulating` Starter
+cohort authorizes none of those actions (ADR-0017, 2026-08-18 amendment).
+
 ERP and ISP subscriber management remain separate product assemblies/data planes
 even when they consume the same kernel. ERP `Organization` is the natural tenant
 mapping candidate; in the ISP product, the ISP operator—not each subscriber—is

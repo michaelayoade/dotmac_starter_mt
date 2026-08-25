@@ -1,0 +1,37 @@
+schema_version = 1
+
+# This registry owns programme membership only. Packages can be implemented,
+# tested and released independently; dotmac_erp later owns exact pins,
+# migration bindings, readiness evidence and the production promotion.
+[[cohorts]]
+code = "erp-shared-module-authority-v1"
+product = "dotmac_erp"
+status = "accumulating"
+cutover_policy = "single-production-promotion"
+partial_activation = false
+activation_threshold = 6
+entry_gate = "Every member has a published compatible release; ERP has one tenant and transaction authority; every member-specific inventory, backfill, parity and retirement gate is green; and the ERP assembly declares the complete cohort with exact pins and migration bindings."
+completion_gate = "One ERP production promotion composes all six members, applies one ERP-owned authority-switch revision after every selected module head, retires every displaced local writer, and records production plus dossier adoption evidence for the cohort together."
+rollback_boundary = "Before the authority-switch transaction commits, the whole cohort rolls back. After commit the change is forward-only. No earlier deployment may switch one member's authority independently."
+
+members = [
+  { package = "dotmac-approvals", plane = "tenant" },
+  { package = "dotmac-files", plane = "tenant" },
+  { package = "dotmac-imports", plane = "tenant" },
+  { package = "dotmac-numbering", plane = "tenant" },
+  { package = "dotmac-template-studio", plane = "tenant" },
+  { package = "dotmac-ticketing", plane = "tenant" },
+]
+
+# These packages remain real shared modules, but ERP is not their authority.
+exclusions = [
+  { package = "dotmac-application-directory", reason = "Workspace owns the connected-application portfolio. ERP is a launch target, not a second directory owner." },
+  { package = "dotmac-entitlement-allocation", reason = "Vendor CP owns commercial allocation. ERP consumes licence or entitlement projections over a typed boundary rather than composing mod_ealloc." },
+  { package = "dotmac-release-catalog", reason = "Vendor or OEM control planes own release evidence. ERP is a product data plane and app_user is deliberately isolated from mod_rel." },
+]
+
+# This is coordinated with the programme but never counted toward the six
+# stateful authority cutovers or toward module reuse evidence.
+retirements = [
+  { package = "dotmac-auth-oidc", reason = "ERP's dormant OIDC implementation is deleted; it was never production-used, so deletion is cleanup rather than a module cutover or second-consumer proof." },
+]

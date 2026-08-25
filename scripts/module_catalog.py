@@ -6,7 +6,8 @@ This script deliberately owns no module metadata.  It joins:
 * ``packages/*/EXTRACTION.toml`` for contract, evidence and adoption state;
 * package ``pyproject.toml`` for declared version and kernel requirement;
 * ``ModuleManifest`` source for persistence-plane and schema declarations; and
-* the three closed release allowlists for publication policy.
+* the three closed release allowlists for publication policy; and
+* ``docs/module-adoption-cohorts.toml`` for coordinated product cutover sets.
 
 Stdlib only so the catalogue can be checked before repository dependencies are
 installed, just like the module release resolver.
@@ -27,6 +28,7 @@ from typing import Final
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT: Final = REPO_ROOT / "docs" / "MODULE_CATALOG.md"
 ALLOWLIST_PATH: Final = REPO_ROOT / ".github" / "release-modules.json"
+ADOPTION_COHORTS_RELATIVE_PATH: Final = Path("docs") / "module-adoption-cohorts.toml"
 
 CLASSIFICATION_LABELS: Final = {
     "universal-facility": "universal facility",
@@ -69,6 +71,34 @@ class ModuleRecord:
     kernel_requirement: str | None
     release_policy: str
     release_path: Path | None
+
+
+@dataclass(frozen=True)
+class CohortMember:
+    distribution: str
+    plane: str
+
+
+@dataclass(frozen=True)
+class CohortBoundary:
+    distribution: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class AdoptionCohort:
+    code: str
+    product: str
+    status: str
+    cutover_policy: str
+    partial_activation: bool
+    activation_threshold: int
+    entry_gate: str
+    completion_gate: str
+    rollback_boundary: str
+    members: tuple[CohortMember, ...]
+    exclusions: tuple[CohortBoundary, ...]
+    retirements: tuple[CohortBoundary, ...]
 
 
 def _load_toml(path: Path) -> dict:
@@ -474,6 +504,279 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
     return tuple(sorted(records, key=lambda record: record.distribution))
 
 
+def _cohort_text(value: object, *, field: str, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CatalogError(f"{label}: {field} must be a non-empty string")
+    return value.strip()
+
+
+def _cohort_boundaries(
+    value: object,
+    *,
+    field: str,
+    label: str,
+) -> tuple[CohortBoundary, ...]:
+    if not isinstance(value, list):
+        raise CatalogError(f"{label}: {field} must be an array")
+    boundaries: list[CohortBoundary] = []
+    for index, item in enumerate(value):
+        item_label = f"{label}: {field}[{index}]"
+        if not isinstance(item, dict):
+            raise CatalogError(f"{item_label} must be an inline table")
+        if set(item) != {"package", "reason"}:
+            raise CatalogError(f"{item_label} must contain exactly package and reason")
+        boundaries.append(
+            CohortBoundary(
+                distribution=_cohort_text(
+                    item.get("package"), field="package", label=item_label
+                ),
+                reason=_cohort_text(
+                    item.get("reason"), field="reason", label=item_label
+                ),
+            )
+        )
+    names = [item.distribution for item in boundaries]
+    if len(names) != len(set(names)):
+        raise CatalogError(f"{label}: {field} contains a duplicate package")
+    return tuple(boundaries)
+
+
+def _cohort_members(value: object, *, label: str) -> tuple[CohortMember, ...]:
+    if not isinstance(value, list) or not value:
+        raise CatalogError(f"{label}: members must be a non-empty array")
+    members: list[CohortMember] = []
+    for index, item in enumerate(value):
+        item_label = f"{label}: members[{index}]"
+        if not isinstance(item, dict):
+            raise CatalogError(f"{item_label} must be an inline table")
+        if set(item) != {"package", "plane"}:
+            raise CatalogError(f"{item_label} must contain exactly package and plane")
+        plane = _cohort_text(item.get("plane"), field="plane", label=item_label)
+        if plane not in {"tenant", "platform"}:
+            raise CatalogError(f"{item_label}: unknown target plane {plane!r}")
+        members.append(
+            CohortMember(
+                distribution=_cohort_text(
+                    item.get("package"), field="package", label=item_label
+                ),
+                plane=plane,
+            )
+        )
+    names = [member.distribution for member in members]
+    if len(names) != len(set(names)):
+        raise CatalogError(f"{label}: members contains a duplicate package")
+    return tuple(members)
+
+
+def discover_adoption_cohorts(
+    repo_root: Path = REPO_ROOT,
+    *,
+    registry_path: Path | None = None,
+    records: tuple[ModuleRecord, ...] | None = None,
+) -> tuple[AdoptionCohort, ...]:
+    """Load and prove deferred product cutover cohorts against live dossiers.
+
+    The file owns programme membership, not runtime composition. A candidate
+    dossier entering or leaving the cohort changes one of those facts, so the
+    exact-set comparison runs both ways instead of letting the registry become
+    an aspirational list that quietly misses the next module.
+    """
+    path = registry_path or repo_root / ADOPTION_COHORTS_RELATIVE_PATH
+    data = _load_toml(path)
+    if set(data) != {"schema_version", "cohorts"}:
+        raise CatalogError(
+            f"{path}: root must contain exactly schema_version and cohorts"
+        )
+    if data.get("schema_version") != 1:
+        raise CatalogError(f"{path}: schema_version must equal 1")
+    raw_cohorts = data.get("cohorts")
+    if not isinstance(raw_cohorts, list) or not raw_cohorts:
+        raise CatalogError(f"{path}: cohorts must be a non-empty array")
+
+    module_records = records if records is not None else discover_modules(repo_root)
+    by_distribution = {record.distribution: record for record in module_records}
+    cohorts: list[AdoptionCohort] = []
+    seen_codes: set[str] = set()
+    active_members_by_product: dict[str, set[str]] = {}
+    retirement_by_product: dict[str, set[str]] = {}
+
+    for index, raw in enumerate(raw_cohorts):
+        label = f"{path}: cohorts[{index}]"
+        if not isinstance(raw, dict):
+            raise CatalogError(f"{label} must be a table")
+        expected_fields = {
+            "code",
+            "product",
+            "status",
+            "cutover_policy",
+            "partial_activation",
+            "activation_threshold",
+            "entry_gate",
+            "completion_gate",
+            "rollback_boundary",
+            "members",
+            "exclusions",
+            "retirements",
+        }
+        if set(raw) != expected_fields:
+            missing_fields = sorted(expected_fields - set(raw))
+            extra_fields = sorted(set(raw) - expected_fields)
+            raise CatalogError(
+                f"{label}: fields disagree; missing={missing_fields}, "
+                f"extra={extra_fields}"
+            )
+        code = _cohort_text(raw.get("code"), field="code", label=label)
+        if code in seen_codes:
+            raise CatalogError(f"{path}: duplicate cohort code {code!r}")
+        seen_codes.add(code)
+        product = _cohort_text(raw.get("product"), field="product", label=label)
+        status = _cohort_text(raw.get("status"), field="status", label=label)
+        if status not in {"accumulating", "completed"}:
+            raise CatalogError(f"{label}: unknown status {status!r}")
+        cutover_policy = _cohort_text(
+            raw.get("cutover_policy"), field="cutover_policy", label=label
+        )
+        if cutover_policy != "single-production-promotion":
+            raise CatalogError(
+                f"{label}: cutover_policy must be single-production-promotion"
+            )
+        partial_activation = raw.get("partial_activation")
+        if partial_activation is not False:
+            raise CatalogError(f"{label}: partial_activation must be false")
+        members = _cohort_members(raw.get("members"), label=label)
+        activation_threshold = raw.get("activation_threshold")
+        if (
+            not isinstance(activation_threshold, int)
+            or isinstance(activation_threshold, bool)
+            or activation_threshold != len(members)
+        ):
+            raise CatalogError(
+                f"{label}: activation_threshold must equal all {len(members)} members"
+            )
+        exclusions = _cohort_boundaries(
+            raw.get("exclusions"), field="exclusions", label=label
+        )
+        retirements = _cohort_boundaries(
+            raw.get("retirements"), field="retirements", label=label
+        )
+        member_names = {member.distribution for member in members}
+        boundary_names = {item.distribution for item in (*exclusions, *retirements)}
+        overlap = sorted(member_names & boundary_names)
+        if overlap:
+            raise CatalogError(
+                f"{label}: packages cannot be members and boundaries: "
+                + ", ".join(overlap)
+            )
+
+        for item in (*members, *exclusions, *retirements):
+            if item.distribution not in by_distribution:
+                raise CatalogError(
+                    f"{label}: unknown distribution {item.distribution!r}"
+                )
+        for member in members:
+            record = by_distribution[member.distribution]
+            if (
+                record.classification != "optional-module"
+                or record.persistence_plane in {"stateless", "n/a"}
+            ):
+                raise CatalogError(
+                    f"{label}: {member.distribution} is not a stateful optional module"
+                )
+            if member.plane not in record.persistence_plane.split("+"):
+                raise CatalogError(
+                    f"{label}: {member.distribution} does not declare the "
+                    f"{member.plane} plane"
+                )
+            if status == "accumulating":
+                if product not in record.candidate_consumers:
+                    raise CatalogError(
+                        f"{label}: {member.distribution} does not name {product} "
+                        "as a candidate"
+                    )
+                if product in record.contract_consumers:
+                    raise CatalogError(
+                        f"{label}: {member.distribution} already names {product} "
+                        "as a proven consumer"
+                    )
+            elif product not in record.contract_consumers:
+                raise CatalogError(
+                    f"{label}: completed member {member.distribution} lacks "
+                    f"{product} consumer evidence"
+                )
+
+        cohorts.append(
+            AdoptionCohort(
+                code=code,
+                product=product,
+                status=status,
+                cutover_policy=cutover_policy,
+                partial_activation=partial_activation,
+                activation_threshold=activation_threshold,
+                entry_gate=_cohort_text(
+                    raw.get("entry_gate"), field="entry_gate", label=label
+                ),
+                completion_gate=_cohort_text(
+                    raw.get("completion_gate"),
+                    field="completion_gate",
+                    label=label,
+                ),
+                rollback_boundary=_cohort_text(
+                    raw.get("rollback_boundary"),
+                    field="rollback_boundary",
+                    label=label,
+                ),
+                members=members,
+                exclusions=exclusions,
+                retirements=retirements,
+            )
+        )
+        if status == "accumulating":
+            active = active_members_by_product.setdefault(product, set())
+            duplicate = sorted(active & member_names)
+            if duplicate:
+                raise CatalogError(
+                    f"{label}: active cohort membership is duplicated: "
+                    + ", ".join(duplicate)
+                )
+            active.update(member_names)
+            retirement_by_product.setdefault(product, set()).update(
+                item.distribution for item in retirements
+            )
+
+    for product, actual in active_members_by_product.items():
+        expected = {
+            record.distribution
+            for record in module_records
+            if record.classification == "optional-module"
+            and record.persistence_plane not in {"stateless", "n/a"}
+            and product in record.candidate_consumers
+            and product not in record.contract_consumers
+        }
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
+            raise CatalogError(
+                f"{path}: {product} candidate membership disagrees with dossiers; "
+                f"missing={missing}, extra={extra}"
+            )
+        expected_retirements = {
+            record.distribution
+            for record in module_records
+            if record.classification == "stateless-protocol-adapter"
+            and product in record.candidate_consumers
+            and product not in record.contract_consumers
+        }
+        actual_retirements = retirement_by_product.get(product, set())
+        if actual_retirements != expected_retirements:
+            raise CatalogError(
+                f"{path}: {product} retirement membership disagrees with dossiers; "
+                f"missing={sorted(expected_retirements - actual_retirements)}, "
+                f"extra={sorted(actual_retirements - expected_retirements)}"
+            )
+
+    return tuple(cohorts)
+
+
 def _relative_link(repo_root: Path, path: Path) -> str:
     return "../" + path.relative_to(repo_root).as_posix()
 
@@ -534,8 +837,25 @@ def _release_cell(record: ModuleRecord, repo_root: Path) -> str:
     return f"[{record.release_policy}]({target})"
 
 
+def _cohort_plane_readiness(record: ModuleRecord, target_plane: str) -> str:
+    """Whether today's manifest can install exactly the cohort's target plane."""
+    if record.installation_sets == ("atomic",):
+        declared = set(record.persistence_plane.split("+"))
+        if declared == {target_plane}:
+            return "declared — atomic target-only lineage"
+        return (
+            "**blocked — atomic lineage also installs "
+            + ", ".join(f"`{plane}`" for plane in sorted(declared - {target_plane}))
+            + "**"
+        )
+    if target_plane in record.installation_sets:
+        return "declared as a selectable installation set"
+    return f"**blocked — `{target_plane}` is not selectable alone**"
+
+
 def render_catalog(repo_root: Path = REPO_ROOT) -> str:
     records = discover_modules(repo_root)
+    cohorts = discover_adoption_cohorts(repo_root, records=records)
     selections = assembly_selections(repo_root)
     installed = assembly_installed(repo_root)
     lines = [
@@ -621,6 +941,63 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
             )
             + " |"
         )
+
+    records_by_distribution = {record.distribution: record for record in records}
+    registry_link = _relative_link(
+        repo_root, repo_root / ADOPTION_COHORTS_RELATIVE_PATH
+    )
+    lines.extend(
+        [
+            "",
+            "## Deferred product cutover cohorts",
+            "",
+            "The machine-checked "
+            f"[`module-adoption-cohorts.toml`]({registry_link}) owns programme",
+            "membership only. Modules may mature and publish independently; the",
+            "product still owns exact pins, readiness evidence and deployment.",
+            "An `accumulating` cohort is explicitly **not** authorization to deploy",
+            "or switch any writer.",
+            "",
+        ]
+    )
+    for cohort in cohorts:
+        lines.extend(
+            [
+                f"### `{cohort.code}`",
+                "",
+                f"- **Product:** `{cohort.product}`.",
+                f"- **State:** `{cohort.status}`.",
+                f"- **Cutover policy:** `{cohort.cutover_policy}`; partial "
+                "activation is forbidden.",
+                f"- **Activation threshold:** all `{cohort.activation_threshold}` "
+                "registered members.",
+                f"- **Entry gate:** {_cell(cohort.entry_gate)}",
+                f"- **Completion gate:** {_cell(cohort.completion_gate)}",
+                f"- **Rollback boundary:** {_cell(cohort.rollback_boundary)}",
+                "",
+                "| Distribution | Target plane | Current package evidence "
+                "| Exact-plane readiness |",
+                "|---|---|---|---|",
+            ]
+        )
+        for member in cohort.members:
+            record = records_by_distribution[member.distribution]
+            readme = record.package_dir / "README.md"
+            package_target = readme if readme.is_file() else record.dossier_path
+            lines.append(
+                "| "
+                f"[`{record.distribution}`]"
+                f"({_relative_link(repo_root, package_target)}) | "
+                f"`{member.plane}` | `{record.evidence_status}` | "
+                f"{_cohort_plane_readiness(record, member.plane)} |"
+            )
+        lines.extend(["", "**Explicit exclusions**", ""])
+        for item in cohort.exclusions:
+            lines.append(f"- `{item.distribution}` — {_cell(item.reason)}")
+        lines.extend(["", "**Coordinated retirement-only work**", ""])
+        for item in cohort.retirements:
+            lines.append(f"- `{item.distribution}` — {_cell(item.reason)}")
+        lines.append("")
 
     lines.extend(
         [
