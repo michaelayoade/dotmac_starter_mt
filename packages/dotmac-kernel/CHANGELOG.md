@@ -220,7 +220,11 @@ separately.
   partial policies, new directives and widened sources fail application
   construction.
 
-## 0.1.0a96 — 2026-08-25
+## 0.1.0a96 — 2026-08-25 — UNRELEASED / SKIPPED
+
+> This version was never published or tagged. The release sequence moved from
+> `0.1.0a95` directly to `0.1.0a97`; the changes recorded below first became
+> installable in `0.1.0a97`. Do not backfill an a96 artifact after a97.
 
 **A machine credential now says WHOSE it is, and rotates without dropping a
 call.** Continues the a90 machine-credential facility (`0027_machine_credential`)
