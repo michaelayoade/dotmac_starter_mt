@@ -43,6 +43,23 @@ assert __version__
 print("ok")
 """
 
+_TRANSACTION_PROBE = """
+import sys
+from dotmac_kernel.transactions import conflict_savepoint
+assert conflict_savepoint
+assert "dotmac_kernel.db" not in sys.modules
+print("ok")
+"""
+
+_FINGERPRINT_PROBE = """
+import sys
+from dotmac_kernel.fingerprints import fingerprint_of
+assert fingerprint_of
+assert "dotmac_kernel.db" not in sys.modules
+assert "dotmac_kernel.idempotency" not in sys.modules
+print("ok")
+"""
+
 
 def _import_without_database_url(source: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
@@ -66,6 +83,36 @@ def test_importing_the_kernel_needs_no_database_url() -> None:
         "which builds the engine at module scope. Move that import INSIDE the "
         "function that needs it (see `errors.py`'s `WebAuthRedirect` import)."
     )
+
+
+def test_public_transaction_mechanic_needs_no_database_runtime() -> None:
+    """A caller-owned Session can use a SAVEPOINT without a second engine."""
+    result = _import_without_database_url(_TRANSACTION_PROBE)
+    assert result.returncode == 0, (
+        "`dotmac_kernel.transactions` imported the kernel DB runtime:\n"
+        f"{result.stderr}"
+    )
+
+
+def test_public_fingerprint_mechanic_needs_no_database_runtime() -> None:
+    """Canonical identity does not load the persistence-backed ledger."""
+    result = _import_without_database_url(_FINGERPRINT_PROBE)
+    assert result.returncode == 0, (
+        "`dotmac_kernel.fingerprints` imported database-backed runtime:\n"
+        f"{result.stderr}"
+    )
+
+
+def test_fingerprint_probe_would_notice_the_persistence_ledger() -> None:
+    """Sensitivity proof: the import guard fails when the ledger is loaded."""
+    planted_violation = _FINGERPRINT_PROBE.replace(
+        "assert fingerprint_of\n",
+        "assert fingerprint_of\nimport dotmac_kernel.idempotency\n",
+    )
+    result = _import_without_database_url(planted_violation)
+    assert (
+        result.returncode != 0
+    ), "fingerprint import canary missed the planted idempotency dependency"
 
 
 def test_the_probe_would_notice_a_module_level_db_import() -> None:

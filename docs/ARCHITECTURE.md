@@ -2739,8 +2739,9 @@ There is exactly ONE transaction authority in this codebase:
 - **Caller-session services do not enter the engine owner.** Kernel domain
   services such as consent, delivery, idempotency and external identity accept
   the installing assembly's `Session`. Their savepoint mechanic lives in the
-  private, engine-free `dotmac_kernel._transactions`; `dotmac_kernel.db`
-  re-exports `conflict_savepoint` as the supported public spelling. This is an
+  private, engine-free `dotmac_kernel._transactions`, exposed to assemblies as
+  `dotmac_kernel.transactions.conflict_savepoint`. `dotmac_kernel.db` retains a
+  compatibility re-export for the reference assembly. This is an
   implementation seam, not a second boundary or transaction authority: it
   constructs no engine/session and never commits or rolls back the caller's
   outer transaction (ADR-0024 amendment, 2026-08-19).
@@ -2780,8 +2781,10 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`dotmac_kernel.db.conflict_savepoint(db)` is the supported public spelling for
-the fix, a context manager around `Session.begin_nested()` (a `SAVEPOINT`
+`dotmac_kernel.transactions.conflict_savepoint(db)` is the engine-free public
+spelling for caller-owned sessions; `dotmac_kernel.db.conflict_savepoint(db)`
+remains the reference assembly's compatibility spelling. The helper is a
+context manager around `Session.begin_nested()` (a `SAVEPOINT`
 scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
