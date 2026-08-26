@@ -107,11 +107,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-integration": {
-      "declared": "0.1.0a16",
-      "reason": "DECLARED BY THE DOMAIN-OWNED PAYLOAD-CONTRACT AND DURABLE RESULT SLICE, NOT YET RELEASED. a15 IS published (peeled tag dotmac-integration-v0.1.0a15 -> bd8d2262c26f62041cc22a813916066b9af85c7f), so the new CapabilityContract schema/digest surface, Outcome.result and ig_0013 delivery result storage require a new version. It is NOT to be repaired by editing the version down: remove this row only when the module release workflow installs, verifies and tags 0.1.0a16, and never publish a connector that requires the new contract before that tag exists.",
-      "state": "declared-unpublished"
-    },
     "dotmac-kernel": {
       "declared": "0.1.0a97",
       "reason": "DECLARED BY THE FACET-RUNTIME AND CSRF SECURITY SLICE, NOT YET RELEASED. a96 already names the separate machine-attribution release, so the versioned browser contract, request-scoped surface runtime and signed session-bound CSRF correction require a97 rather than silently broadening a96. Remove this row only in an oracle-backed a97 release record; do not edit the declared version down.",
