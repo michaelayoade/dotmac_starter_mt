@@ -272,6 +272,33 @@ def test_a_selector_still_requires_the_source_input_schema_to_be_held() -> None:
     )
 
 
+def test_a_half_declared_selector_is_refused_when_the_binding_is_BUILT() -> None:
+    """A malformed selector never reaches compatibility checking at all.
+
+    Resolving the source input schema lazily raised a question about refusal
+    ORDER: would a pointer with no value be reported as "schema is not held",
+    blaming an absent document for a defect in the binding? It cannot, and the
+    reason is worth pinning — the pair is validated in
+    `CapabilityEvidenceBinding.__post_init__`, so a half-declared selector is
+    unconstructible. `require_compatible_with` only ever sees bindings whose
+    selectors are already whole, which is why the lookup inside it is free to
+    move.
+
+    Pinned at the boundary that actually holds it, rather than at the one that
+    merely happens not to be reached.
+    """
+    for kwargs in (
+        {"source_selector_pointer": "/resource_kind"},
+        {"source_selector_value": "domain"},
+        {"target_selector_pointer": "/resource_kind"},
+        {"target_selector_value": "recordset"},
+    ):
+        with pytest.raises(
+            CapabilityCompositionError, match="both be set or both be null"
+        ):
+            replace(_binding(), **kwargs)
+
+
 def test_composition_refuses_secret_or_undeclared_evidence_paths() -> None:
     secret_source = CapabilitySchemaDocument.from_mapping(
         {

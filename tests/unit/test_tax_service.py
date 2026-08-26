@@ -1419,21 +1419,50 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         ),
         determined_at=NOW,
     )
-    # Keep the persisted rows and their components LIVE for the rest of this
-    # test. SQLAlchemy's identity map holds instances weakly, and this suite
-    # deliberately relies on SQLite dropping tzinfo to exercise
-    # `_require_aware_persisted` (see the `db.expire_all()` guard below). So a
-    # determination that gets collected here is re-read NAIVE, and
-    # `generate_statutory_report` raises for a reason this test is not about.
-    # Whether that happened depended on when CPython's GC fired, i.e. on how
-    # much every PRECEDING test allocated — so this test passed or failed
-    # according to what else ran before it. Holding the rows states the
-    # precondition instead of inheriting it by luck. Binding `determine_tax_set`
-    # is NOT enough: it returns an ORM-free contract, not these rows.
+    # PRECONDITION, restored rather than inherited.
+    #
+    # The report path re-reads persisted determination sets. This suite
+    # deliberately relies on SQLite dropping tzinfo so that
+    # `_require_aware_persisted` can be exercised (that refusal is asserted
+    # further down, on a row inserted for exactly that purpose). So a
+    # determination whose in-memory state is lost comes back NAIVE, and
+    # `generate_statutory_report` then raises for a reason this test is not
+    # about.
+    #
+    # An earlier fix held strong references, reasoning about CPython's GC. That
+    # guards the wrong mechanism. Two probes settle it: forcing `gc.collect()`
+    # here leaves this test GREEN — the references do their job — while forcing
+    # `db.expire_all()` reproduces the failure exactly. Expiry, not collection.
+    # Any `Session.rollback` expires every instance, and the suite reaches one
+    # depending on what ran before, so the outcome still turned on test
+    # ordering: adding two unrelated test FILES elsewhere in `tests/unit` was
+    # enough to flip it.
+    #
+    # References are still held, because they are cheap and correct as far as
+    # they go. The invariant is then RESTORED explicitly, so the test states
+    # what it needs instead of hoping the session was left undisturbed.
     _live_rows = [
         (row, list(row.components))
         for row in db.scalars(select(TaxDeterminationSet)).all()
     ]
+    assert _live_rows, "no determination sets to report on — setup did not run"
+
+    def _restore_written_offsets() -> None:
+        """Put back what SQLite cannot store.
+
+        `_validate_persisted_result_structure` checks the SET's timestamp AND
+        every COMPONENT's, so both have to be restored — fixing only the set
+        moves the failure one line down rather than resolving it. Values are
+        the exact ones written; the DB rows are untouched.
+        """
+        for row, components in _live_rows:
+            if row.determined_at.tzinfo is None:
+                row.determined_at = NOW
+            for component in components:
+                if component.determined_at.tzinfo is None:
+                    component.determined_at = NOW
+
+    _restore_written_offsets()
     definition = create_statutory_report_definition(
         db,
         tenant_id=tenant.id,
@@ -1471,6 +1500,11 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         due_on=date(2026, 8, 18),
         taxpayer_ref="taxpayer:local",
     )
+    # Restore again: `create_statutory_report_definition` and
+    # `create_filing_obligation` run in between and can expire the session, so
+    # restoring only once above is not enough. Re-asserting here is what makes
+    # the precondition hold at the moment it is actually needed.
+    _restore_written_offsets()
     report = generate_statutory_report(
         db,
         tenant_id=tenant.id,
