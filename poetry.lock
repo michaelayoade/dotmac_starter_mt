@@ -1973,7 +1973,7 @@ url = "packages/dotmac-surveys"
 
 [[package]]
 name = "dotmac-tax"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Composable tax determination, statutory reporting and return-lifecycle owner"
 optional = false
 python-versions = ">=3.11,<3.14"
