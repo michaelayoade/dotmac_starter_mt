@@ -54,12 +54,22 @@ specifics) points here and must never fork these rules.
 7. **No `payload: Any` in feature services** — every payload parameter is a
    concrete Pydantic schema.
    (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
-8. **`dotmac_kernel/db.py` is the ONE transaction authority.** No module outside
-   it calls `SessionLocal()`/`PlatformSessionLocal()`/`sessionmaker(...)` or
+8. **There is ONE transaction authority, and it lives in two files.**
+   `dotmac_kernel/session_runtime.py` holds the implementation —
+   `DatabaseRuntime`, the class a product instantiates with its own DSNs,
+   credentials and tenancy table — and `dotmac_kernel/db.py` is the reference
+   assembly's single INSTANCE of it. That is one authority in two files, not
+   two; what stays forbidden is a THIRD. No module outside those two calls
+   `SessionLocal()`/`PlatformSessionLocal()`/`sessionmaker(...)` or
    constructs `Session(...)`; boundaries (`get_db`/`get_platform_db`/
-   `platform_session`) own commit/rollback, services only mutate and flush.
+   `platform_session`/`tenant_session`/`resolver_session`) own
+   commit/rollback, services only mutate and flush. `app.current_tenant` is a
+   schema contract baked into every composed lineage's RLS policies, never a
+   deployment knob — `legacy_tenant_settings` adds names alongside it and only
+   ever shrinks (ADR-0066).
    See `docs/ARCHITECTURE.md` § "Transaction authority".
-   (`tests/architecture/test_session_authority.py`)
+   (`tests/architecture/test_session_authority.py`,
+   `tests/architecture/test_session_runtime_is_engine_free.py`)
 9. **Feature services never call `db.rollback()`.** Expected conflicts use
    `dotmac_kernel.db.conflict_savepoint`, with the mutation INSIDE the `with`
    block — a bare rollback wipes the transaction's `SET LOCAL` tenant

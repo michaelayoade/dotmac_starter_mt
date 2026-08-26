@@ -37,12 +37,15 @@ import pytest
 from dotmac_kernel.db import (
     SessionLocal,
     resolver_session,
+    runtime,
     set_tenant,
+    tenant_scope,
     tenant_session,
     tenant_session_by_slug,
 )
 from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Role, Tenant
+from dotmac_kernel.session_runtime import DatabaseRuntime
 from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
@@ -344,3 +347,125 @@ def test_resolver_result_is_usable_after_the_block(tenant_a) -> None:
     # Outside the block, on a closed session: must not raise.
     assert found.slug == tenant_a.slug
     assert found.id == tenant_a.id
+
+
+# ── the scope mechanic itself (kernel 0.1.0a100) ─────────────────────────────
+#
+# `tenant_session` is now `tenant_scope` plus an owned boundary, and
+# `tenant_scope` is available on its own for a product that owns its session
+# lifecycle. The tests above cover the boundary; these cover the mechanic —
+# and they are here rather than in `tests/unit/` because every property below
+# is only observable against a real fail-closed policy.
+
+
+def test_tenant_scope_scopes_a_caller_owned_session(
+    admin_session: Session, tenant_a
+) -> None:
+    """The seam for a product with its own session factory.
+
+    It gets the kernel's scope discipline without the kernel's engines — which
+    is the whole reason the runtime became instantiable.
+    """
+    role = _seed_role(admin_session, tenant_a, "caller-owned-canary")
+    try:
+        db = SessionLocal()
+        try:
+            assert role.slug not in _slugs(db)  # unscoped: fails closed
+            with tenant_scope(db, tenant_a.id):
+                assert role.slug in _slugs(db)
+        finally:
+            db.rollback()
+            db.close()
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_tenant_scope_re_arms_after_a_commit(admin_session: Session, tenant_a) -> None:
+    """`SET LOCAL` dies with the transaction; the `after_begin` listener is
+    what puts it back. Without the re-arm, everything after the first commit
+    inside the block runs unscoped — and reads as an empty tenant."""
+    role = _seed_role(admin_session, tenant_a, "rearm-canary")
+    try:
+        db = SessionLocal()
+        try:
+            with tenant_scope(db, tenant_a.id):
+                assert role.slug in _slugs(db)
+                db.commit()
+                assert role.slug in _slugs(db)
+                db.commit()
+                assert role.slug in _slugs(db)
+        finally:
+            db.rollback()
+            db.close()
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_the_scope_ends_with_the_block_not_with_the_session(
+    admin_session: Session, tenant_a
+) -> None:
+    """The half a session-level setting got wrong.
+
+    A caller-owned session outlives the `with`, so a scope that outlived it too
+    would silently keep answering as that tenant — including after the caller
+    moved on to other work. Leaving the block must un-scope it.
+    """
+    role = _seed_role(admin_session, tenant_a, "block-bound-canary")
+    try:
+        db = SessionLocal()
+        try:
+            with tenant_scope(db, tenant_a.id):
+                assert role.slug in _slugs(db)
+            db.commit()  # ends the last scoped transaction
+            assert role.slug not in _slugs(db)
+        finally:
+            db.rollback()
+            db.close()
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_a_legacy_setting_is_primed_with_the_same_value(tenant_a) -> None:
+    """The ERP compatibility case, proven rather than asserted in prose.
+
+    A product mid-migration has tables whose policies predate the module
+    lineage contract and read their own setting. Both names must carry the SAME
+    tenant, primed together — two statements could leave one armed and the
+    other stale, which is not an error, it is a working scope over the wrong
+    rows.
+    """
+    legacy = DatabaseRuntime(
+        engine=runtime.engine,
+        legacy_tenant_settings=("app.current_org_probe",),
+    )
+    with legacy.tenant_session(tenant_a.id) as db:
+        read = text(
+            "SELECT current_setting('app.current_tenant', true), "
+            "current_setting('app.current_org_probe', true)"
+        )
+        canonical, org = db.execute(read).one()
+        assert canonical == str(tenant_a.id)
+        assert org == str(tenant_a.id)
+
+
+def test_the_canonical_setting_is_never_displaced_by_a_legacy_one(
+    admin_session: Session, tenant_a
+) -> None:
+    """Declaring a legacy setting must not weaken the isolation that every
+    composed module's RLS policy depends on. `app.current_tenant` is a
+    cross-repository contract; the legacy name rides alongside it, never
+    instead of it."""
+    role = _seed_role(admin_session, tenant_a, "legacy-alongside-canary")
+    try:
+        legacy = DatabaseRuntime(
+            engine=runtime.engine,
+            legacy_tenant_settings=("app.current_org_probe",),
+        )
+        with legacy.tenant_session(tenant_a.id) as db:
+            assert role.slug in _slugs(db)
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
