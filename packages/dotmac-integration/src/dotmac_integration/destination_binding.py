@@ -97,12 +97,16 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
 from dotmac_integration.capability_registry import (
     CapabilityContract,
+    CapabilityOwner,
     CapabilityRegistry,
+    ContractDeprecation,
+    SchemaGrace,
     require_declared_for_binding,
 )
 from dotmac_integration.models import (
@@ -125,6 +129,8 @@ __all__ = [
     "ProductPortDescriptorInvalid",
     "ProductPortDescriptorSnapshot",
     "UntrustedDestination",
+    "capability_contract_document",
+    "capability_contract_from_document",
     "capability_bindings_for",
     "corroborate",
     "destination_client",
@@ -214,6 +220,8 @@ class ProductPortDescriptorSnapshot:
     activation_state: str
     source_revision: str
     descriptor_digest: str
+    wire_schema_version: str | None = None
+    capability_contract: CapabilityContract | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +255,7 @@ _DESCRIPTOR_SCHEMAS = frozenset(
     {
         "dotmac.io/product-port-descriptor/v1",
         "dotmac.io/product-port-descriptor/v2",
+        "dotmac.io/product-port-descriptor/v3",
     }
 )
 _DESCRIPTOR_STATES = frozenset(
@@ -254,11 +263,180 @@ _DESCRIPTOR_STATES = frozenset(
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
+_CONTRACT_FIELDS = frozenset(
+    {
+        "command_schema",
+        "result_schema",
+        "observation_schema",
+        "deprecation",
+        "schema_grace",
+        "contract_digest",
+    }
+)
+
+
+def capability_contract_document(
+    contract: CapabilityContract,
+) -> dict[str, object]:
+    """Return the product-owned payload declaration in its canonical wire shape.
+
+    The owner/id/summary stay on the descriptor's established top-level fields;
+    this nested document carries the payload contract and its independently
+    checkable digest. Keeping one serializer in the module gives products and
+    assemblies a parity target without making this package the schema author.
+    """
+
+    deprecation = contract.deprecation
+    grace = contract.schema_grace
+    return {
+        "command_schema": contract.command_schema,
+        "result_schema": contract.result_schema,
+        "observation_schema": contract.observation_schema,
+        "deprecation": (
+            None
+            if deprecation is None
+            else {
+                "replaced_by": deprecation.replaced_by,
+                "retire_after": deprecation.retire_after.isoformat(),
+                "reason": deprecation.reason,
+            }
+        ),
+        "schema_grace": (
+            None
+            if grace is None
+            else {
+                "reason": grace.reason,
+                "retire_after": grace.retire_after.isoformat(),
+                "tracked_by": grace.tracked_by,
+            }
+        ),
+        "contract_digest": contract.contract_digest,
+    }
+
+
+def _optional_schema(
+    document: Mapping[str, object], name: str
+) -> dict[str, object] | None:
+    value = document[name]
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ProductPortDescriptorInvalid(
+            f"capability contract {name} must be a JSON object or null"
+        )
+    return {str(key): item for key, item in value.items()}
+
+
+def _calendar_date(value: object, *, field: str) -> date:
+    if not isinstance(value, str):
+        raise ProductPortDescriptorInvalid(
+            f"capability contract {field} must be an ISO calendar date"
+        )
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise ProductPortDescriptorInvalid(
+            f"capability contract {field} must be an ISO calendar date"
+        ) from None
+
+
+def capability_contract_from_document(
+    document: Mapping[str, object],
+    *,
+    capability_id: str,
+    application: str,
+    owner_module: str,
+    summary: str,
+) -> CapabilityContract:
+    """Parse one exact product-owned contract and verify its claimed digest."""
+
+    if set(document) != _CONTRACT_FIELDS:
+        raise ProductPortDescriptorInvalid(
+            "capability contract does not have the exact field set"
+        )
+
+    raw_deprecation = document["deprecation"]
+    deprecation: ContractDeprecation | None = None
+    if raw_deprecation is not None:
+        if not isinstance(raw_deprecation, Mapping) or set(raw_deprecation) != {
+            "replaced_by",
+            "retire_after",
+            "reason",
+        }:
+            raise ProductPortDescriptorInvalid(
+                "capability contract deprecation does not have the exact field set"
+            )
+        replaced_by = raw_deprecation["replaced_by"]
+        reason = raw_deprecation["reason"]
+        if not isinstance(replaced_by, str) or not isinstance(reason, str):
+            raise ProductPortDescriptorInvalid(
+                "capability contract deprecation contains an invalid typed field"
+            )
+        deprecation = ContractDeprecation(
+            replaced_by=replaced_by,
+            retire_after=_calendar_date(
+                raw_deprecation["retire_after"], field="deprecation.retire_after"
+            ),
+            reason=reason,
+        )
+
+    raw_grace = document["schema_grace"]
+    grace: SchemaGrace | None = None
+    if raw_grace is not None:
+        if not isinstance(raw_grace, Mapping) or set(raw_grace) != {
+            "reason",
+            "retire_after",
+            "tracked_by",
+        }:
+            raise ProductPortDescriptorInvalid(
+                "capability contract schema_grace does not have the exact field set"
+            )
+        reason = raw_grace["reason"]
+        tracked_by = raw_grace["tracked_by"]
+        if not isinstance(reason, str) or not isinstance(tracked_by, str):
+            raise ProductPortDescriptorInvalid(
+                "capability contract schema_grace contains an invalid typed field"
+            )
+        grace = SchemaGrace(
+            reason=reason,
+            retire_after=_calendar_date(
+                raw_grace["retire_after"], field="schema_grace.retire_after"
+            ),
+            tracked_by=tracked_by,
+        )
+
+    try:
+        contract = CapabilityContract(
+            capability_id=capability_id,
+            owner=CapabilityOwner(application=application, module=owner_module),
+            summary=summary,
+            command_schema=_optional_schema(document, "command_schema"),
+            result_schema=_optional_schema(document, "result_schema"),
+            observation_schema=_optional_schema(document, "observation_schema"),
+            deprecation=deprecation,
+            schema_grace=grace,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProductPortDescriptorInvalid(
+            "capability contract contains an invalid declaration"
+        ) from exc
+
+    claimed_digest = document["contract_digest"]
+    if claimed_digest is not None and not isinstance(claimed_digest, str):
+        raise ProductPortDescriptorInvalid(
+            "capability contract contract_digest must be a string or null"
+        )
+    if claimed_digest != contract.contract_digest:
+        raise ProductPortDescriptorInvalid(
+            "capability contract digest does not cover its published schemas"
+        )
+    return contract
+
 
 def _descriptor_document(
     descriptor: ProductPortDescriptorSnapshot,
 ) -> dict[str, object]:
-    return {
+    document: dict[str, object] = {
         "schema_version": descriptor.schema_version,
         "application": descriptor.application,
         "owner_module": descriptor.owner_module,
@@ -275,6 +453,17 @@ def _descriptor_document(
         "activation_state": descriptor.activation_state,
         "source_revision": descriptor.source_revision,
     }
+    if descriptor.schema_version == "dotmac.io/product-port-descriptor/v3":
+        wire_schema_version = descriptor.wire_schema_version
+        contract = descriptor.capability_contract
+        if wire_schema_version is None or contract is None:
+            raise ProductPortDescriptorInvalid(
+                "product-port descriptor v3 requires a wire schema and "
+                "capability contract"
+            )
+        document["wire_schema_version"] = wire_schema_version
+        document["capability_contract"] = capability_contract_document(contract)
+    return document
 
 
 def product_port_descriptor_digest(
@@ -320,6 +509,31 @@ def _require_valid_descriptor(descriptor: ProductPortDescriptorSnapshot) -> None
         raise ProductPortDescriptorInvalid(
             "descriptor contract_version must be positive"
         )
+    contract = descriptor.capability_contract
+    if descriptor.schema_version == "dotmac.io/product-port-descriptor/v3":
+        if not descriptor.wire_schema_version or contract is None:
+            raise ProductPortDescriptorInvalid(
+                "product-port descriptor v3 requires a wire schema and "
+                "capability contract"
+            )
+        if contract.capability_id != descriptor.capability_id:
+            raise ProductPortDescriptorInvalid(
+                "descriptor capability id disagrees with its capability contract"
+            )
+        if contract.owner != CapabilityOwner(
+            application=descriptor.application, module=descriptor.owner_module
+        ):
+            raise ProductPortDescriptorInvalid(
+                "descriptor owner disagrees with its capability contract"
+            )
+        if contract.summary != descriptor.capability_summary:
+            raise ProductPortDescriptorInvalid(
+                "descriptor summary disagrees with its capability contract"
+            )
+    elif descriptor.wire_schema_version is not None or contract is not None:
+        raise ProductPortDescriptorInvalid(
+            "legacy product-port descriptors cannot carry v3 contract fields"
+        )
     if descriptor.activation_state not in _DESCRIPTOR_STATES:
         raise ProductPortDescriptorInvalid(
             f"unknown descriptor activation state {descriptor.activation_state!r}"
@@ -338,7 +552,7 @@ def _require_valid_descriptor(descriptor: ProductPortDescriptorSnapshot) -> None
 
 
 def _product_port_snapshot(
-    row: CapabilityDestinationRevision,
+    row: CapabilityDestinationRevision, *, capability_id: str
 ) -> ProductPortDescriptorSnapshot | None:
     if row.descriptor_digest is None:
         return None
@@ -356,11 +570,23 @@ def _product_port_snapshot(
         raise ProductPortDescriptorInvalid(
             f"destination revision {row.id} holds an incomplete descriptor snapshot"
         )
+    contract_document = row.descriptor_contract_json
+    capability_contract = (
+        None
+        if contract_document is None
+        else capability_contract_from_document(
+            contract_document,
+            capability_id=capability_id,
+            application=row.application,
+            owner_module=str(row.descriptor_owner_module),
+            summary=str(row.descriptor_capability_summary),
+        )
+    )
     return ProductPortDescriptorSnapshot(
         schema_version=str(row.descriptor_schema_version),
         application=row.application,
         owner_module=str(row.descriptor_owner_module),
-        capability_id="",  # filled from the binding by `_destination_binding`
+        capability_id=capability_id,
         capability_summary=str(row.descriptor_capability_summary),
         contract_version=row.contract_version,
         destination_binding_id=row.product_binding_id,  # type: ignore[arg-type]
@@ -370,6 +596,8 @@ def _product_port_snapshot(
         activation_state=str(row.product_activation_state),
         source_revision=str(row.descriptor_source_revision),
         descriptor_digest=row.descriptor_digest,
+        wire_schema_version=row.product_wire_schema_version,
+        capability_contract=capability_contract,
     )
 
 
@@ -379,23 +607,8 @@ def _destination_binding(
     contract: CapabilityContract,
     established: CapabilityDestinationRevision,
 ) -> DestinationBinding:
-    snapshot = _product_port_snapshot(established)
+    snapshot = _product_port_snapshot(established, capability_id=binding.capability_id)
     if snapshot is not None:
-        snapshot = ProductPortDescriptorSnapshot(
-            schema_version=snapshot.schema_version,
-            application=snapshot.application,
-            owner_module=snapshot.owner_module,
-            capability_id=binding.capability_id,
-            capability_summary=snapshot.capability_summary,
-            contract_version=snapshot.contract_version,
-            destination_binding_id=snapshot.destination_binding_id,
-            delivery_path=snapshot.delivery_path,
-            mirror_path=snapshot.mirror_path,
-            destination_scope=snapshot.destination_scope,
-            activation_state=snapshot.activation_state,
-            source_revision=snapshot.source_revision,
-            descriptor_digest=snapshot.descriptor_digest,
-        )
         _require_valid_descriptor(snapshot)
     return DestinationBinding(
         capability_binding_id=binding.id,
@@ -593,6 +806,13 @@ def reconcile_product_port_descriptor(
             f"descriptor contract version {descriptor.contract_version} does "
             f"not match {binding.capability_id!r}"
         )
+    if (
+        descriptor.capability_contract is not None
+        and descriptor.capability_contract != contract
+    ):
+        raise ProductPortDescriptorInvalid(
+            "descriptor capability contract disagrees with the installed registry"
+        )
 
     current = db.execute(
         select(CapabilityDestinationRevision)
@@ -630,6 +850,12 @@ def reconcile_product_port_descriptor(
         product_activation_state=descriptor.activation_state,
         descriptor_source_revision=descriptor.source_revision,
         descriptor_digest=descriptor.descriptor_digest,
+        product_wire_schema_version=descriptor.wire_schema_version,
+        descriptor_contract_json=(
+            None
+            if descriptor.capability_contract is None
+            else capability_contract_document(descriptor.capability_contract)
+        ),
         established_by=reconciled_by,
         reason="reconcile authenticated product-port descriptor",
     )

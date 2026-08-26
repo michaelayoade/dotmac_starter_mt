@@ -8,8 +8,8 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a15`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, and a15 adds typed outbound repair and runtime safety |
-| Declared | `0.1.0a16` adds domain-owned command/result/observation schemas, durable validated command results, and durable polling attempt/failure/backoff evidence — none of which changes SPI 1.4 |
+| Released | `0.1.0a1` through **`0.1.0a16`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, a11 adds executable polling, a12 adds capability-wide product-port reconciliation, a13 adds ProductObservation v1 projection, a14 adds additive **SPI 1.4** capability modes plus outbound evidence/retention, a15 adds typed outbound repair and runtime safety, and a16 adds the domain-owned payload gate plus durable polling evidence |
+| Declared | `0.1.0a17` adds product-port descriptor v3, carrying the domain's payload contract or dated grace separately from the product wire — it does not change SPI 1.4 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
@@ -282,6 +282,21 @@ would be a second claim over a row that already has a stronger one.
 Backoff is not redefined here — `poll_backoff_seconds` delegates to
 `retry.retry_delay_seconds`, which stays the one owner of the curve for the
 outbox and the poll loop alike.
+
+## Product-port descriptor v3 carries the domain contract
+
+`0.1.0a17` closes the assembly gap exposed by a16's fail-closed payload gate.
+The authenticated product-port descriptor carries the owning domain's exact
+`CapabilityContract` document: command, result and observation schemas or one
+dated `SchemaGrace`, plus its canonical digest. The module parses and persists
+that declaration and refuses disagreement with the installed registry; it does
+not create a schema for the product.
+
+Descriptor protocol version and `wire_schema_version` are separate. Messaging
+may still require its established envelope while settlement renders the generic
+ProductObservation wire; adding payload-contract metadata must not collapse
+those two product protocols into one ambiguous assembly branch. This is an
+engine/storage addition only. Connector SPI remains 1.4.
 
 `ensure_polling_checkpoint` is the declaration lifecycle; it does not list
 work. `due_polling_jobs` is the sole scheduling selector. Failure-history

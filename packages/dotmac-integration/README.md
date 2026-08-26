@@ -12,7 +12,7 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a15`; `0.1.0a16` is declared and
+**Released: `0.1.0a1` through `0.1.0a16`; `0.1.0a17` is declared and
 unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
@@ -34,6 +34,10 @@ validated command result, and gives polling one module-owned lifecycle,
 due-job selector, retry state and bounded failure-history sweep; raw provider
 response bodies remain unrepresentable. The module chooses no polling cadence
 and no failure-retention period.
+a17 accepts product-port descriptor v3: the owning product now carries its
+capability payload contract (or dated schema grace) and independently names the
+wire the assembly must render. The module persists and revalidates both without
+authoring either contract.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

@@ -1136,6 +1136,42 @@ def test_a_product_descriptor_snapshot_is_group_complete_in_postgres(
             ),
             {"id": revision_id},
         ).one()
+
+        v3_insert = text(
+            "INSERT INTO mod_intg.capability_destination_revisions ("
+            "id, capability_binding_id, revision, application, scope_kind, "
+            "scope_ref, contract_version, descriptor_schema_version, "
+            "descriptor_owner_module, descriptor_capability_summary, "
+            "product_binding_id, delivery_path, mirror_path, "
+            "product_activation_state, descriptor_source_revision, "
+            "descriptor_digest, product_wire_schema_version, "
+            "descriptor_contract_json) VALUES ("
+            ":id, :binding, 2, 'sub', 'inbox', 'support', 1, :schema, "
+            ":owner, :summary, :product_binding, :delivery, :mirror, "
+            "'configured_disabled', :source_revision, :digest, :wire, "
+            "CAST(:contract AS jsonb))"
+        )
+        v3_values = {
+            "id": uuid.uuid4(),
+            "binding": binding_id,
+            "schema": "dotmac.io/product-port-descriptor/v3",
+            "owner": "communications.product_port_descriptor",
+            "summary": "Inbound provider observations",
+            "product_binding": product_binding_id,
+            "delivery": f"/api/v1/integration/observations/{product_binding_id}",
+            "mirror": (f"/api/v1/integration/observations/{product_binding_id}/mirror"),
+            "source_revision": "d" * 64,
+            "digest": "e" * 64,
+            "wire": "dotmac.io/integrator-observation-envelope/v1",
+            "contract": "{}",
+        }
+        with pytest.raises(IntegrityError):
+            with conn.begin_nested():
+                conn.execute(v3_insert, {**v3_values, "wire": None})
+        with pytest.raises(IntegrityError):
+            with conn.begin_nested():
+                conn.execute(v3_insert, {**v3_values, "contract": None})
+        conn.execute(v3_insert, v3_values)
     engine.dispose()
 
     assert persisted.product_binding_id == product_binding_id
