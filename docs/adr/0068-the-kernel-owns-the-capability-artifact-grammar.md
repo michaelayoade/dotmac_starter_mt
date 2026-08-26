@@ -259,10 +259,17 @@ pinned, because simply deleting the fetch would also have made the suite pass:
 
 - a selector binding whose source input schema is withheld must still be
   REFUSED — laziness must not turn a missing document into a skipped check; and
-- a half-declared selector (pointer without value, or the reverse) must report
-  a SELECTOR error, not "schema is not held". Refusal order is part of the
-  contract: blaming an absent document for a malformed binding sends a reader
-  to supply a schema that would not fix it.
+- a half-declared selector (pointer without value, or the reverse) is refused
+  when the BINDING IS BUILT, in `CapabilityEvidenceBinding.__post_init__`, so
+  it never reaches compatibility checking at all.
+
+The second property is why the lookup was free to move. The concern when the
+fetch became lazy was refusal ORDER — that a malformed selector might now be
+reported as "source input capability schema is not held", blaming an absent
+document for a defect in the binding. It cannot: the pair is validated at
+construction, so `require_compatible_with` only ever sees bindings whose
+selectors are already whole. That is pinned at the boundary which actually
+holds it, rather than at the one that merely happens not to be reached.
 
 This was reachable only because the archive's own test for the ordinary
 no-selector path had never been run green. It is the reason a restack ports the

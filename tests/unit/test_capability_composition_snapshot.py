@@ -272,26 +272,31 @@ def test_a_selector_still_requires_the_source_input_schema_to_be_held() -> None:
     )
 
 
-def test_a_half_declared_selector_is_a_selector_error_not_a_missing_document() -> None:
-    """Refusal ORDER is part of the contract.
+def test_a_half_declared_selector_is_refused_when_the_binding_is_BUILT() -> None:
+    """A malformed selector never reaches compatibility checking at all.
 
-    A pointer with no value is a malformed binding. Resolving the schema first
-    would report "source input capability schema is not held" — blaming an
-    absent document for a defect in the binding, and sending a reader to supply
-    a schema that would not fix it. `_selector` therefore runs before the
-    lookup, so the diagnosis names the thing that is actually wrong.
+    Resolving the source input schema lazily raised a question about refusal
+    ORDER: would a pointer with no value be reported as "schema is not held",
+    blaming an absent document for a defect in the binding? It cannot, and the
+    reason is worth pinning — the pair is validated in
+    `CapabilityEvidenceBinding.__post_init__`, so a half-declared selector is
+    unconstructible. `require_compatible_with` only ever sees bindings whose
+    selectors are already whole, which is why the lookup inside it is free to
+    move.
+
+    Pinned at the boundary that actually holds it, rather than at the one that
+    merely happens not to be reached.
     """
-    binding = replace(_binding(), source_selector_pointer="/resource_kind")
-    with pytest.raises(CapabilityCompositionError, match="both be set or both be null"):
-        CapabilityCompositionSnapshot(
-            owner_code="dotmac-managed-suite",
-            composition_code="managed-suite.mail-dns.v1",
-            schema_version=1,
-            evidence_bindings=(binding,),
-        ).require_compatible_with(
-            contracts=(SOURCE_CONTRACT, TARGET_CONTRACT),
-            schemas=(SOURCE_SCHEMA, TARGET_SCHEMA),
-        )
+    for kwargs in (
+        {"source_selector_pointer": "/resource_kind"},
+        {"source_selector_value": "domain"},
+        {"target_selector_pointer": "/resource_kind"},
+        {"target_selector_value": "recordset"},
+    ):
+        with pytest.raises(
+            CapabilityCompositionError, match="both be set or both be null"
+        ):
+            replace(_binding(), **kwargs)
 
 
 def test_composition_refuses_secret_or_undeclared_evidence_paths() -> None:
