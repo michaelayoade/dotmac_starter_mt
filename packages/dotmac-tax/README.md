@@ -25,6 +25,26 @@ consequences through their accounting owner and perform any authority
 transport outside this package. Product catalogues contain neither a tax flag
 nor a statutory rate.
 
+`determine_tax_set` returns the published, immutable
+`TaxDeterminationSetV1` read contract rather than a persistence model. Its
+ordered component and progressive-line contracts carry exact kernel `Money`,
+the source fingerprint and the selected rule/classification evidence. Explicit
+zero-rated, exempt and out-of-scope components remain available through
+`reportable_zero_components` even when there is no accounting consequence.
+Consumers import these values from `dotmac_tax`; `dotmac_tax.models` is not a
+public integration surface.
+
+Each a3 result also carries a persisted `rv1:` content fingerprint over the
+full normalized set/component/line evidence. Projection recomputes it and
+refuses membership, duplicated-evidence or content drift. The database admits
+children only during the result's transaction-local `building` phase, permits
+one content-preserving transition to `sealed`, and refuses commit until that
+transition completes. Statutory reports aggregate those verified public
+contracts, never raw child rows. Immutable a2 sets and standalone legacy
+determinations have no truthful seal and therefore fail closed in a3 readers;
+a caller must submit a new source version rather than rewriting statutory
+history.
+
 The optional package owns the `tx` lineage and `mod_tax` schema. It imports no
 sibling domain and never reads another application's database. See
 `EXTRACTION.toml` and `docs/inventories/tax-sources.md`.

@@ -1183,6 +1183,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-tax ──
+    "dotmac-tax-v0.1.0a3": (
+        "dotmac-tax",
+        "531f7f8c",
+        {
+            "tx_0001_tax.py": (
+                "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
+            ),
+            "tx_0002_multi_tax.py": (
+                "9b78094519fe8d0785735f3a4e3a37dacdb9901b88eda25c90cdb167474abde0"
+            ),
+            "tx_0003_result_fingerprint.py": (
+                "dd9751218ce7e27922a6ae4a869f6b25061dfa4bb93e0db7e152ea834579d4b3"
+            ),
+        },
+    ),
     "dotmac-tax-v0.1.0a2": (
         "dotmac-tax",
         "bd8d2262",
