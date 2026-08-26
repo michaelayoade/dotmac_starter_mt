@@ -1403,7 +1403,15 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
             recoverable_rate=Decimal("0"),
         ),
     )
-    determine_tax_set(
+    # Bound, not discarded: SQLAlchemy's identity map holds instances WEAKLY,
+    # and `TaxDeterminationSet.determined_at` is `DateTime(timezone=True)` —
+    # which SQLite cannot round-trip. If this instance is collected before
+    # `generate_statutory_report` re-queries it, the row reloads NAIVE and
+    # `_require_aware_persisted` raises. Whether that happens depends only on
+    # when CPython's generational GC fires, i.e. on how much every PRECEDING
+    # test allocated — so this test passed or failed according to what else
+    # was collected before it. Holding the reference removes that coupling.
+    _determination_set = determine_tax_set(
         db,
         tenant_id=tenant.id,
         fact=TaxFact(
