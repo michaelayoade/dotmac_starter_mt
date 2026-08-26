@@ -220,3 +220,38 @@ The accepting condition is capability, not another promise: a human approval
 credential is never installed in an agent-visible session; an App or machine
 identity used for dispatch and monitoring is not an environment reviewer and
 reports `current_user_can_approve=false` at the pending gate.
+
+---
+
+## 2026-08-26 — package-release human gates retired; main moved during the final gated release
+
+**Retired control.** Michael explicitly replaced the `registry-release` and
+`pypi-release` required-reviewer waits with automatic package publication from
+exact, green protected `main`. The historical a91/a93 attribution exceptions
+above remain facts; their open remediation actions are **superseded for package
+publication** rather than marked done. They still describe the correct rule for
+any protected production deployment.
+
+**Replacement controls.** Package environments remain main-only secret
+boundaries, with zero reviewers and zero wait. Closed allowlists, exact version
+matching, build-once artifact inspection, the current-main re-check immediately
+before publication, install-back verification, tag-after-verification, strict
+required CI, no bypass and the durable publication record remain mandatory.
+The recorder App enables squash auto-merge on its mechanical record PR; branch
+protection, not the App, decides when it lands. The checked-in contract is
+`.github/release-environments.json` and ADR-0005's 2026-08-26 amendment.
+
+**Last gated-release race.** Commercial Agreements `0.1.0a2` run
+`33010902146` published successfully from exact main
+`42acc8b30f1bcaed1580d312fd33d7b5ef358817`. While its second environment wait
+held verification, PR #468 moved protected main to
+`3617caf0746fa8d5a44c67921cf3c0f04548aed7`. The package directory is
+byte-identical between those revisions, so the published artifact is valid and
+must be verified, tagged at its release SHA and recorded — never republished.
+The freeze was nevertheless violated. Removing the redundant waits shrinks the
+race; rule 32 and the immediate pre-publish current-main check remain because a
+queue can still race.
+
+**Status:** policy replacement implemented on
+`feat/automated-release-authorization`; the current release remains open until
+verification, tag, record auto-merge and green protected main complete.

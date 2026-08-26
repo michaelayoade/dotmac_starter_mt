@@ -6,7 +6,7 @@ name: Release capability contract catalogue
 # `release-adapter.yml` and `release-connector.yml` — assert this run is the
 # current protected-main tip -> resolve the reviewed allowlist -> prove the
 # source is data-only -> build once -> inspect the bytes -> smoke them ->
-# AWAIT environment approval -> re-assert the approved SHA is still main's tip
+# enter the main-only release environment -> re-assert the run SHA is still main's tip
 # -> publish THOSE SAME downloaded bytes -> install the published release from
 # the index and verify -> tag only then -> open the durable record.
 #
@@ -15,7 +15,7 @@ name: Release capability contract catalogue
 # `.github/release-contracts.json` is the authorization boundary and it is
 # CLOSED AND EMPTY, so every dispatch fails at `resolve` today. The presence of
 # this workflow is not authorization to publish an unlisted catalogue or to skip
-# the protected-environment approval.
+# the release-environment credential boundary.
 #
 # WHY A FOURTH LANE WITH ITS OWN CLASSIFICATION
 #
@@ -213,19 +213,18 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: registry-release    # protected: main-only + required review
+    environment: registry-release    # main-only release credential boundary; no reviewer wait
     permissions:
       contents: read
     steps:
-      # RE-check freshness AFTER the approval wait, before anything is
-      # published. `build` proved this run was main's tip at dispatch time, but
-      # a protected environment can sit pending for hours — and the approval is
-      # a decision about a SHA, not about a run id. First step in the job, so it
-      # fails before the artifact is fetched or the publish token is used.
+      # RE-check freshness at the irreversible boundary. `build` proved this
+      # run was main's tip at dispatch time, but a queued job can start after
+      # main moves. First step in the job, so it fails before the artifact is
+      # fetched or the publish token is used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Re-assert the approved SHA is still the current protected main
+      - name: Re-assert the run SHA is still the current protected main
         run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
       # Defence in depth: the allowlist is re-checked on the publish side, so a

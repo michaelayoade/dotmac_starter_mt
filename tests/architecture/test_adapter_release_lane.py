@@ -4,7 +4,7 @@ Two claims, and they are separate:
 
 * **The lane exists and is safe.** `release-adapter.yml` reproduces every safety
   step of the module lane — current-main SHA asserted before the build AND
-  re-asserted after the approval wait, a wheel-content policy, the published
+  re-asserted before publication, a wheel-content policy, the published
   bytes downloaded rather than rebuilt, install-and-verify from the index, and a
   tag written only at the end.
 * **The door is shut.** `.github/release-adapters.json` lists nothing, so
@@ -398,7 +398,7 @@ def test_the_release_sequence_matches_the_module_workflow() -> None:
 
     assert (
         source.count("assert_current_main.sh") == 2
-    ), "main must be asserted at build AND re-asserted after the approval wait"
+    ), "main must be asserted at build AND re-asserted before publication"
     assert "environment: registry-release" in source
     assert "download-artifact" in source, "publish must use the built bytes"
     assert "poetry build" in source

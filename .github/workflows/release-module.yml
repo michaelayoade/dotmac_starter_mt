@@ -7,8 +7,8 @@ name: Release module
 # weaken whichever check the other cannot satisfy.
 #
 # Flow, unchanged from the kernel path: build once (on the exact current
-# protected-main SHA) -> inspect the bytes -> smoke them -> AWAIT environment
-# approval -> re-assert the approved SHA is still main's tip -> publish THOSE
+# protected-main SHA) -> inspect the bytes -> smoke them -> enter the main-only
+# release environment -> re-assert the run SHA is still main's tip -> publish THOSE
 # SAME bytes -> install the published release from the index and verify ->
 # tag only then.
 #
@@ -29,7 +29,7 @@ name: Release module
 # ONE MODULE PER RUN, on purpose. Releasing two in a single dispatch would read
 # as transactional when it is not: the second upload can fail with the first
 # already public, leaving a "failed" run that published half its subject. Two
-# approvals for two releases is the honest shape, and the composition proof runs
+# dispatches for two releases is the honest shape, and the composition proof runs
 # afterwards against both published versions.
 #
 # The target is resolved from `.github/release-modules.json` — a CLOSED,
@@ -244,19 +244,18 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: registry-release    # protected: main-only + required review
+    environment: registry-release    # main-only release credential boundary; no reviewer wait
     permissions:
       contents: read
     steps:
-      # RE-check freshness AFTER the approval wait, before anything is
-      # published. `build` proved this run was main's tip at dispatch time, but
-      # a protected environment can sit pending for hours — and the approval is
-      # a decision about a SHA, not about a run id. First step in the job, so it
-      # fails before the artifact is fetched or the publish token is used.
+      # RE-check freshness at the irreversible boundary. `build` proved this
+      # run was main's tip at dispatch time, but a queued job can start after
+      # main moves. First step in the job, so it fails before the artifact is
+      # fetched or the publish token is used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Re-assert the approved SHA is still the current protected main
+      - name: Re-assert the run SHA is still the current protected main
         run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
       # Defence in depth: the allowlist is re-checked on the publish side, so a
