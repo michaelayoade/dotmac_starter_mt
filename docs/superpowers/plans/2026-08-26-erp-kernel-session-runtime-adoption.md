@@ -8,16 +8,18 @@
 > govern. The plan authorizes no code, schema, pin, release or production change
 > by itself.
 >
-> **Target repository:** `dotmac_erp` for steps S3–S6. S1 and S2 are already
-> landed kernel work in `dotmac_starter_mt` and appear here as context, not as
-> work to schedule.
+> **Target repository:** `dotmac_erp` for steps S2b–S6. S1 and S2 are kernel
+> work in `dotmac_starter_mt`; they are AUTHORED but not published, and they
+> appear here as prerequisites with their own release gates rather than as
+> finished context. No step from S2b onward may start before its kernel rung
+> has a release oracle.
 >
 > **Decision source:** ADR-0066 (the database runtime is a facility products
 > instantiate, not a singleton they share), extending ADR-0006's product-first
 > extraction amendment (`AGENTS.md` rule 22) and ADR-0024 § 2.
 >
-> **Evidence basis:** kernel side, `dotmac_starter_mt` branch
-> `feat/kernel-session-runtime` —
+> **Evidence basis:** kernel side, `dotmac_starter_mt` PR #451 branch
+> `feat/kernel-session-runtime` (open, unmerged, unpublished) —
 > `packages/dotmac-kernel/src/dotmac_kernel/session_runtime.py`, ADR-0066,
 > `COMPATIBILITY.md` § "Owning your own database runtime", `CHANGELOG.md`
 > 0.1.0a100. ERP side, seams verified 2026-08-26 on branch
@@ -111,54 +113,76 @@ itself is a second place each of those has to be found again.
 
 ## Delivery sequence
 
-Each step is a separate, reviewable change in the repository named. S1 and S2
-are recorded as landed context. Publication, pinning, merging, staging and
-production work remain separately authorized.
+Each step is a separate, reviewable change in the repository named.
 
-### S1 — Engine-free transaction, error and fingerprint surface — PARTIALLY LANDED
+**S1 and S2 are AUTHORED, not published.** Both are open starter PRs whose
+kernel versions are declared and unreleased, and rule 26 refuses a declared
+version as evidence of anything. They are ordered as one release train, and
+each rung must be merged, published through the protected workflow and recorded
+before the next is rebased onto it:
 
-**State:** `fingerprints` and `exceptions` are released (kernel a96/a97). The
-public engine-free savepoint spelling is NOT: it exists only on the unmerged
-`dotmac_starter_mt` PR #445, which is green and mergeable but declares an
-already-published version. See the two gates below.
+| Rung | PR | Kernel | State |
+|---|---|---|---|
+| S1 | #445 | `0.1.0a98` | open, declared-unpublished |
+| — | #450 | `0.1.0a99` | open, declared-unpublished (facet-admission repair; positional, not a dependency of this plan) |
+| S2 | #451 | `0.1.0a100` | open, declared-unpublished |
 
-A caller-session kernel service no longer imports the eager database owner
-merely to open a SAVEPOINT: the mechanic moved to an engine-free module, and
-`dotmac_kernel.fingerprints` and `dotmac_kernel.exceptions` are likewise
-importable without a DSN. That is what makes an adopting product able to consume
-kernel services against its OWN session.
+The ordering is release mechanics, not a dependency graph: a99 touches neither
+a98 nor a100, and a100's `DatabaseRuntime` needs nothing from a98. What the
+train buys is that no two branches claim one version and every rung has an
+oracle before the next is cut.
 
-**This step is NOT finished, and the plan should not read as though it is.**
-On `origin/main` the engine-free savepoint still lives at the private
-`dotmac_kernel._transactions`, listed under COMPATIBILITY.md's "Internal modules
-and names (do not import)", and the only supported spelling remains
-`dotmac_kernel.db.conflict_savepoint` — the eager module ERP's ledger prohibits
-and whose import costs a `DATABASE_URL`. The public `dotmac_kernel.transactions`
-module exists ONLY on the unmerged starter PR #445.
+S3 cannot start until a100 exists as a published, tagged artifact. Publication,
+pinning, merging, staging and production work remain separately authorized.
 
-Two consequences follow, and both are gates on S3 rather than details:
+### S1 — The public engine-free transaction and fingerprint surface — AUTHORED (kernel a98, PR #445)
 
-* **ERP is already ahead of the published surface.** Four files on ERP's
-  `fix/retire-external-ticket-runtime` working tree
-  (`app/services/sync/dotmac_sub_sync_service.py`, `sub/base.py`,
-  `sub/expenses.py`, `sub/procurement.py`) import
-  `dotmac_kernel.transactions`, which no released kernel ships. That work
-  cannot merge until #445 does and a kernel release carries the module. It is
-  uncommitted, so nothing is broken in production — but it is the exact shape
-  rule 26 exists to catch, and it should not be resolved by importing the
-  private `_transactions` name instead.
-* **#445 needs a version before it can release.** That branch declares kernel
-  `0.1.0a96`, and a96 was published from a different commit (the
-  machine-attribution renumber). Merging it as-is would document a new public
-  module under an already-released heading, so it must be renumbered on the way
-  in, as a100, with the admission repair at a99 and this runtime at a100.
+**State:** open, unmerged, declared-unpublished. Nothing below is available to
+ERP yet.
 
-Until both are done, S3 does not get to assume ERP can call
-`conflict_savepoint` at all.
+A caller-session kernel service must be able to open a SAVEPOINT without
+entering the eager database owner. On `origin/main` it cannot: the mechanic
+lives at the private `dotmac_kernel._transactions`, listed under
+COMPATIBILITY.md's "Internal modules and names (do not import)", and the only
+supported spelling is `dotmac_kernel.db.conflict_savepoint` — the module ERP's
+ledger prohibits and whose import costs a `DATABASE_URL`. a98 publishes
+`dotmac_kernel.transactions` as the supported engine-free spelling.
 
-### S2 — The configurable kernel session/tenant runtime — LANDED (kernel a100)
+**`fingerprints` is in the same position, and the distinction matters.** Main
+DOCUMENTS `dotmac_kernel.fingerprints` in COMPATIBILITY.md but does not list it
+in `SUPPORTED_MODULES`, so by the kernel's own rule — a name is public only if
+it is in a supported module's `__all__`, and the module is in
+`SUPPORTED_MODULES` — it is not actually public. a98 registers it and
+reconciles the two. Do not read the prose contract as evidence of the machine
+one; that gap is the defect a98 closes, and a plan that treated `fingerprints`
+as already released would be reasoning from the wrong artifact.
 
-**State:** shipped on `feat/kernel-session-runtime`; ADR-0066 accepted.
+**The ERP consequence, which is a gate on S3 rather than a detail.** Four files
+on ERP's `fix/retire-external-ticket-runtime` working tree
+(`app/services/sync/dotmac_sub_sync_service.py`, `sub/base.py`,
+`sub/expenses.py`, `sub/procurement.py`) already import
+`dotmac_kernel.transactions`. No released kernel ships it, so those imports
+cannot collect against the installed kernel and ERP's exact-pin test should be
+failing there — as expected, since the work is uncommitted and anticipates a98.
+That work cannot merge until a98 is published and ERP repins to the exact
+tagged version. It must not be resolved by importing the private
+`_transactions` name.
+
+That branch also carries an internal inconsistency worth clearing first: ERP
+`main` is consistently `0.1.0a94`, while the working tree has package and lock
+at a94 and `KERNEL_PIN`/the adoption ledger at a96. Reconcile before S3.
+
+**Why a98 and not a96.** The branch originally declared `0.1.0a96`, a version
+already published from a different commit (the machine-attribution renumber).
+Leaving it there would document a new public module under an already-released
+changelog heading, so the entries were moved into their own a98 section on the
+way in.
+
+### S2 — The configurable kernel session/tenant runtime — AUTHORED (kernel a100, PR #451)
+
+**State:** open, unmerged, declared-unpublished. ADR-0066 is accepted as a
+decision; the code it describes is not yet an installable artifact, and this
+plan must not be read as though it were.
 
 `DatabaseRuntime` holds the engines, the session factories, the tenant scope and
 every boundary (`request_session`, `platform_request_session`,
@@ -174,6 +198,46 @@ not a `Request`. The four lines that read tenancy off request state and carry
 whatever annotation the framework needs stay in the product — which is precisely
 what lets ERP's dependency-primed organization context adopt the transaction
 discipline without adopting a router stack.
+
+### S2b — ERP pin-only prerequisite — PIN ONLY, NO BEHAVIOUR CHANGE
+
+**Purpose:** move ERP onto the published a100 kernel as a change that adopts
+nothing, so that the adoption in S3 is reviewed on its own merits against a
+pin that already works.
+
+**Precondition:** a100 exists as a published, tagged artifact with an
+authoritative external oracle carrying its immutable coordinates. Not a merged
+PR, not a version in the starter's `pyproject.toml` — rule 26 refuses both.
+
+Six artifacts move TOGETHER, in one commit, because any subset leaves a green
+check over an untested combination:
+
+| Artifact | Why it is in this set |
+|---|---|
+| `pyproject.toml` | what the resolver installs |
+| `poetry.lock` | what is actually installed |
+| `KERNEL_PIN` (`tests/architecture/test_kernel_compatibility.py`) | what the compatibility canaries assert against |
+| `app/bill_of_materials.py` | what ERP reports it is running |
+| `docs/PLATFORM_ADOPTION_LEDGER.md` | what the import allowlist is checked against |
+| the exact-pin tests | the guard that the first three agree |
+
+ERP `main` is consistently `0.1.0a94`. The
+`fix/retire-external-ticket-runtime` working tree is NOT: package and lock at
+a94, `KERNEL_PIN` and the ledger at a96. Its four
+`dotmac_kernel.transactions` imports therefore cannot collect against the
+installed kernel, and the exact-pin test should be failing there. That is the
+expected signal, not a mystery to route around — the branch anticipates a98 and
+is waiting for it.
+
+**Consequence for the in-flight ticket/CRM-retirement work:** it rebases onto
+the published a100 pin rather than carrying its own kernel expectations. Doing
+it the other way — landing that work first and repinning after — means the pin
+change arrives on top of an unrelated diff and nobody can tell which of the two
+moved a failing test.
+
+**This step adopts nothing.** No `DatabaseRuntime` is constructed, no ledger
+row is reclassified, no session factory changes. If it needs a behaviour change
+to go green, that change belongs in S3 and the pin is not ready.
 
 ### S3 — Adopt the runtime in ERP with dual-GUC compatibility
 
@@ -219,15 +283,12 @@ adopted. `tests/architecture/test_kernel_import_boundary.py`'s
 allowlist and a ledger that drift apart mean the guard is asserting against a
 document nobody is reading.
 
-**Pin reconciliation, before this work starts.** ERP pins exact kernel versions
-in three places that must agree: `pyproject.toml`, `poetry.lock`, and
-`KERNEL_PIN` in `tests/architecture/test_kernel_compatibility.py`. On the branch
-read for this plan they do not: `pyproject.toml` and the lock say `0.1.0a94`
-while `KERNEL_PIN` and the ledger say `0.1.0a96`. That inconsistency must be
-reconciled as its own change first, because a compatibility test asserting a
-version the resolver never installs is a green check over an untested
-combination. Then, and only after rule 26's oracle exists for a100, move all
-three together.
+**The pin is already done when this step starts.** S2b moved all six pin
+artifacts together against a published a100. If this step finds itself editing
+`pyproject.toml`, `poetry.lock` or `KERNEL_PIN`, S2b was skipped or was
+incomplete — go back rather than folding a pin change into an adoption diff,
+because the two failing together is indistinguishable from either failing
+alone.
 
 **Deliverable unique to this step:** the shrink-only ratchet test (see "The
 ratchet" below). It lands here, with the legacy set at one, so that the count it
