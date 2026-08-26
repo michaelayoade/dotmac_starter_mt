@@ -1419,6 +1419,21 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         ),
         determined_at=NOW,
     )
+    # Keep the persisted rows and their components LIVE for the rest of this
+    # test. SQLAlchemy's identity map holds instances weakly, and this suite
+    # deliberately relies on SQLite dropping tzinfo to exercise
+    # `_require_aware_persisted` (see the `db.expire_all()` guard below). So a
+    # determination that gets collected here is re-read NAIVE, and
+    # `generate_statutory_report` raises for a reason this test is not about.
+    # Whether that happened depended on when CPython's GC fired, i.e. on how
+    # much every PRECEDING test allocated — so this test passed or failed
+    # according to what else ran before it. Holding the rows states the
+    # precondition instead of inheriting it by luck. Binding `determine_tax_set`
+    # is NOT enough: it returns an ORM-free contract, not these rows.
+    _live_rows = [
+        (row, list(row.components))
+        for row in db.scalars(select(TaxDeterminationSet)).all()
+    ]
     definition = create_statutory_report_definition(
         db,
         tenant_id=tenant.id,
