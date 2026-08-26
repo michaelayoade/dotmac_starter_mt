@@ -69,6 +69,7 @@ from dotmac_tax.models import (
 )
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 NGN = Currency("NGN", 2)
 NOW = datetime(2026, 8, 19, 12, tzinfo=UTC)
@@ -1746,11 +1747,10 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
     # An earlier fix held strong references, reasoning about CPython's GC. That
     # guards the wrong mechanism. Two probes settle it: forcing `gc.collect()`
     # here leaves this test GREEN — the references do their job — while forcing
-    # `db.expire_all()` reproduces the failure exactly. Expiry, not collection.
-    # Any `Session.rollback` expires every instance, and the suite reaches one
-    # depending on what ran before, so the outcome still turned on test
-    # ordering: adding two unrelated test FILES elsewhere in `tests/unit` was
-    # enough to flip it.
+    # `db.expire_all()` reproduces the failure exactly. Expiry, not collection,
+    # is therefore the mechanism. The event that causes expiry in the
+    # order-sensitive suite path is still unidentified; adding two unrelated
+    # test FILES elsewhere in `tests/unit` is enough to expose it.
     #
     # References are still held, because they are cheap and correct as far as
     # they go. The invariant is then RESTORED explicitly, so the test states
@@ -1767,14 +1767,16 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         `_validate_persisted_result_structure` checks the SET's timestamp AND
         every COMPONENT's, so both have to be restored — fixing only the set
         moves the failure one line down rather than resolving it. Values are
-        the exact ones written; the DB rows are untouched.
+        the exact ones written. `set_committed_value` repairs identity-map
+        state without making the persistent attributes dirty, so a later
+        autoflush cannot turn this dialect workaround into a database update.
         """
         for row, components in _live_rows:
             if row.determined_at.tzinfo is None:
-                row.determined_at = NOW
+                set_committed_value(row, "determined_at", NOW)
             for component in components:
                 if component.determined_at.tzinfo is None:
-                    component.determined_at = NOW
+                    set_committed_value(component, "determined_at", NOW)
 
     _restore_written_offsets()
     definition = create_statutory_report_definition(
@@ -1814,10 +1816,12 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         due_on=date(2026, 8, 18),
         taxpayer_ref="taxpayer:local",
     )
-    # Restore again: `create_statutory_report_definition` and
-    # `create_filing_obligation` run in between and can expire the session, so
-    # restoring only once above is not enough. Re-asserting here is what makes
-    # the precondition hold at the moment it is actually needed.
+    # Re-assert immediately before the persisted report read. Expiry is the
+    # proven mechanism, but its triggering event in the order-sensitive suite
+    # path is still unidentified; neither intervening service above expires
+    # the session itself. This makes the required precondition explicit at the
+    # point where it is consumed without attributing the expiry to an unproved
+    # source.
     _restore_written_offsets()
     report = generate_statutory_report(
         db,
