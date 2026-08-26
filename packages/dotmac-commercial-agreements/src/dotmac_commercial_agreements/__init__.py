@@ -78,6 +78,7 @@ from dotmac_commercial_agreements.facts import (
     AGREEMENT_SUSPENDED_V1,
     AGREEMENT_TERMINATED_V1,
     PUBLISHED_EVENT_TYPES,
+    AgreementPage,
     AgreementView,
     PromisedLine,
     TransitionRecord,
@@ -94,6 +95,7 @@ from dotmac_commercial_agreements.models import (
 )
 from dotmac_commercial_agreements.ports import (
     ActivationEvidence,
+    AgreementBoundaryError,
     AgreementError,
     AgreementPeriod,
     ApprovalEvidence,
@@ -106,9 +108,12 @@ from dotmac_commercial_agreements.ports import (
     TransitionRefusedError,
     UndeclaredCapabilityError,
     UnknownProductError,
+    derive_end_exclusive,
 )
 from dotmac_commercial_agreements.service import (
     AUDIT_ACTION_TRANSITIONED,
+    DEFAULT_AGREEMENT_PAGE_SIZE,
+    MAX_AGREEMENT_PAGE_SIZE,
     ActivateCommand,
     AmendCommand,
     ApproveCommand,
@@ -125,6 +130,7 @@ from dotmac_commercial_agreements.service import (
     family,
     get,
     history,
+    list_agreements,
     open_draft,
     propose,
     reinstate,
@@ -134,7 +140,7 @@ from dotmac_commercial_agreements.service import (
     terminate,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AGREEMENT_ACTIVATED_V1",
@@ -148,16 +154,20 @@ __all__ = [
     "AGREEMENT_SUSPENDED_V1",
     "AGREEMENT_TERMINATED_V1",
     "AUDIT_ACTION_TRANSITIONED",
+    "DEFAULT_AGREEMENT_PAGE_SIZE",
+    "MAX_AGREEMENT_PAGE_SIZE",
     "PUBLISHED_EVENT_TYPES",
     "SCHEMA",
     "TERMINAL_STATUSES",
     "ActivateCommand",
     "ActivationEvidence",
+    "AgreementBoundaryError",
     "Agreement",
     "AgreementError",
     "AgreementEvent",
     "AgreementLine",
     "AgreementPeriod",
+    "AgreementPage",
     "AgreementStatus",
     "AgreementView",
     "AmendCommand",
@@ -184,10 +194,12 @@ __all__ = [
     "amend",
     "approve",
     "cancel",
+    "derive_end_exclusive",
     "expire",
     "family",
     "get",
     "history",
+    "list_agreements",
     "module",
     "open_draft",
     "propose",

@@ -25,11 +25,15 @@ from datetime import UTC, date, datetime
 
 import pytest
 from dotmac_commercial_agreements import (
+    MAX_AGREEMENT_PAGE_SIZE,
     ActivateCommand,
     ActivationEvidence,
+    AgreementBoundaryError,
     AgreementError,
+    AgreementPage,
     AgreementPeriod,
     AgreementStatus,
+    AgreementView,
     AmendCommand,
     ApprovalEvidence,
     ApproveCommand,
@@ -53,6 +57,7 @@ from dotmac_commercial_agreements import (
     family,
     get,
     history,
+    list_agreements,
     module,
     open_draft,
     propose,
@@ -374,6 +379,12 @@ class TestIllegalTransitionsAreRefused:
         with pytest.raises(TransitionRefusedError):
             expire(db, TransitionCommand("cmd-x", view.id), as_of=date(2027, 1, 1))
 
+    def test_expiry_date_itself_is_still_inside_the_term(self, db, catalogue) -> None:
+        """a1's expiry date remains inclusive; a2 does not move the boundary."""
+        view = _to_active(db, catalogue)
+        with pytest.raises(TransitionRefusedError):
+            expire(db, TransitionCommand("cmd-x", view.id), as_of=_END)
+
     def test_expiry_succeeds_once_the_term_has_ended(self, db, catalogue) -> None:
         view = _to_active(db, catalogue)
         view = expire(db, TransitionCommand("cmd-e", view.id), as_of=date(2027, 9, 1))
@@ -406,6 +417,17 @@ class TestIllegalTransitionsAreRefused:
         """
         with pytest.raises(AgreementError):
             AgreementPeriod(date(2027, 1, 1), date(2026, 1, 1))
+
+    def test_the_exclusive_end_is_derived_from_the_inclusive_expiry(self) -> None:
+        period = AgreementPeriod(_TODAY, _END)
+        assert period.expiry_date == date(2027, 8, 31)
+        assert period.end_exclusive == date(2027, 9, 1)
+
+    def test_an_unrepresentable_exclusive_end_is_a_typed_refusal(self) -> None:
+        period = AgreementPeriod(date.max, date.max)
+        assert period.expiry_date == date.max, "the inclusive a1 value is preserved"
+        with pytest.raises(AgreementBoundaryError, match="no representable"):
+            _ = period.end_exclusive
 
 
 # ── Catalogue validation ────────────────────────────────────────────────────
@@ -658,6 +680,58 @@ class TestAmendmentIsANewVersion:
         )
         versions = family(db, original.agreement_family_id)
         assert [v.agreement_version for v in versions] == [1, 2]
+
+
+# ── Bounded estate inspection ───────────────────────────────────────────────
+
+
+class TestAgreementEstateListing:
+    def test_pages_every_agreement_once_in_stable_id_order(self, db, catalogue) -> None:
+        created = tuple(_draft(db, catalogue) for _ in range(5))
+        expected_ids = sorted(view.id for view in created)
+
+        first = list_agreements(db, limit=2)
+        assert isinstance(first, AgreementPage)
+        assert [view.id for view in first.items] == expected_ids[:2]
+        assert first.next_after == expected_ids[1]
+
+        second = list_agreements(db, after=first.next_after, limit=2)
+        assert [view.id for view in second.items] == expected_ids[2:4]
+        assert second.next_after == expected_ids[3]
+
+        final = list_agreements(db, after=second.next_after, limit=2)
+        assert [view.id for view in final.items] == expected_ids[4:]
+        assert final.next_after is None
+
+    def test_a_full_final_page_does_not_invent_a_continuation(
+        self, db, catalogue
+    ) -> None:
+        created = tuple(_draft(db, catalogue) for _ in range(2))
+        page = list_agreements(db, limit=2)
+        assert {view.id for view in page.items} == {view.id for view in created}
+        assert page.next_after is None
+
+    def test_views_and_lines_remain_usable_after_the_orm_is_detached(
+        self, db, catalogue
+    ) -> None:
+        created = _draft(db, catalogue)
+        page = list_agreements(db, limit=1)
+        db.expunge_all()
+
+        assert isinstance(page.items[0], AgreementView)
+        assert not hasattr(page.items[0], "_sa_instance_state")
+        assert page.items[0].id == created.id
+        assert page.items[0].lines[0].capability_code == "subscriber.manage"
+        assert page.items[0].end_exclusive == date(2027, 9, 1)
+
+    @pytest.mark.parametrize("limit", [False, 0, MAX_AGREEMENT_PAGE_SIZE + 1])
+    def test_invalid_page_limits_are_refused(self, db, limit) -> None:
+        with pytest.raises(AgreementError, match="page limit"):
+            list_agreements(db, limit=limit)
+
+    def test_a_non_uuid_cursor_is_refused_at_the_public_boundary(self, db) -> None:
+        with pytest.raises(AgreementError, match="cursor"):
+            list_agreements(db, after="not-a-uuid")  # type: ignore[arg-type]
 
 
 # ── Rejection clears the frozen snapshot ────────────────────────────────────

@@ -67,7 +67,7 @@ undeclared capability.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -76,6 +76,10 @@ from uuid import UUID
 
 class AgreementError(ValueError):
     """Base: this command cannot be applied to this agreement."""
+
+
+class AgreementBoundaryError(AgreementError):
+    """An inclusive agreement end has no representable exclusive boundary."""
 
 
 class UnknownProductError(AgreementError):
@@ -279,7 +283,10 @@ class AgreementPeriod:
 
     A pair rather than two parameters because the only invalid combination is a
     relationship between them, and a type that can hold an invalid pair pushes
-    the check to every call site.
+    the check to every call site. ``expiry_date`` is inclusive: the agreement
+    remains in term for that whole date. ``end_exclusive`` derives the boundary
+    immediately after it, so range consumers do not each make their own
+    one-day decision.
     """
 
     effective_date: date
@@ -292,9 +299,30 @@ class AgreementPeriod:
                 f"{self.effective_date}; an agreement cannot end before it starts"
             )
 
+    @property
+    def end_exclusive(self) -> date:
+        """The first date outside the inclusive agreement period."""
+        return derive_end_exclusive(self.expiry_date)
+
+
+def derive_end_exclusive(expiry_date: date) -> date:
+    """Derive the first out-of-term date from an inclusive ``expiry_date``.
+
+    ``date.max`` remains a valid stored inclusive end from the a1 contract, but
+    Python cannot represent the following date. Refuse that derivation with a
+    typed error rather than wrapping or silently treating it as open-ended.
+    """
+    try:
+        return expiry_date + timedelta(days=1)
+    except OverflowError as exc:
+        raise AgreementBoundaryError(
+            f"expiry {expiry_date} has no representable exclusive boundary"
+        ) from exc
+
 
 __all__ = [
     "ActivationEvidence",
+    "AgreementBoundaryError",
     "AgreementError",
     "AgreementPeriod",
     "ApprovalEvidence",
@@ -307,4 +335,5 @@ __all__ = [
     "TransitionRefusedError",
     "UndeclaredCapabilityError",
     "UnknownProductError",
+    "derive_end_exclusive",
 ]
