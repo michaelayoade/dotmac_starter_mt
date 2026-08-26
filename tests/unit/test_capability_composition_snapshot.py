@@ -272,6 +272,28 @@ def test_a_selector_still_requires_the_source_input_schema_to_be_held() -> None:
     )
 
 
+def test_a_half_declared_selector_is_a_selector_error_not_a_missing_document() -> None:
+    """Refusal ORDER is part of the contract.
+
+    A pointer with no value is a malformed binding. Resolving the schema first
+    would report "source input capability schema is not held" — blaming an
+    absent document for a defect in the binding, and sending a reader to supply
+    a schema that would not fix it. `_selector` therefore runs before the
+    lookup, so the diagnosis names the thing that is actually wrong.
+    """
+    binding = replace(_binding(), source_selector_pointer="/resource_kind")
+    with pytest.raises(CapabilityCompositionError, match="both be set or both be null"):
+        CapabilityCompositionSnapshot(
+            owner_code="dotmac-managed-suite",
+            composition_code="managed-suite.mail-dns.v1",
+            schema_version=1,
+            evidence_bindings=(binding,),
+        ).require_compatible_with(
+            contracts=(SOURCE_CONTRACT, TARGET_CONTRACT),
+            schemas=(SOURCE_SCHEMA, TARGET_SCHEMA),
+        )
+
+
 def test_composition_refuses_secret_or_undeclared_evidence_paths() -> None:
     secret_source = CapabilitySchemaDocument.from_mapping(
         {

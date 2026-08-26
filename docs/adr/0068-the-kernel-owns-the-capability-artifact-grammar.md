@@ -235,7 +235,40 @@ for grace, and adopting a snapshot is a one-way exit. A contract that could
 re-enter grace after presenting exact schemas would make the ungated window
 reachable from the gated state, which is the wrong direction.
 
-### 8. What this decision does NOT authorize
+### 8. One repair made to the ported grammar
+
+The port is otherwise verbatim. One behaviour changed, and it is recorded here
+because "restacked from the archive" must not become cover for a silent
+redesign.
+
+`CapabilityCompositionSnapshot.require_compatible_with` resolved the SOURCE
+capability's APPLY-**input** schema unconditionally, then handed it to a
+selector check that returns immediately when the binding declares no selector.
+Every caller therefore had to hold a document the proof never reads.
+
+The asymmetry is the argument. An evidence binding joins a source APPLY-OUTPUT
+to a target APPLY-INPUT; the source's own input says nothing about that edge.
+And the target's OUTPUT schema — referenced by the very same pinned operation —
+was never required. So "hold every schema the pinned operations reference" was
+not the rule the function enforced; it demanded exactly one document beyond
+what it used.
+
+The schema is now resolved only when a selector actually consults it, to prove
+the chosen instance value is closed by a `const` or `enum`. Two properties are
+pinned, because simply deleting the fetch would also have made the suite pass:
+
+- a selector binding whose source input schema is withheld must still be
+  REFUSED — laziness must not turn a missing document into a skipped check; and
+- a half-declared selector (pointer without value, or the reverse) must report
+  a SELECTOR error, not "schema is not held". Refusal order is part of the
+  contract: blaming an absent document for a malformed binding sends a reader
+  to supply a schema that would not fix it.
+
+This was reachable only because the archive's own test for the ordinary
+no-selector path had never been run green. It is the reason a restack ports the
+tests as well as the module, and runs them.
+
+### 9. What this decision does NOT authorize
 
 No catalogue becomes publishable because this grammar exists. The seven
 candidate catalogues remain archive-only, and
