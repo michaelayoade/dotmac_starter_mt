@@ -134,6 +134,14 @@ Migration `0028_machine_attribution` (kernel lineage, revises
   exactly one release so an existing deployment can attribute its rows; open at
   rest is not open at runtime.
 
+### Fixed
+
+- `dotmac_kernel.fingerprints` is now registered in `SUPPORTED_MODULES`,
+  reconciling the machine-readable public surface with the compatibility
+  contract published when the persistence-free module was introduced in a88.
+  A fresh-process canary proves it imports without loading the kernel database
+  runtime or the persistence-backed idempotency ledger.
+
 ### Inventory correction
 
 The merged inventory recorded Sub as scope-EXACT, on the strength of

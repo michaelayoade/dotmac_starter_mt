@@ -290,6 +290,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.exceptions",
         "dotmac_kernel.external_identity",
         "dotmac_kernel.features",
+        "dotmac_kernel.fingerprints",
         "dotmac_kernel.idempotency",
         "dotmac_kernel.idempotency_models",
         "dotmac_kernel.identity",

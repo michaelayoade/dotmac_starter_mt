@@ -139,7 +139,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
 | `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
 | `dotmac_kernel.messaging.models` | `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` |
-| `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence — import this rather than `idempotency` when you only need identity) |
+| `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence or configured database required — import this rather than `idempotency` when you only need identity) |
 | `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of` (re-export of `fingerprints`), `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
 | `dotmac_kernel.idempotency_models` | `IdempotencyRecord`, `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware`, `CSRFTokenSigner`, `CSRFValidationError`, `require_csrf`, `CSRF_COOKIE`, `CSRF_HOST_COOKIE`, `CSRF_HEADER`, `CSRF_FORM_FIELD`, `CSRF_PROTECTED_ATTR` |
