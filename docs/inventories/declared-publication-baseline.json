@@ -107,11 +107,6 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a97",
-      "reason": "DECLARED BY THE FACET-RUNTIME AND CSRF SECURITY SLICE, NOT YET RELEASED. a96 already names the separate machine-attribution release, so the versioned browser contract, request-scoped surface runtime and signed session-bound CSRF correction require a97 rather than silently broadening a96. Remove this row only in an oracle-backed a97 release record; do not edit the declared version down.",
-      "state": "declared-unpublished"
-    },
     "dotmac-template-studio": {
       "declared": "0.2.0a4",
       "reason": "DECLARED BY THE WEB-SURFACE CONTRACT MIGRATION, NOT YET RELEASED. a3 remains the previously authorized supply-only content; a4 adds the module-contract-v2 surface and requires kernel a97, so it must not be folded into a3. Remove this row only in an oracle-backed a4 release record; preserve the Sub adoption gates in EXTRACTION.toml.",
