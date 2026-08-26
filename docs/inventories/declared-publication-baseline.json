@@ -99,7 +99,7 @@
     },
     "dotmac-integration": {
       "declared": "0.1.0a17",
-      "reason": "OUTSTANDING FOR THE PRODUCT-OWNED CONTRACT HANDSHAKE. a16 IS published (peeled tag dotmac-integration-v0.1.0a16 -> dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e), and its fail-closed CapabilityContract correctly exposes that the authenticated product-port descriptor did not carry a schema or dated grace. a17 adds descriptor v3 plus ig_0015 so the owning product can publish that declaration independently of its downstream wire; source presence is not registry evidence. Remove this row only when the protected module release installs, verifies, registers and tags exact 0.1.0a17; Integrator must not exact-pin or lock a17 before that tag exists.",
+      "reason": "OUTSTANDING FOR THE PRODUCT-OWNED CONTRACT HANDSHAKE. a16 IS published (peeled tag dotmac-integration-v0.1.0a16 -> dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e), and its fail-closed CapabilityContract correctly exposes that the authenticated product-port descriptor did not carry a schema or dated grace. a17 adds descriptor v3 plus ig_0015 so the owning product can publish that declaration independently of its downstream wire; source presence is not registry evidence. It is NOT to be repaired by editing the version down: remove this row only when the protected module release installs, verifies, registers and tags exact 0.1.0a17; Integrator must not exact-pin or lock a17 before that tag exists.",
       "state": "declared-unpublished"
     },
     "dotmac-inbox": {
