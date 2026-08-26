@@ -58,13 +58,13 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from dotmac_kernel.audit import write_platform_audit_event
 from dotmac_kernel.messaging import enqueue_platform_event, process_once_platform
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from dotmac_commercial_agreements import facts
 from dotmac_commercial_agreements.models import (
@@ -76,6 +76,7 @@ from dotmac_commercial_agreements.models import (
 )
 from dotmac_commercial_agreements.ports import (
     ActivationEvidence,
+    AgreementError,
     AgreementPeriod,
     ApprovalEvidence,
     CapabilityCatalogueReader,
@@ -108,6 +109,11 @@ SCOPE_CANCEL = "commercial_agreement.cancel"
 SCOPE_AMEND = "commercial_agreement.amend"
 
 _ENTITY = "commercial_agreement"
+
+#: Agreement rows carry promised lines, so the owner bounds one read rather
+#: than relying on every adapter to remember a safe limit.
+DEFAULT_AGREEMENT_PAGE_SIZE: Final[int] = 100
+MAX_AGREEMENT_PAGE_SIZE: Final[int] = 200
 
 
 # ── Commands ────────────────────────────────────────────────────────────────
@@ -874,7 +880,9 @@ def expire(
 ) -> facts.AgreementView:
     """`active | suspended → expired`, guarded on the term having actually ended.
 
-    Clock-driven, and the guard is the point: an expiry command that trusted its
+    ``expiry_date`` is inclusive, so the first eligible ``as_of`` is the
+    derived ``end_exclusive`` boundary. Clock-driven, and the guard is the point:
+    an expiry command that trusted its
     caller's word about the date would let a mis-scheduled job expire a live
     agreement a year early. `as_of` is passed in rather than read from the
     system clock so the decision is reproducible in a test and in a replay.
@@ -1054,6 +1062,40 @@ def family(db: Session, agreement_family_id: UUID) -> tuple[facts.AgreementView,
     return tuple(_view(row) for row in rows)
 
 
+def list_agreements(
+    db: Session,
+    *,
+    after: UUID | None = None,
+    limit: int = DEFAULT_AGREEMENT_PAGE_SIZE,
+) -> facts.AgreementPage:
+    """Read a bounded deterministic page of the complete agreement estate.
+
+    Agreement id is the stable total key. The ``limit + 1`` probe distinguishes
+    a full final page from a page that really has a successor without a count
+    query. Views and promised lines are materialized before return; no ORM row
+    or lazy loader crosses the module boundary.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise AgreementError("agreement page limit must be a whole number")
+    if not 1 <= limit <= MAX_AGREEMENT_PAGE_SIZE:
+        raise AgreementError(
+            f"agreement page limit must be between 1 and {MAX_AGREEMENT_PAGE_SIZE}"
+        )
+    if after is not None and not isinstance(after, UUID):
+        raise AgreementError("agreement page cursor must be a UUID or None")
+
+    statement = select(Agreement).options(selectinload(Agreement.lines))
+    if after is not None:
+        statement = statement.where(Agreement.id > after)
+    statement = statement.order_by(Agreement.id).limit(limit + 1)
+    rows = tuple(db.execute(statement).scalars().all())
+    page_rows = rows[:limit]
+    return facts.AgreementPage(
+        items=tuple(_view(row) for row in page_rows),
+        next_after=page_rows[-1].id if len(rows) > limit else None,
+    )
+
+
 # ── Small helpers ───────────────────────────────────────────────────────────
 
 
@@ -1133,6 +1175,8 @@ def _now() -> datetime:
 
 __all__ = [
     "AUDIT_ACTION_TRANSITIONED",
+    "DEFAULT_AGREEMENT_PAGE_SIZE",
+    "MAX_AGREEMENT_PAGE_SIZE",
     "SCOPE_ACTIVATE",
     "SCOPE_AMEND",
     "SCOPE_APPROVE",
@@ -1160,6 +1204,7 @@ __all__ = [
     "family",
     "get",
     "history",
+    "list_agreements",
     "open_draft",
     "propose",
     "reinstate",

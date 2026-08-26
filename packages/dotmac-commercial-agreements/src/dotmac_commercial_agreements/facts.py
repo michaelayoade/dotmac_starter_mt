@@ -39,6 +39,8 @@ from datetime import date, datetime
 from typing import Final
 from uuid import UUID
 
+from dotmac_commercial_agreements.ports import derive_end_exclusive
+
 # ── Event types ─────────────────────────────────────────────────────────────
 
 AGREEMENT_PROPOSED_V1: Final[str] = "agreement.proposed.v1"
@@ -101,6 +103,8 @@ class AgreementView:
 
     Returning a detached ORM row would let a caller lazy-load into a session it
     does not own, and would make every column a public contract by accident.
+    ``expiry_date`` preserves a1's inclusive end; ``end_exclusive`` is the
+    explicit derived boundary for consumers that work with half-open ranges.
     """
 
     id: UUID
@@ -123,6 +127,24 @@ class AgreementView:
     supersedes_id: UUID | None = None
     superseded_by_id: UUID | None = None
     lines: tuple[PromisedLine, ...] = ()
+
+    @property
+    def end_exclusive(self) -> date:
+        """The first date outside the inclusive agreement period."""
+        return derive_end_exclusive(self.expiry_date)
+
+
+@dataclass(frozen=True, slots=True)
+class AgreementPage:
+    """A bounded keyset page of detached agreement views.
+
+    ``next_after`` is the last id in ``items`` only when another row exists.
+    Pass it back unchanged; it is a stable UUID keyset, not an offset or a row
+    count that moves when the estate changes.
+    """
+
+    items: tuple[AgreementView, ...]
+    next_after: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +173,7 @@ __all__ = [
     "AGREEMENT_SUSPENDED_V1",
     "AGREEMENT_TERMINATED_V1",
     "PUBLISHED_EVENT_TYPES",
+    "AgreementPage",
     "AgreementView",
     "PromisedLine",
     "TransitionRecord",
