@@ -45,6 +45,17 @@ source_paths = [
   "dotmac_sub:app/api/crm.py",
   "dotmac_sub:app/services/web_system_api_key_mutations.py",
   "dotmac_sub:app/services/owner_commands.py",
+  # Tenant-scope lifecycle (2026-08-26, `session_runtime.DatabaseRuntime`).
+  # ERP is the only source with a scope that SURVIVES a commit without also
+  # surviving the session: transaction-local priming plus an `after_begin`
+  # listener that re-arms each later transaction. The kernel had the two halves
+  # separately and each carried the other's hazard — a session-level setting
+  # that rides a pooled connection out, or a SET LOCAL that dies at the first
+  # commit inside a CLI loop. Ported at ERP
+  # 24dc218afae60cb6ec41fce641fe99512984767b; the dual-GUC prime in `rls.py` is
+  # the reason `legacy_tenant_settings` exists at all.
+  "dotmac_erp:app/db/session_context.py",
+  "dotmac_erp:app/rls.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",

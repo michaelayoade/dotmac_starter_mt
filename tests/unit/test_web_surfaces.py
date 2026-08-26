@@ -8,13 +8,17 @@ from types import SimpleNamespace
 
 import pytest
 from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.models import Party
 from dotmac_kernel.modules import ModuleManifest, ModuleRegistryError
+from dotmac_kernel.permissions import PermissionSpec
 from dotmac_kernel.web_deps import WebAuthRedirect
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserCapabilityProvision,
     BrowserCapabilityRequirement,
     BrowserCredentialTransport,
+    BrowserSecurityPlane,
     BrowserSecurityRequirement,
     BrowserSessionPolicy,
     DuplicateFacetError,
@@ -577,3 +581,175 @@ def test_login_route_must_be_a_parameterless_get_entry() -> None:
 
     with pytest.raises(ValueError, match="parameterless GET"):
         _registry(manifest, facet=_facet(entry_routes=(login_ref,)))
+
+
+# ── admission is a TENANT-plane decision (ADR-0006, post-a97 repair) ─────────
+#
+# `admission_permission` is evaluated as `authorize_party(db, tenant, party,
+# code)`. That call needs a tenant-scoped `Party`. A PLATFORM profile resolves
+# a `PlatformAdmin`, and a public/NONE profile resolves no principal at all —
+# so on either plane there is nothing the permission could be checked against,
+# and the runtime's non-tenant context dependency simply never consults it.
+#
+# The declaration therefore READ as an access control while enforcing nothing.
+# That is the worst shape a security control can take: a reviewer sees the
+# permission on the facet, the permission catalogue confirms it is declared,
+# and every request is admitted. The binding is invalid, so the registry now
+# refuses it at startup rather than letting it look enforced.
+
+
+class _PlatformProvider:
+    transport = BrowserCredentialTransport.COOKIE_SESSION
+
+    @staticmethod
+    def dependency() -> object:
+        return SimpleNamespace(id=uuid.uuid4(), email="ops@example.test")
+
+
+def _platform_profile(
+    code: str = "platform_session",
+) -> AuthenticationProfileBinding:
+    return AuthenticationProfileBinding(
+        code=code,
+        provider=_PlatformProvider(),
+        session=BrowserSessionPolicy(cookie_name="platform_token"),
+        security_plane=BrowserSecurityPlane.PLATFORM,
+    )
+
+
+def _facet_on(
+    profile_code: str,
+    *,
+    admission_permission: str | None,
+    prefix: str = "/ops",
+    code: str = "ops_console",
+) -> WebFacetMount:
+    return WebFacetMount(
+        code=code,
+        url_prefix=prefix,
+        shell=TemplateRef("layouts/admin.html"),
+        authentication_profile=profile_code,
+        admission_permission=admission_permission,
+        navigation_regions=(NavigationRegion("primary"),),
+    )
+
+
+def _manifest() -> ModuleManifest:
+    return ModuleManifest(code="plane-probe", version="1.0.0")
+
+
+def test_a_platform_profile_cannot_carry_an_admission_permission() -> None:
+    with pytest.raises(WebSurfaceError, match="plane"):
+        WebSurfaceRegistry(
+            manifests=(_manifest(),),
+            facets=(_facet_on("platform_session", admission_permission="ops.access"),),
+            authentication_profiles=(_platform_profile(),),
+            ui_contract_version=1,
+        )
+
+
+def test_a_public_profile_cannot_carry_an_admission_permission() -> None:
+    """A public binding has `provider=None`, which forces its plane to NONE.
+
+    `WebFacetMount` already refuses admission with NO profile at all; this is
+    the gap that left — a profile is named, so the facet-level check passes,
+    and the named profile turns out to authenticate nobody.
+    """
+    with pytest.raises(WebSurfaceError, match="plane"):
+        WebSurfaceRegistry(
+            manifests=(_manifest(),),
+            facets=(_facet_on("public", admission_permission="ops.access"),),
+            authentication_profiles=(AuthenticationProfileBinding(code="public"),),
+            ui_contract_version=1,
+        )
+
+
+def test_a_platform_profile_without_admission_remains_valid() -> None:
+    """The repair must refuse an invalid BINDING, not the platform plane.
+
+    A platform facet authorizes inside its own routes against a
+    `PlatformAdmin`; that is the supported shape and this canary is what stops
+    the check being widened into "platform facets cannot be secured".
+    """
+    registry = WebSurfaceRegistry(
+        manifests=(_manifest(),),
+        facets=(_facet_on("platform_session", admission_permission=None),),
+        authentication_profiles=(_platform_profile(),),
+        ui_contract_version=1,
+    )
+    facet = registry.facet("ops_console")
+    assert facet.admission_permission is None
+    assert facet.authentication_profile == "platform_session"
+
+
+def test_a_tenant_profile_with_admission_is_accepted_and_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The positive half: accepted at startup AND actually consulted.
+
+    Refusing the invalid planes is only half a repair — a check that also
+    stopped the valid binding from enforcing would pass the three tests above
+    while quietly disabling admission everywhere. So this drives a real
+    request and asserts both verdicts, and that the code reaching
+    `authorize_party` is the facet's own.
+    """
+    from dotmac_kernel import create_app
+    from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+
+    tenant = SimpleNamespace(id=uuid.uuid4(), slug="admission-test")
+    monkeypatch.setattr(TenantResolverMiddleware, "_resolve", lambda self, host: tenant)
+    monkeypatch.setattr(TenantResolverMiddleware, "_allow", lambda self, t: t)
+
+    party = Party(id=uuid.uuid4(), tenant_id=tenant.id, party_type="person")
+
+    class _PartyProvider:
+        transport = BrowserCredentialTransport.COOKIE_SESSION
+
+        @staticmethod
+        def dependency() -> Party:
+            return party
+
+    asked: list[str] = []
+    verdict = {"allow": False}
+
+    def _authorize(db, *, tenant, party, code):
+        asked.append(code)
+        return verdict["allow"]
+
+    monkeypatch.setattr("dotmac_kernel.web_runtime.authorize_party", _authorize)
+
+    router = APIRouter(prefix="/console")
+
+    @router.get("/home", name="home")
+    def home() -> dict[str, bool]:
+        return {"ok": True}
+
+    manifest = ModuleManifest(
+        code="admission-probe",
+        version="1.0.0",
+        web_surfaces=(_surface(router, facet="ops_console"),),
+        permissions=(PermissionSpec(code="ops.access", description="Ops access"),),
+    )
+    spec = ProductAssemblySpec(
+        name="admission-test",
+        modules=(manifest,),
+        web_facets=(_facet_on("tenant_session", admission_permission="ops.access"),),
+        authentication_profiles=(
+            AuthenticationProfileBinding(
+                code="tenant_session",
+                provider=_PartyProvider(),
+                session=BrowserSessionPolicy(cookie_name="access_token"),
+            ),
+        ),
+        ui_contract_version=1,
+    )
+
+    app = create_app(spec)
+    app.dependency_overrides[get_db] = lambda: None
+
+    with TestClient(app) as client:
+        assert client.get("/ops/console/home").status_code == 403
+        verdict["allow"] = True
+        assert client.get("/ops/console/home").json() == {"ok": True}
+
+    assert asked == ["ops.access", "ops.access"]

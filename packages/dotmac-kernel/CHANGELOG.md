@@ -6,6 +6,79 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a98 — 2026-08-26
+
+One release, three independent changes: the public engine-free transaction
+and fingerprint surface, a facet-admission security repair, and the
+instantiable database runtime. None depends on the others; they ship
+together because none had been published separately.
+
+### Added
+
+- `dotmac_kernel.transactions` — the public engine-free
+  `conflict_savepoint` surface for services that receive an application's
+  caller-owned session. It does not import settings, construct an engine, or
+  own the outer commit/rollback; `dotmac_kernel.db` retains its compatibility
+  re-export for reference-assembly callers.
+- `dotmac_kernel.session_runtime` — the engine/session/tenant-context runtime
+  as an INSTANTIABLE `DatabaseRuntime`, so a product supplies its own
+  deployment configuration, credentials and tenant identity instead of
+  reimplementing the boundary. Build once means the implementation is written
+  once and instantiated per product, not that every application shares one
+  running database.
+- `DatabaseRuntime.tenant_scope(session, tenant_id)` — scope a CALLER-OWNED
+  session for the duration of a block. Ported from `dotmac_erp`'s production
+  `tenant_scope_for_session` (hard rule 22, product-first extraction): a
+  transaction-local prime plus an `after_begin` listener that re-arms every
+  later transaction. This is the seam for a product that owns its session
+  lifecycle and wants the kernel's scope discipline without its session
+  factory.
+- `DatabaseRuntime(legacy_tenant_settings=...)` — additional Postgres settings
+  primed alongside `app.current_tenant`, in the same statement and with the
+  same value, for tables not yet on a composed module lineage. A shrink-only
+  transitional set, exposed as a property so an adopting product can ratchet it
+  to zero in its own architecture test. The canonical setting name itself is
+  NOT configurable: every module lineage's RLS policy reads
+  `public.app_current_tenant_id()`, so it is a cross-repository contract rather
+  than a deployment knob.
+- `dotmac_kernel.db.runtime` — the reference assembly's instance, public so a
+  consumer sharing this module's configuration need not re-derive engines from
+  the same environment.
+
+### Changed
+
+- `tenant_session` and `tenant_session_by_slug` now scope through
+  `tenant_scope` instead of a session-level setting plus a reset-and-commit
+  `finally`. Same observable contract, one fewer hazard: nothing outlives a
+  transaction, so no scope can ride a pooled connection out to the next
+  borrower, and there is no reset left that a dying process can skip.
+- `dotmac_kernel.db` is now one instance of `DatabaseRuntime` rather than the
+  implementation itself. Every public name is unchanged, still module-level and
+  still bound once, so dependency identity and existing monkeypatch seams hold.
+  It remains EAGER on purpose — importing it still requires a parseable
+  `DATABASE_URL`, which is what keeps the package-root import guards honest.
+
+### Fixed
+
+- `dotmac_kernel.fingerprints` is now registered in `SUPPORTED_MODULES`,
+  reconciling the machine-readable public surface with the compatibility
+  contract published when the persistence-free module was introduced in a88.
+  A fresh-process canary proves it imports without loading the kernel database
+  runtime or the persistence-backed idempotency ledger.
+- `WebSurfaceRegistry` now REFUSES a facet that declares an
+  `admission_permission` while its authentication profile enters the
+  `platform` or `none` security plane. Admission is evaluated as
+  `authorize_party(db, tenant, party, code)`, which requires a tenant-scoped
+  `Party`: a platform profile resolves a `PlatformAdmin` and a public profile
+  resolves no principal at all, so the runtime's non-tenant context dependency
+  never consulted the permission. The binding was therefore invalid, and its
+  failure mode was silent admission — a reviewer saw the permission on the
+  facet, the catalogue confirmed it was declared, and every request was let
+  through. Startup now fails instead. The existing declared-permission check is
+  unchanged, a platform facet WITHOUT admission stays valid, and no
+  `UI_CONTRACT_VERSION` bump is required: this rejects a composition that could
+  never have been enforced, so no valid assembly's contract changes.
+
 ## 0.1.0a97 — 2026-08-25
 
 ### Added

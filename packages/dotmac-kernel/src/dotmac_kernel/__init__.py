@@ -262,7 +262,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a97"
+__version__ = "0.1.0a98"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -290,6 +290,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.exceptions",
         "dotmac_kernel.external_identity",
         "dotmac_kernel.features",
+        "dotmac_kernel.fingerprints",
         "dotmac_kernel.idempotency",
         "dotmac_kernel.idempotency_models",
         "dotmac_kernel.identity",
@@ -334,6 +335,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.query",
         "dotmac_kernel.security",
+        "dotmac_kernel.session_runtime",
         "dotmac_kernel.setting_domains",
         "dotmac_kernel.setting_scopes",
         "dotmac_kernel.setting_value_types",
@@ -349,6 +351,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.transactions",
         "dotmac_kernel.web_deps",
         "dotmac_kernel.web_surfaces",
     }
@@ -356,11 +359,10 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
 
 # ── Deliberately-internal modules ───────────────────────────────────────────
 # Present in the package but NOT part of the public surface — a consumer must
-# not import from these. `_transactions` is the engine-free savepoint mechanic
-# for caller-session kernel services; its public spelling remains
-# `dotmac_kernel.db.conflict_savepoint`. `display` is consumed only within the
-# kernel (by `templating` / `web_deps`); the `settings_resolver` write helpers
-# are the `settings_admin` narrow surface, not general API (see that module).
+# not import from these. `_transactions` implements the engine-free savepoint
+# mechanic exported by `dotmac_kernel.transactions`; `display` is consumed only
+# within the kernel (by `templating` / `web_deps`); the `settings_resolver`
+# write helpers are the `settings_admin` narrow surface, not general API.
 INTERNAL_MODULES: frozenset[str] = frozenset(
     {
         "dotmac_kernel._transactions",

@@ -1442,6 +1442,51 @@ The authentication profile also owns **session mechanics**: cookie name, scope,
 session-fixation protection, idle and absolute expiry, revocation, tenant-switch
 behaviour, and whether any session is shared across facets.
 
+##### § 5 amendment — 2026-08-26: facet admission is a TENANT-plane decision
+
+§ 5 named a mechanism for layer 2 without saying which authentication profiles
+can supply its arguments. `authorize_party(db, tenant, party, code)` takes an
+already-established, tenant-scoped `Party` — that is exactly what makes it
+authentication-neutral, and it is also what makes it unanswerable on the other
+two planes. A `BrowserSecurityPlane.PLATFORM` profile resolves a
+`PlatformAdmin`, a control-plane catalogue row with no tenant and no role
+grants; a public profile (`provider=None`, whose plane is forced to `NONE`)
+resolves no principal at all. The runtime routes both through its non-tenant
+context dependency, which never reads `WebFacetMount.admission_permission`.
+
+A facet naming a platform or public profile alongside an admission permission
+was therefore a binding that could not be enforced, and its failure mode was
+**silent admission** rather than a crash. The permission was visible on the
+facet, `create_app`'s declaration check confirmed it was in the permission
+catalogue, the surface read as guarded in review — and every request reached
+the routes behind it. A control that is legible and inert is worse than an
+absent one, because it retires the question a reviewer would otherwise ask.
+
+**Amended rule.** A facet may declare `admission_permission` only when its
+named authentication profile declares `BrowserSecurityPlane.TENANT`.
+`WebSurfaceRegistry` refuses any other binding at startup, naming the profile
+and the plane it enters. § 5's existing requirement that the code be declared
+is unchanged and composes with this one: a tenant-plane facet must still
+declare the permission it admits on. Canaries in
+`tests/unit/test_web_surfaces.py` cover both refusals, the platform facet that
+must keep working, and — the half a one-sided check would lose — that the valid
+tenant binding is still consulted on a live request.
+
+A platform or public facet WITHOUT admission remains valid, and is not secured
+less by this rule. The plane is rejected as an ANSWER to layer 2, not as an
+audience: such a facet authorizes at layer 3, inside its own routes against its
+own principal, which is where a non-`Party` principal's authorization has
+always belonged.
+
+**No `UI_CONTRACT_VERSION` bump accompanies this.** The contract version
+describes what a valid composition may rely on, and every composition that was
+valid before this amendment is valid after it. The only assemblies that stop
+booting are ones whose admission permission was never evaluated, so no enforced
+behaviour changes and no consumer's supported-version range narrows. The
+reference assembly is already correct — `staff_admin` is tenant-plane with
+`web.portal.staff.access`, `platform_admin` is platform-plane with no admission
+— so this closes the hole for the next assembly rather than repairing this one.
+
 #### 6. CSRF follows the declared transport, not a path prefix
 
 **Ruling: CSRF applicability is derived from the declared authentication

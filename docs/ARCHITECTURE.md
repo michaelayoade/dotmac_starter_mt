@@ -1440,6 +1440,20 @@ incompatible UI versions, browser capabilities, overlapping prefixes, cookie
 scope, route/nav/namespace collisions and unresolved entry/login routes all stop
 startup.
 
+Facet admission is a TENANT-plane decision. `mount_web_surfaces` evaluates
+`WebFacetMount.admission_permission` through `authorize_party(db, tenant,
+party, code)`, which needs a tenant-scoped `Party`, so only a facet whose
+authentication profile declares `BrowserSecurityPlane.TENANT` ever reaches that
+call. A platform profile resolves a `PlatformAdmin` and a public profile
+resolves no principal at all; both take the non-tenant context dependency,
+which never reads the permission. A facet declaring admission against either
+plane was therefore enforcing nothing while reading as guarded — the permission
+sat on the facet, `create_app` confirmed it was declared, and every request was
+admitted anyway. `WebSurfaceRegistry` refuses that binding at startup. A
+platform or public facet WITHOUT admission stays valid and authorizes inside
+its own routes against its own principal, which is where a non-`Party`
+principal's authorization belongs (ADR-0006 § 5 amendment, 2026-08-26).
+
 The kernel's contract-v2 platform contribution uses an assembly-declared
 `platform_admin` facet when one exists. During the migration window only, an
 assembly with `platform_surface_enabled=True` and no such declaration receives
@@ -2718,13 +2732,30 @@ not scattered per-router).
 
 ## Transaction authority (control-plane security Task 4)
 
-There is exactly ONE transaction authority in this codebase:
-`dotmac_kernel/db.py`. The contract:
+There is exactly ONE transaction authority in this codebase, and since
+2026-08-26 (ADR-0066) it lives in TWO files:
+`dotmac_kernel/session_runtime.py` holds the implementation — `DatabaseRuntime`,
+the class a product instantiates with its own DSNs, credentials and tenancy
+table — and `dotmac_kernel/db.py` is the reference assembly's single INSTANCE of
+it, built from the kernel's `Settings` at import. That is one authority in two
+files, not two authorities: the behaviour has to live somewhere a second
+deployment can construct, and a module whose job is to construct the class
+cannot also be forbidden from constructing its sessions. What stays forbidden is
+a THIRD place. `dotmac_kernel.db`'s public names are unchanged and still bound
+once at module scope, so dependency identity holds; it remains eager on purpose
+(entering it still costs a `DATABASE_URL`, which is what keeps the package-root
+import guards able to tell a module-level import from a deferred one).
+
+The contract:
 
 - **The boundary owns commit/rollback.** `get_db` and `get_platform_db`
   (request boundaries) and `platform_session` (the non-request boundary for
   lifespan hooks/jobs) construct the session, commit on success, roll back
-  on error, and close. Nothing else does.
+  on error, and close. Nothing else does. Each is a thin binding over the
+  runtime's own generator/context manager, and the runtime's boundaries take a
+  tenant id rather than a `Request` — reading tenancy off request state is a
+  framework concern, so a product with its own request pipeline writes its own
+  four-line adapter and inherits everything below it.
 - **Route dependencies enter the boundary lazily.** `dotmac_kernel.deps`
   exports thin `get_db`/`get_platform_db` generator adapters whose only action
   is a function-local import followed by `yield from` the corresponding
@@ -2736,18 +2767,64 @@ There is exactly ONE transaction authority in this codebase:
   savepoint section below), and never constructs a session of its own.
 - **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
   not the transaction (next section).
+- **Non-request callers use a named boundary, never a bare factory.**
+  `tenant_session` / `tenant_session_by_slug` for work acting as one tenant
+  (CLI, jobs, workers), `platform_session` for work acting as the platform, and
+  `resolver_session` for the one legitimate unscoped case — deciding WHICH
+  tenant to scope to, which cannot itself be scoped. Reaching for
+  `SessionLocal` instead is the one mistake nothing here can catch for you: RLS
+  fails **closed**, so an unscoped session returns zero rows rather than
+  raising, and the caller cannot tell an empty tenant from an invisible one. A
+  `dotmac_academy_app` audit command did exactly this and reported a clean
+  estate against a database holding 333 banks. `resolver_session` additionally
+  RESETs the tenant settings before yielding and expunges before rolling back —
+  a scope inherited from a pooled connection would filter the resolver's own
+  lookup, and a valid host would resolve to no tenant at all.
+- **The tenant scope is transaction-local, and re-armed rather than reset.**
+  `tenant_scope` (ported from `dotmac_erp`'s `tenant_scope_for_session` under
+  `AGENTS.md` rule 22; see `packages/dotmac-kernel/EXTRACTION.toml`) primes the
+  already-open transaction and installs an `after_begin` listener that re-arms
+  every later one, then removes the listener on exit. Both halves are needed and
+  each alone carries the other's hazard: a session-level `SET` survives commits
+  but also survives the session, riding the pooled connection out to the next
+  borrower — which is why the old code carried a reset-and-commit dance in a
+  `finally`, only as good as the process surviving to run it — while a bare
+  `SET LOCAL` cannot leak but dies at the first commit inside a CLI loop or a
+  worker drain, leaving the rest running unscoped against a fail-closed policy
+  (and `expire_on_commit` then reloading an attribute yields an
+  `ObjectDeletedError` on a row the session itself just wrote). Re-arming takes
+  the safe half of each: every transaction is scoped, nothing outlives one, and
+  there is no reset left that can be skipped.
+- **`app.current_tenant` is a schema contract, not a knob.** Every composed
+  module lineage writes its RLS policies as
+  `tenant_id = public.app_current_tenant_id()`, which reads
+  `current_setting('app.current_tenant', true)`, and
+  `dotmac_kernel/migrations/verify.py` pins those semantics as a prerequisite
+  marker. `DatabaseRuntime` therefore always primes that exact name and offers
+  no way to replace it; `legacy_tenant_settings` primes ADDITIONAL names
+  alongside it, in the SAME statement and with the same value, for tables a
+  product has not yet moved onto a composed lineage (ERP's
+  `app.current_organization_id` is the motivating case). One statement, because
+  a failure between two would leave the canonical setting armed and a legacy one
+  stale — a working scope over the wrong rows. The set is a shrink-only ratchet
+  owned by the adopting product's own architecture test; the starter's instance
+  declares it empty and keeps it empty.
 - **Caller-session services do not enter the engine owner.** Kernel domain
   services such as consent, delivery, idempotency and external identity accept
   the installing assembly's `Session`. Their savepoint mechanic lives in the
-  private, engine-free `dotmac_kernel._transactions`; `dotmac_kernel.db`
-  re-exports `conflict_savepoint` as the supported public spelling. This is an
+  private, engine-free `dotmac_kernel._transactions`, exposed to assemblies as
+  `dotmac_kernel.transactions.conflict_savepoint`. `dotmac_kernel.db` retains a
+  compatibility re-export for the reference assembly. This is an
   implementation seam, not a second boundary or transaction authority: it
   constructs no engine/session and never commits or rolls back the caller's
   outer transaction (ADR-0024 amendment, 2026-08-19).
 - **No route, task, or service constructs an ad hoc session.** The old
   `dotmac_kernel/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
   second, zero-consumer transaction authority — DELETED under the stronger
-  SoT rule (zero consumers → delete), not kept "just in case".
+  SoT rule (zero consumers → delete), not kept "just in case". The same rule is
+  why ADR-0066 added no `database` slot to `ProductAssemblySpec`: a product
+  constructs its runtime in its own composition root, so a field nothing reads
+  would be the very shape this rule deletes.
 - **Provisioning's `SET LOCAL` idiom:** platform-session code that must
   write tenant-scoped rows (atomic tenant provisioning) establishes RLS
   context ON the current transaction with
@@ -2756,13 +2833,33 @@ There is exactly ONE transaction authority in this codebase:
   := true)` idiom `get_db` uses, because `platform_api` has no BYPASSRLS.
 
 Enforced by `tests/architecture/test_session_authority.py` (AST-based: no
-module outside `dotmac_kernel/db.py` may call `SessionLocal()`,
-`PlatformSessionLocal()`, `sessionmaker(...)`, or construct `Session(...)`;
-no feature module may import `sessionmaker`; sensitivity self-tested). The
-one allowlisted exception is `dotmac_kernel/middleware/tenant.py`: the resolver
-runs before any route dependency exists, so it owns its own short
-read-only session boundary — the allowlist entry and this paragraph must
-stay in sync.
+module outside the two declared authorities — `dotmac_kernel/session_runtime.py`
+and `dotmac_kernel/db.py` — may call `SessionLocal()`, `PlatformSessionLocal()`,
+`sessionmaker(...)`, or construct `Session(...)`; no feature module may import
+`sessionmaker`; sensitivity self-tested).
+`test_every_declared_authority_still_exists` fails loudly if either declared
+path is renamed or deleted, so the exclusion cannot silently widen into a hole
+— or worse, leave a moved file being scanned as ordinary code. The call
+allowlist is EMPTY and is worth keeping that way: its one entry was
+`dotmac_kernel/middleware/tenant.py`, which opened a bare `SessionLocal()`
+because the resolver runs before any route dependency exists and nothing on the
+public surface named that need. `resolver_session()` names it, so the exception
+disappeared rather than being documented, which is the outcome an allowlist
+should be aiming for. `test_allowlist_is_still_needed` fails on a stale entry,
+which is how that one was found.
+
+`tests/architecture/test_session_runtime_is_engine_free.py` asserts the two
+modules' deliberately OPPOSITE import contracts as a pair, in a subprocess with
+`DATABASE_URL` removed rather than blanked: importing `session_runtime` must
+succeed and must not drag `dotmac_kernel.db` in behind it, while importing
+`dotmac_kernel.db` must still fail. `tests/unit/test_session_runtime.py` pins
+the priming rules (canonical always first, legacy names in one statement, the
+canonical name refused as a legacy entry, names validated against the plain
+Postgres identifier grammar because `set_config` cannot bind them, listener
+removed even when the block raises), and `tests/test_tenant_session_scope.py` is
+the Postgres canary for the behaviour itself — including
+`test_a_bare_session_is_blind_not_loud`, which asserts that the BROKEN path is
+silent.
 
 ## Conflict handling: savepoints preserve RLS context (2b.1-T2, finding F3)
 
@@ -2780,8 +2877,10 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`dotmac_kernel.db.conflict_savepoint(db)` is the supported public spelling for
-the fix, a context manager around `Session.begin_nested()` (a `SAVEPOINT`
+`dotmac_kernel.transactions.conflict_savepoint(db)` is the engine-free public
+spelling for caller-owned sessions; `dotmac_kernel.db.conflict_savepoint(db)`
+remains the reference assembly's compatibility spelling. The helper is a
+context manager around `Session.begin_nested()` (a `SAVEPOINT`
 scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
