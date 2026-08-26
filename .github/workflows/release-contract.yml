@@ -1,0 +1,359 @@
+name: Release capability contract catalogue
+
+# Publish ONE product-owned STATELESS CONTRACT CATALOGUE to the PRIVATE Forgejo
+# index at registry.dotmac.io. The same security sequence as
+# `release-kernel.yml`, `release-ui.yml`, `release-module.yml`,
+# `release-adapter.yml` and `release-connector.yml` — assert this run is the
+# current protected-main tip -> resolve the reviewed allowlist -> prove the
+# source is data-only -> build once -> inspect the bytes -> smoke them ->
+# AWAIT environment approval -> re-assert the approved SHA is still main's tip
+# -> publish THOSE SAME downloaded bytes -> install the published release from
+# the index and verify -> tag only then -> open the durable record.
+#
+# THE ALLOWLIST IS THE LOCK, NOT THIS FILE
+#
+# `.github/release-contracts.json` is the authorization boundary and it is
+# CLOSED AND EMPTY, so every dispatch fails at `resolve` today. The presence of
+# this workflow is not authorization to publish an unlisted catalogue or to skip
+# the protected-environment approval.
+#
+# WHY A FOURTH LANE WITH ITS OWN CLASSIFICATION
+#
+# A catalogue shares the adapter's four properties — no `ModuleManifest`, no
+# lineage, no `MIGRATION_OWNER_LEDGER` allocation, no persistence import — and
+# adds a fifth the adapter lane cannot assert: it reaches NOTHING. An adapter
+# exists to reach a provider (`dotmac-auth-oidc` ships `transport.py` and
+# declares `httpx`), so a single word covering both shapes would have to permit
+# the network import and a catalogue that acquired a provider client would be
+# caught by nothing but somebody remembering the stricter lane. That is why the
+# connector lane's "a release profile, not a new classification" ruling — which
+# stands for connectors — does not extend here (ADR-0006's 2026-08-26
+# amendment). `scripts/release_contract.py` refuses `httpx`, `requests`,
+# `socket`, `urllib` and `subprocess` outright, and the classification is read
+# from the package's own `EXTRACTION.toml` rather than trusted.
+#
+# WHAT THIS LANE PROVES THAT NO OTHER ONE DOES
+#
+# Exact coverage: the INSTALLED artifact's Product Manifest, capability
+# contracts, canonical schema bytes and their digests must exactly cover one
+# another, including the contracts reached through composition dependencies,
+# which are pinned EXACTLY (`==`, never `>=`). An ordinary adapter smoke cannot
+# make that claim, and a connector lane would incorrectly require provider
+# execution against something that executes nothing.
+#
+# `contract` is `type: string` ONLY because a `workflow_dispatch` choice must
+# offer at least one option and the lane is empty.
+# `tests/architecture/test_contract_release_policy.py` is a two-directional
+# ratchet: the moment the allowlist gains an entry the input must become a
+# `choice` whose options match the allowlist exactly. The enforced layer remains
+# `resolve`; the UI is a convenience, not the lock.
+#
+# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
+# environment secret whose canonical source is OpenBao
+# (secret/dotmac/forgejo/ci-publisher-token). Third-party actions are pinned to
+# the same reviewed full commit SHAs as the other release workflows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      contract:
+        description: "Allowlisted product-owned contract or composition catalogue"
+        required: true
+        type: string
+      version:
+        description: "Version to publish (MUST equal the package's pyproject version)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      # Carried so `verify` can pin the exact floor on the registry install.
+      # `resolve` is the one place the floor is read from the allowlist and
+      # proved to have a release tag, so the pin comes from there rather than
+      # being spelled a second time in a shell step.
+      kernel_floor: ${{ steps.resolve.outputs.kernel_floor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+      - name: Assert run is on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      # THE GATE, and the lock. Refuses an unallowlisted distribution — which is
+      # every distribution today — a pyproject whose name disagrees with the
+      # dispatch, a version that was not typed exactly, an entry carrying
+      # module/connector facts or missing any required field, a package outside
+      # `packages/*-contracts`, a dossier whose classification is not
+      # `stateless-contract-catalogue`, a connector entry point, a
+      # `composition_dependencies` map that is not exactly pinned, and a
+      # `kernel_floor` naming a kernel nobody released. Everything after this
+      # step uses only its output.
+      #
+      # The floor check needs the full history fetched above: it asks whether
+      # `dotmac-kernel-v<floor>` was ever tagged, and a shallow clone would
+      # answer "no" for every version.
+      - name: Resolve the allowlisted contract catalogue
+        id: resolve
+        run: |
+          python scripts/release_contract.py resolve \
+            "${{ inputs.contract }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # Static, AST-only conformance: no network, persistence, subprocess or
+      # dynamic-import root, no `ModuleManifest`, no migration path, no
+      # connector entry point. Runs before the build so a defect findable from
+      # source does not wait for a wheel.
+      - name: Prove data-only source shape
+        run: python scripts/release_contract.py conformance "${{ inputs.contract }}"
+
+      - name: Build wheel + sdist
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+
+      - name: Inspect exact wheel contents
+        run: |
+          python scripts/release_contract.py inspect "${{ inputs.contract }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
+      # Build the EXACT declared floor from its release tag. `packages/
+      # dotmac-kernel` is whatever main happens to be today, so building it here
+      # would prove the catalogue resolves against the CURRENT capability
+      # grammar and say nothing about the one its metadata promises — the defect
+      # this step replaces did exactly that while calling itself "the exact
+      # kernel floor". `fetch-depth: 0` is already set above, so the tagged tree
+      # is in this checkout.
+      - name: Build the exact dotmac-kernel floor from its release tag
+        env:
+          FLOOR: ${{ steps.resolve.outputs.kernel_floor }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/kernel-floor && mkdir -p /tmp/kernel-floor
+          git archive "dotmac-kernel-v${FLOOR}" packages/dotmac-kernel \
+            | tar -x -C /tmp/kernel-floor
+          python -m pip install --quiet build
+          python -m build --wheel --outdir /tmp/kernel-floor/dist \
+            /tmp/kernel-floor/packages/dotmac-kernel
+          echo "built dotmac-kernel ${FLOOR} from its release tag"
+
+      # The current release, built from this exact main checkout.
+      - name: Build the current dotmac-kernel release for the second leg
+        working-directory: packages/dotmac-kernel
+        run: poetry build --output "${GITHUB_WORKSPACE}/kernel-dist"
+
+      # A composition dependency is another catalogue in this same allowlist,
+      # pinned exactly. The build job has no registry credential, so build those
+      # from this checkout and supply the wheels locally; the post-publish leg
+      # separately resolves them from the registry, so a local artifact can
+      # never substitute for publication.
+      - name: Build exact composition dependencies for the pre-publish smoke
+        if: steps.resolve.outputs.composition_dependency_dirs != ''
+        run: |
+          set -euo pipefail
+          for package_dir in ${{ steps.resolve.outputs.composition_dependency_dirs }}; do
+            (cd "${package_dir}" && \
+              poetry build --output "${GITHUB_WORKSPACE}/contract-dependency-dist")
+          done
+
+      # Installed-artifact conformance, run TWICE: once against the exact kernel
+      # floor the catalogue declares, once against the current release. A
+      # catalogue is installable across `>=floor`, so proving one end proves only
+      # that end — and the floor end is the one no run had ever executed (a
+      # tag-existence check is not an execution). Both must pass before the bytes
+      # are eligible to publish.
+      - name: Verify manifest, contracts and schema coverage at the declared floor
+        run: |
+          set -euo pipefail
+          dependency_args=()
+          if [[ -d "${GITHUB_WORKSPACE}/contract-dependency-dist" ]]; then
+            dependency_args=(
+              --dependency-dist "${GITHUB_WORKSPACE}/contract-dependency-dist"
+            )
+          fi
+          python scripts/release_contract.py verify-wheel "${{ inputs.contract }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --kernel-dist /tmp/kernel-floor/dist \
+            "${dependency_args[@]}"
+
+      - name: Verify manifest, contracts and schema coverage at the current release
+        run: |
+          set -euo pipefail
+          dependency_args=()
+          if [[ -d "${GITHUB_WORKSPACE}/contract-dependency-dist" ]]; then
+            dependency_args=(
+              --dependency-dist "${GITHUB_WORKSPACE}/contract-dependency-dist"
+            )
+          fi
+          python scripts/release_contract.py verify-wheel "${{ inputs.contract }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist" \
+            "${dependency_args[@]}"
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.contract }}-dist
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release    # protected: main-only + required review
+    permissions:
+      contents: read
+    steps:
+      # RE-check freshness AFTER the approval wait, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, but
+      # a protected environment can sit pending for hours — and the approval is
+      # a decision about a SHA, not about a run id. First step in the job, so it
+      # fails before the artifact is fetched or the publish token is used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the approved SHA is still the current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      # Defence in depth: the allowlist is re-checked on the publish side, so a
+      # tampered `build` output cannot smuggle a target past the gate.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Re-assert the target is allowlisted
+        run: |
+          python scripts/release_contract.py resolve \
+            "${{ inputs.contract }}" --version "${{ inputs.version }}" >/dev/null
+
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.contract }}-dist
+          path: dist
+
+      # Publish the SAME bytes `build` inspected and conformed — downloaded,
+      # never rebuilt.
+      - name: Publish the inspected bytes to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" \
+            dist/*
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The index may lag a few seconds after publish.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.contract }}/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
+            fi
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
+          done
+          echo "::error::${{ inputs.contract }} ${{ inputs.version }} did not appear in time"
+          exit 1
+
+      # Install the PUBLISHED release from the index into a clean venv and run
+      # the coverage proof against those bytes. The Dotmac distributions come
+      # from the private index and third-party dependencies from the public one,
+      # which is why both index flags are paired — `--index-url` REPLACES the
+      # default, so alone it would see the Dotmac distributions and nothing they
+      # depend on.
+      #
+      # Leg 1 — the EXACT declared floor. Without the explicit
+      # `dotmac-kernel==<floor>` pin (which `verify-registry` only accepts when
+      # it equals the gated floor) pip resolves the catalogue's own `>=<floor>`
+      # against the index and picks the NEWEST kernel, so this venv would have
+      # certified the same grammar as leg 2 and the declared floor would never be
+      # executed at all.
+      - name: Install from the Forgejo registry and verify at the declared floor
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+          PUBLIC_INDEX_URL: https://pypi.org/simple
+          FLOOR: ${{ needs.build.outputs.kernel_floor }}
+        run: |
+          python scripts/release_contract.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.contract }}==${{ inputs.version }}" \
+            --kernel-floor "${FLOOR}"
+
+      # Leg 2 — the current supported release, resolved the way an ordinary
+      # installer would.
+      - name: Install from the Forgejo registry and verify at the current release
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+          PUBLIC_INDEX_URL: https://pypi.org/simple
+        run: |
+          python scripts/release_contract.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.contract }}==${{ inputs.version }}"
+
+      # Only AFTER both registry verifications: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" \
+            -m "${{ inputs.contract }} ${{ inputs.version }} (verified on the Forgejo registry; manifest, contract and schema coverage proved on the published bytes at the declared kernel floor and the current release)" \
+            "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"
+
+      # The tag makes the publication-ledger row false THE MOMENT it lands.
+      # Several gates fail from that instant until the record is written.
+      # Leaving that to memory put `main` red four times in two days, so the
+      # record PR is opened HERE rather than remembered. `if: always()` is
+      # deliberate: the tag is pushed by the step above, so a later failure must
+      # not leave a tag with no record — the exact state this exists to prevent.
+      # No `--manifest-python`: a catalogue ships no adopted connector manifest
+      # digest, so it has two ledgers, not three.
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        if: always()
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution "${{ inputs.contract }}" \
+            --version "${{ inputs.version }}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --package-dir "${{ needs.build.outputs.package_dir }}"

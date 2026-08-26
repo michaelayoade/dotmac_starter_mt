@@ -64,12 +64,31 @@ VALID_CLASSIFICATIONS = {
     # exist (ADR-0006, 2026-08-14 amendment).
     #
     # This is a GOVERNED value, not an accepted string: see
-    # `stateless_adapter_violations` below for the four properties the word has
+    # `stateless_package_violations` below for the four properties the word has
     # to mean, checked generically against whatever package claims it.
     "stateless-protocol-adapter",
+    # A catalogue of one owner's capability contracts: canonical schema bytes
+    # and their digests, and nothing that runs. It shares the adapter's four
+    # properties, so those are checked identically — but it is NOT an adapter,
+    # because an adapter EXISTS to reach a provider (`dotmac-auth-oidc` ships
+    # `transport.py` and declares `httpx`) while a catalogue reaches nothing at
+    # all. That fifth property is the one the separate word buys, and it is
+    # checked here rather than only in the release lane, so a catalogue that
+    # grew a provider client is caught by its CLASSIFICATION and not merely by
+    # whether someone remembered to allowlist it (ADR-0006, 2026-08-26
+    # amendment; the connector lane's "profile, not a classification" ruling
+    # stands where the properties really are identical).
+    "stateless-contract-catalogue",
 }
 
 STATELESS_ADAPTER = "stateless-protocol-adapter"
+CONTRACT_CATALOGUE = "stateless-contract-catalogue"
+
+# Import roots that mean "this package reaches off-box after all". An adapter
+# is ALLOWED these; a contract catalogue is not.
+NETWORK_ROOTS = frozenset(
+    {"httpx", "requests", "aiohttp", "urllib", "urllib3", "socket", "subprocess"}
+)
 
 # Import roots that mean "this holds rows after all".
 PERSISTENCE_ROOTS = frozenset({"sqlalchemy", "alembic", "psycopg", "asyncpg"})
@@ -209,8 +228,19 @@ def _reference_problems(field: str, references: list[Any]) -> list[str]:
     return problems
 
 
-def stateless_adapter_violations(package_dir: Path) -> list[str]:
-    """The four properties `stateless-protocol-adapter` has to MEAN.
+def stateless_package_violations(
+    package_dir: Path, *, label: str = "stateless adapter"
+) -> list[str]:
+    """The four properties a STATELESS classification has to MEAN.
+
+    Shared by `stateless-protocol-adapter` and `stateless-contract-catalogue`:
+    both hold nothing, install nothing, own no lineage and allocate no
+    namespace, so checking those four twice would be two spellings of one rule.
+    What separates the two is the FIFTH property, network reach, which
+    `contract_catalogue_violations` adds on top — see `NETWORK_ROOTS`.
+
+    `label` only names the classification in the message. It never changes what
+    is checked, so the two callers cannot drift apart on the shared four.
 
     Generic over whatever package declares the classification — it takes a
     directory, not a name, so it governs the next such package as much as the
@@ -237,14 +267,14 @@ def stateless_adapter_violations(package_dir: Path) -> list[str]:
             if isinstance(node, ast.Name) and node.id == "ModuleManifest":
                 problems.append(
                     f"{rel}:{node.lineno} references ModuleManifest — a "
-                    "stateless protocol adapter is CALLED, not installed"
+                    f"{label} is CALLED, not installed"
                 )
             # 2. No lineage (hard rule 14's stateless shape). A real declaration
             #    is an assignment target or a keyword argument, never prose.
             if isinstance(node, ast.keyword) and node.arg in _LINEAGE_DECLARATIONS:
                 problems.append(
                     f"{rel} passes {node.arg!r} — that is the STATEFUL shape; "
-                    "a stateless adapter declares neither"
+                    f"a {label} declares neither"
                 )
             if isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -254,8 +284,7 @@ def stateless_adapter_violations(package_dir: Path) -> list[str]:
                     ):
                         problems.append(
                             f"{rel}:{node.lineno} assigns {target.id!r} — that is "
-                            "the STATEFUL shape; a stateless adapter declares "
-                            "neither"
+                            f"the STATEFUL shape; a {label} declares neither"
                         )
             # 4. No persistence.
             if isinstance(node, ast.Import):
@@ -268,24 +297,24 @@ def stateless_adapter_violations(package_dir: Path) -> list[str]:
                 root = name.split(".")[0]
                 if root in PERSISTENCE_ROOTS:
                     problems.append(
-                        f"{rel}:{node.lineno} imports {root!r} — a stateless "
-                        "adapter that grew persistence has become a module "
-                        "without changing its dossier"
+                        f"{rel}:{node.lineno} imports {root!r} — a {label} "
+                        "that grew persistence has become a module without "
+                        "changing its dossier"
                     )
                 if root == "dotmac_kernel" and "ModuleManifest" in (
                     alias.name for alias in getattr(node, "names", [])
                 ):
                     problems.append(
                         f"{rel}:{node.lineno} imports ModuleManifest — a "
-                        "stateless protocol adapter is CALLED, not installed"
+                        f"{label} is CALLED, not installed"
                     )
 
     # 2b. No migrations tree.
     for migrations in package_dir.rglob("migrations"):
         if migrations.is_dir():
             problems.append(
-                f"{migrations.relative_to(package_dir)} exists — a stateless "
-                "adapter owns no lineage"
+                f"{migrations.relative_to(package_dir)} exists — a {label} "
+                "owns no lineage"
             )
 
     # 3. No namespace allocation. An allocation is permanent once added, so one
@@ -294,8 +323,48 @@ def stateless_adapter_violations(package_dir: Path) -> list[str]:
     if _ledger_allocates(distribution):
         problems.append(
             f"{distribution} holds a MIGRATION_OWNER_LEDGER allocation — a "
-            "stateless adapter owns no schema"
+            f"{label} owns no schema"
         )
+    return problems
+
+
+def contract_catalogue_violations(package_dir: Path) -> list[str]:
+    """The FIVE properties `stateless-contract-catalogue` has to MEAN.
+
+    The shared four, plus the one that earns the separate word: a catalogue
+    reaches nothing. An adapter is allowed a provider client — that is what an
+    adapter IS, and `dotmac-auth-oidc` declares `httpx` in its own release
+    entry. A catalogue is held data: canonical schema bytes and the digests
+    that attest them. A network import in one is the point; in the other it is
+    a package that has quietly stopped being a catalogue.
+
+    Checked on the DECLARED classification rather than on lane membership, so
+    an unlisted catalogue is governed exactly as much as an allowlisted one.
+    """
+    problems = stateless_package_violations(package_dir, label="contract catalogue")
+
+    for path in sorted(package_dir.rglob("*.py")):
+        rel = path.relative_to(package_dir)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            for name in names:
+                root = name.split(".")[0]
+                if root in NETWORK_ROOTS:
+                    problems.append(
+                        f"{rel}:{node.lineno} imports {root!r} — a contract "
+                        "catalogue describes semantics and reaches nothing; a "
+                        "package that calls a provider is an ADAPTER and "
+                        "belongs in that lane, where the network is expected"
+                    )
     return problems
 
 
@@ -549,7 +618,9 @@ def _validate_dossier(
             f"classification must be one of {sorted(VALID_CLASSIFICATIONS)}"
         )
     if classification == STATELESS_ADAPTER and package_dir is not None:
-        problems.extend(stateless_adapter_violations(package_dir))
+        problems.extend(stateless_package_violations(package_dir))
+    if classification == CONTRACT_CATALOGUE and package_dir is not None:
+        problems.extend(contract_catalogue_violations(package_dir))
 
     source_mode = dossier.get("source_mode")
     if source_mode not in VALID_SOURCE_MODES:
@@ -1388,7 +1459,7 @@ def _synthetic_adapter(root: Path, *, body: str = "def go() -> None: ...\n") -> 
 def test_a_conforming_stateless_adapter_has_no_violations(tmp_path: Path) -> None:
     """The negative control. Without it, every assertion below could pass
     because the checker returns problems for anything at all."""
-    assert stateless_adapter_violations(_synthetic_adapter(tmp_path)) == []
+    assert stateless_package_violations(_synthetic_adapter(tmp_path)) == []
 
 
 def test_the_real_adapter_conforms() -> None:
@@ -1397,14 +1468,14 @@ def test_the_real_adapter_conforms() -> None:
     package = PACKAGES_DIR / "dotmac-auth-oidc"
     if not package.is_dir():  # pragma: no cover - package not yet present
         pytest.skip("dotmac-auth-oidc is not in this tree")
-    assert stateless_adapter_violations(package) == []
+    assert stateless_package_violations(package) == []
 
 
 def test_a_planted_manifest_is_caught(tmp_path: Path) -> None:
     package = _synthetic_adapter(
         tmp_path, body="from dotmac_kernel.modules import ModuleManifest\n"
     )
-    problems = stateless_adapter_violations(package)
+    problems = stateless_package_violations(package)
     assert any("ModuleManifest" in problem for problem in problems), problems
 
 
@@ -1413,14 +1484,14 @@ def test_a_planted_lineage_declaration_is_caught(
     tmp_path: Path, declaration: str
 ) -> None:
     package = _synthetic_adapter(tmp_path, body=f'{declaration} = "oid"\n')
-    problems = stateless_adapter_violations(package)
+    problems = stateless_package_violations(package)
     assert any(declaration in problem for problem in problems), problems
 
 
 def test_a_planted_migrations_tree_is_caught(tmp_path: Path) -> None:
     package = _synthetic_adapter(tmp_path)
     (package / "src" / "dotmac_fake_adapter" / "migrations").mkdir()
-    problems = stateless_adapter_violations(package)
+    problems = stateless_package_violations(package)
     assert any("migrations" in problem for problem in problems), problems
 
 
@@ -1429,7 +1500,7 @@ def test_a_planted_persistence_import_is_caught(tmp_path: Path, root: str) -> No
     """The property that would otherwise rot silently: a package that grew an
     ORM has become a module without its dossier changing."""
     package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
-    problems = stateless_adapter_violations(package)
+    problems = stateless_package_violations(package)
     assert any(root in problem for problem in problems), problems
 
 
@@ -1447,7 +1518,7 @@ def test_prose_explaining_the_absence_does_not_trip_the_rule(tmp_path: Path) -> 
             "# import sqlalchemy\n"
         ),
     )
-    assert stateless_adapter_violations(package) == []
+    assert stateless_package_violations(package) == []
 
 
 def test_the_classification_is_not_applied_to_other_packages(tmp_path: Path) -> None:
@@ -1457,4 +1528,82 @@ def test_the_classification_is_not_applied_to_other_packages(tmp_path: Path) -> 
     assert dossier["classification"] != STATELESS_ADAPTER
     # Ticketing WOULD fail the rule — it has a manifest and a lineage — and the
     # sweep passes today, which is the evidence that the check is scoped.
-    assert stateless_adapter_violations(PACKAGES_DIR / "dotmac-ticketing")
+    assert stateless_package_violations(PACKAGES_DIR / "dotmac-ticketing")
+
+
+# --- `stateless-contract-catalogue`: the fifth property -----------------------
+#
+# ADR-0018 requires a guard to be shown biting. The four shared properties are
+# already proved above, so what needs proving here is only the property that
+# earns the separate word — and, just as importantly, that it does NOT reach
+# the classification it was carved out of.
+
+
+def test_a_conforming_contract_catalogue_has_no_violations(tmp_path: Path) -> None:
+    """The negative control for the five-property checker."""
+    package = _synthetic_adapter(
+        tmp_path, body="CAPABILITY_SCHEMAS: tuple[bytes, ...] = ()\n"
+    )
+    assert contract_catalogue_violations(package) == []
+
+
+@pytest.mark.parametrize("root", sorted(NETWORK_ROOTS))
+def test_a_catalogue_that_reaches_a_provider_is_caught(
+    tmp_path: Path, root: str
+) -> None:
+    package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
+    problems = contract_catalogue_violations(package)
+    assert any(root in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("root", sorted(NETWORK_ROOTS))
+def test_the_same_import_is_fine_in_an_ADAPTER(tmp_path: Path, root: str) -> None:
+    """The discriminator, stated as a test.
+
+    If this passed for both classifications the fifth property would be
+    decoration and the connector lane's "profile, not a classification" ruling
+    would apply unchanged. It is the ONE place the two words are allowed to
+    disagree, so it is the one that has to be pinned.
+    """
+    package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
+    assert stateless_package_violations(package) == []
+
+
+def test_a_real_adapter_is_refused_by_the_catalogue_checker() -> None:
+    """A synthetic proof can be tuned until it passes; a real package cannot.
+
+    `dotmac-auth-oidc` satisfies the adapter classification exactly — the sweep
+    above asserts it — and must STILL be refused here, because it ships
+    `transport.py` and declares `httpx`. That is what stops the catalogue
+    classification from becoming a second spelling of the adapter one.
+    """
+    package = PACKAGES_DIR / "dotmac-auth-oidc"
+    if not package.is_dir():  # pragma: no cover - package not yet present
+        pytest.skip("dotmac-auth-oidc is not in this tree")
+    assert stateless_package_violations(package) == []
+    assert contract_catalogue_violations(package), (
+        "the real adapter passed the catalogue checker — the fifth property is "
+        "not being enforced"
+    )
+
+
+def test_no_package_claims_the_catalogue_classification_yet() -> None:
+    """A check over an empty set passes for the wrong reason.
+
+    No `stateless-contract-catalogue` package exists on main: the seven
+    candidates are archive-only and floor on a kernel grammar that is not
+    published. This test records that emptiness DELIBERATELY, so the first real
+    catalogue to land flips it and the reviewer is made to look at the sweep
+    rather than inheriting a green that never measured anything.
+    """
+    claimed = [
+        package.name
+        for package in sorted(PACKAGES_DIR.iterdir())
+        if (package / "EXTRACTION.toml").is_file()
+        and _load_toml(package / "EXTRACTION.toml").get("classification")
+        == CONTRACT_CATALOGUE
+    ]
+    assert claimed == [], (
+        f"{claimed} now claim the catalogue classification — delete this test "
+        "and assert the real sweep instead"
+    )

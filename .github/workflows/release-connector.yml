@@ -107,6 +107,11 @@ jobs:
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
+      # Carried so `verify` can pin the exact floor on the registry install.
+      # `resolve` is the one place the floor is read from the allowlist and
+      # proved to have a release tag, so the pin comes from there rather than
+      # being spelled a second time in a shell step.
+      integration_floor: ${{ steps.resolve.outputs.integration_floor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -158,11 +163,40 @@ jobs:
             "${{ inputs.connector }}" \
             --dist "${{ steps.resolve.outputs.package_dir }}/dist"
 
-      # Release-artifact conformance: install the freshly built wheel into a
-      # clean venv beside the pinned control plane and run the SHIPPED kit
-      # (`assert_plugin_conforms`) against the installed bytes. The source tree
-      # and the wheel are different objects and only one of them gets published.
-      - name: Release wheel conformance
+      # Build the EXACT declared floor from its release tag. `packages/
+      # dotmac-integration` is whatever main happens to be today, so installing
+      # it proved the connector works against the CURRENT control plane and
+      # said nothing about the one its metadata promises. `fetch-depth: 0` is
+      # already set above, so the tagged tree is in this checkout.
+      - name: Build the exact dotmac-integration floor
+        env:
+          FLOOR: ${{ steps.resolve.outputs.integration_floor }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/integration-floor && mkdir -p /tmp/integration-floor
+          git archive "dotmac-integration-v${FLOOR}" \
+            packages/dotmac-integration | tar -x -C /tmp/integration-floor
+          python -m pip install --quiet build
+          python -m build --wheel --outdir /tmp/integration-floor/dist \
+            /tmp/integration-floor/packages/dotmac-integration
+          echo "built dotmac-integration ${FLOOR} from its release tag"
+
+      # Release-artifact conformance, run TWICE: once against the exact floor
+      # the connector declares, once against the current control plane. A
+      # connector is installable across `>=floor`, so proving one end proves
+      # only that end — and the floor end is the one no run had ever executed
+      # (a tag-existence check is not an execution). Both must pass before the
+      # bytes are eligible to publish.
+      - name: Release wheel conformance at the declared floor
+        run: |
+          python -m venv /tmp/connector-smoke-floor
+          /tmp/connector-smoke-floor/bin/pip install --quiet \
+            packages/dotmac-kernel /tmp/integration-floor/dist/*.whl \
+            "${{ steps.resolve.outputs.package_dir }}"/dist/*.whl
+          python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
+            --python /tmp/connector-smoke-floor/bin/python
+
+      - name: Release wheel conformance at the current release
         run: |
           python -m venv /tmp/connector-smoke
           /tmp/connector-smoke/bin/pip install --quiet \
@@ -258,7 +292,28 @@ jobs:
       # which is why both index flags are paired — `--index-url` REPLACES the
       # default, so alone it would see the Dotmac distributions and nothing they
       # depend on.
-      - name: Install from the Forgejo registry and verify conformance
+      # Leg 1 — the EXACT declared floor. Without the explicit
+      # `dotmac-integration==` pin pip resolves the connector's own
+      # `>=<floor>` against the index and picks the NEWEST release, so this
+      # venv would have certified the same control plane as leg 2 and the
+      # declared floor would never be executed at all.
+      - name: Install from the Forgejo registry and verify at the declared floor
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+          PUBLIC_INDEX_URL: https://pypi.org/simple
+          FLOOR: ${{ needs.build.outputs.integration_floor }}
+        run: |
+          python -m venv /tmp/connector-registry-floor
+          /tmp/connector-registry-floor/bin/pip install --quiet \
+            --index-url "${INDEX}" --extra-index-url "${PUBLIC_INDEX_URL}" \
+            "${{ inputs.connector }}==${{ inputs.version }}" \
+            "dotmac-integration==${FLOOR}"
+          python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
+            --python /tmp/connector-registry-floor/bin/python
+
+      # Leg 2 — the current supported release, resolved the way an ordinary
+      # installer would.
+      - name: Install from the Forgejo registry and verify at the current release
         env:
           INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
           PUBLIC_INDEX_URL: https://pypi.org/simple

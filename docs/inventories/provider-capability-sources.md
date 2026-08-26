@@ -193,7 +193,7 @@ delta. That is real product-first evidence for the naming convention in § 7.2.
 admitting a stateless connector distribution, and that `optional-module` was
 *"a lie the gate currently forces."* At `e6ba2022f3d7` the vocabulary now
 includes **`stateless-protocol-adapter`**, governed by
-`stateless_adapter_violations()` — a pure function over a directory that
+`stateless_package_violations()` — a pure function over a directory that
 refuses persistence imports and lineage declarations, with a synthetic-package
 sensitivity proof. `packages/dotmac-auth-oidc/EXTRACTION.toml` already uses it.
 G1 is closed; G2 (no secret resolver), G3, G4, G5, G6 and G7 are not.
@@ -640,7 +640,7 @@ directory cannot pass for the wrong reason.
 
 **Detector:** one pure function, `provider_leak_violations(package_dir) -> list[str]`,
 over a directory rather than a package name — the shape
-`stateless_adapter_violations()` already uses, chosen so the sensitivity proof
+`stateless_package_violations()` already uses, chosen so the sensitivity proof
 can build a synthetic package in `tmp_path` and watch the checker fire. Source
 is parsed with `ast`, docstrings stripped and re-unparsed before any text scan,
 copying `test_the_assembly_stays_thin.py::_source_without_docstrings` — these
@@ -693,7 +693,7 @@ Four properties, three already enforced and one still to build.
 | A plugin cannot write anything: `dispatch.invoke` accepts no session by signature | **enforced**, `test_invoke_cannot_be_given_a_database_session` |
 | A plugin's `Outcome` classifies but does not schedule; only `retry.next_state` and the engine decide what happens next, and a plugin cannot reschedule itself | **enforced**, `retry.py` + `test_integration_execution.py` |
 | A plugin's `error_code` is stored and never branched on in shared code | **enforced**, `test_no_product_error_code_leaks_into_the_generic_claim` |
-| A plugin holds no state: `planes = "none"`, no table, no lineage, no persistence import | **enforceable today** via `classification = "stateless-protocol-adapter"` and `stateless_adapter_violations()` |
+| A plugin holds no state: `planes = "none"`, no table, no lineage, no persistence import | **enforceable today** via `classification = "stateless-protocol-adapter"` and `stateless_package_violations()` |
 | **A callback never assigns a Dotmac lifecycle state** | **not yet provable** — there is no ingress path. The receipt's `consequence_json` is filled by the *caller*, and nothing today constrains what that caller may write |
 
 The last row is the design obligation the ingress work inherits: an inbox
@@ -995,7 +995,7 @@ Plus per-distribution scans, each with a planted-violation proof:
   loop, no declared table, cursor or watermark;
 - no import of any product package and no SQLAlchemy import — which
   `classification = "stateless-protocol-adapter"` and
-  `stateless_adapter_violations()` already check generically.
+  `stateless_package_violations()` already check generically.
 
 **Nothing in the kit reaches a network.** The whole
 installation → configuration → binding → dispatch → settle slice must be

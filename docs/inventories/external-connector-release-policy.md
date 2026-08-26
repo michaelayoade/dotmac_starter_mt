@@ -98,9 +98,28 @@ clean input passes.
    the first dispatch. The source tree and the wheel are different objects and
    only one of them gets published, so the static half (`conformance`) and the
    executable half (`verify-wheel`) both exist.
-4. **An installable floor.** `integration_floor` names the earliest
+4. **An installable floor, EXECUTED.** `integration_floor` names the earliest
    `dotmac-integration` release whose SPI admits the connector, **and that
    release must be published**. See § 4 — this is the check with live teeth.
+
+   Published was, until 2026-08-26, the *only* thing proved about it.
+   `_refuse_unpublished_floor` established that a release tag exists; nothing
+   installed it. Both smokes resolved `dotmac-integration` the ordinary way —
+   the build job from the in-tree `packages/dotmac-integration`, the registry
+   job by letting pip satisfy the connector's own `>=<floor>` — and pip takes
+   the NEWEST release. So every run certified the current control plane twice
+   and the declared floor zero times. The divergence was real, not theoretical:
+   `dotmac-connector-linkedin` and `-mono` declare `0.1.0a11` and the other
+   five declare `0.1.0a14`, while published `dotmac-integration` had reached
+   `0.1.0a16`. A connector that would fail against its own stated minimum
+   would have shipped green.
+
+   The lane now runs conformance on **both legs, in both jobs**: the exact
+   floor, built from its release tag before publication and pinned with
+   `dotmac-integration==<floor>` on the registry install afterwards, and
+   separately the current release. Both precede `git tag`, so a floor failure
+   refuses the tag rather than being discovered after it. A declared floor is
+   now a claim the lane executes, not one it merely reads.
 5. **No secret shape, no persistence, no private retry/checkpoint engine.** A
    connector holds a *reference* to credential material (ADR-0024 § 7), never
    the value, and ships no migration lineage. It also may not carry its own

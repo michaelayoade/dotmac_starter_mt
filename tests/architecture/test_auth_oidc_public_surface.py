@@ -260,7 +260,7 @@ def test_the_manifest_modules_import_and_declare_all() -> None:
 
 # NOTE: "declares no manifest / lineage / namespace / persistence" is NOT
 # checked here any more. It moved to
-# `tests/architecture/test_product_first_extraction.py::stateless_adapter_violations`,
+# `tests/architecture/test_product_first_extraction.py::stateless_package_violations`,
 # which applies it GENERICALLY to any package declaring
 # `classification = "stateless-protocol-adapter"` rather than to this one by
 # name — and which is AST-based, so it does not fail on this package's own
