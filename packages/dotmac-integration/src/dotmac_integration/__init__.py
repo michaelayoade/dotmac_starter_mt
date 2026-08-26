@@ -176,6 +176,8 @@ from dotmac_integration.destination_binding import (
     ProductPortDescriptorSnapshot,
     UntrustedDestination,
     capability_bindings_for,
+    capability_contract_document,
+    capability_contract_from_document,
     corroborate,
     destination_client,
     establish_destination,
@@ -521,7 +523,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a16"
+__version__ = "0.1.0a17"
 
 __all__ = [
     "ObservationRejected",
@@ -607,6 +609,8 @@ __all__ = [
     "UnknownCapabilityError",
     "UntrustedDestination",
     "capability_bindings_for",
+    "capability_contract_document",
+    "capability_contract_from_document",
     "capability_registry",
     "contract_from_declaration",
     "corroborate",

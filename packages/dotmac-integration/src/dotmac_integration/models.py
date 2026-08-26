@@ -378,6 +378,19 @@ class CapabilityDestinationRevision(Base):
         String(64), nullable=True
     )
     descriptor_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The product wire the assembly must render after a receipt is claimed.
+    #: Descriptor protocol versions are deliberately independent of this value:
+    #: v3 can carry both the messaging envelope and generic observation wire.
+    product_wire_schema_version: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    #: The exact product-owned capability payload declaration carried by
+    #: descriptor v3. JSON rather than columns because JSON Schema is itself a
+    #: versioned document; the owning product and CapabilityContract validate
+    #: its meaning before this immutable snapshot is written.
+    descriptor_contract_json: Mapped[dict[str, object] | None] = mapped_column(
+        _JSON, nullable=True
+    )
 
     established_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     #: Why the route changed. Free text, operator-supplied, never parsed.

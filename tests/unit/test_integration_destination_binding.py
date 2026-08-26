@@ -56,6 +56,8 @@ from dotmac_integration import (
     SchemaGrace,
     UntrustedDestination,
     capability_bindings_for,
+    capability_contract_document,
+    capability_contract_from_document,
     corroborate,
     destination_client,
     establish_destination,
@@ -161,11 +163,23 @@ def _descriptor(**overrides: object) -> ProductPortDescriptorSnapshot:
     )
 
 
+def _contract_descriptor(**overrides: object) -> ProductPortDescriptorSnapshot:
+    values: dict[str, object] = {
+        "schema_version": "dotmac.io/product-port-descriptor/v3",
+        "wire_schema_version": "dotmac.io/product-observation/v1",
+        "capability_summary": CONTRACT.summary,
+        "capability_contract": CONTRACT,
+    }
+    values.update(overrides)
+    return _descriptor(**values)
+
+
 @pytest.mark.parametrize(
     "schema_version",
     [
         "dotmac.io/product-port-descriptor/v1",
         "dotmac.io/product-port-descriptor/v2",
+        "dotmac.io/product-port-descriptor/v3",
     ],
 )
 def test_published_descriptor_versions_are_accepted(
@@ -176,7 +190,11 @@ def test_published_descriptor_versions_are_accepted(
     reconcile_product_port_descriptor(
         db,
         capability_binding_id=binding.id,
-        descriptor=_descriptor(schema_version=schema_version),
+        descriptor=(
+            _contract_descriptor()
+            if schema_version == "dotmac.io/product-port-descriptor/v3"
+            else _descriptor(schema_version=schema_version)
+        ),
         registry=REGISTRY,
     )
 
@@ -189,7 +207,7 @@ def test_an_unknown_descriptor_version_is_refused(db: Session) -> None:
             db,
             capability_binding_id=binding.id,
             descriptor=_descriptor(
-                schema_version="dotmac.io/product-port-descriptor/v3"
+                schema_version="dotmac.io/product-port-descriptor/v4"
             ),
             registry=REGISTRY,
         )
@@ -336,6 +354,93 @@ def test_product_descriptor_reconciler_is_idempotent_and_resolvable(
         ).product_port
         == descriptor
     )
+
+
+def test_v3_persists_and_revalidates_the_product_owned_capability_contract(
+    db: Session,
+) -> None:
+    binding = _bound(db, destination=None)
+    descriptor = _contract_descriptor()
+
+    reconciled = reconcile_product_port_descriptor(
+        db,
+        capability_binding_id=binding.id,
+        descriptor=descriptor,
+        registry=REGISTRY,
+    )
+    row = db.query(CapabilityDestinationRevision).one()
+
+    assert row.descriptor_contract_json is not None
+    assert row.product_wire_schema_version == "dotmac.io/product-observation/v1"
+    assert row.descriptor_contract_json["schema_grace"] == {
+        "reason": SYNTHETIC_GRACE.reason,
+        "retire_after": "2099-12-31",
+        "tracked_by": SYNTHETIC_GRACE.tracked_by,
+    }
+    assert reconciled.product_port == descriptor
+    assert (
+        resolve_destination(
+            db, capability_binding_id=binding.id, registry=REGISTRY
+        ).product_port
+        == descriptor
+    )
+
+
+def test_v3_refuses_a_contract_that_disagrees_with_the_registry(db: Session) -> None:
+    binding = _bound(db, destination=None)
+    other = CapabilityContract(
+        capability_id=CAPABILITY,
+        owner=CONTRACT.owner,
+        summary=CONTRACT.summary,
+        observation_schema={"type": "object"},
+    )
+
+    with pytest.raises(ProductPortDescriptorInvalid, match="installed registry"):
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=_contract_descriptor(capability_contract=other),
+            registry=REGISTRY,
+        )
+
+
+def test_v3_contract_document_refuses_a_changed_schema_behind_the_claimed_digest() -> (
+    None
+):
+    typed_contract = CapabilityContract(
+        capability_id=CAPABILITY,
+        owner=CONTRACT.owner,
+        summary=CONTRACT.summary,
+        observation_schema={
+            "type": "object",
+            "required": ["provider_event_id"],
+        },
+    )
+    document = capability_contract_document(typed_contract)
+    schema = document["observation_schema"]
+    assert isinstance(schema, dict)
+    schema["required"] = []
+
+    with pytest.raises(ProductPortDescriptorInvalid, match="digest"):
+        capability_contract_from_document(
+            document,
+            capability_id=CAPABILITY,
+            application=OWNER_APP,
+            owner_module="messages",
+            summary=CONTRACT.summary,
+        )
+
+
+def test_v3_refuses_a_missing_wire_schema(db: Session) -> None:
+    binding = _bound(db, destination=None)
+
+    with pytest.raises(ProductPortDescriptorInvalid, match="wire schema"):
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=_contract_descriptor(wire_schema_version=None),
+            registry=REGISTRY,
+        )
 
 
 def test_capability_wide_reconciliation_projects_every_matching_binding(

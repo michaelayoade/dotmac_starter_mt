@@ -2,19 +2,19 @@
 
 ## Release state — read this before pinning
 
-**Fifteen versions have been released. Pin `0.1.0a15`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a15`; a15 was published, installed
+**Sixteen versions have been released. Pin `0.1.0a16`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a16`; a16 was published, installed
 back from the private index, registered and tagged from exact revision
-`bd8d2262c26f62041cc22a813916066b9af85c7f`.
+`dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e` by release run `32929018760`.
 
-`0.1.0a15` is the latest published version. It makes outbound idempotency
-collisions and enqueue races typed, adds repair/reconciliation, runtime safety
-and module-owned metric definitions.
+`0.1.0a16` is the latest published version. It adds domain-owned payload
+contracts and durably stores a validated normalized result in `ig_0013`, and
+adds durable polling attempt/failure/backoff evidence with a bounded keyset
+selection in `ig_0014`.
 
-`0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts
-and durably stores a validated normalized result in `ig_0013`, and adds durable
-polling attempt/failure/backoff evidence with a bounded keyset selection in
-`ig_0014`.
+`0.1.0a17` is declared and unreleased. It adds authenticated product-port
+descriptor v3, which carries the owning domain's exact payload contract or
+dated grace separately from the product wire, persisted by `ig_0015`.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -76,7 +76,28 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a16 — unreleased
+## 0.1.0a17 — unreleased
+
+### The product descriptor now carries the product's payload contract
+
+- Accepts `dotmac.io/product-port-descriptor/v3`. Its nested capability
+  contract carries the domain-owned command, result and observation schemas or
+  an explicit dated `SchemaGrace`, plus the canonical contract digest.
+- Parses the exact field set, re-derives the domain contract and refuses a
+  changed schema behind a stale digest or disagreement with the installed
+  registry. The module validates and stores the product declaration; it never
+  invents compatibility in the Integrator assembly.
+- Adds an independent `wire_schema_version`. Descriptor version is metadata
+  protocol, not product payload protocol: messaging's established envelope and
+  settlement's ProductObservation wire remain distinct without a capability or
+  provider branch in the assembly.
+- Adds `ig_0015_descriptor_contract`, persisting both v3 fields on the immutable
+  destination revision and constraining legacy v1/v2 rows to carry neither.
+- Connector SPI stays 1.4. This is the serial prerequisite for a thin assembly
+  to accept product-owned a16 contracts without constructing silent registry
+  entries.
+
+## 0.1.0a16 — 2026-08-26 — RELEASED
 
 ### One capability id now means one PAYLOAD, and the domain owns it
 
