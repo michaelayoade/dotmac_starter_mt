@@ -847,6 +847,23 @@ type = "directory"
 url = "packages/dotmac-connector-mono"
 
 [[package]]
+name = "dotmac-connector-nira"
+version = "0.1.0a1"
+description = "NiRA .ng registry connector: CoCCA EPP delivery and poll transport"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a14"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-nira"
+
+[[package]]
 name = "dotmac-connector-paystack"
 version = "0.1.0a3"
 description = "Paystack settlement ingress and reconciliation connector"
@@ -4313,4 +4330,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "7d3c6d73cec8742aaf61fb7f37518ed54727e6d68a4a7a49dd8e439f7add894e"
+content-hash = "81db2f2ee585ebdf67a0e6d0424cc416390a55e066a2b558e9ca8dfb1c337ecb"

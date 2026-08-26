@@ -104,7 +104,7 @@ def test_host_create_frame_carries_both_address_families() -> None:
     xml = frames.host_create(
         "ns1.dotmac.ng", addrs=["160.119.127.200", "2c0f:e888:11::51"], cltrid="k"
     )
-    assert '<host:name>ns1.dotmac.ng</host:name>' in xml
+    assert "<host:name>ns1.dotmac.ng</host:name>" in xml
     assert '<host:addr ip="v4">160.119.127.200</host:addr>' in xml
     assert '<host:addr ip="v6">2c0f:e888:11::51</host:addr>' in xml
 
@@ -115,7 +115,7 @@ def test_domain_check_includes_fee_extension_when_currency_given() -> None:
     assert '<fee:command name="create">' in xml
 
 
-def test_cltrid_is_the_idempotency_key() -> None:
+def test_cltrid_carries_the_engine_correlation_key() -> None:
     xml = frames.domain_info("dotmac.ng", cltrid="idem-42")
     assert "<clTRID>idem-42</clTRID>" in xml
 

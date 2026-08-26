@@ -29,7 +29,9 @@ from dotmac_integration.spi import (
     SpiRange,
 )
 
+from dotmac_connector_nira import frames
 from dotmac_connector_nira.delivery import (
+    ALLOWED_EGRESS_HOSTS,
     CLIENT_PEM,
     EPP_PASSWORD,
     OUTBOUND_CAPABILITY_IDS,
@@ -43,6 +45,7 @@ from dotmac_connector_nira.epp import (
     EppProtocolError,
     EppSession,
     EppTransportError,
+    classify_result,
     declared_services,
 )
 from dotmac_connector_nira.polling import MESSAGE_CAPABILITY, NiraPollHandler
@@ -51,9 +54,9 @@ CONNECTOR_KEY: Final = "nira"
 VERSION: Final = "0.1.0a1"
 
 # The registry declares these in its greeting; the connector needs the objects
-# to operate and speaks the fee/secDNS extensions. Confirmed live against
-# ote.registry.ng: objURI domain/host/contact, extURI rgp/secDNS/fee + CoCCA
-# finance.
+# and negotiates the fee extension it actually emits. A greeting-only OT&E
+# probe confirmed the objects and extension. Authenticated login remains a
+# release gate and is now part of validate_connection.
 _REQUIRED_OBJECTS: Final = frozenset(
     {
         "urn:ietf:params:xml:ns:domain-1.0",
@@ -61,13 +64,14 @@ _REQUIRED_OBJECTS: Final = frozenset(
         "urn:ietf:params:xml:ns:contact-1.0",
     }
 )
+_REQUIRED_EXTENSIONS: Final = frozenset({frames.FEE_EXTENSION_URI})
 
 POLL_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["host", "port", "clid", "connect_timeout", "read_timeout"],
     "properties": {
-        "host": {"type": "string", "minLength": 1},
+        "host": {"type": "string", "enum": list(ALLOWED_EGRESS_HOSTS)},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
         "clid": {"type": "string", "minLength": 1},
         "connect_timeout": {"type": "number", "minimum": 1, "maximum": 120},
@@ -110,7 +114,7 @@ MANIFEST: Final = ConnectorManifest(
         ),
     ),
     secret_bindings=_SECRET_BINDINGS,
-    egress=EgressDeclaration(),  # host is per-installation config (OT&E vs prod)
+    egress=EgressDeclaration(hosts=ALLOWED_EGRESS_HOSTS),
 )
 
 
@@ -138,21 +142,24 @@ class NiraConnector:
         config: Mapping[str, object],
         secrets: Mapping[str, object],
     ) -> tuple[Diagnostic, ...]:
-        """Open TLS, read the greeting, confirm the registry offers what we need.
-
-        No login is attempted: a greeting proves the channel and the registry's
-        declared services without spending a credential, and an unwhitelisted
-        source IP fails at login with 2202 — a condition the connector cannot
-        resolve and must not mask as a health pass.
-        """
-        if _material(secrets, EPP_PASSWORD) is None:
+        """Prove exact egress, TLS, services and authenticated registry access."""
+        password = _material(secrets, EPP_PASSWORD)
+        if password is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         host = _text(config.get("host"))
         port = config.get("port")
+        clid = _text(config.get("clid"))
         connect_timeout = _num(config.get("connect_timeout")) or 15.0
         read_timeout = _num(config.get("read_timeout")) or 30.0
-        if host is None or not isinstance(port, int) or isinstance(port, bool):
+        if (
+            host is None
+            or not isinstance(port, int)
+            or isinstance(port, bool)
+            or clid is None
+        ):
             return (Diagnostic(ok=False, code="config_incomplete"),)
+        if host not in ALLOWED_EGRESS_HOSTS:
+            return (Diagnostic(ok=False, code="egress_host_not_allowed"),)
         client_pem = _material(secrets, CLIENT_PEM)
         session = EppSession(
             host,
@@ -163,15 +170,25 @@ class NiraConnector:
         )
         try:
             greeting = session.connect()
+            services = declared_services(greeting)
+            offered_objects = set(services.get("objects", ()))
+            offered_extensions = set(services.get("extensions", ()))
+            if not _REQUIRED_OBJECTS.issubset(offered_objects):
+                return (Diagnostic(ok=False, code="registry_objects_insufficient"),)
+            if not _REQUIRED_EXTENSIONS.issubset(offered_extensions):
+                return (Diagnostic(ok=False, code="registry_extensions_insufficient"),)
+            login = session.request(frames.login(clid, password, cltrid="health-login"))
+            if classify_result(login.code) != "ok":
+                return (Diagnostic(ok=False, code="registry_login_refused"),)
+            logout = session.request(frames.logout(cltrid="health-logout"))
+            if classify_result(logout.code) != "ok":
+                return (Diagnostic(ok=False, code="registry_logout_refused"),)
         except EppTransportError:
             return (Diagnostic(ok=False, code="registry_unreachable"),)
         except EppProtocolError:
-            return (Diagnostic(ok=False, code="greeting_unreadable"),)
+            return (Diagnostic(ok=False, code="registry_protocol_unreadable"),)
         finally:
             session.close()
-        offered = set(declared_services(greeting).get("objects", ()))
-        if not _REQUIRED_OBJECTS.issubset(offered):
-            return (Diagnostic(ok=False, code="registry_objects_insufficient"),)
         return ()
 
 

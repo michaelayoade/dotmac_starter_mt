@@ -66,6 +66,7 @@ def _policy() -> dict:
 def _valid_entry() -> dict:
     return {
         "package_dir": "packages/dotmac-connector-example",
+        "release_enabled": True,
         "import_name": "dotmac_connector_example",
         "plugin_attr": "PLUGIN",
         "connector_key": "example.v1",
@@ -147,6 +148,28 @@ def test_a_listed_connector_resolves(lane) -> None:
         "dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"}
     )
     assert resolved["connector_key"] == "example.v1"
+
+
+def test_a_held_back_connector_is_refused_by_resolve(lane) -> None:
+    """SENSITIVITY: listing/composing a connector must not make it releasable.
+
+    Both workflow enforcement points call this same gate, so this refusal
+    applies before build and again after protected-environment approval.
+    """
+    gate, _ = lane({**_valid_entry(), "release_enabled": False})
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
+    message = str(refusal.value)
+    assert "release_enabled is false" in message
+    assert "HELD BACK" in message
+
+
+def test_release_enabled_must_be_an_exact_boolean(lane) -> None:
+    """A truthy string must not turn a reviewed release hold into permission."""
+    gate, _ = lane({**_valid_entry(), "release_enabled": "false"})
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
+    assert "release_enabled must be a boolean" in str(refusal.value)
 
 
 def test_an_entry_carrying_stateful_facts_is_refused(lane) -> None:
@@ -242,6 +265,7 @@ def test_a_real_adapter_with_the_same_classification_is_still_refused(
     policy["connectors"] = {
         "dotmac-auth-oidc": {
             "package_dir": "packages/dotmac-auth-oidc",
+            "release_enabled": True,
             "import_name": "dotmac_auth_oidc",
             "plugin_attr": "PLUGIN",
             "connector_key": "oidc.v1",
@@ -635,7 +659,7 @@ def test_the_executable_conformance_actually_calls_the_kit() -> None:
 
 
 def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
-    """The real entry resolves while every neighbouring lane remains refused."""
+    """Release-enabled entries resolve; held-back and neighbouring ones refuse."""
     assert set(_policy()["connectors"]) == {
         "dotmac-connector-flutterwave",
         "dotmac-connector-linkedin",
@@ -647,6 +671,22 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "dotmac-connector-whatsapp",
     }
     gate = _gate()
+    for distribution, entry in _policy()["connectors"].items():
+        assert isinstance(entry["release_enabled"], bool), distribution
+    enabled = {
+        distribution
+        for distribution, entry in _policy()["connectors"].items()
+        if entry["release_enabled"] is True
+    }
+    assert enabled == {
+        "dotmac-connector-flutterwave",
+        "dotmac-connector-linkedin",
+        "dotmac-connector-meta-social",
+        "dotmac-connector-mono",
+        "dotmac-connector-paystack",
+        "dotmac-connector-remita",
+        "dotmac-connector-whatsapp",
+    }
     resolved_keys = {
         distribution: gate.resolve(
             distribution,
@@ -656,18 +696,20 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
                 "dotmac-integration-v0.1.0a14",
             },
         )["connector_key"]
-        for distribution in _policy()["connectors"]
+        for distribution in enabled
     }
     assert resolved_keys == {
         "dotmac-connector-flutterwave": "flutterwave",
         "dotmac-connector-linkedin": "linkedin",
         "dotmac-connector-meta-social": "meta_social",
         "dotmac-connector-mono": "mono",
-        "dotmac-connector-nira": "nira",
         "dotmac-connector-paystack": "paystack",
         "dotmac-connector-remita": "remita",
         "dotmac-connector-whatsapp": "meta_whatsapp",
     }
+    with pytest.raises(SystemExit) as held_back:
+        gate.resolve("dotmac-connector-nira", tags={"dotmac-integration-v0.1.0a14"})
+    assert "release_enabled is false" in str(held_back.value)
     for attempt in (
         "dotmac-connector-stripe",  # a plausible future name
         "dotmac-auth-oidc",  # a real package, right classification
@@ -814,19 +856,52 @@ def test_the_remita_entry_resolves_through_the_release_command(
     assert "tag=dotmac-connector-remita-v0.1.0a2" in output
 
 
-def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:
-    """TWO-DIRECTIONAL. A `workflow_dispatch` choice must offer at least one
-    option, and an empty allowlist has none — so the input is free text today.
-    The moment a connector is listed the input must become an exact `choice`
-    list matching the allowlist, so the first entry cannot land without the UI
-    layer following it, and a stale option cannot outlive its entry.
+def test_the_workflow_choice_matches_release_enabled_connectors_exactly() -> None:
+    """TWO-DIRECTIONAL. The UI offers exactly the mechanically enabled subset.
+
+    A held-back connector stays in the governed inventory for composition and
+    manifest-digest coverage, but cannot be selected. Enabling or disabling a
+    row therefore requires the workflow surface to change in the same diff.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     connector_input = workflow[True]["workflow_dispatch"]["inputs"]["connector"]
     connectors = _policy()["connectors"]
-    assert connectors
+    enabled = {
+        distribution
+        for distribution, entry in connectors.items()
+        if entry["release_enabled"] is True
+    }
+    assert enabled
     assert connector_input["type"] == "choice"
-    assert set(connector_input["options"]) == set(connectors)
+    assert set(connector_input["options"]) == enabled
+    assert "dotmac-connector-nira" not in connector_input["options"]
+
+
+def test_nira_is_composable_but_both_release_resolves_refuse_it() -> None:
+    """The hold governs publication, not source composition or discovery."""
+    root = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependency = root["tool"]["poetry"]["group"]["dev"]["dependencies"][
+        "dotmac-connector-nira"
+    ]
+    assert dependency == {
+        "path": "packages/dotmac-connector-nira",
+        "develop": True,
+    }
+    assert _policy()["connectors"]["dotmac-connector-nira"]["release_enabled"] is False
+
+    gate = _gate()
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve("dotmac-connector-nira", tags={"dotmac-integration-v0.1.0a14"})
+    assert "release_enabled is false" in str(refusal.value)
+
+    source = "\n".join(
+        line
+        for line in WORKFLOW.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert source.count("release_connector.py resolve") == 2
+    publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
+    assert "release_connector.py resolve" in publish
 
 
 def test_the_workflow_says_the_allowlist_is_the_lock() -> None:

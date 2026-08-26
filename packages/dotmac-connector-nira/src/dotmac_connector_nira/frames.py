@@ -8,19 +8,19 @@ payload. These are string templates with correct namespaces and escaping,
 nothing more.
 
 Namespaces follow the CoCCA reference module (``cocca-whmcs-v9``): domain,
-host and contact objects at their RFC URIs, and the fee-1.0 / secDNS-1.1
-extensions the registry declared in its greeting.
+host and contact objects at their RFC URIs, plus the fee-1.0 extension used by
+availability checks. DNSSEC is not emitted by this version.
 
 ``clTRID`` (client transaction id) is stamped by the caller from the engine's
-idempotency key, so a retried dispatch carries the same clTRID and the registry
-can recognise the replay. A builder never invents one — that would break the
-engine's at-most-once guarantee.
+idempotency key, so an operator can correlate an ambiguous command with the
+registry. It is evidence, not a provider idempotency guarantee; post-send
+transport failures are therefore reconciled rather than blindly retried.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, quoteattr  # nosec B406 - output escaping only
 
 __all__ = [
     "login",
@@ -36,20 +36,27 @@ __all__ = [
     "contact_check",
     "poll_request",
     "poll_ack",
+    "FEE_EXTENSION_URI",
 ]
 
 _DOMAIN = "urn:ietf:params:xml:ns:domain-1.0"
 _HOST = "urn:ietf:params:xml:ns:host-1.0"
 _CONTACT = "urn:ietf:params:xml:ns:contact-1.0"
-_FEE = "urn:ietf:params:xml:ns:epp:fee-1.0"
+FEE_EXTENSION_URI = "urn:ietf:params:xml:ns:epp:fee-1.0"
+_FEE = FEE_EXTENSION_URI
 _EPP = "urn:ietf:params:xml:ns:epp-1.0"
 
 _PROLOG = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>'
 
 
 def _e(value: str) -> str:
-    """Escape a value for XML text/attribute content."""
+    """Escape a value for XML text content."""
     return escape(value)
+
+
+def _a(value: str) -> str:
+    """Quote and escape one complete XML attribute value."""
+    return quoteattr(value)
 
 
 def _envelope(inner: str, cltrid: str) -> str:
@@ -81,6 +88,9 @@ def login(clid: str, pw: str, *, cltrid: str, new_pw: str | None = None) -> str:
         f"        <objURI>{_DOMAIN}</objURI>\n"
         f"        <objURI>{_HOST}</objURI>\n"
         f"        <objURI>{_CONTACT}</objURI>\n"
+        "        <svcExtension>\n"
+        f"          <extURI>{FEE_EXTENSION_URI}</extURI>\n"
+        "        </svcExtension>\n"
         "      </svcs>\n"
         "    </login>"
     )
@@ -101,9 +111,7 @@ def domain_check(
     price so the availability answer carries cost — the owning application
     applies any markup, never this builder.
     """
-    name_xml = "\n".join(
-        f"      <domain:name>{_e(n)}</domain:name>" for n in names
-    )
+    name_xml = "\n".join(f"      <domain:name>{_e(n)}</domain:name>" for n in names)
     check = (
         "    <check>\n"
         f'      <domain:check xmlns:domain="{_DOMAIN}">\n'
@@ -159,7 +167,7 @@ def domain_create(
         f"        <domain:ns>\n{ns_xml}\n        </domain:ns>\n" if ns_xml else ""
     )
     contact_xml = "\n".join(
-        f'        <domain:contact type="{_e(t)}">{_e(cid)}</domain:contact>'
+        f"        <domain:contact type={_a(t)}>{_e(cid)}</domain:contact>"
         for t, cid in (contacts or {}).items()
     )
     contact_block = f"{contact_xml}\n" if contact_xml else ""
@@ -252,7 +260,7 @@ def domain_transfer(
         else ""
     )
     inner = (
-        f'    <transfer op="{_e(op)}">\n'
+        f"    <transfer op={_a(op)}>\n"
         f'      <domain:transfer xmlns:domain="{_DOMAIN}">\n'
         f"        <domain:name>{_e(name)}</domain:name>\n"
         f"{period}"
@@ -292,9 +300,7 @@ def _host_addr(literal: str) -> str:
 
 
 def host_check(names: Iterable[str], *, cltrid: str) -> str:
-    name_xml = "\n".join(
-        f"      <host:name>{_e(n)}</host:name>" for n in names
-    )
+    name_xml = "\n".join(f"      <host:name>{_e(n)}</host:name>" for n in names)
     inner = (
         "    <check>\n"
         f'      <host:check xmlns:host="{_HOST}">\n'
@@ -306,9 +312,7 @@ def host_check(names: Iterable[str], *, cltrid: str) -> str:
 
 
 def contact_check(ids: Iterable[str], *, cltrid: str) -> str:
-    id_xml = "\n".join(
-        f"      <contact:id>{_e(c)}</contact:id>" for c in ids
-    )
+    id_xml = "\n".join(f"      <contact:id>{_e(c)}</contact:id>" for c in ids)
     inner = (
         "    <check>\n"
         f'      <contact:check xmlns:contact="{_CONTACT}">\n'
@@ -330,9 +334,9 @@ def poll_request(*, cltrid: str) -> str:
 
 
 def poll_ack(message_id: str, *, cltrid: str) -> str:
-    """<poll op="ack"> — dequeue the message we just returned to the engine.
+    """<poll op="ack"> — dequeue one durably recorded registry message.
 
-    Ack only happens after the handler has handed the event to the engine, so a
-    message is never dequeued before the checkpoint that records it.
+    The poll handler calls this only on a later invocation whose input cursor
+    proves the engine committed the corresponding observation and checkpoint.
     """
-    return _envelope(f'    <poll op="ack" msgID="{_e(message_id)}"/>', cltrid)
+    return _envelope(f'    <poll op="ack" msgID={_a(message_id)}/>', cltrid)

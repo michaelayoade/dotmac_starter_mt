@@ -17,23 +17,34 @@ obeys outbound.
 ## The engine owns the checkpoint
 
 ``poll`` receives the cursor the engine persisted and returns the events found
-plus the cursor to persist next. It never writes the cursor itself, so it can
-never advance past a message it failed to hand back. The cursor is the last
-registry message id acked in this batch; a crash before the engine records it
-simply re-reads the same queue head next time — at-least-once, which the
-engine's idempotency makes at-most-once downstream.
+plus the cursor to persist next. The cursor is proof that Integration durably
+recorded that registry message on an EARLIER call; only then may this handler
+ack the same queue head. It returns at most the next head without acking it.
+That two-phase handshake means a crash before record re-reads the unacked head,
+while a crash after an ambiguous ack is recovered by comparing the next head
+with the still-persisted cursor.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Final
-from xml.etree.ElementTree import ParseError
+from xml.etree.ElementTree import (  # nosec B405 - parse happens behind DTD gate
+    ParseError,
+    tostring,
+)
 
 from dotmac_integration.spi import InboundDisposition, InboundEvent
 
 from dotmac_connector_nira import frames
-from dotmac_connector_nira.delivery import EPP_PASSWORD, _material, _num, _text
+from dotmac_connector_nira.delivery import (
+    ALLOWED_EGRESS_HOSTS,
+    CLIENT_PEM,
+    EPP_PASSWORD,
+    _material,
+    _num,
+    _text,
+)
 from dotmac_connector_nira.epp import (
     EPP_NS,
     EppProtocolError,
@@ -47,14 +58,9 @@ __all__ = ["NiraPollHandler", "MESSAGE_CAPABILITY"]
 
 MESSAGE_CAPABILITY: Final = "registry.message.v1"
 
-#: Bound on how many messages one poll pass drains, so a large backlog is
-#: worked in bounded batches rather than one unbounded session. The engine
-#: schedules the next pass; this is not a retry loop.
-_MAX_PER_PASS: Final = 50
-
 
 class NiraPollHandler:
-    """Reads and acks the registry message queue for `registry.message.v1`."""
+    """Read one new head and ack only an earlier durably persisted head."""
 
     def poll(
         self,
@@ -70,7 +76,7 @@ class NiraPollHandler:
         connect_timeout = _num(config.get("connect_timeout"))
         read_timeout = _num(config.get("read_timeout"))
         if (
-            host is None
+            host not in ALLOWED_EGRESS_HOSTS
             or not isinstance(port, int)
             or isinstance(port, bool)
             or clid is None
@@ -78,53 +84,68 @@ class NiraPollHandler:
             or connect_timeout is None
             or read_timeout is None
         ):
-            # A misconfigured poll returns no events and does not advance the
-            # cursor: nothing was read, so nothing may be marked read.
-            return (), cursor
+            raise EppProtocolError("poll configuration or required material is invalid")
 
         session = EppSession(
             host,
             port,
+            client_pem=_material(secrets, CLIENT_PEM),
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
         )
-        events: list[InboundEvent] = []
-        last_acked = cursor
         try:
             session.connect()
             login = session.request(frames.login(clid, pw, cltrid="poll-login"))
             if classify_result(login.code) != "ok":
+                raise EppProtocolError(
+                    f"registry refused poll login with EPP {login.code}"
+                )
+
+            head = _read_head(session)
+            if head is None:
                 return (), cursor
-            for _ in range(_MAX_PER_PASS):
-                res = session.request(frames.poll_request(cltrid="poll-req"))
-                poll_status = classify_result(res.code)
-                if poll_status == "ok_no_messages" and res.code == 1300:
-                    break  # queue empty
-                if poll_status not in ("ok", "ok_no_messages"):
-                    break  # registry fault; stop, keep the cursor we have
-                parsed = _parse_message(res.raw)
-                if parsed is None:
-                    break
-                msg_id, event = parsed
-                events.append(event)
+
+            msg_id, event = head
+            if cursor is not None and msg_id == cursor:
+                # The input cursor is durable Integration state from the prior
+                # call. Equality with the live head is the only proof that this
+                # exact message is safe to remove from the provider queue.
                 ack = session.request(frames.poll_ack(msg_id, cltrid="poll-ack"))
                 if classify_result(ack.code) not in ("ok", "ok_no_messages"):
-                    # Could not dequeue: do NOT advance past it. The event is
-                    # already returned; the engine's idempotency absorbs the
-                    # re-read next pass.
-                    break
-                last_acked = msg_id
-        except (EppTransportError, EppProtocolError):
-            # Return whatever we fully acked; the cursor only advances for
-            # messages the registry confirmed dequeued.
-            pass
+                    raise EppProtocolError("registry refused the poll acknowledgement")
+
+                # Only after the durable predecessor is gone may one new head
+                # be returned. It remains unacked until its returned cursor is
+                # committed and supplied on a later call.
+                head = _read_head(session)
+                if head is None:
+                    return (), cursor
+                msg_id, event = head
+
+            # A different head means an earlier ambiguous ack already took
+            # effect. Never ack the different id using a stale cursor: return
+            # it for Integration to persist first.
+            return (event,), msg_id
         finally:
             try:
                 session.request(frames.logout(cltrid="poll-logout"))
             except (EppTransportError, EppProtocolError):
                 pass
             session.close()
-        return tuple(events), last_acked
+
+
+def _read_head(session: EppSession) -> tuple[str, InboundEvent] | None:
+    """Read, but never acknowledge, the current queue head."""
+    result = session.request(frames.poll_request(cltrid="poll-req"))
+    status = classify_result(result.code)
+    if status == "ok_no_messages" and result.code == 1300:
+        return None
+    if status not in ("ok", "ok_no_messages"):
+        raise EppProtocolError("registry refused the poll request")
+    parsed = _parse_message(result.raw)
+    if parsed is None:
+        raise EppProtocolError("poll response carries no queue message")
+    return parsed
 
 
 def _parse_message(xml: str) -> tuple[str, InboundEvent] | None:
@@ -139,12 +160,13 @@ def _parse_message(xml: str) -> tuple[str, InboundEvent] | None:
     msg_id = msgq.get("id")
     if not msg_id:
         return None
-    # The message body is registry-defined; we carry it verbatim as transport
-    # evidence rather than interpreting it. The owning application classifies
-    # the observation against its own contract.
+    # The message body and structured result are registry-defined. Preserve the
+    # serialized subtree as transport evidence rather than interpreting it: a
+    # later durable-cursor call may delete the provider's only copy.
     body = msgq.find(f"{{{EPP_NS}}}msg")
     text = "".join(body.itertext()).strip() if body is not None else ""
     resdata = root.find(f"{{{EPP_NS}}}response/{{{EPP_NS}}}resData")
+    resdata_xml = tostring(resdata, encoding="unicode") if resdata is not None else None
     event = InboundEvent(
         provider_event_id=f"nira-msg:{msg_id}",
         event_type=MESSAGE_CAPABILITY,
@@ -153,7 +175,10 @@ def _parse_message(xml: str) -> tuple[str, InboundEvent] | None:
             "registry_message_id": msg_id,
             "message_text": text,
             "has_structured_data": resdata is not None,
-            "transport_evidence": {"source": "epp_poll"},
+            "transport_evidence": {
+                "source": "epp_poll",
+                "res_data_xml": resdata_xml,
+            },
         },
         disposition=InboundDisposition.DELIVER,
     )

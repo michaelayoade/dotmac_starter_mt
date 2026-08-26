@@ -70,8 +70,11 @@ name: Release connector
 # the second upload can fail with the first already public.
 #
 # `connector` is an exact `choice`, kept byte-for-byte in sync with the
-# allowlist by `tests/architecture/test_connector_release_policy.py`. The
-# enforced layer remains `resolve`; the UI is a convenience, not the lock.
+# release-enabled subset of the allowlist by
+# `tests/architecture/test_connector_release_policy.py`. A held-back package
+# remains available to development composition but is neither selectable here
+# nor accepted by `resolve`. The enforced layer remains `resolve`; the UI is a
+# convenience, not the lock.
 #
 # Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
 # environment secret whose canonical source is OpenBao
@@ -90,7 +93,6 @@ on:
           - dotmac-connector-linkedin
           - dotmac-connector-meta-social
           - dotmac-connector-mono
-          - dotmac-connector-nira
           - dotmac-connector-paystack
           - dotmac-connector-remita
           - dotmac-connector-whatsapp
@@ -134,8 +136,9 @@ jobs:
       # stateful-only facts or missing any required field, a package outside
       # `packages/dotmac-connector-`, a dossier whose classification is wrong, an
       # entry point count other than one, a connector_key that disagrees with the
-      # registration, and an `integration_floor` naming a version nobody
-      # published. Everything after this step uses only its output.
+      # registration, an entry explicitly held back by `release_enabled: false`,
+      # and an `integration_floor` naming a version nobody published. Everything
+      # after this step uses only its output.
       #
       # `git tag` needs the full history fetched above: the floor check asks
       # whether the pinned dotmac-integration release was ever verified and

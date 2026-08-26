@@ -25,7 +25,7 @@ import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec B405 - DTD gate below is tested
 
 __all__ = [
     "EppError",
@@ -72,7 +72,7 @@ def safe_fromstring(xml: str) -> ET.Element:
     """
     if _DOCTYPE_RE.search(xml):
         raise EppProtocolError("DTD/DOCTYPE is not permitted in an EPP frame")
-    return ET.fromstring(xml)  # noqa: S314 (DTD refused above; see docstring)
+    return ET.fromstring(xml)  # nosec B314  # noqa: S314 (DTD refused above)
 
 
 #: A document type declaration. A DOCTYPE is only legal in the prolog, and a
@@ -88,9 +88,10 @@ class EppError(Exception):
 class EppTransportError(EppError):
     """The socket failed: connect, TLS, or a truncated/oversized frame.
 
-    Always a candidate for retry — the command may never have reached the
-    registry. Classification into the engine's ``RETRYABLE`` is the caller's;
-    this layer only names what went wrong on the wire.
+    Retry safety depends on WHEN it failed. A connect/login failure precedes a
+    business effect and may be retried; a failure while sending or reading the
+    business command is ambiguous because the registry may already have
+    committed it. The delivery adapter owns that phase-aware classification.
     """
 
 
@@ -122,7 +123,7 @@ def classify_result(code: int) -> str:
     table rather than scattered integer comparisons. The engine never sees
     these strings; it sees the ``Outcome`` the handler builds from them.
     """
-    if code in (1000,):
+    if code in (1000, 1500):  # ordinary success / successful session-ending logout
         return "ok"
     if code in (1001,):
         return "pending"  # accepted, action completes asynchronously
@@ -318,8 +319,8 @@ def declared_services(greeting_xml: str) -> Mapping[str, tuple[str, ...]]:
     """Extract the objects and extensions a greeting declares.
 
     Used by ``validate_connection`` to confirm the registry offers what the
-    connector needs (domain/host/contact objects, the fee and secDNS
-    extensions) before an installation is ever enabled. Returns a plain mapping
+    connector needs (domain/host/contact objects and the fee extension) before
+    an installation is ever enabled. Returns a plain mapping
     so the diagnostic layer decides sufficiency — this function only reads.
     """
     try:
@@ -335,9 +336,7 @@ def declared_services(greeting_xml: str) -> Mapping[str, tuple[str, ...]]:
     ext_menu = svc.find(f"{{{EPP_NS}}}svcExtension")
     extensions = (
         tuple(
-            el.text or ""
-            for el in ext_menu.findall(f"{{{EPP_NS}}}extURI")
-            if el.text
+            el.text or "" for el in ext_menu.findall(f"{{{EPP_NS}}}extURI") if el.text
         )
         if ext_menu is not None
         else ()

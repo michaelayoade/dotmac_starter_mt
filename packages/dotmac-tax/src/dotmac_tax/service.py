@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from dotmac_kernel.money import Currency, Money
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_tax.contracts import (
@@ -1195,19 +1196,56 @@ def ensure_tax_authority(
         )
     )
     if existing is not None:
-        contract = _authority_contract(existing)
-        if (
-            contract.name,
-            contract.authority_level_code,
-            contract.status,
-        ) != (name, authority_level_code, "active"):
-            raise TaxConflict(
-                f"tax authority {code} exists with different current content"
+        return _exact_authority_replay(
+            existing,
+            code=code,
+            name=name,
+            authority_level_code=authority_level_code,
+        )
+
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row = create_tax_authority(db, tenant_id=tenant_id, command=command)
+    except (IntegrityError, TaxConflict) as exc:
+        winner = db.scalar(
+            select(TaxAuthority).where(
+                TaxAuthority.tenant_id == tenant_id,
+                TaxAuthority.code == code,
             )
-        return contract
-    return _authority_contract(
-        create_tax_authority(db, tenant_id=tenant_id, command=command)
-    )
+        )
+        if winner is None:
+            if isinstance(exc, TaxConflict):
+                raise
+            raise TaxConflict(f"tax authority {code} identity conflicts") from exc
+        try:
+            return _exact_authority_replay(
+                winner,
+                code=code,
+                name=name,
+                authority_level_code=authority_level_code,
+            )
+        except TaxConflict as conflict:
+            raise conflict from exc
+    return _authority_contract(row)
+
+
+def _exact_authority_replay(
+    row: TaxAuthority,
+    *,
+    code: str,
+    name: str,
+    authority_level_code: str | None,
+) -> TaxAuthorityV1:
+    contract = _authority_contract(row)
+    if (
+        contract.name,
+        contract.authority_level_code,
+        contract.status,
+    ) != (name, authority_level_code, "active"):
+        raise TaxConflict(f"tax authority {code} exists with different current content")
+    return contract
 
 
 def ensure_tax_jurisdiction(
@@ -1228,29 +1266,72 @@ def ensure_tax_jurisdiction(
         )
     )
     if existing is not None:
-        contract = _jurisdiction_contract(existing)
-        if (
-            contract.authority_id,
-            contract.name,
-            contract.country_code,
-            contract.subdivision_code,
-            contract.currency,
-            contract.status,
-        ) != (
-            command.authority_id,
-            name,
-            country_code,
-            subdivision_code,
-            command.currency,
-            "active",
-        ):
-            raise TaxConflict(
-                f"tax jurisdiction {code} exists with different current content"
+        return _exact_jurisdiction_replay(
+            existing,
+            command=command,
+            code=code,
+            name=name,
+            country_code=country_code,
+            subdivision_code=subdivision_code,
+        )
+
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row = create_tax_jurisdiction(db, tenant_id=tenant_id, command=command)
+    except IntegrityError as exc:
+        winner = db.scalar(
+            select(TaxJurisdiction).where(
+                TaxJurisdiction.tenant_id == tenant_id,
+                TaxJurisdiction.code == code,
             )
-        return contract
-    return _jurisdiction_contract(
-        create_tax_jurisdiction(db, tenant_id=tenant_id, command=command)
-    )
+        )
+        if winner is None:
+            raise TaxConflict(f"tax jurisdiction {code} identity conflicts") from exc
+        try:
+            return _exact_jurisdiction_replay(
+                winner,
+                command=command,
+                code=code,
+                name=name,
+                country_code=country_code,
+                subdivision_code=subdivision_code,
+            )
+        except TaxConflict as conflict:
+            raise conflict from exc
+    return _jurisdiction_contract(row)
+
+
+def _exact_jurisdiction_replay(
+    row: TaxJurisdiction,
+    *,
+    command: TaxJurisdictionInput,
+    code: str,
+    name: str,
+    country_code: str,
+    subdivision_code: str | None,
+) -> TaxJurisdictionV1:
+    contract = _jurisdiction_contract(row)
+    if (
+        contract.authority_id,
+        contract.name,
+        contract.country_code,
+        contract.subdivision_code,
+        contract.currency,
+        contract.status,
+    ) != (
+        command.authority_id,
+        name,
+        country_code,
+        subdivision_code,
+        command.currency,
+        "active",
+    ):
+        raise TaxConflict(
+            f"tax jurisdiction {code} exists with different current content"
+        )
+    return contract
 
 
 def ensure_tax_code(
@@ -1277,33 +1358,74 @@ def ensure_tax_code(
         )
     )
     if existing is not None:
-        contract = _code_contract(existing)
-        if (
-            contract.name,
-            contract.tax_kind_code,
-            contract.description,
-            contract.status,
-        ) != (
-            normalized_name,
-            normalized_kind,
-            normalized_description,
-            "active",
-        ):
-            raise TaxConflict(
-                f"tax code {normalized_code} exists with different current content"
-            )
-        return contract
-    return _code_contract(
-        create_tax_code(
-            db,
-            tenant_id=tenant_id,
-            jurisdiction_id=jurisdiction_id,
-            code=code,
-            name=name,
-            tax_kind_code=tax_kind_code,
-            description=description,
+        return _exact_code_replay(
+            existing,
+            normalized_code=normalized_code,
+            normalized_name=normalized_name,
+            normalized_kind=normalized_kind,
+            normalized_description=normalized_description,
         )
-    )
+
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row = create_tax_code(
+                db,
+                tenant_id=tenant_id,
+                jurisdiction_id=jurisdiction_id,
+                code=code,
+                name=name,
+                tax_kind_code=tax_kind_code,
+                description=description,
+            )
+    except IntegrityError as exc:
+        winner = db.scalar(
+            select(TaxCode).where(
+                TaxCode.tenant_id == tenant_id,
+                TaxCode.jurisdiction_id == jurisdiction_id,
+                TaxCode.code == normalized_code,
+            )
+        )
+        if winner is None:
+            raise TaxConflict(f"tax code {normalized_code} identity conflicts") from exc
+        try:
+            return _exact_code_replay(
+                winner,
+                normalized_code=normalized_code,
+                normalized_name=normalized_name,
+                normalized_kind=normalized_kind,
+                normalized_description=normalized_description,
+            )
+        except TaxConflict as conflict:
+            raise conflict from exc
+    return _code_contract(row)
+
+
+def _exact_code_replay(
+    row: TaxCode,
+    *,
+    normalized_code: str,
+    normalized_name: str,
+    normalized_kind: str,
+    normalized_description: str | None,
+) -> TaxCodeV1:
+    contract = _code_contract(row)
+    if (
+        contract.name,
+        contract.tax_kind_code,
+        contract.description,
+        contract.status,
+    ) != (
+        normalized_name,
+        normalized_kind,
+        normalized_description,
+        "active",
+    ):
+        raise TaxConflict(
+            f"tax code {normalized_code} exists with different current content"
+        )
+    return contract
 
 
 def _rule_command_content(command: TaxRuleInput) -> tuple[object, ...]:
@@ -1373,15 +1495,50 @@ def ensure_tax_rule(
         )
     )
     if existing is not None:
-        contract = _rule_contract(db, tenant_id=tenant_id, row=existing)
-        if _rule_contract_content(contract) != _rule_command_content(command):
-            raise TaxConflict("tax rule version exists with different current content")
-        return contract
-    return _rule_contract(
-        db,
-        tenant_id=tenant_id,
-        row=publish_tax_rule(db, tenant_id=tenant_id, command=command),
-    )
+        return _exact_rule_replay(
+            db, tenant_id=tenant_id, row=existing, command=command
+        )
+
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row = publish_tax_rule(db, tenant_id=tenant_id, command=command)
+    except (IntegrityError, TaxConflict) as exc:
+        winner = db.scalar(
+            select(TaxRule).where(
+                TaxRule.tenant_id == tenant_id,
+                TaxRule.tax_code_id == command.tax_code_id,
+                TaxRule.version == command.version,
+            )
+        )
+        if winner is None:
+            if isinstance(exc, TaxConflict):
+                raise
+            raise TaxConflict("tax rule version identity conflicts") from exc
+        try:
+            return _exact_rule_replay(
+                db,
+                tenant_id=tenant_id,
+                row=winner,
+                command=command,
+            )
+        except TaxConflict as conflict:
+            raise conflict from exc
+    return _rule_contract(db, tenant_id=tenant_id, row=row)
+
+
+def _exact_rule_replay(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    row: TaxRule,
+    command: TaxRuleInput,
+) -> TaxRuleV1:
+    contract = _rule_contract(db, tenant_id=tenant_id, row=row)
+    if _rule_contract_content(contract) != _rule_command_content(command):
+        raise TaxConflict("tax rule version exists with different current content")
+    return contract
 
 
 def _classification_command_content(
@@ -1433,6 +1590,21 @@ def _classification_contract_content(
     )
 
 
+def _exact_classification_replay(
+    row: TaxSubjectClassification,
+    *,
+    expected: tuple[object, ...],
+    identity: str,
+) -> TaxSubjectClassificationV1:
+    contract = _classification_contract(row)
+    if _classification_contract_content(contract) != expected:
+        raise TaxConflict(
+            f"tax classification {identity} identity exists with different "
+            "current content"
+        )
+    return contract
+
+
 def ensure_tax_subject_classification(
     db: Session,
     *,
@@ -1477,13 +1649,11 @@ def ensure_tax_subject_classification(
         )
     )
     if source_match is not None:
-        contract = _classification_contract(source_match)
-        if _classification_contract_content(contract) != expected:
-            raise TaxConflict(
-                "tax classification source identity exists with different "
-                "current content"
-            )
-        return contract
+        return _exact_classification_replay(
+            source_match,
+            expected=expected,
+            identity="source",
+        )
     version_match = db.scalar(
         select(TaxSubjectClassification).where(
             TaxSubjectClassification.tenant_id == tenant_id,
@@ -1494,19 +1664,59 @@ def ensure_tax_subject_classification(
         )
     )
     if version_match is not None:
-        contract = _classification_contract(version_match)
-        if _classification_contract_content(contract) != expected:
-            raise TaxConflict(
-                "tax classification version exists with different current content"
-            )
-        return contract
-    return _classification_contract(
-        publish_tax_subject_classification(
-            db,
-            tenant_id=tenant_id,
-            command=command,
+        return _exact_classification_replay(
+            version_match,
+            expected=expected,
+            identity="version",
         )
-    )
+
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row = publish_tax_subject_classification(
+                db,
+                tenant_id=tenant_id,
+                command=command,
+            )
+    except (IntegrityError, TaxConflict) as exc:
+        source_winner = db.scalar(
+            select(TaxSubjectClassification).where(
+                TaxSubjectClassification.tenant_id == tenant_id,
+                TaxSubjectClassification.source_ref == source_ref,
+                TaxSubjectClassification.source_version == source_version,
+            )
+        )
+        version_winner = db.scalar(
+            select(TaxSubjectClassification).where(
+                TaxSubjectClassification.tenant_id == tenant_id,
+                TaxSubjectClassification.tax_code_id == command.tax_code_id,
+                TaxSubjectClassification.subject_kind == command.subject_kind,
+                TaxSubjectClassification.subject_ref == subject_ref,
+                TaxSubjectClassification.version == command.version,
+            )
+        )
+        if (
+            source_winner is not None
+            and version_winner is not None
+            and source_winner.id == version_winner.id
+        ):
+            contract = _classification_contract(source_winner)
+            if _classification_contract_content(contract) == expected:
+                return contract
+        if isinstance(exc, TaxConflict):
+            raise
+        if source_winner is None or version_winner is None:
+            raise TaxConflict("tax classification identity conflicts") from exc
+        if source_winner.id != version_winner.id:
+            raise TaxConflict(
+                "tax classification identities resolve to different records"
+            ) from exc
+        raise TaxConflict(
+            "tax classification source and version identity exists with different "
+            "current content"
+        ) from exc
+    return _classification_contract(row)
 
 
 def _optional_match(configured: str | None, observed: str | None) -> bool:

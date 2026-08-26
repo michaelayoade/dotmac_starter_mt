@@ -105,6 +105,7 @@ PRIVATE_ENGINE_MARKERS: Final = ("retry", "backoff", "checkpoint", "dead_letter"
 #: and starts being treated as something else.
 REQUIRED_FIELDS: Final = (
     "package_dir",
+    "release_enabled",
     "import_name",
     "plugin_attr",
     "connector_key",
@@ -187,6 +188,21 @@ def resolve(distribution: str, *, tags: set[str] | None = None) -> dict:
             f"{distribution}: connector entry is missing {', '.join(missing)}. "
             "Every field is required; an absent one would be read downstream as "
             "'unknown' rather than 'refused'."
+        )
+
+    release_enabled = entry["release_enabled"]
+    if not isinstance(release_enabled, bool):
+        raise ReleaseRefused(
+            f"{distribution}: release_enabled must be a boolean, got "
+            f"{release_enabled!r}. A release-control value must fail closed "
+            "rather than depend on truthiness."
+        )
+    if not release_enabled:
+        raise ReleaseRefused(
+            f"{distribution}: release_enabled is false — this connector is "
+            "HELD BACK and may be composed for development, but it cannot be "
+            "published. Change the reviewed release policy only after its "
+            "recorded adoption and provider-runtime gates are satisfied."
         )
 
     # First-party connectors live under Starter `packages/` with a name that

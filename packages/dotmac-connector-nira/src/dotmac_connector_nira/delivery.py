@@ -47,12 +47,16 @@ __all__ = [
     "OUTBOUND_CONFIG_SCHEMA",
     "EPP_PASSWORD",
     "CLIENT_PEM",
+    "ALLOWED_EGRESS_HOSTS",
+    "OTE_HOST",
     "NiraDeliveryHandler",
     "OperationContractError",
 ]
 
 EPP_PASSWORD: Final = "epp_password"
 CLIENT_PEM: Final = "client_pem"
+OTE_HOST: Final = "ote.registry.ng"
+ALLOWED_EGRESS_HOSTS: Final = (OTE_HOST,)
 
 AVAILABILITY_CAPABILITY: Final = "registry.availability.v1"
 DOMAIN_INFO_CAPABILITY: Final = "registry.domain_info.v1"
@@ -128,7 +132,7 @@ OUTBOUND_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "additionalProperties": False,
     "required": ["host", "port", "clid", "connect_timeout", "read_timeout"],
     "properties": {
-        "host": {"type": "string", "minLength": 1},
+        "host": {"type": "string", "enum": list(ALLOWED_EGRESS_HOSTS)},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
         "clid": {"type": "string", "minLength": 1},
         "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
@@ -142,9 +146,12 @@ OUTBOUND_CONFIG_SCHEMA: Final[dict[str, object]] = {
 _STATUS_BY_TOKEN: Final[Mapping[str, OutcomeStatus]] = MappingProxyType(
     {
         "ok": OutcomeStatus.SUCCEEDED,
-        "ok_no_messages": OutcomeStatus.SUCCEEDED,
-        "object_exists": OutcomeStatus.SUCCEEDED,  # idempotent: already present
-        "object_absent": OutcomeStatus.SUCCEEDED,  # a valid check answer
+        "ok_no_messages": OutcomeStatus.RECONCILIATION_REQUIRED,
+        # Neither code proves identity or prior ownership. A create that finds
+        # an object may have found somebody else's object; an absent object may
+        # contradict local state. The owning domain must reconcile both.
+        "object_exists": OutcomeStatus.RECONCILIATION_REQUIRED,
+        "object_absent": OutcomeStatus.RECONCILIATION_REQUIRED,
         "pending": OutcomeStatus.RECONCILIATION_REQUIRED,  # 1001 async completion
         "authorization": OutcomeStatus.TERMINAL,  # IP/creds — no retry helps
         "authentication": OutcomeStatus.TERMINAL,
@@ -152,6 +159,19 @@ _STATUS_BY_TOKEN: Final[Mapping[str, OutcomeStatus]] = MappingProxyType(
         "registry_failure": OutcomeStatus.RETRYABLE,  # transient registry fault
         "unknown": OutcomeStatus.RECONCILIATION_REQUIRED,
     }
+)
+
+_READ_OPERATIONS: Final = frozenset(
+    {
+        "domain_check",
+        "domain_info",
+        "domain_transfer_query",
+        "host_check",
+        "contact_check",
+    }
+)
+_TRANSFER_OPERATIONS: Final = frozenset(
+    {"request", "approve", "reject", "cancel", "query"}
 )
 
 
@@ -196,7 +216,20 @@ class NiraDeliveryHandler:
             frame = self._frame(operation, request.payload, cltrid)
         except OperationContractError as exc:
             return Outcome(status=OutcomeStatus.TERMINAL, error_code=str(exc))
-        return self._execute(frame, request.config, pw, cltrid)
+        result_operation = (
+            "domain_transfer_query"
+            if operation == "domain_transfer"
+            and _text(request.payload.get("transfer_op")) == "query"
+            else operation
+        )
+        return self._execute(
+            frame,
+            request.config,
+            pw,
+            _material(request.secrets, CLIENT_PEM),
+            cltrid,
+            result_operation,
+        )
 
     # -- payload -> frame ----------------------------------------------------
 
@@ -207,9 +240,7 @@ class NiraDeliveryHandler:
             raise OperationContractError("payload_missing_operation")
         return op
 
-    def _frame(
-        self, operation: str, payload: Mapping[str, object], cltrid: str
-    ) -> str:
+    def _frame(self, operation: str, payload: Mapping[str, object], cltrid: str) -> str:
         if operation == "domain_check":
             return frames.domain_check(
                 self._names(payload),
@@ -253,9 +284,12 @@ class NiraDeliveryHandler:
                 cltrid=cltrid,
             )
         if operation == "domain_transfer":
+            transfer_op = self._req_str(payload, "transfer_op")
+            if transfer_op not in _TRANSFER_OPERATIONS:
+                raise OperationContractError("payload_invalid_transfer_op")
             return frames.domain_transfer(
                 self._name(payload),
-                op=self._req_str(payload, "transfer_op"),
+                op=transfer_op,
                 auth_pw=self._req_str(payload, "auth_pw"),
                 period_years=_int(payload.get("period_years")),
                 cltrid=cltrid,
@@ -269,7 +303,9 @@ class NiraDeliveryHandler:
         command_frame: str,
         config: Mapping[str, object],
         pw: str,
+        client_pem: str | None,
         cltrid: str,
+        operation: str,
     ) -> Outcome:
         host = _text(config.get("host"))
         port = _int(config.get("port"))
@@ -278,57 +314,78 @@ class NiraDeliveryHandler:
             return Outcome(
                 status=OutcomeStatus.TERMINAL, error_code="config_incomplete"
             )
+        if host not in ALLOWED_EGRESS_HOSTS:
+            return Outcome(
+                status=OutcomeStatus.TERMINAL, error_code="egress_host_not_allowed"
+            )
         connect_timeout = _num(config.get("connect_timeout"))
         read_timeout = _num(config.get("read_timeout"))
         if connect_timeout is None or read_timeout is None:
-            return Outcome(
-                status=OutcomeStatus.TERMINAL, error_code="timeout_invalid"
-            )
+            return Outcome(status=OutcomeStatus.TERMINAL, error_code="timeout_invalid")
         session = EppSession(
             host,
             port,
-            client_pem=None,  # cert lives in secrets; wired by the plugin, not here
+            client_pem=client_pem,
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
         )
+        logged_in = False
         try:
-            session.connect()
-            login = session.request(
-                frames.login(clid, pw, cltrid=f"{cltrid}-login")
-            )
-            if classify_result(login.code) not in ("ok",):
-                return self._outcome(login)
-            result = session.request(command_frame)
-            return self._outcome(result)
-        except EppTransportError as exc:
-            # The command may never have reached the registry — retryable.
-            return Outcome(
-                status=OutcomeStatus.RETRYABLE,
-                error_code="epp_transport_error",
-                error_detail=str(exc)[:500],
-            )
-        except EppProtocolError as exc:
-            return Outcome(
-                status=OutcomeStatus.RECONCILIATION_REQUIRED,
-                error_code="epp_protocol_error",
-                error_detail=str(exc)[:500],
-            )
-        finally:
             try:
-                session.request(frames.logout(cltrid=f"{cltrid}-logout"))
-            except EppProtocolError:
-                pass
-            except EppTransportError:
-                pass
+                session.connect()
+                login = session.request(
+                    frames.login(clid, pw, cltrid=f"{cltrid}-login")
+                )
+            except (EppTransportError, EppProtocolError) as exc:
+                # No business command was attempted. Retrying a connection or
+                # login cannot duplicate the requested domain effect.
+                return Outcome(
+                    status=OutcomeStatus.RETRYABLE,
+                    error_code="epp_session_unavailable",
+                    error_detail=str(exc)[:500],
+                )
+            if classify_result(login.code) != "ok":
+                return self._outcome("login", login)
+            logged_in = True
+            try:
+                result = session.request(command_frame)
+            except (EppTransportError, EppProtocolError) as exc:
+                # The command bytes may already have reached the registry. A
+                # blind retry can double-create, renew or transfer; park it for
+                # an explicit info/query reconciliation instead.
+                return Outcome(
+                    status=OutcomeStatus.RECONCILIATION_REQUIRED,
+                    error_code="epp_command_outcome_unknown",
+                    error_detail=str(exc)[:500],
+                )
+            return self._outcome(operation, result)
+        finally:
+            if logged_in:
+                try:
+                    session.request(frames.logout(cltrid=f"{cltrid}-logout"))
+                except (EppProtocolError, EppTransportError):
+                    pass
             session.close()
 
     @staticmethod
-    def _outcome(result: EppResult) -> Outcome:
-        token = classify_result(result.code)
-        status = _STATUS_BY_TOKEN.get(token, OutcomeStatus.RECONCILIATION_REQUIRED)
+    def _outcome(operation: str, result: EppResult) -> Outcome:
+        classification = classify_result(result.code)
+        if classification == "ok" and operation in _READ_OPERATIONS:
+            # The connector has no authority to invent a domain result schema.
+            # Until the owning domain publishes one, a successful read is
+            # evidence to reconcile, not a falsely body-less success.
+            return Outcome(
+                status=OutcomeStatus.RECONCILIATION_REQUIRED,
+                error_code="domain_result_contract_unavailable",
+                error_detail=result.message[:500] or None,
+                provider_reference=f"epp:{result.code}",
+            )
+        status = _STATUS_BY_TOKEN.get(
+            classification, OutcomeStatus.RECONCILIATION_REQUIRED
+        )
         return Outcome(
             status=status,
-            error_code=None if status is OutcomeStatus.SUCCEEDED else token,
+            error_code=(None if status is OutcomeStatus.SUCCEEDED else classification),
             error_detail=result.message[:500] or None,
             provider_status_code=None,
             provider_reference=f"epp:{result.code}",
@@ -363,11 +420,7 @@ class NiraDeliveryHandler:
     def _contacts(raw: object) -> dict[str, str]:
         if not isinstance(raw, Mapping):
             return {}
-        return {
-            str(k): v
-            for k, v in raw.items()
-            if isinstance(v, str) and v.strip()
-        }
+        return {str(k): v for k, v in raw.items() if isinstance(v, str) and v.strip()}
 
     @staticmethod
     def _req_str(payload: Mapping[str, object], key: str) -> str:
