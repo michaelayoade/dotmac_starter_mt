@@ -243,6 +243,7 @@ dotmac-connector-flutterwave = { path = "packages/dotmac-connector-flutterwave",
 dotmac-connector-linkedin = { path = "packages/dotmac-connector-linkedin", develop = true }
 dotmac-connector-mono = { path = "packages/dotmac-connector-mono", develop = true }
 dotmac-connector-remita = { path = "packages/dotmac-connector-remita", develop = true }
+dotmac-connector-nira = { path = "packages/dotmac-connector-nira", develop = true }
 dotmac-app-sync = { path = "packages/dotmac-app-sync", develop = true }
 
 [tool.ruff]
@@ -457,6 +458,7 @@ root_packages = [
     "dotmac_connector_whatsapp",
     "dotmac_connector_meta_social",
     "dotmac_connector_paystack",
+    "dotmac_connector_nira",
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
@@ -777,7 +779,11 @@ type = "forbidden"
 # what is wrong). `dotmac_connector_paystack` joins it with the outbound
 # command slice, where the cost of importing a product is no longer a wrong
 # fact but somebody's money.
-source_modules = ["dotmac_connector_whatsapp", "dotmac_connector_paystack"]
+source_modules = [
+    "dotmac_connector_whatsapp",
+    "dotmac_connector_paystack",
+    "dotmac_connector_nira",
+]
 forbidden_modules = [
     "app",
     "dotmac_kernel",

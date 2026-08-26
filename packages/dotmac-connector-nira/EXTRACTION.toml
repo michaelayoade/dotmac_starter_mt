@@ -1,0 +1,28 @@
+schema_version = 1
+package = "dotmac-connector-nira"
+classification = "stateless-protocol-adapter"
+status = "in-progress"
+source_mode = "greenfield-after-inventory"
+
+owner = "NiRA .ng registry transport over CoCCA EPP in both directions: TLS framing (RFC 5734), login/logout session, the domain/host/contact check-create-info-renew-update-transfer command frames with fee-1.0 and secDNS-1.1 extensions, EPP result-code classification, and the registry message-queue poll that turns queued messages into typed observations."
+
+contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key nira. Serve registry.availability.v1, registry.domain_info.v1, registry.domain_register.v1, registry.domain_renew.v1, registry.domain_update.v1, registry.domain_transfer.v1, registry.host_provision.v1 and registry.contact_provision.v1 in DELIVERY, each capability mapped only to DELIVERY so a binding granted one command cannot issue another; and registry.message.v1 in POLL. Carry the engine's idempotency key as the EPP clTRID so a retried dispatch is a recognisable replay at the registry. Map each EPP result code to succeeded/reconciliation_required/retryable/terminal: 1000 and idempotent 2302/2303 succeed, 1001 is reconciliation_required, transport faults are retryable, and 2201/2202 (IP/credential) and 4xx client errors are terminal. Emit the registry's fee verbatim on availability; the owning application applies markup. On poll, return each queued message as a typed observation and advance the cursor only past messages the registry confirmed dequeued. Own no domain lifecycle decision, price or markup, contact/registrant identity, retry curve, checkpoint, outbox, row, session or product database; persist nothing, and never write an authoritative lifecycle field from a poll observation."
+
+# ── Greenfield, not ported ───────────────────────────────────────────────────
+#
+# No qualifying EPP/registrar implementation existed anywhere in the fleet at
+# inventory (measured across the ADR-0030 repositories, 2026-08-15). The wire
+# SHAPE is taken from the CoCCA reference module NiRA distributes to WHMCS
+# registrars (`cocca-whmcs-v9-2026-02-27.zip`), which is a documented registry
+# contract, not a Dotmac source. This distribution is therefore
+# greenfield-after-inventory against that external contract.
+#
+# ── One connector, one binding behind one contract ───────────────────────────
+#
+# The nine `registry.*` capabilities are provider-neutral contracts owned by the
+# domains application (greenfield per ADR-0030), not by this connector. A second
+# registry (a gTLD reseller platform) is a DIFFERENT connector implementing the
+# SAME contracts, selected by a capability binding — never a `.ng` variant of a
+# contract and never a provider name in the owning application.
+
+consumers = []  # dotmac-domains is greenfield; no runtime consumer yet.

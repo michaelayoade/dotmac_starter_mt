@@ -90,6 +90,7 @@ on:
           - dotmac-connector-linkedin
           - dotmac-connector-meta-social
           - dotmac-connector-mono
+          - dotmac-connector-nira
           - dotmac-connector-paystack
           - dotmac-connector-remita
           - dotmac-connector-whatsapp
