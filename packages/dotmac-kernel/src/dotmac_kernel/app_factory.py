@@ -57,6 +57,7 @@ from dotmac_kernel.outbox_event_types import (
     OutboxEventTypeRegistry,
     install_outbox_event_types,
 )
+from dotmac_kernel.permission_provisioning import PermissionPlan
 from dotmac_kernel.permissions import (
     PERMISSION_CODE_ATTR,
     PermissionCatalogue,
@@ -356,9 +357,7 @@ def _referenced_capabilities(app: FastAPI) -> list[tuple[str, str]]:
     return _referenced_codes(app, CAPABILITY_CODE_ATTR)
 
 
-def _validate_referenced_permissions(
-    app: FastAPI, catalogue: PermissionCatalogue
-) -> None:
+def _validate_referenced_permissions(app: FastAPI, plan: PermissionPlan) -> None:
     """Fail the BOOT when a mounted route requires a permission no installed
     module declares. Without this a typo'd code is invisible until the first
     request reaches that route — and then denies it, which reads as a
@@ -366,7 +365,7 @@ def _validate_referenced_permissions(
     undeclared = [
         (label, code)
         for label, code in _referenced_permissions(app)
-        if not catalogue.is_declared(code)
+        if not plan.is_declared(code)
     ]
     if undeclared:
         listed = ", ".join(f"{label} -> {code!r}" for label, code in undeclared)
@@ -530,6 +529,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # both are read at request/write time by code the mount produces.
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
+    # Storage-neutral and READ-ONLY. Product migrations may diff this plan
+    # against their own persistence schema; application startup never writes,
+    # creates a role, reactivates a permission, or changes authorization.
+    permission_plan = PermissionPlan.from_manifests(
+        manifests,
+        spec.role_grant_profiles,
+        spec.role_definitions,
+    )
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
     # Attribution: which applications this deployment accepts, and which one it
     # IS. Installed with the other declaration catalogues and for the same
@@ -654,6 +661,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # deployment profile permits.
     app.state.module_registry = registry
     app.state.module_inventory = registry.inventory(disabled)
+    app.state.permission_plan = permission_plan
 
     # FastAPI/Starlette runs the LAST added middleware first — order preserved
     # from the reference app (innermost CSRF → outermost SecurityHeaders).
@@ -757,7 +765,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     # AFTER mounting: every route that now exists must reference only declared
     # permission codes. Fails the boot, before the app is ever returned.
-    _validate_referenced_permissions(app, permission_catalogue)
+    _validate_referenced_permissions(app, permission_plan)
     _validate_referenced_capabilities(app, capability_catalogue)
     return app
 

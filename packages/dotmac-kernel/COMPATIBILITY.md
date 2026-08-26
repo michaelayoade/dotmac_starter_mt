@@ -202,6 +202,7 @@ Two rules travel with it:
 | `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
+| `dotmac_kernel.permission_provisioning` | `PERMISSION_PLAN_SCHEMA_VERSION`, `PermissionDefinition`, `RoleDefinition`, `RoleGrant`, `RoleGrantProfile`, `PermissionState`, `PermissionPlan`, `PermissionPlanDiff`, `PermissionPlanConflict`, `PermissionPlanError` (pure additive provisioning plan; also top-level) |
 | `dotmac_kernel.planes` | `ModulePlane`, `ModulePlaneSelection`, `ModulePlaneSelectionError`, `install_module_plane_selections`, `installed_module_plane_selections`, `selected_module_planes`, `supported_plane_sets`, `validate_module_plane_selections` (explicit per-module persistence-plane composition; ADR-0028) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `require_platform_web_auth`, `platform_auth_router`, `PLATFORM_AUDIENCE`, `PLATFORM_COOKIE`, `PLATFORM_LOGIN_PATH`, `PLATFORM_COOKIE_AUTHENTICATION` |
 | `dotmac_kernel.product_manifest` | `PRODUCT_MANIFEST_SCHEMA`, `ProductManifestSnapshot`, `ProductManifestError`, `ProductManifestDigestMismatchError` (canonical release-bound product/capability document; also top-level) |
@@ -586,6 +587,16 @@ real consumer together; an inert manifest field is not a compatibility surface.
   validation: a code declared by two modules raises `DuplicatePermissionError`.
   `require(code)` returns the declared spec or raises
   `UndeclaredPermissionError`; `is_declared`/`spec`/`owner`/`codes` read it.
+- **`PermissionPlan.from_manifests(manifests, profiles, roles)`** — compiles those
+  module-owned definitions separately from the assembly's `RoleDefinition`s
+  and versioned product-role baselines. Profiles may reference only declared
+  roles and permissions, two profiles may not own the same baseline grant, and
+  a permission with no baseline role is valid. The normalized document has a
+  schema-versioned SHA-256 digest. `diff(PermissionState(...))` returns only
+  permission, explicitly authorized role, and grant inserts. Existing
+  descriptions, operator grants, unknown permissions, roles, and links are
+  preserved; implicit missing roles and inactive desired state are conflicts.
+  There is deliberately no reactivation, update, revoke, rename, or delete.
 - **`AuditActionRegistry.from_manifests(manifests)`** — the same, for the
   free-text-no-longer `audit_events.action` vocabulary:
   `DuplicateAuditActionError` on two owners, `require(action)` raising
@@ -625,6 +636,15 @@ real consumer together; an inert manifest field is not a compatibility surface.
   business operation. A consumer that builds an app by hand (a test mounting a
   router on a bare `FastAPI()`) must install them itself, exactly as it must call
   `install_surface_globals`.
+
+`ProductAssemblySpec.role_definitions` and `role_grant_profiles` carry the
+assembly-owned role vocabulary and profiles.
+`create_app` compiles the installed manifests and those profiles, exposes the
+read-only result as `app.state.permission_plan`, and uses it for mounted-route
+declaredness validation. It performs no permission provisioning write. During
+the compatibility window, `authorize_party` continues to decide requests from
+`PermissionSpec.default_roles`; adding or omitting profiles therefore does not
+change authorization behavior by itself.
 
 **The consumers, which is why the fields exist at all:**
 
