@@ -1,12 +1,21 @@
 """One transaction authority (control-plane security Task 4).
 
-`dotmac_kernel/db.py` is the ONLY module that may construct DB sessions.
-Everything else receives a session at its boundary (`get_db` /
-`get_platform_db`, which own commit/rollback) and only mutates + flushes;
-expected conflicts use `conflict_savepoint`. `UnitOfWork` — a second,
-zero-consumer transaction authority — was DELETED this task (stronger SoT
-rule: zero consumers → delete), and this test keeps a second authority from
-ever growing back.
+`dotmac_kernel/session_runtime.py` and `dotmac_kernel/db.py` are the ONLY
+modules that may construct DB sessions. Everything else receives a session at
+its boundary (`get_db` / `get_platform_db`, which own commit/rollback) and only
+mutates + flushes; expected conflicts use `conflict_savepoint`. `UnitOfWork` —
+a second, zero-consumer transaction authority — was DELETED (stronger SoT rule:
+zero consumers → delete), and this test keeps a second authority from ever
+growing back.
+
+The pair is ONE authority, not two. `session_runtime` holds the implementation
+— the class a product instantiates with its own configuration — and `db` is the
+reference assembly's single instance of it, built from the kernel's `Settings`
+at import. Splitting them is what "build once, instantiate per product" costs:
+the behaviour has to live somewhere a second deployment can construct, and a
+module that constructs a class cannot also be forbidden from constructing its
+sessions. What the contract still forbids is a THIRD place — any other module
+growing its own factory — which is the regression this test exists for.
 
 AST-based, not string-matching (module control-plane directive standard):
 a comment or docstring mentioning `SessionLocal()` must not trip it, and a
@@ -36,8 +45,10 @@ _SCANNED_TREES = ((APP_ROOT, "app"), (KERNEL_ROOT, "dotmac_kernel"))
 # The session factories/constructors nobody outside dotmac_kernel/db.py may CALL.
 _FORBIDDEN_CALLS = {"SessionLocal", "PlatformSessionLocal", "sessionmaker", "Session"}
 
-# The one module that owns session construction.
-_AUTHORITY = "dotmac_kernel/db.py"
+# The modules that own session construction: the runtime class, and the
+# reference assembly's one instance of it. See the module docstring for why
+# this is one authority in two files rather than two authorities.
+_AUTHORITIES = frozenset({"dotmac_kernel/session_runtime.py", "dotmac_kernel/db.py"})
 
 # Explicit, justified exceptions to the CALL rule (module-path suffix →
 # reason). Additions require a matching justification in ARCHITECTURE.md's
@@ -99,7 +110,7 @@ def _iter_app_modules():
             if "__pycache__" in path.parts:
                 continue
             rel_path = f"{prefix}/" + str(path.relative_to(root)).replace("\\", "/")
-            if rel_path == _AUTHORITY:
+            if rel_path in _AUTHORITIES:
                 continue
             if rel_path.startswith(_UNSCANNED_PREFIXES):
                 continue
@@ -112,7 +123,8 @@ def test_only_core_db_constructs_sessions() -> None:
         violations.extend(find_session_authority_violations(rel_path, source))
     assert not violations, (
         "Session-construction outside the one transaction authority "
-        "(dotmac_kernel/db.py):\n" + "\n".join(violations)
+        "(dotmac_kernel/session_runtime.py + dotmac_kernel/db.py):\n"
+        + "\n".join(violations)
     )
 
 
@@ -145,6 +157,21 @@ def _resolve(rel_path: str) -> Path:
         if rel_path.startswith(f"{prefix}/"):
             return root / rel_path[len(prefix) + 1 :]
     raise AssertionError(f"unknown tree for {rel_path}")
+
+
+def test_every_declared_authority_still_exists() -> None:
+    """A renamed or deleted authority must fail loudly, not silently widen.
+
+    `_AUTHORITIES` is skipped during the audit, so a stale entry is a module
+    path that excuses nothing and a real authority that is no longer excused —
+    or worse, a file that has moved and is now being scanned as if it were
+    ordinary code. Either way the contract stops meaning what it says.
+    """
+    for rel_path in _AUTHORITIES:
+        assert _resolve(rel_path).exists(), (
+            f"{rel_path} is declared a session authority but does not exist. "
+            "Update _AUTHORITIES to the module that now constructs sessions."
+        )
 
 
 def test_allowlist_is_still_needed() -> None:

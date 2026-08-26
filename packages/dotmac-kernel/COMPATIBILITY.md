@@ -94,6 +94,46 @@ and may change or disappear without a deprecation cycle**.
    receive a caller-owned `Session` remain import- and invocation-safe: they do
    not enter that eager owner merely to open a SAVEPOINT.
 
+### Owning your own database runtime
+
+`dotmac_kernel.db` is the reference assembly's runtime, not the only one a
+product may have. It is one instance of
+`dotmac_kernel.session_runtime.DatabaseRuntime`, and a product that resolves
+its own DSNs, holds its own credentials or answers to its own tenancy table
+constructs its own instead:
+
+```python
+from dotmac_kernel.session_runtime import DatabaseRuntime
+
+db_runtime = DatabaseRuntime.from_urls(
+    database_url=my_settings.database_url,
+    tenant_lookup=resolve_my_organization,        # your tenancy table
+    legacy_tenant_settings=("app.current_org_id",),  # shrink-only, see below
+)
+```
+
+`session_runtime` imports no settings and constructs no engine of its own, so
+importing it costs nothing and requires no `DATABASE_URL`; only entering a
+runtime you built does. It is also framework-free — `request_session` takes a
+tenant id rather than a request, and the four-line web adapter that reads
+tenancy off request state stays yours (`dotmac_kernel.db.get_db` is the
+reference one).
+
+Two rules travel with it:
+
+- **`app.current_tenant` is not a knob.** Every composed module's RLS policy
+  evaluates `public.app_current_tenant_id()`, which reads that exact setting;
+  the prerequisite verifier pins the semantics. A runtime priming a different
+  name yields a database where every policy silently matches nothing, and RLS
+  fails CLOSED, so the symptom is zero rows rather than an error.
+  `legacy_tenant_settings` primes ADDITIONAL names alongside it, never instead
+  of it.
+- **`legacy_tenant_settings` is a ratchet, not a feature.** It exists for
+  tables a product has not yet moved onto a composed module lineage. Expose it
+  through the `legacy_tenant_settings` property and assert in your own
+  architecture test that the count only ever falls; empty is the finished
+  state.
+
 ### Supported modules and their public names
 
 | Module | Public names |
@@ -111,7 +151,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.consent_models` | `REASON_BOUNCE`, `REASON_COMPLAINT`, `REASON_ERASURE`, `REASON_MANUAL`, `REASON_UNSUBSCRIBE`, `SCOPE_ALL`, `SCOPE_MARKETING`, `SUPPRESSION_REASONS`, `SUPPRESSION_SCOPES`, `CommunicationSuppression` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
-| `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
+| `dotmac_kernel.session_runtime` | `DatabaseRuntime`, `TenantLookup`, `CANONICAL_TENANT_SETTING` |
+| `dotmac_kernel.db` | `runtime`, `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_scope`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
 | `dotmac_kernel.transactions` | `conflict_savepoint` — engine-free SAVEPOINT mechanics for services that receive a caller-owned session; the caller's boundary still owns the outer commit or rollback |
 | `dotmac_kernel.delivery` | `DeliveryError`, `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
 | `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |

@@ -335,6 +335,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.query",
         "dotmac_kernel.security",
+        "dotmac_kernel.session_runtime",
         "dotmac_kernel.setting_domains",
         "dotmac_kernel.setting_scopes",
         "dotmac_kernel.setting_value_types",

@@ -407,7 +407,11 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 6. Import-linter independence contract stays in byte-for-byte sync with
    `FEATURE_MODULES` (`test_feature_manifests.py`).
 7. No `payload: Any` in feature services (`test_service_typing.py`).
-8. `dotmac_kernel/db.py` is the one transaction authority
+8. One transaction authority, in two files: `dotmac_kernel/session_runtime.py`
+   holds the instantiable `DatabaseRuntime`, `dotmac_kernel/db.py` is the
+   reference assembly's single instance of it. A product supplies its own
+   configuration, credentials and tenant identity by constructing its own —
+   never by growing a third session factory
    (`test_session_authority.py`; ARCHITECTURE.md § "Transaction authority").
 9. Feature services never call `db.rollback()` — use `conflict_savepoint`,
    mutation INSIDE the `with` block (`test_no_feature_rollback.py`;
