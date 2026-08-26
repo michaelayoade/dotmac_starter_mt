@@ -6,6 +6,24 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a98 — 2026-08-26
+
+### Added
+
+- `dotmac_kernel.transactions` — the public engine-free
+  `conflict_savepoint` surface for services that receive an application's
+  caller-owned session. It does not import settings, construct an engine, or
+  own the outer commit/rollback; `dotmac_kernel.db` retains its compatibility
+  re-export for reference-assembly callers.
+
+### Fixed
+
+- `dotmac_kernel.fingerprints` is now registered in `SUPPORTED_MODULES`,
+  reconciling the machine-readable public surface with the compatibility
+  contract published when the persistence-free module was introduced in a88.
+  A fresh-process canary proves it imports without loading the kernel database
+  runtime or the persistence-backed idempotency ledger.
+
 ## 0.1.0a97 — 2026-08-25
 
 ### Added
