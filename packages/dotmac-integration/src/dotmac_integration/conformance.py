@@ -363,6 +363,7 @@ class FakePlugin:
             status=ProvisionResultStatus.SUCCEEDED
         )
     )
+    provisioning_plan_result: ProvisionPlanResult | None = None
     provisioning_seen: list[object] = field(default_factory=list)
     provisioning_raises: BaseException | None = None
     provisioning_handler_wrong_shape: bool = False
@@ -441,6 +442,8 @@ class FakePlugin:
 
             def plan(self, request: ProvisionPlanRequest) -> ProvisionPlanResult:
                 self._record(request)
+                if fake.provisioning_plan_result is not None:
+                    return fake.provisioning_plan_result
                 return ProvisionPlanResult(
                     plan_hash=request.plan_hash,
                     steps=tuple(request.steps),
@@ -460,6 +463,8 @@ class FakePlugin:
                     return ProvisioningResult(
                         status=ProvisionResultStatus.CANCELLED,
                         provider_operation_ref=request.provider_operation_ref,
+                        evidence=dict(fake.provisioning_result.evidence),
+                        error_code=fake.provisioning_result.error_code,
                     )
                 return fake.provisioning_result
 

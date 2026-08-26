@@ -1259,6 +1259,7 @@ def _plan_and_build_approved_apply(  # type: ignore[no-untyped-def]
         deployment_ref=deployment_ref,
         request_body_digest=request_body_digest,
         capability_id=FAKE_CAPABILITY,
+        capability_instance_ref=binding.capability_instance_ref,
         binding_id=binding.id,
         config_digest=config_digest,
         plan_hash=plan_hash,
@@ -1334,6 +1335,7 @@ def _plan_and_build_approved_apply(  # type: ignore[no-untyped-def]
         profile_content_hash="sha256:" + "7" * 64,
         command_schema_version="integrator.provisioning-command.v1",
         capability_id=FAKE_CAPABILITY,
+        capability_instance_ref=binding.capability_instance_ref,
         capability_owner_code=contract.owner_code,
         capability_code=contract.capability_code,
         capability_schema_version=contract.schema_version,
@@ -1424,7 +1426,11 @@ def _seed_two_step_provisioning(
         )
         enable(db, installation, registry=registry)
         binding = add_binding(
-            db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+            db,
+            installation,
+            registry=registry,
+            capability_id=FAKE_CAPABILITY,
+            capability_instance_ref="primary",
         )
         set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
         plan_hash = "sha256:" + "1" * 64
@@ -1581,6 +1587,7 @@ def test_cross_binding_apply_locks_and_accepts_exact_succeeded_receipt(
             installation_b,
             registry=registry,
             capability_id=FAKE_CAPABILITY,
+            capability_instance_ref="secondary",
         )
         set_binding_enabled(
             db,

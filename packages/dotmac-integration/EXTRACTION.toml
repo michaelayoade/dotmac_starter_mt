@@ -162,7 +162,7 @@ shadow_and_drift = "Cutover is shadow-first: the Integrator receives the provide
 # equality cannot detect overlapping scopes, so if scoped routing ever gains a
 # real consumer it needs a separate typed route/assignment contract with
 # canonical keys and overlap rules — not a constraint bolted onto a JSON column.
-binding_multiplicity = "Unique on (installation_id, capability_id). Many installations may implement one capability; dispatch resolves exactly one enabled binding or fails closed."
+binding_multiplicity = "Unique on (installation_id, capability_id, capability_instance_ref). Many named instances and installations may implement one capability; dispatch resolves the exact requested instance or fails closed."
 
 # CLOSED 2026-08-13: the SPI range is now STORED on the installation
 # (`connector_installations.spi_range`) as well as compared, and checked at

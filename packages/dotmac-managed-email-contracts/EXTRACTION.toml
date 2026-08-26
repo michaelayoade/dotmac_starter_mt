@@ -1,0 +1,44 @@
+schema_version = 1
+package = "dotmac-managed-email-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral managed email application/domain/mailbox/alias/quota/delivery/app-password/DKIM lifecycle contract and its exact operation schemas."
+contract = "Declare plan/apply/observe/cancel for coherent email resources and health evidence. This catalogue owns meanings and exact schema bytes only; it does not own provider I/O, deployment state, retries, host backup/restore/update, product users, DNS decisions, or secrets."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_erp:app/services/mailcow/client.py",
+  "dotmac_erp:app/services/people/hr/offboarding.py",
+  "dotmac_erp:tests/services/test_mailcow_offboarding.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_email_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP first replaces synthetic mail contract evidence with this exact released catalogue; the managed-email connector then proves it through the Integration SPI without returning secret material."
+shadow_and_drift = "ERP has an unqualified and unverified provider client plus one mocked offboarding caller, not a production-used tested implementation eligible for extraction. Drift is detected through declared email configuration and health observations; this package stores no state. Host backup/restore/update evidence belongs to the managed-host contract."
+local_copy_retirement = "Vendor CP synthetic email snapshots retire with adoption. ERP's provider-specific client is not copied and remains a separate product retirement decision. No host script or connector implementation lives in this catalogue."
+next_action = "Admit and publish 0.1.0a1 through the contract-catalogue profile, replace Vendor CP synthetic email evidence with the exact artifact, then require the email connector fake and isolated acceptance to satisfy all schemas and checks. Compose separately released managed-host backup/restore/update capabilities at the suite/profile layer."

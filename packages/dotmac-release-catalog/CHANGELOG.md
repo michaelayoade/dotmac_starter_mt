@@ -4,7 +4,7 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
-## 0.1.0a5 — 2026-08-17
+## 0.1.0a5 — unreleased
 
 Adds two distinct upstream-admission claims:
 `vulnerability_policy_result` and `compatibility_result`. A managed deployment

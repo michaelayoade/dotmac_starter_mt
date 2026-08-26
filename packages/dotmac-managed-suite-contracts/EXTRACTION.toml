@@ -1,0 +1,49 @@
+schema_version = 1
+package = "dotmac-managed-suite-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The immutable managed-suite mapping from exact public/non-secret capability output evidence to exact downstream capability inputs."
+contract = "Approve value-free cross-capability dataflow by exact owner, capability/schema version, operation, schema ref/digest and JSON Pointer. It owns no product operation, runtime value, provider mapping, deployment step, evidence receipt, secret, or retry."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/capability_composition.py",
+  "dotmac_vendor_control_plane:src/vendor_cp/managed_profiles/composition_contracts.py",
+  "dotmac_vendor_control_plane:src/vendor_cp/managed_profiles/service.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_suite_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_capability_composition_snapshot.py",
+  "dotmac_starter_mt:tests/unit/test_managed_identity_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_managed_email_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_managed_collaboration_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_managed_domains_contracts.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/adr/0032-integrator-executes-approved-provisioning-commands.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP must replace its synthetic composition registry with the released exact artifact; Integrator must then prove that an approved upstream receipt supplies only the declared pointer to the downstream command."
+shadow_and_drift = "No qualifying production composition implementation exists. Vendor CP's current in-memory test registry is source evidence, not a released owner. Exact dependency/schema digests make drift fail at import and catalogue admission; runtime values remain signed Integrator receipt evidence outside this package."
+local_copy_retirement = "Vendor CP's CapabilityEvidenceBindingDefinition and synthetic composition_digest document retire when it consumes the kernel grammar and this released catalogue. Vendor retains commercial component selection; Integrator retains receipt verification and value injection."
+next_action = "Publish only after the exact identity, email, collaboration and domains a1 catalogues; adopt the four compositions in Vendor CP and Integrator and retire every synthetic mapping registry."

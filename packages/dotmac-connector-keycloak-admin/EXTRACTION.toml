@@ -1,0 +1,45 @@
+schema_version = 1
+package = "dotmac-connector-keycloak-admin"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "Keycloak Admin REST wire translation for the managed-identity realm, OIDC confidential-client and stable-reference user lifecycle contracts."
+
+contract = "Implement dotmac-integration SPI >=1.2,<2.0 for connector key keycloak_admin and exactly identity.realm.lifecycle.v1, identity.oidc-client.lifecycle.v1 and identity.user.lifecycle.v1 in PROVISION mode. Authority is limited to pre-created non-master realms, their realm-scoped clients and stable-reference users. Integrator supplies an exact held service-account bundle (client_id plus client_secret) for realm-local token exchange and separately held caller-created managed-client material; it owns installations, bindings, capability-instance identity, execution, receipts, retry and reconciliation. The connector owns no rows, secret generation, product identity, authorization or product-session decision; user correlation is by stable owner reference, enrollment carries no password, and disable is incomplete until IdP sessions are revoked."
+
+source_repositories = [
+  "dotmac_starter_mt",
+  "dotmac_workspace",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_starter_mt:docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+  "dotmac_starter_mt:packages/dotmac-managed-identity-contracts/src/dotmac_managed_identity_contracts/catalogue.py",
+  "dotmac_starter_mt:packages/dotmac-managed-identity-contracts/src/dotmac_managed_identity_contracts/schemas.py",
+  "dotmac_workspace:docs/PILOT-RUNBOOK.md",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_keycloak_admin_connector.py",
+  "dotmac_starter_mt:tests/architecture/test_keycloak_admin_connector_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+first_cutover = "After dotmac-integration 0.1.0a6 and this wheel are released, exact-pin both beside the managed-identity catalogue in dotmac_integrator. On Seabone, reconcile a disposable pre-created non-master realm, a confidential client whose secret is already held, and a stable-reference user; prove enrollment carries no password, exact issuer/subject evidence, disable plus IdP-session logout, discovery, RS256 JWKS, S256 login, audience/azp validation, cross-worker callback, observe and cleanup. Publication alone is not adoption and does not enter contract_consumers."
+
+shadow_and_drift = "Compare the connector's public realm/client/user observation with the host-local Keycloak verifier and a real disposable relying-party login. Refuse issuer, RS256, S256, redirect, confidential-client, audience, stable-reference, enrollment or disable/logout drift. Ambiguous mutation results enter Integration reconciliation and are observed before another apply; the connector owns no retry ledger."
+
+local_copy_retirement = "There is no qualifying checked-in Keycloak Admin implementation to retire. Host-local configuration remains operational evidence only and is not copied as a second connector. Products retain OIDC relying-party behavior through dotmac-auth-oidc and exact external-identity bindings; the Admin connector never replaces those owners."
+
+next_action = "Publish and verify kernel 0.1.0a69, then dotmac-integration 0.1.0a6 and dotmac-managed-identity-contracts 0.1.0a1. Add this package to the connector release allowlist/workflow only after all three resolve from the registry, run its installed-wheel conformance on Observer CI, publish 0.1.0a1, exact-pin it in dotmac_integrator, and perform disposable Seabone acceptance before any production binding."

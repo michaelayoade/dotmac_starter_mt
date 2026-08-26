@@ -116,8 +116,8 @@ jobs:
           python-version: "3.12"
       - uses: ./.github/actions/setup-poetry
 
-      # THE GATE, and the lock. Refuses an unallowlisted distribution — which is
-      # every distribution today — a pyproject whose name disagrees with the
+      # THE GATE, and the lock. Refuses an unallowlisted distribution — including
+      # every governed holdback — a pyproject whose name disagrees with the
       # dispatch, a version that was not typed exactly, an entry carrying
       # stateful-only facts or missing any required field, a package outside
       # `packages/dotmac-connector-`, a dossier whose classification is wrong, an
@@ -152,15 +152,30 @@ jobs:
             "${{ inputs.connector }}" \
             --dist "${{ steps.resolve.outputs.package_dir }}/dist"
 
+      - name: Build governed first-party dependency wheels
+        env:
+          SOURCE_DEPENDENCY_DIRS: ${{ steps.resolve.outputs.source_dependency_dirs }}
+        run: |
+          for dependency_dir in ${SOURCE_DEPENDENCY_DIRS}; do
+            (cd "${dependency_dir}" && poetry build)
+          done
+
       # Release-artifact conformance: install the freshly built wheel into a
       # clean venv beside the pinned control plane and run the SHIPPED kit
       # (`assert_plugin_conforms`) against the installed bytes. The source tree
       # and the wheel are different objects and only one of them gets published.
       - name: Release wheel conformance
+        env:
+          SOURCE_DEPENDENCY_DIRS: ${{ steps.resolve.outputs.source_dependency_dirs }}
         run: |
           python -m venv /tmp/connector-smoke
           /tmp/connector-smoke/bin/pip install --quiet \
-            packages/dotmac-kernel packages/dotmac-integration \
+            packages/dotmac-kernel packages/dotmac-integration
+          for dependency_dir in ${SOURCE_DEPENDENCY_DIRS}; do
+            /tmp/connector-smoke/bin/pip install --quiet \
+              "${dependency_dir}"/dist/*.whl
+          done
+          /tmp/connector-smoke/bin/pip install --quiet \
             "${{ steps.resolve.outputs.package_dir }}"/dist/*.whl
           python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
             --python /tmp/connector-smoke/bin/python

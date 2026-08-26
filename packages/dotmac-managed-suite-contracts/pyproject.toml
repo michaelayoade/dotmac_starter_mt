@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "dotmac-managed-suite-contracts"
+version = "0.1.0a1"
+description = "Exact cross-capability evidence compositions for Dotmac managed suites"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_managed_suite_contracts", from = "src" }]
+include = [
+    { path = "src/dotmac_managed_suite_contracts/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+# Exact because composition digests pin these catalogues' exact schema bytes.
+dotmac-domains-contracts = "0.1.0a1"
+dotmac-managed-collaboration-contracts = "0.1.0a1"
+dotmac-managed-email-contracts = "0.1.0a1"
+dotmac-managed-identity-contracts = "0.1.0a1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

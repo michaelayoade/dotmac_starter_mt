@@ -1,0 +1,42 @@
+schema_version = 1
+package = "dotmac-managed-host-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral closed deployment-bundle, backup/restore and health-probe lifecycle contracts and their exact operation schemas."
+contract = "Declare plan/apply/observe/cancel for a constrained host agent. The catalogue owns typed meanings and exact schema bytes only; it never exposes generic remote execution and owns no connector I/O, deployment state, schedule, retry or secret."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_academy",
+  "dotmac_starter_mt",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_erp:scripts/mailcow_sogo_cleanup/",
+  "dotmac_academy:app/services/lab_engine/runner.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_host_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP first replaces synthetic host snapshots with this exact released catalogue; the constrained host connector and target-agent fake then prove all three families before isolated Seabone acceptance."
+shadow_and_drift = "ERP Mailcow cleanup and Academy lab-runner code are product-specific process-control implementations with shapes this fleet contract must refuse. No qualifying production-used constrained host-agent implementation exists, so the contract is greenfield after inventory. Drift is measured through exact bundle/configuration pins plus public restore and health observations; signed plan identity remains in Integration's orchestration envelope."
+local_copy_retirement = "Vendor CP synthetic host snapshots retire with adoption. Product cleanup scripts and Academy lab execution remain rejected sources and are never copied into the catalogue or connector."
+next_action = "Admit and publish 0.1.0a1 through the contract-catalogue profile, replace Vendor CP synthetic host evidence with the exact artifact, then require connector and agent conformance before an isolated Seabone failure rehearsal."

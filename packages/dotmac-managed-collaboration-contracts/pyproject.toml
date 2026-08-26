@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dotmac-managed-collaboration-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral managed collaboration lifecycle contracts"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_managed_collaboration_contracts", from = "src" }]
+include = [
+    { path = "src/dotmac_managed_collaboration_contracts/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

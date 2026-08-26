@@ -1,10 +1,9 @@
 """Binding multiplicity and the dispatch seam — enabled is not selected.
 
 This is the file that encodes the 2026-08-13 ruling, and it exists because an
-earlier reading of ADR-0024 § 7 got it wrong. § 7 says "each `(installation,
-capability)` has exactly one active connector binding" — the TUPLE. It was read
-as a global per-capability constraint, which would have blocked a topology the
-source product supports and the ADR permits.
+earlier reading of ADR-0024 § 7 got it wrong. A6 extends the stable tuple with
+the orchestrator's provider-neutral capability instance reference, so several
+instances of one contract can coexist without becoming product semantics.
 
     enabled    this installation is capable and permitted. MANY installations
                may be enabled for one capability.
@@ -82,6 +81,7 @@ def _binding(
     installation: ConnectorInstallation,
     *,
     capability: str = FAKE_CAPABILITY,
+    capability_instance_ref: str = "primary",
     state: str = "enabled",
     default: bool | None = None,
 ) -> CapabilityBinding:
@@ -89,6 +89,7 @@ def _binding(
         id=uuid.uuid4(),
         installation_id=installation.id,
         capability_id=capability,
+        capability_instance_ref=capability_instance_ref,
         state=state,
         policy_json={"default": default} if default is not None else None,
     )
@@ -100,11 +101,40 @@ def _binding(
 # ── 1. Duplicate binding within ONE installation fails ──────────────────────
 
 
-def test_one_installation_may_bind_a_capability_only_once(db: Session) -> None:
+def test_one_installation_may_bind_a_capability_instance_only_once(db: Session) -> None:
     installation = _installation(db)
     _binding(db, installation)
     with pytest.raises(IntegrityError):
         _binding(db, installation)
+
+
+def test_one_installation_may_bind_two_instances_of_one_capability(
+    db: Session,
+) -> None:
+    installation = _installation(db)
+    first = _binding(db, installation, capability_instance_ref="email.oidc-client")
+    second = _binding(
+        db, installation, capability_instance_ref="collaboration.oidc-client"
+    )
+
+    assert first.capability_id == second.capability_id
+    assert first.capability_instance_ref != second.capability_instance_ref
+
+
+def test_selection_can_require_the_exact_capability_instance(db: Session) -> None:
+    installation = _installation(db)
+    _binding(db, installation, capability_instance_ref="email.oidc-client")
+    wanted = _binding(
+        db, installation, capability_instance_ref="collaboration.oidc-client"
+    )
+
+    chosen = resolve_binding(
+        db,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="collaboration.oidc-client",
+        capability_binding_id=wanted.id,
+    )
+    assert chosen.id == wanted.id
 
 
 # ── 2. Two installations MAY implement the same capability ──────────────────
@@ -293,12 +323,16 @@ def test_a_capability_alone_is_not_a_uniqueness_constraint() -> None:
         for constraint in CapabilityBinding.__table__.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     ]
-    assert ("capability_id", "installation_id") in uniques
+    assert (
+        "capability_id",
+        "capability_instance_ref",
+        "installation_id",
+    ) in uniques
     assert ("capability_id",) not in uniques, (
         "capability_id must NOT be globally unique: ADR-0024 §7 scopes "
-        "uniqueness to (installation, capability), and many installations may "
-        "implement one capability. Choosing between them is a DISPATCH "
-        "decision — see dotmac_integration.selection."
+        "uniqueness to (installation, capability, instance), and many instances "
+        "and installations may implement one capability. Choosing between them "
+        "is a DISPATCH decision — see dotmac_integration.selection."
     )
 
 

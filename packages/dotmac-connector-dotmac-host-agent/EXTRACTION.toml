@@ -1,0 +1,43 @@
+schema_version = 1
+package = "dotmac-connector-dotmac-host-agent"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "Integrator-side mutually authenticated HTTPS translation for the exact managed-host capability contracts; never the target host agent or a generic execution facility."
+
+contract = "Implement dotmac-integration SPI >=1.2,<2.0 for connector key dotmac_host_agent and exactly host.deployment-bundle.lifecycle.v1, host.backup-restore.lifecycle.v1 and host.health-probe.lifecycle.v1 in PROVISION mode. The connector carries exact owner snapshots/schema bytes, a closed capability-specific protocol and no state. Integrator owns bindings, held materialization, approvals, dispatch, retries and receipts. The separately deployed target owns local effect idempotency and closed catalogue execution. Neither surface admits shell, SSH, argv, file-and-run, arbitrary URLs, secret output or a second product owner."
+
+source_repositories = ["dotmac_starter_mt"]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_starter_mt:docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+  "dotmac_starter_mt:packages/dotmac-managed-host-contracts/src/dotmac_managed_host_contracts/catalogue.py",
+  "dotmac_starter_mt:packages/dotmac-managed-host-contracts/src/dotmac_managed_host_contracts/schemas.py",
+  "dotmac_starter_mt:packages/dotmac-connector-dotmac-host-agent/TARGET_AGENT_API.md",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:packages/dotmac-connector-dotmac-host-agent/tests/unit/test_plugin.py",
+  "dotmac_starter_mt:packages/dotmac-connector-dotmac-host-agent/tests/unit/test_transport.py",
+  "dotmac_starter_mt:packages/dotmac-connector-dotmac-host-agent/tests/architecture/test_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+
+inventory_evidence = [
+  "packages/dotmac-connector-dotmac-host-agent/TARGET_AGENT_API.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+first_cutover = "After kernel 0.1.0a69, Integration 0.1.0a6 and managed-host contracts 0.1.0a1 are published, release and exact-pin this connector in dotmac_integrator. Build the separately deployed target agent against TARGET_AGENT_API.md, then use a disposable identity and isolated Seabone workload to prove all three capability families, ambiguity reconciliation, durable target idempotency and the no-generic-execution boundary before any production binding."
+
+shadow_and_drift = "Each invocation re-verifies exact contract/schema identity and capability-specific activation proof over mTLS before sending a typed operation. Successful target evidence must validate against the exact public owner output schema. Integration reconciles ambiguous transport outcomes through OBSERVE; the connector owns no retry or execution state."
+
+local_copy_retirement = "No qualifying constrained host-agent implementation exists. ERP cleanup scripts, Academy lab execution and operator SSH remain explicitly rejected sources rather than code to extract. Vendor CP synthetic host snapshots retire only when it consumes the released exact managed-host catalogue."
+
+next_action = "Publish and verify kernel 0.1.0a69, dotmac-integration 0.1.0a6 and dotmac-managed-host-contracts 0.1.0a1. Add connector release wiring separately, run package and installed-wheel conformance on Observer CI, publish this connector 0.1.0a1, exact-pin it in dotmac_integrator, implement the separate target agent, and complete every TARGET_AGENT_API.md Seabone acceptance item before production adoption."

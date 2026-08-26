@@ -39,6 +39,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID
 
+from dotmac_integration.capability_instances import require_capability_instance_ref
 from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.execution import payload_digest
 from dotmac_integration.models import (
@@ -58,6 +59,7 @@ __all__ = [
     "AdoptionPreview",
     "LifecycleError",
     "add_binding",
+    "assign_capability_instance_ref",
     "adopt_manifest",
     "create_draft",
     "disable",
@@ -204,6 +206,7 @@ def add_binding(
     *,
     registry: ConnectorRegistry,
     capability_id: str,
+    capability_instance_ref: str,
     scope: dict[str, object] | None = None,
     policy: dict[str, object] | None = None,
     actor: str | None = None,
@@ -217,10 +220,12 @@ def add_binding(
     manifest = registry.get(installation.connector_key)
     # The undeclared-capability refusal, at the write.
     manifest.require_declares(capability_id)
+    instance_ref = require_capability_instance_ref(capability_instance_ref)
 
     binding = CapabilityBinding(
         installation_id=installation.id,
         capability_id=capability_id,
+        capability_instance_ref=instance_ref,
         state="disabled",
         scope_json=scope,
         policy_json=policy,
@@ -228,6 +233,34 @@ def add_binding(
         updated_by=actor,
     )
     db.add(binding)
+    db.flush()
+    return binding
+
+
+def assign_capability_instance_ref(
+    db: Any,
+    binding: CapabilityBinding,
+    *,
+    capability_instance_ref: str,
+    actor: str | None = None,
+) -> CapabilityBinding:
+    """Assign the missing a6 identity to one disabled legacy binding.
+
+    Existing identities are immutable.  A legacy enabled binding must first be
+    disabled so this migration cannot silently retarget live traffic.
+    """
+
+    instance_ref = require_capability_instance_ref(capability_instance_ref)
+    if binding.capability_instance_ref == instance_ref:
+        return binding
+    if binding.capability_instance_ref is not None:
+        raise LifecycleError("capability instance identity is immutable")
+    if binding.state != "disabled":
+        raise LifecycleError(
+            "disable the legacy capability binding before assigning its instance"
+        )
+    binding.capability_instance_ref = instance_ref
+    binding.updated_by = actor
     db.flush()
     return binding
 
@@ -245,6 +278,12 @@ def set_binding_enabled(
     from dotmac_integration.activation import require_activatable
 
     if enabled:
+        if binding.capability_instance_ref is None:
+            raise LifecycleError(
+                f"capability {binding.capability_id!r} has no assigned "
+                "capability_instance_ref"
+            )
+        require_capability_instance_ref(binding.capability_instance_ref)
         require_activatable(installation, binding, registry)
         plugin = registry.plugin(installation.connector_key)
         if ConnectorMode.PROVISION in plugin.modes:

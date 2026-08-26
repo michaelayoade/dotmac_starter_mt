@@ -844,6 +844,11 @@ capability_code, schema_version)`. A binding may independently name one of the
 snapshot's `CapabilityOperation`s, but an operation never becomes a second
 capability or a second owner.
 
+`capability_code` is deliberately unversioned. The public manifest/wire id is
+the derived `f"{capability_code}.v{schema_version}"`; a code that already ends in
+`.vN` is refused so consumers cannot accidentally produce `.v1.v1` or let the
+code and schema version disagree.
+
 - `CapabilityOperation` binds exact request/result schema references and
   SHA-256 digests; an operation name alone is never an executable contract.
 - `CapabilityConfigField` declares a generic type, compatible closed format
@@ -852,7 +857,10 @@ capability or a second owner.
   carries material, and the snapshot has no value/default field.
 - `CapabilityEndpointRequirement` declares only a provider-neutral endpoint
   shape (`https_url`, `fqdn`, or `host_port`) and the exact declared operations
-  it serves, never a deployed address.
+  it serves, never a deployed address. Endpoint codes and configuration-field
+  codes are disjoint. Integration may hold both kinds of values in one
+  installed configuration mapping, but the owner contract gives each code one
+  declaration and refuses a collision at construction/parsing time.
 - `CapabilityCheck` distinguishes activation gates from evidence checks and
   types the evidence shape. Product/domain owners supply every code and its
   meaning.

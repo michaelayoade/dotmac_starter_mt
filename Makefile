@@ -37,10 +37,23 @@ APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
 INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
 OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
 CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
+DOMAINS_CONTRACTS_SRC ?= packages/dotmac-domains-contracts/src/dotmac_domains_contracts
+COLLABORATION_CONTRACTS_SRC ?= packages/dotmac-managed-collaboration-contracts/src/dotmac_managed_collaboration_contracts
+EMAIL_CONTRACTS_SRC ?= packages/dotmac-managed-email-contracts/src/dotmac_managed_email_contracts
+HOST_CONTRACTS_SRC ?= packages/dotmac-managed-host-contracts/src/dotmac_managed_host_contracts
+IDENTITY_CONTRACTS_SRC ?= packages/dotmac-managed-identity-contracts/src/dotmac_managed_identity_contracts
+INFRASTRUCTURE_CONTRACTS_SRC ?= packages/dotmac-managed-infrastructure-contracts/src/dotmac_managed_infrastructure_contracts
+SUITE_CONTRACTS_SRC ?= packages/dotmac-managed-suite-contracts/src/dotmac_managed_suite_contracts
+CONNECTOR_CONTABO_SRC ?= packages/dotmac-connector-contabo/src/dotmac_connector_contabo
+CONNECTOR_HOST_AGENT_SRC ?= packages/dotmac-connector-dotmac-host-agent/src/dotmac_connector_dotmac_host_agent
+CONNECTOR_KEYCLOAK_SRC ?= packages/dotmac-connector-keycloak-admin/src/dotmac_connector_keycloak_admin
+CONNECTOR_MAILCOW_SRC ?= packages/dotmac-connector-mailcow/src/dotmac_connector_mailcow
+CONNECTOR_NEXTCLOUD_SRC ?= packages/dotmac-connector-nextcloud/src/dotmac_connector_nextcloud
+MANAGED_SERVICE_SRC = $(DOMAINS_CONTRACTS_SRC) $(COLLABORATION_CONTRACTS_SRC) $(EMAIL_CONTRACTS_SRC) $(HOST_CONTRACTS_SRC) $(IDENTITY_CONTRACTS_SRC) $(INFRASTRUCTURE_CONTRACTS_SRC) $(SUITE_CONTRACTS_SRC) $(CONNECTOR_CONTABO_SRC) $(CONNECTOR_HOST_AGENT_SRC) $(CONNECTOR_KEYCLOAK_SRC) $(CONNECTOR_MAILCOW_SRC) $(CONNECTOR_NEXTCLOUD_SRC)
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(MANAGED_SERVICE_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(MANAGED_SERVICE_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

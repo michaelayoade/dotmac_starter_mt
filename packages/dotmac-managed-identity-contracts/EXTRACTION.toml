@@ -1,0 +1,50 @@
+schema_version = 1
+package = "dotmac-managed-identity-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral managed identity realm, OIDC confidential-client and user lifecycle contracts, including exact operation schemas and fixed security evidence."
+contract = "Declare plan/apply/observe/cancel for identity realms, confidential OIDC clients and stable-reference users. This catalogue owns meanings and exact schema bytes only; it does not own provider administration, relying-party login, local identity binding, product authorization, product sessions, deployment state, retry, or secrets."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_academy_app",
+  "dotmac_workspace",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_starter_mt:docs/inventories/external-identity-sources.md",
+  "dotmac_starter_mt:packages/dotmac-auth-oidc/src/dotmac_auth_oidc/client.py",
+  "dotmac_starter_mt:packages/dotmac-auth-oidc/src/dotmac_auth_oidc/discovery.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_identity_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_discovery.py",
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_id_token.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/inventories/external-identity-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. The first cutover is Vendor CP replacing its synthetic identity contract evidence with an exact released catalogue pin, followed by the Keycloak Admin connector proving the owner contract through the Integrator SPI."
+shadow_and_drift = "No qualifying checked-in identity-provider Admin REST implementation exists to shadow. The operational realm/client supplies security invariants but its host-local verification script is not a releasable tested source. Drift is detected by observe output and the declared private-admin, HTTPS discovery, RS256, confidential-client, S256, audience/azp, stable-user-reference and disable-session-revocation checks; this package stores no observed state."
+local_copy_retirement = "Vendor CP test-only synthetic identity snapshots retire when it consumes the released wheel. The host-local administrative script is not copied. dotmac-auth-oidc remains the separate relying-party owner and is not retired by this catalogue."
+next_action = "Admit and publish 0.1.0a1 through the contract-catalogue release profile, replace Vendor CP synthetic identity evidence with the exact artifact, then require the identity connector fake and Seabone acceptance to satisfy every check without returning secret material."

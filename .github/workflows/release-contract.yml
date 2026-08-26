@@ -1,0 +1,152 @@
+name: Release capability contract catalogue
+
+# The closed allowlist is the lock: every absent owner fails at `resolve`.
+# This workflow exists separately because a contract catalogue must
+# prove exact ProductManifest/CapabilityContract/CapabilitySchema coverage; an
+# ordinary adapter smoke cannot make that claim and a connector lane would
+# incorrectly require provider execution.
+
+on:
+  workflow_dispatch:
+    inputs:
+      contract:
+        description: "Allowlisted product-owned contract or composition catalogue"
+        required: true
+        type: string
+      version:
+        description: "Exact pyproject version"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Assert current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - name: Resolve reviewed contract catalogue
+        id: resolve
+        run: |
+          python scripts/release_contract.py resolve \
+            "${{ inputs.contract }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+      - name: Prove data-only source shape
+        run: python scripts/release_contract.py conformance "${{ inputs.contract }}"
+      - name: Build once
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+      - name: Inspect exact wheel contents
+        run: |
+          python scripts/release_contract.py inspect "${{ inputs.contract }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+      - name: Build the exact kernel floor for the pre-publish smoke
+        working-directory: packages/dotmac-kernel
+        run: poetry build --output "${GITHUB_WORKSPACE}/kernel-dist"
+      - name: Build exact composition dependencies for the pre-publish smoke
+        if: steps.resolve.outputs.composition_dependency_dirs != ''
+        run: |
+          for package_dir in ${{ steps.resolve.outputs.composition_dependency_dirs }}; do
+            poetry build --directory "${package_dir}" \
+              --output "${GITHUB_WORKSPACE}/contract-dependency-dist"
+          done
+      - name: Verify installed manifest, contracts and schema coverage
+        run: |
+          dependency_args=()
+          if [[ -d "${GITHUB_WORKSPACE}/contract-dependency-dist" ]]; then
+            dependency_args=(
+              --dependency-dist "${GITHUB_WORKSPACE}/contract-dependency-dist"
+            )
+          fi
+          python scripts/release_contract.py verify-wheel "${{ inputs.contract }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist" \
+            "${dependency_args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.contract }}-dist
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert approved SHA is current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Re-assert reviewed target
+        run: |
+          python scripts/release_contract.py resolve \
+            "${{ inputs.contract }}" --version "${{ inputs.version }}" >/dev/null
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.contract }}-dist
+          path: dist
+      - name: Publish the inspected bytes
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" \
+            dist/*
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Wait for exact release
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.contract }}/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+      - name: Verify registry-installed contract catalogue
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_contract.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.contract }}==${{ inputs.version }}"
+      - name: Tag only after registry verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag "${{ needs.build.outputs.tag }}" "${GITHUB_SHA}"
+          git push origin "${{ needs.build.outputs.tag }}"

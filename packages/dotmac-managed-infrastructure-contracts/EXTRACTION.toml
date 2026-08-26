@@ -1,0 +1,41 @@
+schema_version = 1
+package = "dotmac-managed-infrastructure-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral instance, network, volume and firewall desired-state lifecycle contracts and their exact operation schemas."
+contract = "Declare independently bindable plan/apply/observe/cancel resource lifecycles. This catalogue owns meanings and exact schema bytes only; it owns no provider I/O, deployment state, retry, product state or secret."
+
+source_repositories = [
+  "dotmac_starter_mt",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/providers/provisioning.py",
+  "dotmac_starter_mt:tests/unit/test_provider_provisioning.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_infrastructure_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP first replaces synthetic infrastructure snapshots with this exact released catalogue, then the first IaaS connector proves every family through Integration SPI 1.2."
+shadow_and_drift = "Kernel provider provisioning contains a tested fake and provider-neutral state-machine semantics, but no qualifying production-used provider wire implementation exists. Drift is measured through exact desired-state digests and public observations; this package stores no state."
+local_copy_retirement = "Vendor CP synthetic infrastructure snapshots retire with adoption. Provider names, SKUs, API shapes and clients remain connector-owned and are never copied here."
+next_action = "Admit and publish 0.1.0a1 through the contract-catalogue profile, replace Vendor CP synthetic infrastructure evidence with the exact artifact, then require connector fake and isolated acceptance against all four families."

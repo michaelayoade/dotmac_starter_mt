@@ -1,0 +1,47 @@
+schema_version = 1
+package = "dotmac-connector-nextcloud"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+
+owner = "Nextcloud HTTPS, OCS, user_oidc administration, exact user/group/quota wire translation, and bounded WebDAV verification."
+contract = "Implement the four dotmac-managed-collaboration PROVISION contracts through dotmac-integration SPI 1.2. The connector translates exact provider wire outcomes only; it owns no product state, deployment decision, database, session, retry ledger, schedule, secret, generated credential, or shell surface."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_sub@05210fe3d00b:app/services/integrations/connectors/nextcloud_talk.py",
+  "dotmac_sub@05210fe3d00b:app/services/integrations/nextcloud_talk_capability.py",
+  "dotmac_sub@05210fe3d00b:app/services/nextcloud_talk_staff.py",
+  "dotmac_sub@05210fe3d00b:tests/test_nextcloud_talk_staff_notifications.py",
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_starter_mt:docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+  "dotmac_starter_mt:packages/dotmac-managed-collaboration-contracts/src/dotmac_managed_collaboration_contracts/catalogue.py",
+  "dotmac_starter_mt:packages/dotmac-managed-collaboration-contracts/src/dotmac_managed_collaboration_contracts/schemas.py",
+]
+
+preserved_tests = [
+  "dotmac_sub@05210fe3d00b:tests/test_nextcloud_talk_staff_notifications.py",
+  "dotmac_starter_mt:packages/dotmac-connector-nextcloud/tests/test_transport.py",
+  "dotmac_starter_mt:packages/dotmac-connector-nextcloud/tests/test_plugin.py",
+  "dotmac_starter_mt:packages/dotmac-connector-nextcloud/tests/test_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+first_cutover = "Install only after dotmac-integration 0.1.0a6 and the exact managed-collaboration 0.1.0a1 catalogue are released and the Nextcloud management surface proves every activation check in isolated acceptance. Publication is not adoption."
+shadow_and_drift = "Sub's production Nextcloud Talk implementation supplies the common HTTPS/SSRF, redirect, OCS-envelope, exact-id and ambiguous-outcome behavior. It remains the shadow source until an isolated corpus proves the extracted transport. The four provisioning endpoint mappings are greenfield-after-inventory and are checked against the exact owner schemas on every operation."
+local_copy_retirement = "Retire no Sub product decision or Talk delivery behavior in this slice. A later separately approved message capability may move provider transport while Sub retains notification routing and product state. This connector contains no permanent copy of a product decision or persistence layer."
+next_action = "Run package tests only in Observer's fresh isolated worktree, then prove the exact Nextcloud/user_oidc/WebDAV compatibility matrix and all activation checks before admitting the wheel to an Integrator assembly."

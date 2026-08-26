@@ -1,0 +1,213 @@
+{
+  "$comment": [
+    "The CLOSED set of product-owned managed-capability CONTRACT CATALOGUES this repository may publish.",
+    "A contract catalogue is a stateless-protocol-adapter by governed extraction shape, but earns this stricter release profile only when its installed wheel exports one ProductManifestSnapshot plus exact owned CapabilityContractSnapshot and CapabilitySchemaDocument bytes, or an exact CapabilityCompositionSnapshot with separately named, exact dependency documents.",
+    "It owns no provider I/O, connector entry point, secret, persistence, retry engine or deployment decision. The contract package describes product semantics; an independently released connector implements them.",
+    "Only the complete owner catalogues admitted by ADR-0034 and their exact-pinned composition catalogues belong here. Every absent owner catalogue remains publication-locked."
+  ],
+  "conformance": {
+    "classification": "stateless-protocol-adapter",
+    "package_dir_prefix": "packages/",
+    "package_dir_suffix": "-contracts",
+    "required_exports": [
+      "PRODUCT_MANIFEST",
+      "CAPABILITY_CONTRACTS",
+      "CAPABILITY_SCHEMAS",
+      "CAPABILITY_COMPOSITIONS",
+      "COMPOSITION_DEPENDENCY_CONTRACTS",
+      "COMPOSITION_DEPENDENCY_SCHEMAS"
+    ]
+  },
+  "contracts": {
+    "dotmac-domains-contracts": {
+      "package_dir": "packages/dotmac-domains-contracts",
+      "import_name": "dotmac_domains_contracts",
+      "owner_code": "dotmac-domains",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-domains-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_domains_contracts/__init__.py",
+          "dotmac_domains_contracts/catalogue.py",
+          "dotmac_domains_contracts/schemas.py",
+          "dotmac_domains_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-collaboration-contracts": {
+      "package_dir": "packages/dotmac-managed-collaboration-contracts",
+      "import_name": "dotmac_managed_collaboration_contracts",
+      "owner_code": "dotmac-managed-collaboration",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-managed-collaboration-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_collaboration_contracts/__init__.py",
+          "dotmac_managed_collaboration_contracts/catalogue.py",
+          "dotmac_managed_collaboration_contracts/schemas.py",
+          "dotmac_managed_collaboration_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-email-contracts": {
+      "package_dir": "packages/dotmac-managed-email-contracts",
+      "import_name": "dotmac_managed_email_contracts",
+      "owner_code": "dotmac-managed-email",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-managed-email-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_email_contracts/__init__.py",
+          "dotmac_managed_email_contracts/catalogue.py",
+          "dotmac_managed_email_contracts/schemas.py",
+          "dotmac_managed_email_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-host-contracts": {
+      "package_dir": "packages/dotmac-managed-host-contracts",
+      "import_name": "dotmac_managed_host_contracts",
+      "owner_code": "dotmac-managed-host",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-managed-host-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_host_contracts/__init__.py",
+          "dotmac_managed_host_contracts/catalogue.py",
+          "dotmac_managed_host_contracts/schemas.py",
+          "dotmac_managed_host_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-identity-contracts": {
+      "package_dir": "packages/dotmac-managed-identity-contracts",
+      "import_name": "dotmac_managed_identity_contracts",
+      "owner_code": "dotmac-managed-identity",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-managed-identity-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_identity_contracts/__init__.py",
+          "dotmac_managed_identity_contracts/catalogue.py",
+          "dotmac_managed_identity_contracts/schemas.py",
+          "dotmac_managed_identity_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-infrastructure-contracts": {
+      "package_dir": "packages/dotmac-managed-infrastructure-contracts",
+      "import_name": "dotmac_managed_infrastructure_contracts",
+      "owner_code": "dotmac-managed-infrastructure",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {},
+      "tag_prefix": "dotmac-managed-infrastructure-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_infrastructure_contracts/__init__.py",
+          "dotmac_managed_infrastructure_contracts/catalogue.py",
+          "dotmac_managed_infrastructure_contracts/schemas.py",
+          "dotmac_managed_infrastructure_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "python"
+        ]
+      }
+    },
+    "dotmac-managed-suite-contracts": {
+      "package_dir": "packages/dotmac-managed-suite-contracts",
+      "import_name": "dotmac_managed_suite_contracts",
+      "owner_code": "dotmac-managed-suite",
+      "kernel_floor": "0.1.0a69",
+      "composition_dependencies": {
+        "dotmac-domains-contracts": "0.1.0a1",
+        "dotmac-managed-collaboration-contracts": "0.1.0a1",
+        "dotmac-managed-email-contracts": "0.1.0a1",
+        "dotmac-managed-identity-contracts": "0.1.0a1"
+      },
+      "tag_prefix": "dotmac-managed-suite-contracts-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_managed_suite_contracts/__init__.py",
+          "dotmac_managed_suite_contracts/catalogue.py",
+          "dotmac_managed_suite_contracts/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "alembic/",
+          "scripts/",
+          "tests/"
+        ],
+        "allowed_requires": [
+          "dotmac-domains-contracts",
+          "dotmac-kernel",
+          "dotmac-managed-collaboration-contracts",
+          "dotmac-managed-email-contracts",
+          "dotmac-managed-identity-contracts",
+          "python"
+        ]
+      }
+    }
+  }
+}

@@ -71,8 +71,13 @@ def _valid_entry() -> dict:
         "connector_key": "example.v1",
         "spi_range": ">=1.0,<2.0",
         "integration_floor": "0.1.0a1",
+        "source_dependencies": [],
         "tag_prefix": "dotmac-connector-example-v",
-        "wheel_contents": {"required": [], "forbidden_prefixes": []},
+        "wheel_contents": {
+            "required": [],
+            "forbidden_prefixes": [],
+            "allowed_requires": ["dotmac-integration"],
+        },
     }
 
 
@@ -247,8 +252,13 @@ def test_a_real_adapter_with_the_same_classification_is_still_refused(
             "connector_key": "oidc.v1",
             "spi_range": ">=1.0,<2.0",
             "integration_floor": "0.1.0a1",
+            "source_dependencies": [],
             "tag_prefix": "dotmac-auth-oidc-v",
-            "wheel_contents": {"required": [], "forbidden_prefixes": []},
+            "wheel_contents": {
+                "required": [],
+                "forbidden_prefixes": [],
+                "allowed_requires": ["dotmac-integration"],
+            },
         }
     }
     allowlist = tmp_path / "release-connectors.json"
@@ -284,6 +294,69 @@ def test_a_connector_must_live_under_the_first_party_path(lane) -> None:
     with pytest.raises(SystemExit) as refusal:
         gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
     assert "packages/dotmac-connector-" in str(refusal.value)
+
+
+def test_source_dependencies_exactly_cover_runtime_catalogues(lane) -> None:
+    """A local wheel smoke must install the same exact owner catalogue imported
+    by the connector; a range would let unchanged connector bytes claim a new
+    contract digest, while an unlisted dependency would make smoke reach PyPI.
+    """
+    import argparse
+
+    dependency = "dotmac-managed-example-contracts"
+    entry = {
+        **_valid_entry(),
+        "source_dependencies": [dependency],
+        "wheel_contents": {
+            "required": [],
+            "forbidden_prefixes": [],
+            "allowed_requires": ["dotmac-integration", dependency],
+        },
+    }
+    gate, package = lane(entry)
+    dependency_root = package.parents[0] / dependency
+    dependency_root.mkdir()
+    (dependency_root / "pyproject.toml").write_text(
+        "[tool.poetry]\n" f'name = "{dependency}"\n' 'version = "0.1.0a1"\n',
+        encoding="utf-8",
+    )
+    connector_pyproject = package / "pyproject.toml"
+    connector_pyproject.write_text(
+        connector_pyproject.read_text(encoding="utf-8").replace(
+            '[tool.poetry.plugins."dotmac_integration.connectors"]',
+            f'{dependency} = "0.1.0a1"\n'
+            '[tool.poetry.plugins."dotmac_integration.connectors"]',
+        ),
+        encoding="utf-8",
+    )
+    (package / "src" / "dotmac_connector_example" / "contract_use.py").write_text(
+        "from dotmac_managed_example_contracts import CONTRACT\n",
+        encoding="utf-8",
+    )
+
+    resolved = gate.resolve(
+        "dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"}
+    )
+    assert gate.source_dependency_dirs(
+        "dotmac-connector-example", resolved, gate._declared(resolved)
+    ) == (f"packages/{dependency}",)
+    gate.cmd_conformance(argparse.Namespace(distribution="dotmac-connector-example"))
+
+    connector_pyproject.write_text(
+        connector_pyproject.read_text(encoding="utf-8").replace(
+            f'{dependency} = "0.1.0a1"', f'{dependency} = ">=0.1.0a1"'
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="must be exactly"):
+        gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
+
+    entry["source_dependencies"] = []
+    policy = json.loads(gate.ALLOWLIST.read_text(encoding="utf-8"))
+    policy["connectors"]["dotmac-connector-example"] = entry
+    gate.ALLOWLIST.write_text(json.dumps(policy), encoding="utf-8")
+    with pytest.raises(SystemExit, match="must exactly cover"):
+        gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
 
 
 # ── The floor must be installable, not merely declared ──────────────────────
@@ -522,6 +595,35 @@ def test_static_conformance_refuses_a_private_retry_or_checkpoint_engine(
     assert "retry.py" in str(refusal.value)
 
 
+def test_static_conformance_refuses_a_direct_kernel_or_product_import(lane) -> None:
+    """Kernel grammar reaches connectors through the SPI/owner catalogue only.
+
+    Allowing the transitive dependency is necessary; allowing a direct import
+    would let a plugin quietly grow local identity, persistence or policy code.
+    """
+    import argparse
+
+    gate, package = lane(_valid_entry())
+    source = package / "src" / "dotmac_connector_example" / "client.py"
+    source.write_text(
+        "from dotmac_integration.spi import ConnectorManifest\n",
+        encoding="utf-8",
+    )
+    gate.cmd_conformance(argparse.Namespace(distribution="dotmac-connector-example"))
+
+    source.write_text(
+        "from dotmac_kernel import CapabilityContractSnapshot\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as refusal:
+        gate.cmd_conformance(
+            argparse.Namespace(distribution="dotmac-connector-example")
+        )
+    message = str(refusal.value)
+    assert "outside Integration or its exact owner catalogues" in message
+    assert "dotmac_kernel" in message
+
+
 def test_static_conformance_refuses_a_secret_shaped_file(lane) -> None:
     """ADR-0024 section 7: a connector holds a REFERENCE to credential material,
     never the value. Uses the module lane's shared name-shape list rather than a
@@ -668,6 +770,7 @@ def test_the_real_entry_resolves_through_the_release_command(
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_whatsapp" in output
+    assert "source_dependency_dirs=" in output
     assert "tag=dotmac-connector-whatsapp-v0.1.0a1" in output
 
 
@@ -716,6 +819,9 @@ def test_the_workflow_matches_the_release_security_sequence() -> None:
     assert source.index("poetry build") < source.index("twine upload")
     assert "release_connector.py inspect" in source
     assert source.index("release_connector.py inspect") < source.index("twine upload")
+    assert "steps.resolve.outputs.source_dependency_dirs" in source
+    assert "Build governed first-party dependency wheels" in source
+    assert "dotmac-managed-identity-contracts" not in source
     # Defence in depth: the gate is re-run after the approval wait.
     publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
     assert "release_connector.py resolve" in publish
@@ -746,6 +852,7 @@ def test_the_policy_states_what_an_entry_does_not_prove() -> None:
     assert "not that a version was published" in prose
     assert "not that anything adopted it" in prose
     assert "not that the provider works" in prose
+    assert "a holdback row is machine-checked disposition only" in prose
 
 
 def test_the_three_lanes_do_not_overlap() -> None:
@@ -771,7 +878,7 @@ def test_the_three_lanes_do_not_overlap() -> None:
     assert not adapters & connectors
 
 
-def test_no_first_party_connector_package_exists_unlisted() -> None:
+def test_no_first_party_connector_package_exists_without_release_disposition() -> None:
     """The path prefix is also a discovery rule. A package under
     `packages/dotmac-connector-*` that is NOT in the allowlist is either a
     connector someone forgot to list or one deliberately held back — and the
@@ -782,9 +889,21 @@ def test_no_first_party_connector_package_exists_unlisted() -> None:
         for path in (PROJECT_ROOT / "packages").glob("dotmac-connector-*")
         if path.is_dir()
     }
-    listed = set(_policy()["connectors"])
-    assert on_disk - listed == set(), (
-        f"connector packages exist but are unlisted: {sorted(on_disk - listed)}. "
-        "List them in .github/release-connectors.json with their proof, or "
-        "record why they are held back — absence must be a decision, not a gap"
+    policy = _policy()
+    listed = set(policy["connectors"])
+    holdbacks = policy["holdbacks"]
+    assert isinstance(holdbacks, dict)
+    assert listed.isdisjoint(holdbacks), "a connector cannot be held and publishable"
+    assert on_disk == listed | set(holdbacks), (
+        "every connector package needs exactly one disposition; "
+        f"missing={sorted(on_disk - listed - set(holdbacks))}, "
+        f"stale={sorted((listed | set(holdbacks)) - on_disk)}"
     )
+    for distribution, disposition in holdbacks.items():
+        assert distribution.startswith("dotmac-connector-")
+        assert isinstance(disposition, dict)
+        blockers = disposition.get("blocking_conditions")
+        assert isinstance(blockers, list) and blockers
+        assert all(isinstance(item, str) and item.strip() for item in blockers)
+        next_action = disposition.get("next_action")
+        assert isinstance(next_action, str) and next_action.strip()

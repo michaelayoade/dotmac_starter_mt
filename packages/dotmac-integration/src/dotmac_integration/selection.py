@@ -12,9 +12,10 @@ concept      meaning                                         multiplicity
 **selected** the binding chosen for ONE concrete dispatch    **exactly one**
 ============ =============================================== ================
 
-So the schema constrains `(installation_id, capability_id)` and nothing else,
-and every ambiguity is resolved *here*, per dispatch, where the caller's intent
-is available.
+So the schema constrains
+`(installation_id, capability_id, capability_instance_ref)`, and every
+remaining ambiguity is resolved *here*, per dispatch, where the caller's
+intent is available.
 
 ## Explicit binding is the generic seam
 
@@ -43,6 +44,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from dotmac_integration.capability_instances import require_capability_instance_ref
 from dotmac_integration.models import CapabilityBinding, ConnectorInstallation
 
 __all__ = [
@@ -73,6 +75,7 @@ def resolve_binding(
     db: Any,
     *,
     capability_id: str,
+    capability_instance_ref: str | None = None,
     capability_binding_id: UUID | None = None,
     connector_key: str | None = None,
 ) -> CapabilityBinding:
@@ -95,6 +98,11 @@ def resolve_binding(
         )
         .where(CapabilityBinding.capability_id == capability_id)
     )
+    if capability_instance_ref is not None:
+        query = query.where(
+            CapabilityBinding.capability_instance_ref
+            == require_capability_instance_ref(capability_instance_ref)
+        )
     if capability_binding_id is not None:
         query = query.where(CapabilityBinding.id == capability_binding_id)
     if connector_key is not None:

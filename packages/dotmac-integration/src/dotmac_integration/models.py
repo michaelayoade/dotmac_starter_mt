@@ -17,10 +17,10 @@ faithful port rather than a decision imposed on the source.
 
 ## Binding multiplicity: enabled is not selected
 
-`(installation_id, capability_id)` is unique — an installation binds a
-capability once. **`capability_id` alone is deliberately NOT unique**: many
-installations may implement one capability, which is what ADR-0024 § 7's
-"each `(installation, capability)`" actually says.
+`(installation_id, capability_id, capability_instance_ref)` is unique — an
+installation binds each named capability instance once. **`capability_id`
+alone is deliberately NOT unique**: many instances and installations may
+implement one capability.
 
 Choosing between them is a DISPATCH concern, not a schema one. See
 `dotmac_integration.selection`: exactly one enabled binding is resolved per
@@ -227,11 +227,12 @@ class CapabilityBinding(Base, TimestampMixin):
 
     __tablename__ = "capability_bindings"
     __table_args__ = (
-        # The ADR-0024 § 7 tuple: an installation binds a capability ONCE.
+        # One installation may expose several named instances of a capability.
         UniqueConstraint(
             "installation_id",
             "capability_id",
-            name="uq_capability_bindings_installation_capability",
+            "capability_instance_ref",
+            name="uq_capability_bindings_installation_capability_instance",
         ),
         CheckConstraint(
             "state IN ('disabled', 'enabled')", name="ck_capability_bindings_state"
@@ -259,6 +260,12 @@ class CapabilityBinding(Base, TimestampMixin):
     #: A capability CONTRACT id, e.g. `ticket.observation.v1`. Must be declared
     #: by the installation's connector manifest — see `activation`.
     capability_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: Stable orchestrator identity for one configured instance. Nullable only
+    #: for rows created before a6; activation and provisioning refuse those
+    #: rows until an operator assigns an authoritative value.
+    capability_instance_ref: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
     #: The ONE stable identifier an ingress URL addresses, and NULL until
     #: minted. The IDENTITY is the binding — installation, connector,
     #: capability, pinned manifest, active config revision and secret

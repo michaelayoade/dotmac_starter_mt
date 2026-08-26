@@ -30,6 +30,7 @@ from dotmac_integration import (
     SecretValueError,
     add_binding,
     adopt_manifest,
+    assign_capability_instance_ref,
     create_draft,
     disable,
     enable,
@@ -139,9 +140,89 @@ def test_a_binding_starts_disabled(db: Session, registry) -> None:
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
     binding = add_binding(
-        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
     )
     assert binding.state == "disabled"
+
+
+def test_two_instances_of_the_same_capability_are_distinct_bindings(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    email = add_binding(
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="email.oidc-client",
+    )
+    collaboration = add_binding(
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="collaboration.oidc-client",
+    )
+
+    assert email.id != collaboration.id
+    assert email.capability_id == collaboration.capability_id
+    assert email.capability_instance_ref != collaboration.capability_instance_ref
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("", "Uppercase", "bad_instance", "bad..instance", "bad-", "a" * 201),
+)
+def test_capability_instance_reference_grammar_is_strict(
+    db: Session, registry, value: str
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    with pytest.raises(ValueError, match="capability_instance_ref"):
+        add_binding(
+            db,
+            installation,
+            registry=registry,
+            capability_id=FAKE_CAPABILITY,
+            capability_instance_ref=value,
+        )
+
+
+def test_legacy_binding_instance_assignment_is_explicit_and_immutable(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    legacy = CapabilityBinding(
+        installation_id=installation.id,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref=None,
+        state="disabled",
+    )
+    db.add(legacy)
+    db.flush()
+
+    assigned = assign_capability_instance_ref(
+        db,
+        legacy,
+        capability_instance_ref="collaboration.primary",
+        actor="operator-1",
+    )
+    assert assigned.capability_instance_ref == "collaboration.primary"
+    with pytest.raises(LifecycleError, match="immutable"):
+        assign_capability_instance_ref(
+            db,
+            legacy,
+            capability_instance_ref="collaboration.secondary",
+        )
 
 
 def test_binding_an_undeclared_capability_is_refused(db: Session, registry) -> None:
@@ -149,7 +230,13 @@ def test_binding_an_undeclared_capability_is_refused(db: Session, registry) -> N
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
     with pytest.raises(Exception, match="does not declare capability"):
-        add_binding(db, installation, registry=registry, capability_id=OTHER_CAPABILITY)
+        add_binding(
+            db,
+            installation,
+            registry=registry,
+            capability_id=OTHER_CAPABILITY,
+            capability_instance_ref="primary",
+        )
 
 
 def test_enabling_requires_a_configuration_revision(db: Session, registry) -> None:
@@ -272,7 +359,13 @@ def test_adoption_is_refused_when_it_would_strand_a_bound_capability(
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    add_binding(db, installation, registry=registry, capability_id=FAKE_CAPABILITY)
+    add_binding(
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
+    )
 
     narrowed = fake_registry(
         plugins=[
@@ -335,7 +428,11 @@ def _enabled(db: Session, registry) -> tuple:
     )
     enable(db, installation, registry=registry)
     binding = add_binding(
-        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
     )
     set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
     return installation, binding
@@ -497,7 +594,11 @@ def test_the_service_surface_the_routes_would_call_is_complete(
     )
     put_config_revision(db, installation, config={"a": 1})
     binding = add_binding(
-        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
     )
     enable(db, installation, registry=registry)
     set_binding_enabled(db, installation, binding, registry=registry, enabled=True)

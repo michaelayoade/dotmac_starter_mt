@@ -101,8 +101,10 @@ __all__ = [
     "CURRENT_SPI_VERSION",
     "MODE_PROTOCOLS",
     "Acknowledgement",
+    "CapabilityContractSnapshot",
     "CapabilityDeclaration",
     "CapabilityHandler",
+    "CapabilitySchemaDocument",
     "ConnectorManifest",
     "ConnectorMode",
     "ConnectorPlugin",
@@ -608,6 +610,10 @@ class ProvisionPlanRequest:
 class ProvisionPlanResult:
     plan_hash: str
     steps: tuple[ProvisionStep, ...]
+    evidence: Mapping[str, object] = _NO_MATERIAL
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -634,10 +640,12 @@ class ProvisionObserveRequest:
     plan_hash: str
     step_key: str
     provider_operation_ref: str
+    target: Mapping[str, object]
     config: Mapping[str, object]
     secrets: Mapping[str, str]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "target", MappingProxyType(dict(self.target)))
         object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
         object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
 
@@ -650,12 +658,14 @@ class ProvisionCancelRequest:
     plan_hash: str
     step_key: str
     provider_operation_ref: str
+    target: Mapping[str, object]
     reason: str
     idempotency_key: str
     config: Mapping[str, object]
     secrets: Mapping[str, str]
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "target", MappingProxyType(dict(self.target)))
         object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
         object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
 

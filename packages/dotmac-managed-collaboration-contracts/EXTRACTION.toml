@@ -1,0 +1,53 @@
+schema_version = 1
+package = "dotmac-managed-collaboration-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral managed collaboration product lifecycle, exact OIDC configuration, stable user/group/quota state and file-roundtrip evidence schemas."
+contract = "Declare plan/apply/observe/cancel for application, OIDC configuration, user/group/quota and bounded file-roundtrip lifecycles. This catalogue owns meanings and exact schema bytes only; it does not own provider I/O, host execution, login ceremonies, local identity/session state, deployment state, retry, persistence, or secrets."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_academy_app",
+  "dotmac_workspace",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_starter_mt:packages/dotmac-auth-oidc/src/dotmac_auth_oidc/client.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/external_identity.py",
+  "dotmac_sub:app/services/integrations/connectors/nextcloud_talk.py",
+  "dotmac_sub:app/services/integrations/nextcloud_talk_capability.py",
+  "dotmac_sub:app/services/nextcloud_talk_staff.py",
+  "dotmac_sub:tests/test_nextcloud_talk_staff_notifications.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_collaboration_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_id_token.py",
+  "dotmac_starter_mt:tests/unit/test_external_identity.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+  "dotmac_sub:tests/test_nextcloud_talk_staff_notifications.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP first replaces synthetic collaboration evidence with this exact released catalogue; the collaboration connector then proves all four owner contracts through Integration without returning secret material."
+shadow_and_drift = "Sub's production-used Talk connector supplies the tested HTTPS/SSRF, redirect refusal, OCS envelope, exact-user and ambiguous-outcome transport precedent, but it does not implement the four provisioning contracts and is not copied into this data-only package. Fleet inspection found no qualifying OCS user/group/quota/file or user_oidc administration, backup, restore or upgrade implementation. Exact observe schemas and checks make later provider drift visible; this catalogue stores no state."
+local_copy_retirement = "Vendor CP synthetic collaboration snapshots retire on adoption. Sub retains its application-owned notification decisions until a separately owned provider-neutral message contract and cutover exist; no Talk transport, provider client, host script or local identity/session implementation is copied here."
+next_action = "First land and release the Integration a6 executable-schema gate for plan/observe/cancel as well as apply; decorative operation pins are not admissible. Then admit and publish 0.1.0a1 through the contract-catalogue profile, replace Vendor CP synthetic evidence with the exact artifact, and require the collaboration connector fake and isolated acceptance to satisfy every schema and check. Message/share behavior remains blocked on a separately owned provider-neutral contract rather than being inferred from the file-roundtrip family."

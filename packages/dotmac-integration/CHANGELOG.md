@@ -57,6 +57,10 @@ Nothing in this file is a publication claim except this section.
   digest now binds the complete canonical contract and schemas (configuration,
   endpoints and checks included), while the <=1.1 digest path remains
   byte-for-byte compatible.
+- Re-exports `CapabilityContractSnapshot` and `CapabilitySchemaDocument` from
+  the SPI surface. Connector source imports Integration plus its exact owner
+  catalogue, never Kernel directly; Kernel remains the transitive value-grammar
+  dependency owned by those two contracts.
 - Adds the provider-neutral `verify_capability_configuration` gate for binding
   activation and provisioning intake. It validates typed values, semantic
   formats, endpoints, required/unknown fields and held secret references without
@@ -69,6 +73,23 @@ Nothing in this file is a publication claim except this section.
   ambiguous provider effects. Plan/apply/observe/cancel each carry an
   independently replayable command id; effect idempotency keys stay stable
   across retry attempts.
+- Adds required provider-neutral `capability_instance_ref` identity for new
+  bindings and all four commands, permitting several instances of one
+  capability while binding template/body fingerprints, durable operations and
+  immutable receipts to the exact instance. Legacy binding rows are left
+  unassigned and fail closed until explicitly assigned while disabled.
+- Makes all four owner operation schema pairs executable. PLAN validates every
+  step input before command mutation and binds the validated, repr-suppressed
+  result-evidence digest into its immutable receipt. OBSERVE and CANCEL derive
+  immutable targets solely from input-schema-declared fields on the original
+  durable APPLY step, validate them before claim/I/O, validate successful
+  output evidence (including `CANCELLED`/`NOT_FOUND` cancellation outcomes),
+  and receipt only the canonical evidence digest plus its schema-declared
+  public, non-secret projection.
+- Enforces declared standard JSON Schema formats during every operation-input
+  and successful-evidence validation. A declared email, URI or date-time format
+  is a runtime contract rather than an annotation invalid data can pass before
+  provider I/O.
 - Refuses unverified, expired, stale or hash-mismatched approvals before
   connector I/O. Invocation is the middle of a prepare/invoke/settle boundary,
   so no database session crosses provider I/O.
@@ -90,9 +111,10 @@ Nothing in this file is a publication claim except this section.
   arbitrary values.
 - Adds `ig_0008_provisioning`: five platform-only tables and immutable,
   hash-chained receipts carrying exact connector, manifest, artifact,
-  configuration, approval and plan provenance. Step receipts snapshot the step
-  key and provider operation reference; operation-level receipts leave both
-  null rather than inventing a fake step identity.
+  configuration, approval, plan and capability-instance provenance. Step
+  receipts snapshot the step key and provider operation reference;
+  operation-level receipts leave both null rather than inventing a fake step
+  identity.
 
 ## 0.1.0a5 — released 2026-08-17
 

@@ -46,6 +46,13 @@ SPI 1.2's provisioning handler exposes typed
 plan and exact connector/configuration provenance, materializes secrets only at
 the invocation boundary, and records ambiguous provider outcomes for
 reconciliation rather than retrying an effect it cannot prove did not happen.
+Every binding also carries a required provider-neutral
+`capability_instance_ref` (1..200 ASCII characters matching
+`^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$`). This distinguishes several configured
+instances of the same versioned capability without entering product-owned
+operation inputs. Legacy rows remain unassigned and fail activation/provisioning
+until an operator disables and explicitly assigns them through
+`assign_capability_instance_ref`.
 
 A connector declaring `PROVISION` must attach the product owner's exact kernel
 `CapabilityContractSnapshot` and every referenced canonical
@@ -61,6 +68,19 @@ only in `secret_refs`, and the verifier returns value-free provenance.
 `create_draft`/`adopt_manifest` also accept the exact connector distribution
 digest already admitted by the Release Catalog. PROVISION activation refuses a
 missing or non-canonical artifact pin; config revisions never alter it.
+
+All four operation schema pairs are executable. PLAN validates every proposed
+step input against the held `plan` input schema before it records a command;
+the connector's repr-suppressed plan evidence must satisfy the held output
+schema, and only its canonical digest enters the immutable PLAN result receipt.
+OBSERVE and CANCEL derive an immutable provider-neutral `target` from the
+durable original step input, copying only top-level fields declared by the held
+operation input schema. Their successful output evidence is schema-validated;
+receipts retain only a canonical full-evidence digest and the schema-derived
+`public_non_secret` projection. `CANCELLED` and `NOT_FOUND` are successful
+cancel outcomes for this validation boundary. Installation config and held
+secret references remain separate SPI request fields and are never copied into
+an operation target.
 
 An APPLY command also separates what approval can know from what execution
 produces later. `provisioning_command_template_digest` binds the exact local
@@ -85,7 +105,8 @@ operation. The same intake check corroborates the exact local installation,
 connector artifact, manifest, configuration revision, product-owned capability
 contract and `DEFAULT_POLICY_DIGEST`; a signed command cannot relabel any one
 of those local facts. Operation receipts are hash chained and project
-`step_key` plus `provider_operation_ref` from immutable receipt columns. Both
+the immutable capability instance, plus `step_key` and
+`provider_operation_ref` from immutable receipt columns. Both
 are null only for operation-level receipts such as `command_accepted`.
 
 A declared mode is a promise the module verifies at discovery, in both

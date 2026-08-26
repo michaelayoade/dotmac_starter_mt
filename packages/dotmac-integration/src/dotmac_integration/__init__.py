@@ -92,10 +92,11 @@ never quietly skipped.
 
 ## enabled is not selected
 
-Many installations may be ENABLED for one capability; exactly one is SELECTED
-per dispatch. The schema constrains `(installation_id, capability_id)` and
-nothing else, and ambiguity is resolved per dispatch where the caller's intent
-exists. See :mod:`dotmac_integration.selection`.
+Many installations and multiple named instances may be ENABLED for one
+capability; exactly one is SELECTED per dispatch. The schema constrains
+`(installation_id, capability_id, capability_instance_ref)`, and ambiguity is
+resolved per dispatch where the caller's intent exists. See
+:mod:`dotmac_integration.selection`.
 
 ## Public surface
 
@@ -109,6 +110,11 @@ from dotmac_integration.activation import (
     ActivationRefused,
     check_activation,
     require_activatable,
+)
+from dotmac_integration.capability_instances import (
+    CAPABILITY_INSTANCE_REF_MAX_LENGTH,
+    CAPABILITY_INSTANCE_REF_PATTERN,
+    require_capability_instance_ref,
 )
 from dotmac_integration.capability_registry import (
     EMPTY_REGISTRY,
@@ -217,6 +223,7 @@ from dotmac_integration.lifecycle import (
     LifecycleError,
     add_binding,
     adopt_manifest,
+    assign_capability_instance_ref,
     create_draft,
     disable,
     enable,
@@ -417,6 +424,8 @@ __version__ = "0.1.0a6"
 __all__ = [
     # ── Approval-bound provisioning ────────────────────────────────────────
     "PROVISIONING_PLATFORM_TABLES",
+    "CAPABILITY_INSTANCE_REF_MAX_LENGTH",
+    "CAPABILITY_INSTANCE_REF_PATTERN",
     "PROVISION_OPERATION_CODES",
     "ApprovalRefused",
     "CommandAcceptance",
@@ -451,6 +460,7 @@ __all__ = [
     "ProvisioningStepRecord",
     "VerifiedApprovalGrant",
     "accept_provisioning_command",
+    "assign_capability_instance_ref",
     "invoke_prepared_cancellation",
     "invoke_prepared_observation",
     "invoke_prepared_plan",
@@ -462,6 +472,7 @@ __all__ = [
     "provisioning_command_template_digest",
     "read_provisioning_plan_receipt",
     "read_provisioning_receipts",
+    "require_capability_instance_ref",
     "settle_cancellation",
     "settle_observation",
     "settle_provisioning_plan",

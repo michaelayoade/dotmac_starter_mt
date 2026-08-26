@@ -67,7 +67,7 @@
     "",
     "## What earns an entry",
     "",
-    "Five things, and every one of them is checked rather than asserted in",
+    "Six things, and every one of them is checked rather than asserted in",
     "review. `scripts/release_connector.py` is where each is enforced:",
     "",
     "  1. CLASSIFICATION and LOCATION. `EXTRACTION.toml` says",
@@ -97,9 +97,20 @@
     "     resolved by an installer, so it is not a floor at all.' Here it is",
     "     enforced rather than only written down: `resolve` refuses an",
     "     `integration_floor` with no release tag. This bites TODAY —",
-    "     `dotmac-integration` declares 0.1.0a2 and has published 0.1.0a1, so a",
-    "     connector may currently floor at a1 or wait, and may not floor at a2.",
-    "  5. NO SECRET SHAPE, no persistence, and no private retry/checkpoint",
+    "     `dotmac-integration` declares 0.1.0a6 while 0.1.0a5 is the newest",
+    "     published release, so the managed-service connectors correctly remain",
+    "     governed holdbacks until a6 is verified and tagged.",
+    "  5. EXACT FIRST-PARTY SOURCE DEPENDENCIES. A connector that imports an",
+    "     owner contract catalogue lists it in `source_dependencies`, pins the",
+    "     catalogue's exact local version, and admits it in the wheel closure.",
+    "     The build smoke builds those governed local wheels generically before",
+    "     installing the connector; an unlisted Dotmac dependency, compatible",
+    "     range, missing package or name mismatch fails before build. This keeps",
+    "     unchanged connector bytes bound to one contract digest without",
+    "     hardcoding provider packages into the shared workflow. Connector source",
+    "     may import Integration and those exact catalogues, never Kernel or a",
+    "     product/runtime authority directly; transitive grammar is not authority.",
+    "  6. NO SECRET SHAPE, no persistence, and no private retry/checkpoint",
     "     engine. A connector holds a reference to credential material (ADR-0024",
     "     section 7); it never holds the value, it declares no tables, and it does",
     "     not carry its own delivery-retry or feed-checkpoint machinery — that is",
@@ -133,6 +144,16 @@
     "dotmac-integration 0.1.0a5 floor. This is the rule ADR-0026 section 8 set",
     "for release eligibility: the entry lands WITH the proof, never ahead of it.",
     "",
+    "## Governed holdbacks",
+    "",
+    "An on-disk candidate whose exact release floor or provider activation",
+    "evidence does not yet exist belongs in `holdbacks`, not in `connectors`.",
+    "A holdback row is machine-checked disposition only: `resolve` still",
+    "refuses it, the workflow never offers it, and it becomes publishable only",
+    "through a reviewed move into `connectors` after every named condition is",
+    "closed. This permits dependency-ordered review without making absence an",
+    "unrecorded exception or an allowlist row a promise pip cannot resolve.",
+    "",
     "THIS OBJECT IS THE LOCK. `.github/workflows/release-connector.yml` exists",
     "and is NOT the lock — a reader must not mistake an input option for",
     "authorization. `resolve` reads this exact object before build and again",
@@ -161,6 +182,48 @@
     "classification": "stateless-protocol-adapter",
     "package_dir_prefix": "packages/dotmac-connector-"
   },
+  "holdbacks": {
+    "dotmac-connector-contabo": {
+      "blocking_conditions": [
+        "dotmac-integration 0.1.0a6 is not published",
+        "managed-infrastructure and domains contract catalogues are not published",
+        "only the firewall capability has honest provider conformance evidence"
+      ],
+      "next_action": "Publish the exact dependency train, prove the firewall binding on Seabone, and keep every other declared infrastructure or DNS capability disabled until its provider evidence exists."
+    },
+    "dotmac-connector-dotmac-host-agent": {
+      "blocking_conditions": [
+        "dotmac-integration 0.1.0a6 is not published",
+        "managed-host contracts 0.1.0a1 are not published",
+        "the constrained target host agent is not implemented or activation-proven"
+      ],
+      "next_action": "Publish the exact dependency train, implement the separately deployed closed host-agent API, and prove bundle, backup and health activation checks on Seabone."
+    },
+    "dotmac-connector-keycloak-admin": {
+      "blocking_conditions": [
+        "dotmac-integration 0.1.0a6 is not published",
+        "managed-identity contracts 0.1.0a1 are not published",
+        "realm, client and stable-reference user operations have no Seabone provider receipt"
+      ],
+      "next_action": "Publish the exact dependency train and prove realm, client, user enrollment, disable and session logout against disposable Keycloak on Seabone."
+    },
+    "dotmac-connector-mailcow": {
+      "blocking_conditions": [
+        "dotmac-integration 0.1.0a6 is not published",
+        "managed-email contracts 0.1.0a1 are not published",
+        "upstream browser SSO has not proved immutable issuer-subject mailbox mapping"
+      ],
+      "next_action": "Publish the exact dependency train and keep browser SSO activation refused until a disposable Mailcow run proves immutable subject mapping or a reviewed constrained facade supplies it."
+    },
+    "dotmac-connector-nextcloud": {
+      "blocking_conditions": [
+        "dotmac-integration 0.1.0a6 is not published",
+        "managed-collaboration contracts 0.1.0a1 are not published",
+        "the constrained management facade required by the owner contract is not deployed"
+      ],
+      "next_action": "Publish the exact dependency train, implement the private constrained Nextcloud facade, and prove OIDC, account, quota and file-roundtrip activation on Seabone."
+    }
+  },
   "connectors": {
     "dotmac-connector-whatsapp": {
       "$comment": [
@@ -179,6 +242,7 @@
       "connector_key": "meta_whatsapp",
       "spi_range": ">=1.2,<2.0",
       "integration_floor": "0.1.0a5",
+      "source_dependencies": [],
       "tag_prefix": "dotmac-connector-whatsapp-v",
       "wheel_contents": {
         "required": [

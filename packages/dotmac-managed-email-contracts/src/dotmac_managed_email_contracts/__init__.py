@@ -1,0 +1,24 @@
+"""Managed email lifecycle contracts, never a provider implementation."""
+
+from .catalogue import (
+    CAPABILITY_COMPOSITIONS,
+    CAPABILITY_CONTRACTS,
+    CAPABILITY_SCHEMAS,
+    COMPOSITION_DEPENDENCY_CONTRACTS,
+    COMPOSITION_DEPENDENCY_SCHEMAS,
+    EMAIL_LIFECYCLE,
+    PRODUCT_MANIFEST,
+)
+
+__version__ = "0.1.0a1"
+
+__all__ = [
+    "CAPABILITY_COMPOSITIONS",
+    "CAPABILITY_CONTRACTS",
+    "CAPABILITY_SCHEMAS",
+    "COMPOSITION_DEPENDENCY_CONTRACTS",
+    "COMPOSITION_DEPENDENCY_SCHEMAS",
+    "EMAIL_LIFECYCLE",
+    "PRODUCT_MANIFEST",
+    "__version__",
+]

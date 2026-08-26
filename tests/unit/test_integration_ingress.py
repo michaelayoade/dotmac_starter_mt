@@ -386,7 +386,11 @@ def build(
         secret_refs={"signing": "bao://kv/signing"},
     )
     binding = add_binding(
-        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
     )
     if installation_state == "enabled":
         enable(db, installation, registry=registry)

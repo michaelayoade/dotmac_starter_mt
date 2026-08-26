@@ -82,7 +82,11 @@ def _enabled(db: Session, registry) -> tuple:
     put_config_revision(db, installation, config={"a": 1})
     enable(db, installation, registry=registry)
     binding = add_binding(
-        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        capability_instance_ref="primary",
     )
     set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
     return installation, binding

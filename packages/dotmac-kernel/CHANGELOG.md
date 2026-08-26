@@ -21,6 +21,13 @@ format vocabulary, typed endpoint requirements linked to their declared
 operations, and activation/evidence checks. Every nested declaration is frozen,
 uniquely keyed and already canonically ordered; parsing refuses unknown fields,
 normalization, invalid enum members, non-canonical bytes and digest mismatches.
+Configuration-field and endpoint codes are disjoint: an endpoint value remains
+part of installed connector configuration, but its type and requiredness have
+one declaration rather than two definitions that can drift or make activation
+structurally impossible.
+`capability_code` is unversioned and `capability_id` is derived by appending the
+separate schema version; a pre-versioned code is refused rather than producing
+an ambiguous or doubled wire id.
 
 Also adds `CapabilitySchemaDocument`, the held canonical-document counterpart
 to an operation's schema reference and digest. It fixes `$id` to the exact
@@ -34,7 +41,13 @@ Also adds `CapabilityCompositionSnapshot`, a value-free owner document for an
 approved APPLY-output to APPLY-input edge. It binds both exact capability and
 schema identities, requires a declared public/non-secret source path, and
 proves source/target primitive compatibility without naming installations or
-runtime values. `CapabilitySchemaDocument` can now return a fresh mapping,
+runtime values. Optional source/target instance selectors address only input
+properties closed by a string `const` or `enum`, so a composition can apply to
+one resource kind inside a multi-resource owner contract without Vendor
+inferring product semantics. Each edge also names whether every matching source
+or every matching target must occur exactly once, turning completeness into an
+owner-signed invariant rather than a caller-selected set. `CapabilitySchemaDocument`
+can now return a fresh mapping,
 read an approved instance pointer, and project only explicitly classified
 public evidence for the Integration module's durable receipt boundary.
 

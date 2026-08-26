@@ -76,7 +76,12 @@ dotmac-integration = { path = "packages/dotmac-integration", develop = true }
 # Product-owned managed capability and composition catalogues. They are tested
 # and released here but composed by Vendor CP and Integrator, never by the
 # reference application's runtime assembly.
+dotmac-domains-contracts = { path = "packages/dotmac-domains-contracts", develop = true }
+dotmac-managed-collaboration-contracts = { path = "packages/dotmac-managed-collaboration-contracts", develop = true }
+dotmac-managed-email-contracts = { path = "packages/dotmac-managed-email-contracts", develop = true }
+dotmac-managed-host-contracts = { path = "packages/dotmac-managed-host-contracts", develop = true }
 dotmac-managed-identity-contracts = { path = "packages/dotmac-managed-identity-contracts", develop = true }
+dotmac-managed-infrastructure-contracts = { path = "packages/dotmac-managed-infrastructure-contracts", develop = true }
 dotmac-managed-suite-contracts = { path = "packages/dotmac-managed-suite-contracts", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
@@ -331,9 +336,10 @@ source_modules = ["dotmac_auth_oidc"]
 forbidden_modules = ["dotmac_kernel", "app"]
 
 [[tool.importlinter.contracts]]
-name = "Connector plugins depend only on the integration SPI"
+name = "Connector plugins import only Integration and owner contract catalogues"
 type = "forbidden"
 source_modules = ["dotmac_connector_whatsapp"]
+allow_indirect_imports = true
 forbidden_modules = [
     "app",
     "dotmac_kernel",

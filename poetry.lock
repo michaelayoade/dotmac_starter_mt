@@ -576,6 +576,23 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-domains-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral authoritative DNS and TLS requirement contracts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-domains-contracts"
+
+[[package]]
 name = "dotmac-entitlement-allocation"
 version = "0.1.0a5"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
@@ -676,6 +693,57 @@ type = "directory"
 url = "packages/dotmac-kernel"
 
 [[package]]
+name = "dotmac-managed-collaboration-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral managed collaboration lifecycle contracts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-managed-collaboration-contracts"
+
+[[package]]
+name = "dotmac-managed-email-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral managed email lifecycle contracts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-managed-email-contracts"
+
+[[package]]
+name = "dotmac-managed-host-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral closed managed host lifecycle contracts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-managed-host-contracts"
+
+[[package]]
 name = "dotmac-managed-identity-contracts"
 version = "0.1.0a1"
 description = "Provider-neutral managed identity realm and OIDC confidential-client lifecycle contracts"
@@ -693,6 +761,23 @@ type = "directory"
 url = "packages/dotmac-managed-identity-contracts"
 
 [[package]]
+name = "dotmac-managed-infrastructure-contracts"
+version = "0.1.0a1"
+description = "Provider-neutral managed infrastructure lifecycle contracts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a69,<0.2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-managed-infrastructure-contracts"
+
+[[package]]
 name = "dotmac-managed-suite-contracts"
 version = "0.1.0a1"
 description = "Exact cross-capability evidence compositions for Dotmac managed suites"
@@ -703,7 +788,10 @@ files = []
 develop = true
 
 [package.dependencies]
+dotmac-domains-contracts = "0.1.0a1"
 dotmac-kernel = ">=0.1.0a69,<0.2.0"
+dotmac-managed-collaboration-contracts = "0.1.0a1"
+dotmac-managed-email-contracts = "0.1.0a1"
 dotmac-managed-identity-contracts = "0.1.0a1"
 
 [package.source]
@@ -2961,4 +3049,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "2f35471a672dc2a0ef2308da69e0897b3cf6c5e9fc18db994306fcd0d2fc818c"
+content-hash = "e7b66987f6e09db86eb8c0e85e849982f45d3e88521b7de983c2c8e7ce8aa156"

@@ -77,15 +77,40 @@
       "state": "declared-unpublished",
       "reason": "AWAITING THE PRODUCT-OWNED CAPABILITY-CONTRACT CUTOVER. a68 is the newest published release and owns the platform-audit prerequisite; it does not contain this grammar. a69 preserves that prerequisite and adds the provider-neutral canonical dotmac.capability-contract/v1 grammar, exact held JSON Schema documents and value-free dotmac.capability-composition/v1 mappings between exact APPLY output/input paths. Vendor CP and dotmac-integration must consume the verified wheel rather than copy these grammars. Delete this row in the same change that verifies and tags dotmac-kernel-v0.1.0a69; never repair it by lowering the declared version."
     },
+    "dotmac-domains-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This product-owned catalogue defines authoritative DNS zone, recordset and observation semantics plus the exact public TLS and mail-deliverability evidence used by managed service compositions. Publish and verify kernel a69 first, then publish this exact a1 wheel before a DNS connector or Vendor profile pins it. Delete this row with the verified dotmac-domains-contracts-v0.1.0a1 tag; never copy these schemas into a provider connector or accept request-carried contract bytes."
+    },
+    "dotmac-managed-collaboration-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This product-owned catalogue defines managed collaboration application, user/OIDC, group/quota and file-roundtrip lifecycle semantics without naming a collaboration provider. Publish and verify kernel a69 first, then publish this exact a1 wheel before the collaboration connector or Vendor profile pins it. Delete this row with the verified dotmac-managed-collaboration-contracts-v0.1.0a1 tag; do not replace the exact floor with a path dependency."
+    },
+    "dotmac-managed-email-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This product-owned catalogue defines managed email application, domain, mailbox, alias, quota, delivery, app-password and DKIM lifecycle semantics while leaving provider I/O and host backup/update to their separate owners. Publish and verify kernel a69 first, then publish this exact a1 wheel before the email connector or Vendor profile pins it. Delete this row with the verified dotmac-managed-email-contracts-v0.1.0a1 tag; no product credential material may be added to make a connector convenient."
+    },
+    "dotmac-managed-host-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This product-owned catalogue defines a closed deployment-bundle lifecycle plus backup/restore and health-probe semantics for the constrained host agent. It contains no generic command, shell, SSH, argv, path or script surface. Publish and verify kernel a69 first, then publish this exact a1 wheel before the host-agent connector or Vendor profile pins it. Delete this row with the verified dotmac-managed-host-contracts-v0.1.0a1 tag; never broaden the bundle vocabulary to clear a provider-specific need."
+    },
     "dotmac-managed-identity-contracts": {
       "declared": "0.1.0a1",
       "state": "never-published",
-      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This first provider-neutral identity catalogue exactly owns realm and confidential OIDC-client lifecycle contracts and canonical schemas, but its required kernel a69 grammar is still declared-unpublished. Publish and verify kernel a69 first, then publish this exact a1 wheel before any Vendor profile or connector pins it. Delete this row with the dotmac-managed-identity-contracts-v0.1.0a1 verified tag; do not replace the exact floor with a path dependency or copy its contracts into Vendor/Integrator."
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This first provider-neutral identity catalogue exactly owns realm, confidential OIDC-client and stable-reference user lifecycle contracts and canonical schemas, but its required kernel a69 grammar is still declared-unpublished. The user contract emits exact issuer/subject evidence, never links by email, and requires IdP-session revocation on disable. Publish and verify kernel a69 first, then publish this exact a1 wheel before any Vendor profile or connector pins it. Delete this row with the dotmac-managed-identity-contracts-v0.1.0a1 verified tag; do not replace the exact floor with a path dependency or copy its contracts into Vendor/Integrator."
+    },
+    "dotmac-managed-infrastructure-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This product-owned catalogue defines independently bindable instance, network, volume and firewall lifecycle semantics without selecting a cloud provider. Publish and verify kernel a69 first, then publish this exact a1 wheel before the infrastructure connector or Vendor profile pins it. Delete this row with the verified dotmac-managed-infrastructure-contracts-v0.1.0a1 tag; provider account, endpoint and secret configuration remains held by Integration."
     },
     "dotmac-managed-suite-contracts": {
       "declared": "0.1.0a1",
       "state": "never-published",
-      "reason": "AWAITING ITS EXACT DEPENDENCY CHAIN. This composition-only catalogue owns the value-free realm issuer -> OIDC-client issuer mapping without claiming either capability. Its wheel exactly pins dotmac-managed-identity-contracts 0.1.0a1, which in turn requires published kernel a69. Publish in that order and then remove this row with the verified dotmac-managed-suite-contracts-v0.1.0a1 tag. It must never be made green by re-exporting dependency capabilities as suite-owned or by accepting request-carried mapping bytes."
+      "reason": "AWAITING ITS EXACT DEPENDENCY CHAIN. This composition-only catalogue owns value-free realm-to-client/user, identity-user-to-collaboration-account, client-to-email, client-to-collaboration and email-to-DNS evidence mappings without claiming any dependency capability. Its wheel exactly pins identity, email, collaboration and domains a1, all of which require published kernel a69. Publish those owner catalogues first, then remove this row with the verified dotmac-managed-suite-contracts-v0.1.0a1 tag. It must never be made green by re-exporting dependency capabilities as suite-owned or by accepting request-carried mapping bytes."
     },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",

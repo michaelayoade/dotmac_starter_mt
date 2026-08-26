@@ -1,0 +1,35 @@
+schema_version = 1
+package = "dotmac-connector-mailcow"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "Mailcow supported administrative API wire translation for managed email."
+contract = "Implement dotmac-managed-email-contracts email.lifecycle.v1 through Integration SPI 1.2 without owning product state, credentials, retry, scheduling, approval, sessions or provider-independent decisions."
+
+source_repositories = ["dotmac_erp", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/services/mailcow/client.py",
+  "dotmac_erp:app/services/people/hr/offboarding.py",
+  "dotmac_erp:tests/services/test_mailcow_offboarding.py",
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_starter_mt:packages/dotmac-managed-email-contracts/src/dotmac_managed_email_contracts/catalogue.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_mailcow_connector.py",
+  "dotmac_starter_mt:tests/architecture/test_mailcow_connector_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+inventory_evidence = [
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+]
+
+first_cutover = "Install only after Integration a6, kernel a69 and the managed-email a1 catalogue are published and isolated Mailcow acceptance proves every enabled activation check."
+shadow_and_drift = "ERP's former Mailcow offboarding boundary is behavior evidence only; it has no qualifying tested real wire client. Exact API routes and outcomes are checked against Mailcow's maintained source revision 06424670fa5d60fee851f58bfc49f66086d5f0a6 and the injected transport suite. That source proves password-free generic-oidc mailbox creation but still maps browser login solely by the user-info email claim, so immutable issuer/subject activation remains refused."
+local_copy_retirement = "Retire no ERP lifecycle decision in this slice. A later ERP caller uses its product-owned lifecycle port; this connector remains the only provider wire owner and never imports ERP."
+next_action = "Run package tests on Observer, then exercise domain/mailbox/alias/quota/DKIM routes on disposable Seabone Mailcow state and retain the SSO/app-password-create refusals until their named gates pass."

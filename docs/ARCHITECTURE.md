@@ -45,11 +45,12 @@ only provider wire translation and I/O. The thin assembly adds no competing
 engine or persistence. Products therefore add no provider client or conditional
 when an external system changes.
 
-The first concrete plugin follows that split exactly:
+Concrete plugins follow that split exactly:
 
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
+| Keycloak Admin realm/client/user wire translation and bounded realm-scoped HTTPS I/O | `dotmac-connector-keycloak-admin` (`keycloak_admin`, PROVISION-only, `identity.realm.lifecycle.v1`, `identity.oidc-client.lifecycle.v1` and `identity.user.lifecycle.v1`) | Owns no realm creation/master authority, generated secret, installation/binding/receipt, product account, product session or authorization decision; user correlation is by stable owner reference and disable includes IdP-session logout; publication waits for kernel a69, Integration a6 and the identity-contract a1 wheels |
 | Connector installation, binding, materialized secret lifetime, receipt identity, retry/repair and verification evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
 

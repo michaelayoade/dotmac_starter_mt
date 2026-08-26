@@ -52,12 +52,13 @@ Here it is ENFORCED rather than only written down. `resolve` refuses an
 after `verify-registry` has installed the exact published version from the index.
 
 This bites today, and that is the point rather than an inconvenience:
-`dotmac-integration` declares `0.1.0a2` while only `0.1.0a1` is tagged. So the
-first connector may floor at `a1` — inheriting a published module whose
-`run_effect_once` raises `TypeError` on its first call — or wait for `a2` to be
-released. It may NOT floor at `a2`, because nothing can install `a2`. A gate
-that let it would produce a wheel whose dependency resolution fails for every
-consumer, discovered at install time by someone who did not write it.
+`dotmac-integration` declares `0.1.0a6` while `0.1.0a5` is the newest tagged
+release. The managed-service connectors require the unreleased provisioning
+surface and therefore remain governed holdbacks. They may NOT floor at `a6`
+until that version is published and tagged, because nothing can install it. A
+gate that allowed such a row would produce a wheel whose dependency resolution
+fails for every consumer, discovered at install time by someone who did not
+write it.
 
 Stdlib only, deliberately: `resolve` and `conformance` run before anything is
 installed. `verify-wheel` runs after, and is the only subcommand that imports
@@ -67,6 +68,7 @@ the connector or the kit.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import pathlib
 import subprocess
@@ -110,6 +112,7 @@ REQUIRED_FIELDS: Final = (
     "connector_key",
     "spi_range",
     "integration_floor",
+    "source_dependencies",
     "tag_prefix",
     "wheel_contents",
 )
@@ -249,13 +252,91 @@ def resolve(distribution: str, *, tags: set[str] | None = None) -> dict:
         set(git_tags(REPO_ROOT)) if tags is None else tags,
     )
 
-    return {**entry, "distribution": distribution, "package_path": package_dir}
+    resolved = {**entry, "distribution": distribution, "package_path": package_dir}
+    source_dependency_dirs(distribution, resolved, _declared(resolved))
+    return resolved
 
 
 def _declared(entry: dict) -> dict:
     return tomllib.loads(
         (entry["package_path"] / "pyproject.toml").read_text(encoding="utf-8")
     )["tool"]["poetry"]
+
+
+def source_dependency_dirs(
+    distribution: str, entry: dict, poetry: dict
+) -> tuple[str, ...]:
+    """Validate exact first-party catalogue dependencies used by wheel smoke.
+
+    A connector imports its owner catalogue at runtime. A compatible range
+    would let unchanged connector bytes silently claim a different contract
+    digest, so every first-party dependency beyond Kernel/Integration is exact
+    and points at the correspondingly named package in this checkout.
+    """
+
+    raw = entry["source_dependencies"]
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise ReleaseRefused(
+            f"{distribution}: source_dependencies must be an array of "
+            "distribution names"
+        )
+    dependencies = tuple(raw)
+    if dependencies != tuple(sorted(set(dependencies))):
+        raise ReleaseRefused(
+            f"{distribution}: source_dependencies must be unique and canonically sorted"
+        )
+    declared_dependencies = poetry.get("dependencies", {})
+    if not isinstance(declared_dependencies, dict):
+        raise ReleaseRefused(f"{distribution}: Poetry dependencies must be an object")
+    first_party = {
+        name
+        for name in declared_dependencies
+        if isinstance(name, str)
+        and name.startswith("dotmac-")
+        and name not in {"dotmac-integration", "dotmac-kernel"}
+    }
+    if set(dependencies) != first_party:
+        raise ReleaseRefused(
+            f"{distribution}: source_dependencies must exactly cover first-party "
+            f"runtime dependencies; declared={sorted(first_party)}, "
+            f"listed={list(dependencies)}"
+        )
+
+    allowed = {
+        name.lower() for name in entry["wheel_contents"].get("allowed_requires", [])
+    }
+    paths: list[str] = []
+    for dependency in dependencies:
+        relative = f"packages/{dependency}"
+        package = REPO_ROOT / relative
+        pyproject = package / "pyproject.toml"
+        if not pyproject.is_file():
+            raise ReleaseRefused(
+                f"{distribution}: source dependency {dependency!r} has no "
+                f"{relative}/pyproject.toml"
+            )
+        dependency_poetry = tomllib.loads(pyproject.read_text(encoding="utf-8"))[
+            "tool"
+        ]["poetry"]
+        if dependency_poetry.get("name") != dependency:
+            raise ReleaseRefused(
+                f"{distribution}: {relative} declares distribution "
+                f"{dependency_poetry.get('name')!r}, expected {dependency!r}"
+            )
+        local_version = dependency_poetry.get("version")
+        if declared_dependencies.get(dependency) != local_version:
+            raise ReleaseRefused(
+                f"{distribution}: first-party dependency {dependency!r} must be "
+                f"exactly {local_version!r}; declared "
+                f"{declared_dependencies.get(dependency)!r}"
+            )
+        if dependency.lower() not in allowed:
+            raise ReleaseRefused(
+                f"{distribution}: source dependency {dependency!r} is absent "
+                "from wheel_contents.allowed_requires"
+            )
+        paths.append(relative)
+    return tuple(paths)
 
 
 def entry_point_registration(poetry: dict, group: str) -> dict[str, str]:
@@ -273,6 +354,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     entry = resolve(args.distribution)
     poetry = _declared(entry)
     policy = load_policy()["conformance"]
+    dependency_dirs = source_dependency_dirs(args.distribution, entry, poetry)
 
     if poetry["name"] != args.distribution:
         raise ReleaseRefused(
@@ -317,6 +399,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
         print(f"{key}={entry[key]}")
     print(f"integration_floor={entry['integration_floor']}")
     print(f"spi_range={entry['spi_range']}")
+    print(f"source_dependency_dirs={' '.join(dependency_dirs)}")
     print(f"version={poetry['version']}")
     print(f"tag={entry['tag_prefix']}{poetry['version']}")
 
@@ -387,6 +470,46 @@ def cmd_conformance(args: argparse.Namespace) -> None:
                 "(ADR-0024 section 6) — call dotmac_integration's, do not rebuild "
                 "them behind a plugin boundary where the fleet ratchet cannot see "
                 "them"
+            )
+
+        # A connector talks through the Integration SPI and may import only the
+        # exact owner catalogues listed as source dependencies.  The catalogues
+        # and Integration may themselves use Kernel's value-free grammar, but a
+        # plugin importing Kernel directly acquires a much broader runtime
+        # surface than the connector contract authorizes.
+        allowed_dotmac_imports = {
+            entry["import_name"],
+            "dotmac_integration",
+            *(name.replace("-", "_") for name in entry["source_dependencies"]),
+        }
+        imported_dotmac: set[str] = set()
+        for path in sorted(package_src.rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as exc:
+                problems.append(
+                    f"cannot parse {path.relative_to(package_src)} for import "
+                    f"closure: {exc.msg}"
+                )
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported_dotmac.update(
+                        alias.name.split(".", 1)[0]
+                        for alias in node.names
+                        if alias.name.startswith("dotmac_")
+                    )
+                elif (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module
+                    and node.module.startswith("dotmac_")
+                ):
+                    imported_dotmac.add(node.module.split(".", 1)[0])
+        forbidden_dotmac = imported_dotmac - allowed_dotmac_imports
+        if forbidden_dotmac:
+            problems.append(
+                "imports Dotmac runtime authority outside Integration or its exact "
+                f"owner catalogues: {sorted(forbidden_dotmac)}"
             )
 
     for name in policy["required_assertions"]:

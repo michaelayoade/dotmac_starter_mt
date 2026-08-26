@@ -1,0 +1,46 @@
+schema_version = 1
+package = "dotmac-domains-contracts"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "The provider-neutral authoritative DNS and TLS requirement contract, including exact desired-state and evidence schemas."
+contract = "Declare plan/apply/observe/cancel for authoritative DNS zones, recordsets and observations. This catalogue owns meanings and schema bytes only; it does not own registered-domain lifecycle, provider I/O, DNS intent, drift decisions, retries, persistence, or secrets."
+
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_erp",
+  "dotmac_crm",
+  "dotmac_vendor_control_plane",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/domains-sources.md",
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/inventories/provider-capability-sources.md",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/providers/provisioning.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_managed_domains_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_provisioning_provider.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
+]
+
+inventory_evidence = [
+  "docs/inventories/domains-sources.md",
+  "docs/inventories/managed-service-connector-sources.md",
+  "docs/inventories/provider-capability-sources.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_integrator"]
+
+first_cutover = "Not yet adopted. Vendor CP first replaces its synthetic DNS evidence with this exact released catalogue; an authorized DNS connector then proves the contract through Integration SPI 1.2."
+shadow_and_drift = "The audited fleet has no qualifying authoritative-DNS or PTR provider implementation. Kernel provisioning semantics supply the plan/apply/observe/cancel state-machine precedent but not a connector seam. Drift is derived from exact desired and observed RRsets outside this data-only catalogue."
+local_copy_retirement = "Vendor CP synthetic DNS snapshots retire with adoption. Kernel TenantDomain remains a hostname-routing catalogue and is not replaced. No provider client or DNS decision is copied into this package."
+next_action = "Admit and publish 0.1.0a1 through the contract-catalogue profile, replace Vendor CP synthetic DNS evidence with the exact artifact, then require the DNS connector fake and isolated acceptance to satisfy every DNS/TLS schema and check."

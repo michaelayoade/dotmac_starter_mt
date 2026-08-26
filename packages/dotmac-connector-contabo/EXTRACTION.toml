@@ -1,0 +1,45 @@
+schema_version = 1
+package = "dotmac-connector-contabo"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+
+owner = "Contabo OAuth/API wire translation for the exact managed-infrastructure and managed-domains owner contracts this provider can prove."
+
+contract = "Implement dotmac-integration SPI >=1.2,<2.0 for connector key contabo in PROVISION mode. Declare exactly infrastructure.firewall.lifecycle.v1 and translate only its proven inbound-rule subset. Preserve named activation gates, pinned to the exact owner capabilities, for instance, network, volume and dns.authoritative.v1. Integrator owns installations, bindings, capability-instance identity, held secret materialization, execution, receipts, retry and reconciliation. The connector owns no rows, provider credentials, generic shell, product state, DNS/TLS truth or retry ledger."
+
+source_repositories = ["dotmac_starter_mt"]
+
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/managed-service-connector-sources.md",
+  "dotmac_starter_mt:docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "dotmac_starter_mt:docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+  "dotmac_starter_mt:packages/dotmac-managed-infrastructure-contracts/src/dotmac_managed_infrastructure_contracts/catalogue.py",
+  "dotmac_starter_mt:packages/dotmac-managed-infrastructure-contracts/src/dotmac_managed_infrastructure_contracts/schemas.py",
+  "dotmac_starter_mt:packages/dotmac-domains-contracts/src/dotmac_domains_contracts/catalogue.py",
+  "dotmac_starter_mt:packages/dotmac-domains-contracts/src/dotmac_domains_contracts/schemas.py",
+  "dotmac_starter_mt:packages/dotmac-connector-contabo/PROVIDER_INVENTORY.md",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:packages/dotmac-connector-contabo/tests/unit/test_plugin.py",
+  "dotmac_starter_mt:packages/dotmac-connector-contabo/tests/unit/test_transport.py",
+  "dotmac_starter_mt:packages/dotmac-connector-contabo/tests/architecture/test_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+
+inventory_evidence = [
+  "packages/dotmac-connector-contabo/PROVIDER_INVENTORY.md",
+  "docs/adr/0033-exact-managed-service-connectors-are-authorized.md",
+  "docs/adr/0034-managed-capability-contracts-are-separate-product-artifacts.md",
+]
+
+first_cutover = "After kernel 0.1.0a69, Integration 0.1.0a6 and both owner catalogues 0.1.0a1 are published, release this connector and exact-pin it in dotmac_integrator. On Seabone, create a disposable inbound-only firewall through an approved command, prove observe and idempotent re-apply, force a post-mutation timeout into ambiguous reconciliation, then delete it and prove absence. No instance/network/volume/DNS binding may be activated from this manifest."
+
+shadow_and_drift = "Compare public firewall status and normalized inbound-rule digest against the official Contabo GET response. Name/marker collision, foreign provider rule shape and unsupported provider state fail closed. Mutation uncertainty becomes Integration-owned ambiguous reconciliation; the connector owns no retry state."
+
+local_copy_retirement = "No qualifying checked-in Contabo connector implementation exists. Vendor scripts and host-local commands are operational evidence only and are not adopted as a parallel writer. Generic shell/SSH remains outside this connector."
+
+next_action = "Publish and verify kernel 0.1.0a69, dotmac-integration 0.1.0a6, dotmac-managed-infrastructure-contracts 0.1.0a1 and dotmac-domains-contracts 0.1.0a1. Then add this package to the connector release lane in a separate change, run package and installed-wheel conformance on Observer CI, publish 0.1.0a1, exact-pin in dotmac_integrator, and complete disposable Seabone acceptance before any production binding."

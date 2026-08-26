@@ -62,6 +62,10 @@ factory:
 methods. No request type exposes a shell command or argv. Materialized secrets
 are held only in repr-suppressed request envelopes during plugin I/O; durable
 state contains secret references and immutable provenance, never their values.
+`ProvisionPlanResult.evidence` is an immutable, repr-suppressed mapping.
+`ProvisionObserveRequest.target` and `ProvisionCancelRequest.target` are
+immutable mappings derived by the engine from the durable original APPLY step;
+connectors do not reconstruct a target from operation ids or configuration.
 
 Every capability on a connector declaring `PROVISION` carries an exact
 product-owned `CapabilityContractSnapshot` and the canonical Draft 2020-12
@@ -73,6 +77,12 @@ configuration fields, endpoint requirements and activation/evidence checks.
 Changing any of them therefore invalidates the pin. The legacy digest algorithm
 is retained byte-for-byte when no snapshot is present, so <=1.1 and
 non-PROVISION installations keep their existing pins.
+
+`CapabilityContractSnapshot` and `CapabilitySchemaDocument` are public SPI
+re-exports. A connector imports those type names from `dotmac_integration.spi`
+and imports contract instances from its exact owner catalogue; it never imports
+Kernel directly. This keeps the plugin boundary narrow while preserving one
+canonical grammar implementation beneath the SPI and catalogue.
 
 `verify_capability_configuration` is the one provider-neutral static gate used
 at binding activation and available to provisioning plan/acceptance. It enforces
@@ -101,6 +111,26 @@ input, validates that input against its held schema, and records a resolved-inpu
 digest. `endpoint_code` equals the versioned capability id in SPI 1.2; it is not
 a second action vocabulary. Apply results are validated against the exact output
 schema, and receipts persist only its declared public projection.
+
+A6 also makes `capability_instance_ref` the required provider-neutral identity
+for each new binding and every PLAN/APPLY/OBSERVE/CANCEL command. It is part of
+PLAN and APPLY fingerprints, the approved template, durable operations, and
+both immutable receipt shapes. The exact grammar is exported as
+`CAPABILITY_INSTANCE_REF_PATTERN`. The ig_0008 migration leaves legacy binding
+rows null rather than inventing an identity; they cannot activate or provision
+until explicitly assigned while disabled.
+
+PLAN step inputs and plan evidence are likewise validated against the exact
+held `plan` schemas, including declared standard JSON Schema formats, before
+command mutation and settlement respectively. The
+immutable PLAN receipt binds the canonical evidence digest inside its
+`result_digest` without persisting the evidence values. OBSERVE and CANCEL copy
+only operation-input-schema top-level properties from the durable original step
+into their `target`, validate that target before a claim, and carry the exact
+held output schema through invoke/settle. Successful observation and
+cancellation evidence (`CANCELLED` and `NOT_FOUND` included for cancellation)
+is validated before state mutation; the hash-chain receipt stores only its
+canonical digest and public, non-secret schema projection.
 
 The module's PLAN result is durable evidence, not an assembly assertion.
 `read_provisioning_plan_receipt` verifies and projects its immutable receipt;

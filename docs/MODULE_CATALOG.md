@@ -47,13 +47,23 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp` |
+| [`dotmac-connector-contabo`](../packages/dotmac-connector-contabo/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-contabo/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-connector-dotmac-host-agent`](../packages/dotmac-connector-dotmac-host-agent/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-dotmac-host-agent/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-connector-keycloak-admin`](../packages/dotmac-connector-keycloak-admin/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-keycloak-admin/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-connector-mailcow`](../packages/dotmac-connector-mailcow/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-mailcow/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-connector-nextcloud`](../packages/dotmac-connector-nextcloud/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-nextcloud/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_integrator` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-domains-contracts`](../packages/dotmac-domains-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-domains-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a66` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a69` | `dotmac_integrator` | — |
 | [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a69` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-collaboration-contracts`](../packages/dotmac-managed-collaboration-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-collaboration-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-email-contracts`](../packages/dotmac-managed-email-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-email-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-host-contracts`](../packages/dotmac-managed-host-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-host-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
 | [`dotmac-managed-identity-contracts`](../packages/dotmac-managed-identity-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-identity-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-infrastructure-contracts`](../packages/dotmac-managed-infrastructure-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-infrastructure-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
 | [`dotmac-managed-suite-contracts`](../packages/dotmac-managed-suite-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-suite-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
@@ -91,6 +101,46 @@ and the next gate.
 - **Proven consumers:** `dotmac_workspace`.
 - **Candidate consumers:** `dotmac_erp`.
 
+### [`dotmac-connector-contabo`](../packages/dotmac-connector-contabo/README.md)
+
+- **Owner:** Contabo OAuth/API wire translation for the exact managed-infrastructure and managed-domains owner contracts this provider can prove.
+- **Contract:** Implement dotmac-integration SPI >=1.2,<2.0 for connector key contabo in PROVISION mode. Declare exactly infrastructure.firewall.lifecycle.v1 and translate only its proven inbound-rule subset. Preserve named activation gates, pinned to the exact owner capabilities, for instance, network, volume and dns.authoritative.v1. Integrator owns installations, bindings, capability-instance identity, held secret materialization, execution, receipts, retry and reconciliation. The connector owns no rows, provider credentials, generic shell, product state, DNS/TLS truth or retry ledger.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-contabo/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-connector-dotmac-host-agent`](../packages/dotmac-connector-dotmac-host-agent/README.md)
+
+- **Owner:** Integrator-side mutually authenticated HTTPS translation for the exact managed-host capability contracts; never the target host agent or a generic execution facility.
+- **Contract:** Implement dotmac-integration SPI >=1.2,<2.0 for connector key dotmac_host_agent and exactly host.deployment-bundle.lifecycle.v1, host.backup-restore.lifecycle.v1 and host.health-probe.lifecycle.v1 in PROVISION mode. The connector carries exact owner snapshots/schema bytes, a closed capability-specific protocol and no state. Integrator owns bindings, held materialization, approvals, dispatch, retries and receipts. The separately deployed target owns local effect idempotency and closed catalogue execution. Neither surface admits shell, SSH, argv, file-and-run, arbitrary URLs, secret output or a second product owner.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-dotmac-host-agent/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-connector-keycloak-admin`](../packages/dotmac-connector-keycloak-admin/README.md)
+
+- **Owner:** Keycloak Admin REST wire translation for the managed-identity realm, OIDC confidential-client and stable-reference user lifecycle contracts.
+- **Contract:** Implement dotmac-integration SPI >=1.2,<2.0 for connector key keycloak_admin and exactly identity.realm.lifecycle.v1, identity.oidc-client.lifecycle.v1 and identity.user.lifecycle.v1 in PROVISION mode. Authority is limited to pre-created non-master realms, their realm-scoped clients and stable-reference users. Integrator supplies an exact held service-account bundle (client_id plus client_secret) for realm-local token exchange and separately held caller-created managed-client material; it owns installations, bindings, capability-instance identity, execution, receipts, retry and reconciliation. The connector owns no rows, secret generation, product identity, authorization or product-session decision; user correlation is by stable owner reference, enrollment carries no password, and disable is incomplete until IdP sessions are revoked.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-keycloak-admin/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-connector-mailcow`](../packages/dotmac-connector-mailcow/README.md)
+
+- **Owner:** Mailcow supported administrative API wire translation for managed email.
+- **Contract:** Implement dotmac-managed-email-contracts email.lifecycle.v1 through Integration SPI 1.2 without owning product state, credentials, retry, scheduling, approval, sessions or provider-independent decisions.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-mailcow/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-connector-nextcloud`](../packages/dotmac-connector-nextcloud/README.md)
+
+- **Owner:** Nextcloud HTTPS, OCS, user_oidc administration, exact user/group/quota wire translation, and bounded WebDAV verification.
+- **Contract:** Implement the four dotmac-managed-collaboration PROVISION contracts through dotmac-integration SPI 1.2. The connector translates exact provider wire outcomes only; it owns no product state, deployment decision, database, session, retry ledger, schedule, secret, generated credential, or shell surface.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-nextcloud/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 
 - **Owner:** Meta WhatsApp Cloud API ingress authentication and wire translation: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, and provider acknowledgement bytes.
@@ -98,6 +148,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-domains-contracts`](../packages/dotmac-domains-contracts/README.md)
+
+- **Owner:** The provider-neutral authoritative DNS and TLS requirement contract, including exact desired-state and evidence schemas.
+- **Contract:** Declare plan/apply/observe/cancel for authoritative DNS zones, recordsets and observations. This catalogue owns meanings and schema bytes only; it does not own registered-domain lifecycle, provider I/O, DNS intent, drift decisions, retries, persistence, or secrets.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-domains-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
 
 ### [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md)
 
@@ -139,11 +197,43 @@ and the next gate.
 - **Proven consumers:** `dotmac_starter_mt`.
 - **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
+### [`dotmac-managed-collaboration-contracts`](../packages/dotmac-managed-collaboration-contracts/README.md)
+
+- **Owner:** The provider-neutral managed collaboration product lifecycle, exact OIDC configuration, stable user/group/quota state and file-roundtrip evidence schemas.
+- **Contract:** Declare plan/apply/observe/cancel for application, OIDC configuration, user/group/quota and bounded file-roundtrip lifecycles. This catalogue owns meanings and exact schema bytes only; it does not own provider I/O, host execution, login ceremonies, local identity/session state, deployment state, retry, persistence, or secrets.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-collaboration-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-managed-email-contracts`](../packages/dotmac-managed-email-contracts/README.md)
+
+- **Owner:** The provider-neutral managed email application/domain/mailbox/alias/quota/delivery/app-password/DKIM lifecycle contract and its exact operation schemas.
+- **Contract:** Declare plan/apply/observe/cancel for coherent email resources and health evidence. This catalogue owns meanings and exact schema bytes only; it does not own provider I/O, deployment state, retries, host backup/restore/update, product users, DNS decisions, or secrets.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-email-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-managed-host-contracts`](../packages/dotmac-managed-host-contracts/README.md)
+
+- **Owner:** The provider-neutral closed deployment-bundle, backup/restore and health-probe lifecycle contracts and their exact operation schemas.
+- **Contract:** Declare plan/apply/observe/cancel for a constrained host agent. The catalogue owns typed meanings and exact schema bytes only; it never exposes generic remote execution and owns no connector I/O, deployment state, schedule, retry or secret.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-host-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
+
 ### [`dotmac-managed-identity-contracts`](../packages/dotmac-managed-identity-contracts/README.md)
 
-- **Owner:** The provider-neutral managed identity realm and OIDC confidential-client lifecycle contract, including exact operation schemas and fixed security evidence.
-- **Contract:** Declare plan/apply/observe/cancel for identity realms and confidential OIDC clients. This catalogue owns meanings and exact schema bytes only; it does not own provider administration, relying-party login, local identity binding, authorization, sessions, deployment state, retry, or secrets.
+- **Owner:** The provider-neutral managed identity realm, OIDC confidential-client and user lifecycle contracts, including exact operation schemas and fixed security evidence.
+- **Contract:** Declare plan/apply/observe/cancel for identity realms, confidential OIDC clients and stable-reference users. This catalogue owns meanings and exact schema bytes only; it does not own provider administration, relying-party login, local identity binding, product authorization, product sessions, deployment state, retry, or secrets.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-identity-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-managed-infrastructure-contracts`](../packages/dotmac-managed-infrastructure-contracts/README.md)
+
+- **Owner:** The provider-neutral instance, network, volume and firewall desired-state lifecycle contracts and their exact operation schemas.
+- **Contract:** Declare independently bindable plan/apply/observe/cancel resource lifecycles. This catalogue owns meanings and exact schema bytes only; it owns no provider I/O, deployment state, retry, product state or secret.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-infrastructure-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
 

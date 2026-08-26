@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "dotmac-connector-mailcow"
+version = "0.1.0a1"
+description = "Stateless Mailcow managed-email connector for Dotmac Integrator"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_mailcow", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_mailcow/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-integration = ">=0.1.0a6"
+dotmac-managed-email-contracts = "0.1.0a1"
+httpx = ">=0.27,<0.29"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+mailcow = "dotmac_connector_mailcow:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
