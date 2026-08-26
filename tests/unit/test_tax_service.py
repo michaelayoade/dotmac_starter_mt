@@ -15,16 +15,21 @@ from dotmac_kernel.money import Currency, Money
 from dotmac_tax import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
+    TaxAuthorityV1,
+    TaxCodeV1,
     TaxConflict,
     TaxDeterminationComponentV1,
     TaxDeterminationLineV1,
     TaxDeterminationSetV1,
     TaxFact,
     TaxJurisdictionInput,
+    TaxJurisdictionV1,
     TaxRuleBandInput,
     TaxRuleInput,
+    TaxRuleV1,
     TaxRuleViolation,
     TaxSubjectClassificationInput,
+    TaxSubjectClassificationV1,
     accept_tax_return,
     approve_tax_return,
     create_filing_obligation,
@@ -35,8 +40,18 @@ from dotmac_tax import (
     create_tax_return,
     determine_tax,
     determine_tax_set,
+    ensure_tax_authority,
+    ensure_tax_code,
+    ensure_tax_jurisdiction,
+    ensure_tax_rule,
+    ensure_tax_subject_classification,
     file_tax_return,
     generate_statutory_report,
+    get_tax_authority,
+    get_tax_code,
+    get_tax_jurisdiction,
+    get_tax_rule,
+    get_tax_subject_classification,
     prepare_tax_return,
     publish_tax_rule,
     publish_tax_subject_classification,
@@ -44,12 +59,17 @@ from dotmac_tax import (
 from dotmac_tax import service as tax_service
 from dotmac_tax.models import (
     TENANT_MODELS,
+    TaxAuthority,
+    TaxCode,
     TaxDetermination,
     TaxDeterminationSet,
+    TaxJurisdiction,
     TaxReturnEvent,
+    TaxRule,
 )
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 NGN = Currency("NGN", 2)
 NOW = datetime(2026, 8, 19, 12, tzinfo=UTC)
@@ -128,6 +148,301 @@ def _masters(db: Session, tenant_id):
         tax_kind_code="tenant-defined-kind",
     )
     return authority, jurisdiction, code
+
+
+def test_policy_ensure_seam_returns_contracts_and_replays_before_parent_state(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    authority_command = TaxAuthorityInput(
+        code=" FIRS ",
+        name=" Federal authority ",
+        authority_level_code=" federal ",
+    )
+    authority = ensure_tax_authority(db, tenant_id=tenant.id, command=authority_command)
+    assert isinstance(authority, TaxAuthorityV1)
+    assert get_tax_authority(db, tenant_id=tenant.id, code="FIRS") == authority
+
+    jurisdiction_command = TaxJurisdictionInput(
+        authority_id=authority.authority_id,
+        code=" NG-FED ",
+        name=" Nigeria federal ",
+        country_code="ng",
+        currency=NGN,
+    )
+    jurisdiction = ensure_tax_jurisdiction(
+        db, tenant_id=tenant.id, command=jurisdiction_command
+    )
+    assert isinstance(jurisdiction, TaxJurisdictionV1)
+    assert get_tax_jurisdiction(db, tenant_id=tenant.id, code="NG-FED") == jurisdiction
+
+    code = ensure_tax_code(
+        db,
+        tenant_id=tenant.id,
+        jurisdiction_id=jurisdiction.jurisdiction_id,
+        code="PAYE",
+        name="Pay as you earn",
+        tax_kind_code="progressive-income-tax",
+        description="Approved progressive policy",
+    )
+    assert isinstance(code, TaxCodeV1)
+    assert (
+        get_tax_code(
+            db,
+            tenant_id=tenant.id,
+            jurisdiction_id=jurisdiction.jurisdiction_id,
+            code="PAYE",
+        )
+        == code
+    )
+    rule_command = TaxRuleInput(
+        tax_code_id=code.tax_code_id,
+        version=1,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        priority=10,
+        fact_kind="taxable-pay",
+        recognition_basis_code="earned",
+        transaction_side="liability",
+        calculation_method="progressive",
+        rate=None,
+        fixed_amount=None,
+        inclusive=False,
+        recoverable_rate=Decimal("0"),
+        party_category="paye-standard",
+        bands=(
+            TaxRuleBandInput(1, Decimal("0"), Decimal("300000"), Decimal("0.07")),
+            TaxRuleBandInput(2, Decimal("300000"), None, Decimal("0.11")),
+        ),
+    )
+    rule = ensure_tax_rule(db, tenant_id=tenant.id, command=rule_command)
+    assert isinstance(rule, TaxRuleV1)
+    assert (
+        get_tax_rule(
+            db,
+            tenant_id=tenant.id,
+            tax_code_id=code.tax_code_id,
+            version=1,
+        )
+        == rule
+    )
+
+    classification_command = TaxSubjectClassificationInput(
+        tax_code_id=code.tax_code_id,
+        subject_kind="party",
+        subject_ref="employee:42",
+        category_code="paye-standard",
+        version=1,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        basis_code="approved-payroll-profile",
+        evidence_ref="approval:42",
+        published_by_ref="principal:reviewer",
+        source_ref="erp:employee-tax-profile:42",
+        source_version="cv1:profile",
+    )
+    classification = ensure_tax_subject_classification(
+        db,
+        tenant_id=tenant.id,
+        command=classification_command,
+    )
+    assert isinstance(classification, TaxSubjectClassificationV1)
+    assert (
+        get_tax_subject_classification(
+            db,
+            tenant_id=tenant.id,
+            source_ref=classification_command.source_ref,
+            source_version=classification_command.source_version,
+        )
+        == classification
+    )
+
+    authority_row = db.get(TaxAuthority, authority.authority_id)
+    jurisdiction_row = db.get(TaxJurisdiction, jurisdiction.jurisdiction_id)
+    code_row = db.get(TaxCode, code.tax_code_id)
+    assert authority_row is not None
+    assert jurisdiction_row is not None
+    assert code_row is not None
+    authority_row.status = "retired"
+    assert (
+        ensure_tax_jurisdiction(db, tenant_id=tenant.id, command=jurisdiction_command)
+        == jurisdiction
+    )
+    jurisdiction_row.status = "retired"
+    assert (
+        ensure_tax_code(
+            db,
+            tenant_id=tenant.id,
+            jurisdiction_id=jurisdiction.jurisdiction_id,
+            code="PAYE",
+            name="Pay as you earn",
+            tax_kind_code="progressive-income-tax",
+            description="Approved progressive policy",
+        )
+        == code
+    )
+    code_row.status = "retired"
+    assert ensure_tax_rule(db, tenant_id=tenant.id, command=rule_command) == rule
+    assert (
+        ensure_tax_subject_classification(
+            db,
+            tenant_id=tenant.id,
+            command=classification_command,
+        )
+        == classification
+    )
+
+
+def test_policy_ensure_seam_refuses_drift_under_every_natural_identity(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    authority = ensure_tax_authority(
+        db,
+        tenant_id=tenant.id,
+        command=TaxAuthorityInput(code="AUTH", name="Authority"),
+    )
+    with pytest.raises(TaxConflict, match="different current content"):
+        ensure_tax_authority(
+            db,
+            tenant_id=tenant.id,
+            command=TaxAuthorityInput(code="AUTH", name="Different"),
+        )
+    jurisdiction = ensure_tax_jurisdiction(
+        db,
+        tenant_id=tenant.id,
+        command=TaxJurisdictionInput(
+            authority_id=authority.authority_id,
+            code="JUR",
+            name="Jurisdiction",
+            country_code="NG",
+            currency=NGN,
+        ),
+    )
+    with pytest.raises(TaxConflict, match="different current content"):
+        ensure_tax_jurisdiction(
+            db,
+            tenant_id=tenant.id,
+            command=TaxJurisdictionInput(
+                authority_id=authority.authority_id,
+                code="JUR",
+                name="Changed jurisdiction",
+                country_code="NG",
+                currency=NGN,
+            ),
+        )
+    code = ensure_tax_code(
+        db,
+        tenant_id=tenant.id,
+        jurisdiction_id=jurisdiction.jurisdiction_id,
+        code="VAT",
+        name="VAT",
+        tax_kind_code="consumption",
+    )
+    with pytest.raises(TaxConflict, match="different current content"):
+        ensure_tax_code(
+            db,
+            tenant_id=tenant.id,
+            jurisdiction_id=jurisdiction.jurisdiction_id,
+            code="VAT",
+            name="Changed VAT",
+            tax_kind_code="consumption",
+        )
+    rule_command = TaxRuleInput(
+        tax_code_id=code.tax_code_id,
+        version=1,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        priority=10,
+        fact_kind="invoice-line",
+        recognition_basis_code="accrual",
+        transaction_side="output",
+        calculation_method="percentage",
+        rate=Decimal("0.075"),
+        fixed_amount=None,
+        inclusive=False,
+        recoverable_rate=Decimal("0"),
+    )
+    ensure_tax_rule(db, tenant_id=tenant.id, command=rule_command)
+    with pytest.raises(TaxConflict, match="different current content"):
+        ensure_tax_rule(
+            db,
+            tenant_id=tenant.id,
+            command=replace(rule_command, rate=Decimal("0.08")),
+        )
+    classification_command = TaxSubjectClassificationInput(
+        tax_code_id=code.tax_code_id,
+        subject_kind="party",
+        subject_ref="customer:1",
+        category_code="standard",
+        version=1,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        basis_code="profile",
+        evidence_ref="approval:1",
+        published_by_ref="principal:1",
+        source_ref="erp:profile:1",
+        source_version="cv1:1",
+    )
+    ensure_tax_subject_classification(
+        db, tenant_id=tenant.id, command=classification_command
+    )
+    with pytest.raises(TaxConflict, match="different current content"):
+        ensure_tax_subject_classification(
+            db,
+            tenant_id=tenant.id,
+            command=replace(classification_command, category_code="exempt"),
+        )
+    with pytest.raises(TaxConflict, match="version exists.*different"):
+        ensure_tax_subject_classification(
+            db,
+            tenant_id=tenant.id,
+            command=replace(
+                classification_command,
+                source_ref="erp:profile:alternate",
+                source_version="cv1:alternate",
+            ),
+        )
+
+
+def test_policy_rule_read_refuses_to_round_corrupt_persisted_fixed_money(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    _, _, code = _masters(db, tenant.id)
+    row = TaxRule(
+        tenant_id=tenant.id,
+        tax_code_id=code.id,
+        version=1,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        priority=1,
+        fact_kind="invoice-line",
+        recognition_basis_code="accrual",
+        transaction_side="output",
+        calculation_method="fixed",
+        rate=None,
+        fixed_amount=Decimal("1.234567"),
+        inclusive=False,
+        recoverable_rate=Decimal("0"),
+        party_category=None,
+        supply_category=None,
+        place_code=None,
+        treatment_code="standard_rated",
+        calculation_sequence=100,
+        calculation_base_code="source_amount",
+        published_at=NOW,
+    )
+    db.add(row)
+    db.flush()
+
+    with pytest.raises(TaxConflict, match="exceeds.*minor units"):
+        get_tax_rule(
+            db,
+            tenant_id=tenant.id,
+            tax_code_id=code.id,
+            version=1,
+        )
 
 
 def test_tax_rule_selection_and_rate_are_effective_dated_data(db: Session) -> None:
@@ -1432,11 +1747,10 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
     # An earlier fix held strong references, reasoning about CPython's GC. That
     # guards the wrong mechanism. Two probes settle it: forcing `gc.collect()`
     # here leaves this test GREEN — the references do their job — while forcing
-    # `db.expire_all()` reproduces the failure exactly. Expiry, not collection.
-    # Any `Session.rollback` expires every instance, and the suite reaches one
-    # depending on what ran before, so the outcome still turned on test
-    # ordering: adding two unrelated test FILES elsewhere in `tests/unit` was
-    # enough to flip it.
+    # `db.expire_all()` reproduces the failure exactly. Expiry, not collection,
+    # is therefore the mechanism. The event that causes expiry in the
+    # order-sensitive suite path is still unidentified; adding two unrelated
+    # test FILES elsewhere in `tests/unit` is enough to expose it.
     #
     # References are still held, because they are cheap and correct as far as
     # they go. The invariant is then RESTORED explicitly, so the test states
@@ -1453,14 +1767,16 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         `_validate_persisted_result_structure` checks the SET's timestamp AND
         every COMPONENT's, so both have to be restored — fixing only the set
         moves the failure one line down rather than resolving it. Values are
-        the exact ones written; the DB rows are untouched.
+        the exact ones written. `set_committed_value` repairs identity-map
+        state without making the persistent attributes dirty, so a later
+        autoflush cannot turn this dialect workaround into a database update.
         """
         for row, components in _live_rows:
             if row.determined_at.tzinfo is None:
-                row.determined_at = NOW
+                set_committed_value(row, "determined_at", NOW)
             for component in components:
                 if component.determined_at.tzinfo is None:
-                    component.determined_at = NOW
+                    set_committed_value(component, "determined_at", NOW)
 
     _restore_written_offsets()
     definition = create_statutory_report_definition(
@@ -1500,10 +1816,12 @@ def test_report_definition_boxes_and_due_dates_are_crud_data(db: Session) -> Non
         due_on=date(2026, 8, 18),
         taxpayer_ref="taxpayer:local",
     )
-    # Restore again: `create_statutory_report_definition` and
-    # `create_filing_obligation` run in between and can expire the session, so
-    # restoring only once above is not enough. Re-asserting here is what makes
-    # the precondition hold at the moment it is actually needed.
+    # Re-assert immediately before the persisted report read. Expiry is the
+    # proven mechanism, but its triggering event in the order-sensitive suite
+    # path is still unidentified; neither intervening service above expires
+    # the session itself. This makes the required precondition explicit at the
+    # point where it is consumed without attributing the expiry to an unproved
+    # source.
     _restore_written_offsets()
     report = generate_statutory_report(
         db,

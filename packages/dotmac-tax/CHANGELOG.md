@@ -1,6 +1,31 @@
 # Changelog — dotmac-tax
 
-## 0.1.0a3 — unreleased
+## 0.1.0a4 — unreleased
+
+### Added
+
+- Immutable, ORM-free V1 read contracts for authorities, jurisdictions, tax
+  codes, effective rule versions with ordered progressive bands, and evidenced
+  subject classifications.
+- Public natural-key lookup functions for policy adoption without importing
+  module models.
+- Idempotent `ensure_*` policy functions. An exact existing command replays
+  before mutable parent-state and new-publication validation; reusing the same
+  natural identity with different current content fails closed.
+- Exact fixed-money reads: persisted values that exceed the jurisdiction
+  currency's minor units are refused rather than rounded into new evidence.
+
+### Compatibility
+
+- Existing create/publish functions retain their create-only behavior and ORM
+  return values. Adopters opt into the new read/ensure surface explicitly.
+- No schema or migration changes are included.
+
+## 0.1.0a3 — 2026-08-25
+
+Published, installed back from the private index, registered and tagged from
+exact protected-main revision `531f7f8c37ce2fdf41ecbf2f9a7a9940264a18f9`
+by release run `32898397980`. Publication moved no product authority.
 
 ### Added
 
