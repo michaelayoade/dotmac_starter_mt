@@ -139,7 +139,7 @@ Two corollaries that are violated more often than the rule itself:
   reach the server at cold start is offline, not signed out. Clearing the
   credential store there discards a valid long-lived refresh token and converts a
   coverage hole into a lockout — and, once authentication is federated
-  (ADR-0066), into a lockout only a reachable identity provider can end.
+  (ADR-0069), into a lockout only a reachable identity provider can end.
 
 *Prevents:* a server outage or a coverage hole signing out a workforce that is
 holding unsent evidence.
@@ -206,7 +206,7 @@ holds the client.
 
 - `docs/adr/0065-mobile-clients-are-composed-applications.md` §§ 3, 7, 8 — the
   mobile expression of these four invariants
-- `docs/adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md`
+- `docs/adr/0069-mobile-authentication-federates-to-the-existing-identity-provider.md`
   — why § 4's restore corollary gets more expensive under federated login
 - `docs/adr/0014-at-most-once-execution-has-one-owner.md` — the one-coordinator
   reasoning this ADR applies to destruction

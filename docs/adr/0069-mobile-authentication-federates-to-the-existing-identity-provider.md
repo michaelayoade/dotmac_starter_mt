@@ -1,7 +1,11 @@
-# ADR 0066 — Mobile authentication federates to the existing identity provider
+# ADR 0069 — Mobile authentication federates to the existing identity provider
 
 **Status:** Accepted
 **Date:** 2026-08-26
+**Catalogue correction — 2026-08-26:** This decision first reached `main`
+through PR #459 with the already-claimed number 0066. It moved to 0069; the
+decision itself is unchanged. The database-runtime decision that reached
+`main` earlier through PR #452 keeps ADR-0066.
 **Decision owner:** Michael
 **Extends:** ADR-0065 (native mobile clients are composed applications — this
 ADR closes the "choice of authorization server" that ADR-0065 explicitly did not
