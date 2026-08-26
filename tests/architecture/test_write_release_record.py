@@ -528,13 +528,15 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
     monkeypatch.setattr(writer, "LEDGER", ledger)
     monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "abcdef12")
+    synthetic_digests = {
+        "ns_0001_nonesuch.py": "a" * 64,
+        "wrong_0002_second_lineage.py": "b" * 64,
+    }
+    monkeypatch.setattr(writer, "migration_digests", lambda *_args: synthetic_digests)
     monkeypatch.setattr(
         writer,
-        "migration_digests",
-        lambda *_args: {
-            "ns_0001_nonesuch.py": "a" * 64,
-            "wrong_0002_second_lineage.py": "b" * 64,
-        },
+        "published_release_history",
+        lambda *_args: {"dotmac-nonesuch-v1.0.0": ("abcdef12", synthetic_digests)},
     )
 
     with pytest.raises(writer.ReleaseRecordError) as refusal:
