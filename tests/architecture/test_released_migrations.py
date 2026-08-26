@@ -73,14 +73,11 @@ tagged meaning and proves its additive upgrade on PostgreSQL.
 
 ## Scope
 
-Three distributions: `dotmac-approvals`, `dotmac-integration`, and
-`dotmac-entitlement-allocation`.
-Each was added by the change that was tempted to edit its released bytes —
-integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
-digests were read out of the tags in that same change. That is the enrolment
-rule, and it is the reason this is still not generalised to "every allowlisted
-module": a distribution enters when somebody has actually verified its tags,
-because a guard populated by guesswork is worse than an absent one.
+Every distribution named in ``DISTRIBUTIONS``. Each entry's digests were read
+from its published tags when that lineage enrolled. That is the enrolment rule,
+and it is the reason this is still not generalised to "every allowlisted
+module": a distribution enters when the tag oracle has actually verified its
+history, because a guard populated by guesswork is worse than an absent one.
 
 Enrolment is therefore a data edit — a row in `DISTRIBUTIONS`, its tags in
 `RELEASED_TAGS`, and its still-editable files in `UNRELEASED`. The
@@ -246,6 +243,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-template-studio"
         / "src/dotmac_template_studio/migrations/versions"
     ),
+    "dotmac-commercial-agreements": (
+        REPO_ROOT
+        / "packages/dotmac-commercial-agreements"
+        / "src/dotmac_commercial_agreements/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -282,6 +284,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-service-access-policy": "sap_*.py",
     "dotmac-services": "se_*.py",
     "dotmac-template-studio": "ts_*.py",
+    "dotmac-commercial-agreements": "cg_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -315,6 +318,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-service-access-policy": "dotmac-service-access-policy-v",
     "dotmac-services": "dotmac-services-v",
     "dotmac-template-studio": "dotmac-template-studio-v",
+    "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1372,6 +1376,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-commercial-agreements ──
+    "dotmac-commercial-agreements-v0.1.0a1": (
+        "dotmac-commercial-agreements",
+        "fead57bc",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
 }
 
 
@@ -1466,6 +1480,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
+    "dotmac-commercial-agreements": frozenset(),
 }
 
 
@@ -2011,15 +2026,16 @@ def test_the_cross_check_would_catch_a_doctored_map() -> None:
     otherwise the comparison is not reading git at all, which is exactly how a
     cross-check degrades into a second copy of the thing it checks.
     """
-    for tag, name in (
-        ("dotmac-integration-v0.1.0a1", "ig_0001_connector_control_plane.py"),
-        # Every enrolled distribution, because `_blob_digest` resolves the
-        # directory from the tag's owner. Reading only integration's would
-        # leave the other rows compared against a path nothing checks.
-        ("dotmac-entitlement-allocation-v0.1.0a1", "ea_0001_allocations.py"),
-        ("dotmac-approvals-v0.1.0a1", "ap_0001_approvals.py"),
-        ("dotmac-files-v0.1.0a2", "fi_0001_stored_files.py"),
-    ):
+    # One derived example per enrolled distribution. A hardcoded spot-check
+    # stopped at four owners while the registry grew past thirty, so its claim
+    # of covering every path silently became false.
+    examples: dict[str, tuple[str, str]] = {}
+    for tag, (owner, _, files) in sorted(RELEASED_TAGS.items()):
+        if files:
+            examples.setdefault(owner, (tag, sorted(files)[0]))
+    assert set(examples) == set(DISTRIBUTIONS)
+
+    for tag, name in examples.values():
         actual = _blob_digest(tag, name)
         assert actual == RELEASED_TAGS[tag][2][name]
         assert actual != "0" * 64
