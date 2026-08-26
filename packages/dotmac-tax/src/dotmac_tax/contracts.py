@@ -49,6 +49,47 @@ class TaxJurisdictionInput:
 
 
 @dataclass(frozen=True, slots=True)
+class TaxAuthorityV1:
+    """Immutable, ORM-free view of one tenant tax authority."""
+
+    tenant_id: UUID
+    authority_id: UUID
+    code: str
+    name: str
+    authority_level_code: str | None
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaxJurisdictionV1:
+    """Immutable, ORM-free view of one tax jurisdiction."""
+
+    tenant_id: UUID
+    jurisdiction_id: UUID
+    authority_id: UUID
+    code: str
+    name: str
+    country_code: str
+    subdivision_code: str | None
+    currency: Currency
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class TaxCodeV1:
+    """Immutable, ORM-free view of one composable tax code."""
+
+    tenant_id: UUID
+    tax_code_id: UUID
+    jurisdiction_id: UUID
+    code: str
+    name: str
+    tax_kind_code: str
+    description: str | None
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
 class TaxRuleBandInput:
     sequence: int
     lower_bound: Decimal
@@ -78,6 +119,45 @@ class TaxRuleInput:
     treatment_code: str = "standard_rated"
     calculation_sequence: int = 100
     calculation_base_code: str = "source_amount"
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleBandV1:
+    """One exact progressive band in a published rule."""
+
+    sequence: int
+    lower_bound: Decimal
+    upper_bound: Decimal | None
+    rate: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRuleV1:
+    """Immutable, ORM-free view of one effective-dated tax rule."""
+
+    tenant_id: UUID
+    rule_id: UUID
+    tax_code_id: UUID
+    version: int
+    effective_from: date
+    effective_to: date | None
+    priority: int
+    fact_kind: str
+    recognition_basis_code: str
+    transaction_side: str
+    calculation_method: str
+    rate: Decimal | None
+    fixed_amount: Money | None
+    inclusive: bool
+    recoverable_rate: Decimal
+    party_category: str | None
+    supply_category: str | None
+    place_code: str | None
+    treatment_code: str
+    calculation_sequence: int
+    calculation_base_code: str
+    published_at: datetime
+    bands: tuple[TaxRuleBandV1, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,6 +452,28 @@ class TaxSubjectClassificationInput:
 
 
 @dataclass(frozen=True, slots=True)
+class TaxSubjectClassificationV1:
+    """Immutable policy evidence for one subject classification version."""
+
+    tenant_id: UUID
+    classification_id: UUID
+    tax_code_id: UUID
+    subject_kind: str
+    subject_ref: str
+    category_code: str
+    version: int
+    effective_from: date
+    effective_to: date | None
+    basis_code: str
+    evidence_ref: str
+    published_by_ref: str
+    source_ref: str
+    source_version: str
+    source_fingerprint: str
+    published_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class StatutoryReportBoxInput:
     box_code: str
     label: str
@@ -384,12 +486,18 @@ class StatutoryReportBoxInput:
 __all__ = [
     "StatutoryReportBoxInput",
     "TaxAuthorityInput",
+    "TaxAuthorityV1",
+    "TaxCodeV1",
     "TaxDeterminationComponentV1",
     "TaxDeterminationLineV1",
     "TaxDeterminationSetV1",
     "TaxFact",
     "TaxJurisdictionInput",
+    "TaxJurisdictionV1",
     "TaxRuleBandInput",
+    "TaxRuleBandV1",
     "TaxRuleInput",
+    "TaxRuleV1",
     "TaxSubjectClassificationInput",
+    "TaxSubjectClassificationV1",
 ]

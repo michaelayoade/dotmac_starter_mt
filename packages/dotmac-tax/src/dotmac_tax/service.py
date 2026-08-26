@@ -18,13 +18,19 @@ from sqlalchemy.orm import Session
 from dotmac_tax.contracts import (
     StatutoryReportBoxInput,
     TaxAuthorityInput,
+    TaxAuthorityV1,
+    TaxCodeV1,
     TaxDeterminationComponentV1,
     TaxDeterminationLineV1,
     TaxDeterminationSetV1,
     TaxFact,
     TaxJurisdictionInput,
+    TaxJurisdictionV1,
+    TaxRuleBandV1,
     TaxRuleInput,
+    TaxRuleV1,
     TaxSubjectClassificationInput,
+    TaxSubjectClassificationV1,
 )
 from dotmac_tax.models import (
     StatutoryReport,
@@ -116,6 +122,210 @@ def _code(db: Session, tenant_id: UUID, tax_code_id: UUID) -> TaxCode:
     if row is None:
         raise TaxNotFound("tax code not found")
     return row
+
+
+def _authority_contract(row: TaxAuthority) -> TaxAuthorityV1:
+    return TaxAuthorityV1(
+        tenant_id=row.tenant_id,
+        authority_id=row.id,
+        code=row.code,
+        name=row.name,
+        authority_level_code=row.authority_level_code,
+        status=row.status,
+    )
+
+
+def _jurisdiction_contract(row: TaxJurisdiction) -> TaxJurisdictionV1:
+    return TaxJurisdictionV1(
+        tenant_id=row.tenant_id,
+        jurisdiction_id=row.id,
+        authority_id=row.authority_id,
+        code=row.code,
+        name=row.name,
+        country_code=row.country_code,
+        subdivision_code=row.subdivision_code,
+        currency=Currency(row.currency_code, row.minor_units),
+        status=row.status,
+    )
+
+
+def _code_contract(row: TaxCode) -> TaxCodeV1:
+    return TaxCodeV1(
+        tenant_id=row.tenant_id,
+        tax_code_id=row.id,
+        jurisdiction_id=row.jurisdiction_id,
+        code=row.code,
+        name=row.name,
+        tax_kind_code=row.tax_kind_code,
+        description=row.description,
+        status=row.status,
+    )
+
+
+def _exact_policy_money(amount: Decimal, *, currency: Currency) -> Money:
+    value = Money(amount=amount, currency=currency)
+    if value.amount != amount:
+        raise TaxConflict(
+            "persisted fixed tax amount exceeds the jurisdiction currency's "
+            "minor units"
+        )
+    return value
+
+
+def _rule_contract(
+    db: Session, *, tenant_id: UUID, row: TaxRule
+) -> TaxRuleV1:
+    code = _code(db, tenant_id, row.tax_code_id)
+    jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
+    currency = Currency(jurisdiction.currency_code, jurisdiction.minor_units)
+    return TaxRuleV1(
+        tenant_id=row.tenant_id,
+        rule_id=row.id,
+        tax_code_id=row.tax_code_id,
+        version=row.version,
+        effective_from=row.effective_from,
+        effective_to=row.effective_to,
+        priority=row.priority,
+        fact_kind=row.fact_kind,
+        recognition_basis_code=row.recognition_basis_code,
+        transaction_side=row.transaction_side,
+        calculation_method=row.calculation_method,
+        rate=row.rate,
+        fixed_amount=(
+            _exact_policy_money(row.fixed_amount, currency=currency)
+            if row.fixed_amount is not None
+            else None
+        ),
+        inclusive=row.inclusive,
+        recoverable_rate=row.recoverable_rate,
+        party_category=row.party_category,
+        supply_category=row.supply_category,
+        place_code=row.place_code,
+        treatment_code=row.treatment_code,
+        calculation_sequence=row.calculation_sequence,
+        calculation_base_code=row.calculation_base_code,
+        published_at=row.published_at,
+        bands=tuple(
+            TaxRuleBandV1(
+                sequence=band.sequence,
+                lower_bound=band.lower_bound,
+                upper_bound=band.upper_bound,
+                rate=band.rate,
+            )
+            for band in row.bands
+        ),
+    )
+
+
+def _classification_contract(
+    row: TaxSubjectClassification,
+) -> TaxSubjectClassificationV1:
+    return TaxSubjectClassificationV1(
+        tenant_id=row.tenant_id,
+        classification_id=row.id,
+        tax_code_id=row.tax_code_id,
+        subject_kind=row.subject_kind,
+        subject_ref=row.subject_ref,
+        category_code=row.category_code,
+        version=row.version,
+        effective_from=row.effective_from,
+        effective_to=row.effective_to,
+        basis_code=row.basis_code,
+        evidence_ref=row.evidence_ref,
+        published_by_ref=row.published_by_ref,
+        source_ref=row.source_ref,
+        source_version=row.source_version,
+        source_fingerprint=row.source_fingerprint,
+        published_at=row.published_at,
+    )
+
+
+def get_tax_authority(
+    db: Session, *, tenant_id: UUID, code: str
+) -> TaxAuthorityV1:
+    """Read one authority by its tenant-local natural identity."""
+
+    normalized_code = _clean(code, "tax authority code")
+    row = db.scalar(
+        select(TaxAuthority).where(
+            TaxAuthority.tenant_id == tenant_id,
+            TaxAuthority.code == normalized_code,
+        )
+    )
+    if row is None:
+        raise TaxNotFound("tax authority not found")
+    return _authority_contract(row)
+
+
+def get_tax_jurisdiction(
+    db: Session, *, tenant_id: UUID, code: str
+) -> TaxJurisdictionV1:
+    """Read one jurisdiction by its tenant-local natural identity."""
+
+    normalized_code = _clean(code, "jurisdiction code")
+    row = db.scalar(
+        select(TaxJurisdiction).where(
+            TaxJurisdiction.tenant_id == tenant_id,
+            TaxJurisdiction.code == normalized_code,
+        )
+    )
+    if row is None:
+        raise TaxNotFound("tax jurisdiction not found")
+    return _jurisdiction_contract(row)
+
+
+def get_tax_code(
+    db: Session, *, tenant_id: UUID, jurisdiction_id: UUID, code: str
+) -> TaxCodeV1:
+    """Read one tax code by its jurisdiction-local natural identity."""
+
+    normalized_code = _clean(code, "tax code")
+    row = db.scalar(
+        select(TaxCode).where(
+            TaxCode.tenant_id == tenant_id,
+            TaxCode.jurisdiction_id == jurisdiction_id,
+            TaxCode.code == normalized_code,
+        )
+    )
+    if row is None:
+        raise TaxNotFound("tax code not found")
+    return _code_contract(row)
+
+
+def get_tax_rule(
+    db: Session, *, tenant_id: UUID, tax_code_id: UUID, version: int
+) -> TaxRuleV1:
+    """Read one immutable rule version without exposing ORM state."""
+
+    row = db.scalar(
+        select(TaxRule).where(
+            TaxRule.tenant_id == tenant_id,
+            TaxRule.tax_code_id == tax_code_id,
+            TaxRule.version == version,
+        )
+    )
+    if row is None:
+        raise TaxNotFound("tax rule not found")
+    return _rule_contract(db, tenant_id=tenant_id, row=row)
+
+
+def get_tax_subject_classification(
+    db: Session, *, tenant_id: UUID, source_ref: str, source_version: str
+) -> TaxSubjectClassificationV1:
+    """Read classification evidence by its idempotent source identity."""
+
+    normalized_ref = _clean(source_ref, "classification source reference")
+    normalized_version = _clean(source_version, "classification source version")
+    row = db.scalar(
+        select(TaxSubjectClassification).where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.source_ref == normalized_ref,
+            TaxSubjectClassification.source_version == normalized_version,
+        )
+    )
+    if row is None:
+        raise TaxNotFound("tax subject classification not found")
+    return _classification_contract(row)
 
 
 def _currency_matches(currency: Currency, code: str, minor_units: int) -> bool:
@@ -962,6 +1172,341 @@ def publish_tax_subject_classification(
     db.add(row)
     db.flush()
     return row
+
+
+def ensure_tax_authority(
+    db: Session, *, tenant_id: UUID, command: TaxAuthorityInput
+) -> TaxAuthorityV1:
+    """Create an authority or replay the exact active natural-key command."""
+
+    code = command.code.strip()
+    name = command.name.strip()
+    authority_level_code = (
+        command.authority_level_code.strip()
+        if command.authority_level_code
+        else None
+    )
+    existing = db.scalar(
+        select(TaxAuthority).where(
+            TaxAuthority.tenant_id == tenant_id,
+            TaxAuthority.code == code,
+        )
+    )
+    if existing is not None:
+        contract = _authority_contract(existing)
+        if (
+            contract.name,
+            contract.authority_level_code,
+            contract.status,
+        ) != (name, authority_level_code, "active"):
+            raise TaxConflict(
+                f"tax authority {code} exists with different current content"
+            )
+        return contract
+    return _authority_contract(
+        create_tax_authority(db, tenant_id=tenant_id, command=command)
+    )
+
+
+def ensure_tax_jurisdiction(
+    db: Session, *, tenant_id: UUID, command: TaxJurisdictionInput
+) -> TaxJurisdictionV1:
+    """Create a jurisdiction or replay its exact natural-key command."""
+
+    code = command.code.strip()
+    name = command.name.strip()
+    country_code = command.country_code.strip().upper()
+    subdivision_code = (
+        command.subdivision_code.strip() if command.subdivision_code else None
+    )
+    existing = db.scalar(
+        select(TaxJurisdiction).where(
+            TaxJurisdiction.tenant_id == tenant_id,
+            TaxJurisdiction.code == code,
+        )
+    )
+    if existing is not None:
+        contract = _jurisdiction_contract(existing)
+        if (
+            contract.authority_id,
+            contract.name,
+            contract.country_code,
+            contract.subdivision_code,
+            contract.currency,
+            contract.status,
+        ) != (
+            command.authority_id,
+            name,
+            country_code,
+            subdivision_code,
+            command.currency,
+            "active",
+        ):
+            raise TaxConflict(
+                f"tax jurisdiction {code} exists with different current content"
+            )
+        return contract
+    return _jurisdiction_contract(
+        create_tax_jurisdiction(db, tenant_id=tenant_id, command=command)
+    )
+
+
+def ensure_tax_code(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    jurisdiction_id: UUID,
+    code: str,
+    name: str,
+    tax_kind_code: str,
+    description: str | None = None,
+) -> TaxCodeV1:
+    """Create a tax code or replay its exact jurisdiction-local command."""
+
+    normalized_code = code.strip()
+    normalized_name = name.strip()
+    normalized_kind = tax_kind_code.strip()
+    normalized_description = description.strip() if description else None
+    existing = db.scalar(
+        select(TaxCode).where(
+            TaxCode.tenant_id == tenant_id,
+            TaxCode.jurisdiction_id == jurisdiction_id,
+            TaxCode.code == normalized_code,
+        )
+    )
+    if existing is not None:
+        contract = _code_contract(existing)
+        if (
+            contract.name,
+            contract.tax_kind_code,
+            contract.description,
+            contract.status,
+        ) != (
+            normalized_name,
+            normalized_kind,
+            normalized_description,
+            "active",
+        ):
+            raise TaxConflict(
+                f"tax code {normalized_code} exists with different current content"
+            )
+        return contract
+    return _code_contract(
+        create_tax_code(
+            db,
+            tenant_id=tenant_id,
+            jurisdiction_id=jurisdiction_id,
+            code=code,
+            name=name,
+            tax_kind_code=tax_kind_code,
+            description=description,
+        )
+    )
+
+
+def _rule_command_content(command: TaxRuleInput) -> tuple[object, ...]:
+    return (
+        command.effective_from,
+        command.effective_to,
+        command.priority,
+        command.fact_kind.strip(),
+        command.recognition_basis_code.strip(),
+        command.transaction_side,
+        command.calculation_method,
+        command.rate,
+        command.fixed_amount,
+        command.inclusive,
+        command.recoverable_rate,
+        command.party_category.strip() if command.party_category else None,
+        command.supply_category.strip() if command.supply_category else None,
+        command.place_code.strip() if command.place_code else None,
+        command.treatment_code,
+        command.calculation_sequence,
+        command.calculation_base_code,
+        tuple(
+            TaxRuleBandV1(
+                sequence=band.sequence,
+                lower_bound=band.lower_bound,
+                upper_bound=band.upper_bound,
+                rate=band.rate,
+            )
+            for band in sorted(command.bands, key=lambda item: item.sequence)
+        ),
+    )
+
+
+def _rule_contract_content(contract: TaxRuleV1) -> tuple[object, ...]:
+    return (
+        contract.effective_from,
+        contract.effective_to,
+        contract.priority,
+        contract.fact_kind,
+        contract.recognition_basis_code,
+        contract.transaction_side,
+        contract.calculation_method,
+        contract.rate,
+        contract.fixed_amount,
+        contract.inclusive,
+        contract.recoverable_rate,
+        contract.party_category,
+        contract.supply_category,
+        contract.place_code,
+        contract.treatment_code,
+        contract.calculation_sequence,
+        contract.calculation_base_code,
+        contract.bands,
+    )
+
+
+def ensure_tax_rule(
+    db: Session, *, tenant_id: UUID, command: TaxRuleInput
+) -> TaxRuleV1:
+    """Publish a rule or replay exact content for its immutable version."""
+
+    existing = db.scalar(
+        select(TaxRule).where(
+            TaxRule.tenant_id == tenant_id,
+            TaxRule.tax_code_id == command.tax_code_id,
+            TaxRule.version == command.version,
+        )
+    )
+    if existing is not None:
+        contract = _rule_contract(db, tenant_id=tenant_id, row=existing)
+        if _rule_contract_content(contract) != _rule_command_content(command):
+            raise TaxConflict(
+                "tax rule version exists with different current content"
+            )
+        return contract
+    return _rule_contract(
+        db,
+        tenant_id=tenant_id,
+        row=publish_tax_rule(db, tenant_id=tenant_id, command=command),
+    )
+
+
+def _classification_command_content(
+    command: TaxSubjectClassificationInput,
+    *,
+    subject_ref: str,
+    category_code: str,
+    basis_code: str,
+    evidence_ref: str,
+    published_by_ref: str,
+    source_ref: str,
+    source_version: str,
+    fingerprint: str,
+) -> tuple[object, ...]:
+    return (
+        command.tax_code_id,
+        command.subject_kind,
+        subject_ref,
+        category_code,
+        command.version,
+        command.effective_from,
+        command.effective_to,
+        basis_code,
+        evidence_ref,
+        published_by_ref,
+        source_ref,
+        source_version,
+        fingerprint,
+    )
+
+
+def _classification_contract_content(
+    contract: TaxSubjectClassificationV1,
+) -> tuple[object, ...]:
+    return (
+        contract.tax_code_id,
+        contract.subject_kind,
+        contract.subject_ref,
+        contract.category_code,
+        contract.version,
+        contract.effective_from,
+        contract.effective_to,
+        contract.basis_code,
+        contract.evidence_ref,
+        contract.published_by_ref,
+        contract.source_ref,
+        contract.source_version,
+        contract.source_fingerprint,
+    )
+
+
+def ensure_tax_subject_classification(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    command: TaxSubjectClassificationInput,
+) -> TaxSubjectClassificationV1:
+    """Publish classification evidence or replay either exact identity."""
+
+    subject_ref = command.subject_ref.strip()
+    category_code = command.category_code.strip()
+    basis_code = command.basis_code.strip()
+    evidence_ref = command.evidence_ref.strip()
+    published_by_ref = command.published_by_ref.strip()
+    source_ref = command.source_ref.strip()
+    source_version = command.source_version.strip()
+    fingerprint = _classification_fingerprint(
+        command,
+        subject_ref=subject_ref,
+        category_code=category_code,
+        basis_code=basis_code,
+        evidence_ref=evidence_ref,
+        published_by_ref=published_by_ref,
+        source_ref=source_ref,
+        source_version=source_version,
+    )
+    expected = _classification_command_content(
+        command,
+        subject_ref=subject_ref,
+        category_code=category_code,
+        basis_code=basis_code,
+        evidence_ref=evidence_ref,
+        published_by_ref=published_by_ref,
+        source_ref=source_ref,
+        source_version=source_version,
+        fingerprint=fingerprint,
+    )
+    source_match = db.scalar(
+        select(TaxSubjectClassification).where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.source_ref == source_ref,
+            TaxSubjectClassification.source_version == source_version,
+        )
+    )
+    if source_match is not None:
+        contract = _classification_contract(source_match)
+        if _classification_contract_content(contract) != expected:
+            raise TaxConflict(
+                "tax classification source identity exists with different "
+                "current content"
+            )
+        return contract
+    version_match = db.scalar(
+        select(TaxSubjectClassification).where(
+            TaxSubjectClassification.tenant_id == tenant_id,
+            TaxSubjectClassification.tax_code_id == command.tax_code_id,
+            TaxSubjectClassification.subject_kind == command.subject_kind,
+            TaxSubjectClassification.subject_ref == subject_ref,
+            TaxSubjectClassification.version == command.version,
+        )
+    )
+    if version_match is not None:
+        contract = _classification_contract(version_match)
+        if _classification_contract_content(contract) != expected:
+            raise TaxConflict(
+                "tax classification version exists with different current content"
+            )
+        return contract
+    return _classification_contract(
+        publish_tax_subject_classification(
+            db,
+            tenant_id=tenant_id,
+            command=command,
+        )
+    )
 
 
 def _optional_match(configured: str | None, observed: str | None) -> bool:
@@ -2001,10 +2546,21 @@ __all__ = [
     "create_tax_return",
     "determine_tax",
     "determine_tax_set",
+    "ensure_tax_authority",
+    "ensure_tax_code",
+    "ensure_tax_jurisdiction",
+    "ensure_tax_rule",
+    "ensure_tax_subject_classification",
     "file_tax_return",
     "generate_statutory_report",
+    "get_tax_authority",
+    "get_tax_code",
+    "get_tax_jurisdiction",
+    "get_tax_rule",
+    "get_tax_subject_classification",
     "prepare_tax_return",
     "publish_tax_rule",
+    "publish_tax_subject_classification",
     "reject_tax_return",
     "update_tax_authority",
     "update_tax_code",
