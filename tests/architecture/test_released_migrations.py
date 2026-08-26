@@ -1348,6 +1348,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-template-studio ──
+    "dotmac-template-studio-v0.2.0a4": (
+        "dotmac-template-studio",
+        "ac5e439e",
+        {
+            "ts_0001_templates.py": (
+                "511073d3225c8fa9be09c687500e0515efbb5d8fdc4859791e1e4f16ed7308f4"
+            ),
+            "ts_0002_notification_identity.py": (
+                "b50c2387f54a877cf0f0ff772bcfc84083a973595c490d6facf6bf7a8f196088"
+            ),
+        },
+    ),
     "dotmac-template-studio-v0.2.0a3": (
         "dotmac-template-studio",
         "5777ceb5",
