@@ -112,6 +112,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a99",
+      "reason": "OUTSTANDING FOR THE ADDITIVE PERMISSION-PROVISIONING CONTRACT. a98 IS published (peeled tag dotmac-kernel-v0.1.0a98 -> ae7320876ad91d5bf4639d634d65a6e8fd36bb00); a99 adds the storage-neutral PermissionPlan, assembly-owned role definitions and versioned grant profiles. Source presence is not registry evidence, and products must not pin a99 until the protected kernel release installs and verifies the artifact from the private index and tags the exact revision. Remove this row only in the a99 oracle-backed release record; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",

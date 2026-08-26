@@ -27,8 +27,13 @@ from dotmac_kernel import (
     ModuleManifest,
     NavigationRegion,
     NavItem,
+    PermissionPlanError,
+    PermissionState,
     ProductAssemblySpec,
     ProductSecurityPolicy,
+    RoleDefinition,
+    RoleGrant,
+    RoleGrantProfile,
     TemplateRef,
     WebFacetMount,
     WebSurfaceContribution,
@@ -94,6 +99,8 @@ def test_spec_is_frozen_and_collections_immutable():
     spec = ProductAssemblySpec(
         name="s",
         modules=[],
+        role_definitions=[],
+        role_grant_profiles=[],
         disabled_modules=frozenset({"x"}),
         providers={"a": 1},
         startup_checks=[lambda: ()],
@@ -102,6 +109,8 @@ def test_spec_is_frozen_and_collections_immutable():
     with pytest.raises(FrozenInstanceError):
         spec.name = "other"  # type: ignore[misc]
     assert isinstance(spec.modules, tuple)
+    assert isinstance(spec.role_definitions, tuple)
+    assert isinstance(spec.role_grant_profiles, tuple)
     assert isinstance(spec.disabled_modules, frozenset)
     assert isinstance(spec.startup_checks, tuple)
     assert isinstance(spec.startup_hooks, tuple)
@@ -610,6 +619,47 @@ def test_mixed_feature_and_module_assembly_boots():
         "legacy",
         "modern",
     ]
+
+
+def test_create_app_attaches_the_read_only_assembly_permission_plan() -> None:
+    permission = PermissionSpec("expense:claims.read", description="Read claims")
+    profile = RoleGrantProfile(
+        "erp.expense", (RoleGrant("finance_manager", permission.code),)
+    )
+
+    app = create_app(
+        ProductAssemblySpec(
+            name="permission-plan",
+            modules=(FeatureManifest(name="expense", permissions=(permission,)),),
+            role_definitions=(RoleDefinition("finance_manager"),),
+            role_grant_profiles=[profile],
+            web_enabled=False,
+            platform_surface_enabled=False,
+        )
+    )
+
+    assert app.state.permission_plan.profiles == (profile,)
+    assert app.state.permission_plan.grants == profile.grants
+    assert app.state.permission_plan.diff(PermissionState()).missing_roles == (
+        "finance_manager",
+    )
+
+
+def test_create_app_rejects_profile_reference_to_undeclared_permission() -> None:
+    with pytest.raises(PermissionPlanError, match="undeclared permission"):
+        create_app(
+            ProductAssemblySpec(
+                name="bad-permission-plan",
+                role_definitions=(RoleDefinition("admin"),),
+                role_grant_profiles=(
+                    RoleGrantProfile(
+                        "bad", (RoleGrant("admin", "invented.permission"),)
+                    ),
+                ),
+                web_enabled=False,
+                platform_surface_enabled=False,
+            )
+        )
 
 
 def test_module_manifest_routers_mount_like_feature_routers():

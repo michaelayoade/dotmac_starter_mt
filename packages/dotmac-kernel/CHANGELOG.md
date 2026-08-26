@@ -6,6 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a99 — 2026-08-26
+
+### Added
+
+- `dotmac_kernel.permission_provisioning` — a pure, storage-neutral planner
+  that separates module-owned permission definitions from assembly-owned role
+  definitions and versioned role-grant profiles. Its normalized,
+  schema-versioned digest supports migration previews and drift evidence.
+- `ProductAssemblySpec.role_definitions` and `role_grant_profiles`; `create_app`
+  compiles their read-only plan into `app.state.permission_plan` and uses the
+  same declaration set for mounted-route validation.
+
+### Safety and compatibility
+
+- Stage 1 produces additive permission, explicitly authorized role, and grant
+  inserts only. It preserves unknown/operator state and existing descriptions,
+  refuses inactive desired state and implicit role creation, and performs no
+  startup persistence writes.
+- Request authorization continues to evaluate `PermissionSpec.default_roles`.
+  Products retire that compatibility path only after persisting an assembly
+  profile and proving decision parity.
+
 ## 0.1.0a98 — 2026-08-26
 
 One release, four independent changes: the public engine-free transaction

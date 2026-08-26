@@ -29,14 +29,13 @@ surfacing as a mystery 403 on the first request that reaches it.
 ## Why a spec, not a bare string
 
 A capability declaration is a bare code because the *decision* it feeds lives in
-a database (a tenant's grant row). A permission's decision has no store yet, so
-the declaration carries the binding it needs: ``default_roles``, the role slugs
-that hold the permission out of the box. That is the same relationship a
-``SettingSpec.default`` has to a ``domain_settings`` row — the code-declared
-default, layered under a future tenant-configurable override, NOT a second
-authority. Adding tenant-configurable role→permission grants is a later program
-step; when it lands it layers over this default exactly as a tenant setting
-layers over a spec default.
+a database (a tenant's grant row). Permission authorization still has no shared
+runtime store, so ``default_roles`` remains the compatibility evaluator used by
+``authorize_party``. It is not the target product-policy owner:
+``permission_provisioning.PermissionPlan`` separately combines module-owned
+definitions with assembly-owned role profiles for migration and drift evidence.
+The compatibility binding retires only after an adopting product persists that
+profile and changes its evaluator under a behavior-equivalence gate.
 
 ## Process-active catalogue
 
@@ -81,9 +80,11 @@ class PermissionSpec:
 
     `code` is the stable identifier a guard references. `default_roles` is the
     code-declared default binding (see the module docstring): the role slugs
-    whose holders satisfy the permission. It is deliberately non-empty — a
-    permission no role can hold is an unreachable route, which is a declaration
-    bug, not a lockdown.
+    whose holders satisfy the permission during the compatibility window. It
+    remains deliberately non-empty until the runtime evaluator consumes the
+    product-owned catalogue; an operator-only permission is valid in a
+    ``PermissionPlan`` profile, but is not yet expressible through this legacy
+    request-time field.
     """
 
     code: str
