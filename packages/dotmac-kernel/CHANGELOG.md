@@ -23,6 +23,19 @@ here.
   contract published when the persistence-free module was introduced in a88.
   A fresh-process canary proves it imports without loading the kernel database
   runtime or the persistence-backed idempotency ledger.
+- `WebSurfaceRegistry` now REFUSES a facet that declares an
+  `admission_permission` while its authentication profile enters the
+  `platform` or `none` security plane. Admission is evaluated as
+  `authorize_party(db, tenant, party, code)`, which requires a tenant-scoped
+  `Party`: a platform profile resolves a `PlatformAdmin` and a public profile
+  resolves no principal at all, so the runtime's non-tenant context dependency
+  never consulted the permission. The binding was therefore invalid, and its
+  failure mode was silent admission — a reviewer saw the permission on the
+  facet, the catalogue confirmed it was declared, and every request was let
+  through. Startup now fails instead. The existing declared-permission check is
+  unchanged, a platform facet WITHOUT admission stays valid, and no
+  `UI_CONTRACT_VERSION` bump is required: this rejects a composition that could
+  never have been enforced, so no valid assembly's contract changes.
 
 ## 0.1.0a97 — 2026-08-25
 

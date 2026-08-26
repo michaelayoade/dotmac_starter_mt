@@ -1440,6 +1440,20 @@ incompatible UI versions, browser capabilities, overlapping prefixes, cookie
 scope, route/nav/namespace collisions and unresolved entry/login routes all stop
 startup.
 
+Facet admission is a TENANT-plane decision. `mount_web_surfaces` evaluates
+`WebFacetMount.admission_permission` through `authorize_party(db, tenant,
+party, code)`, which needs a tenant-scoped `Party`, so only a facet whose
+authentication profile declares `BrowserSecurityPlane.TENANT` ever reaches that
+call. A platform profile resolves a `PlatformAdmin` and a public profile
+resolves no principal at all; both take the non-tenant context dependency,
+which never reads the permission. A facet declaring admission against either
+plane was therefore enforcing nothing while reading as guarded — the permission
+sat on the facet, `create_app` confirmed it was declared, and every request was
+admitted anyway. `WebSurfaceRegistry` refuses that binding at startup. A
+platform or public facet WITHOUT admission stays valid and authorizes inside
+its own routes against its own principal, which is where a non-`Party`
+principal's authorization belongs (ADR-0006 § 5 amendment, 2026-08-26).
+
 The kernel's contract-v2 platform contribution uses an assembly-declared
 `platform_admin` facet when one exists. During the migration window only, an
 assembly with `platform_surface_enabled=True` and no such declaration receives
