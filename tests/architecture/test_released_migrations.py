@@ -246,6 +246,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-template-studio"
         / "src/dotmac_template_studio/migrations/versions"
     ),
+    "dotmac-commercial-agreements": (
+        REPO_ROOT
+        / "packages/dotmac-commercial-agreements"
+        / "src/dotmac_commercial_agreements/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -282,6 +287,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-service-access-policy": "sap_*.py",
     "dotmac-services": "se_*.py",
     "dotmac-template-studio": "ts_*.py",
+    "dotmac-commercial-agreements": "cg_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -315,6 +321,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-service-access-policy": "dotmac-service-access-policy-v",
     "dotmac-services": "dotmac-services-v",
     "dotmac-template-studio": "dotmac-template-studio-v",
+    "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1372,6 +1379,25 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-commercial-agreements ──
+    "dotmac-commercial-agreements-v0.1.0a1": (
+        "dotmac-commercial-agreements",
+        "fead57bc",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
+    "dotmac-commercial-agreements-v0.1.0a2": (
+        "dotmac-commercial-agreements",
+        "42acc8b3",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
 }
 
 
@@ -1466,6 +1492,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
+    "dotmac-commercial-agreements": frozenset(),
 }
 
 
