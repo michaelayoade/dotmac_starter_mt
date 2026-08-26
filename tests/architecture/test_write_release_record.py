@@ -43,6 +43,11 @@ KNOWN_DISTRIBUTION = "dotmac-integration"
 KNOWN_PACKAGE_DIR = "packages/dotmac-integration"
 KNOWN_IMPORT_NAME = "dotmac_integration"
 
+AGREEMENTS_TAG = "dotmac-commercial-agreements-v0.1.0a1"
+AGREEMENTS_DISTRIBUTION = "dotmac-commercial-agreements"
+AGREEMENTS_PACKAGE_DIR = "packages/dotmac-commercial-agreements"
+AGREEMENTS_IMPORT_NAME = "dotmac_commercial_agreements"
+
 
 def _writer():
     spec = importlib.util.spec_from_file_location("write_release_record", SCRIPT)
@@ -98,6 +103,30 @@ def test_digests_read_from_the_tag_reproduce_a_hand_built_record() -> None:
     assert (
         writer.migration_digests(KNOWN_TAG, KNOWN_PACKAGE_DIR, KNOWN_IMPORT_NAME)
         == digests
+    )
+
+
+def test_first_enrolment_history_reads_every_published_matching_tag() -> None:
+    """The Commercial Agreements regression: a1 shipped before enrolment.
+
+    The next release must not pretend its requested tag is the first tag. The
+    repository tag set is the oracle, and a1's peeled coordinates and bytes
+    must be part of the history the recorder supplies to first enrolment.
+    """
+    writer = _writer()
+    history = writer.published_release_history(
+        AGREEMENTS_DISTRIBUTION,
+        AGREEMENTS_PACKAGE_DIR,
+        AGREEMENTS_IMPORT_NAME,
+    )
+
+    assert history[AGREEMENTS_TAG] == (
+        "fead57bc",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            )
+        },
     )
 
 
@@ -401,17 +430,25 @@ def test_a_row_describing_a_different_version_is_refused() -> None:
     assert "describes a different" in str(refusal.value)
 
 
-def test_a_first_release_enrols_every_migration_guard_map() -> None:
-    """The release workflow must be able to record a module's first tag.
+def test_a_first_enrolment_records_history_and_every_migration_guard_map() -> None:
+    """The release workflow must be able to enrol after a prior release.
 
     Appending only ``RELEASED_TAGS`` is not enough: the guard then rejects the
-    unknown owner and still leaves main red. First-release enrolment is one
-    mechanical operation over all four owner maps plus the immutable tag map.
+    unknown owner and still leaves main red. Recording only the requested tag
+    is also insufficient when an older tag already exists. First enrolment is
+    one mechanical operation over the complete published history, all four
+    owner maps and the immutable tag map.
     """
     writer = _writer()
     text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
     distribution = "dotmac-nonesuch"
-    tag = "dotmac-nonesuch-v1.0.0"
+    tag = "dotmac-nonesuch-v2.0.0"
+    historical_tag = "dotmac-nonesuch-v1.0.0"
+    digests = {"ns_0001_nonesuch.py": "a" * 64}
+    historical_releases = {
+        tag: ("abcdef12", digests),
+        historical_tag: ("12345678", digests),
+    }
     assert distribution not in _mapping_keys(text, "DISTRIBUTIONS")
 
     updated, added = writer.add_released_tag(
@@ -419,9 +456,10 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
         tag,
         distribution,
         "abcdef12",
-        {"ns_0001_nonesuch.py": "a" * 64},
+        digests,
         package_dir="packages/dotmac-nonesuch",
         import_name="dotmac_nonesuch",
+        historical_releases=historical_releases,
     )
 
     assert added
@@ -429,6 +467,7 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
     for mapping in ("DISTRIBUTIONS", "LINEAGE_GLOBS", "TAG_PREFIXES", "UNRELEASED"):
         assert distribution in _mapping_keys(updated, mapping)
     assert tag in _mapping_keys(updated, "RELEASED_TAGS")
+    assert historical_tag in _mapping_keys(updated, "RELEASED_TAGS")
     assert '"dotmac-nonesuch": "ns_*.py"' in updated
     assert '"dotmac-nonesuch": "dotmac-nonesuch-v"' in updated
     assert "packages/dotmac-nonesuch" in updated
@@ -439,7 +478,7 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
         tag,
         distribution,
         "abcdef12",
-        {"ns_0001_nonesuch.py": "a" * 64},
+        digests,
     )
     assert not added_again
     assert unchanged == updated
