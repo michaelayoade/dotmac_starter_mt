@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "dotmac-connector-nira"
+version = "0.1.0a1"
+description = "NiRA .ng registry connector: CoCCA EPP delivery and poll transport"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_nira", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_nira/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# SPI 1.4 (per-capability modes) requires the integration release that
+# introduced it, matching the other 1.4 connectors.
+dotmac-integration = ">=0.1.0a14"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+nira = "dotmac_connector_nira:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
