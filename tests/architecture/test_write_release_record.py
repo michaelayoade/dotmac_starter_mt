@@ -139,9 +139,9 @@ def _without_tags_after(text: str, distribution: str, tag: str) -> str:
 
 def _unreleased_filenames(text: str, distribution: str) -> set[str]:
     row = re.search(
-        rf'^    "{re.escape(distribution)}": frozenset\(([^\n]*)\),$',
+        rf'^    "{re.escape(distribution)}": frozenset\((.*?)\),$',
         text,
-        re.MULTILINE,
+        re.MULTILINE | re.DOTALL,
     )
     assert row is not None, distribution
     payload = row.group(1).strip()
@@ -152,9 +152,9 @@ def _with_unreleased_filenames(
     text: str, distribution: str, filenames: set[str]
 ) -> str:
     row = re.search(
-        rf'^    "{re.escape(distribution)}": frozenset\(([^\n]*)\),$',
+        rf'^    "{re.escape(distribution)}": frozenset\((.*?)\),$',
         text,
-        re.MULTILINE,
+        re.MULTILINE | re.DOTALL,
     )
     assert row is not None, distribution
     values = ", ".join(repr(filename) for filename in sorted(filenames))

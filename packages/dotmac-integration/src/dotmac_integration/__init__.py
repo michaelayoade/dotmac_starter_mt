@@ -80,6 +80,30 @@ posture without anyone deciding it. And a receipt under legal hold, claimed by
 a worker, unresolved, or awaiting reconciliation is refused BY NAME and counted,
 never quietly skipped.
 
+## Durable polling evidence (slice 4)
+
+A poll that SUCCEEDED always left a trace — receipts and an advanced cursor. A
+poll that FAILED left nothing, so the durable state could not say how often a
+job had been failing, when it was safe to try again, or what kind of failure it
+was. Every assembly running a poll worker answered those three questions itself,
+in its own counter, its own constant and sometimes its own table — a parallel
+retry ledger and a second writer of a decision this module already owned half
+of.
+
+:mod:`dotmac_integration.poll_schedule` closes it without adding a scheduler.
+The checkpoint carries the current retry state, a never-rewritten table carries
+the per-attempt history, and :func:`due_polling_jobs` is the sole bounded
+KEYSET selection a worker loops over. The engine owns the FLOOR ("not before"),
+never the CADENCE ("every N seconds"), and it never dead-letters a poll job — a provider
+stream nobody is reading fails silently, so the curve saturates and the job
+stays selectable. Backoff itself is not redefined: it delegates to
+:func:`dotmac_integration.retry.retry_delay_seconds`, the one owner of the
+curve.
+
+:func:`ensure_polling_checkpoint` owns declaration only and cannot rewind or
+list work. :func:`prune_poll_failure_history` owns bounded deletion only and
+requires a product-supplied cutoff; the module supplies no retention duration.
+
 ## enabled is not selected
 
 Many installations may be ENABLED for one capability; exactly one is SELECTED
@@ -312,17 +336,47 @@ from dotmac_integration.outbound_repair import (
     resolve_dead_letter_page_size,
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.poll_schedule import (
+    DEFAULT_POLL_PAGE_SIZE,
+    MAX_POLL_PAGE_SIZE,
+    POLL_FAILURE_CODES,
+    POLL_PAGE_SIZE_VAR,
+    POLL_SCHEDULE_PLATFORM_TABLES,
+    DuePollingJob,
+    PollFailurePageKey,
+    PollingAttemptFailure,
+    PollingJobUnknown,
+    PollPageKey,
+    PollRetryState,
+    RecordedPollFailure,
+    classify_poll_failure,
+    due_polling_jobs,
+    is_retry_eligible,
+    poll_backoff_seconds,
+    poll_failure_history,
+    prune_poll_failure_history,
+    record_poll_failure,
+    record_poll_success,
+    resolve_poll_page_size,
+    retry_state,
+)
 from dotmac_integration.polling import (
+    CheckpointCreationRaced,
+    CheckpointDefinitionConflict,
+    CheckpointLifecycleError,
     CursorInvalid,
     PollBatch,
     PollConnectorRaised,
     PollContractError,
     PollError,
     PollHandlerUnavailable,
+    PollingJobRef,
+    PollingJobRegistration,
     PollResult,
     PollSecretsUnavailable,
     PollUnavailable,
     PreparedPoll,
+    ensure_polling_checkpoint,
     invoke_poll,
     poll_once,
     prepare_poll,
@@ -750,6 +804,32 @@ __all__ = [
     "claim_receipt",
     "claim_delivery",
     "advance_checkpoint",
+    # ── Durable polling attempt/failure/backoff evidence ───────────────────
+    "DEFAULT_POLL_PAGE_SIZE",
+    "MAX_POLL_PAGE_SIZE",
+    "POLL_FAILURE_CODES",
+    "POLL_PAGE_SIZE_VAR",
+    "POLL_SCHEDULE_PLATFORM_TABLES",
+    "DuePollingJob",
+    "PollFailurePageKey",
+    "PollPageKey",
+    "PollRetryState",
+    "PollingAttemptFailure",
+    "PollingJobUnknown",
+    "RecordedPollFailure",
+    "classify_poll_failure",
+    "due_polling_jobs",
+    "is_retry_eligible",
+    "poll_backoff_seconds",
+    "poll_failure_history",
+    "prune_poll_failure_history",
+    "record_poll_failure",
+    "record_poll_success",
+    "resolve_poll_page_size",
+    "retry_state",
+    "CheckpointCreationRaced",
+    "CheckpointDefinitionConflict",
+    "CheckpointLifecycleError",
     "CursorInvalid",
     "PollBatch",
     "PollConnectorRaised",
@@ -759,7 +839,10 @@ __all__ = [
     "PollResult",
     "PollSecretsUnavailable",
     "PollUnavailable",
+    "PollingJobRef",
+    "PollingJobRegistration",
     "PreparedPoll",
+    "ensure_polling_checkpoint",
     "invoke_poll",
     "poll_once",
     "prepare_poll",

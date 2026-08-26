@@ -1807,7 +1807,8 @@
           "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py",
           "dotmac_integration/migrations/versions/ig_0011_replay_retention.py",
           "dotmac_integration/migrations/versions/ig_0012_delivery_evidence.py",
-          "dotmac_integration/migrations/versions/ig_0013_delivery_result.py"
+          "dotmac_integration/migrations/versions/ig_0013_delivery_result.py",
+          "dotmac_integration/migrations/versions/ig_0014_polling_evidence.py"
         ],
         "forbidden_prefixes": [
           "app/",

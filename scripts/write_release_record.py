@@ -226,9 +226,9 @@ def _retire_unreleased(
     name = re.escape(distribution)
     mapping = _mapping_text(text, "UNRELEASED")
     row = re.search(
-        rf'^    "{name}": frozenset\(([^\n]*)\),$',
+        rf'^    "{name}": frozenset\((.*?)\),$',
         mapping,
-        flags=re.MULTILINE,
+        flags=re.MULTILINE | re.DOTALL,
     )
     if row is None:
         raise ReleaseRecordError(

@@ -12,7 +12,9 @@ collisions and enqueue races typed, adds repair/reconciliation, runtime safety
 and module-owned metric definitions.
 
 `0.1.0a16` is declared and unreleased. It adds domain-owned payload contracts
-and durably stores a validated normalized result in `ig_0013`.
+and durably stores a validated normalized result in `ig_0013`, and adds durable
+polling attempt/failure/backoff evidence with a bounded keyset selection in
+`ig_0014`.
 
 `0.1.0a11` keeps SPI 1.3 and makes the declared POLL mode executable through a
 three-phase engine; it was published and tagged from `f25df1ad`.
@@ -131,6 +133,76 @@ grew two disjoint command vocabularies with nothing able to see it.
   migrates. `tests/architecture/test_capability_contract_divergence.py` holds
   that and the four other shared-and-ungated capability ids in a
   two-directional ratchet.
+
+### A failed poll now leaves durable evidence, and the engine backs it off
+
+The three-phase POLL engine recorded a SUCCESS — receipts plus an advanced
+cursor — and recorded nothing at all about a FAILURE. The durable state could
+not say how many times in a row a job had failed, when it might safely be tried
+again, or what kind of failure it was, so every assembly running a poll worker
+answered those three questions itself. That is a parallel retry ledger and a
+second writer of a decision this module already owned half of (the checkpoint's
+optimistic `version`).
+
+- New module `poll_schedule`, exported from the top-level namespace. It owns the
+  retry state, the failure history and the selection query; the assembly gains
+  no scheduler and no counter of its own.
+- `PollingCheckpoint` gains `attempt_count`, `next_attempt_at` (NOT NULL),
+  `last_attempt_at`, `last_success_at`, `last_failure_at` and
+  `last_failure_code`. `attempt_count` counts CONSECUTIVE failures since the
+  last success, not lifetime attempts.
+- **Failure bookkeeping never touches `version`.** The version is a claim about
+  the CURSOR, and a failed attempt moved no cursor; bumping it would make a
+  concurrent in-flight settle lose a race that did not happen.
+- New never-rewritten platform table `polling_attempt_failures`: attempt number,
+  the checkpoint version the attempt worked against, the failure code, a
+  sanitized connector exception TYPE NAME, the backoff actually applied and the
+  resulting floor. **It has no free-text column at all** — the guarantee that
+  connector or provider text never reaches a column is enforced here by the
+  absence of anywhere to put it, rather than by a source scan.
+- `POLL_FAILURE_CODES` is a CLOSED vocabulary of eight codes derived from this
+  package's own exception types, enforced by a database check constraint. An
+  unrecognised error is recorded as `settlement_failed` rather than given a new
+  code. No connector `error_code` and no provider status reaches it.
+- `poll_backoff_seconds` DELEGATES to `retry.retry_delay_seconds`. The curve,
+  its ceiling and its overflow guard stay defined once.
+- **A poll job is never dead-lettered.** A failing delivery eventually is; a
+  failing poll must not be, because a provider stream nobody reads fails
+  silently. The curve saturates at `ExecutionPolicy.max_backoff_seconds` and the
+  job stays selectable. Suppressing a poll keeps its one existing owner:
+  disable the binding or the installation.
+- `due_polling_jobs` is a bounded KEYSET selection (`PollPageKey`, page size
+  `INTEGRATION_POLL_PAGE_SIZE`, capped at 1000). It claims nothing — the
+  checkpoint's optimistic `version` is already the stronger claim, and a lease
+  here would be a second one over the same row. Ordering by
+  `(next_attempt_at, id)` makes healthy jobs round-robin (a success stamps the
+  floor with the moment of the success) and pushes failing ones behind their own
+  backoff, so a permanently broken early checkpoint cannot starve the rows
+  created after it. `poll_failure_history` pages the same way, newest first.
+- `ensure_polling_checkpoint` is the one public declaration lifecycle for a
+  `(binding, job_key)`. It validates the pinned POLL capability, contains an
+  insert race with the kernel savepoint, returns detached state and never
+  rewinds. It deliberately offers no listing method: `due_polling_jobs` remains
+  the sole scheduling selector.
+- The engine owns the FLOOR ("not before"), never the CADENCE ("every N
+  seconds"). A polling interval is a deployment's decision about one provider.
+- `poll_once` records every failing path before re-raising, in a FRESH unit of
+  work so the evidence is not rolled back with the attempt it describes. There
+  is no opt-out keyword: one would be a supported way to keep a private attempt
+  counter instead. The write is best-effort — a broken recorder never replaces
+  the operator's exception, and a lost record degrades toward MORE polling,
+  never toward a job that silently stops.
+- `PollConnectorRaised` gains a public `exception_type` attribute carrying the
+  already-sanitized type name, so a persisting caller never has to parse the
+  message.
+- Adds `ig_0014_polling_evidence`. `next_attempt_at` is backfilled from
+  `COALESCE(advanced_at, created_at)` before being made NOT NULL, so a
+  deployment with an existing polling backlog keeps its ordering instead of
+  having every job tied at the moment of the migration.
+- `prune_poll_failure_history` owns the bounded oldest-first deletion mechanic.
+  Its timezone-aware cutoff is mandatory and product-supplied: the package has
+  no default age, environment read or hidden TTL. Failure rows are never
+  updated, but they are not falsely described as immortal append-only facts.
 
 ### Declaring a binding no longer erases how it is selected
 
