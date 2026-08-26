@@ -233,6 +233,45 @@ def test_instance_selectors_restrict_same_capability_resource_instances() -> Non
         )
 
 
+def test_a_selector_still_requires_the_source_input_schema_to_be_held() -> None:
+    """Lazy resolution must not skip the schema a source selector reads."""
+    source_input = _discriminated_schema(
+        SOURCE_INPUT.schema_ref,
+        value_field="domain",
+        resource_kinds=("domain", "mailbox"),
+        public_value=False,
+    )
+    source_contract = _contract(
+        SOURCE_CONTRACT.owner_code,
+        SOURCE_CONTRACT.capability_code,
+        source_input,
+        SOURCE_SCHEMA,
+    )
+    binding = replace(
+        _binding(),
+        source_selector_pointer="/resource_kind",
+        source_selector_value="domain",
+    )
+    composition = CapabilityCompositionSnapshot(
+        owner_code="dotmac-managed-suite",
+        composition_code="managed-suite.mail-dns.v1",
+        schema_version=1,
+        evidence_bindings=(binding,),
+    )
+
+    with pytest.raises(CapabilityCompositionError, match="source input"):
+        composition.require_compatible_with(
+            contracts=(source_contract, TARGET_CONTRACT),
+            # `source_input` deliberately withheld.
+            schemas=(SOURCE_SCHEMA, TARGET_SCHEMA),
+        )
+
+    composition.require_compatible_with(
+        contracts=(source_contract, TARGET_CONTRACT),
+        schemas=(SOURCE_SCHEMA, source_input, TARGET_SCHEMA),
+    )
+
+
 def test_composition_refuses_secret_or_undeclared_evidence_paths() -> None:
     secret_source = CapabilitySchemaDocument.from_mapping(
         {

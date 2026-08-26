@@ -350,19 +350,27 @@ class CapabilityCompositionSnapshot:
                     f"binding {binding.binding_code!r} source and target schema "
                     "types/formats differ"
                 )
-            source_input_schema = _held_schema(
-                schema_index,
-                source_operation.input_schema_ref,
-                source_operation.input_schema_digest,
-                "source input",
-            )
-            _require_selector_matches_schema(
-                source_input_schema,
-                pointer=binding.source_selector_pointer,
-                value=binding.source_selector_value,
-                binding_code=binding.binding_code,
+            # A source selector is the only part of this edge that reads the
+            # source APPLY-input schema. Resolve it only when one is declared;
+            # the edge itself binds source output to target input.
+            source_selector = _selector(
+                binding.source_selector_pointer,
+                binding.source_selector_value,
                 side="source",
             )
+            if source_selector is not None:
+                _require_selector_matches_schema(
+                    _held_schema(
+                        schema_index,
+                        source_operation.input_schema_ref,
+                        source_operation.input_schema_digest,
+                        "source input",
+                    ),
+                    pointer=binding.source_selector_pointer,
+                    value=binding.source_selector_value,
+                    binding_code=binding.binding_code,
+                    side="source",
+                )
             _require_selector_matches_schema(
                 target_schema,
                 pointer=binding.target_selector_pointer,
