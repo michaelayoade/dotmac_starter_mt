@@ -83,6 +83,14 @@ def _clean(value: str, label: str) -> str:
     return cleaned
 
 
+def _utc_datetime(value: datetime) -> datetime:
+    """Return one stable UTC representation across database drivers."""
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _country(value: str) -> str:
     code = value.strip().upper()
     if len(code) != 2 or not code.isalpha() or not code.isascii():
@@ -204,7 +212,7 @@ def _rule_contract(
         treatment_code=row.treatment_code,
         calculation_sequence=row.calculation_sequence,
         calculation_base_code=row.calculation_base_code,
-        published_at=row.published_at,
+        published_at=_utc_datetime(row.published_at),
         bands=tuple(
             TaxRuleBandV1(
                 sequence=band.sequence,
@@ -236,7 +244,7 @@ def _classification_contract(
         source_ref=row.source_ref,
         source_version=row.source_version,
         source_fingerprint=row.source_fingerprint,
-        published_at=row.published_at,
+        published_at=_utc_datetime(row.published_at),
     )
 
 
