@@ -197,6 +197,59 @@ class TestTheModuleOwnsNoTransaction:
         assert not self._FORBIDDEN.search("    db.add(row)")
 
 
+# ── Public inspection contract ──────────────────────────────────────────────
+
+
+def _listing_source(source: str) -> str:
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "list_agreements":
+            return ast.get_source_segment(source, node) or ""
+    return ""
+
+
+def _listing_shape(source: str) -> dict[str, bool]:
+    body = _listing_source(source)
+    return {
+        "stable_keyset": "Agreement.id > after" in body,
+        "deterministic_order": ".order_by(Agreement.id)" in body,
+        "bounded_probe": ".limit(limit + 1)" in body,
+        "detached_lines": "selectinload(Agreement.lines)" in body,
+        "no_offset": ".offset(" not in body,
+    }
+
+
+class TestTheAgreementEstateReaderIsPublicAndBounded:
+    def test_the_public_surface_returns_typed_detached_values(self) -> None:
+        from dotmac_commercial_agreements import (
+            MAX_AGREEMENT_PAGE_SIZE,
+            AgreementPage,
+            AgreementView,
+            list_agreements,
+        )
+
+        assert list_agreements.__annotations__["return"] == "facts.AgreementPage"
+        assert AgreementPage.__dataclass_params__.frozen
+        assert AgreementView.__dataclass_params__.frozen
+        assert 1 < MAX_AGREEMENT_PAGE_SIZE <= 1_000
+
+    def test_the_reader_uses_one_stable_bounded_keyset_and_eager_lines(self) -> None:
+        shape = _listing_shape((SRC / "service.py").read_text())
+        assert all(shape.values()), shape
+
+    def test_the_shape_detector_fires_against_offset_pagination(self) -> None:
+        synthetic = """
+def list_agreements(db, *, after=None, limit=100):
+    return db.execute(select(Agreement).offset(after).limit(limit)).all()
+"""
+        shape = _listing_shape(synthetic)
+        assert not shape["stable_keyset"]
+        assert not shape["deterministic_order"]
+        assert not shape["bounded_probe"]
+        assert not shape["detached_lines"]
+        assert not shape["no_offset"]
+
+
 # ── The published vocabulary ────────────────────────────────────────────────
 
 

@@ -12,8 +12,11 @@ import pytest
 from dotmac_integration import (
     CapabilityBinding,
     CheckpointConflict,
+    CheckpointDefinitionConflict,
+    CheckpointLifecycleError,
     ConnectorConfigRevision,
     ConnectorInstallation,
+    ConnectorMode,
     ConnectorRegistry,
     EventIdentityCollision,
     InboundDisposition,
@@ -21,7 +24,11 @@ from dotmac_integration import (
     InboxReceipt,
     PollConnectorRaised,
     PollContractError,
+    PollingAttemptFailure,
     PollingCheckpoint,
+    PollingJobRegistration,
+    advance_checkpoint,
+    ensure_polling_checkpoint,
     invoke_poll,
     payload_digest,
     poll_once,
@@ -46,6 +53,11 @@ def engine() -> Engine:
         CapabilityBinding,
         InboxReceipt,
         PollingCheckpoint,
+        # Created so the failure paths below exercise the REAL evidence write
+        # rather than the best-effort swallow in `polling._record_failure`. A
+        # fixture missing this table would let `poll_once`'s durable recording
+        # break without a single test in this file noticing.
+        PollingAttemptFailure,
     ):
         cast(Any, model.__table__).create(value)
     return value
@@ -125,6 +137,148 @@ def _unit_of_work(engine: Engine):
 def test_invoke_poll_cannot_be_given_a_database_session() -> None:
     assert "db" not in inspect.signature(invoke_poll).parameters
     assert "session" not in inspect.signature(invoke_poll).parameters
+
+
+def test_checkpoint_registration_is_idempotent_and_detached(engine: Engine) -> None:
+    registry, _, seeded_id = _seed(engine)
+    with Session(engine) as db:
+        seeded = db.get(PollingCheckpoint, seeded_id)
+        assert seeded is not None
+        first = ensure_polling_checkpoint(
+            db,
+            capability_binding_id=seeded.capability_binding_id,
+            job_key="  reconciliation-tail  ",
+            initial_cursor="page-7",
+            registry=registry,
+        )
+        replay = ensure_polling_checkpoint(
+            db,
+            capability_binding_id=seeded.capability_binding_id,
+            job_key="reconciliation-tail",
+            initial_cursor="page-7",
+            registry=registry,
+        )
+        db.commit()
+
+    assert isinstance(first, PollingJobRegistration)
+    assert first.created is True
+    assert replay.created is False
+    assert replay.checkpoint == first.checkpoint
+    assert first.checkpoint.job_key == "reconciliation-tail"
+    assert first.checkpoint.cursor == "page-7"
+    assert first.checkpoint.version == 1
+
+
+def test_checkpoint_registration_refuses_changed_initial_cursor(engine: Engine) -> None:
+    registry, _, seeded_id = _seed(engine)
+    with Session(engine) as db:
+        seeded = db.get(PollingCheckpoint, seeded_id)
+        assert seeded is not None
+        ensure_polling_checkpoint(
+            db,
+            capability_binding_id=seeded.capability_binding_id,
+            job_key="daily-reconciliation",
+            initial_cursor="day-1",
+            registry=registry,
+        )
+        with pytest.raises(CheckpointDefinitionConflict, match="initial cursor"):
+            ensure_polling_checkpoint(
+                db,
+                capability_binding_id=seeded.capability_binding_id,
+                job_key="daily-reconciliation",
+                initial_cursor="day-2",
+                registry=registry,
+            )
+
+
+def test_advanced_checkpoint_replays_only_without_initial_cursor(
+    engine: Engine,
+) -> None:
+    registry, _, seeded_id = _seed(engine)
+    with Session(engine) as db:
+        seeded = db.get(PollingCheckpoint, seeded_id)
+        assert seeded is not None
+        registered = ensure_polling_checkpoint(
+            db,
+            capability_binding_id=seeded.capability_binding_id,
+            job_key="advanced-tail",
+            initial_cursor="original",
+            registry=registry,
+        )
+        checkpoint = db.get(PollingCheckpoint, registered.checkpoint.id)
+        assert checkpoint is not None
+        advance_checkpoint(
+            db,
+            checkpoint=checkpoint,
+            cursor={"cursor": "current"},
+            expected_version=1,
+        )
+
+        replay = ensure_polling_checkpoint(
+            db,
+            capability_binding_id=seeded.capability_binding_id,
+            job_key="advanced-tail",
+            registry=registry,
+        )
+        assert replay.created is False
+        assert replay.checkpoint.cursor == "current"
+        for explicit in ("original", "current", None):
+            with pytest.raises(
+                CheckpointDefinitionConflict, match="no longer revalidatable"
+            ):
+                ensure_polling_checkpoint(
+                    db,
+                    capability_binding_id=seeded.capability_binding_id,
+                    job_key="advanced-tail",
+                    initial_cursor=explicit,
+                    registry=registry,
+                )
+
+
+@pytest.mark.parametrize("job_key", ["", "   ", "x" * 161])
+def test_checkpoint_registration_refuses_invalid_job_keys(
+    engine: Engine, job_key: str
+) -> None:
+    registry, _, seeded_id = _seed(engine)
+    with Session(engine) as db:
+        seeded = db.get(PollingCheckpoint, seeded_id)
+        assert seeded is not None
+        with pytest.raises(CheckpointLifecycleError):
+            ensure_polling_checkpoint(
+                db,
+                capability_binding_id=seeded.capability_binding_id,
+                job_key=job_key,
+                registry=registry,
+            )
+
+
+def test_checkpoint_registration_refuses_missing_binding(engine: Engine) -> None:
+    registry, _, _ = _seed(engine)
+    with (
+        Session(engine) as db,
+        pytest.raises(CheckpointLifecycleError, match="binding does not exist"),
+    ):
+        ensure_polling_checkpoint(
+            db,
+            capability_binding_id=uuid.uuid4(),
+            job_key="missing-binding",
+            registry=registry,
+        )
+
+
+def test_checkpoint_registration_refuses_non_poll_binding(engine: Engine) -> None:
+    registry, plugin, seeded_id = _seed(engine)
+    object.__setattr__(plugin, "modes_", frozenset({ConnectorMode.DELIVERY}))
+    with Session(engine) as db:
+        seeded = db.get(PollingCheckpoint, seeded_id)
+        assert seeded is not None
+        with pytest.raises(CheckpointLifecycleError, match="poll mode"):
+            ensure_polling_checkpoint(
+                db,
+                capability_binding_id=seeded.capability_binding_id,
+                job_key="impossible-poll",
+                registry=registry,
+            )
 
 
 def test_prepare_pins_config_references_cursor_and_checkpoint_version(
