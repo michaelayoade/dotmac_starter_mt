@@ -112,6 +112,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
+| `dotmac_kernel.transactions` | `conflict_savepoint` — engine-free SAVEPOINT mechanics for services that receive a caller-owned session; the caller's boundary still owns the outer commit or rollback |
 | `dotmac_kernel.delivery` | `DeliveryError`, `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
 | `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |
 | `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
@@ -1093,10 +1094,8 @@ moving a caller from the first to the second is one identifier.
 
 ## Internal modules and names (do not import)
 
-- `dotmac_kernel._transactions` — private, engine-free savepoint mechanics for
-  kernel-owned services. Consumers use the supported
-  `dotmac_kernel.db.conflict_savepoint` spelling; the private location does not
-  create another session or transaction authority.
+- `dotmac_kernel._transactions` — private implementation behind the public
+  transaction surface. Consumers never import it directly.
 - `dotmac_kernel.display` — consumed only within the kernel (by `templating` /
   `web_deps`). Display formatting reaches templates through the registered Jinja
   filters, not a consumer import.

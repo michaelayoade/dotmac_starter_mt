@@ -3,8 +3,9 @@
 This module deliberately has no engine, settings or session-factory imports.
 Kernel services that receive an assembly-owned ``Session`` may therefore use a
 SAVEPOINT without importing :mod:`dotmac_kernel.db` and constructing the
-kernel's configured database runtime. ``dotmac_kernel.db`` remains the one
-public transaction authority and re-exports ``conflict_savepoint``.
+kernel's configured database runtime. :mod:`dotmac_kernel.transactions` is the
+public engine-free surface; :mod:`dotmac_kernel.db` retains its compatibility
+re-export.
 """
 
 from __future__ import annotations
