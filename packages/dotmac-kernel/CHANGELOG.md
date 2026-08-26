@@ -8,10 +8,11 @@ here.
 
 ## 0.1.0a98 — 2026-08-26
 
-One release, three independent changes: the public engine-free transaction
-and fingerprint surface, a facet-admission security repair, and the
-instantiable database runtime. None depends on the others; they ship
-together because none had been published separately.
+One release, four independent changes: the public engine-free transaction
+and fingerprint surface, a facet-admission security repair, the instantiable
+database runtime, and the owner-attested capability artifact grammar. None
+depends on the others; they ship together because none had been published
+separately.
 
 ### Added
 
@@ -44,6 +45,28 @@ together because none had been published separately.
 - `dotmac_kernel.db.runtime` — the reference assembly's instance, public so a
   consumer sharing this module's configuration need not re-derive engines from
   the same environment.
+- `dotmac_kernel.capability_contract` — `CapabilityContractSnapshot` (a
+  product owner's capability: identity, operations, configuration fields,
+  endpoint requirements and activation checks) and `CapabilitySchemaDocument`
+  (held canonical JSON Schema bytes). Both are exact documents rather than
+  descriptions of one: canonical JSON is re-serialized and compared on parse,
+  so bytes that are valid JSON but not THE canonical document are refused
+  rather than normalized; nested declarations must already be canonically
+  ordered and unique, so a digest can never attest one spelling while callers
+  reason about another. `capability_code` is unversioned and the public
+  `capability_id` is derived, so a version can never disagree with itself.
+  Configuration values carry `reference` and `secret_reference` as distinct
+  types and the document dereferences neither — it is value-free by
+  construction (ADR-0009).
+- `dotmac_kernel.capability_composition` — `CapabilityCompositionSnapshot` and
+  `CapabilityEvidenceBinding`: APPLY-output to APPLY-input evidence edges. Each
+  binding pins both capability identities AND both schema ref and digest,
+  requires the source path be classified `public_non_secret`, proves source and
+  target `type`/`format` agree, and carries an explicit per-edge coverage axis
+  so completeness is owner-signed rather than caller-assumed.
+- Schema documents permit only LOCAL `$ref`/`$dynamicRef`/`$recursiveRef` and
+  require draft 2020-12. Validation can therefore never become a network read —
+  the property the release lane also enforces from the outside.
 
 ### Changed
 
@@ -78,6 +101,25 @@ together because none had been published separately.
   unchanged, a platform facet WITHOUT admission stays valid, and no
   `UI_CONTRACT_VERSION` bump is required: this rejects a composition that could
   never have been enforced, so no valid assembly's contract changes.
+
+### Notes on the capability artifact grammar
+
+
+- **No new dependency.** Both modules are stdlib plus
+  `dotmac_kernel.product_manifest`; neither imports `jsonschema`, an ORM, or a
+  web framework, so `import dotmac_kernel` stays database-free.
+- **Product-first (hard rule 22).** `ProductManifestSnapshot` is the qualifying
+  canonical-document convention already in the kernel, and Sub's assembly is
+  the qualifying owner of real capability declarations. The checked-in
+  inventory records that no product held the richer typed capability-contract
+  document to extract, so its generic shape is greenfield AFTER inventory
+  rather than a fork of a running implementation. Source of record:
+  `docs/inventories/provider-capability-sources.md`.
+- **The kernel owns the DOCUMENT, not the lifecycle.**
+  `dotmac_integration.capability_registry` keeps the runtime registry, schema
+  grace and deprecation succession; nothing in this release duplicates them,
+  and nothing in it is installed at runtime. ADR-0068 records the boundary and
+  the two questions Integration must answer when it adopts.
 
 ## 0.1.0a97 — 2026-08-25
 

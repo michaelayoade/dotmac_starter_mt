@@ -67,6 +67,33 @@ from dotmac_kernel.capabilities import (
     active_capabilities,
     install_capabilities,
 )
+from dotmac_kernel.capability_composition import (
+    CAPABILITY_COMPOSITION_SCHEMA,
+    CapabilityCompositionDigestMismatchError,
+    CapabilityCompositionError,
+    CapabilityCompositionSnapshot,
+    CapabilityEvidenceBinding,
+)
+from dotmac_kernel.capability_contract import (
+    CAPABILITY_CONTRACT_SCHEMA,
+    CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY,
+    CAPABILITY_SCHEMA_DIALECT,
+    CapabilityCheck,
+    CapabilityCheckStage,
+    CapabilityConfigField,
+    CapabilityConfigValueFormat,
+    CapabilityConfigValueType,
+    CapabilityContractDigestMismatchError,
+    CapabilityContractError,
+    CapabilityContractSnapshot,
+    CapabilityEndpointRequirement,
+    CapabilityEndpointType,
+    CapabilityEvidenceType,
+    CapabilityOperation,
+    CapabilitySchemaDataClassification,
+    CapabilitySchemaDigestMismatchError,
+    CapabilitySchemaDocument,
+)
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.entitlements import (
     EntitlementDecision,
@@ -275,6 +302,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.audit_actions",
         "dotmac_kernel.branding",
         "dotmac_kernel.capabilities",
+        "dotmac_kernel.capability_composition",
+        "dotmac_kernel.capability_contract",
         "dotmac_kernel.config",
         "dotmac_kernel.channel_policy",
         "dotmac_kernel.consent",
@@ -502,6 +531,35 @@ __all__ = [
     "ProductManifestDigestMismatchError",
     "ProductManifestError",
     "ProductManifestSnapshot",
+    # owner-attested capability artifacts: the immutable serialization grammar
+    # a product owner's contract catalogue is written in. The kernel owns the
+    # DOCUMENT (canonical bytes, digests, identity, composition validation);
+    # `dotmac-integration` keeps the runtime LIFECYCLE (registry, grace,
+    # deprecation). Neither defines what the other owns — ADR-0068.
+    "CAPABILITY_CONTRACT_SCHEMA",
+    "CAPABILITY_SCHEMA_DIALECT",
+    "CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY",
+    "CapabilityContractSnapshot",
+    "CapabilitySchemaDocument",
+    "CapabilityOperation",
+    "CapabilityConfigField",
+    "CapabilityEndpointRequirement",
+    "CapabilityCheck",
+    "CapabilityConfigValueType",
+    "CapabilityConfigValueFormat",
+    "CapabilityEndpointType",
+    "CapabilityCheckStage",
+    "CapabilityEvidenceType",
+    "CapabilitySchemaDataClassification",
+    "CapabilityContractError",
+    "CapabilityContractDigestMismatchError",
+    "CapabilitySchemaDigestMismatchError",
+    # owner-attested composition: APPLY-output -> APPLY-input evidence edges
+    "CAPABILITY_COMPOSITION_SCHEMA",
+    "CapabilityCompositionSnapshot",
+    "CapabilityEvidenceBinding",
+    "CapabilityCompositionError",
+    "CapabilityCompositionDigestMismatchError",
     # permission catalogue (module control-plane step 3)
     "PermissionSpec",
     "PermissionCatalogue",
