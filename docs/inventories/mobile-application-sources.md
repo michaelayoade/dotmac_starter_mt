@@ -20,9 +20,18 @@ whether anything measured here may be extracted, as amended by § "Decision
 amendment — 2026-08-12", which rules that a second consumer is **evidence, not
 permission** and that all three dossier states permit a shared module.
 
-Its companion decision is
+Its companion decisions are
 [`ADR-0065 — Native mobile clients are composed applications`](../adr/0065-mobile-clients-are-composed-applications.md),
-which states the contracts. This file states only the facts they rest on.
+which states the contracts;
+[`ADR-0066 — Mobile authentication federates to the existing identity provider`](../adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md)
+(Accepted 2026-08-26), which decides the authorization server ADR-0065 left
+open — the existing `idp.dotmac.io` Keycloak realm, public native clients using
+Authorization Code + PKCE **S256** and OS-browser authentication, exchanged
+inside Sub for a Sub-owned session, with **no client secret and never the
+confidential `dotmac-auth-oidc` client in a Flutter artifact**; and
+[`ADR-0067 — A client that persists a refreshable bearer credential tears down atomically`](../adr/0067-a-credential-holding-client-tears-down-atomically.md)
+(Accepted 2026-08-26), which owns the four teardown invariants ADR-0065 §§ 3, 7
+and 8 implement for mobile. This file states only the facts they rest on.
 
 ---
 
@@ -572,12 +581,32 @@ this document.
 | D11 | both fields | **Neither field app has ever been released from a tag.** No `field-mobile-v*` tag exists in either repository, and no `mobile-v*` tag exists in `dotmac_sub`. | `git tag --list` in both repositories |
 | D12 | field (Sub) | An authentication fix on the retiring copy never reached the surviving copy — see § 5.4. | `dotmac_crm` `50beb0cb` vs `field_mobile/lib/features/auth/auth_repository.dart:99,118` |
 
+### 6a. Further findings measured on 2026-08-26, held separately
+
+Taking the three rulings of 2026-08-26 surfaced four more measured facts. They
+are numbered **R1–R4** and kept OUT of the D1–D12 table **deliberately**: three
+documents already cite that table as "twelve found, eleven open", and folding new
+rows into it would silently move a count those citations depend on. The D-series
+is the audit's finding set at the audited revisions; the R-series is what the
+rulings measured on top of it. Neither count is stale, and neither is the other.
+
+| # | Application / surface | Finding | Evidence | Owner |
+|---|---|---|---|---|
+| R1 | both fields + self-care | **No verified deep link exists anywhere.** `field_mobile` has no intent-filter beyond `MAIN`/`LAUNCHER` and **no `CFBundleURLTypes` key at all**. Self-care has one payment intent-filter with **`android:autoVerify="false"`** — an unverified custom scheme any app may claim — and configures that scheme **twice, differently**: Android reads `${paymentScheme}` while iOS hardcodes `dotmacpay`. | `field_mobile/android/app/src/main/AndroidManifest.xml:35-38`; `field_mobile/ios/Runner/Info.plist` (key absent); `mobile/android/app/src/main/AndroidManifest.xml:44-49`; `mobile/ios/Runner/Info.plist:46-56` | ADR-0066 § 7 — a **prerequisite** for registering an OIDC redirect, not a follow-up |
+| R2 | field (Sub) | **A pure network failure at cold start wipes the token store.** `_restoreSession` calls `ensureFreshToken()` and, when it returns `null`, calls `currentStore.clear()`; the surrounding `catch (_)` does the same. A valid 30-day refresh token is discarded because the device was out of coverage at launch. Under federated login (ADR-0066) recovery then needs the OS browser to reach the **identity provider**, so a coverage hole becomes a lockout. | `field_mobile/lib/features/auth/auth_state.dart:82-86` | ADR-0067 § 4 (*transport failure is not revocation*); a **blocker** for ADR-0066 § 6's `field_mobile` adoption |
+| R3 | self-care release pipeline | **A guard named for a property it does not test.** The step *"Verify the artifact is not debug-signed"* runs `test -n "$OUT"` — it asserts only that `find` matched a filename. It would pass on a debug-signed bundle, and on a correctly signed bundle of the **wrong application** (compare D7). | `dotmac_sub/.github/workflows/mobile-release.yml:81-85` | ADR-0018 amendment 2026-08-26; Sub draft PR #2716 replaces it with real certificate inspection — **open, not merged** |
+| R4 | the Keycloak realm | The realm advertises `code_challenge_methods_supported: ["plain", "S256"]` and `grant_types_supported` including `implicit` and `password`. `plain` PKCE is not a proof of possession. These are **realm-level** advertisements; the mitigation is per-client and does not exist yet. | `https://idp.dotmac.io/realms/dotmac/.well-known/openid-configuration`, fetched 2026-08-26 (HTTP 200) | ADR-0066 § 4 — per-client `S256` pin and per-client disabling of `implicit`/`password`, both prerequisites |
+
+**Nothing in R1–R4 is fixed by this document**, and no Dotmac repository holds a
+check for any of them today.
+
 ---
 
 ## 7. Candidate future adopters — and why none is an adopter today
 
-Michael's 2026-08-26 rulings put CRM out of the pool and count Sub's two apps as
-one product. **Michael has since ruled on the outcome: stay at "no package"** —
+Michael's 2026-08-26 rulings put CRM out of the pool, count Sub's two apps as one
+product, and settle Frontline's status under the strict reading (§ 7.1).
+**Michael has since ruled on the outcome: stay at "no package"** —
 justified in ADR-0065 § 9 on grounds of readiness, not on the count below.
 Nothing in this section is an argument that a package is forbidden; ADR-0006's
 2026-08-12 amendment settled that a consumer count neither grants nor withholds
@@ -596,11 +625,25 @@ The pool, measured across the fleet beside this checkout:
 | `dotmac_backoffice` | 0 | none | ADR-0006's README correction records this is not an independently deployed application |
 | `dotmac_integrator` | 0 | none | a transport |
 
-### 7.1 ERP "DotMac Frontline" — a credible future candidate, not an adopter
+### 7.1 ERP "DotMac Frontline" — a FUTURE candidate, decided 2026-08-26
 
-**Michael's ruling, recorded as given:** *a credible future candidate, but zero
-Dart means it is not yet an adopter. Its online-only MVP could eventually prove
-the session and data-scope slices, but not queued mutation or push.*
+**Michael's ruling, decided 2026-08-26 and recorded as given:**
+
+> Frontline: strict reading. Zero Dart means no existing assembly, so Frontline
+> remains a **future** candidate — not a concrete candidate, and not an adopter.
+> **A specification proves intent, not consumption.**
+
+This is a **recorded owner decision, not an applied interpretation**, and the
+question is closed. Its reasoning is carried in ADR-0065 § 9 rather than only
+here, because *a specification proves intent, not consumption* is the durable
+test and it generalises past Flutter: any future nomination is measured the same
+way, and a written spec, a locked scope or a shipped backend for a client that
+does not exist are all evidence of intent, never of consumption.
+
+**The consequence, stated plainly: with zero concrete candidates, no mobile
+package dossier may be opened at ANY state — `audit-complete` included**, since
+`audit-complete` is the weakest state and still requires at least one concrete
+candidate consumer.
 
 Measured against ADR-0006's own definition of a concrete candidate — **"an
 assembly that exists and will consume it — the smallest claim that still carries
@@ -611,8 +654,10 @@ evidence"** — Frontline fails on the first half:
 | *an assembly that **exists*** | `dotmac_erp` contains **zero Dart files** and no `pubspec.yaml`; the consuming assembly for a Flutter package is a Flutter application, and none exists | **fails** |
 | *and **will consume it*** | the spec locks scope, personas and backend posture, and its `/me/*` backend shipped with 28 tests | plausible |
 
-So Frontline is **not an adopter, and not yet a concrete candidate either**. A
-spec is intent; an assembly is evidence.
+So Frontline is **not an adopter, and not a concrete candidate either**. A spec
+is intent; an assembly is evidence. What would change that is an ERP Flutter
+assembly that **exists** — a `pubspec.yaml` and a Dart tree — not a further
+specification, however detailed.
 
 What remains true and worth recording, for when it does start:
 
@@ -638,7 +683,7 @@ and Frontline is the case that forces it. Its locked posture is *"lean —
 online-only, polling (no push in MVP)"*. Counted per application it would look
 like one future adopter of everything. Counted per slice:
 
-| Contract slice (ADR-0065) | Consumers exercising it today | Future candidate | Could Frontline ever evidence it? |
+| Contract slice (ADR-0065) | Consumers exercising it today | Future candidate (none is concrete — § 7.1) | Could Frontline ever evidence it? |
 |---|---|---|---|
 | `MobileSessionContextV1` | 0 | ERP Frontline | **yes** — its personas need authenticated sessions from day one |
 | `MobileDataScopeV1` | 0 (`field_mobile` partitions 1 of 9 tables; the self-care disk cache partitions nothing) | ERP Frontline | **yes** — a role-aware app on shared staff devices |
@@ -670,8 +715,10 @@ none of which requires session context, a plan document, or a Knowledge entry:
    authentication fix committed to the retiring copy on 2026-08-18 has still not
    reached the surviving copy (§ 5.4), and twelve further defects are recorded
    in § 6 — eleven still open, D10 closed by Sub PR #2719.
-4. **Is there an adopter, per slice?** No. Frontline fails the concrete-candidate
-   test today (zero Dart), and even in its locked MVP it could never evidence
+4. **Is there an adopter, per slice?** No — and by the 2026-08-26 ruling, not a
+   concrete candidate either. Frontline fails the concrete-candidate test today
+   (zero Dart), so **no dossier may be opened at any state, `audit-complete`
+   included**; and even in its locked MVP it could never evidence
    `QueuedMutationV1` or `PushIntentV1` (§ 7.1, § 7.2).
 
 **Note what question is NOT on that list: "may a package be built?"** The

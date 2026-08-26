@@ -217,19 +217,28 @@ Three readings that matter for the programme:
 |---|---|
 | Native mobile three-app inventory | `mobile-application-sources.md` |
 | Mobile client contract (session, data scope, queued mutation, push intent, wipe, auth state machine) | `docs/adr/0065-mobile-clients-are-composed-applications.md` (Proposed) |
+| Mobile authorization server, client type, token exchange and rollout order | `docs/adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md` (Accepted 2026-08-26) |
+| Teardown invariants for any client holding a refreshable bearer credential | `docs/adr/0067-a-credential-holding-client-tears-down-atomically.md` (Accepted 2026-08-26) |
 
 ADR-0065 decides **no shared mobile package yet**, and is explicit that this is
 a readiness decision rather than a permission problem. ADR-0006's 2026-08-12
 amendment ruled that a second consumer is **evidence, not permission**, and that
 all three dossier states permit a shared module — so the adopter count is not
 the reason. The four grounds are: the contracts are proposed rather than
-ratified, the package boundaries are unproven, enforcement is missing (nine
-`none yet` rows, and this Python repository cannot run Dart checks at all), and
+ratified, the package boundaries are unproven, enforcement is missing
+(**thirteen** of the ADR's seventeen enforcement rows say `none yet`, and this
+Python repository cannot run Dart checks at all), and
 the twelve defects in the inventory's § 6 are the current work (eleven still open; D10, the missing codegen freshness gate, was closed by Sub PR #2719).
+Four further findings measured while taking the 2026-08-26 rulings are held
+separately as **R1–R4** in the inventory's § 6a, deliberately outside the D-series
+count so neither number goes stale.
 
-ERP "DotMac Frontline" is recorded as a **credible future candidate that is not
-an adopter** — `dotmac_erp` holds zero Dart, so it fails ADR-0006's
-concrete-candidate test ("an assembly that exists and will consume it"). Both
+ERP "DotMac Frontline" is recorded, by Michael's **2026-08-26 ruling**, as a
+**future candidate — not a concrete candidate and not an adopter**: `dotmac_erp`
+holds zero Dart, so it fails ADR-0006's concrete-candidate test ("an assembly
+that exists and will consume it"), and **a specification proves intent, not
+consumption**. The consequence is that **no mobile package dossier may be opened
+at any state, `audit-complete` included**. Both
 documents also establish a standing rule: **evidence is tracked per contract
 slice, never per application.** Frontline's locked online-only MVP could
 eventually evidence `MobileSessionContextV1` and `MobileDataScopeV1`; it can
@@ -238,4 +247,27 @@ all. ADR-0065 § 11 additionally fixes the shape any future extraction takes, on
 of whose rules — regenerate committed code and fail on drift — was never gated
 on extraction and has already landed green in `dotmac_sub`'s `field-flutter`
 job.
+
+ADR-0066 (Accepted) closes the one question ADR-0065 left open: mobile clients
+federate to the existing `idp.dotmac.io` Keycloak realm using **public** native
+clients with Authorization Code + PKCE **S256** and OS-browser authentication,
+exchanging the ID token inside Sub for a Sub-owned session via
+`dotmac_kernel.external_identity.finalize_external_login`. **No client secret and
+never the confidential `dotmac-auth-oidc` client goes into a Flutter artifact** —
+that package requires a `client_secret`, sends it as HTTP Basic on the token
+exchange, and rests on a server-side single-use state store plus an `HttpOnly`
+cookie, none of which a device has. `field_mobile` adopts first; customer
+self-care is deferred **until Keycloak has HA**. **Seven** of its nine
+enforcement rows say `none yet`; one is partial, and one — *identity-provider
+roles never grant product permissions* — is already enforced at source level in
+the kernel binding seam and its ERP counterpart.
+
+ADR-0067 (Accepted, fleet-wide) owns the four teardown invariants that ADR-0065
+§§ 3, 7 and 8 implement for mobile — atomic credential record, generation fencing
+with a durable half, one wipe coordinator with no subset clears, and *transport
+failure is not revocation*. It binds clients that persist a **refreshable bearer
+credential**, explicitly not ordinary server or browser cookie sessions. **Three**
+of its four enforcement rows say `none yet` and the fourth is partial, and it
+says why: every in-scope client in the fleet is a Flutter application, and this
+Python repository cannot run a check over any of them.
 

@@ -6,7 +6,9 @@ external connector control plane), 2026-08-19 (Context, caller-owned runtime),
 completeness) and 2026-08-24 again (§§ 10–12 below, the correction: the
 canonical schema belongs to the domain contract, a published version is
 succeeded rather than redefined, and a capability exposes product meaning
-rather than provider workflow). Every amendment is a dated addition; no earlier
+rather than provider workflow), and 2026-08-26 (§ 13 below, caller-path parity:
+an independently released caller binds to a pinned published contract, with a
+non-vacuous binding). Every amendment is a dated addition; no earlier
 text is rewritten, and where a later section supersedes an earlier framing it
 says so by name.
 **Date:** 2026-08-13
@@ -518,6 +520,65 @@ ignores what it cannot use rather than refusing the command that carries it.
 Flutterwave and Remita derive their own required fields the same way. Neither
 connector is asked to look like the other, and neither product is asked to know
 which one it is talking to.
+
+## Decision amendment — 2026-08-26 (caller-path parity: an independently released caller binds to a PINNED published contract)
+
+**Scope — this is the ruling, not a summary of it.** This amendment binds
+**callers that cannot deploy atomically with their destination**: an
+independently released client, an asynchronous sender, a mobile artifact in an
+app store, a scheduled job in another repository, a connector shipped on its own
+cadence. It is **not** a blanket rule for every caller. A caller that ships in
+the same artifact as its destination, in the same deploy, against the same
+build, already has parity by construction; adding a pinned-contract ceremony
+there buys nothing and would dilute the rule where it matters.
+
+### 13. A caller that cannot deploy atomically with its destination binds to a pinned published contract
+
+The hazard is specific and it is not "the API changed". It is that **the caller
+and the destination are on different clocks**, so at every moment some deployed
+caller is running against a destination it was never built against — and nothing
+in either repository's tests notices, because each side is internally
+consistent.
+
+Three instances, all measured in the 2026-08-26 fleet audit:
+
+| Instance | What broke | Why no test caught it |
+|---|---|---|
+| **The vendor-auth 404 outage** (`dotmac_sub` draft PR #2722, *"fix(vendor-auth): restore the JSON API contract the field app calls"*) | A JSON API contract the shipped field application calls was changed on the server. The application is an installed artifact and could not be redeployed with it. | Server tests asserted the *new* contract. The caller lives in another tree and is not built, run or asserted by them. |
+| **CRM's dead webhook senders** (four of them, recorded in the same audit) | Outbound senders emitting to receivers that no longer exist. Delivery kept "succeeding" into nothing. | A sender's own tests assert that it sent. Nothing asserted that anything was listening. |
+| **The `on_break` / `work_order_id` field-mobile drift** | `field_mobile/lib/features/location/location_cadence.dart:16` serializes its shift state to the wire value `'break'`; `dotmac_sub`'s own `app/models/team_inbox.py:58,1640` declares the enum member and the DB `CHECK` constraint as `'on_break'`. Two spellings of one value, one on each side of the wire. | Each side round-trips its own spelling in its own tests. Neither test ever sees the other's string. |
+
+**The rule.** Such a caller binds to a **published contract version, pinned
+exactly** — a version identifier with immutable coordinates, in the sense hard
+rule 30 already requires of a release claim. Not "the current API". Not a branch
+name. Not "whatever `main` serves". The destination publishes versions and
+succeeds them rather than redefining them (§ 11); the caller names the one it
+was built against.
+
+**And the binding must be NON-VACUOUS.** This half is the one the three
+instances above actually failed, and it is why "we have a contract" was true in
+each case and useless in each case. A binding is non-vacuous only when it can
+**fail**:
+
+1. **A test exercises the real caller shape against the pinned contract**, not a
+   fixture the caller's own code authored. A test where both sides are generated
+   from the same local constant proves the constant equals itself.
+2. **The contract's identity is checked, not just its presence.** A check that
+   an endpoint exists, or that a payload is non-empty, does not test the
+   property it is named for — the same failure ADR-0018's 2026-08-26 amendment
+   names in a release pipeline.
+3. **A sender proves a receiver.** An outbound integration's parity test names
+   the consuming contract and fails when nothing accepts it. "Delivery
+   succeeded" is a transport fact and is not evidence of a caller path.
+4. **The vocabulary is compared across the wire, not within one side.** The
+   `on_break` case is the shape: a parity test asserts the caller's serialized
+   value against the destination's declared accepted set, so two spellings of
+   one value fail on the day the second one is written.
+
+A binding that cannot fail is not a binding; it is a description of one. Where a
+caller path has no such check, it is an **unmonitored region** and must be
+recorded as one (ADR-0018), never described as covered.
+
 
 ## Enforcement and evidence
 

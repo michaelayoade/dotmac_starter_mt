@@ -1,6 +1,11 @@
 # ADR 0065 — Native mobile clients are composed applications, not a shared framework
 
-**Status:** Proposed
+**Status:** Proposed — the §§ 3–8 client contracts are under review and are not
+ratified. **Two things inside this ADR are NOT proposed:** § 9's ruling on the
+ERP Frontline candidate is an **Accepted owner decision taken 2026-08-26 by
+Michael**, and § 7's owner note records that ADR-0067 (Accepted) owns the
+teardown invariants §§ 3, 7 and 8 implement. The authorization-server question
+this ADR deliberately left open is closed by ADR-0066 (Accepted 2026-08-26).
 **Date:** 2026-08-26
 **Extends:** ADR-0024 (applications compose by synchronizing data), ADR-0006
 (white-label product foundation — the extraction rule **as amended 2026-08-12**:
@@ -13,8 +18,10 @@ the proposed package boundaries and the release/adoption rules that would govern
 them
 **Does not own:** any server-side authority (every domain decision stays with
 its module under the Dotmac source-of-truth standard); the browser/Jinja portal
-surface; store release mechanics; the choice of authorization server, which is
-an open owner decision recorded in § 9
+surface; store release mechanics; the choice of authorization server, **decided
+2026-08-26 in ADR-0066** — federate to the existing `idp.dotmac.io` Keycloak
+realm with public native clients using Authorization Code + PKCE S256, exchanged
+inside Sub for a Sub-owned session
 
 ---
 
@@ -295,6 +302,14 @@ parsed.
 
 ### 7. Logout and wipe participation
 
+**Owner note (2026-08-26).** The four teardown invariants this section applies —
+an atomic credential record, generation fencing with a durable half, one wipe
+coordinator with no subset clears, and *transport failure is not revocation* —
+are owned by **ADR-0067**, which states them for any client that persists a
+refreshable bearer credential. §§ 3, 7 and 8 here are the **mobile expression**
+of those invariants, not a parallel statement of them. If the two disagree,
+ADR-0067 wins and this section is corrected.
+
 Local state does not disappear when a session ends unless something deletes it.
 Today `field_mobile`'s logout is `_store.clear()` — the token store, and nothing
 else. The database, the photo directory and the pending-ping file survive.
@@ -460,13 +475,31 @@ and will consume it — the smallest claim that still carries evidence."** ERP
 | *an assembly that **exists*** | `dotmac_erp` contains **zero Dart files** and no `pubspec.yaml`. The consuming assembly for a Flutter package is a Flutter application, and no such application exists. | **fails** |
 | *and **will consume it*** | `dotmac_erp/docs/mobile/dotmac-frontline-spec.md` v1.0 (2026-06-10) locks scope, personas and backend posture, and its `/me/*` backend shipped with 28 tests. Written intent is real. | plausible |
 
-**Frontline therefore does not clear the concrete-candidate bar today**, and the
-honest consequence is stronger than "we have one candidate instead of two":
-these proposed packages do not currently qualify even for `audit-complete`, so
-**no dossier should be opened for them yet**. Michael's position is recorded as
-given — *a credible future candidate, but zero Dart means it is not yet an
-adopter* — and this ADR adds only the mechanical reading of the amendment that
-agrees with it. A spec is intent; an assembly is evidence.
+**Frontline therefore does not clear the concrete-candidate bar today.**
+
+**This is a recorded owner decision, taken 2026-08-26 by Michael, not an agent's
+applied interpretation.** The strict reading of the concrete-candidate test is
+the ruling, and the question is closed:
+
+> Frontline: strict reading. Zero Dart means no existing assembly, so Frontline
+> remains a **future** candidate — not a concrete candidate, and not an adopter.
+> **A specification proves intent, not consumption.**
+
+That last sentence is the durable test, and it is recorded here rather than only
+in the inventory because **it generalises past Flutter**. Any future nomination
+— a Dart package, a Python module, a TypeScript contract — is measured the same
+way: a written specification, a locked scope, a signed-off design, a shipped
+*backend* for a client that does not exist, are all evidence of **intent**. The
+concrete-candidate test asks for evidence of **consumption**, and only an
+assembly that exists supplies that. A spec is intent; an assembly is evidence.
+
+**The consequence, stated plainly: with zero concrete candidates, no mobile
+package dossier may be opened at ANY state — including `audit-complete`.**
+`audit-complete` is the weakest of the three states and it still requires at
+least one concrete candidate consumer, so the weakest state is also out of
+reach. This is not a technicality being noted; it is the bar the 2026-08-12
+amendment set, applied to a programme whose only named candidate has written
+zero lines of Dart.
 
 This finding reinforces the decision below but does not cause it. Even if
 Frontline had shipped its first Dart file this morning and cleared the bar, the
@@ -508,14 +541,11 @@ permission:
 specification and implemented locally by each application; the duplication is
 recorded and left in place; and no reuse is claimed (§ 10 rule 6).
 
-**And what dossier state that is: none of the three.** `audit-complete` is the
-weakest state and it still requires at least one *concrete* candidate consumer,
-which the candidate test above shows does not exist — so **no dossier is opened
-for these packages**, and this ADR does not claim `audit-complete` for them. That
-is not a loophole being noted; it is the amendment's own bar, applied to a
-mobile programme whose only named candidate has written zero lines of Dart. A
-dossier claiming `audit-complete` here would be "a package built for nobody",
-which is precisely the speculative extraction ADR-0006 § 5 exists to stop.
+**And what dossier state that is: none of the three.** Per the 2026-08-26 ruling
+above, **no dossier is opened for these packages at any state, `audit-complete`
+included**, and this ADR claims none for them. A dossier claiming
+`audit-complete` here would be "a package built for nobody", which is precisely
+the speculative extraction ADR-0006 § 5 exists to stop.
 
 **What would change the decision.** Ground 1 clears when the contracts are
 ratified; ground 2 when a second implementation exercises the seams, even before
@@ -526,7 +556,10 @@ Sub's `.github/workflows/mobile.yml` today, a package's own suite later; ground
 assembly that exists and will consume the packages. **These are independent
 tracks: a concrete candidate appearing does not clear grounds 1–4, and clearing
 grounds 1–4 does not by itself make a dossier openable.** Neither is Michael's
-approval of a nomination; the amendment's test is mechanical.
+approval of a nomination; the amendment's test is mechanical, and the 2026-08-26
+ruling above fixes how it is read. What clears the candidate half is an ERP
+Flutter assembly that **exists** — a `pubspec.yaml` and a Dart tree — not a
+further specification, however detailed, and not a shipped backend for it.
 
 ### 9a. Proposed package boundaries, and per-slice evidence
 
@@ -538,7 +571,7 @@ to do.
 | Proposed package | Would own | Would NOT own | Dependencies |
 |---|---|---|---|
 | `dotmac_mobile_contracts` | the types in §§ 3–6 and their serialization, the `operation_code` and `intent_code` registries, version negotiation | any I/O, any storage engine, any HTTP client, any Flutter import | none — pure Dart |
-| `dotmac_mobile_session` | the § 8 state machine, single-flight refresh, generation fencing, atomic credential storage | which authorization server is used; login UI; MFA UI | `dotmac_mobile_contracts`, a secure-storage port |
+| `dotmac_mobile_session` | the § 8 state machine, single-flight refresh, generation fencing, atomic credential storage | which authorization server is used (that is ADR-0066's decision, not a package's); login UI; MFA UI | `dotmac_mobile_contracts`, a secure-storage port |
 | `dotmac_mobile_sync` | the `QueuedMutationV1` outbox, aggregate-ordered flush, conflict parking, evidence-file ordering | operation semantics; endpoint paths; any product's DTOs | `dotmac_mobile_contracts`, a database port |
 | `dotmac_mobile_wipe` | the § 7 participant registry, journal and resumable wipe | what each participant stores | `dotmac_mobile_contracts` |
 
@@ -725,7 +758,7 @@ row names a guard that has not been written.
 | §8 network failure and 5xx do not sign out | `field_mobile/test/auth_flow_test.dart::"transient refresh failure preserves the session for retry"` | asserted in one application; absent in `dotmac_crm/mobile`, which violates the rule |
 | §8 single-flight refresh | `field_mobile/test/auth_flow_test.dart::"concurrent refreshes share one in-flight request and all get the new token"`; `mobile/test/api_client_test.dart` | asserted in both Sub applications |
 | §8 session-generation fencing | — | **none yet.** No application has the concept. |
-| §9 dossier state / concrete-candidate test | — | **none yet.** No dossier is open; § 9 records that these packages do not currently qualify for `audit-complete`. |
+| §9 dossier state / concrete-candidate test | — | **none yet.** No dossier is open; § 9 records the 2026-08-26 ruling that these packages do not qualify for any state, `audit-complete` included. |
 | §9a evidence tracked per contract slice, never per application | — | **none yet.** There is no mobile dossier to hold slice rows; the table in § 9a is the record until there is. |
 | §9a package boundaries, no product switches | — | **none yet.** No package exists. |
 | §10 immutable release, exact pin, conformance without a path override, reuse never claimed early | — | **none yet.** No package exists. |
@@ -766,13 +799,15 @@ row stays `none yet` until the same is true of it.
   expects "we only have one adopter" to appear as the reason will not find it,
   because under the corrected rule it is not one.
 - **Evidence is now tracked per contract slice, and that changes what a future
-  adopter can prove.** ERP "DotMac Frontline" is recorded as a credible future
-  candidate that is **not an adopter** — `dotmac_erp` holds zero Dart, so it does
-  not clear the amendment's "an assembly that exists and will consume it" test,
-  and these packages do not currently qualify even for `audit-complete`. Its
-  locked online-only MVP could eventually evidence `MobileSessionContextV1` and
-  `MobileDataScopeV1`; it can never evidence `QueuedMutationV1` or
-  `PushIntentV1`. Those two slices have no candidate at all.
+  adopter can prove.** ERP "DotMac Frontline" is recorded, by Michael's
+  **2026-08-26 ruling**, as a **future** candidate — not a concrete candidate and
+  not an adopter: `dotmac_erp` holds zero Dart, so no assembly exists to consume
+  anything, and **a specification proves intent, not consumption**. The
+  consequence is that **no mobile package dossier may be opened at any state,
+  `audit-complete` included**. Its locked online-only MVP could eventually
+  evidence `MobileSessionContextV1` and `MobileDataScopeV1`; it can never
+  evidence `QueuedMutationV1` or `PushIntentV1`. Those two slices have no
+  candidate at all.
 - **One rule has already landed.** § 11 (3) — regenerate committed code and fail
   on drift — was never gated on extraction, and it is now enforced in Sub's
   `field-flutter` job (draft PR #2719), running before format, analyze and tests.
@@ -791,6 +826,15 @@ row stays `none yet` until the same is true of it.
   harder than clearing a directory on logout. Each is chosen because the cheaper
   version has a silent failure mode, and every one of those failure modes is
   present in the fleet today.
+- **The one question this ADR deliberately left open is now closed.**
+  ADR-0066 (2026-08-26) decides the authorization server: federate to the
+  existing `idp.dotmac.io` Keycloak realm with a **public** native client per
+  artifact, Authorization Code + PKCE **S256**, OS-browser authentication, and an
+  ID-token exchange inside Sub for a Sub-owned session delegating to
+  `dotmac_kernel.external_identity.finalize_external_login`. No client secret and
+  never the confidential `dotmac-auth-oidc` client goes into a Flutter artifact.
+  § 8's state machine is unchanged by it: what the device holds afterwards is
+  still a Sub credential.
 - **Nothing here is implemented by this ADR.** It changes no runtime behaviour in
   this repository, which contains no mobile code. It constrains what MOB-02 and
   later steps may build.
@@ -813,5 +857,11 @@ row stays `none yet` until the same is true of it.
 - `docs/adr/0009-secrets-are-held-not-dereferenced.md`
 - `docs/adr/0014-at-most-once-execution-has-one-owner.md` — the idempotency
   rules § 5 mirrors on the client
+- `docs/adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md`
+  — the authorization-server decision this ADR left open: the existing Keycloak
+  realm, public native clients, PKCE S256, and an ID-token exchange for a
+  Sub-owned session
+- `docs/adr/0067-a-credential-holding-client-tears-down-atomically.md` — the
+  **owner** of the four teardown invariants §§ 3, 7 and 8 implement for mobile
 - `docs/adr/0018-an-exemption-must-be-enforceable.md` — why the
   enforcement table says `none yet`

@@ -849,6 +849,80 @@ specifics) points here and must never fork these rules.
     `tests/architecture/test_semantic_identity_and_replay.py`;
     `tests/unit/test_subscriptions_treatments.py`).
 
+37. **A caller that cannot deploy atomically with its destination binds to a
+    PINNED published contract, and the binding must be able to FAIL.** Scope is
+    the rule, not a summary of it: this binds independently released or
+    asynchronous callers — a shipped mobile artifact, a connector on its own
+    cadence, a scheduled job in another repository, an outbound event sender. It
+    is NOT a blanket rule for every caller; one that ships in the same artifact,
+    same deploy, same build as its destination already has parity by
+    construction. The hazard is that the two sides are on different clocks, so
+    some deployed caller is always running against a destination it was never
+    built against while each side's own tests stay green. Bind to a published
+    version with immutable coordinates — never "the current API", a branch name,
+    or whatever `main` serves. **Non-vacuity is the half that actually failed in
+    all three fleet instances:** the test exercises the REAL caller shape rather
+    than a fixture the caller authored, checks the contract's IDENTITY rather
+    than its presence, makes a sender prove a RECEIVER (delivery success is a
+    transport fact, not caller-path evidence), and compares vocabulary ACROSS
+    the wire rather than round-tripping one side's own spelling. Evidence:
+    the vendor-auth 404 outage (Sub PR #2722), CRM's four dead webhook senders,
+    and the `on_break`/`work_order_id` field-mobile drift — the client
+    serializes `'break'` while Sub's enum and DB `CHECK` declare `'on_break'`.
+    A caller path with no such check is an UNMONITORED region and is recorded as
+    one (ADR-0018), never described as covered.
+    (ADR-0024 amendment 2026-08-26 § 13; enforcement: **none yet** — no guard in
+    this repository reads a caller tree in another repository)
+
+38. **A client that persists a REFRESHABLE BEARER CREDENTIAL tears down
+    atomically.** Scope is the rule, not a summary of it: this binds clients that
+    hold such a credential — a native application, a device agent, a daemon, a
+    token-caching CLI, a worker holding a service credential. It does NOT bind an
+    ordinary server-side or browser cookie session, where the server owns the
+    record, teardown is a row deletion in one transaction, and the client holds
+    nothing it can fail to delete. Four invariants: (1) **the credential record is
+    ATOMIC** — credential, principal, scope, generation and expiry written and
+    destroyed as ONE record, never several keys in sequence, because a process
+    killed between two writes leaves a state no reader has a correct branch for;
+    (2) **generation fencing with a DURABLE half** — the held generation is
+    persisted beside the credential and compared on COLD START, since a fence
+    living only in process memory is defeated by the most ordinary event on a
+    device; (3) **ONE wipe coordinator, no subset clears** — participants are
+    registered rather than discovered, no component clears its own storage on its
+    own initiative, and the wipe is journalled and resumable (marker first,
+    credentials second, failures collected, marker cleared only on full success,
+    a marker found at start-up blocks the client); (4) **transport failure is NOT
+    revocation** — a timeout, connection failure, DNS failure or 5xx ends
+    nothing; only a 401/403 on the REFRESH EXCHANGE ITSELF or an observed
+    generation bump does, and a failed *restore* is not a failed
+    *authentication*. Evidence: Sub PR #2717.
+    (ADR-0067; ADR-0065 §§ 3, 7, 8 are its mobile expression, not a second owner;
+    enforcement: **none yet** in this repository — every in-scope client in the
+    fleet is a Flutter application and this Python repository cannot run a check
+    over any of them)
+
+39. **Every signed release pipeline verifies the PRODUCED ARTIFACT's application
+    identity and its actual signing certificate — not secret or file existence.**
+    Read the Android `applicationId` / iOS `CFBundleIdentifier` from the built
+    output rather than from a source file, a Gradle property or a workflow input,
+    because a pipeline that builds the WRONG application from correct
+    configuration is exactly what a source-side check cannot see. Inspect the
+    issuer, subject and fingerprint of the certificate that actually signed the
+    artifact and compare them to an expected value; "a signing secret was present
+    in the environment" and "a file was produced" are preconditions, not results.
+    The check carries rule 25's sensitivity proof — shown RED against a
+    deliberately debug-signed or wrongly-identified artifact. **And a step is
+    renamed if it does not test the property it is named for**, because a guard
+    named for a property it does not test converts an unmonitored region into one
+    everyone believes is covered, which is worse than no guard at all. Evidence:
+    `dotmac_sub/.github/workflows/mobile-release.yml` step *"Verify the artifact
+    is not debug-signed"* was `test -n "$OUT"` — it asserted only that `find`
+    matched a filename, and would have passed on a debug-signed bundle and on a
+    correctly signed bundle of the wrong application; Sub PR #2716 replaces it
+    with real certificate inspection.
+    (ADR-0018 amendment 2026-08-26; enforcement: **none yet** in this repository —
+    the pipeline this governs lives in `dotmac_sub`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
