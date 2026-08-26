@@ -225,7 +225,7 @@ all three dossier states permit a shared module — so the adopter count is not
 the reason. The four grounds are: the contracts are proposed rather than
 ratified, the package boundaries are unproven, enforcement is missing (nine
 `none yet` rows, and this Python repository cannot run Dart checks at all), and
-the twelve defects in the inventory's § 6 are the current work.
+the twelve defects in the inventory's § 6 are the current work (eleven still open; D10, the missing codegen freshness gate, was closed by Sub PR #2719).
 
 ERP "DotMac Frontline" is recorded as a **credible future candidate that is not
 an adopter** — `dotmac_erp` holds zero Dart, so it fails ADR-0006's
@@ -235,6 +235,7 @@ slice, never per application.** Frontline's locked online-only MVP could
 eventually evidence `MobileSessionContextV1` and `MobileDataScopeV1`; it can
 never evidence `QueuedMutationV1` or `PushIntentV1`, which have no candidate at
 all. ADR-0065 § 11 additionally fixes the shape any future extraction takes, one
-of whose rules — regenerate committed code and fail on drift — lands now rather
-than at extraction.
+of whose rules — regenerate committed code and fail on drift — was never gated
+on extraction and has already landed green in `dotmac_sub`'s `field-flutter`
+job.
 

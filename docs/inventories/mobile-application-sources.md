@@ -298,10 +298,19 @@ behaviour than self-care, concentrated in four files:
   `job_location_update_test.dart` (1).
 
 **CI.** The `field-flutter` job in `.github/workflows/mobile.yml`, filtered on
-`field_mobile/**` — same four steps as the self-care job. Note that it does
-**not** run `dart run build_runner build`, so `database.g.dart` is trusted as
-committed; CRM's own workflow does run it (see § 4). No iOS build job covers
-`field_mobile` at all: `ios-build` is gated on `needs.changes.outputs.mobile`.
+`field_mobile/**` — same four steps as the self-care job. **At the audited
+revision it did not run `dart run build_runner build`**, so `database.g.dart`
+was trusted as committed; CRM's own workflow does run it (see § 4). No iOS build
+job covers `field_mobile` at all: `ios-build` is gated on
+`needs.changes.outputs.mobile`.
+
+> **Remediated after this audit.** Sub draft PR #2719
+> (`feat/field-offline-encryption`, head `19091b01c`) adds a *"Regenerate
+> committed code and fail on drift"* step to this job — `build_runner` followed
+> by `git diff --exit-code -- .` — making the order codegen-drift → format →
+> analyze → tests. It is green, and its first run reported **zero drift** in
+> `database.g.dart`. The inventory line above records the state at
+> `1a3edf0eb`, which is what an inventory is for; see D10.
 
 **Release: there is none.** Four independent facts:
 
@@ -559,7 +568,7 @@ this document.
 | D7 | field (Sub) | The Xcode Cloud post-clone hook builds the **wrong application** — `MOBILE="$REPO/mobile"` is the self-care app in this repository. | `field_mobile/ios/ci_scripts/ci_post_clone.sh` |
 | D8 | field (Sub) | `field_mobile/docs/RELEASE.md` documents `.github/workflows/field-app-release.yml`, which exists only in `dotmac_crm`. Sub's field app has analyze/test CI and **no release pipeline at all**. | `field_mobile/docs/RELEASE.md:6`; `dotmac_sub/.github/workflows/` |
 | D9 | field (Sub) | `field_mobile/brand.json` does not exist and no `--dart-define-from-file` is passed, so a field build takes default theming. | `dotmac_sub/brand.json` only |
-| D10 | field (Sub) | Sub's CI does not run `build_runner`; `database.g.dart` is trusted as committed. CRM's CI regenerates it. A stale generated file passes Sub's gate. | `mobile.yml` `field-flutter` job vs `field-app-ci.yml` `mobile` job |
+| D10 | field (Sub) | **FIXED after this audit.** At `1a3edf0eb` Sub's CI did not run `build_runner`, so `database.g.dart` was trusted as committed and a stale generated file would pass Sub's gate. Sub draft PR #2719 adds `build_runner` + `git diff --exit-code -- .` to the `field-flutter` job; it is green and reported zero drift on its first run. CRM's CI regenerates but has **no `git diff --exit-code`** — running codegen is not gating on it. | `mobile.yml` `field-flutter` job vs `field-app-ci.yml` `mobile` job; fix in Sub PR #2719 (`19091b01c`) |
 | D11 | both fields | **Neither field app has ever been released from a tag.** No `field-mobile-v*` tag exists in either repository, and no `mobile-v*` tag exists in `dotmac_sub`. | `git tag --list` in both repositories |
 | D12 | field (Sub) | An authentication fix on the retiring copy never reached the surviving copy — see § 5.4. | `dotmac_crm` `50beb0cb` vs `field_mobile/lib/features/auth/auth_repository.dart:99,118` |
 
@@ -660,7 +669,7 @@ none of which requires session context, a plan document, or a Knowledge entry:
 3. **Is duplication actually costing anything?** Yes, measurably: an
    authentication fix committed to the retiring copy on 2026-08-18 has still not
    reached the surviving copy (§ 5.4), and twelve further defects are recorded
-   in § 6.
+   in § 6 — eleven still open, D10 closed by Sub PR #2719.
 4. **Is there an adopter, per slice?** No. Frontline fails the concrete-candidate
    test today (zero Dart), and even in its locked MVP it could never evidence
    `QueuedMutationV1` or `PushIntentV1` (§ 7.1, § 7.2).

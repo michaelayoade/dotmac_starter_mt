@@ -486,20 +486,23 @@ permission:
    been built against those seams. A boundary that has never carried a second
    shape is a guess, and the amendment's own warning applies: a second consumer
    *constrains generalisation*, and without one the generalisation is unchecked.
-3. **Enforcement is missing, and this repository cannot supply it.** Nine rows
-   of the enforcement table below say `none yet`. That is not a paperwork gap:
-   `dotmac_starter_mt` is a Python repository holding no Dart, so it cannot run
-   an analyzer, a Flutter test, or a package conformance suite. A package
-   published under contracts that nothing checks is a package that drifts from
-   its own ADR on the first commit — which is precisely the failure §§ 5.4 and 6
-   of the inventory already document in the unshared code.
+3. **Enforcement is missing, and this repository cannot supply it.** Thirteen of
+   the seventeen rows in the enforcement table below say `none yet`, and the one
+   row that is fully enforced is enforced in `dotmac_sub`, not here. That is not
+   a paperwork gap: `dotmac_starter_mt` is a Python repository holding no Dart,
+   so it cannot run an analyzer, a Flutter test, or a package conformance suite.
+   A package published under contracts that nothing checks is a package that
+   drifts from its own ADR on the first commit — which is precisely the failure
+   §§ 5.4 and 6 of the inventory already document in the unshared code.
 4. **Defect remediation comes first.** The twelve defects in the inventory's § 6
-   are the current work: an entirely unencrypted field database, a logout that
-   clears only the token store, a principal-free response-cache key, a push
-   router that navigates to any raw path the server sends, an Xcode Cloud hook
-   that builds the wrong application, and two field apps that have never been
-   released from a tag. Extracting a package from code with those properties
-   exports the defects into a shared artifact and gives them a version number.
+   are the current work — eleven of them still open: an entirely unencrypted
+   field database, a logout that clears only the token store, a principal-free
+   response-cache key, a push router that navigates to any raw path the server
+   sends, an Xcode Cloud hook that builds the wrong application, and two field
+   apps that have never been released from a tag. (D10, the missing codegen
+   freshness gate, is closed — see § 11 rule 3.) Extracting a package from code
+   with the remaining properties exports the defects into a shared artifact and
+   gives them a version number.
 
 **What "no package yet" concretely means.** The contracts are published as a
 specification and implemented locally by each application; the duplication is
@@ -670,18 +673,37 @@ because a build pipeline has to satisfy all five at once.
    repositories, whose `pubspec.yaml` and `pubspec.lock` are byte-identical
    (inventory § 1, § 5.5).
 
-**Rule 3 is NOT gated on extraction. It lands now — with, or before, MOB-03.**
-It needs no package, no second adopter and no ratified contract; it is two
-commands in a CI job. It is written into this ADR because the inventory found
-the exact defect it prevents: `dotmac_crm`'s field CI runs
-`dart run build_runner build --delete-conflicting-outputs` before analyzing,
-while `dotmac_sub`'s `field-flutter` job does not — so Sub trusts
-`database.g.dart` as committed and **a stale generated file passes Sub's gate**
-(inventory D10). That is a live defect in the application currently scheduled for
-encryption work, where the generated file is the Drift schema. Adding the
-regenerate-and-diff step to Sub's `field-flutter` job is the smallest change in
-this whole ADR and the only one that can be made before anything else is
-decided.
+**Rule 3 was NOT gated on extraction, and it has already landed.** It needed no
+package, no adopter and no ratified contract — it is two commands in a CI job.
+It is written into this ADR because the inventory found the exact defect it
+prevents: `dotmac_crm`'s field CI ran
+`dart run build_runner build --delete-conflicting-outputs` before analyzing
+while `dotmac_sub`'s `field-flutter` job did not, so Sub trusted
+`database.g.dart` as committed and **a stale generated file passed Sub's gate**
+(inventory D10) — in the application currently scheduled for encryption work,
+where that generated file is the Drift schema.
+
+**Status: landed and green.** `dotmac_sub` draft PR **#2719**
+(`feat/field-offline-encryption`, head `19091b01c`, base `dev`) adds a
+*"Regenerate committed code and fail on drift"* step to the `field-flutter` job
+of `.github/workflows/mobile.yml`, running
+`dart run build_runner build --delete-conflicting-outputs` followed by
+`git diff --exit-code -- .` (scoped by the job's `field_mobile`
+working-directory). The job order is now **codegen-drift → format → analyze →
+tests**, and it passes.
+
+It produced evidence on its first run: `build_runner` regenerated
+`database.g.dart` and `git diff --exit-code` reported **zero drift** — the
+committed file is byte-identical to the regenerated one, column ordering
+included. That is the useful result. The gate was added because nothing proved
+the file was fresh, not because it was known to be stale; a passing gate now
+converts an assumption into a checked fact, and will fail the first time a
+schema change ships without regeneration.
+
+The step is deliberately **only** on the `field-flutter` job. The customer
+self-care app declares no code generators (no `build_runner`, no `drift_dev` —
+its JSON parsing is hand-written), so running codegen there would buy nothing
+and cost a minute.
 
 ---
 
@@ -706,9 +728,9 @@ row names a guard that has not been written.
 | §9 dossier state / concrete-candidate test | — | **none yet.** No dossier is open; § 9 records that these packages do not currently qualify for `audit-complete`. |
 | §9a evidence tracked per contract slice, never per application | — | **none yet.** There is no mobile dossier to hold slice rows; the table in § 9a is the record until there is. |
 | §9a package boundaries, no product switches | — | **none yet.** No package exists. |
-| §11 (1)(2)(4)(5) extraction shape: immutable packages, exact pins, build against the published artifact, per-app release identity | — | **none yet.** No package exists, and **neither field application has ever been released from a tag** (inventory D11). |
-| §11 (3) regenerate committed code and fail on drift | `dotmac_crm/.github/workflows/field-app-ci.yml` runs `build_runner` before analyze — **but has no `git diff --exit-code`**, and it is on the retiring repository | **none in `dotmac_sub`.** Its `field-flutter` job does not run `build_runner` at all (inventory D10). This rule lands with or before MOB-03; the guard must live in Sub's workflow, not here. |
 | §10 immutable release, exact pin, conformance without a path override, reuse never claimed early | — | **none yet.** No package exists. |
+| §11 (1)(2)(4)(5) extraction shape: immutable packages, exact pins, build against the published artifact, per-app release identity | — | **none yet.** No package exists, and **neither field application has ever been released from a tag** (inventory D11). |
+| §11 (3) regenerate committed code and fail on drift | **`dotmac_sub/.github/workflows/mobile.yml`, `field-flutter` job** — step *"Regenerate committed code and fail on drift"*: `build_runner` then `git diff --exit-code -- .` (Sub draft PR #2719, head `19091b01c`) | **ENFORCED for `field_mobile`, and green.** First run reported zero drift in `database.g.dart`. Covers `field-flutter` only: the customer app declares no code generators, so it was deliberately not added there. `dotmac_crm`'s `field-app-ci.yml` runs `build_runner` but has **no `git diff --exit-code`** — it regenerates without gating, which is why it never caught this — and it is on the retiring repository. This starter repository still cannot enforce the rule; the guard correctly lives in Sub's workflow. |
 
 **Most of these will stay `none yet` for a structural reason worth stating:**
 this repository is Python and contains no Dart, so it cannot run an analyzer, a
@@ -719,19 +741,22 @@ one exists. That is ground 3 of § 9, restated as a table. Writing an
 aspirational guard name here would be exactly the "enforceable premise" failure
 ADR-0018 forbids: a claim whose premise nothing can check.
 
-The one row that can move without any other decision is **§ 11 (3)**: adding
-`dart run build_runner build --delete-conflicting-outputs` and
-`git diff --exit-code` to Sub's `field-flutter` job. It needs no package, no
-adopter and no ratified contract.
+**One row has already moved off `none yet`, and it moved in the right place.**
+§ 11 (3) is enforced by Sub's `field-flutter` job as of draft PR #2719 — not by
+anything in this repository, which is exactly the split this section describes:
+the contract is stated here, the guard runs where the Dart lives. Every other
+row stays `none yet` until the same is true of it.
 
 ---
 
 ## Consequences
 
 - **Three applications acquire a written target and none of them meets it
-  today.** Twelve defects are already recorded against them in the inventory. This
-  ADR does not fix any of them; it makes each one a deviation from a stated
-  contract rather than an undiscovered property.
+  today.** Twelve defects are recorded against them in the inventory, eleven
+  still open. This ADR fixes none of them directly; it makes each one a deviation
+  from a stated contract rather than an undiscovered property — which is what
+  let D10 be closed in Sub PR #2719 rather than remaining an unexamined
+  difference between two CI files.
 - **No package is built yet, and the reason is readiness, not permission.**
   ADR-0006's 2026-08-12 amendment removed the two-consumer prerequisite: a second
   consumer proves reuse and constrains generalisation, and all three dossier
@@ -748,10 +773,13 @@ adopter and no ratified contract.
   locked online-only MVP could eventually evidence `MobileSessionContextV1` and
   `MobileDataScopeV1`; it can never evidence `QueuedMutationV1` or
   `PushIntentV1`. Those two slices have no candidate at all.
-- **One rule lands immediately.** § 11 (3) — regenerate committed code and fail
-  on drift — is not gated on extraction and should reach Sub's `field-flutter`
-  job with or before MOB-03, because Sub currently trusts `database.g.dart` as
-  committed while CRM regenerates it.
+- **One rule has already landed.** § 11 (3) — regenerate committed code and fail
+  on drift — was never gated on extraction, and it is now enforced in Sub's
+  `field-flutter` job (draft PR #2719), running before format, analyze and tests.
+  Its first run reported zero drift in `database.g.dart`, converting an
+  assumption into a checked fact. It is the only rule in this ADR that is
+  enforced anywhere, and it is enforced in `dotmac_sub` rather than here —
+  which is the correct place for it.
 - **CRM mobile is out of the picture and will keep drifting until it is
   deleted.** That is the accepted cost of the retirement decision. The `await`
   fix on `50beb0cb` will not be back-ported by this ADR; whether Sub's field app
