@@ -43,6 +43,14 @@ assert __version__
 print("ok")
 """
 
+_TRANSACTION_PROBE = """
+import sys
+from dotmac_kernel.transactions import conflict_savepoint
+assert conflict_savepoint
+assert "dotmac_kernel.db" not in sys.modules
+print("ok")
+"""
+
 
 def _import_without_database_url(source: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
@@ -65,6 +73,15 @@ def test_importing_the_kernel_needs_no_database_url() -> None:
         "Something reachable from the package root imports `dotmac_kernel.db`, "
         "which builds the engine at module scope. Move that import INSIDE the "
         "function that needs it (see `errors.py`'s `WebAuthRedirect` import)."
+    )
+
+
+def test_public_transaction_mechanic_needs_no_database_runtime() -> None:
+    """A caller-owned Session can use a SAVEPOINT without a second engine."""
+    result = _import_without_database_url(_TRANSACTION_PROBE)
+    assert result.returncode == 0, (
+        "`dotmac_kernel.transactions` imported the kernel DB runtime:\n"
+        f"{result.stderr}"
     )
 
 
