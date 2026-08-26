@@ -5,7 +5,7 @@ ratified. **Two things inside this ADR are NOT proposed:** § 9's ruling on the
 ERP Frontline candidate is an **Accepted owner decision taken 2026-08-26 by
 Michael**, and § 7's owner note records that ADR-0067 (Accepted) owns the
 teardown invariants §§ 3, 7 and 8 implement. The authorization-server question
-this ADR deliberately left open is closed by ADR-0066 (Accepted 2026-08-26).
+this ADR deliberately left open is closed by ADR-0069 (Accepted 2026-08-26).
 **Date:** 2026-08-26
 **Extends:** ADR-0024 (applications compose by synchronizing data), ADR-0006
 (white-label product foundation — the extraction rule **as amended 2026-08-12**:
@@ -19,7 +19,7 @@ them
 **Does not own:** any server-side authority (every domain decision stays with
 its module under the Dotmac source-of-truth standard); the browser/Jinja portal
 surface; store release mechanics; the choice of authorization server, **decided
-2026-08-26 in ADR-0066** — federate to the existing `idp.dotmac.io` Keycloak
+2026-08-26 in ADR-0069** — federate to the existing `idp.dotmac.io` Keycloak
 realm with public native clients using Authorization Code + PKCE S256, exchanged
 inside Sub for a Sub-owned session
 
@@ -571,7 +571,7 @@ to do.
 | Proposed package | Would own | Would NOT own | Dependencies |
 |---|---|---|---|
 | `dotmac_mobile_contracts` | the types in §§ 3–6 and their serialization, the `operation_code` and `intent_code` registries, version negotiation | any I/O, any storage engine, any HTTP client, any Flutter import | none — pure Dart |
-| `dotmac_mobile_session` | the § 8 state machine, single-flight refresh, generation fencing, atomic credential storage | which authorization server is used (that is ADR-0066's decision, not a package's); login UI; MFA UI | `dotmac_mobile_contracts`, a secure-storage port |
+| `dotmac_mobile_session` | the § 8 state machine, single-flight refresh, generation fencing, atomic credential storage | which authorization server is used (that is ADR-0069's decision, not a package's); login UI; MFA UI | `dotmac_mobile_contracts`, a secure-storage port |
 | `dotmac_mobile_sync` | the `QueuedMutationV1` outbox, aggregate-ordered flush, conflict parking, evidence-file ordering | operation semantics; endpoint paths; any product's DTOs | `dotmac_mobile_contracts`, a database port |
 | `dotmac_mobile_wipe` | the § 7 participant registry, journal and resumable wipe | what each participant stores | `dotmac_mobile_contracts` |
 
@@ -827,7 +827,7 @@ row stays `none yet` until the same is true of it.
   version has a silent failure mode, and every one of those failure modes is
   present in the fleet today.
 - **The one question this ADR deliberately left open is now closed.**
-  ADR-0066 (2026-08-26) decides the authorization server: federate to the
+  ADR-0069 (2026-08-26) decides the authorization server: federate to the
   existing `idp.dotmac.io` Keycloak realm with a **public** native client per
   artifact, Authorization Code + PKCE **S256**, OS-browser authentication, and an
   ID-token exchange inside Sub for a Sub-owned session delegating to
@@ -857,7 +857,7 @@ row stays `none yet` until the same is true of it.
 - `docs/adr/0009-secrets-are-held-not-dereferenced.md`
 - `docs/adr/0014-at-most-once-execution-has-one-owner.md` — the idempotency
   rules § 5 mirrors on the client
-- `docs/adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md`
+- `docs/adr/0069-mobile-authentication-federates-to-the-existing-identity-provider.md`
   — the authorization-server decision this ADR left open: the existing Keycloak
   realm, public native clients, PKCE S256, and an ID-token exchange for a
   Sub-owned session

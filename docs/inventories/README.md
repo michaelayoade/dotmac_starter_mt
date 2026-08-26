@@ -218,7 +218,7 @@ Three readings that matter for the programme:
 |---|---|
 | Native mobile three-app inventory | `mobile-application-sources.md` |
 | Mobile client contract (session, data scope, queued mutation, push intent, wipe, auth state machine) | `docs/adr/0065-mobile-clients-are-composed-applications.md` (Proposed) |
-| Mobile authorization server, client type, token exchange and rollout order | `docs/adr/0066-mobile-authentication-federates-to-the-existing-identity-provider.md` (Accepted 2026-08-26) |
+| Mobile authorization server, client type, token exchange and rollout order | `docs/adr/0069-mobile-authentication-federates-to-the-existing-identity-provider.md` (Accepted 2026-08-26) |
 | Teardown invariants for any client holding a refreshable bearer credential | `docs/adr/0067-a-credential-holding-client-tears-down-atomically.md` (Accepted 2026-08-26) |
 
 ADR-0065 decides **no shared mobile package yet**, and is explicit that this is
@@ -249,7 +249,7 @@ of whose rules — regenerate committed code and fail on drift — was never gat
 on extraction and has already landed green in `dotmac_sub`'s `field-flutter`
 job.
 
-ADR-0066 (Accepted) closes the one question ADR-0065 left open: mobile clients
+ADR-0069 (Accepted) closes the one question ADR-0065 left open: mobile clients
 federate to the existing `idp.dotmac.io` Keycloak realm using **public** native
 clients with Authorization Code + PKCE **S256** and OS-browser authentication,
 exchanging the ID token inside Sub for a Sub-owned session via
