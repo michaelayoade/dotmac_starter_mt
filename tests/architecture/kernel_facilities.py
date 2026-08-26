@@ -74,6 +74,13 @@ NOT_MODULE_FACILITIES: Final[dict[str, str]] = {
         "importing it would be creating a second session factory, which a "
         "different gate already refuses."
     ),
+    "session_runtime": (
+        "SUPPLIES the Session rather than consuming one — the class that "
+        "`dotmac_kernel.db` is one instance of. Same premise as `db` above, "
+        "and the same gate refuses a module that constructs its own: a module "
+        "receives a session from its caller, so instantiating a runtime would "
+        "make it the second session factory in its own process."
+    ),
     "testing/harness": (
         "Test kit. It builds engines for suites, is never imported by shipped "
         "module code, and an import-linter contract keeps it that way."

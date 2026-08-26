@@ -262,7 +262,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a97"
+__version__ = "0.1.0a100"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -334,6 +334,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.query",
         "dotmac_kernel.security",
+        "dotmac_kernel.session_runtime",
         "dotmac_kernel.setting_domains",
         "dotmac_kernel.setting_scopes",
         "dotmac_kernel.setting_value_types",
