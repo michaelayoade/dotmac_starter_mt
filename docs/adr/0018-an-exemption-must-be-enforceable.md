@@ -1,6 +1,10 @@
 # ADR 0018 — A guard exemption must carry an enforceable premise
 
-**Status:** Accepted — **fleet-wide**
+**Status:** Accepted — **fleet-wide**. Amended 2026-08-26 (a guard named for a
+property it does not test — signed release pipelines verify the produced
+artifact's application identity and actual signing certificate, not secret or
+file existence). The amendment is a dated addition; no earlier text is
+rewritten.
 **Date:** 2026-08-11
 **Applies to:** every Dotmac repository. Enforcement for repositories other than
 the starter lands through the pinned Governance source (hard rule 15); this ADR
@@ -10,7 +14,9 @@ same concern seen from the other side: 0010 asks what a guard must cover, this
 asks what may be excluded from one and on what terms.
 **Owns:** the rule that an exclusion from a lint, type, architecture or security
 check states a premise, that the premise is machine-checkable, and that any
-resulting backlog is a two-directional ratchet
+resulting backlog is a two-directional ratchet; and (2026-08-26 amendment) the
+mirror rule that a guard must test the property it is named for, stated for
+signed release pipelines
 **Does not own:** which checks a repository runs, or what any individual check
 asserts
 
@@ -81,6 +87,67 @@ exemption — it is an unmonitored region, and is not permitted.**
 5. **Prove sensitivity.** A newly-covered region that passes must be shown to
    FAIL without its ratchet. Otherwise a clean run is indistinguishable from the
    guard having stopped looking.
+
+## Decision amendment — 2026-08-26 (a guard named for a property it does not test)
+
+**Scope — this is the ruling, not a summary of it.** *Every signed release
+pipeline verifies the produced artifact's application identity and its actual
+signing certificate, not merely secret or file existence.* The amendment is
+stated for **signed release pipelines**, because that is where the evidence is
+and where the consequence is a signed artifact that ships. It is not a general
+licence to demand deep inspection from every check.
+
+The original decision covered exclusions: a region deliberately left out of a
+guard. This amendment covers the mirror case, which turns out to be the same
+failure wearing the opposite costume — a region formally **inside** a guard whose
+check does not test the property the guard is named for. Both produce an
+unmonitored region. Only one of them looks unmonitored.
+
+**The evidence.** `dotmac_sub/.github/workflows/mobile-release.yml`, at the
+audited revision `1a3edf0eb`, contains a step named:
+
+```yaml
+      - name: Verify the artifact is not debug-signed
+        run: |
+          OUT=$(find build/app/outputs -name '*.aab' -o -name '*-release.apk' | head -1)
+          echo "Artifact: $OUT"
+          test -n "$OUT"
+```
+
+`test -n "$OUT"` asserts that `find` matched a filename. It says nothing about
+signing, nothing about which key signed, and nothing about which application was
+built. **It cannot fail for the reason it is named for.** It would have passed on
+a debug-signed bundle, and it would have passed on a correctly signed bundle of
+the *wrong application* — which matters here, because the same audit found an
+Xcode Cloud post-clone hook pointing at `$REPO/mobile` in a repository where that
+path is the *self-care* app rather than the field app. `dotmac_sub` draft PR
+#2716, *"fix(field_mobile): a real field release pipeline and an iOS script that
+builds the right app"*, replaces it with real certificate inspection; it is
+**open, not merged**, as of 2026-08-26.
+
+**6. A release-pipeline guard verifies the produced artifact, not its
+preconditions.** Concretely, for a signed release:
+
+- **Application identity is read from the built artifact** — the Android
+  `applicationId` / iOS `CFBundleIdentifier` as it appears in the output, not as
+  it appears in a source file, a Gradle property or a workflow input. A pipeline
+  that builds the wrong application from correct configuration is exactly the
+  failure a source-side check cannot see.
+- **The signing certificate is inspected** — issuer, subject and fingerprint of
+  the certificate that actually signed the artifact — and compared to an expected
+  value. "A signing secret was present in the environment" is a precondition, not
+  a result. So is "a file was produced".
+- **The check carries the sensitivity proof rule 5 already requires.** A release
+  guard that has never been shown RED against a deliberately debug-signed or
+  wrongly-identified artifact is indistinguishable from `test -n`.
+
+**And the naming rule that follows.** A step's name is read as its contract by
+every reviewer who does not open it. A step named for a property it does not test
+is worse than an unnamed one, because it converts an unmonitored region into a
+region everyone believes is covered — the precise inversion the original decision
+was written to prevent. Either the check tests the named property, or the step is
+renamed to what it actually does.
+
 
 ## Consequences
 

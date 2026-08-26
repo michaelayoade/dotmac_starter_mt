@@ -513,6 +513,27 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     compares it with the tree offline and tag-free, and the architecture test
     re-derives every digest from the tag itself
     (`AGENTS.md` rule **34**; `tests/architecture/test_released_manifest_digests.py`).
+28. A caller that cannot deploy ATOMICALLY with its destination binds to a
+    pinned published contract, and the binding must be able to fail — not a
+    blanket rule for every caller, only for independently released or
+    asynchronous ones. Non-vacuity is the half that fails in practice: exercise
+    the real caller shape, check the contract's identity rather than its
+    presence, make a sender prove a receiver, and compare vocabulary across the
+    wire. An unchecked caller path is an unmonitored region, never "covered"
+    (`AGENTS.md` rule **37**; ADR-0024 amendment 2026-08-26 § 13; enforcement
+    `none yet`).
+29. A client that persists a REFRESHABLE BEARER CREDENTIAL tears down
+    atomically — an atomic credential record, generation fencing with a durable
+    half compared on cold start, one wipe coordinator with no subset clears, and
+    transport failure is not revocation. Scoped to credential-holding clients,
+    NOT to ordinary server/browser cookie sessions
+    (`AGENTS.md` rule **38**; ADR-0067, whose mobile expression is ADR-0065
+    §§ 3, 7, 8; enforcement `none yet`).
+30. A signed release pipeline verifies the PRODUCED artifact's application
+    identity and its actual signing certificate, never secret or file
+    existence — and a step is renamed if it does not test the property it is
+    named for (`AGENTS.md` rule **39**; ADR-0018 amendment 2026-08-26;
+    enforcement `none yet`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
