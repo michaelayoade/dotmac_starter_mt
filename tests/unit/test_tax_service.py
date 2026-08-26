@@ -158,9 +158,7 @@ def test_policy_ensure_seam_returns_contracts_and_replays_before_parent_state(
         name=" Federal authority ",
         authority_level_code=" federal ",
     )
-    authority = ensure_tax_authority(
-        db, tenant_id=tenant.id, command=authority_command
-    )
+    authority = ensure_tax_authority(db, tenant_id=tenant.id, command=authority_command)
     assert isinstance(authority, TaxAuthorityV1)
     assert get_tax_authority(db, tenant_id=tenant.id, code="FIRS") == authority
 
@@ -175,10 +173,7 @@ def test_policy_ensure_seam_returns_contracts_and_replays_before_parent_state(
         db, tenant_id=tenant.id, command=jurisdiction_command
     )
     assert isinstance(jurisdiction, TaxJurisdictionV1)
-    assert (
-        get_tax_jurisdiction(db, tenant_id=tenant.id, code="NG-FED")
-        == jurisdiction
-    )
+    assert get_tax_jurisdiction(db, tenant_id=tenant.id, code="NG-FED") == jurisdiction
 
     code = ensure_tax_code(
         db,
@@ -221,12 +216,15 @@ def test_policy_ensure_seam_returns_contracts_and_replays_before_parent_state(
     )
     rule = ensure_tax_rule(db, tenant_id=tenant.id, command=rule_command)
     assert isinstance(rule, TaxRuleV1)
-    assert get_tax_rule(
-        db,
-        tenant_id=tenant.id,
-        tax_code_id=code.tax_code_id,
-        version=1,
-    ) == rule
+    assert (
+        get_tax_rule(
+            db,
+            tenant_id=tenant.id,
+            tax_code_id=code.tax_code_id,
+            version=1,
+        )
+        == rule
+    )
 
     classification_command = TaxSubjectClassificationInput(
         tax_code_id=code.tax_code_id,
@@ -266,9 +264,7 @@ def test_policy_ensure_seam_returns_contracts_and_replays_before_parent_state(
     assert code_row is not None
     authority_row.status = "retired"
     assert (
-        ensure_tax_jurisdiction(
-            db, tenant_id=tenant.id, command=jurisdiction_command
-        )
+        ensure_tax_jurisdiction(db, tenant_id=tenant.id, command=jurisdiction_command)
         == jurisdiction
     )
     jurisdiction_row.status = "retired"

@@ -180,9 +180,7 @@ def _exact_policy_money(amount: Decimal, *, currency: Currency) -> Money:
     return value
 
 
-def _rule_contract(
-    db: Session, *, tenant_id: UUID, row: TaxRule
-) -> TaxRuleV1:
+def _rule_contract(db: Session, *, tenant_id: UUID, row: TaxRule) -> TaxRuleV1:
     code = _code(db, tenant_id, row.tax_code_id)
     jurisdiction = _jurisdiction(db, tenant_id, code.jurisdiction_id)
     currency = Currency(jurisdiction.currency_code, jurisdiction.minor_units)
@@ -248,9 +246,7 @@ def _classification_contract(
     )
 
 
-def get_tax_authority(
-    db: Session, *, tenant_id: UUID, code: str
-) -> TaxAuthorityV1:
+def get_tax_authority(db: Session, *, tenant_id: UUID, code: str) -> TaxAuthorityV1:
     """Read one authority by its tenant-local natural identity."""
 
     normalized_code = _clean(code, "tax authority code")
@@ -1190,9 +1186,7 @@ def ensure_tax_authority(
     code = command.code.strip()
     name = command.name.strip()
     authority_level_code = (
-        command.authority_level_code.strip()
-        if command.authority_level_code
-        else None
+        command.authority_level_code.strip() if command.authority_level_code else None
     )
     existing = db.scalar(
         select(TaxAuthority).where(
@@ -1381,9 +1375,7 @@ def ensure_tax_rule(
     if existing is not None:
         contract = _rule_contract(db, tenant_id=tenant_id, row=existing)
         if _rule_contract_content(contract) != _rule_command_content(command):
-            raise TaxConflict(
-                "tax rule version exists with different current content"
-            )
+            raise TaxConflict("tax rule version exists with different current content")
         return contract
     return _rule_contract(
         db,
