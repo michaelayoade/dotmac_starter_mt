@@ -13,14 +13,32 @@ from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
-from dotmac_tax import contracts, models
+from dotmac_tax import contracts, models, service
 from dotmac_tax.contracts import (
+    TaxAuthorityV1,
+    TaxCodeV1,
     TaxDeterminationComponentV1,
     TaxDeterminationLineV1,
     TaxDeterminationSetV1,
+    TaxJurisdictionV1,
+    TaxRuleBandV1,
+    TaxRuleV1,
+    TaxSubjectClassificationV1,
 )
 from dotmac_tax.manifest import module
-from dotmac_tax.service import determine_tax_set
+from dotmac_tax.service import (
+    determine_tax_set,
+    ensure_tax_authority,
+    ensure_tax_code,
+    ensure_tax_jurisdiction,
+    ensure_tax_rule,
+    ensure_tax_subject_classification,
+    get_tax_authority,
+    get_tax_code,
+    get_tax_jurisdiction,
+    get_tax_rule,
+    get_tax_subject_classification,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "packages/dotmac-tax"
@@ -30,7 +48,7 @@ MIGRATIONS = tuple(sorted((SOURCE / "migrations/versions").glob("tx_*.py")))
 
 def test_manifest_allocates_one_tenant_only_tax_lineage() -> None:
     assert module.code == "tax"
-    assert module.version == "0.1.0a3"
+    assert module.version == "0.1.0a4"
     assert module.short_code == "tax"
     assert module.migration_prefix == "tx"
     assert module.migration_branch == "tax"
@@ -119,6 +137,53 @@ def test_tax_publishes_an_orm_free_exact_money_determination_contract() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported_roots.add(node.module.split(".", 1)[0])
     assert imported_roots.isdisjoint({"sqlalchemy", "dotmac_tax"})
+
+
+def test_tax_publishes_orm_free_policy_reads_and_idempotent_ensure_seams() -> None:
+    policy_contracts = {
+        "TaxAuthorityV1": TaxAuthorityV1,
+        "TaxJurisdictionV1": TaxJurisdictionV1,
+        "TaxCodeV1": TaxCodeV1,
+        "TaxRuleBandV1": TaxRuleBandV1,
+        "TaxRuleV1": TaxRuleV1,
+        "TaxSubjectClassificationV1": TaxSubjectClassificationV1,
+    }
+    assert set(policy_contracts) <= set(contracts.__all__)
+    assert set(policy_contracts) <= set(dotmac_tax.__all__)
+    for contract in policy_contracts.values():
+        assert contract.__dataclass_params__.frozen is True
+
+    assert get_type_hints(get_tax_authority)["return"] is TaxAuthorityV1
+    assert get_type_hints(get_tax_jurisdiction)["return"] is TaxJurisdictionV1
+    assert get_type_hints(get_tax_code)["return"] is TaxCodeV1
+    assert get_type_hints(get_tax_rule)["return"] is TaxRuleV1
+    assert (
+        get_type_hints(get_tax_subject_classification)["return"]
+        is TaxSubjectClassificationV1
+    )
+    assert get_type_hints(ensure_tax_authority)["return"] is TaxAuthorityV1
+    assert get_type_hints(ensure_tax_jurisdiction)["return"] is TaxJurisdictionV1
+    assert get_type_hints(ensure_tax_code)["return"] is TaxCodeV1
+    assert get_type_hints(ensure_tax_rule)["return"] is TaxRuleV1
+    assert (
+        get_type_hints(ensure_tax_subject_classification)["return"]
+        is TaxSubjectClassificationV1
+    )
+
+    public_services = {
+        "ensure_tax_authority",
+        "ensure_tax_jurisdiction",
+        "ensure_tax_code",
+        "ensure_tax_rule",
+        "ensure_tax_subject_classification",
+        "get_tax_authority",
+        "get_tax_jurisdiction",
+        "get_tax_code",
+        "get_tax_rule",
+        "get_tax_subject_classification",
+    }
+    assert public_services <= set(dotmac_tax.__all__)
+    assert public_services <= set(service.__all__)
 
 
 def test_tax_python_range_is_compatible_with_kernel_and_erp_first_adopter() -> None:
