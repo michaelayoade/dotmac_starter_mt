@@ -158,6 +158,7 @@ across repos.
 | **Vendor CP composition readiness** | the completion map for ADR-0057: every decision and transition in the Vendor journey against exactly ONE owner, the three steps whose owner is named but whose code is deferred, the six typed seams the future Vendor assembly must implement, the plane derivation for all four new modules, and the four open items the programme surfaced without taking — including that Sub's `semantic_colors` reduction needs a ruling and that ERP's receiver-side licence format is still unretired | `vendor-cp-composition-readiness.md` |
 | **Sub vNext parity sources** | the exact-revision audit and ten-capability adjudication for Referrals, Reseller Management, AI Operations, Remote Access, Compliance Reporting, Workflow Runtime, Support Access, Platform Health, Fleet Control and independently reusable Forms; records five product-first sources, three narrow greenfield findings, Deployment Control reuse and every legacy-writer retirement gate | `sub-vnext-parity-sources.md` + `sub-vnext-parity-dispositions.toml` |
 | **Machine credential sources** | the two `X-Api-Key` implementations that already exist and DISAGREE: Sub restricts a key to exactly its scopes while ERP treats an empty scope list as granting everything; plus Sub's unsalted-SHA-256 fallback, its verification key derived from the connector encryption key, and its `db.commit()` during a GET, against ERP's SHA-256-only hashing and its requirement that a machine credential name a human `person_id`. Records the wire precedent worth preserving and the eight behaviours that must not be carried into a kernel facility, and the finding that adoption is credential REISSUANCE rather than a hash migration because a stored digest holds no material to re-key from | `machine-credential-sources.md` |
+| **Native mobile application sources** | the fleet's three Flutter applications at exact revisions — `dotmac_sub/mobile` (self-care, 128 files / 26,554 lines / 159 test cases), `dotmac_sub/field_mobile` and `dotmac_crm/mobile` (field ops) — with the CRM→Sub copy history and the measured divergence: **51 files differ, 9 are one-sided, and 17 of the 51 differ on CONTRACT** (different backend host, different outbox routing vocabulary, different owner of the job-completion gate, different rule on whether a transport failure ends a session). Records that the two field trees share a byte-identical `pubspec.yaml`/`pubspec.lock`, that an authentication fix landed on the retiring CRM copy on 2026-08-18 and never reached Sub's, and twelve confirmed defects including an entirely unencrypted field database, a logout that clears only the token store, a principal-free response-cache key, a push router that navigates to any raw path the server sends, an Xcode Cloud hook that builds the wrong application, and the fact that **neither field app has ever been released from a tag**. This is duplication evidence, not reuse evidence | `mobile-application-sources.md` |
 
 ## Cross-repo scale, at a glance
 
@@ -209,3 +210,18 @@ Three readings that matter for the programme:
 | Supported product-profile matrix | ADR-0006 § 4 |
 | Brand precedence decision | ADR-0006 § 3 |
 | Module vs theme vs product-facet terminology | ADR-0006 § 1 |
+
+## Coverage beyond F0
+
+| Deliverable | Where |
+|---|---|
+| Native mobile three-app inventory | `mobile-application-sources.md` |
+| Mobile client contract (session, data scope, queued mutation, push intent, wipe, auth state machine) | `docs/adr/0065-mobile-clients-are-composed-applications.md` (Proposed) |
+
+ADR-0065 authorizes **no** shared mobile package: no second independent
+adopter exists, CRM mobile is a retirement target and cannot be one, and
+Michael ruled on 2026-08-26 that Sub's two applications count as one product.
+The inventory nominates ERP "DotMac Frontline" as a candidate second adopter
+with three caveats; that nomination needs Michael's approval and is not a
+decision either document takes.
+
