@@ -26,6 +26,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from dotmac_kernel.modules import AnyManifest
+from dotmac_kernel.permission_provisioning import RoleDefinition, RoleGrantProfile
 from dotmac_kernel.planes import (
     ModulePlaneSelection,
     validate_module_plane_selections,
@@ -91,6 +92,14 @@ class ProductAssemblySpec:
     # adapts when it builds the `ModuleRegistry`. The two may be MIXED in one
     # assembly — that is what makes migrating feature packages incremental.
     modules: Sequence[AnyManifest] = ()
+    # Product role vocabulary used by permission profiles. A role is never
+    # created unless its RoleDefinition explicitly opts into that operation.
+    role_definitions: Sequence[RoleDefinition] = ()
+    # Product-owned baseline role mappings. Modules own permission definitions
+    # but cannot know an adopter's role algebra; keeping the mappings here makes
+    # that boundary explicit. create_app compiles a READ-ONLY plan and performs
+    # no provisioning writes.
+    role_grant_profiles: Sequence[RoleGrantProfile] = ()
     # Explicit per-module plane intent for lineages that declare more than one
     # supported plane combination. This is distinct from migration bindings:
     # a product may physically have a tenant catalogue and still select only a
@@ -214,6 +223,8 @@ class ProductAssemblySpec:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "modules", tuple(self.modules))
+        object.__setattr__(self, "role_definitions", tuple(self.role_definitions))
+        object.__setattr__(self, "role_grant_profiles", tuple(self.role_grant_profiles))
         object.__setattr__(
             self,
             "module_planes",

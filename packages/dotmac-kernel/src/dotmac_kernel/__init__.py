@@ -217,6 +217,18 @@ from dotmac_kernel.outbox_event_types import (
     active_outbox_event_types,
     install_outbox_event_types,
 )
+from dotmac_kernel.permission_provisioning import (
+    PERMISSION_PLAN_SCHEMA_VERSION,
+    PermissionDefinition,
+    PermissionPlan,
+    PermissionPlanConflict,
+    PermissionPlanDiff,
+    PermissionPlanError,
+    PermissionState,
+    RoleDefinition,
+    RoleGrant,
+    RoleGrantProfile,
+)
 from dotmac_kernel.permissions import (
     DuplicatePermissionError,
     PermissionCatalogue,
@@ -289,7 +301,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a98"
+__version__ = "0.1.0a99"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -355,6 +367,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.namespaces",
         "dotmac_kernel.outbox_event_types",
         "dotmac_kernel.permissions",
+        "dotmac_kernel.permission_provisioning",
         "dotmac_kernel.planes",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.prerequisites",
@@ -567,6 +580,17 @@ __all__ = [
     "UndeclaredPermissionError",
     "install_permissions",
     "active_permissions",
+    # storage-neutral permission provisioning plan
+    "PermissionDefinition",
+    "PERMISSION_PLAN_SCHEMA_VERSION",
+    "PermissionPlan",
+    "PermissionPlanConflict",
+    "PermissionPlanDiff",
+    "PermissionPlanError",
+    "PermissionState",
+    "RoleDefinition",
+    "RoleGrant",
+    "RoleGrantProfile",
     # audit-action registry (module control-plane step 3)
     "AuditActionRegistry",
     "AuditActionsNotInstalledError",

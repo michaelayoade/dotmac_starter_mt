@@ -4,6 +4,14 @@
 
 ### Added
 
+- A pure, storage-neutral permission provisioning contract separates
+  module-owned `PermissionDefinition`s from assembly-owned `RoleDefinition`s
+  and versioned `RoleGrantProfile`s. `create_app` attaches the digest-addressed
+  read-only plan for migration/deploy adapters; its diff is additive only,
+  preserves operator state and existing descriptions, and reports inactive
+  desired state as conflicts. A missing role is created only when its assembly
+  definition explicitly authorizes it. Startup performs no provisioning writes
+  and the existing `PermissionSpec.default_roles` behavior is unchanged.
 - Runtime brand projection at `GET /branding/theme.css`: the assembly resolves
   tenant branding through the kernel, generates complete brand/accent ramps and
   their semantic role channels with `dotmac-ui`, and links the result after

@@ -2481,7 +2481,7 @@ consumer" rule.
 
 | Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
 |---|---|---|---|
-| `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
+| `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue`; storage-neutral `PermissionPlan` combines the definitions with assembly-owned `ProductAssemblySpec.role_grant_profiles` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise; `create_app` exposes the read-only plan for deploy/migration adapters | at BOOT: `create_app` walks every mounted route's stamped code through that same plan and raises `UndeclaredPermissionError` |
 | `...capabilities` (`CapabilitySpec`) | `dotmac_kernel.capabilities.CapabilityCatalogue` | `dotmac_kernel.deps.require_capability` | at the request (`UndeclaredCapabilityError`) |
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
 | `...outbox_event_types` (bare codes) | `dotmac_kernel.outbox_event_types.OutboxEventTypeRegistry` | `dotmac_durable_timers.schedule_timer` | before scheduling takes a lock or writes a timer/outbox row (`UndeclaredOutboxEventTypeError`) |
@@ -2536,6 +2536,43 @@ the same relation to a future tenant-configurable role→permission grant that a
 supported as the raw role check; both share one `_holds_any_role` query. The
 `rbac` feature's JSON routes are migrated to `require_permission`; every other
 feature still uses `require_role` and migrates one at a time.
+
+#### Permission provisioning ownership (Stage 1, 2026-08-26)
+
+Permission definitions and product role mappings have different owners. A
+module declares the opaque permission code, description, and owning module in
+its manifest; it cannot name the role algebra of every assembly that may adopt
+it. An assembly declares exact baseline mappings through
+`ProductAssemblySpec.role_grant_profiles`. The assembly also declares its role
+vocabulary through `role_definitions`, including the explicit policy for a
+missing role. A permission with no baseline grant is valid and remains
+available for an operator-owned assignment.
+
+`dotmac_kernel.permission_provisioning.PermissionPlan` is the pure composition
+contract between those authorities. It normalizes a positive profile version
+and emits a deterministic SHA-256 digest for preview and drift evidence.
+`create_app` builds it from the INSTALLED manifests, attaches it as
+`app.state.permission_plan`, and uses it for the existing mounted-route
+declaredness check. That is a read-only startup consumer, not a writer:
+persistence adapters belong in product migrations or deploy tooling and
+compare their rows with `PermissionPlan.diff`.
+
+The Stage 1 diff is additive only. It may propose a missing permission row, a
+missing link, and a missing product role only when that role's assembly-owned
+definition has `create_if_missing=True`. It never creates an implicit role,
+updates an existing description, reactivates or renames a permission or role,
+removes a grant, or deletes unknown/operator state. A missing role without
+that opt-in and any inactive desired role or permission are explicit
+conflicts. Subtractive reconciliation is not safe until role-permission policy
+claims have provenance, because an effective link alone cannot distinguish an
+operator's intent from a baseline profile's.
+
+The reference assembly's `starter.admin` profile is an exact explicit shadow of
+the nine current `admin` bindings. It is deliberately not derived as “admin
+gets every installed permission”: a later operator-only declaration must not
+silently expand that role. For this stage, `authorize_party` continues to read
+`PermissionSpec.default_roles`; the shadow profile changes no request decision
+and gives downstream products an additive adoption seam.
 
 #### The permission seam is authentication-neutral (kernel `0.1.0a62`)
 
