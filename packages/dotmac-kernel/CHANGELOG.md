@@ -64,6 +64,14 @@ separately.
   requires the source path be classified `public_non_secret`, proves source and
   target `type`/`format` agree, and carries an explicit per-edge coverage axis
   so completeness is owner-signed rather than caller-assumed.
+- One repair to the ported grammar, recorded rather than folded in silently:
+  `CapabilityCompositionSnapshot.require_compatible_with` resolved the source
+  capability's APPLY-INPUT schema unconditionally and then handed it to a
+  selector check that no-ops when no selector is declared, so every caller had
+  to hold a document the proof never read. It is now resolved only when a
+  selector consults it, and a selector binding with that schema withheld is
+  still refused, so laziness cannot turn a missing document into a skipped
+  check (ADR-0068 § 8).
 - Schema documents permit only LOCAL `$ref`/`$dynamicRef`/`$recursiveRef` and
   require draft 2020-12. Validation can therefore never become a network read —
   the property the release lane also enforces from the outside.
