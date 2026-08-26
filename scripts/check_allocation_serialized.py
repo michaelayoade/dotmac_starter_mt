@@ -32,6 +32,9 @@ working tree and never inferred from the layout:
   is genuinely stateless (declares no `short_code`/`migration_prefix`), which
   is a module that owns no namespace and therefore needs no allocation.
 - `stateless-protocol-adapter` (connectors, OIDC) — allowed with no row.
+- `stateless-contract-catalogue` (owner contract catalogues) — allowed with no
+  row. It is data, not an adapter: it holds canonical schema bytes and digests
+  and reaches no provider at all, so it owns no namespace to allocate.
 - `presentation-foundation` (`dotmac-ui`) — allowed with no row.
 - `universal-facility` (`dotmac-kernel`) — allowed with no row; it owns the
   grandfathered host lineage in `public` and declares no installable manifest.
@@ -67,7 +70,12 @@ GATED_CLASSIFICATIONS = frozenset({"optional-module"})
 # Classifications that legitimately own no lineage. Enumerated, so a NEW
 # classification is an error rather than something that silently skips.
 EXEMPT_CLASSIFICATIONS = frozenset(
-    {"stateless-protocol-adapter", "presentation-foundation", "universal-facility"}
+    {
+        "stateless-protocol-adapter",
+        "stateless-contract-catalogue",
+        "presentation-foundation",
+        "universal-facility",
+    }
 )
 
 

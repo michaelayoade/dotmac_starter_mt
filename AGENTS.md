@@ -158,7 +158,8 @@ specifics) points here and must never fork these rules.
     and exits 2 rather than passing when it cannot establish an answer.
     What is gated comes from each package's `EXTRACTION.toml`
     `classification` read AT THE BRANCH HEAD — `optional-module` is gated;
-    `stateless-protocol-adapter`, `presentation-foundation` and
+    `stateless-protocol-adapter`, `stateless-contract-catalogue`,
+    `presentation-foundation` and
     `universal-facility` legitimately own no lineage — never from a directory
     name or from "does it have a manifest", both of which fail open. A missing,
     unreadable or unknown classification FAILS. A genuinely stateless manifest

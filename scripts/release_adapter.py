@@ -48,7 +48,7 @@ checkout:
 
 (4) and (5) are the runtime halves of two of the four properties ADR-0006 gives
 the classification. The static halves are checked at PR time, generically over
-any package claiming the classification, by `stateless_adapter_violations` in
+any package claiming the classification, by `stateless_package_violations` in
 `tests/architecture/test_product_first_extraction.py`. Checking them again on
 the artifact is not duplication: the source tree and the wheel are different
 objects, and only one of them gets published.

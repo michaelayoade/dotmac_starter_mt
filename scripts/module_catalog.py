@@ -38,6 +38,12 @@ CLASSIFICATION_LABELS: Final = {
     # for its persistence plane, which is the truth rather than a gap
     # (ADR-0006, 2026-08-14 amendment).
     "stateless-protocol-adapter": "stateless protocol adapter",
+    # Data, not an adapter. A catalogue holds one owner's canonical capability
+    # schema bytes and their digests; it calls nothing, so where an adapter is
+    # ALLOWED to reach a provider (httpx and friends) a catalogue is REFUSED
+    # one. That is the property the separate word buys, and it is what the
+    # contract release lane enforces (ADR-0006, 2026-08-26 amendment).
+    "stateless-contract-catalogue": "stateless contract catalogue",
 }
 DEDICATED_RELEASE_WORKFLOWS: Final = {
     "dotmac-kernel": ".github/workflows/release-kernel.yml",
@@ -99,6 +105,23 @@ def _load_adapter_allowlist(repo_root: Path) -> dict[str, dict]:
     if not isinstance(adapters, dict):
         raise CatalogError(f"{path}: adapters must be an object")
     return adapters
+
+
+def _load_contract_allowlist(repo_root: Path) -> dict[str, dict]:
+    """The stateless-contract-catalogue lane (ADR-0006, 2026-08-26 amendment).
+
+    A FOURTH closed allowlist. It exists for the property the adapter lane
+    cannot assert: a catalogue reaches no provider at all, so the lane refuses
+    the network imports an adapter is allowed to make. Read here for the same
+    reason as the adapter lane — so the generated document cannot call an
+    allowlisted package "not allowlisted".
+    """
+    path = repo_root / ".github" / "release-contracts.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    contracts = data.get("contracts")
+    if not isinstance(contracts, dict):
+        raise CatalogError(f"{path}: contracts must be an object")
+    return contracts
 
 
 def _load_connector_allowlist(repo_root: Path) -> dict[str, dict]:
@@ -341,6 +364,7 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
     allowlist = _load_allowlist(repo_root)
     adapter_allowlist = _load_adapter_allowlist(repo_root)
     connector_allowlist = _load_connector_allowlist(repo_root)
+    contract_allowlist = _load_contract_allowlist(repo_root)
     records: list[ModuleRecord] = []
 
     for package_dir in _shared_package_dirs(repo_root):
@@ -423,6 +447,23 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
                 )
             release_policy = "connector allowlist"
             release_path = repo_root / ".github" / "release-connectors.json"
+        elif distribution in contract_allowlist:
+            contract_entry = contract_allowlist[distribution]
+            expected_dir = package_dir.relative_to(repo_root).as_posix()
+            if contract_entry.get("package_dir") != expected_dir:
+                raise CatalogError(
+                    f"{distribution}: contract package_dir disagrees with "
+                    f"{expected_dir}"
+                )
+            if classification != "stateless-contract-catalogue":
+                raise CatalogError(
+                    f"{distribution}: listed in the contract allowlist but "
+                    f"classified {classification!r} — the contract lane refuses "
+                    "provider I/O, so a package published through it must be "
+                    "classified as the thing that has none"
+                )
+            release_policy = "contract allowlist"
+            release_path = repo_root / ".github" / "release-contracts.json"
         elif distribution in DEDICATED_RELEASE_WORKFLOWS:
             release_policy = "dedicated workflow"
             release_path = repo_root / DEDICATED_RELEASE_WORKFLOWS[distribution]
@@ -462,10 +503,21 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
         )
 
     discovered = {record.distribution for record in records}
-    orphaned = sorted(
-        (set(allowlist) | set(adapter_allowlist) | set(connector_allowlist))
-        - discovered
+    lanes = (allowlist, adapter_allowlist, connector_allowlist, contract_allowlist)
+    # Four lanes make double-listing reachable in a way three did not: the
+    # branch chain above resolves to the FIRST match, so a package in two
+    # allowlists would be published by one lane while silently claiming the
+    # other's guarantees. Refuse the overlap rather than pick a winner.
+    overlapping = sorted(
+        distribution
+        for distribution in set().union(*lanes)
+        if sum(distribution in lane for lane in lanes) > 1
     )
+    if overlapping:
+        raise CatalogError(
+            "packages listed in more than one release lane: " + ", ".join(overlapping)
+        )
+    orphaned = sorted(set().union(*lanes) - discovered)
     if orphaned:
         raise CatalogError(
             "release allowlist names packages absent from the catalogue inputs: "

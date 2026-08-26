@@ -715,6 +715,17 @@ schema ownership into an optional check. `.github/release-adapters.json` owns
 the separate question for `stateless-protocol-adapter` distributions, which
 have no `ModuleManifest` or kernel floor and are gated, built and verified by
 `release-adapter.yml` instead (ADR-0006's 2026-08-14 amendment).
+`.github/release-contracts.json` owns the fourth lane, for
+`stateless-contract-catalogue` distributions — a product owner's capability
+contracts as canonical schema bytes and digests. It shares the adapter's four
+properties and adds a fifth the adapter lane cannot assert: a catalogue reaches
+nothing, so `release_contract.py` refuses `httpx`, `requests`, `socket`,
+`urllib` and `subprocess`, where an adapter is expected to declare a provider
+client. That difference is why the connector lane's "a release profile, not a
+new classification" ruling does not extend here (ADR-0006's 2026-08-26
+amendment). The lane is CLOSED and currently empty: the seven candidate
+catalogues live only on an archive ref and floor on a kernel capability grammar
+that is not yet published, and absence from the allowlist is the lock.
 The module lane's pre-publish smoke builds the target and kernel wheels plus
 every repository-local distribution named by that module's reviewed
 `wheel_contents.allowed_requires`; this is how the permitted

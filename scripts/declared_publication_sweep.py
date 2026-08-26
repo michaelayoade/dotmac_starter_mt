@@ -78,6 +78,7 @@ LANES: Final = (
     ("module", ".github/release-modules.json", "modules"),
     ("stateless-protocol-adapter", ".github/release-adapters.json", "adapters"),
     ("connector", ".github/release-connectors.json", "connectors"),
+    ("contract-catalogue", ".github/release-contracts.json", "contracts"),
 )
 
 #: Packages released by a DEDICATED workflow rather than a lane allowlist.

@@ -1148,6 +1148,98 @@ proof ADR-0018 requires: the checker is a pure function over a synthetic package
 tree, shown to fire on a planted manifest, a planted migrations directory and a
 planted ORM import, and shown NOT to fire on a conforming one.
 
+### Decision amendment — 2026-08-26 (a fifth classification: the stateless contract catalogue)
+
+This amendment adds `stateless-contract-catalogue` and, in doing so, departs
+from a ruling recorded when the connector lane was built. The departure is the
+substance of the amendment, so it is stated first.
+
+**What was ruled, and why it stands.** The connector lane's first cut demanded
+`classification = "connector-plugin"` in `EXTRACTION.toml`. That was rejected: a
+connector needs a distinct release *profile*, not a new extraction
+classification, because the four properties `stateless-protocol-adapter`
+governs — no `ModuleManifest`, no lineage, no ledger allocation, no persistence
+import — are **exactly** a connector's four. A second word for one set of
+properties would mean amending this ADR and the global validator to describe the
+same thing twice, and the ruling closed with an explicit instruction: never
+promote `connector-plugin` to a classification without amending both first.
+
+That reasoning is correct and is not disturbed here. A connector remains a
+release profile over `stateless-protocol-adapter`, and what separates its lane
+from the adapter lane remains strictness the adapter lane does not ask for.
+
+**Why a contract catalogue is not the same case.** A catalogue is one product
+owner's capability contracts: canonical schema bytes, the digests that attest
+them, and a typed public surface. It shares the adapter's four properties, and
+if that were the whole story the connector ruling would apply unchanged and this
+amendment would be wrong.
+
+It is not the whole story, because the four properties are silent on the one
+thing that most distinguishes these packages: **network reach**. An adapter
+EXISTS to reach a provider. That is what the word adapter means here, and it is
+not incidental — `dotmac-auth-oidc` ships `transport.py`, declares `httpx` in
+its own reviewed `allowed_requires`, and this ADR names network I/O as one of
+the two concerns that cannot be faked. A contract catalogue reaches nothing at
+all. It is held data. Its release lane refuses `httpx`, `requests`, `socket`,
+`urllib` and `subprocess` outright.
+
+So the two classifications differ on an enforceable property, not on emphasis.
+A single word covering both would have to permit the network import, because
+the adapter genuinely needs it — and a catalogue that acquired a provider client
+would then be caught by nothing but whether someone remembered to route it
+through the stricter lane. That is precisely the failure the connector ruling
+was protecting against, arriving from the other direction: there, a second word
+would have weakened nothing and duplicated a definition; here, a single word
+weakens the check for one of the two shapes it covers.
+
+**The properties the word has to mean.** The shared four are checked identically
+to the adapter's, through the same pure function, so the two cannot drift apart
+on what they agree about:
+
+1. **No `ModuleManifest`.** Nothing to install.
+2. **No migration lineage.** No `migrations/` tree, no `short_code`, no
+   `migration_prefix`.
+3. **No namespace allocation.** No row in `MIGRATION_OWNER_LEDGER`.
+4. **No persistence import.** No ORM, no database driver.
+
+And the fifth, which is the one this classification exists to carry:
+
+5. **No network reach.** No `httpx`, `requests`, `aiohttp`, `urllib`,
+   `urllib3`, `socket` or `subprocess` import. A catalogue describes semantics;
+   an independently released connector implements them against a provider.
+
+**Where it is checked.** On the DECLARED classification, in
+`tests/architecture/test_product_first_extraction.py`
+(`contract_catalogue_violations`), so an unlisted catalogue is governed exactly
+as much as an allowlisted one — the classification is the gate, not lane
+membership. The shared four come from `stateless_package_violations`, renamed
+from `stateless_adapter_violations` because it now governs two classifications
+and a name that says "adapter" would misdescribe half its callers.
+
+The ADR-0018 sensitivity proof is the discriminator itself, stated as tests: the
+same planted network import must be REFUSED for a catalogue and ACCEPTED for an
+adapter, and the real `dotmac-auth-oidc` — which passes the adapter checker
+exactly — must still be refused by the catalogue checker, because it ships
+`transport.py`. If that pair ever passed together, the fifth property would be
+decoration and this amendment should be reverted rather than patched.
+
+**The lane.** `.github/release-contracts.json` is the fourth closed allowlist,
+gated, built and verified by `release-contract.yml` through
+`scripts/release_contract.py`. It lands CLOSED and EMPTY. The seven candidate
+catalogues exist only on an archive ref and declare a `dotmac-kernel` floor of
+`0.1.0a69` — a number that branch minted for itself and that mainline later
+spent on unrelated work — while the capability grammar they import
+(`CapabilityContractSnapshot`, `CapabilitySchemaDocument`,
+`CapabilityCompositionSnapshot`) is on no published kernel. Absence from the
+allowlist is the lock; the workflow is not.
+
+**Not a licence to reclassify.** Adding a fifth value does not invite a sixth
+whenever a package fits awkwardly. The test this amendment sets is the one it
+had to pass itself: name the property the existing classification cannot
+express, show it is enforceable, and show the guard distinguishing the two.
+A classification that cannot answer all three is a release profile — which is
+what the connector lane correctly remained.
+
 ### Decision amendment — 2026-08-15 (a legacy source and its module shadow, disambiguated)
 
 D1 says that until an extraction's cutover is proven, "the source product and

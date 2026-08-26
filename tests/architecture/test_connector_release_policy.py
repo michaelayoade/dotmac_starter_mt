@@ -878,6 +878,48 @@ def test_the_published_bytes_are_conformance_checked_not_just_installed() -> Non
     assert "--index-url" in verify and "--extra-index-url" in verify
 
 
+def test_the_declared_floor_is_EXECUTED_not_merely_tagged() -> None:
+    """`_refuse_unpublished_floor` proves a floor has a release TAG. It does not
+    install it, and nothing else did either: pip resolves the connector's own
+    `>=<floor>` against the index and takes the NEWEST release, so both the
+    pre-publish smoke and the registry smoke certified the CURRENT control
+    plane twice and the declared floor zero times.
+
+    That was not hypothetical. `dotmac-connector-linkedin` and `-mono` declare
+    `0.1.0a11` and the other five declare `0.1.0a14`, while published
+    `dotmac-integration` runs to `0.1.0a16` — so no connector's declared floor
+    had ever been executed, and one that would `ImportError` against its own
+    stated minimum would have shipped green.
+
+    The gate is now both legs, in both jobs: install `dependency==floor`
+    exactly, run the shipped kit there, and separately test the current
+    release. Either leg failing refuses the tag.
+    """
+    source = WORKFLOW.read_text(encoding="utf-8")
+    verify = source.split("verify:", 1)[1]
+
+    # Two conformance runs, not one.
+    assert verify.count("release_connector.py verify-wheel") == 2, (
+        "the verify job must run conformance at the declared floor AND at the "
+        "current release"
+    )
+    # One of them pins the floor EXACTLY. `>=` would resolve to the newest
+    # release again and quietly restore the defect this test exists to prevent.
+    assert "dotmac-integration==" in verify
+    assert "dotmac-integration>=" not in verify
+
+    # Both legs precede the tag: a floor failure must refuse publication
+    # evidence, not be discovered after the tag is pushed.
+    assert "git tag" in verify
+    assert verify.rindex("verify-wheel") < verify.index("git tag")
+
+    # The pre-publish smoke builds the floor from its RELEASE TAG rather than
+    # from `packages/dotmac-integration`, which is whatever main is today.
+    build = source.split("build:", 1)[1].split("verify:", 1)[0]
+    assert "git archive" in build and "dotmac-integration-v" in build
+    assert build.count("release_connector.py verify-wheel") == 2
+
+
 def test_the_policy_states_what_an_entry_does_not_prove() -> None:
     """The failure mode this lane is most exposed to is a reader taking an
     allowlist row for an endorsement of a provider integration. The three
@@ -889,7 +931,7 @@ def test_the_policy_states_what_an_entry_does_not_prove() -> None:
     assert "not that the provider works" in prose
 
 
-def test_the_three_lanes_do_not_overlap() -> None:
+def test_the_four_lanes_do_not_overlap() -> None:
     """A distribution in two lanes would be publishable by whichever gate asks
     the fewest questions."""
     modules = set(
@@ -906,10 +948,20 @@ def test_the_three_lanes_do_not_overlap() -> None:
             )
         )["adapters"]
     )
+    contracts = set(
+        json.loads(
+            (PROJECT_ROOT / ".github" / "release-contracts.json").read_text(
+                encoding="utf-8"
+            )
+        )["contracts"]
+    )
     connectors = set(_policy()["connectors"])
     assert not modules & adapters
     assert not modules & connectors
+    assert not modules & contracts
     assert not adapters & connectors
+    assert not adapters & contracts
+    assert not connectors & contracts
 
 
 def test_no_first_party_connector_package_exists_unlisted() -> None:
