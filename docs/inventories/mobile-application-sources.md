@@ -16,8 +16,9 @@ cross-repository record of what they are, what they assert, or how far they have
 drifted apart. Read it under the same two cautions as every other file in this
 directory: facts go stale (re-run the measurements rather than trusting them),
 and **an inventory is not a mandate** — ADR-0006 § "The extraction rule" governs
-whether anything measured here may be extracted, and § "Decision amendment —
-2026-08-12" governs what counts as a second consumer.
+whether anything measured here may be extracted, as amended by § "Decision
+amendment — 2026-08-12", which rules that a second consumer is **evidence, not
+permission** and that all three dossier states permit a shared module.
 
 Its companion decision is
 [`ADR-0065 — Native mobile clients are composed applications`](../adr/0065-mobile-clients-are-composed-applications.md),
@@ -343,9 +344,10 @@ a continuing product. Two consequences are load-bearing for this dossier:
 
 - CRM mobile receives **no Wave-2 security or offline-sync work.** Its
   unencrypted Drift database is not scheduled for SQLCipher.
-- CRM mobile **cannot serve as the second independent adopter** for any shared
-  package. A second adopter must come from another live Dotmac product and needs
-  Michael's separate approval (see § 7).
+- CRM mobile **cannot supply adopter evidence** for any shared package. A
+  consumer being deleted cannot corroborate a contract or constrain a
+  generalisation; evidence must come from another live Dotmac product (see § 7).
+  This limits what may be *claimed*, not what may be *built* — see § 5.5.
 
 **CI.** `.github/workflows/field-app-ci.yml` runs on pull requests to `main`
 only. Its `mobile` job additionally runs `dart run build_runner build
@@ -500,27 +502,43 @@ owner rather than a second copy.
 
 ### 5.5 Why this is duplication evidence, not reuse evidence
 
-ADR-0006 § "The extraction rule" requires **two independent consumers of the
-same contract**, and the 2026-08-12 amendment makes clear that a second consumer
-is evidence, not permission. Neither test is met here:
+**First, what this section does not claim.** ADR-0006 § 5 point 1, read as
+written, made two independent consumers a prerequisite for sharing at all. **That
+reading was amended on 2026-08-12** — the amendment is headed "a second consumer
+is evidence, not permission" and rules that "a second consumer proves reuse and
+constrains generalisation; it does **not** determine whether a coherent
+capability belongs in a module." All three of its dossier states —
+`audit-complete`, `adopted`, `reuse-proven` — permit a shared module; the state
+records the evidence level, never the placement permission.
 
-1. **They are not independent.** `field_mobile` is a directory copy of
-   `crm/mobile` taken on 2026-07-09. Their `pubspec.yaml` and `pubspec.lock` are
-   byte-identical, down to the package name and the version string. Michael
-   ruled on 2026-08-26 that Sub's two apps count as **one product** for adoption
-   purposes; the CRM/Sub pair is not two products either — it is one
-   implementation stored twice.
+So nothing below is an argument that a package is *forbidden* because only one
+adopter exists. The consumer count neither grants nor withholds permission. What
+the count does determine is **what may be claimed**, and the finding here is
+narrower and firmer: these two trees supply *one implementation's* worth of
+evidence, not two.
+
+1. **They are not independent, so they cannot corroborate each other.**
+   `field_mobile` is a directory copy of `crm/mobile` taken on 2026-07-09. Their
+   `pubspec.yaml` and `pubspec.lock` are byte-identical, down to the package name
+   and the version string. Michael ruled on 2026-08-26 that Sub's two apps count
+   as **one product** for adoption purposes; the CRM/Sub pair is not two products
+   either — it is one implementation stored twice. Two copies of one design
+   cannot constrain a generalisation, which is the specific work the amendment
+   says a second consumer does.
 2. **They are not consumers of the same contract.** They point at different
    hosts (row 10), route four outbox kinds differently (rows 2 and 4), disagree
    about who owns the completion gate (rows 7–9), and disagree about whether a
    transport failure ends a session (row 1). Seventeen contract-affecting
    differences is the opposite of one contract with two consumers.
-3. **One of them is being deleted.** Extracting a package whose second consumer
-   is scheduled for retirement produces a package with one consumer and a
-   fictitious adoption record.
+3. **One of them is being deleted.** A consumer scheduled for retirement cannot
+   carry an adoption record, because the record stops describing the fleet the
+   day the repository goes.
 
 The correct reading of the 51 files is therefore: *this is what happens without a
-contract*, and it is the input to ADR-0065, not a licence to build a package.
+contract.* It is the input to ADR-0065. Whether a package is built is decided in
+ADR-0065 § 9 on grounds of readiness — proposed contracts, unproven boundaries,
+missing enforcement, defect remediation first — and **not** on this consumer
+count.
 
 ---
 
@@ -547,11 +565,17 @@ this document.
 
 ---
 
-## 7. The second-adopter question
+## 7. Candidate future adopters — and why none is an adopter today
 
-Michael's 2026-08-26 ruling removed CRM from the pool of possible second
-adopters, and ruled that Sub's two apps count as one product. The pool that
-remains, measured across the fleet beside this checkout:
+Michael's 2026-08-26 rulings put CRM out of the pool and count Sub's two apps as
+one product. **Michael has since ruled on the outcome: stay at "no package"** —
+justified in ADR-0065 § 9 on grounds of readiness, not on the count below.
+Nothing in this section is an argument that a package is forbidden; ADR-0006's
+2026-08-12 amendment settled that a consumer count neither grants nor withholds
+permission. This section establishes only **what could eventually be evidenced,
+and by whom.**
+
+The pool, measured across the fleet beside this checkout:
 
 | Repository | Dart files | Mobile artefact | Assessment |
 |---|---|---|---|
@@ -563,54 +587,63 @@ remains, measured across the fleet beside this checkout:
 | `dotmac_backoffice` | 0 | none | ADR-0006's README correction records this is not an independently deployed application |
 | `dotmac_integrator` | 0 | none | a transport |
 
-**Recommendation, for Michael's approval — not a decision taken here: nominate
-ERP "DotMac Frontline" as the second independent adopter.** The reasoning:
+### 7.1 ERP "DotMac Frontline" — a credible future candidate, not an adopter
 
-1. **It is a real product with a written scope, not a hypothetical.**
-   `dotmac_erp/docs/mobile/dotmac-frontline-spec.md` names three personas
-   (employee self-service, manager approvals, field/warehouse), locks the MVP
-   scope, and records resolved decisions. The Knowledge entry
-   `project-mobile-frontline` records that its backend (`/me/attendance`,
-   `/me/notifications`, `/me/approvals`, `/me/expenses/claims`) shipped with 28
-   tests in PR #91.
-2. **It is genuinely independent.** Different repository, different database,
-   different domain, different backend, and a different audience from both Sub
-   apps. It cannot be a copy of either, because no Dart exists yet. It satisfies
-   the independence half of ADR-0006 § "The extraction rule" in a way no other
-   candidate does.
-3. **Its needs overlap where the contracts are, not where the screens are.** The
-   spec's three personas need authenticated session handling, a typed approval
-   inbox, receipt capture with offline tolerance, and push. Those map onto
-   `MobileSessionContextV1`, `QueuedMutationV1` and `PushIntentV1` — and onto
-   *nothing* in the self-care app's billing screens or the field app's map
-   layers. That is the correct kind of overlap: contract, not markup.
-4. **Greenfield adoption proves the contract rather than retrofitting it.**
-   A package adopted by an application that has not yet been written cannot
-   inherit the shape of the first implementation by accident, which is exactly
-   the failure ADR-0006 § 5 exists to prevent.
+**Michael's ruling, recorded as given:** *a credible future candidate, but zero
+Dart means it is not yet an adopter. Its online-only MVP could eventually prove
+the session and data-scope slices, but not queued mutation or push.*
 
-**Three caveats Michael should weigh before approving.**
+Measured against ADR-0006's own definition of a concrete candidate — **"an
+assembly that exists and will consume it — the smallest claim that still carries
+evidence"** — Frontline fails on the first half:
 
-- The spec's locked posture is *"lean — online-only, polling (no push in MVP)"*.
-  If Frontline ships online-only, it exercises `MobileSessionContextV1` and
-  `MobileDataScopeV1` but **not** `QueuedMutationV1`, and push only as a fast
-  follow. A second adopter that does not exercise the offline contract is not
-  evidence for extracting the offline contract.
-- The spec is dated 2026-06-10 and its repository still contains zero Dart. It
-  has not started. Nominating it commits the mobile programme's package timeline
-  to a project that has not begun.
-- ERP is the fleet's outlier on every other adoption axis — no kernel adoption,
-  no import boundary, its own licence scheme (ADR-0006's F0 reading 2). Being
-  first to adopt a *new* contract is easier than retrofitting an old one, but it
-  is still ERP.
+| Half of the test | Frontline today | Verdict |
+|---|---|---|
+| *an assembly that **exists*** | `dotmac_erp` contains **zero Dart files** and no `pubspec.yaml`; the consuming assembly for a Flutter package is a Flutter application, and none exists | **fails** |
+| *and **will consume it*** | the spec locks scope, personas and backend posture, and its `/me/*` backend shipped with 28 tests | plausible |
 
-**If Michael rejects Frontline, there is no second adopter, and the correct
-outcome is no package.** Recording the duplication and shipping the contract as
-a specification each application implements locally is a complete and legitimate
-result under ADR-0006 § 5 — "Recording it is the deliverable; removing it is
-not."
+So Frontline is **not an adopter, and not yet a concrete candidate either**. A
+spec is intent; an assembly is evidence.
 
----
+What remains true and worth recording, for when it does start:
+
+1. **It is a real product with a written scope, not a hypothetical.** The spec
+   names three personas (employee self-service, manager approvals,
+   field/warehouse), locks the MVP scope, and records resolved decisions.
+2. **It would be genuinely independent.** Different repository, database, domain,
+   backend and audience from both Sub apps. It cannot be a copy of either,
+   because no Dart exists yet — which is exactly what would let it *constrain a
+   generalisation* rather than confirm one.
+3. **Greenfield adoption checks a contract rather than retrofitting it.** An
+   application not yet written cannot inherit the first implementation's
+   accidents by accident.
+4. **ERP is the fleet's outlier on every other adoption axis** — no kernel
+   adoption, no import boundary, its own licence scheme (ADR-0006's F0 reading
+   2). Adopting a *new* contract is easier than retrofitting an old one, but it
+   is still ERP.
+
+### 7.2 Evidence is tracked PER CONTRACT SLICE, not per application
+
+This is the mechanism that stops a partial adopter being counted as a whole one,
+and Frontline is the case that forces it. Its locked posture is *"lean —
+online-only, polling (no push in MVP)"*. Counted per application it would look
+like one future adopter of everything. Counted per slice:
+
+| Contract slice (ADR-0065) | Consumers exercising it today | Future candidate | Could Frontline ever evidence it? |
+|---|---|---|---|
+| `MobileSessionContextV1` | 0 | ERP Frontline | **yes** — its personas need authenticated sessions from day one |
+| `MobileDataScopeV1` | 0 (`field_mobile` partitions 1 of 9 tables; the self-care disk cache partitions nothing) | ERP Frontline | **yes** — a role-aware app on shared staff devices |
+| `QueuedMutationV1` | 0 on the contract; `field_mobile` has the closest implementation | **none** | **no** — online-only is a locked decision, not a schedule |
+| `PushIntentV1` | 0 on the contract; `field_mobile`'s typed `routeForMessage` is the closest shape | **none** | **no** — push is a post-MVP fast-follow, not a commitment |
+| Wipe participation | 0 (`field_mobile` logout clears only the token store) | ERP Frontline **only if** it persists anything | undetermined while online-only |
+| Auth state machine | 0 on the contract; two Sub apps independently implement single-flight refresh | ERP Frontline | **yes** |
+
+**A slice's evidence level is the number of consumers that exercise that slice** —
+never the number of applications that adopted a neighbouring slice, and never a
+whole-application claim applied downward. The two slices with the most expensive
+semantics, `QueuedMutationV1` and `PushIntentV1`, have **no candidate at all**,
+now or in the locked MVP. Any future dossier must carry one row per slice; a
+single state for a multi-slice package reports a number that does not exist.
 
 ## 8. What a reviewer can decide from this file alone
 
@@ -620,22 +653,26 @@ none of which requires session context, a plan document, or a Knowledge entry:
 1. **How much code is actually shared?** 51 files differ and 9 are one-sided
    between the only two trees that could be called duplicates (§ 5.2, § 5.3).
    Seventeen of the 51 differ on contract, not appearance (§ 5.3).
-2. **Are there two independent consumers today?** No. One tree is a July copy of
-   the other, with byte-identical `pubspec.yaml` and `pubspec.lock`, and the
-   original is scheduled for deletion (§ 4, § 5.5).
+2. **What evidence do the existing trees supply?** One implementation's worth,
+   not two. One tree is a July copy of the other, with byte-identical
+   `pubspec.yaml` and `pubspec.lock`, and the original is scheduled for deletion
+   (§ 4, § 5.5). Two copies of one design cannot constrain a generalisation.
 3. **Is duplication actually costing anything?** Yes, measurably: an
    authentication fix committed to the retiring copy on 2026-08-18 has still not
    reached the surviving copy (§ 5.4), and twelve further defects are recorded
    in § 6.
-4. **Is there a credible second adopter?** One, conditionally — ERP Frontline,
-   with three caveats, and it is Michael's call (§ 7).
+4. **Is there an adopter, per slice?** No. Frontline fails the concrete-candidate
+   test today (zero Dart), and even in its locked MVP it could never evidence
+   `QueuedMutationV1` or `PushIntentV1` (§ 7.1, § 7.2).
 
-A reviewer who answers "no" to (4) should read § 5.5 and conclude **no package**:
-publish the contracts as a specification, fix the twelve defects in place, and
-re-measure after Frontline ships. A reviewer who answers "yes" should read
-ADR-0065 for the contracts a package would have to carry, and note that
-ADR-0065 § "Release and adoption" forbids claiming reuse before a released
-package is adopted by exact pin.
+**Note what question is NOT on that list: "may a package be built?"** The
+consumer count does not answer it. ADR-0006's 2026-08-12 amendment ruled that a
+second consumer is evidence, not permission, and that all three dossier states
+permit a shared module. The build/no-build decision is taken in ADR-0065 § 9 on
+four readiness grounds — proposed contracts, unproven boundaries, missing
+enforcement, defect remediation first — and the answer today is **no package
+yet**. This file supplies facts (1)–(4); it does not supply that decision, and a
+reviewer should not derive it from the adopter count.
 
 ---
 

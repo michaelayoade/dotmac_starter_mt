@@ -3,8 +3,9 @@
 **Status:** Proposed
 **Date:** 2026-08-26
 **Extends:** ADR-0024 (applications compose by synchronizing data), ADR-0006
-(white-label product foundation — the extraction rule and its 2026-08-12
-second-consumer amendment), ADR-0003 (composable deployment profiles)
+(white-label product foundation — the extraction rule **as amended 2026-08-12**:
+a second consumer proves reuse and constrains generalisation; it does not grant
+or withhold permission to share), ADR-0003 (composable deployment profiles)
 **Owns:** the versioned client contracts a Dotmac native mobile application
 implements — session context, data scope, queued mutation, push intent, the
 logout/wipe participation contract, and the authentication state machine — plus
@@ -56,9 +57,11 @@ Two decisions Michael has already taken frame what may follow from this:
 
 - **CRM mobile is a retirement target**, following the standing approved goal to
   retire `dotmac_crm` entirely. It gets no security or offline-sync work, and it
-  **cannot be the second independent adopter** of any shared package.
+  **cannot supply adopter evidence** for any shared package — a consumer that is
+  being deleted proves nothing about a contract's durability.
 - **Sub's two applications count as ONE product** for adoption purposes. The
-  CRM/Sub copied field implementation is not two independent consumers.
+  CRM/Sub copied field implementation supplies one implementation's worth of
+  evidence, not two independent consumers' worth.
 
 Three failure modes have to be designed out before any mobile code moves:
 
@@ -407,20 +410,127 @@ request means the server refused an action; it does not end a session. Only a
 401/403 on the **refresh exchange itself**, or a generation bump, is
 authoritative for session lifetime.
 
-### 9. Proposed package boundaries — proposed, not authorized
+### 9. No package yet — a mobile-programme decision, not a permission problem
 
-**No shared package exists today and none is authorized by this ADR.** ADR-0006
-§ "The extraction rule" requires two independent consumers of the same contract,
-a named owner, and a migration path; the inventory shows the fleet has none of
-the three. Michael's 2026-08-26 rulings remove CRM from the adopter pool and
-count Sub's two applications as one product. **The correct state today is
-therefore: contracts published as a specification, implemented locally by each
-application, with the duplication recorded and left in place.**
+**First, a correction this ADR must not repeat.** ADR-0006 § 5 point 1 and the
+2026-08-08 amendment's point 4, read as written, made two independent consumers
+of the same contract a **prerequisite for sharing at all**. That reading was
+amended on 2026-08-12 by the section headed *"a second consumer is evidence, not
+permission"*. Its ruling, quoted exactly:
 
-If and only if a second independent adopter is approved, these are the boundaries
-a package split would have to respect. They are recorded now so that a future
-extraction is a decision against a stated shape rather than a harvest of
-whatever the first implementation happened to do.
+> A second consumer proves reuse and constrains generalisation; it does **not**
+> determine whether a coherent capability belongs in a module.
+
+The amendment is a **tightening of reasoning, not a loosening of a gate**, and
+its stated cause matters here. A rule requiring two consumers before sharing
+"does not delay those modules; it **forbids** them, and pushes the capability
+back into the single assembly this programme exists to thin." The contradiction
+was found by a build rather than a reading: the release catalogue is a
+vendor-side capability whose tables REVOKE `app_user`, so a product data plane
+is disqualified as a consumer **on purpose**, and its second consumer cannot
+exist until a second vendor or OEM control plane does.
+
+**The three dossier states are the vocabulary this ADR uses.** They are
+ADR-0006's, not invented here, and *all three permit a shared module* — the
+state records the evidence level, never the placement permission:
+
+| State | Means | Requires |
+|---|---|---|
+| `audit-complete` | The inventory ran and the unit was drawn deliberately. Nothing has adopted it. | An audited `source_mode`, **at least one concrete** candidate consumer, and **zero** contract consumers. |
+| `adopted` | One real consumer is on the contract and its first cutover is complete. | An audited `source_mode` and **exactly one** contract consumer. |
+| `reuse-proven` | Two or more independent consumers exercise the same contract. | An audited `source_mode` and **two or more** contract consumers. |
+
+The former `approved` state was deliberately renamed to `reuse-proven` because
+"the old name described a permission, which is precisely what the state no
+longer grants."
+
+So **"we have only one adopter" is not a reason not to extract**, and this ADR
+does not offer it as one. Two adopters are the evidence standard for reaching
+`reuse-proven` and for *claiming* reuse (§ 10 rule 6). They are not a gate on
+starting, and the consumer count neither grants nor withholds permission.
+
+**Applying the amendment's concrete-candidate test honestly.** `audit-complete`
+— the weakest of the three states — still requires "at least one concrete
+candidate consumer", which the amendment defines as **"an assembly that exists
+and will consume it — the smallest claim that still carries evidence."** ERP
+"DotMac Frontline" must be measured against that definition, not waved past it:
+
+| Half of the test | Frontline today | Verdict |
+|---|---|---|
+| *an assembly that **exists*** | `dotmac_erp` contains **zero Dart files** and no `pubspec.yaml`. The consuming assembly for a Flutter package is a Flutter application, and no such application exists. | **fails** |
+| *and **will consume it*** | `dotmac_erp/docs/mobile/dotmac-frontline-spec.md` v1.0 (2026-06-10) locks scope, personas and backend posture, and its `/me/*` backend shipped with 28 tests. Written intent is real. | plausible |
+
+**Frontline therefore does not clear the concrete-candidate bar today**, and the
+honest consequence is stronger than "we have one candidate instead of two":
+these proposed packages do not currently qualify even for `audit-complete`, so
+**no dossier should be opened for them yet**. Michael's position is recorded as
+given — *a credible future candidate, but zero Dart means it is not yet an
+adopter* — and this ADR adds only the mechanical reading of the amendment that
+agrees with it. A spec is intent; an assembly is evidence.
+
+This finding reinforces the decision below but does not cause it. Even if
+Frontline had shipped its first Dart file this morning and cleared the bar, the
+four grounds below would still stand, because none of them is a consumer count.
+
+**The decision: stay at no package.** This is a deliberate mobile-programme
+sequencing decision, taken on four grounds that are about readiness, not
+permission:
+
+1. **The contracts are proposed, not ratified.** Everything in §§ 3–8 carries
+   status `Proposed`. Publishing a package whose types are still under review
+   freezes a shape nobody has agreed to, and § 10 rule 1 then makes that shape
+   immutable. Ratification is cheap now and expensive after a release.
+2. **The boundaries are unproven.** § 9a's split into `_contracts`, `_session`,
+   `_sync` and `_wipe` is a design sketch derived from reading two
+   implementations, one of which is a copy of the other. No application has ever
+   been built against those seams. A boundary that has never carried a second
+   shape is a guess, and the amendment's own warning applies: a second consumer
+   *constrains generalisation*, and without one the generalisation is unchecked.
+3. **Enforcement is missing, and this repository cannot supply it.** Nine rows
+   of the enforcement table below say `none yet`. That is not a paperwork gap:
+   `dotmac_starter_mt` is a Python repository holding no Dart, so it cannot run
+   an analyzer, a Flutter test, or a package conformance suite. A package
+   published under contracts that nothing checks is a package that drifts from
+   its own ADR on the first commit — which is precisely the failure §§ 5.4 and 6
+   of the inventory already document in the unshared code.
+4. **Defect remediation comes first.** The twelve defects in the inventory's § 6
+   are the current work: an entirely unencrypted field database, a logout that
+   clears only the token store, a principal-free response-cache key, a push
+   router that navigates to any raw path the server sends, an Xcode Cloud hook
+   that builds the wrong application, and two field apps that have never been
+   released from a tag. Extracting a package from code with those properties
+   exports the defects into a shared artifact and gives them a version number.
+
+**What "no package yet" concretely means.** The contracts are published as a
+specification and implemented locally by each application; the duplication is
+recorded and left in place; and no reuse is claimed (§ 10 rule 6).
+
+**And what dossier state that is: none of the three.** `audit-complete` is the
+weakest state and it still requires at least one *concrete* candidate consumer,
+which the candidate test above shows does not exist — so **no dossier is opened
+for these packages**, and this ADR does not claim `audit-complete` for them. That
+is not a loophole being noted; it is the amendment's own bar, applied to a
+mobile programme whose only named candidate has written zero lines of Dart. A
+dossier claiming `audit-complete` here would be "a package built for nobody",
+which is precisely the speculative extraction ADR-0006 § 5 exists to stop.
+
+**What would change the decision.** Ground 1 clears when the contracts are
+ratified; ground 2 when a second implementation exercises the seams, even before
+a package exists; ground 3 when a guard lives somewhere that can run Dart —
+Sub's `.github/workflows/mobile.yml` today, a package's own suite later; ground
+4 when the § 6 defects are closed. Separately, a dossier becomes openable at
+`audit-complete` the moment a concrete candidate exists — an ERP Flutter
+assembly that exists and will consume the packages. **These are independent
+tracks: a concrete candidate appearing does not clear grounds 1–4, and clearing
+grounds 1–4 does not by itself make a dossier openable.** Neither is Michael's
+approval of a nomination; the amendment's test is mechanical.
+
+### 9a. Proposed package boundaries, and per-slice evidence
+
+If and when extraction happens, these are the boundaries a split would have to
+respect. They are recorded now so a future extraction is a decision against a
+stated shape rather than a harvest of whatever the first implementation happened
+to do.
 
 | Proposed package | Would own | Would NOT own | Dependencies |
 |---|---|---|---|
@@ -428,6 +538,46 @@ whatever the first implementation happened to do.
 | `dotmac_mobile_session` | the § 8 state machine, single-flight refresh, generation fencing, atomic credential storage | which authorization server is used; login UI; MFA UI | `dotmac_mobile_contracts`, a secure-storage port |
 | `dotmac_mobile_sync` | the `QueuedMutationV1` outbox, aggregate-ordered flush, conflict parking, evidence-file ordering | operation semantics; endpoint paths; any product's DTOs | `dotmac_mobile_contracts`, a database port |
 | `dotmac_mobile_wipe` | the § 7 participant registry, journal and resumable wipe | what each participant stores | `dotmac_mobile_contracts` |
+
+**Evidence is tracked PER CONTRACT SLICE, never per application.** This is a
+standing rule of this ADR, and it is the mechanism that stops a partial adopter
+being counted as a whole one. An application that cannot exercise a slice
+supplies **zero** evidence for that slice, however thoroughly it exercises the
+others; a slice's evidence level is the count of consumers that actually
+exercise *it*, and a dossier that reports one number for a whole application is
+reporting a number that does not exist.
+
+The concrete case that forces the rule: ERP "DotMac Frontline" has a locked
+posture of *"lean — online-only, polling (no push in MVP)"*. Counted per
+application it would look like one adopter of everything. Counted per slice it
+is a **future** candidate — not a concrete one, per § 9 — for two slices and
+nothing at all for the other two. The third column below records future
+candidacy only; nothing in it is evidence today, and nothing in it clears the
+amendment's concrete-candidate test while `dotmac_erp` holds zero Dart:
+
+| Contract slice | Consumers exercising it today | Future candidate (not concrete yet) | Evidence level |
+|---|---|---|---|
+| `MobileSessionContextV1` (§ 3) | 0 — no application implements the contract; three implement session handling that predates it | ERP Frontline (its personas need authenticated sessions from day one) | none |
+| `MobileDataScopeV1` (§ 4) | 0 — `field_mobile` partitions exactly one of nine tables by principal; the self-care disk cache partitions nothing | ERP Frontline (a role-aware app on shared staff devices) | none |
+| `QueuedMutationV1` (§ 5) | 0 on the contract; `field_mobile` has the closest implementation (unique `clientRef`, FIFO, 409 parking) | **none — ERP Frontline is online-only by locked decision and cannot supply this** | none, with no candidate |
+| `PushIntentV1` (§ 6) | 0 on the contract; `field_mobile`'s typed `routeForMessage` is the closest shape, the self-care router is a direct violation | **none — push is a post-MVP fast-follow for Frontline, not a commitment** | none, with no candidate |
+| Wipe participation (§ 7) | 0 — `field_mobile` logout clears only the token store | ERP Frontline **only if** it persists anything; undetermined while it is online-only | none |
+| Auth state machine (§ 8) | 0 on the contract; two Sub applications independently implement single-flight refresh, and one implements the 401/403-only rule | ERP Frontline | none |
+
+Read the third and fourth rows: **the two slices with the most expensive
+semantics are the two with no candidate at all, now or in the locked MVP.** A
+package split that shipped `dotmac_mobile_sync` on the strength of "Frontline is
+adopting" would be shipping a generalisation checked by nobody — and would be
+counting an application-level claim against a slice that application has
+decided, on the record, not to implement. Per-slice tracking makes that visible
+before publication rather than after.
+
+The rule restated so it can be applied without re-reading the case: **a slice's
+evidence level is the number of consumers that exercise that slice.** Never the
+number of applications that adopted the package, never the number that adopted a
+neighbouring slice, and never a whole-application state applied downward. A
+dossier reporting one state for a multi-slice package is reporting a number that
+does not exist.
 
 Layering is one-way and mirrors the server side's
 `assembly → module → dotmac-ui → dotmac-kernel`:
@@ -486,7 +636,52 @@ specification itself.
    contract in one application is the same defect as two writers of one row.
 6. **Reuse is never claimed before (4) and (5) hold.** Until then the honest
    statement is "the contract is specified and implemented independently", and
-   this ADR requires that wording.
+   this ADR requires that wording. Reaching `reuse-proven` additionally needs two
+   or more independent consumers **of the slice in question** (§ 9a).
+
+### 11. The extraction shape, when it eventually happens
+
+**Extraction must not produce one universal mobile build.** The failure this
+guards against is a single Flutter application with per-product branches, or a
+"core app" that every product skins — which is § 1's "no product switch" rule
+defeated at the assembly layer instead of inside a package. Five rules define
+the shape any future extraction takes. Rules 1, 2 and 4 restate § 10 (1), (2)
+and (3) in build terms rather than contract terms; they are listed together here
+because a build pipeline has to satisfy all five at once.
+
+1. **Publish immutable Dart packages.** A published version's content is frozen;
+   a change is a new version, never an edit to a released one.
+2. **Each application pins an exact version.** No path dependency, no `git`
+   dependency, no range or caret constraint in a shipped build. A path override
+   is a development convenience and must not survive into a release build.
+3. **Regenerate committed code and fail on drift.**
+   `dart run build_runner build --delete-conflicting-outputs`, then
+   `git diff --exit-code`. Committed generated output must be reproducible from
+   its source; a build that regenerates a different file than the one committed
+   fails the job.
+4. **Run analysis, tests and Android/iOS builds against the published
+   artifact**, resolved the way a real consumer resolves it — not against a
+   local path override, which proves the working tree rather than the release.
+5. **Each application releases from its own tag, signing identity, application
+   ID, branding and pipeline.** Sharing a package never means sharing a release
+   train. Two applications that ship from one tag, one keystore or one
+   `applicationId` are one product wearing two names, and the fleet already has
+   the failure mode: `io.dotmac.field` is claimed by two source trees in two
+   repositories, whose `pubspec.yaml` and `pubspec.lock` are byte-identical
+   (inventory § 1, § 5.5).
+
+**Rule 3 is NOT gated on extraction. It lands now — with, or before, MOB-03.**
+It needs no package, no second adopter and no ratified contract; it is two
+commands in a CI job. It is written into this ADR because the inventory found
+the exact defect it prevents: `dotmac_crm`'s field CI runs
+`dart run build_runner build --delete-conflicting-outputs` before analyzing,
+while `dotmac_sub`'s `field-flutter` job does not — so Sub trusts
+`database.g.dart` as committed and **a stale generated file passes Sub's gate**
+(inventory D10). That is a live defect in the application currently scheduled for
+encryption work, where the generated file is the Drift schema. Adding the
+regenerate-and-diff step to Sub's `field-flutter` job is the smallest change in
+this whole ADR and the only one that can be made before anything else is
+decided.
 
 ---
 
@@ -508,15 +703,26 @@ row names a guard that has not been written.
 | §8 network failure and 5xx do not sign out | `field_mobile/test/auth_flow_test.dart::"transient refresh failure preserves the session for retry"` | asserted in one application; absent in `dotmac_crm/mobile`, which violates the rule |
 | §8 single-flight refresh | `field_mobile/test/auth_flow_test.dart::"concurrent refreshes share one in-flight request and all get the new token"`; `mobile/test/api_client_test.dart` | asserted in both Sub applications |
 | §8 session-generation fencing | — | **none yet.** No application has the concept. |
-| §9 package boundaries, no product switches | — | **none yet.** No package exists. |
-| §10 immutable release, exact pin, conformance without a path override | — | **none yet.** No package exists; **neither field application has ever been released from a tag** (inventory D11). |
+| §9 dossier state / concrete-candidate test | — | **none yet.** No dossier is open; § 9 records that these packages do not currently qualify for `audit-complete`. |
+| §9a evidence tracked per contract slice, never per application | — | **none yet.** There is no mobile dossier to hold slice rows; the table in § 9a is the record until there is. |
+| §9a package boundaries, no product switches | — | **none yet.** No package exists. |
+| §11 (1)(2)(4)(5) extraction shape: immutable packages, exact pins, build against the published artifact, per-app release identity | — | **none yet.** No package exists, and **neither field application has ever been released from a tag** (inventory D11). |
+| §11 (3) regenerate committed code and fail on drift | `dotmac_crm/.github/workflows/field-app-ci.yml` runs `build_runner` before analyze — **but has no `git diff --exit-code`**, and it is on the retiring repository | **none in `dotmac_sub`.** Its `field-flutter` job does not run `build_runner` at all (inventory D10). This rule lands with or before MOB-03; the guard must live in Sub's workflow, not here. |
+| §10 immutable release, exact pin, conformance without a path override, reuse never claimed early | — | **none yet.** No package exists. |
 
-Two of these will remain `none yet` for a structural reason worth stating: this
-repository is Python and contains no Dart. A guard over a Flutter tree can only
-live in the repository that holds it — Sub's `.github/workflows/mobile.yml`
-today — or in a shared package's own suite once one exists. Writing an
+**Most of these will stay `none yet` for a structural reason worth stating:**
+this repository is Python and contains no Dart, so it cannot run an analyzer, a
+Flutter test, or a package conformance suite. A guard over a Flutter tree can
+only live in the repository that holds it — Sub's
+`.github/workflows/mobile.yml` today — or in a shared package's own suite once
+one exists. That is ground 3 of § 9, restated as a table. Writing an
 aspirational guard name here would be exactly the "enforceable premise" failure
-ADR-0018 forbids: an exemption or a claim whose premise nothing can check.
+ADR-0018 forbids: a claim whose premise nothing can check.
+
+The one row that can move without any other decision is **§ 11 (3)**: adding
+`dart run build_runner build --delete-conflicting-outputs` and
+`git diff --exit-code` to Sub's `field-flutter` job. It needs no package, no
+adopter and no ratified contract.
 
 ---
 
@@ -526,13 +732,26 @@ ADR-0018 forbids: an exemption or a claim whose premise nothing can check.
   today.** Twelve defects are already recorded against them in the inventory. This
   ADR does not fix any of them; it makes each one a deviation from a stated
   contract rather than an undiscovered property.
-- **No package is authorized, and that is the deliverable.** ADR-0006 § 5 says
-  recording duplication is the deliverable and removing it is not. A reviewer who
-  expects this ADR to end in a `dotmac_mobile_*` package should read § 9 and the
-  inventory's § 5.5 instead.
-- **The second-adopter question is escalated, not answered.** The inventory
-  nominates ERP "DotMac Frontline" with reasoning and three caveats; it is
-  Michael's decision, and until he takes it § 9 stands at "no package".
+- **No package is built yet, and the reason is readiness, not permission.**
+  ADR-0006's 2026-08-12 amendment removed the two-consumer prerequisite: a second
+  consumer proves reuse and constrains generalisation, and all three dossier
+  states permit a shared module. § 9 therefore justifies "no package" on four
+  grounds a consumer count cannot supply — proposed contracts, unproven
+  boundaries, missing enforcement, and defect remediation first. A reviewer who
+  expects "we only have one adopter" to appear as the reason will not find it,
+  because under the corrected rule it is not one.
+- **Evidence is now tracked per contract slice, and that changes what a future
+  adopter can prove.** ERP "DotMac Frontline" is recorded as a credible future
+  candidate that is **not an adopter** — `dotmac_erp` holds zero Dart, so it does
+  not clear the amendment's "an assembly that exists and will consume it" test,
+  and these packages do not currently qualify even for `audit-complete`. Its
+  locked online-only MVP could eventually evidence `MobileSessionContextV1` and
+  `MobileDataScopeV1`; it can never evidence `QueuedMutationV1` or
+  `PushIntentV1`. Those two slices have no candidate at all.
+- **One rule lands immediately.** § 11 (3) — regenerate committed code and fail
+  on drift — is not gated on extraction and should reach Sub's `field-flutter`
+  job with or before MOB-03, because Sub currently trusts `database.g.dart` as
+  committed while CRM regenerates it.
 - **CRM mobile is out of the picture and will keep drifting until it is
   deleted.** That is the accepted cost of the retirement decision. The `await`
   fix on `50beb0cb` will not be back-ported by this ADR; whether Sub's field app
@@ -554,7 +773,10 @@ ADR-0018 forbids: an exemption or a claim whose premise nothing can check.
 
 - `docs/inventories/mobile-application-sources.md` — the measured evidence base
 - `docs/adr/0006-white-label-product-foundation.md` — the extraction rule, and
-  the 2026-08-12 amendment ("a second consumer is evidence, not permission")
+  **the 2026-08-12 amendment "a second consumer is evidence, not permission"**,
+  which supplies the three dossier states (`audit-complete`, `adopted`,
+  `reuse-proven`), the concrete-candidate definition, and the ruling that all
+  three states permit a shared module
 - `docs/adr/0024-apps-compose-by-synchronizing-data.md` — applications are
   independent and compose over versioned APIs; no product/provider switches in
   shared behaviour
