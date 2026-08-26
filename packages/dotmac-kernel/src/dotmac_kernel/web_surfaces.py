@@ -760,6 +760,23 @@ class WebSurfaceRegistry:
                 )
             if facet.authentication_profile is not None:
                 profile = self._profiles[facet.authentication_profile]
+                if (
+                    facet.admission_permission is not None
+                    and profile.security_plane is not BrowserSecurityPlane.TENANT
+                ):
+                    raise WebSurfaceError(
+                        f"facet {facet.code!r} declares admission permission "
+                        f"{facet.admission_permission!r} but authentication "
+                        f"profile {profile.code!r} enters the "
+                        f"{profile.security_plane.value} plane. Admission is "
+                        "evaluated with authorize_party(db, tenant, party, "
+                        "code), which needs a tenant-scoped Party: a platform "
+                        "profile resolves a PlatformAdmin and a public profile "
+                        "resolves no principal at all, so there is nothing the "
+                        "permission could be checked against. Either bind a "
+                        "tenant-plane profile or drop the admission permission "
+                        "and authorize inside the facet's own routes."
+                    )
                 if profile.session is not None and not _path_scope_contains(
                     profile.session.cookie_path, facet.url_prefix
                 ):
