@@ -270,4 +270,3 @@ credential**, explicitly not ordinary server or browser cookie sessions. **Three
 of its four enforcement rows say `none yet` and the fourth is partial, and it
 says why: every in-scope client in the fleet is a Flutter application, and this
 Python repository cannot run a check over any of them.
-
