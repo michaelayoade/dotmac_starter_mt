@@ -74,21 +74,17 @@ def _publishable_packages() -> list[tuple[str, Path]]:
     rather than from a glob — so the parametrized failure names the lane that
     would have published the offending wheel.
 
-    ALL THREE lanes. `.github/release-modules.json` is the stateful one;
-    `.github/release-adapters.json` is the stateless-protocol-adapter lane added
-    for `dotmac-auth-oidc` (ADR-0006, 2026-08-14 amendment), and
-    `.github/release-connectors.json` is the discovered connector-plugin lane.
-    A release allowlist
-    that this scan did not read would be a second way to publish a wheel nobody
-    checked — and the adapter lane runs the very same `secret_shaped` predicate
-    at release time, so leaving it out here would recreate exactly the
-    fails-only-after-merge gap this file exists to close.
+    Every lane. A new allowlist that this scan did not read would be another way
+    to publish a wheel nobody checked at PR time. Modules, called adapters,
+    discovered connectors and product-owned contract catalogues all run the
+    same `secret_shaped` predicate again at release time.
     """
     packages: list[tuple[str, Path]] = []
     for allowlist_file, key in (
         (".github/release-modules.json", "modules"),
         (".github/release-adapters.json", "adapters"),
         (".github/release-connectors.json", "connectors"),
+        (".github/release-contracts.json", "contracts"),
     ):
         allowlist = json.loads((REPO_ROOT / allowlist_file).read_text(encoding="utf-8"))
         packages += [

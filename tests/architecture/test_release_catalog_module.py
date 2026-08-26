@@ -38,6 +38,7 @@ MODULE_ROOT = Path(inspect.getfile(identity)).parent
 PACKAGE_ROOT = MODULE_ROOT.parents[1]
 MIGRATIONS = MODULE_ROOT / "migrations" / "versions"
 LINEAGE = MIGRATIONS / "rl_0001_release_artifacts.py"
+ORIGIN_LINEAGE = MIGRATIONS / "rl_0002_artifact_origin.py"
 
 
 def _migration_source() -> str:
@@ -122,6 +123,23 @@ def test_the_revision_id_fits_the_alembic_version_column() -> None:
     """Over-long revision ids do not fail at authoring time — they fail at
     `alembic upgrade`, against a real database."""
     assert len("rl_0001_release_artifacts") <= 32
+    assert len("rl_0002_artifact_origin") <= 32
+
+
+def test_origin_is_catalogue_evidence_and_raw_sql_cannot_relabel_it() -> None:
+    """The request selects an artifact; it never chooses the evidence regime."""
+    source = ORIGIN_LINEAGE.read_text(encoding="utf-8")
+    assert 'revision = "rl_0002_artifact_origin"' in source
+    assert 'down_revision = "rl_0001_release_artifacts"' in source
+    assert "ck_release_artifacts_origin_class" in source
+    assert "trg_artifact_attestations_origin_kind" in source
+    assert "trg_release_artifacts_origin_update" in source
+    assert "vulnerability_policy_result" in source
+    assert "compatibility_result" in source
+    assert "product_manifest" in source
+    assert "capability_contract" in source
+    assert "capability_schema" in source
+    assert "capability_composition" in source
 
 
 # ── Identity is content ──────────────────────────────────────────────────────

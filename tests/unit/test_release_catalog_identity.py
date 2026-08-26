@@ -12,9 +12,11 @@ from __future__ import annotations
 import pytest
 from dotmac_release_catalog import (
     ARTIFACT_KINDS,
+    ARTIFACT_ORIGINS,
     ATTESTATION_KINDS,
     ArtifactIdentityError,
     ArtifactKind,
+    ArtifactOrigin,
     AttestationKind,
     Digest,
     DigestError,
@@ -154,8 +156,14 @@ class TestVocabularies:
             "offline_bundle",
         }
 
-    def test_attestation_kinds_answer_four_distinct_questions(self) -> None:
-        """Inside / built-how / vouched-by / product-declares.
+    def test_artifact_origins_select_two_distinct_evidence_contracts(self) -> None:
+        assert {origin.value for origin in ARTIFACT_ORIGINS} == {
+            "dotmac_product",
+            "upstream_third_party",
+        }
+
+    def test_attestation_kinds_answer_nine_distinct_questions(self) -> None:
+        """Keep inside/build/product/contract/schema/risk/compatibility distinct.
 
         Merging any two into "provenance" is what lets an artifact look
         attested for a claim no document actually makes.
@@ -165,8 +173,14 @@ class TestVocabularies:
             "provenance",
             "signature",
             "product_manifest",
+            "capability_contract",
+            "capability_schema",
+            "capability_composition",
+            "vulnerability_policy_result",
+            "compatibility_result",
         }
 
     def test_members_are_plain_strings_for_a_text_column(self) -> None:
         assert ArtifactKind.CONTAINER_IMAGE == "container_image"
+        assert ArtifactOrigin.UPSTREAM_THIRD_PARTY == "upstream_third_party"
         assert AttestationKind.SBOM == "sbom"

@@ -46,15 +46,17 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 |---|---|---|---|---|---|---|---:|---|---|---|
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
-| [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
+| [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a66` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
-| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a66` | `dotmac_integrator` | — |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a68` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a69` | `dotmac_integrator` | — |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a69` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-identity-contracts`](../packages/dotmac-managed-identity-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-identity-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
+| [`dotmac-managed-suite-contracts`](../packages/dotmac-managed-suite-contracts/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-managed-suite-contracts/EXTRACTION.toml) | n/a | — | — | [contract catalogue allowlist](../.github/release-contracts.json) | `0.1.0a1` | `>=0.1.0a69,<0.2.0` | — | `dotmac_integrator`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
-| [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`reuse-proven`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
@@ -87,7 +89,7 @@ and the next gate.
 - **Contract:** Run an OIDC login and say which external subject authenticated. NOT which local party that is (dotmac_kernel.external_identity), NOT whether they may do anything (dotmac_kernel.deps.authorize_party), NOT a session (the product's own identity facet), NOT a user record (nothing here provisions), and NOT provider-specific behaviour (no Keycloak/Entra/Google/Auth0 branch, per ADR-0024).
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-auth-oidc/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_workspace`.
-- **Candidate consumers:** `dotmac_erp`, `dotmac_workspace`.
+- **Candidate consumers:** `dotmac_erp`.
 
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 
@@ -132,10 +134,26 @@ and the next gate.
 ### [`dotmac-kernel`](../packages/dotmac-kernel/README.md)
 
 - **Owner:** Dotmac platform foundation
-- **Contract:** Universal assembly facilities and versioned cross-product contracts
+- **Contract:** Universal assembly facilities, product manifests, and versioned product-owned capability contracts
 - **Evidence:** `historical-pre-rule` from [`EXTRACTION.toml`](../packages/dotmac-kernel/EXTRACTION.toml); source mode `historical-mixed`.
 - **Proven consumers:** `dotmac_starter_mt`.
 - **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-managed-identity-contracts`](../packages/dotmac-managed-identity-contracts/README.md)
+
+- **Owner:** The provider-neutral managed identity realm and OIDC confidential-client lifecycle contract, including exact operation schemas and fixed security evidence.
+- **Contract:** Declare plan/apply/observe/cancel for identity realms and confidential OIDC clients. This catalogue owns meanings and exact schema bytes only; it does not own provider administration, relying-party login, local identity binding, authorization, sessions, deployment state, retry, or secrets.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-identity-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-managed-suite-contracts`](../packages/dotmac-managed-suite-contracts/README.md)
+
+- **Owner:** The immutable managed-suite mapping from exact public/non-secret capability output evidence to exact downstream capability inputs.
+- **Contract:** Approve value-free cross-capability dataflow by exact owner, capability/schema version, operation, schema ref/digest and JSON Pointer. It owns no product operation, runtime value, provider mapping, deployment step, evidence receipt, secret, or retry.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-managed-suite-contracts/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_vendor_control_plane`.
 
 ### [`dotmac-numbering`](../packages/dotmac-numbering/README.md)
 

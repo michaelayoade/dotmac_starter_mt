@@ -124,6 +124,10 @@ class ReleaseArtifact(Base, TimestampMixin):
 
     artifact_kind: Mapped[str] = mapped_column(String(40), nullable=False)
 
+    #: Admission class is immutable catalogue evidence. A deployment request
+    #: reads it; it cannot relabel an artifact to choose weaker evidence.
+    origin_class: Mapped[str] = mapped_column(String(40), nullable=False)
+
     #: `<algorithm>:<hex>`, validated by `identity.Digest` on the way in.
     #:
     #: 160 is sized for the vocabulary this module says it does NOT close, not

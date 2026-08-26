@@ -41,6 +41,59 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a6 — unreleased
+
+### SPI 1.2 and approval-bound provisioning
+
+- Raises the kernel floor to `>=0.1.0a69`; PROVISION admission consumes the
+  canonical product-owned capability contract introduced there and cannot run
+  against a kernel that does not parse and verify that contract.
+- Adds the closed `PROVISION` mode. Its typed handler owns
+  `plan`/`apply`/`observe`/`cancel`; provider-specific operation names and
+  arbitrary process execution are not expressible through the SPI.
+- Requires each PROVISION capability to carry its product owner's exact kernel
+  capability-contract snapshot, including all four input/output schema
+  identities and canonical Draft 2020-12 schema bytes. The connector manifest
+  digest now binds the complete canonical contract and schemas (configuration,
+  endpoints and checks included), while the <=1.1 digest path remains
+  byte-for-byte compatible.
+- Adds the provider-neutral `verify_capability_configuration` gate for binding
+  activation and provisioning intake. It validates typed values, semantic
+  formats, endpoints, required/unknown fields and held secret references without
+  a product/provider catalogue or branch, returning only value-free evidence.
+- Pins the exact Release Catalog connector artifact digest on installations.
+  Draft/adoption validate an explicit canonical digest; PROVISION activation
+  refuses a missing pin, while legacy non-PROVISION rows remain nullable.
+- Adds durable, collision-detecting provisioning commands, dependency-ordered
+  steps, bounded retries and explicit `reconciliation_required` outcomes for
+  ambiguous provider effects. Plan/apply/observe/cancel each carry an
+  independently replayable command id; effect idempotency keys stay stable
+  across retry attempts.
+- Refuses unverified, expired, stale or hash-mismatched approvals before
+  connector I/O. Invocation is the middle of a prepare/invoke/settle boundary,
+  so no database session crosses provider I/O.
+- Settled PLAN commands produce an immutable module receipt. APPLY locks and
+  corroborates that local receipt against the verified approval evidence, the
+  exact connector installation/artifact/configuration revision, the complete
+  product-owned capability contract, and the module-owned execution-policy
+  digest before it creates an operation.
+- Binds cross-capability dependencies without predicting future hashes: the
+  approved command template carries sorted prerequisite binding ids plus exact
+  public-source/declared-target evidence mappings, while the later signed
+  command must pin each upstream operation's exact latest succeeded receipt.
+  The module locks and verifies those operations before it creates downstream
+  state. Apply preparation re-locks the exact operations and receipt chains,
+  injects only schema-declared `public_non_secret` evidence into a copied target
+  input, validates it against the target schema and records its digest without
+  changing the signed command. Connector output is validated against the held
+  schema; receipts retain its public projection and full-value digest, never
+  arbitrary values.
+- Adds `ig_0008_provisioning`: five platform-only tables and immutable,
+  hash-chained receipts carrying exact connector, manifest, artifact,
+  configuration, approval and plan provenance. Step receipts snapshot the step
+  key and provider operation reference; operation-level receipts leave both
+  null rather than inventing a fake step identity.
+
 ## 0.1.0a5 — released 2026-08-17
 
 ### SPI 1.2 — provider-neutral verification evidence

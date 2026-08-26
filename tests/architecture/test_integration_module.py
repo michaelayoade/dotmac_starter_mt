@@ -195,14 +195,17 @@ def test_the_verification_did_not_land_in_a_released_revision() -> None:
 # ── Release surfaces ────────────────────────────────────────────────────────
 
 
-def test_the_floor_is_the_release_that_named_the_ledger() -> None:
-    """a58 allocated `mod_intg`; a66 published `idempotency_ledger.v1`. The
-    floor is the higher, because a58..a65 cannot import this manifest at all —
-    `validate_prerequisites` does not know the name."""
+def test_the_floor_carries_the_product_owned_capability_contract() -> None:
+    """a68 is now the highest consumed kernel contract.
+
+    a58 allocated ``mod_intg`` and a66 named ``idempotency_ledger.v1``, but a
+    PROVISION declaration cannot be admitted without a68's canonical
+    ``CapabilityContractSnapshot``.
+    """
     manifest = tomllib.loads(
         (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a66"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a68"
 
 
 def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
@@ -212,7 +215,7 @@ def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
     entry = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-integration"]
-    assert entry["kernel_floor"] == "0.1.0a66"
+    assert entry["kernel_floor"] == "0.1.0a68"
     required = set(entry["wheel_contents"]["required"])
     on_disk = {
         f"dotmac_integration/migrations/versions/{path.name}"

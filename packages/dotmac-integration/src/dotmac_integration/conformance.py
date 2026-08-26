@@ -32,6 +32,18 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from dotmac_kernel.capability_contract import (
+    CapabilityCheck,
+    CapabilityCheckStage,
+    CapabilityConfigField,
+    CapabilityConfigValueFormat,
+    CapabilityConfigValueType,
+    CapabilityContractSnapshot,
+    CapabilityEvidenceType,
+    CapabilityOperation,
+    CapabilitySchemaDocument,
+)
+
 from dotmac_integration.discovery import ConnectorRegistry, discover
 from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
@@ -50,6 +62,14 @@ from dotmac_integration.spi import (
     IngressRequest,
     ModeContractError,
     PollHandler,
+    ProvisionApplyRequest,
+    ProvisionCancelRequest,
+    ProvisioningHandler,
+    ProvisioningResult,
+    ProvisionObserveRequest,
+    ProvisionPlanRequest,
+    ProvisionPlanResult,
+    ProvisionResultStatus,
     SpiRange,
     verify_plugin_modes,
 )
@@ -74,6 +94,111 @@ class ConformanceFailure(AssertionError):
     """A connector manifest does not satisfy the SPI contract."""
 
 
+def _fake_schema(code: str, direction: str) -> CapabilitySchemaDocument:
+    properties: dict[str, object]
+    if direction == "input":
+        properties = {
+            "desired_ref": {"type": "string"},
+            # A target need only be declared. Public classification governs
+            # what may LEAVE a source; requiring it on the target would confuse
+            # disclosure policy with an ordinary typed input location.
+            "phase": {"type": "string"},
+            "public_ref": {
+                "type": "string",
+                "x-dotmac-data-classification": "public_non_secret",
+            },
+        }
+    else:
+        properties = {
+            "phase": {
+                "type": "string",
+                "x-dotmac-data-classification": "public_non_secret",
+            },
+            "public_ref": {
+                "type": "string",
+                "x-dotmac-data-classification": "public_non_secret",
+            },
+            "detail": {
+                "type": "string",
+                "x-dotmac-data-classification": "secret",
+            },
+        }
+    return CapabilitySchemaDocument.from_mapping(
+        {
+            "$id": f"schema:conformance/{code}-{direction}@v1",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": direction == "input",
+            "properties": properties,
+            "type": "object",
+        }
+    )
+
+
+def _fake_owner_contract(capability_id: str) -> CapabilityContractSnapshot:
+    """A provider-free product contract for the SPI's four-operation fake.
+
+    The optional fields cover the shapes existing engine tests exercise.  They
+    are not a fleet catalogue: the declaration is scoped to the deliberately
+    synthetic ``conformance.*`` capability and connector authors replace it
+    with their product owner's exact snapshot.
+    """
+
+    operations = tuple(
+        CapabilityOperation(
+            operation_code=code,
+            input_schema_ref=(input_schema := _fake_schema(code, "input")).schema_ref,
+            input_schema_digest=input_schema.digest,
+            output_schema_ref=(
+                output_schema := _fake_schema(code, "output")
+            ).schema_ref,
+            output_schema_digest=output_schema.digest,
+        )
+        for code in ("apply", "cancel", "observe", "plan")
+    )
+    return CapabilityContractSnapshot(
+        owner_code="conformance-kit",
+        capability_code=capability_id.rsplit(".v", 1)[0],
+        schema_version=1,
+        operations=operations,
+        config_fields=(
+            CapabilityConfigField(
+                "a", CapabilityConfigValueType.INTEGER, required=False
+            ),
+            CapabilityConfigField(
+                "credential",
+                CapabilityConfigValueType.SECRET_REFERENCE,
+                required=False,
+            ),
+            CapabilityConfigField(
+                "endpoint",
+                CapabilityConfigValueType.STRING,
+                CapabilityConfigValueFormat.HTTPS_URL,
+                required=False,
+            ),
+            CapabilityConfigField(
+                "signing",
+                CapabilityConfigValueType.SECRET_REFERENCE,
+                required=False,
+            ),
+            CapabilityConfigField(
+                "token",
+                CapabilityConfigValueType.SECRET_REFERENCE,
+                required=False,
+            ),
+            CapabilityConfigField(
+                "variant", CapabilityConfigValueType.STRING, required=False
+            ),
+        ),
+        checks=(
+            CapabilityCheck(
+                "connection-valid",
+                CapabilityCheckStage.ACTIVATION,
+                CapabilityEvidenceType.BOOLEAN,
+            ),
+        ),
+    )
+
+
 def fake_manifest(
     *,
     connector_key: str = "conformance_fake",
@@ -88,7 +213,29 @@ def fake_manifest(
         version=version,
         spi_range=SpiRange.parse(spi_range or default_range),
         capabilities=tuple(
-            CapabilityDeclaration(capability_id=c) for c in capabilities
+            CapabilityDeclaration(
+                capability_id=c,
+                contract_snapshot=_fake_owner_contract(c),
+                schema_documents=tuple(
+                    sorted(
+                        (
+                            schema
+                            for operation_code in (
+                                "apply",
+                                "cancel",
+                                "observe",
+                                "plan",
+                            )
+                            for schema in (
+                                _fake_schema(operation_code, "input"),
+                                _fake_schema(operation_code, "output"),
+                            )
+                        ),
+                        key=lambda item: item.schema_ref,
+                    )
+                ),
+            )
+            for c in capabilities
         ),
     )
 
@@ -101,7 +248,7 @@ class FakePlugin:
     without a provider, and a kit that needed credentials would make every
     author's first encounter with the SPI a secrets problem.
 
-    It declares and implements **all three modes**, so the kit's default fake
+    It declares and implements **all four modes**, so the kit's default fake
     exercises the whole frozen mode registry. A mode with no fake behind it is a
     mode whose contract nothing ever runs — which is how `POLL` spent SPI 1.0 as
     a label. Negative cases get their own vehicle rather than a hole in the
@@ -207,6 +354,19 @@ class FakePlugin:
     #: The same for POLL.
     poll_handler_wrong_shape: bool = False
 
+    # ── provisioning ───────────────────────────────────────────────────────
+    #: The neutral outcome returned from apply/observe. A connector-specific
+    #: test selects another closed status without teaching the engine a
+    #: provider vocabulary.
+    provisioning_result: ProvisioningResult = field(
+        default_factory=lambda: ProvisioningResult(
+            status=ProvisionResultStatus.SUCCEEDED
+        )
+    )
+    provisioning_seen: list[object] = field(default_factory=list)
+    provisioning_raises: BaseException | None = None
+    provisioning_handler_wrong_shape: bool = False
+
     @property
     def manifest(self) -> ConnectorManifest:
         return self.manifest_
@@ -266,6 +426,44 @@ class FakePlugin:
                 return fake.inbound, fake.next_cursor
 
         return _Poll()
+
+    def provisioning_handler_for(self, capability_id: str) -> ProvisioningHandler:
+        self.manifest_.require_declares(capability_id)
+        if self.provisioning_handler_wrong_shape:
+            return lambda request: None  # type: ignore[return-value]
+        fake = self
+
+        class _Provisioning:
+            def _record(self, request: object) -> None:
+                fake.provisioning_seen.append(request)
+                if fake.provisioning_raises is not None:
+                    raise fake.provisioning_raises
+
+            def plan(self, request: ProvisionPlanRequest) -> ProvisionPlanResult:
+                self._record(request)
+                return ProvisionPlanResult(
+                    plan_hash=request.plan_hash,
+                    steps=tuple(request.steps),
+                )
+
+            def apply(self, request: ProvisionApplyRequest) -> ProvisioningResult:
+                self._record(request)
+                return fake.provisioning_result
+
+            def observe(self, request: ProvisionObserveRequest) -> ProvisioningResult:
+                self._record(request)
+                return fake.provisioning_result
+
+            def cancel(self, request: ProvisionCancelRequest) -> ProvisioningResult:
+                self._record(request)
+                if fake.provisioning_result.status is ProvisionResultStatus.SUCCEEDED:
+                    return ProvisioningResult(
+                        status=ProvisionResultStatus.CANCELLED,
+                        provider_operation_ref=request.provider_operation_ref,
+                    )
+                return fake.provisioning_result
+
+        return _Provisioning()
 
     def _ingress_handler(self) -> IngressHandler:
         fake = self
@@ -414,21 +612,17 @@ def assert_connector_conforms(manifest: ConnectorManifest) -> None:
             f"connector {manifest.connector_key!r} declares no capabilities"
         )
 
-    # Discovery must accept it ALONE — a connector that only validates
-    # alongside its neighbours is not independently releasable.
-    try:
-        registry = fake_registry([manifest])
-    except Exception as exc:
-        raise ConformanceFailure(
-            f"connector {manifest.connector_key!r} is not discoverable on its "
-            f"own: {exc}"
-        ) from exc
-
-    resolved = registry.get(manifest.connector_key)
+    # A bare manifest has no modes or factories, so putting it on the all-mode
+    # FakePlugin would test the FAKE'S executable claims under somebody else's
+    # metadata.  That used to be harmless; once PROVISION carries an owner
+    # contract it would also make a perfectly valid <=1.1 manifest appear to
+    # declare PROVISION.  Executable discovery is proved below by
+    # `assert_plugin_conforms` against the caller's real plugin.  This metadata
+    # half exercises the manifest's own refusal directly.
     for capability in manifest.capabilities:
         # `require_declares` is what activation calls; a connector whose own
         # declarations do not satisfy it could never be bound.
-        resolved.require_declares(capability.capability_id)
+        manifest.require_declares(capability.capability_id)
 
 
 def assert_plugin_conforms(plugin: ConnectorPlugin) -> None:

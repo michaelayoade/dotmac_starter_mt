@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from dotmac_integration import (
     DEFAULT_POLICY,
+    DEFAULT_POLICY_DIGEST,
+    EXECUTION_POLICY_SCHEMA,
     CapabilityBinding,
     CheckpointConflict,
     ConnectorInstallation,
@@ -35,6 +37,7 @@ from dotmac_integration import (
     claim_delivery,
     claim_receipt,
     enqueue_delivery,
+    execution_policy_digest,
     next_state,
     payload_digest,
     receive_verified,
@@ -304,6 +307,22 @@ def test_a_nonsense_attempt_cap_is_refused_where_it_is_configured() -> None:
         ExecutionPolicy(max_attempts=0)
     with pytest.raises(ValueError, match="immortal"):
         ExecutionPolicy(max_attempts=999)
+
+
+def test_execution_policy_has_one_canonical_wire_identity() -> None:
+    assert EXECUTION_POLICY_SCHEMA == "dotmac.integration.execution-policy/v1"
+    assert DEFAULT_POLICY_DIGEST == (
+        "sha256:c8b475b054fffe618dc26b02ca8f8fcc3ca4da13bc5670449343497bb475b536"
+    )
+    assert execution_policy_digest(DEFAULT_POLICY) == DEFAULT_POLICY_DIGEST
+    assert execution_policy_digest(ExecutionPolicy(lease_seconds=301)) != (
+        DEFAULT_POLICY_DIGEST
+    )
+
+
+def test_execution_policy_digest_refuses_a_shadow_policy_object() -> None:
+    with pytest.raises(TypeError, match="ExecutionPolicy"):
+        execution_policy_digest(object())  # type: ignore[arg-type]
 
 
 def test_backoff_is_exponential_and_capped() -> None:

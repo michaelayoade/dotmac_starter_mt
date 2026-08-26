@@ -4,6 +4,46 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
+## 0.1.0a5 — 2026-08-17
+
+Adds two distinct upstream-admission claims:
+`vulnerability_policy_result` and `compatibility_result`. A managed deployment
+may now bind an upstream artifact to the exact immutable result documents that
+admitted it, instead of accepting request-carried references or pretending an
+upstream image has a Dotmac `product_manifest`.
+
+Also adds the Dotmac-product-only `capability_contract` attestation. A product
+manifest answers which capability codes exact product bytes declare; each
+capability-contract document separately binds the typed operations, schemas,
+configuration, endpoints and evidence gates for one of those codes. An exact
+artifact may carry several such digest-pinned documents. Upstream artifacts
+cannot carry them, because that would let third-party bytes mint Dotmac-owned
+contract semantics.
+
+`capability_schema` separately binds every canonical schema document referenced
+by those contracts. Keeping schema bytes as their own attestations lets a
+consumer prove exact reference, `$id` and digest coverage without making the
+contract document an unversioned schema bundle or trusting request-carried
+bytes. Upstream artifacts cannot carry these product-owned schema claims.
+
+`capability_composition` binds a suite/product owner's canonical, value-free
+mapping from one exact APPLY output schema path to another exact APPLY input
+path. It never contains a runtime value, installation or connector binding;
+those are resolved later under the approved deployment plan. Like the contract
+and schema kinds, it is a Dotmac-product-only attestation.
+
+The kinds stay separate from `provenance`: how bytes were built does not answer
+whether a versioned vulnerability policy accepted them, and neither answers
+whether they are compatible with a managed profile.
+
+Adds `rl_0002_artifact_origin`, which records the catalogue-owned origin class
+on each artifact and enforces the evidence regime in Postgres as well as the
+service: an upstream artifact cannot carry a Dotmac product manifest,
+capability contract, capability schema or capability composition, and a Dotmac artifact cannot carry
+upstream admission results. Existing catalogue
+rows are backfilled as `dotmac_product`; new raw-SQL writes must state the
+origin explicitly.
+
 ## 0.1.0a4 — 2026-08-15
 
 **The persistence plane is now declared correctly.** This module always built

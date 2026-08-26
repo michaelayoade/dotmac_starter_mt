@@ -68,6 +68,41 @@ preserved_tests = [
   "dotmac_sub:tests/test_integration_installation_api.py",
 ]
 
+# PROVISIONING EXTENSION INVENTORY — 2026-08-17
+#
+# SPI 1.2's approval-bound provisioning mode is new behaviour inside this
+# product-first package; the package's original source ruling does not turn a
+# new surface into a port.  The fleet was checked before writing it:
+#
+# * the kernel publishes the product-neutral plan/apply/observe/cancel PROTOCOL
+#   and a deterministic fake, but deliberately owns no run ledger or connector
+#   execution engine;
+# * Sub's mature integration runner has execute/health/cancel and structured
+#   operation outcomes, but no read-only plan verb and no expected/approved plan
+#   hash on apply.  Its envelope therefore cannot prove that the operation run
+#   is the one a human approved;
+# * ERP has no implementation of the kernel provisioning protocol or an
+#   approval-bound deployment runner;
+# * Academy has no provisioning runner or deployment state machine.
+#
+# The existing Sub runner remains useful evidence for the transport boundary,
+# secret delivery and ambiguous-timeout classification.  It is not a qualifying
+# source for exact-plan approval, so that extension is greenfield-after-
+# inventory rather than silently attributed to the package's product-first
+# origin.
+provisioning_extension_source_mode = "greenfield-after-inventory"
+provisioning_extension_sources = [
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/providers/provisioning.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/testing/provisioning.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/capability_contract.py",
+  "dotmac_sub:app/services/integrations/runtime.py",
+  "dotmac_sub:app/services/integrations/external_runner.py",
+]
+provisioning_extension_absence = [
+  "dotmac_erp:no ProvisioningProvider implementation or approval-bound deployment runner",
+  "dotmac-academy:no provisioning runner or deployment state machine",
+]
+
 # NOT ported, and named so nobody ports them by reflex:
 #
 #   connectors/*            provider plugins — independently released
@@ -82,7 +117,7 @@ preserved_tests = [
 not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "backoffice_contracts.py", "podman_transport.py"]
 
 # The thin assembly is the module's one authoritative runtime and pins the
-# published a4 distribution on its default branch. Products are deliberately
+# published distribution on its default branch. Products are deliberately
 # absent from both sets: they consume typed observations over their own ports,
 # never this module, and Sub keeps only its capability handlers after cutover.
 contract_consumers = ["dotmac_integrator"]
@@ -152,7 +187,7 @@ payload_retention = "NEW behaviour, not ported: Sub retains inbound payloads ind
 
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
-next_action = "dotmac-integration 0.1.0a5 is published with SPI 1.2 verification evidence. Pin a5 in the dotmac_integrator thin assembly, then build and publish the first ingress-only Meta/WhatsApp connector against >=1.2,<2.0. Wire its provider-neutral evidence observer and the Sub product port in the assembly, run a shadow cutover, and lower Sub's external-connector ratchet in the same change that retires the displaced direct surface."
+next_action = "0.1.0a5 is published with SPI 1.2 ingress verification evidence. 0.1.0a6 is the unreleased approval-bound provisioning change: publish and index-verify a6, then update the dotmac_integrator assembly's exact a5 pin and re-run its signed-command/receipt suite against the wheel. Real managed-service connector work remains gated by ADR-0033's product-owned capability contract, provider-free conformance and released-SPI requirements; the original Sub cutover still retires its local engine and lowers the external-connector ratchet in the same change."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 #

@@ -270,11 +270,14 @@ view over those independent owners; it owns no facts of its own. Package
 `EXTRACTION.toml` owns contract/evidence/consumer state, `ModuleManifest` owns
 runtime persistence-plane and schema declarations, and
 `.github/release-modules.json` owns eligibility for the general module release
-workflow — with `.github/release-adapters.json` owning the same question for
-`stateless-protocol-adapter` distributions, which have no `db_schema`,
-`manifest_attr` or `kernel_floor` for the module lane to assert and so are
-gated, built and verified by `release-adapter.yml` instead (ADR-0006's
-2026-08-14 amendment; the adapter lane lists nothing today).
+workflow. Stateless distributions share the governed
+`stateless-protocol-adapter` extraction shape but use stricter, disjoint release
+profiles: `.github/release-adapters.json` for called protocol adapters,
+`.github/release-connectors.json` for Integrator-discovered connector plugins,
+and `.github/release-contracts.json` for product-owned capability contract
+catalogues. The last profile verifies installed Product Manifest, capability
+contract and canonical schema coverage rather than provider execution
+(ADR-0034). A package listed in more than one profile is refused.
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns

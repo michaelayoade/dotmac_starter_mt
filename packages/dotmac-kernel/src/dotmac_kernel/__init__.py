@@ -67,6 +67,33 @@ from dotmac_kernel.capabilities import (
     active_capabilities,
     install_capabilities,
 )
+from dotmac_kernel.capability_composition import (
+    CAPABILITY_COMPOSITION_SCHEMA,
+    CapabilityCompositionDigestMismatchError,
+    CapabilityCompositionError,
+    CapabilityCompositionSnapshot,
+    CapabilityEvidenceBinding,
+)
+from dotmac_kernel.capability_contract import (
+    CAPABILITY_CONTRACT_SCHEMA,
+    CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY,
+    CAPABILITY_SCHEMA_DIALECT,
+    CapabilityCheck,
+    CapabilityCheckStage,
+    CapabilityConfigField,
+    CapabilityConfigValueFormat,
+    CapabilityConfigValueType,
+    CapabilityContractDigestMismatchError,
+    CapabilityContractError,
+    CapabilityContractSnapshot,
+    CapabilityEndpointRequirement,
+    CapabilityEndpointType,
+    CapabilityEvidenceType,
+    CapabilityOperation,
+    CapabilitySchemaDataClassification,
+    CapabilitySchemaDigestMismatchError,
+    CapabilitySchemaDocument,
+)
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.entitlements import (
     EntitlementDecision,
@@ -198,7 +225,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a68"
+__version__ = "0.1.0a69"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -211,6 +238,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.audit_actions",
         "dotmac_kernel.branding",
         "dotmac_kernel.capabilities",
+        "dotmac_kernel.capability_contract",
+        "dotmac_kernel.capability_composition",
         "dotmac_kernel.config",
         "dotmac_kernel.channel_policy",
         "dotmac_kernel.consent",
@@ -400,6 +429,30 @@ __all__ = [
     "install_capabilities",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
+    # product-owned capability contract snapshot
+    "CAPABILITY_COMPOSITION_SCHEMA",
+    "CAPABILITY_CONTRACT_SCHEMA",
+    "CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY",
+    "CAPABILITY_SCHEMA_DIALECT",
+    "CapabilityCheck",
+    "CapabilityCheckStage",
+    "CapabilityConfigField",
+    "CapabilityConfigValueFormat",
+    "CapabilityConfigValueType",
+    "CapabilityContractDigestMismatchError",
+    "CapabilityContractError",
+    "CapabilityContractSnapshot",
+    "CapabilityCompositionDigestMismatchError",
+    "CapabilityCompositionError",
+    "CapabilityCompositionSnapshot",
+    "CapabilityEndpointRequirement",
+    "CapabilityEndpointType",
+    "CapabilityEvidenceType",
+    "CapabilityEvidenceBinding",
+    "CapabilityOperation",
+    "CapabilitySchemaDataClassification",
+    "CapabilitySchemaDigestMismatchError",
+    "CapabilitySchemaDocument",
     # release-bound product manifest
     "PRODUCT_MANIFEST_SCHEMA",
     "ProductManifestDigestMismatchError",

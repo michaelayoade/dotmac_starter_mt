@@ -97,3 +97,31 @@ The first cutover is complete only when:
 ERP and CRM do not invent snapshots before they possess real assembly
 declarations. They adopt the same contract when their product manifests become
 authoritative.
+
+## Amendment — 2026-08-17: typed capability-contract snapshots
+
+The managed-service composition work asked a second, narrower Rule-24
+question: does a scoped product already publish an immutable typed contract for
+one declared capability — operations, configuration field types, endpoint
+requirements, activation/evidence checks, canonical bytes and a content
+digest?
+
+The same repository sweeps above, extended with `operation`, `endpoint`,
+`secret_reference`, `activation` and `evidence` around capability declarations,
+found no such product-owned document or parity suite. Sub remains the
+qualifying source for the ownership convention and real capability
+declarations; `ProductManifestSnapshot` remains the qualifying source for
+canonical JSON, exact parsing and digest verification. The richer generic
+shape is therefore **greenfield after inventory**, not a port beside a mature
+product implementation.
+
+Two boundaries are load-bearing:
+
+- `CapabilitySpec` historically accepts any non-empty string. Every current
+  checked-in capability code satisfies the new lower-case stable-code grammar,
+  but a future invalid declaration will now fail when a product tries to emit
+  an attestable contract. Runtime capability enforcement is unchanged.
+- `dotmac_integration.capability_registry` already owns runtime capability
+  declaration and connector-binding validation. The kernel snapshot is pure
+  data and deliberately adds no installable/global registry; doing so would
+  create a second authority rather than a reusable product contract.

@@ -697,3 +697,26 @@ alongside a long-running, repairable saga without acquiring two authorities.
 **Let Collections suspend directly.** A financial policy engine would become a
 second writer of domain/hosting state and could bypass non-financial holds,
 retention policy, transfer locks and destructive-action approval.
+
+## Amendment 2026-08-17 — exact managed-service connectors authorized
+
+[ADR-0033](0033-exact-managed-service-connectors-are-authorized.md) amends the
+section 6 connector moratorium for exactly seven named distributions:
+`dotmac-connector-contabo`, `dotmac-connector-keycloak-admin`,
+`dotmac-connector-mailcow`, `dotmac-connector-nextcloud`,
+`dotmac-connector-dotmac-erp`, `dotmac-connector-dotmac-academy`, and
+`dotmac-connector-dotmac-host-agent`.
+
+This is a narrow authorization, not a waiver. Each connector still waits for
+its named owner contract, provider-free conformance kit, released Integrator
+SPI, and exact distribution tests. Every other connector remains blocked by
+section 6's controlling text until another accepted amendment names it.
+Version one consumes pre-created held secret material and returns no
+generated secret; the host-agent surface accepts no arbitrary shell, argv,
+script or SSH field. Seabone is only an isolated acceptance target and this
+amendment authorizes no production access.
+
+For avoidance of drift, authoritative DNS/PTR is the independently bindable
+`dns.authoritative.v1` family with `zone`, `recordset`, and `observation`.
+Contabo may implement both that family and IaaS in one distribution, but the
+bindings remain independent.

@@ -1,13 +1,14 @@
-"""The two closed vocabularies: what kind of thing an artifact is, and what
-kind of claim an attestation makes.
+"""The closed vocabularies: artifact kind, origin, and attestation claim.
 
-## Closed in Python, unconstrained in the database
+## Closed in Python; only the security boundary is closed in the database
 
-Both are `str` enums whose values are stored as plain text columns, with no
-`CHECK` constraint — the same split `dotmac_ticketing` uses for ticket status,
-and for the same reason. A `CHECK` is an `ALTER TABLE` on every deployment the
-day a fourth kind is genuinely justified; a closed Python union is a module
-version. Growth should cost a release, not a fleet migration.
+Artifact and attestation kinds remain plain text columns: extending their
+taxonomies costs a module release, not a fleet migration. ``origin_class`` is
+different. It selects which evidence regime is admissible, so ``rl_0002``
+constrains its two values and trigger-checks each origin/attestation pair even
+for raw SQL. The database constraint is deliberate because bypassing the
+Python enum there would weaken artifact admission rather than merely introduce
+an unknown descriptive kind.
 
 ## Why these are closed unions and not ADR-0008 registries
 
@@ -27,6 +28,9 @@ worth stating because "make it a registry" is the wrong default in both:
   registry, and inventing one for three members would be the speculative
   generality ADR-0006 warns about. When a real fourth kind arrives with an
   owner, opening it is a deliberate decision with evidence, not a default.
+* `ArtifactOrigin` is a **security** vocabulary as well: it chooses whether
+  Dotmac product evidence or upstream admission results are accepted. It is
+  therefore closed in Python and at the database write boundary.
 
 The distinction matters beyond this module: an unknown value that fails closed
 is a safety property, an unknown value that a deployer simply cannot act on is
@@ -54,10 +58,23 @@ class ArtifactKind(StrEnum):
     OFFLINE_BUNDLE = "offline_bundle"
 
 
+class ArtifactOrigin(StrEnum):
+    """Which admission contract made an artifact deployable.
+
+    This is catalogue-owned evidence, never a label a deployment request may
+    reinterpret. Dotmac products prove their assembly contract with a product
+    manifest; upstream software proves policy and compatibility admission with
+    two different result documents.
+    """
+
+    DOTMAC_PRODUCT = "dotmac_product"
+    UPSTREAM_THIRD_PARTY = "upstream_third_party"
+
+
 class AttestationKind(StrEnum):
     """What a recorded claim about an artifact actually proves.
 
-    Four distinct questions, deliberately not merged into "provenance":
+    Nine distinct questions, deliberately not merged into "provenance":
 
     * `SBOM` — what is *inside* the artifact.
     * `PROVENANCE` — how and from what the artifact was *built*.
@@ -65,6 +82,22 @@ class AttestationKind(StrEnum):
     * `PRODUCT_MANIFEST` — which product and capabilities the exact product
       assembly declares. Its document schema is owned by
       `dotmac_kernel.product_manifest`; this enum classifies the attestation.
+    * `CAPABILITY_CONTRACT` — the typed operations, inputs, outputs,
+      configuration, endpoints and evidence gates for one product-owned
+      capability. Its document schema is owned by
+      `dotmac_kernel.capability_contract`; one product artifact may publish
+      several independently digest-addressed contracts.
+    * `CAPABILITY_SCHEMA` — canonical schema bytes referenced by one of those
+      contracts. The document's `$id` names the `schema:...@vN` identity and
+      this row binds the exact bytes by digest so a consumer need not trust a
+      request-carried schema or an unverified URI.
+    * `CAPABILITY_COMPOSITION` — a product-owned, value-free mapping from an
+      exact public/non-secret capability output schema path to an exact
+      downstream input path. Runtime values never appear in this attestation.
+    * `VULNERABILITY_POLICY_RESULT` — which versioned vulnerability policy
+      evaluated the artifact, and the exact result document it produced.
+    * `COMPATIBILITY_RESULT` — which versioned managed-profile compatibility
+      contract evaluated the artifact, and the exact result document.
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -76,16 +109,24 @@ class AttestationKind(StrEnum):
     PROVENANCE = "provenance"
     SIGNATURE = "signature"
     PRODUCT_MANIFEST = "product_manifest"
+    CAPABILITY_CONTRACT = "capability_contract"
+    CAPABILITY_SCHEMA = "capability_schema"
+    CAPABILITY_COMPOSITION = "capability_composition"
+    VULNERABILITY_POLICY_RESULT = "vulnerability_policy_result"
+    COMPATIBILITY_RESULT = "compatibility_result"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.
 ARTIFACT_KINDS: frozenset[ArtifactKind] = frozenset(ArtifactKind)
+ARTIFACT_ORIGINS: frozenset[ArtifactOrigin] = frozenset(ArtifactOrigin)
 ATTESTATION_KINDS: frozenset[AttestationKind] = frozenset(AttestationKind)
 
 
 __all__ = [
     "ARTIFACT_KINDS",
+    "ARTIFACT_ORIGINS",
     "ATTESTATION_KINDS",
     "ArtifactKind",
+    "ArtifactOrigin",
     "AttestationKind",
 ]

@@ -13,7 +13,9 @@ verified.
 ## Release state
 
 **Released: `0.1.0a1` through `0.1.0a5`.** Releases a2–a4 implement SPI 1.1;
-a5 implements SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
+a5 implements SPI 1.2 verification evidence. `0.1.0a6` and the additive
+SPI 1.2 provisioning contract are on `main` and unreleased. See `CHANGELOG.md`,
+which is the authority on what has
 and has not shipped.
 
 ## Where to read what
@@ -37,6 +39,54 @@ protocol per mode it declares:
 | `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
 | `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
 | `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+| `PROVISION` | `ProvisionPlugin` | `provisioning_handler_for` | `ProvisioningHandler` |
+
+SPI 1.2's provisioning handler exposes typed
+`plan`/`apply`/`observe`/`cancel` operations. The module persists the approved
+plan and exact connector/configuration provenance, materializes secrets only at
+the invocation boundary, and records ambiguous provider outcomes for
+reconciliation rather than retrying an effect it cannot prove did not happen.
+
+A connector declaring `PROVISION` must attach the product owner's exact kernel
+`CapabilityContractSnapshot` and every referenced canonical
+`CapabilitySchemaDocument` to each `CapabilityDeclaration`. The
+snapshot names the owner and schema version, pins the input and output schema
+identity for all four operations, and supplies the complete typed configuration,
+endpoint and activation/evidence declarations. The declaration refuses missing,
+duplicate or ref/digest-mismatched schema bytes, and the manifest digest embeds
+both contract and schemas rather than a connector-authored subset. Binding activation
+and provisioning intake use `verify_capability_configuration` to enforce the
+same contract without product/provider branches; secret-reference fields live
+only in `secret_refs`, and the verifier returns value-free provenance.
+`create_draft`/`adopt_manifest` also accept the exact connector distribution
+digest already admitted by the Release Catalog. PROVISION activation refuses a
+missing or non-canonical artifact pin; config revisions never alter it.
+
+An APPLY command also separates what approval can know from what execution
+produces later. `provisioning_command_template_digest` binds the exact local
+steps, sorted prerequisite capability-binding ids and the public
+`PrerequisiteEvidenceBinding` dataflow into the approved plan.
+`PrerequisiteReceiptPin` then names the immutable latest succeeded receipt for
+each upstream binding at dispatch. Receipt pins are signed and part of command
+identity, but are not placed in the earlier plan hash: predicting a receipt
+digest before provider execution would be impossible. Intake locks and verifies
+every pinned upstream operation before any downstream row or provider effect.
+At apply preparation it locks and re-verifies the exact upstream receipt chains,
+copies only schema-declared `public_non_secret` values into the target input,
+validates the resolved input against the held Draft 2020-12 schema, and persists
+its digest without rewriting the signed command. Connector apply output is
+likewise schema-validated; receipts retain only its public projection plus the
+digest of the complete result, never arbitrary or secret-classified values.
+
+PLAN settlement writes one immutable `ProvisioningCommandReceipt`, readable by
+`read_provisioning_plan_receipt`. APPLY must bind that exact local receipt as
+well as the separately verified assembly receipt before it can create an
+operation. The same intake check corroborates the exact local installation,
+connector artifact, manifest, configuration revision, product-owned capability
+contract and `DEFAULT_POLICY_DIGEST`; a signed command cannot relabel any one
+of those local facts. Operation receipts are hash chained and project
+`step_key` plus `provider_operation_ref` from immutable receipt columns. Both
+are null only for operation-level receipts such as `command_accepted`.
 
 A declared mode is a promise the module verifies at discovery, in both
 directions and including the shape of the handler that comes back. A mode

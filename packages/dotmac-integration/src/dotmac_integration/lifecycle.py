@@ -32,6 +32,7 @@ retries after a timeout.
 
 from __future__ import annotations
 
+import re
 import secrets as _secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,7 +46,11 @@ from dotmac_integration.models import (
     ConnectorConfigRevision,
     ConnectorInstallation,
 )
-from dotmac_integration.secret_refs import validate_config_revision
+from dotmac_integration.secret_refs import (
+    CapabilityConfigurationError,
+    validate_config_revision,
+    verify_capability_configuration,
+)
 from dotmac_integration.spi import ConnectorMode, accepts_manifest_digest
 
 __all__ = [
@@ -73,6 +78,18 @@ class LifecycleError(RuntimeError):
 
 
 _TERMINAL = frozenset({"retired"})
+_ARTIFACT_DIGEST_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _validated_connector_artifact_digest(digest: str | None) -> str | None:
+    if digest is None:
+        return None
+    if _ARTIFACT_DIGEST_RE.fullmatch(digest) is None:
+        raise LifecycleError(
+            "connector_artifact_digest must be 'sha256:' plus 64 lowercase "
+            "hex digits from the admitted Release Catalog artifact"
+        )
+    return digest
 
 
 def create_draft(
@@ -82,6 +99,7 @@ def create_draft(
     connector_key: str,
     name: str,
     environment: str = "production",
+    connector_artifact_digest: str | None = None,
     actor: str | None = None,
 ) -> ConnectorInstallation:
     """Start an installation, pinned to the connector installed RIGHT NOW.
@@ -89,15 +107,22 @@ def create_draft(
     The manifest digest and SPI range are captured at draft time rather than
     read live later, which is what makes a later upgrade a visible ADOPTION
     decision instead of a silent change under a running integration.
+
+    ``connector_artifact_digest`` is supplied by the assembly after resolving
+    the exact artifact in the Release Catalog. This module validates its
+    canonical content-address shape and stores it; it does not read another
+    module's database or pretend a syntactically valid digest proves release.
     """
     plugin = registry.plugin(connector_key)
     manifest = plugin.manifest
+    artifact_digest = _validated_connector_artifact_digest(connector_artifact_digest)
 
     installation = ConnectorInstallation(
         connector_key=manifest.connector_key,
         connector_version=manifest.version,
         spi_range=str(manifest.spi_range),
         manifest_digest=manifest.digest,
+        connector_artifact_digest=artifact_digest,
         name=name.strip(),
         environment=environment,
         state="draft",
@@ -221,6 +246,33 @@ def set_binding_enabled(
 
     if enabled:
         require_activatable(installation, binding, registry)
+        plugin = registry.plugin(installation.connector_key)
+        if ConnectorMode.PROVISION in plugin.modes:
+            _validated_connector_artifact_digest(installation.connector_artifact_digest)
+            if installation.connector_artifact_digest is None:
+                raise LifecycleError(
+                    f"capability {binding.capability_id!r} cannot activate without "
+                    "the exact Release Catalog connector artifact digest"
+                )
+            if installation.current_config_revision_id is None:
+                raise CapabilityConfigurationError(
+                    f"capability {binding.capability_id!r} has no current "
+                    "configuration revision"
+                )
+            revision = db.get(
+                ConnectorConfigRevision, installation.current_config_revision_id
+            )
+            if revision is None:
+                raise CapabilityConfigurationError(
+                    f"capability {binding.capability_id!r} current configuration "
+                    "revision is unavailable"
+                )
+            declaration = plugin.manifest.require_declares(binding.capability_id)
+            verify_capability_configuration(
+                declaration,
+                config=(revision.config_json or {}),
+                secret_refs=(revision.secret_refs or {}),
+            )
         binding.state = "enabled"
         binding.enabled_at = datetime.now(UTC)
     else:
@@ -657,6 +709,7 @@ def adopt_manifest(
     installation: ConnectorInstallation,
     *,
     registry: ConnectorRegistry,
+    connector_artifact_digest: str | None = None,
     actor: str | None = None,
 ) -> AdoptionPreview:
     """Move the installation onto the installed connector's current manifest.
@@ -668,7 +721,13 @@ def adopt_manifest(
     Refused when adoption would strand a bound capability. Applying it anyway
     would leave a binding pointing at a contract the connector no longer
     implements — an integration that reports healthy and cannot run.
+
+    A PROVISION adoption also requires the new distribution's Release
+    Catalog-backed ``connector_artifact_digest``. Reusing the old pin would
+    falsely claim the new manifest runs from the old bytes.
     """
+    artifact_digest = _validated_connector_artifact_digest(connector_artifact_digest)
+    plugin = registry.plugin(installation.connector_key)
     preview = preview_adoption(db, installation, registry=registry)
     if preview.blocked:
         raise LifecycleError(
@@ -677,12 +736,35 @@ def adopt_manifest(
             "rebind them first"
         )
     if not preview.adoption_required:
+        if artifact_digest is not None:
+            if (
+                installation.connector_artifact_digest is not None
+                and installation.connector_artifact_digest != artifact_digest
+            ):
+                raise LifecycleError(
+                    "connector artifact digest conflicts with the digest already "
+                    "pinned for this manifest"
+                )
+            if installation.connector_artifact_digest is None:
+                installation.connector_artifact_digest = artifact_digest
+                installation.updated_by = actor
+                db.flush()
         return preview
 
-    target = registry.get(installation.connector_key)
+    if ConnectorMode.PROVISION in plugin.modes and artifact_digest is None:
+        raise LifecycleError(
+            "adopting a PROVISION connector requires the exact Release Catalog "
+            "connector artifact digest"
+        )
+    target = plugin.manifest
     installation.manifest_digest = target.digest
     installation.connector_version = target.version
     installation.spi_range = str(target.spi_range)
+    # An artifact pin belongs to one exact released distribution. Preserving a
+    # prior version's digest across adoption would be stronger-looking than
+    # null and false. Legacy non-PROVISION adoption may remain unpinned; a
+    # PROVISION target was required above to supply its replacement.
+    installation.connector_artifact_digest = artifact_digest
     installation.updated_by = actor
     db.flush()
     return preview

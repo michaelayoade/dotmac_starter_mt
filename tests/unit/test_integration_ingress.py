@@ -100,6 +100,8 @@ from dotmac_kernel.models_platform import PlatformAdmin, PlatformAuditEvent
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+TEST_CONNECTOR_ARTIFACT_DIGEST = "sha256:" + "c" * 64
+
 SECRET_SENTINEL = "SENTINEL-MATERIALIZED-SECRET-1a5f"
 BODY_SENTINEL = b'{"leak":"SENTINEL-RAW-BODY-8f2a"}'
 HEADER_SENTINEL = "SENTINEL-SIGNATURE-9c1d"
@@ -371,7 +373,11 @@ def build(
     that moved them together could not express the case the split exists for.
     """
     installation = create_draft(
-        db, registry=registry, connector_key="conformance_fake", name=uuid.uuid4().hex
+        db,
+        registry=registry,
+        connector_key="conformance_fake",
+        name=uuid.uuid4().hex,
+        connector_artifact_digest=TEST_CONNECTOR_ARTIFACT_DIGEST,
     )
     put_config_revision(
         db,

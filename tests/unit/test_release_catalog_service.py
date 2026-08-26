@@ -10,13 +10,16 @@ proven against real Postgres in `tests/test_release_catalog_immutability.py`.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Generator
 
 import pytest
 from dotmac_kernel.models import Base
 from dotmac_release_catalog import (
     ArtifactKind,
+    ArtifactOrigin,
     AttestationKind,
+    AttestationOriginError,
     Digest,
     DigestError,
     ReleaseArtifact,
@@ -69,6 +72,7 @@ def _publish(db: Session, **overrides: object) -> ReleaseArtifact:
         "product_code": "dotmac-sub",
         "version": "7.100.7",
         "artifact_kind": ArtifactKind.CONTAINER_IMAGE,
+        "origin": ArtifactOrigin.DOTMAC_PRODUCT,
         "digest": _DIGEST,
         "artifact_ref": _REF,
     }
@@ -77,11 +81,26 @@ def _publish(db: Session, **overrides: object) -> ReleaseArtifact:
 
 
 class TestPublishValidatesEveryTime:
+    def test_origin_is_an_explicit_admission_decision(self) -> None:
+        assert (
+            inspect.signature(publish_artifact).parameters["origin"].default
+            is inspect.Parameter.empty
+        )
+
     def test_records_a_well_formed_artifact(self, db: Session) -> None:
         artifact = _publish(db)
         assert artifact.digest == _DIGEST
         assert artifact.artifact_ref == _REF
         assert artifact.artifact_kind == "container_image"
+        assert artifact.origin_class == "dotmac_product"
+
+    def test_records_upstream_origin_as_catalogue_authority(self, db: Session) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        assert artifact.origin_class == "upstream_third_party"
 
     def test_accepts_an_already_parsed_digest(self, db: Session) -> None:
         artifact = _publish(db, digest=Digest.parse(_DIGEST))
@@ -141,6 +160,159 @@ class TestAttest:
         )
 
         assert attestation.attestation_kind == "product_manifest"
+
+    def test_records_multiple_product_owned_capability_contracts(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(db)
+        first = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.CAPABILITY_CONTRACT,
+            uri="https://example.com/contracts/identity.json",
+            digest=f"sha256:{_OTHER}",
+        )
+        second = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.CAPABILITY_CONTRACT,
+            uri="https://example.com/contracts/session.json",
+            digest=_DIGEST,
+        )
+
+        assert first.attestation_kind == "capability_contract"
+        assert second.attestation_kind == "capability_contract"
+        assert first.id != second.id
+
+    def test_records_product_owned_capability_schema_bytes(self, db: Session) -> None:
+        artifact = _publish(db)
+        attestation = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.CAPABILITY_SCHEMA,
+            uri="https://example.com/contracts/schemas/plan-input.json",
+            digest=f"sha256:{_OTHER}",
+        )
+
+        assert attestation.attestation_kind == "capability_schema"
+
+    def test_records_product_owned_capability_composition(self, db: Session) -> None:
+        artifact = _publish(db)
+        attestation = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.CAPABILITY_COMPOSITION,
+            uri="https://example.com/contracts/compositions/suite.json",
+            digest=f"sha256:{_OTHER}",
+        )
+
+        assert attestation.attestation_kind == "capability_composition"
+
+    def test_upstream_admission_claims_are_distinct_and_catalogue_backed(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        vulnerability = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.VULNERABILITY_POLICY_RESULT,
+            uri="https://evidence.example/vulnerability.json",
+            digest=f"sha256:{_OTHER}",
+        )
+        compatibility = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.COMPATIBILITY_RESULT,
+            uri="https://evidence.example/compatibility.json",
+            digest=_DIGEST,
+        )
+        assert vulnerability.attestation_kind == "vulnerability_policy_result"
+        assert compatibility.attestation_kind == "compatibility_result"
+
+    def test_origin_refuses_a_dotmac_manifest_for_upstream_bytes(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        with pytest.raises(AttestationOriginError, match="upstream"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.PRODUCT_MANIFEST,
+                uri="https://evidence.example/fake-product-manifest.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+    def test_origin_refuses_a_dotmac_capability_contract_for_upstream_bytes(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        with pytest.raises(AttestationOriginError, match="upstream"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.CAPABILITY_CONTRACT,
+                uri="https://evidence.example/fake-capability-contract.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+    def test_origin_refuses_a_dotmac_capability_schema_for_upstream_bytes(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        with pytest.raises(AttestationOriginError, match="upstream"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.CAPABILITY_SCHEMA,
+                uri="https://evidence.example/fake-capability-schema.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+    def test_origin_refuses_dotmac_composition_for_upstream_bytes(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(
+            db,
+            product_code="nextcloud",
+            origin=ArtifactOrigin.UPSTREAM_THIRD_PARTY,
+        )
+        with pytest.raises(AttestationOriginError, match="upstream"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.CAPABILITY_COMPOSITION,
+                uri="https://evidence.example/fake-composition.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+    def test_origin_refuses_upstream_admission_claims_for_dotmac_bytes(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(db)
+        with pytest.raises(AttestationOriginError, match="Dotmac"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.VULNERABILITY_POLICY_RESULT,
+                uri="https://evidence.example/wrong-origin.json",
+                digest=f"sha256:{_OTHER}",
+            )
 
     def test_refuses_to_attest_an_artifact_that_does_not_exist(
         self, db: Session

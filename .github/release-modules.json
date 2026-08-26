@@ -82,7 +82,8 @@
           "dotmac_release_catalog/py.typed",
           "dotmac_release_catalog/manifest.py",
           "dotmac_release_catalog/migrations/__init__.py",
-          "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
+          "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py",
+          "dotmac_release_catalog/migrations/versions/rl_0002_artifact_origin.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -92,6 +93,7 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
+          "jsonschema",
           "sqlalchemy",
           "python"
         ]
@@ -253,8 +255,11 @@
         "this entry existed the module was unpublishable, and an assembly that",
         "cannot pin a module cannot compose it.",
         "",
-        "kernel_floor is a66, a CAPABILITY raise above its a58 ledger",
-        "allocation, and the row moved to CAPABILITY_RAISED_FLOORS with it.",
+        "kernel_floor is a69, a CAPABILITY raise above its a58 ledger",
+        "allocation, and the row stays in CAPABILITY_RAISED_FLOORS with it.",
+        "a69 publishes the product-owned CapabilityContractSnapshot that every",
+        "PROVISION connector must carry and the engine validates before I/O.",
+        "The older a66 floor remains historically relevant:",
         "a66 published `idempotency_ledger.v1`, the name for the at-most-once",
         "tables `run_effect_once` writes at request time. Every kernel from",
         "a18 HAS those tables, but one below a66 does not know the NAME, so",
@@ -273,11 +278,15 @@
         "application and composing it would create `mod_intg` in every starter",
         "deployment. A wheel that shipped the manifest but dropped a migration",
         "would therefore fail first in the Integrator's deployment, not here.",
-        "The list said 'both migrations' while the lineage had grown to six;",
-        "ig_0003..ig_0006 were added with ig_0007 so the claim is true again.",
+        "The list once said 'both migrations' while the lineage had grown;",
+        "ig_0003..ig_0008 are listed explicitly so the claim is true again.",
         "ig_0007 is the load-bearing one for this rule: it creates nothing, so",
         "a wheel that dropped it would install a module whose prerequisite is",
-        "declared and never verified — exactly the state a3 exists to end.",
+        "declared and never verified — exactly the state a4 exists to end.",
+        "ig_0008 is the approval-bound provisioning ledger added in a6; the",
+        "command, operation, step and immutable-receipt files beside it are",
+        "required because a partial wheel would expose SPI 1.2 without its",
+        "durable execution owner.",
         "",
         "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
         "ships no link helper that emits DDL into a consuming product's",
@@ -293,7 +302,7 @@
       "package_dir": "packages/dotmac-integration",
       "import_name": "dotmac_integration",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a66",
+      "kernel_floor": "0.1.0a69",
       "db_schema": "mod_intg",
       "tag_prefix": "dotmac-integration-v",
       "wheel_contents": {
@@ -303,6 +312,8 @@
           "dotmac_integration/spi.py",
           "dotmac_integration/ingress.py",
           "dotmac_integration/discovery.py",
+          "dotmac_integration/provisioning.py",
+          "dotmac_integration/provisioning_models.py",
           "dotmac_integration/secret_refs.py",
           "dotmac_integration/migrations/__init__.py",
           "dotmac_integration/migrations/versions/ig_0001_connector_control_plane.py",
@@ -311,7 +322,8 @@
           "dotmac_integration/migrations/versions/ig_0004_destinations.py",
           "dotmac_integration/migrations/versions/ig_0005_receipt_delivery.py",
           "dotmac_integration/migrations/versions/ig_0006_retention.py",
-          "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py"
+          "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
+          "dotmac_integration/migrations/versions/ig_0008_provisioning.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -46,6 +46,8 @@ from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin, fake_re
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+TEST_CONNECTOR_ARTIFACT_DIGEST = "sha256:" + "c" * 64
+
 
 @pytest.fixture()
 def db() -> Session:
@@ -71,7 +73,11 @@ def registry():
 
 def _enabled(db: Session, registry) -> tuple:
     installation = create_draft(
-        db, registry=registry, connector_key="conformance_fake", name="primary"
+        db,
+        registry=registry,
+        connector_key="conformance_fake",
+        name="primary",
+        connector_artifact_digest=TEST_CONNECTOR_ARTIFACT_DIGEST,
     )
     put_config_revision(db, installation, config={"a": 1})
     enable(db, installation, registry=registry)

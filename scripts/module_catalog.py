@@ -6,7 +6,7 @@ This script deliberately owns no module metadata.  It joins:
 * ``packages/*/EXTRACTION.toml`` for contract, evidence and adoption state;
 * package ``pyproject.toml`` for declared version and kernel requirement;
 * ``ModuleManifest`` source for persistence-plane and schema declarations; and
-* the three closed release allowlists for publication policy.
+* the closed module, adapter, connector and contract publish allowlists.
 
 Stdlib only so the catalogue can be checked before repository dependencies are
 installed, just like the module release resolver.
@@ -84,31 +84,24 @@ def _load_allowlist(repo_root: Path) -> dict[str, dict]:
     return modules
 
 
-def _load_adapter_allowlist(repo_root: Path) -> dict[str, dict]:
-    """The stateless-protocol-adapter lane (ADR-0006, 2026-08-14 amendment).
+STATELESS_RELEASE_LANES: Final = (
+    ("adapter", ".github/release-adapters.json", "adapters"),
+    ("connector", ".github/release-connectors.json", "connectors"),
+    ("contract catalogue", ".github/release-contracts.json", "contracts"),
+)
 
-    A SECOND closed allowlist, because an adapter has no `db_schema`,
-    `manifest_attr` or `kernel_floor` for the module lane to assert. The
-    catalogue reads it for one reason: without it, the first adapter to be
-    listed would still be rendered "not allowlisted" here — a generated document
-    quietly contradicting the file that governs it.
-    """
-    path = repo_root / ".github" / "release-adapters.json"
+
+def _load_stateless_allowlist(
+    repo_root: Path, *, label: str, relative_path: str, key: str
+) -> dict[str, dict]:
+    """One stateless release profile over the shared governed classification."""
+
+    path = repo_root / relative_path
     data = json.loads(path.read_text(encoding="utf-8"))
-    adapters = data.get("adapters")
-    if not isinstance(adapters, dict):
-        raise CatalogError(f"{path}: adapters must be an object")
-    return adapters
-
-
-def _load_connector_allowlist(repo_root: Path) -> dict[str, dict]:
-    """The discovered connector-plugin lane (ADR-0024)."""
-    path = repo_root / ".github" / "release-connectors.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    connectors = data.get("connectors")
-    if not isinstance(connectors, dict):
-        raise CatalogError(f"{path}: connectors must be an object")
-    return connectors
+    entries = data.get(key)
+    if not isinstance(entries, dict):
+        raise CatalogError(f"{path}: {key} must be an object for {label} lane")
+    return entries
 
 
 def _shared_package_dirs(repo_root: Path) -> list[Path]:
@@ -339,8 +332,15 @@ def _string_tuple(value: object, *, field: str, package: str) -> tuple[str, ...]
 
 def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
     allowlist = _load_allowlist(repo_root)
-    adapter_allowlist = _load_adapter_allowlist(repo_root)
-    connector_allowlist = _load_connector_allowlist(repo_root)
+    stateless_allowlists = {
+        label: (
+            repo_root / relative_path,
+            _load_stateless_allowlist(
+                repo_root, label=label, relative_path=relative_path, key=key
+            ),
+        )
+        for label, relative_path, key in STATELESS_RELEASE_LANES
+    }
     records: list[ModuleRecord] = []
 
     for package_dir in _shared_package_dirs(repo_root):
@@ -389,40 +389,31 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
                 )
             release_policy = "module allowlist"
             release_path = repo_root / ".github" / "release-modules.json"
-        elif distribution in adapter_allowlist:
-            # The stateless lane. No schema to cross-check against a manifest —
-            # there is no manifest — so the only assertion available here is
-            # that the entry names this package's directory.
-            adapter_entry = adapter_allowlist[distribution]
-            expected_dir = package_dir.relative_to(repo_root).as_posix()
-            if adapter_entry.get("package_dir") != expected_dir:
+        elif memberships := [
+            (label, path, entries[distribution])
+            for label, (path, entries) in stateless_allowlists.items()
+            if distribution in entries
+        ]:
+            if len(memberships) != 1:
                 raise CatalogError(
-                    f"{distribution}: adapter package_dir disagrees with "
+                    f"{distribution}: listed in multiple stateless release profiles: "
+                    + ", ".join(label for label, _, _ in memberships)
+                )
+            label, path, stateless_entry = memberships[0]
+            expected_dir = package_dir.relative_to(repo_root).as_posix()
+            if stateless_entry.get("package_dir") != expected_dir:
+                raise CatalogError(
+                    f"{distribution}: {label} package_dir disagrees with "
                     f"{expected_dir}"
                 )
             if classification != "stateless-protocol-adapter":
                 raise CatalogError(
-                    f"{distribution}: listed in the adapter allowlist but "
+                    f"{distribution}: listed in the {label} allowlist but "
                     f"classified {classification!r} — a stateful module "
                     "published through that lane skips every namespace check"
                 )
-            release_policy = "adapter allowlist"
-            release_path = repo_root / ".github" / "release-adapters.json"
-        elif distribution in connector_allowlist:
-            connector_entry = connector_allowlist[distribution]
-            expected_dir = package_dir.relative_to(repo_root).as_posix()
-            if connector_entry.get("package_dir") != expected_dir:
-                raise CatalogError(
-                    f"{distribution}: connector package_dir disagrees with "
-                    f"{expected_dir}"
-                )
-            if classification != "stateless-protocol-adapter":
-                raise CatalogError(
-                    f"{distribution}: listed in the connector allowlist but "
-                    f"classified {classification!r}"
-                )
-            release_policy = "connector allowlist"
-            release_path = repo_root / ".github" / "release-connectors.json"
+            release_policy = f"{label} allowlist"
+            release_path = path
         elif distribution in DEDICATED_RELEASE_WORKFLOWS:
             release_policy = "dedicated workflow"
             release_path = repo_root / DEDICATED_RELEASE_WORKFLOWS[distribution]
@@ -462,10 +453,12 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
         )
 
     discovered = {record.distribution for record in records}
-    orphaned = sorted(
-        (set(allowlist) | set(adapter_allowlist) | set(connector_allowlist))
-        - discovered
-    )
+    stateless_distributions = {
+        distribution
+        for _, entries in stateless_allowlists.values()
+        for distribution in entries
+    }
+    orphaned = sorted((set(allowlist) | stateless_distributions) - discovered)
     if orphaned:
         raise CatalogError(
             "release allowlist names packages absent from the catalogue inputs: "

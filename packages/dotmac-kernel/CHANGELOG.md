@@ -6,7 +6,51 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a68 — UNRELEASED
+## 0.1.0a69 — unreleased
+
+Adds the import-safe, product-owned `CapabilityContractSnapshot`. A product or
+domain owner supplies its stable owner/capability codes and every contract
+member; the kernel supplies only immutable types, canonical UTF-8 JSON,
+SHA-256 digesting, exact parsing and a cross-check against the owning
+`ProductManifestSnapshot`.
+
+The snapshot declares independently addressable operations with exact
+request/result schema references and digests, typed configuration requirements
+(with `reference` and `secret_reference` kept distinct), a closed generic
+format vocabulary, typed endpoint requirements linked to their declared
+operations, and activation/evidence checks. Every nested declaration is frozen,
+uniquely keyed and already canonically ordered; parsing refuses unknown fields,
+normalization, invalid enum members, non-canonical bytes and digest mismatches.
+
+Also adds `CapabilitySchemaDocument`, the held canonical-document counterpart
+to an operation's schema reference and digest. It fixes `$id` to the exact
+`schema:...@vN` identity, requires JSON Schema draft 2020-12, rejects duplicate
+keys and non-finite JSON numbers, and permits only local JSON-pointer references
+so validation cannot turn into an implicit network read. Exact expected
+reference and digest checks let Release Catalog attest schema bytes separately
+from the contract that names them.
+
+Also adds `CapabilityCompositionSnapshot`, a value-free owner document for an
+approved APPLY-output to APPLY-input edge. It binds both exact capability and
+schema identities, requires a declared public/non-secret source path, and
+proves source/target primitive compatibility without naming installations or
+runtime values. `CapabilitySchemaDocument` can now return a fresh mapping,
+read an approved instance pointer, and project only explicitly classified
+public evidence for the Integration module's durable receipt boundary.
+
+There is deliberately no global registry, product/provider enum, product
+capability vocabulary, configuration value, secret resolution, database table
+or network client. Integrator already owns runtime declaration and binding;
+adding another registry in the kernel would create a second authority rather
+than a reusable contract. No migration is added.
+
+Rule-24 source: the existing `ProductManifestSnapshot` is the qualifying
+canonical-document convention and Sub's assembly is the qualifying owner of
+real capability declarations. The checked-in 2026-08-17 inventory amendment
+records that no product had the richer typed capability-contract document to
+extract, so its generic shape is greenfield after inventory rather than a fork.
+
+## 0.1.0a68 — released 2026-08-17
 
 Names and proves the platform-only audit storage consumed by installable
 control-plane modules.

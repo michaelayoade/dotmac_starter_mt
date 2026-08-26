@@ -33,6 +33,7 @@ from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, MODULE_DATABASE_ROLES_V1
 
 from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
+from dotmac_integration.provisioning_models import PROVISIONING_PLATFORM_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 
 module = ModuleManifest(
@@ -47,9 +48,12 @@ module = ModuleManifest(
     # COMPOSED from the areas that own the tables, not one hand-maintained
     # list. `models.PLATFORM_TABLES` is the control-plane and execution
     # machinery; `retention.RETENTION_PLATFORM_TABLES` is the legal-hold
-    # ledger. Declaring each beside the code that owns it keeps the declaration
-    # honest — and keeps two concurrent slices from editing one tuple.
-    platform_tables=PLATFORM_TABLES + RETENTION_PLATFORM_TABLES,
+    # ledger; `provisioning_models.PROVISIONING_PLATFORM_TABLES` owns approved
+    # commands, operations, steps and evidence. Declaring each beside its owner
+    # keeps the declaration honest.
+    platform_tables=(
+        PLATFORM_TABLES + RETENTION_PLATFORM_TABLES + PROVISIONING_PLATFORM_TABLES
+    ),
     # ── Logical database prerequisites ──────────────────────────────────────
     # TWO effects this module needs that none of its own migrations create.
     #

@@ -71,27 +71,33 @@ from dotmac_release_catalog.models import (
     ReleaseArtifact,
 )
 from dotmac_release_catalog.service import (
+    AttestationOriginError,
     UnknownArtifactError,
     attest_artifact,
     publish_artifact,
 )
 from dotmac_release_catalog.vocabulary import (
     ARTIFACT_KINDS,
+    ARTIFACT_ORIGINS,
     ATTESTATION_KINDS,
     ArtifactKind,
+    ArtifactOrigin,
     AttestationKind,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
     "ARTIFACT_KINDS",
+    "ARTIFACT_ORIGINS",
     "ATTESTATION_KINDS",
     "SCHEMA",
     "SHA256",
     "ArtifactAttestation",
     "ArtifactIdentityError",
     "ArtifactKind",
+    "ArtifactOrigin",
+    "AttestationOriginError",
     "AttestationKind",
     "Digest",
     "DigestError",

@@ -155,23 +155,18 @@ CAPABILITY_RAISED_FLOORS = {
     # is ever reached. The floor moved for a capability, so the row moved with
     # it.
     "dotmac-numbering": ("0.1.0a66", "0.1.0a65"),
-    # Integration held a58 — its own ledger row — through `0.1.0a1`, `0.1.0a2`
-    # and `0.1.0a3`, all PUBLISHED. `0.1.0a4` declares `idempotency_ledger.v1`,
-    # the a66 name for the at-most-once tables `run_effect_once` has been
-    # writing at request time since a1, and verifies it in `ig_0007`. The
-    # tables themselves are far older than the floor: kernel `0018` created
-    # them (ADR-0014). What a65 and below lack is the NAME — `validate_
-    # prerequisites` raises `UnknownPrerequisiteError` while constructing the
-    # manifest, so the module cannot be imported at all, let alone reach the
-    # a58 allocation check. Capability outranks allocation, as everywhere else
-    # in this map.
+    # Integration held a58 — its own ledger row — through published a1..a3.
+    # Published a4 raised it to a66 for `idempotency_ledger.v1`; published a5
+    # adds verification evidence without raising that floor. Unreleased a6
+    # raises it again to a69 because PROVISION declarations consume the
+    # canonical product-owned CapabilityContractSnapshot first published
+    # there. Capability outranks allocation, as everywhere else in this map.
     #
     # Unlike numbering, whose a1 was never published, this floor raise is
-    # visible to consumers: `dotmac_integrator` can pin any of three released
-    # versions that run on a58..a65, and a4 will not. That is the correct trade
-    # — every one of those installs on a kernel whose ledger it silently
-    # requires and cannot state.
-    "dotmac-integration": ("0.1.0a66", "0.1.0a58"),
+    # visible to consumers: a1..a3 run on a58, a4..a5 require a66, and a6 requires
+    # a69. A lower floor would import a module unable to verify the product
+    # contract it promises to enforce before provider I/O.
+    "dotmac-integration": ("0.1.0a69", "0.1.0a58"),
     # Entitlement allocation held a56 through `0.1.0a1`..`0.1.0a4`, all four
     # PUBLISHED, and that a56 was `platform_tables` (ADR-0023) rather than its
     # a45 ledger row. `0.1.0a5` declares `idempotency_ledger.v1`, the a66 name

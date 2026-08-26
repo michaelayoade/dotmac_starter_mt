@@ -100,6 +100,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
+| `dotmac_kernel.capability_contract` | `CAPABILITY_CONTRACT_SCHEMA`, `CAPABILITY_SCHEMA_DIALECT`, `CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY`, `CapabilityContractSnapshot`, `CapabilitySchemaDocument`, `CapabilitySchemaDataClassification`, `CapabilityOperation`, `CapabilityConfigField`, `CapabilityEndpointRequirement`, `CapabilityCheck`, `CapabilityConfigValueType`, `CapabilityConfigValueFormat`, `CapabilityEndpointType`, `CapabilityCheckStage`, `CapabilityEvidenceType`, `CapabilityContractError`, `CapabilityContractDigestMismatchError`, `CapabilitySchemaDigestMismatchError` (canonical product-owned capability contract and held schema documents; also top-level) |
+| `dotmac_kernel.capability_composition` | `CAPABILITY_COMPOSITION_SCHEMA`, `CapabilityCompositionSnapshot`, `CapabilityEvidenceBinding`, `CapabilityCompositionError`, `CapabilityCompositionDigestMismatchError` (canonical value-free cross-capability evidence mappings; also top-level) |
 | `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.consent` | `ConsentError`, `filter_eligible`, `is_marketing`, `list_suppressions`, `may_send`, `normalize_address`, `normalize_channel`, `register_marketing_categories`, `register_numeric_channels`, `registered_marketing_categories`, `suppress`, `suppression_reason`, `suppression_reasons_for_addresses`, `unsuppress`, `unsuppress_marketing` |
@@ -833,6 +835,42 @@ Two pure, in-memory code contracts (no database, no fleet state). They
 Stable identifiers (capability codes; `(profile code, version)`), deterministic
 resolution, and the version rule above are part of the public contract and are
 covered by consumer tests.
+
+### Product-owned capability contracts (`dotmac_kernel.capability_contract`)
+
+`CapabilityContractSnapshot` is the immutable, value-free contract behind one
+product-declared capability. Its exact identity is `(owner_code,
+capability_code, schema_version)`. A binding may independently name one of the
+snapshot's `CapabilityOperation`s, but an operation never becomes a second
+capability or a second owner.
+
+- `CapabilityOperation` binds exact request/result schema references and
+  SHA-256 digests; an operation name alone is never an executable contract.
+- `CapabilityConfigField` declares a generic type, compatible closed format
+  and requiredness. In
+  particular, `reference` and `secret_reference` are different types. Neither
+  carries material, and the snapshot has no value/default field.
+- `CapabilityEndpointRequirement` declares only a provider-neutral endpoint
+  shape (`https_url`, `fqdn`, or `host_port`) and the exact declared operations
+  it serves, never a deployed address.
+- `CapabilityCheck` distinguishes activation gates from evidence checks and
+  types the evidence shape. Product/domain owners supply every code and its
+  meaning.
+- `to_json_bytes()` is canonical UTF-8 JSON; `digest` binds those exact bytes;
+  `from_json_bytes(..., expected_digest=...)` refuses alternate spellings,
+  unknown fields, invalid types and digest drift rather than normalising them.
+- `require_declared_by(ProductManifestSnapshot)` ties the contract back to the
+  exact owning product vocabulary. It does not activate or bind anything.
+- `CapabilitySchemaDocument` binds the exact canonical JSON Schema bytes named
+  by an operation. It requires the schema reference as `$id`, draft 2020-12,
+  duplicate-free finite JSON and local-only `$ref` values. Optional expected
+  reference and digest pins are checked independently; validation never fetches
+  a remote schema.
+
+There is intentionally no kernel registry/install singleton. The product
+manifest owns which capability exists; Integrator owns runtime declaration and
+connector binding. A kernel registry would be a parallel authority rather than
+part of this document contract.
 
 ### Signed-licence verification (WS8, `dotmac_kernel.licensing`)
 

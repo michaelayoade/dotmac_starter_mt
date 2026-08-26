@@ -30,15 +30,22 @@ migrations would first run in production.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
 import uuid
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
+
+if TYPE_CHECKING:
+    from dotmac_integration.discovery import ConnectorRegistry
+    from dotmac_integration.provisioning import PreparedProvisioning
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KERNEL_VERSIONS = (
@@ -692,10 +699,11 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     """Every kind of change the lineage makes, accounted for.
 
     `ig_0003` and `ig_0005` add COLUMNS to existing tables; `ig_0004` and
-    `ig_0006` add exactly one table each. Asserted from both sides — the
-    declaration says nine and the live schema holds exactly those nine — plus
-    the ADR-0023 contract, which either a new column or a new table could break
-    by carrying a tenant scope.
+    `ig_0006` add exactly one table each; `ig_0008` adds the five provisioning
+    tables. Asserted from both sides — the declaration says fourteen and the
+    live schema holds exactly those fourteen — plus the ADR-0023 contract,
+    which either a new column or a new table could break by carrying a tenant
+    scope.
 
     The count is stated rather than derived on purpose: a table arriving in a
     migration without arriving in `platform_tables` is precisely the drift this
@@ -706,7 +714,7 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 9
+    assert len(module.platform_tables) == 14
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
     assert module.tables == ()
@@ -1192,3 +1200,581 @@ def test_the_refusals_above_are_not_refusing_everything(
     admin_url, _ = migrated_scratch
     with _broken(admin_url, "DROP TABLE mod_intg.receipt_legal_holds CASCADE") as conn:
         require_prerequisites(conn, _ledger_requires())
+
+
+def _plan_and_build_approved_apply(  # type: ignore[no-untyped-def]
+    db,
+    *,
+    registry,
+    installation,
+    revision,
+    binding,
+    command_id: str,
+    deployment_ref: str,
+    plan_hash: str,
+    steps,
+    moment,
+    prerequisite_capability_binding_ids=(),
+    prerequisite_evidence_bindings=(),
+    prerequisite_receipt_pins=(),
+):
+    """Drive the real PLAN ledger, then bind its exact receipt into APPLY.
+
+    This is intentionally not a constructor-only fixture.  The property under
+    test is that APPLY is accepted only after this module has independently
+    planned and settled the same deployment, binding, configuration and plan.
+    Hand-inserting a plausible receipt would make the Postgres canary certify a
+    path the public service never produced.
+    """
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from dotmac_integration import (
+        DEFAULT_POLICY_DIGEST,
+        ProvisioningCapabilityOperationPin,
+        ProvisioningCommand,
+        VerifiedApprovalGrant,
+        invoke_prepared_plan,
+        prepare_provisioning_plan,
+        provisioning_command_template_digest,
+        read_provisioning_plan_receipt,
+        settle_provisioning_plan,
+    )
+    from dotmac_integration.conformance import FAKE_CAPABILITY
+
+    def _canonical_digest(value: str) -> str:
+        return value if value.startswith("sha256:") else "sha256:" + value
+
+    config_digest = _canonical_digest(revision.config_digest)
+    plan_command_id = f"plan-{command_id}"
+    request_body_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            f"{deployment_ref}:{plan_command_id}:request".encode()
+        ).hexdigest()
+    )
+    prepared = prepare_provisioning_plan(
+        db,
+        command_id=plan_command_id,
+        deployment_ref=deployment_ref,
+        request_body_digest=request_body_digest,
+        capability_id=FAKE_CAPABILITY,
+        binding_id=binding.id,
+        config_digest=config_digest,
+        plan_hash=plan_hash,
+        steps=steps,
+        registry=registry,
+    )
+    assert prepared is not None
+    result = invoke_prepared_plan(
+        prepared,
+        registry=registry,
+        resolve_secrets=lambda refs: {"credential": "held-test-material"},
+    )
+    settle_provisioning_plan(db, prepared=prepared, result=result)
+    plan_receipt = read_provisioning_plan_receipt(db, command_id=plan_command_id)
+
+    declaration = registry.plugin(installation.connector_key).manifest.require_declares(
+        FAKE_CAPABILITY
+    )
+    contract = declaration.contract_snapshot
+    assert contract is not None
+    capability_operations = tuple(
+        ProvisioningCapabilityOperationPin(
+            operation_code=operation.operation_code,
+            input_schema_ref=operation.input_schema_ref,
+            input_schema_digest=operation.input_schema_digest,
+            output_schema_ref=operation.output_schema_ref,
+            output_schema_digest=operation.output_schema_digest,
+        )
+        for operation in contract.operations
+    )
+    saved_plan_id = uuid.uuid4()
+    approval_request_id = uuid.uuid4()
+    approval_binding_hash = "sha256:" + "e" * 64
+    plan_validation_receipt_id = uuid.uuid4()
+    plan_validation_receipt_digest = "sha256:" + "5" * 64
+    placeholder = "sha256:" + "0" * 64
+    approval = VerifiedApprovalGrant(
+        grant_ref=f"approval-{command_id}",
+        approval_request_id=approval_request_id,
+        approval_request_binding_hash=approval_binding_hash,
+        saved_plan_id=saved_plan_id,
+        approved_plan_hash=plan_hash,
+        plan_command_id=plan_command_id,
+        plan_validation_receipt_id=plan_validation_receipt_id,
+        plan_validation_receipt_digest=plan_validation_receipt_digest,
+        plan_validation_request_body_digest=plan_receipt.request_body_digest,
+        module_plan_receipt_hash=plan_receipt.receipt_hash,
+        digest="sha256:" + "b" * 64,
+        expires_at=moment + timedelta(hours=1),
+        verified_at=moment,
+        approved_command_template_digest=placeholder,
+    )
+    connector_artifact_digest = installation.connector_artifact_digest
+    assert connector_artifact_digest is not None
+    command = ProvisioningCommand(
+        command_id=command_id,
+        deployment_ref=deployment_ref,
+        desired_state_revision=1,
+        desired_state_version_id=uuid.uuid4(),
+        desired_state_hash="sha256:" + "d" * 64,
+        saved_plan_id=saved_plan_id,
+        approval_request_id=approval_request_id,
+        approval_request_binding_hash=approval_binding_hash,
+        plan_command_id=plan_command_id,
+        plan_validation_receipt_id=plan_validation_receipt_id,
+        plan_validation_receipt_digest=plan_validation_receipt_digest,
+        plan_validation_request_body_digest=plan_receipt.request_body_digest,
+        module_plan_receipt_hash=plan_receipt.receipt_hash,
+        profile_version_id=uuid.uuid4(),
+        profile_code="managed.application",
+        profile_version=1,
+        profile_schema_version=1,
+        profile_content_hash="sha256:" + "7" * 64,
+        command_schema_version="integrator.provisioning-command.v1",
+        capability_id=FAKE_CAPABILITY,
+        capability_owner_code=contract.owner_code,
+        capability_code=contract.capability_code,
+        capability_schema_version=contract.schema_version,
+        capability_contract_attestation_id=uuid.uuid4(),
+        capability_contract_digest=contract.digest,
+        capability_operations=capability_operations,
+        capability_binding_id=binding.id,
+        binding_ref=binding.id,
+        installation_id=installation.id,
+        installation_ref=installation.name,
+        connector_key=installation.connector_key,
+        connector_version=installation.connector_version,
+        connector_manifest_digest=_canonical_digest(installation.manifest_digest),
+        connector_configuration_revision_id=revision.id,
+        configuration_snapshot_ref=f"vendor-configuration:{uuid.uuid4()}",
+        configuration_schema_version=1,
+        configuration_hash="sha256:" + "8" * 64,
+        plan_hash=plan_hash,
+        expected_plan_hash=plan_hash,
+        artifact_digest=connector_artifact_digest,
+        component_artifact_digest=None,
+        config_digest=config_digest,
+        execution_policy_digest=DEFAULT_POLICY_DIGEST,
+        approval=approval,
+        steps=steps,
+        prerequisite_capability_binding_ids=prerequisite_capability_binding_ids,
+        prerequisite_evidence_bindings=prerequisite_evidence_bindings,
+        prerequisite_receipt_pins=prerequisite_receipt_pins,
+    )
+    return replace(
+        command,
+        approval=replace(
+            approval,
+            approved_command_template_digest=provisioning_command_template_digest(
+                command
+            ),
+        ),
+    )
+
+
+def _seed_two_step_provisioning(
+    admin_url: str,
+) -> tuple[Engine, ConnectorRegistry, uuid.UUID, datetime]:
+    """Create one operation with two independently ready steps."""
+    from datetime import UTC, datetime
+
+    from dotmac_integration import (
+        ProvisionStep,
+        accept_provisioning_command,
+        add_binding,
+        create_draft,
+        enable,
+        put_config_revision,
+        set_binding_enabled,
+    )
+    from dotmac_integration.conformance import (
+        FAKE_CAPABILITY,
+        fake_plugin,
+        fake_registry,
+    )
+    from dotmac_integration.spi import ProvisioningResult, ProvisionResultStatus
+    from sqlalchemy.orm import Session
+
+    plugin = fake_plugin(
+        provisioning_result=ProvisioningResult(
+            status=ProvisionResultStatus.SUCCEEDED,
+            provider_operation_ref="provider-operation-live",
+            evidence={"phase": "ready", "detail": "not-durable"},
+        )
+    )
+    registry = fake_registry(plugins=[plugin])
+    moment = datetime(2026, 8, 17, 12, tzinfo=UTC)
+    suffix = uuid.uuid4().hex
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        installation = create_draft(
+            db,
+            registry=registry,
+            connector_key="conformance_fake",
+            name=f"race-{suffix}",
+            connector_artifact_digest="sha256:" + "c" * 64,
+        )
+        revision, _ = put_config_revision(
+            db,
+            installation,
+            config={"endpoint": "https://service.example"},
+            secret_refs={"credential": "bao://managed-services/test-only"},
+        )
+        enable(db, installation, registry=registry)
+        binding = add_binding(
+            db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+        )
+        set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
+        plan_hash = "sha256:" + "1" * 64
+        command = _plan_and_build_approved_apply(
+            db,
+            registry=registry,
+            installation=installation,
+            revision=revision,
+            binding=binding,
+            command_id=f"apply-{suffix}",
+            deployment_ref=f"deployment-{suffix}",
+            plan_hash=plan_hash,
+            steps=(
+                ProvisionStep(
+                    step_key="first",
+                    endpoint_code=FAKE_CAPABILITY,
+                    depends_on=(),
+                    input={"desired_ref": "one"},
+                ),
+                ProvisionStep(
+                    step_key="second",
+                    endpoint_code=FAKE_CAPABILITY,
+                    depends_on=(),
+                    input={"desired_ref": "two"},
+                ),
+            ),
+            moment=moment,
+        )
+        accepted = accept_provisioning_command(
+            db,
+            command,
+            registry=registry,
+            now=moment,
+        )
+        db.commit()
+        operation_id = accepted.operation_id
+    return engine, registry, operation_id, moment
+
+
+def test_provisioning_serializes_one_operation_claim_across_sessions(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Two ready steps still produce one provider call at a time."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from dotmac_integration import prepare_next_apply
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    engine, registry, operation_id, moment = _seed_two_step_provisioning(admin_url)
+    start = threading.Barrier(2, timeout=30)
+
+    def _claim() -> PreparedProvisioning | None:
+        with Session(engine) as db:
+            db.execute(text("SET LOCAL lock_timeout = '15s'"))
+            db.execute(text("SET LOCAL statement_timeout = '30s'"))
+            start.wait()
+            prepared = prepare_next_apply(
+                db,
+                operation_id=operation_id,
+                registry=registry,
+                now=moment,
+            )
+            db.commit()
+            return prepared
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_claim)
+        second = pool.submit(_claim)
+        claims = (first.result(timeout=90), second.result(timeout=90))
+    assert sum(claim is not None for claim in claims) == 1
+    engine.dispose()
+
+
+def test_cross_binding_apply_locks_and_accepts_exact_succeeded_receipt(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The live ledger, not caller testimony, satisfies an approved DAG edge."""
+    from dotmac_integration import (
+        CapabilityBinding,
+        ConnectorInstallation,
+        PrerequisiteEvidenceBinding,
+        PrerequisiteReceiptPin,
+        ProvisioningOperation,
+        ProvisioningStepRecord,
+        ProvisionStep,
+        accept_provisioning_command,
+        add_binding,
+        create_draft,
+        enable,
+        invoke_prepared_provisioning,
+        prepare_next_apply,
+        put_config_revision,
+        read_provisioning_receipts,
+        set_binding_enabled,
+        settle_provisioning,
+    )
+    from dotmac_integration.conformance import FAKE_CAPABILITY
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    engine, registry, upstream_id, moment = _seed_two_step_provisioning(admin_url)
+    with Session(engine) as db:
+        for _ in range(2):
+            prepared = prepare_next_apply(
+                db, operation_id=upstream_id, registry=registry, now=moment
+            )
+            assert prepared is not None
+            result = invoke_prepared_provisioning(
+                prepared,
+                registry=registry,
+                resolve_secrets=lambda refs: {"credential": "held-test-material"},
+            )
+            settle_provisioning(db, prepared=prepared, result=result, now=moment)
+            db.commit()
+
+        upstream = db.get(ProvisioningOperation, upstream_id)
+        assert upstream is not None and upstream.state == "succeeded"
+        receipt = read_provisioning_receipts(db, operation_id=upstream.id)[-1]
+        assert receipt.receipt_kind == "step_succeeded"
+        assert receipt.step_key == "second"
+        assert receipt.provider_operation_ref == "provider-operation-live"
+        assert receipt.evidence["public_evidence"] == {"phase": "ready"}
+        assert "not-durable" not in repr(receipt.evidence)
+        binding_a = db.get(CapabilityBinding, upstream.capability_binding_id)
+        assert binding_a is not None
+        installation_a = db.get(ConnectorInstallation, binding_a.installation_id)
+        assert installation_a is not None
+        set_binding_enabled(
+            db,
+            installation_a,
+            binding_a,
+            registry=registry,
+            enabled=False,
+        )
+
+        installation_b = create_draft(
+            db,
+            registry=registry,
+            connector_key="conformance_fake",
+            name=f"dependency-target-{uuid.uuid4().hex}",
+            connector_artifact_digest="sha256:" + "c" * 64,
+        )
+        revision_b, _ = put_config_revision(
+            db,
+            installation_b,
+            config={"endpoint": "https://service.example"},
+            secret_refs={"credential": "bao://managed-services/test-only"},
+        )
+        enable(db, installation_b, registry=registry)
+        binding_b = add_binding(
+            db,
+            installation_b,
+            registry=registry,
+            capability_id=FAKE_CAPABILITY,
+        )
+        set_binding_enabled(
+            db,
+            installation_b,
+            binding_b,
+            registry=registry,
+            enabled=True,
+        )
+        contract = (
+            registry.plugin(installation_b.connector_key)
+            .manifest.require_declares(FAKE_CAPABILITY)
+            .contract_snapshot
+        )
+        assert contract is not None
+        apply_operation = next(
+            item for item in contract.operations if item.operation_code == "apply"
+        )
+        command = _plan_and_build_approved_apply(
+            db,
+            registry=registry,
+            installation=installation_b,
+            revision=revision_b,
+            binding=binding_b,
+            command_id=f"cross-binding-live-{uuid.uuid4().hex}",
+            deployment_ref=upstream.deployment_ref,
+            plan_hash=upstream.expected_plan_hash,
+            steps=(
+                ProvisionStep(
+                    step_key="downstream",
+                    endpoint_code=FAKE_CAPABILITY,
+                    depends_on=(),
+                    input={"desired_ref": "downstream"},
+                ),
+            ),
+            moment=moment,
+            prerequisite_capability_binding_ids=(binding_a.id,),
+            prerequisite_evidence_bindings=(
+                PrerequisiteEvidenceBinding(
+                    source_capability_binding_id=binding_a.id,
+                    source_step_key="second",
+                    source_schema_ref=apply_operation.output_schema_ref,
+                    source_schema_digest=apply_operation.output_schema_digest,
+                    source_pointer="/phase",
+                    target_step_key="downstream",
+                    target_schema_ref=apply_operation.input_schema_ref,
+                    target_schema_digest=apply_operation.input_schema_digest,
+                    target_pointer="/phase",
+                    required=True,
+                ),
+            ),
+            prerequisite_receipt_pins=(
+                PrerequisiteReceiptPin(
+                    capability_binding_id=binding_a.id,
+                    operation_id=upstream.id,
+                    terminal_receipt_sequence=receipt.sequence,
+                    terminal_receipt_digest=receipt.receipt_hash,
+                ),
+            ),
+        )
+        accepted = accept_provisioning_command(
+            db, command, registry=registry, now=moment
+        )
+        db.commit()
+        assert accepted.state == "pending"
+        assert accepted.is_new is True
+        downstream_id = accepted.operation_id
+    with Session(engine) as db:
+        prepared = prepare_next_apply(
+            db,
+            operation_id=downstream_id,
+            registry=registry,
+            now=moment,
+        )
+        assert prepared is not None
+        assert prepared.step.input == {
+            "desired_ref": "downstream",
+            "phase": "ready",
+        }
+        stored_step = db.get(ProvisioningStepRecord, prepared.step_id)
+        assert stored_step is not None
+        assert stored_step.resolved_input_digest == (
+            "sha256:"
+            + hashlib.sha256(
+                b'{"desired_ref":"downstream","phase":"ready"}'
+            ).hexdigest()
+        )
+        db.commit()
+    engine.dispose()
+
+
+@pytest.mark.parametrize("verb", ["UPDATE", "DELETE"])
+def test_provisioning_receipt_trigger_refuses_raw_mutation(
+    migrated_scratch: tuple[str, str], verb: str
+) -> None:
+    """The immutable evidence rule survives bypassing the ORM."""
+    from sqlalchemy.exc import DBAPIError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        receipt_id = conn.execute(
+            text("SELECT id FROM mod_intg.provisioning_receipts LIMIT 1")
+        ).scalar_one_or_none()
+    if receipt_id is None:
+        seeded_engine, _, _, _ = _seed_two_step_provisioning(admin_url)
+        seeded_engine.dispose()
+        with engine.connect() as conn:
+            receipt_id = conn.execute(
+                text("SELECT id FROM mod_intg.provisioning_receipts LIMIT 1")
+            ).scalar_one()
+    statement = (
+        "UPDATE mod_intg.provisioning_receipts SET receipt_kind = receipt_kind "
+        "WHERE id = :id"
+        if verb == "UPDATE"
+        else "DELETE FROM mod_intg.provisioning_receipts WHERE id = :id"
+    )
+    with (
+        engine.begin() as conn,
+        pytest.raises(DBAPIError, match="provisioning receipts are immutable"),
+    ):
+        conn.execute(text(statement), {"id": receipt_id})
+    engine.dispose()
+
+
+@pytest.mark.parametrize("verb", ["UPDATE", "DELETE"])
+def test_provisioning_command_receipt_trigger_refuses_raw_mutation(
+    migrated_scratch: tuple[str, str], verb: str
+) -> None:
+    """PLAN settlement evidence is immutable even through direct SQL."""
+    from sqlalchemy.exc import DBAPIError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        receipt_id = conn.execute(
+            text("SELECT id FROM mod_intg.provisioning_command_receipts LIMIT 1")
+        ).scalar_one_or_none()
+    if receipt_id is None:
+        seeded_engine, _, _, _ = _seed_two_step_provisioning(admin_url)
+        seeded_engine.dispose()
+        with engine.connect() as conn:
+            receipt_id = conn.execute(
+                text("SELECT id FROM mod_intg.provisioning_command_receipts LIMIT 1")
+            ).scalar_one()
+    statement = (
+        "UPDATE mod_intg.provisioning_command_receipts "
+        "SET result_digest = result_digest WHERE id = :id"
+        if verb == "UPDATE"
+        else "DELETE FROM mod_intg.provisioning_command_receipts WHERE id = :id"
+    )
+    with (
+        engine.begin() as conn,
+        pytest.raises(DBAPIError, match="provisioning receipts are immutable"),
+    ):
+        conn.execute(text(statement), {"id": receipt_id})
+    engine.dispose()
+
+
+def test_provisioning_command_trigger_allows_state_but_refuses_identity_mutation(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The JSON comparison protects identity without breaking legal progress."""
+    from sqlalchemy.exc import DBAPIError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        command_id = conn.execute(
+            text("SELECT id FROM mod_intg.provisioning_commands LIMIT 1")
+        ).scalar_one_or_none()
+    if command_id is None:
+        seeded_engine, _, _, _ = _seed_two_step_provisioning(admin_url)
+        seeded_engine.dispose()
+        with engine.connect() as conn:
+            command_id = conn.execute(
+                text("SELECT id FROM mod_intg.provisioning_commands LIMIT 1")
+            ).scalar_one()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_intg.provisioning_commands "
+                "SET state = 'accepted' WHERE id = :id"
+            ),
+            {"id": command_id},
+        )
+    with (
+        engine.begin() as conn,
+        pytest.raises(DBAPIError, match="command identities are immutable"),
+    ):
+        conn.execute(
+            text(
+                "UPDATE mod_intg.provisioning_commands "
+                "SET request_json = '{}'::json WHERE id = :id"
+            ),
+            {"id": command_id},
+        )
+    engine.dispose()

@@ -12,13 +12,11 @@ status = "adopted"
 # Rule 24 makes a *qualifying production-used, tested* implementation the
 # mandatory source, and ERP's qualifies on neither count:
 #
-#   - production adoption UNVERIFIED. Every repository-side artifact a
-#     deployment would touch says it is off — `.env.example` default
-#     `OIDC_ENABLED=false`, no compose or systemd reference, one commit
-#     (bded8aa9, 2026-07-20), contract document written as a future cutover
-#     gate. That is evidence of absence in git, NOT proof: the live value is
-#     environment-supplied and the host has not been read (Michael must name
-#     it first). This half is therefore unproven either way.
+#   - production adoption was confirmed absent on 2026-08-15. On the explicitly
+#     authorised ERP host, OIDC_ENABLED/issuer/client settings were unset in both
+#     application containers and the federated identity table held zero rows.
+#     That confirms the repository-side evidence instead of merely inferring
+#     from `.env.example` and deployment files.
 #   - untested where it matters. `_validate_id_token` and `_exchange_code` are
 #     monkeypatched out in EVERY existing test, so signature verification, the
 #     algorithm allowlist, `kid` handling, nonce mismatch and every claim-
@@ -59,7 +57,7 @@ preserved_tests = [
 ]
 
 contract_consumers = ["dotmac_workspace"]
-candidate_consumers = ["dotmac_workspace", "dotmac_erp"]
+candidate_consumers = ["dotmac_erp"]
 
 inventory_evidence = [
   "docs/inventories/external-identity-sources.md",

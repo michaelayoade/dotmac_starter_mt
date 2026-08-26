@@ -17,10 +17,20 @@ source did unless a deployment says otherwise.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Final
 
-__all__ = ["DEFAULT_POLICY", "ExecutionPolicy"]
+__all__ = [
+    "DEFAULT_POLICY",
+    "DEFAULT_POLICY_DIGEST",
+    "EXECUTION_POLICY_SCHEMA",
+    "ExecutionPolicy",
+    "execution_policy_digest",
+]
+
+EXECUTION_POLICY_SCHEMA: Final[str] = "dotmac.integration.execution-policy/v1"
 
 _MIN_ATTEMPTS: Final[int] = 1
 _MAX_ATTEMPTS: Final[int] = 20
@@ -69,3 +79,25 @@ class ExecutionPolicy:
 #: Sub's production values. Used when a caller supplies no policy, so the port
 #: behaves as the source did by default.
 DEFAULT_POLICY: Final[ExecutionPolicy] = ExecutionPolicy()
+
+
+def execution_policy_digest(policy: ExecutionPolicy) -> str:
+    """Content-bind the exact module policy without exposing loose wire knobs."""
+
+    if not isinstance(policy, ExecutionPolicy):
+        raise TypeError("policy must be an ExecutionPolicy")
+    document = {
+        "schema": EXECUTION_POLICY_SCHEMA,
+        "base_delay_seconds": policy.base_delay_seconds,
+        "lease_seconds": policy.lease_seconds,
+        "max_attempts": policy.max_attempts,
+        "max_backoff_seconds": policy.max_backoff_seconds,
+        "stale_checkpoint_after_seconds": policy.stale_checkpoint_after_seconds,
+    }
+    payload = json.dumps(
+        document, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+DEFAULT_POLICY_DIGEST: Final[str] = execution_policy_digest(DEFAULT_POLICY)

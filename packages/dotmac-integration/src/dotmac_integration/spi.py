@@ -43,7 +43,8 @@ declaration, so a binding pointed at an ingress-only connector reached
 ``handler_for`` and failed with an ``AttributeError`` from inside a lookup —
 which reads as a broken plugin rather than as a misconfigured binding.
 
-SPI 1.1 makes each mode an obligation the module verifies. The base
+SPI 1.1 made each original mode an obligation the module verifies. SPI 1.2 adds
+the fourth, ``PROVISION``, with typed plan/apply/observe/cancel operations. The base
 :class:`ConnectorPlugin` carries identity, metadata and connection validation
 only; each mode adds exactly one factory in its own protocol
 (:class:`DeliveryPlugin`, :class:`IngressPlugin`, :class:`PollPlugin`), and
@@ -65,7 +66,7 @@ an ``Enum`` with members cannot be subclassed, ``ConnectorMode("invented")``
 raises, and :data:`MODE_PROTOCOLS` is a read-only mapping asserted exhaustive at
 import.
 
-## SPI 1.2 adds verification evidence without exposing secret material
+## SPI 1.2 adds verification evidence and optional provisioning
 
 ``dotmac-integration`` 0.1.0a2 through a4 published SPI 1.1. SPI 1.2 adds
 :class:`VerificationResult`: an ingress connector may report only whether
@@ -74,7 +75,9 @@ matched. It cannot report a secret name, reference or value. The host can count
 rotation traffic through a provider-neutral observer without importing or
 branching on a connector. SPI 1.1's boolean result remains accepted and is
 adapted to evidence with no positions, so honest ``>=1.0,<2.0`` connectors keep
-working unchanged.
+working unchanged. The later ``PROVISION`` mode is likewise an obligation only
+for a connector that declares it; all earlier mode shapes remain unchanged. The
+compatibility claim is held by the conformance tests, not this paragraph.
 """
 
 from __future__ import annotations
@@ -85,6 +88,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Final, Protocol, runtime_checkable
+
+from dotmac_kernel.capability_contract import (
+    CapabilityContractSnapshot,
+    CapabilityOperation,
+    CapabilitySchemaDocument,
+)
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 __all__ = [
     "CURRENT_SPI_VERSION",
@@ -109,6 +120,17 @@ __all__ = [
     "ModeNotDeclaredError",
     "PollHandler",
     "PollPlugin",
+    "PROVISION_OPERATION_CODES",
+    "ProvisionApplyRequest",
+    "ProvisionCancelRequest",
+    "ProvisionObserveRequest",
+    "ProvisionPlanRequest",
+    "ProvisionPlanResult",
+    "ProvisionPlugin",
+    "ProvisionResultStatus",
+    "ProvisionStep",
+    "ProvisioningHandler",
+    "ProvisioningResult",
     "SpiIncompatibleError",
     "SpiRange",
     "SpiVersion",
@@ -160,7 +182,7 @@ _KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{1,118}$")
 #: separate column: `ticket.observation.v1` and `.v2` are different contracts a
 #: connector may implement independently.
 _CAPABILITY_RE: Final[re.Pattern[str]] = re.compile(
-    r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
+    r"^(?P<code>[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)" r"\.v(?P<version>[1-9][0-9]*)$"
 )
 #: `type/subtype`, optionally with a charset. Anchored and character-restricted
 #: because this string is written into a RESPONSE HEADER: an unvalidated one
@@ -215,13 +237,15 @@ class SpiVersion:
 #
 # Minor rather than major, and honestly so. 1.0's executable surface was
 # `handler_for` and `modes`; a 1.0 DELIVERY connector declaring `>=1.0,<2.0`
-# still discovers, still conforms and still dispatches under 1.1 — proved by
+# still discovers, still conforms and still dispatches under 1.2 — proved by
 # `test_integration_spi_modes.py`'s fixture connector, not asserted here. What
-# 1.1 adds is machinery 1.0 had no expressible form of at all: an ingress
-# protocol, a poll protocol, and the verification that a declared mode is real.
+# 1.1 added ingress/poll machinery and 1.2 adds provisioning machinery that
+# 1.0 had no expressible form for. Only a connector declaring the new mode owes
+# its handler.
 # A major bump would have excluded every honest `>=1.0,<2.0` delivery connector
 # in order to protect a compatibility promise nothing ever consumed. SPI 1.2
-# then added verification evidence without changing the handler protocols.
+# then added verification evidence without changing the handler protocols; the
+# optional PROVISION mode adds obligations only for connectors that declare it.
 CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 2)
 
 
@@ -271,20 +295,109 @@ class SpiRange:
 class CapabilityDeclaration:
     """One capability contract a connector implements.
 
-    `config_schema` is a JSON-schema fragment describing the capability's
-    configuration. It may name secret REFERENCES; it may never carry a secret
-    value — see `dotmac_integration.secret_refs`.
+    ``contract_snapshot`` is the exact product-owned contract implemented
+    by a PROVISION connector.  It carries the owner, schema version, complete
+    typed operation schemas, configuration and endpoint declarations, and
+    activation/evidence checks.  The connector may not restate or narrow that
+    contract in a provider-owned schema.
+
+    ``config_schema`` remains solely for <=1.1/non-PROVISION compatibility.
+    Its presence and the legacy manifest digest are intentionally unchanged;
+    new provisioning connectors must use ``contract_snapshot`` instead.
     """
 
     capability_id: str
     config_schema: dict[str, object] = field(default_factory=dict)
+    contract_snapshot: CapabilityContractSnapshot | None = None
+    schema_documents: tuple[CapabilitySchemaDocument, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _CAPABILITY_RE.fullmatch(self.capability_id):
+        identity = _CAPABILITY_RE.fullmatch(self.capability_id)
+        if identity is None:
             raise InvalidManifestError(
                 f"capability id {self.capability_id!r} must look like "
                 "`domain.noun.vN`, e.g. 'ticket.observation.v1'"
             )
+        snapshot = self.contract_snapshot
+        if snapshot is None:
+            if self.schema_documents:
+                raise InvalidManifestError(
+                    "schema_documents require an exact owner contract snapshot"
+                )
+            return
+        if not isinstance(snapshot, CapabilityContractSnapshot):
+            raise InvalidManifestError(
+                "contract_snapshot must be a CapabilityContractSnapshot"
+            )
+        if snapshot.capability_code != identity.group(
+            "code"
+        ) or snapshot.schema_version != int(identity.group("version")):
+            raise InvalidManifestError(
+                "owner contract identity "
+                f"({snapshot.capability_code!r}, v{snapshot.schema_version}) does "
+                f"not match declaration {self.capability_id!r}"
+            )
+        if self.config_schema:
+            raise InvalidManifestError(
+                f"capability {self.capability_id!r} supplies both an owner contract "
+                "and legacy config_schema; a PROVISION contract has one schema owner"
+            )
+        expected = {
+            (schema_ref, schema_digest)
+            for operation in snapshot.operations
+            for schema_ref, schema_digest in (
+                (operation.input_schema_ref, operation.input_schema_digest),
+                (operation.output_schema_ref, operation.output_schema_digest),
+            )
+        }
+        documents = self.schema_documents
+        actual = {(document.schema_ref, document.digest) for document in documents}
+        if len(actual) != len(documents) or actual != expected:
+            raise InvalidManifestError(
+                "capability schema documents must exactly cover every owner-contract "
+                "operation schema reference and digest"
+            )
+        if documents != tuple(sorted(documents, key=lambda item: item.schema_ref)):
+            raise InvalidManifestError(
+                "capability schema documents must be schema-ref sorted"
+            )
+        for document in documents:
+            try:
+                Draft202012Validator.check_schema(document.to_mapping())
+            except SchemaError as exc:
+                raise InvalidManifestError(
+                    f"capability schema {document.schema_ref!r} is not valid "
+                    "Draft 2020-12"
+                ) from exc
+
+    @property
+    def owner_code(self) -> str | None:
+        return self.contract_snapshot.owner_code if self.contract_snapshot else None
+
+    @property
+    def contract_schema_version(self) -> int | None:
+        return self.contract_snapshot.schema_version if self.contract_snapshot else None
+
+    @property
+    def contract_digest(self) -> str | None:
+        return self.contract_snapshot.digest if self.contract_snapshot else None
+
+    @property
+    def operations(self) -> tuple[CapabilityOperation, ...]:
+        return self.contract_snapshot.operations if self.contract_snapshot else ()
+
+    def require_schema(
+        self, schema_ref: str, schema_digest: str
+    ) -> CapabilitySchemaDocument:
+        """Return the exact held schema, never a ref-only approximation."""
+
+        for document in self.schema_documents:
+            if document.schema_ref == schema_ref and document.digest == schema_digest:
+                return document
+        raise InvalidManifestError(
+            f"capability {self.capability_id!r} does not hold exact schema "
+            f"{schema_ref!r} at {schema_digest!r}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,16 +442,56 @@ class ConnectorManifest:
         change must not invalidate every installation pinned to it.
         """
         import hashlib
+        import json
 
-        material = "|".join(
-            (
-                self.connector_key,
-                self.version,
-                str(self.spi_range),
-                ",".join(sorted(self.capability_ids)),
+        if not any(c.contract_snapshot is not None for c in self.capabilities):
+            # Compatibility is an executable promise: this is byte-for-byte
+            # the <=1.1 algorithm.  A connector which never declares
+            # PROVISION keeps every persisted manifest pin it already earned.
+            material = "|".join(
+                (
+                    self.connector_key,
+                    self.version,
+                    str(self.spi_range),
+                    ",".join(sorted(self.capability_ids)),
+                )
             )
-        )
-        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+            return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+        capabilities: list[dict[str, object]] = []
+        for declaration in sorted(
+            self.capabilities, key=lambda item: item.capability_id
+        ):
+            snapshot = declaration.contract_snapshot
+            capabilities.append(
+                {
+                    "capability_id": declaration.capability_id,
+                    # Embed the canonical document, not a hand-picked subset.
+                    # Its digest consequently binds configuration, endpoint and
+                    # check declarations as well as operation schema identities.
+                    "contract": (
+                        json.loads(snapshot.to_json_bytes())
+                        if snapshot is not None
+                        else None
+                    ),
+                    "schemas": [
+                        json.loads(document.to_json_bytes())
+                        for document in declaration.schema_documents
+                    ],
+                }
+            )
+        canonical_material = json.dumps(
+            {
+                "connector_key": self.connector_key,
+                "version": self.version,
+                "spi_range": str(self.spi_range),
+                "capabilities": capabilities,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical_material).hexdigest()
 
     @property
     def capability_ids(self) -> frozenset[str]:
@@ -377,6 +530,19 @@ class ConnectorMode(str, Enum):
     INGRESS = "ingress"
     POLL = "poll"
     DELIVERY = "delivery"
+    PROVISION = "provision"
+
+
+#: The operations SPI 1.2's typed ProvisioningHandler exposes.  Product owners
+#: provide their exact input/output schema identities in the snapshot; this
+#: tuple names only the engine methods a connector declaring PROVISION must be
+#: able to service.
+PROVISION_OPERATION_CODES: Final[tuple[str, ...]] = (
+    "apply",
+    "cancel",
+    "observe",
+    "plan",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +571,118 @@ class DispatchRequest:
     #: Materialized at the boundary, never persisted. See `dispatch.invoke`.
     secrets: dict[str, object]
     idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionStep:
+    """One provider-neutral operation in an approved provisioning plan.
+
+    ``endpoint_code`` names a connector capability endpoint. It is not a shell
+    command and this type has no executable-string or argv field by design.
+    """
+
+    step_key: str
+    endpoint_code: str
+    depends_on: tuple[str, ...]
+    input: Mapping[str, object] = _NO_MATERIAL
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input", MappingProxyType(dict(self.input)))
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionPlanRequest:
+    capability_id: str
+    command_id: str
+    plan_hash: str
+    steps: tuple[ProvisionStep, ...]
+    config: Mapping[str, object] = _NO_MATERIAL
+    secrets: Mapping[str, str] = _NO_MATERIAL
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionPlanResult:
+    plan_hash: str
+    steps: tuple[ProvisionStep, ...]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionApplyRequest:
+    capability_id: str
+    command_id: str
+    operation_ref: str
+    plan_hash: str
+    step: ProvisionStep
+    config: Mapping[str, object]
+    secrets: Mapping[str, str]
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionObserveRequest:
+    capability_id: str
+    command_id: str
+    operation_ref: str
+    plan_hash: str
+    step_key: str
+    provider_operation_ref: str
+    config: Mapping[str, object]
+    secrets: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisionCancelRequest:
+    capability_id: str
+    command_id: str
+    operation_ref: str
+    plan_hash: str
+    step_key: str
+    provider_operation_ref: str
+    reason: str
+    idempotency_key: str
+    config: Mapping[str, object]
+    secrets: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+        object.__setattr__(self, "secrets", MappingProxyType(dict(self.secrets)))
+
+
+class ProvisionResultStatus(str, Enum):
+    """Closed provider-outcome vocabulary understood by the engine."""
+
+    SUCCEEDED = "succeeded"
+    ACCEPTED = "accepted"
+    PENDING = "pending"
+    RETRYABLE = "retryable"
+    TERMINAL = "terminal"
+    AMBIGUOUS = "ambiguous"
+    CANCELLED = "cancelled"
+    NOT_FOUND = "not_found"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ProvisioningResult:
+    status: ProvisionResultStatus
+    provider_operation_ref: str | None = None
+    evidence: Mapping[str, object] = _NO_MATERIAL
+    error_code: str | None = None
+    error_detail: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -691,6 +969,19 @@ class PollHandler(Protocol):
 
 
 @runtime_checkable
+class ProvisioningHandler(Protocol):
+    """MODE: PROVISION — typed plan/apply/observe/cancel operations."""
+
+    def plan(self, request: ProvisionPlanRequest) -> ProvisionPlanResult: ...
+
+    def apply(self, request: ProvisionApplyRequest) -> ProvisioningResult: ...
+
+    def observe(self, request: ProvisionObserveRequest) -> ProvisioningResult: ...
+
+    def cancel(self, request: ProvisionCancelRequest) -> ProvisioningResult: ...
+
+
+@runtime_checkable
 class ConnectorPlugin(Protocol):
     """The BASE contract: identity, metadata, and connection validation.
 
@@ -752,6 +1043,13 @@ class PollPlugin(ConnectorPlugin, Protocol):
     def poll_handler_for(self, capability_id: str) -> PollHandler: ...
 
 
+@runtime_checkable
+class ProvisionPlugin(ConnectorPlugin, Protocol):
+    """MODE: PROVISION. Applies an approved plan through typed operations."""
+
+    def provisioning_handler_for(self, capability_id: str) -> ProvisioningHandler: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ModeContract:
     """What a declared mode obliges a plugin to provide.
@@ -794,6 +1092,11 @@ MODE_PROTOCOLS: Final[Mapping[ConnectorMode, ModeContract]] = MappingProxyType(
             plugin_protocol=PollPlugin,
             factory="poll_handler_for",
             handler_protocol=PollHandler,
+        ),
+        ConnectorMode.PROVISION: ModeContract(
+            plugin_protocol=ProvisionPlugin,
+            factory="provisioning_handler_for",
+            handler_protocol=ProvisioningHandler,
         ),
     }
 )
@@ -891,6 +1194,24 @@ def verify_plugin_modes(plugin: ConnectorPlugin) -> None:
             f"connector {key!r} declares no modes, so the runtime cannot know "
             "which workers to start for it"
         )
+
+    if ConnectorMode.PROVISION in plugin.modes:
+        for capability in plugin.manifest.capabilities:
+            snapshot = capability.contract_snapshot
+            if snapshot is None:
+                raise ModeContractError(
+                    f"connector {key!r} declares PROVISION for "
+                    f"{capability.capability_id!r} without an exact product-owned "
+                    "owner contract snapshot"
+                )
+            declared = {operation.operation_code for operation in snapshot.operations}
+            missing = set(PROVISION_OPERATION_CODES) - declared
+            if missing:
+                raise ModeContractError(
+                    f"connector {key!r} declares PROVISION for "
+                    f"{capability.capability_id!r} but its owner contract omits "
+                    f"the engine operation schema identities {sorted(missing)}"
+                )
 
     for mode, contract in MODE_PROTOCOLS.items():
         declares = mode in plugin.modes

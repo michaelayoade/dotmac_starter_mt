@@ -62,6 +62,31 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-release-catalog": {
+      "declared": "0.1.0a5",
+      "state": "declared-unpublished",
+      "reason": "AWAITING THE MANAGED-ARTIFACT EVIDENCE CUTOVER. a4 remains the newest published release. a5 adds the catalogue-owned artifact origin, distinct vulnerability_policy_result and compatibility_result attestations for upstream bytes, and product-owned capability_contract, capability_schema and capability_composition attestations for Dotmac contract artifacts. The rl_0002 migration enforces the origin regime, so Vendor CP can bind Mailcow, Nextcloud, Keycloak or Academy artifacts, their separate Dotmac-owned lifecycle contracts/canonical schemas, and exact suite-owned evidence mappings without accepting request-carried claims or fabricating a product manifest. Delete this row in the same change that verifies and tags dotmac-release-catalog-v0.1.0a5; it is NOT to be repaired by editing the version, and Vendor CP must fail closed until the verified a5 wheel is pinned."
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a6",
+      "state": "declared-unpublished",
+      "reason": "AWAITING THE APPROVAL-BOUND PROVISIONING CUTOVER. a5 is the newest published release and adds SPI 1.2 ingress verification evidence; it does not contain the managed-service provisioning engine. a6 preserves that evidence and adds PROVISION plus the ig_0008 durable command, operation, step and immutable-receipt ledger needed by the Vendor CP managed-services execution path. The independently deployed dotmac_integrator is the named first consumer and must pin the verified a6 wheel before any real connector is installed. Delete this row in the same change that verifies and tags dotmac-integration-v0.1.0a6; it is NOT to be repaired by editing the version, and no connector may floor at a6 before that tag exists."
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a69",
+      "state": "declared-unpublished",
+      "reason": "AWAITING THE PRODUCT-OWNED CAPABILITY-CONTRACT CUTOVER. a68 is the newest published release and owns the platform-audit prerequisite; it does not contain this grammar. a69 preserves that prerequisite and adds the provider-neutral canonical dotmac.capability-contract/v1 grammar, exact held JSON Schema documents and value-free dotmac.capability-composition/v1 mappings between exact APPLY output/input paths. Vendor CP and dotmac-integration must consume the verified wheel rather than copy these grammars. Delete this row in the same change that verifies and tags dotmac-kernel-v0.1.0a69; never repair it by lowering the declared version."
+    },
+    "dotmac-managed-identity-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS DECLARED KERNEL FLOOR. This first provider-neutral identity catalogue exactly owns realm and confidential OIDC-client lifecycle contracts and canonical schemas, but its required kernel a69 grammar is still declared-unpublished. Publish and verify kernel a69 first, then publish this exact a1 wheel before any Vendor profile or connector pins it. Delete this row with the dotmac-managed-identity-contracts-v0.1.0a1 verified tag; do not replace the exact floor with a path dependency or copy its contracts into Vendor/Integrator."
+    },
+    "dotmac-managed-suite-contracts": {
+      "declared": "0.1.0a1",
+      "state": "never-published",
+      "reason": "AWAITING ITS EXACT DEPENDENCY CHAIN. This composition-only catalogue owns the value-free realm issuer -> OIDC-client issuer mapping without claiming either capability. Its wheel exactly pins dotmac-managed-identity-contracts 0.1.0a1, which in turn requires published kernel a69. Publish in that order and then remove this row with the verified dotmac-managed-suite-contracts-v0.1.0a1 tag. It must never be made green by re-exporting dependency capabilities as suite-owned or by accepting request-carried mapping bytes."
+    },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
       "state": "declared-unpublished",

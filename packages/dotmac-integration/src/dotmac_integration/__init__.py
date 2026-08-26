@@ -30,6 +30,18 @@ connector SPI and package-metadata discovery — with three refusals:
 Plus secret REFERENCES only, and a dispatch seam that resolves exactly one
 enabled binding or fails closed.
 
+SPI 1.2 PROVISION declarations consume the product owner's exact kernel
+``CapabilityContractSnapshot`` plus every canonical operation schema it pins.
+The manifest digest binds the complete contract and exact schema bytes, and
+``verify_capability_configuration`` is the generic
+pre-I/O verifier shared by binding activation and provisioning acceptance.
+The module supplies validation grammar, never product or provider meanings.
+
+Cross-capability apply dataflow is an approved ``PrerequisiteEvidenceBinding``
+resolved only from the exact locked upstream receipt chain. Only
+schema-declared public, non-secret evidence crosses that boundary; the resolved
+input is validated and digested while the signed command remains unchanged.
+
 ## And the execution machinery (slice 2)
 
 Inbox receipts with binding-scoped deduplication, an outbox with atomic
@@ -240,7 +252,58 @@ from dotmac_integration.operations import (
     replay_delivery,
     replay_receipt,
 )
-from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.policy import (
+    DEFAULT_POLICY,
+    DEFAULT_POLICY_DIGEST,
+    EXECUTION_POLICY_SCHEMA,
+    ExecutionPolicy,
+    execution_policy_digest,
+)
+from dotmac_integration.provisioning import (
+    ApprovalRefused,
+    CommandAcceptance,
+    CommandIdentityCollision,
+    ExpectedProvisioningPin,
+    LostProvisioningClaim,
+    PreparedCancellation,
+    PreparedObservation,
+    PreparedPlan,
+    PreparedProvisioning,
+    PrerequisiteEvidenceBinding,
+    PrerequisiteReceiptPin,
+    ProvisioningCapabilityOperationPin,
+    ProvisioningCommand,
+    ProvisioningPlanReceiptView,
+    ProvisioningReceiptView,
+    ProvisioningRefused,
+    VerifiedApprovalGrant,
+    accept_provisioning_command,
+    invoke_prepared_cancellation,
+    invoke_prepared_observation,
+    invoke_prepared_plan,
+    invoke_prepared_provisioning,
+    prepare_cancellation,
+    prepare_next_apply,
+    prepare_next_observation,
+    prepare_provisioning_plan,
+    provisioning_command_template_digest,
+    read_provisioning_plan_receipt,
+    read_provisioning_receipts,
+    settle_cancellation,
+    settle_observation,
+    settle_provisioning,
+    settle_provisioning_plan,
+)
+from dotmac_integration.provisioning_models import (
+    PROVISIONING_PLATFORM_TABLES,
+    ProvisioningCommandReceipt,
+    ProvisioningCommandRecord,
+    ProvisioningOperation,
+    ProvisioningReceipt,
+)
+from dotmac_integration.provisioning_models import (
+    ProvisioningStep as ProvisioningStepRecord,
+)
 from dotmac_integration.receipt_delivery import (
     DeliveryError,
     DeliveryReport,
@@ -293,9 +356,12 @@ from dotmac_integration.retry import (
 )
 from dotmac_integration.secret_refs import (
     SECRET_REFERENCE_SCHEMES,
+    CapabilityConfigurationError,
     SecretValueError,
+    VerifiedCapabilityConfiguration,
     validate_config_revision,
     validate_secret_refs,
+    verify_capability_configuration,
 )
 from dotmac_integration.selection import (
     AmbiguousBindingError,
@@ -306,6 +372,7 @@ from dotmac_integration.selection import (
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     MODE_PROTOCOLS,
+    PROVISION_OPERATION_CODES,
     Acknowledgement,
     CapabilityDeclaration,
     CapabilityHandler,
@@ -326,6 +393,16 @@ from dotmac_integration.spi import (
     ModeNotDeclaredError,
     PollHandler,
     PollPlugin,
+    ProvisionApplyRequest,
+    ProvisionCancelRequest,
+    ProvisioningHandler,
+    ProvisioningResult,
+    ProvisionObserveRequest,
+    ProvisionPlanRequest,
+    ProvisionPlanResult,
+    ProvisionPlugin,
+    ProvisionResultStatus,
+    ProvisionStep,
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
@@ -335,9 +412,60 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"
 
 __all__ = [
+    # ── Approval-bound provisioning ────────────────────────────────────────
+    "PROVISIONING_PLATFORM_TABLES",
+    "PROVISION_OPERATION_CODES",
+    "ApprovalRefused",
+    "CommandAcceptance",
+    "CommandIdentityCollision",
+    "ExpectedProvisioningPin",
+    "LostProvisioningClaim",
+    "PrerequisiteEvidenceBinding",
+    "PrerequisiteReceiptPin",
+    "PreparedCancellation",
+    "PreparedObservation",
+    "PreparedPlan",
+    "PreparedProvisioning",
+    "ProvisionApplyRequest",
+    "ProvisionCancelRequest",
+    "ProvisionObserveRequest",
+    "ProvisionPlanRequest",
+    "ProvisionPlanResult",
+    "ProvisionPlugin",
+    "ProvisionResultStatus",
+    "ProvisionStep",
+    "ProvisioningCommand",
+    "ProvisioningCapabilityOperationPin",
+    "ProvisioningCommandReceipt",
+    "ProvisioningCommandRecord",
+    "ProvisioningHandler",
+    "ProvisioningOperation",
+    "ProvisioningPlanReceiptView",
+    "ProvisioningReceipt",
+    "ProvisioningRefused",
+    "ProvisioningReceiptView",
+    "ProvisioningResult",
+    "ProvisioningStepRecord",
+    "VerifiedApprovalGrant",
+    "accept_provisioning_command",
+    "invoke_prepared_cancellation",
+    "invoke_prepared_observation",
+    "invoke_prepared_plan",
+    "invoke_prepared_provisioning",
+    "prepare_cancellation",
+    "prepare_next_apply",
+    "prepare_next_observation",
+    "prepare_provisioning_plan",
+    "provisioning_command_template_digest",
+    "read_provisioning_plan_receipt",
+    "read_provisioning_receipts",
+    "settle_cancellation",
+    "settle_observation",
+    "settle_provisioning_plan",
+    "settle_provisioning",
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
     "ENDPOINT_AUDIT_ACTIONS",
     "HANDSHAKE_INSTALLATION_STATES",
@@ -479,7 +607,7 @@ __all__ = [
     "ConnectorPlugin",
     "ConnectorMode",
     "CapabilityHandler",
-    # ── SPI 1.x: mode contracts, ingress types and verification evidence ───
+    # ── SPI 1.2: modes, typed envelopes and verification evidence ──────────
     "MODE_PROTOCOLS",
     "Acknowledgement",
     "DeliveryPlugin",
@@ -525,7 +653,10 @@ __all__ = [
     "DeliveryAttempt",
     "EventSubscription",
     "DEFAULT_POLICY",
+    "DEFAULT_POLICY_DIGEST",
+    "EXECUTION_POLICY_SCHEMA",
     "ExecutionPolicy",
+    "execution_policy_digest",
     "CheckpointConflict",
     "CURRENT_SPI_VERSION",
     "ENTRY_POINT_GROUP",
@@ -536,6 +667,7 @@ __all__ = [
     "ActivationRefused",
     "AmbiguousBindingError",
     "CapabilityBinding",
+    "CapabilityConfigurationError",
     "CapabilityDeclaration",
     "ConnectorConfigRevision",
     "ConnectorInstallation",
@@ -549,6 +681,7 @@ __all__ = [
     "SpiIncompatibleError",
     "SpiRange",
     "SpiVersion",
+    "VerifiedCapabilityConfiguration",
     "__version__",
     "check_activation",
     "discover",
@@ -557,4 +690,5 @@ __all__ = [
     "resolve_binding",
     "validate_config_revision",
     "validate_secret_refs",
+    "verify_capability_configuration",
 ]

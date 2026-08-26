@@ -2,9 +2,10 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-integration` has been published four times and
-`dotmac-entitlement-allocation` four. Every migration file present at any of
-those eight tags is inside a wheel on the registry, and has therefore RUN,
+`dotmac-integration` has been published five times, while
+`dotmac-release-catalog` and `dotmac-entitlement-allocation` have each been
+published four times. Every migration file recorded below is inside a wheel on
+the registry, and has therefore RUN,
 unmodified, in at least one database this repository does not own and cannot
 inspect.
 
@@ -65,13 +66,13 @@ additive.
 
 ## Scope
 
-Two distributions: `dotmac-integration` and `dotmac-entitlement-allocation`.
-Each was added by the change that was tempted to edit its released bytes —
-integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
-digests were read out of the tags in that same change. That is the enrolment
-rule, and it is the reason this is still not generalised to "every allowlisted
-module": a distribution enters when somebody has actually verified its tags,
-because a guard populated by guesswork is worse than an absent one.
+Three distributions: `dotmac-integration`, `dotmac-entitlement-allocation` and
+`dotmac-release-catalog`. Each was added by the change that was tempted to edit
+or extend its released lineage, and every entry's digests were read out of the
+tags in that same change. That is the enrolment rule, and it is the reason this
+is still not generalised to "every allowlisted module": a distribution enters
+when somebody has actually verified its tags, because a guard populated by
+guesswork is worse than an absent one.
 
 Enrolment is therefore a data edit — a row in `DISTRIBUTIONS`, its tags in
 `RELEASED_TAGS`, and its still-editable files in `UNRELEASED`. The
@@ -110,6 +111,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
         / "migrations/versions"
     ),
+    "dotmac-release-catalog": (
+        REPO_ROOT
+        / "packages/dotmac-release-catalog/src/dotmac_release_catalog"
+        / "migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -118,6 +124,7 @@ DISTRIBUTIONS: dict[str, Path] = {
 LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
+    "dotmac-release-catalog": "rl_*.py",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -221,6 +228,48 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-release-catalog ──────────────────────────────────────────────
+    #
+    # All four releases carry the exact same root revision. a2 exposed the
+    # installed lineage locator; a3/a4 changed Python/manifest surfaces. The
+    # origin/evidence regime is therefore additive in rl_0002, never an edit to
+    # the root that existing catalogue databases have already applied.
+    "dotmac-release-catalog-v0.1.0a1": (
+        "dotmac-release-catalog",
+        "fb38ee0",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a2": (
+        "dotmac-release-catalog",
+        "5a91180",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a3": (
+        "dotmac-release-catalog",
+        "461aff8",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a4": (
+        "dotmac-release-catalog",
+        "7556b96",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -285,8 +334,9 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: whole reason "released" is read from tags and not from a version number
 #: somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0008_provisioning.py"}),
     "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
+    "dotmac-release-catalog": frozenset({"rl_0002_artifact_origin.py"}),
 }
 
 
@@ -369,8 +419,8 @@ def test_no_released_migration_has_been_edited(distribution: str) -> None:
 def test_two_tags_agree_about_a_file_they_both_shipped() -> None:
     """The map's own honesty check.
 
-    `ig_0001` and `ig_0002` appear under three tags each and
-    `ea_0001_allocations.py` under four. If the recorded digests ever
+    `ig_0001` and `ig_0002` appear under four tags each; `ea_0001_allocations.py`
+    and `rl_0001_release_artifacts.py` each appear under four. If the digests ever
     disagreed, the map would be asserting that one file had two sets of released
     bytes — which is either a transcription error here or the very edit this
     file exists to forbid, already committed and then papered over by updating

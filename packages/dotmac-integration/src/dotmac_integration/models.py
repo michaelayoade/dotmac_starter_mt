@@ -117,6 +117,12 @@ class ConnectorInstallation(Base, TimestampMixin):
     #: plugin did not change but the host did.
     spi_range: Mapped[str] = mapped_column(String(64), nullable=False)
     manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Exact independently released connector distribution bytes. Historical
+    #: installations predate this evidence and remain nullable; PROVISION
+    #: activation and execution refuse a missing pin.
+    connector_artifact_digest: Mapped[str | None] = mapped_column(
+        String(71), nullable=True
+    )
 
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     environment: Mapped[str] = mapped_column(

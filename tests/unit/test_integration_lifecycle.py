@@ -52,6 +52,9 @@ from dotmac_integration.conformance import (
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+TEST_CONNECTOR_ARTIFACT_DIGEST = "sha256:" + "c" * 64
+UPGRADED_CONNECTOR_ARTIFACT_DIGEST = "sha256:" + "d" * 64
+
 OTHER_CAPABILITY = "ticket.observation.v1"
 
 
@@ -290,12 +293,26 @@ def test_adoption_is_idempotent(db: Session, registry) -> None:
     """Adoption is exactly the operation someone retries after a timeout, so a
     second attempt must succeed rather than error."""
     installation = create_draft(
-        db, registry=registry, connector_key="conformance_fake", name="primary"
+        db,
+        registry=registry,
+        connector_key="conformance_fake",
+        name="primary",
+        connector_artifact_digest=TEST_CONNECTOR_ARTIFACT_DIGEST,
     )
     upgraded = fake_registry(plugins=[_upgraded()])
 
-    first = adopt_manifest(db, installation, registry=upgraded)
-    second = adopt_manifest(db, installation, registry=upgraded)
+    first = adopt_manifest(
+        db,
+        installation,
+        registry=upgraded,
+        connector_artifact_digest=UPGRADED_CONNECTOR_ARTIFACT_DIGEST,
+    )
+    second = adopt_manifest(
+        db,
+        installation,
+        registry=upgraded,
+        connector_artifact_digest=UPGRADED_CONNECTOR_ARTIFACT_DIGEST,
+    )
 
     assert first.adoption_required
     assert not second.adoption_required
@@ -307,7 +324,11 @@ def test_adoption_is_idempotent(db: Session, registry) -> None:
 
 def _enabled(db: Session, registry) -> tuple:
     installation = create_draft(
-        db, registry=registry, connector_key="conformance_fake", name="primary"
+        db,
+        registry=registry,
+        connector_key="conformance_fake",
+        name="primary",
+        connector_artifact_digest=TEST_CONNECTOR_ARTIFACT_DIGEST,
     )
     put_config_revision(
         db, installation, config={"a": 1}, secret_refs={"token": "bao://kv/x#t"}
@@ -468,7 +489,11 @@ def test_the_service_surface_the_routes_would_call_is_complete(
     covered in the source.
     """
     installation = create_draft(
-        db, registry=registry, connector_key="conformance_fake", name="primary"
+        db,
+        registry=registry,
+        connector_key="conformance_fake",
+        name="primary",
+        connector_artifact_digest=TEST_CONNECTOR_ARTIFACT_DIGEST,
     )
     put_config_revision(db, installation, config={"a": 1})
     binding = add_binding(

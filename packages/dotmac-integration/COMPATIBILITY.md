@@ -9,11 +9,13 @@ document is the bug.
 | | |
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a5`**; a2–a4 implement **SPI 1.1**, a5 implements **SPI 1.2** |
+| On `main`, unreleased | `0.1.0a6`, adding **SPI 1.2** provisioning without replacing a5's evidence surface |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
-new result. That obligation is discharged by tests, not by this sentence — see
-"SPI 1.0 still works" and "Verification evidence" below.
+new result. Only connectors declaring `PROVISION` owe the new handler. Those
+obligations are discharged by tests, not by this sentence — see "SPI 1.0 still
+works" and "Verification evidence" below.
 
 ## Two version axes, and only one of them is this package's version
 
@@ -46,7 +48,7 @@ moves data.
 
 ### One protocol per mode
 
-`ConnectorMode` is a **closed** union of three members. Each adds exactly one
+`ConnectorMode` is a **closed** union of four members. Each adds exactly one
 factory:
 
 | Mode | Plugin protocol | Factory | Returns |
@@ -54,6 +56,62 @@ factory:
 | `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
 | `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
 | `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+| `PROVISION` | `ProvisionPlugin` | `provisioning_handler_for` | `ProvisioningHandler` |
+
+`ProvisioningHandler` exposes typed `plan`, `apply`, `observe` and `cancel`
+methods. No request type exposes a shell command or argv. Materialized secrets
+are held only in repr-suppressed request envelopes during plugin I/O; durable
+state contains secret references and immutable provenance, never their values.
+
+Every capability on a connector declaring `PROVISION` carries an exact
+product-owned `CapabilityContractSnapshot` and the canonical Draft 2020-12
+schema bytes for every operation ref/digest it names. Its identity is owner code,
+capability code, schema version and canonical digest; each of the four engine
+operations carries exact input/output schema references and hashes. The
+connector manifest digest embeds the complete canonical snapshot and schemas, including
+configuration fields, endpoint requirements and activation/evidence checks.
+Changing any of them therefore invalidates the pin. The legacy digest algorithm
+is retained byte-for-byte when no snapshot is present, so <=1.1 and
+non-PROVISION installations keep their existing pins.
+
+`verify_capability_configuration` is the one provider-neutral static gate used
+at binding activation and available to provisioning plan/acceptance. It enforces
+declared types and formats, endpoint shapes, required/unknown fields, exact
+operation membership and the distinction between ordinary references and held
+`secret_reference` values. It returns only the contract identity and required
+activation-check codes; it never dereferences or renders secret material.
+The installation separately pins the admitted connector distribution bytes as
+`connector_artifact_digest`. `create_draft` and `adopt_manifest` accept the
+Release Catalog result explicitly; PROVISION activation refuses a missing pin,
+while historical non-PROVISION installations may remain null. A normal config
+revision cannot replace that artifact identity.
+
+Cross-binding APPLY dependencies use the public `PrerequisiteEvidenceBinding`,
+`PrerequisiteReceiptPin` and
+`provisioning_command_template_digest` surfaces. The template binds the static
+prerequisite binding set; dispatch-time pins must exactly cover it with each
+upstream operation's latest `succeeded` receipt. The static mapping names exact
+source/target schemas, a public source pointer and a declared target pointer;
+the later pin selects the exact
+runtime evidence. Pins affect command replay
+identity but, because they do not exist at approval time, not the plan digest.
+Apply preparation locks and verifies the source operation, receipt chain and
+source step, injects only `public_non_secret` values into a copy of the target
+input, validates that input against its held schema, and records a resolved-input
+digest. `endpoint_code` equals the versioned capability id in SPI 1.2; it is not
+a second action vocabulary. Apply results are validated against the exact output
+schema, and receipts persist only its declared public projection.
+
+The module's PLAN result is durable evidence, not an assembly assertion.
+`read_provisioning_plan_receipt` verifies and projects its immutable receipt;
+APPLY refuses unless its verified approval pins that exact local receipt and
+request body. `artifact_digest` on the APPLY contract is the connector
+distribution artifact pinned on the local installation.
+`component_artifact_digest`, when present, is the separately admitted managed
+product component. There is deliberately no second connector-artifact wire
+field. A capability declaration is the versioned id
+`<capability_code>.v<schema_version>` while the product-owned snapshot carries
+the unversioned code and positive schema version separately.
 
 That table is `MODE_PROTOCOLS`, a read-only mapping asserted exhaustive at
 import. A mode cannot be added without deciding what makes it runnable — the

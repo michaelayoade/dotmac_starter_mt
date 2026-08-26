@@ -518,7 +518,7 @@ is gone, and both are visible to the customer within hours.
 
 ### 8.3 DNS
 
-**Capability: `dns.authoritative.v1`** — three declared operations.
+**Capability: `dns.authoritative.v1`** — one independently bindable lifecycle.
 
 Separate from the registrar **family**, and the separation is the point. This
 is the one place ADR-0030 § 8.3's "split only where there is a real reason to
@@ -530,6 +530,11 @@ still two independently bindable capabilities, and that is what lets DNS later
 move to a dedicated provider with **no change in any business module**.
 
 DNS is the one surface that is genuinely **desired-state**, not command/event.
+The table below predates Integration SPI 1.2 and names the three DNS RESOURCE
+KINDS the owner schema must express. They are not connector-engine operation
+codes. The released provisioning engine invokes the canonical `plan`, `apply`,
+`observe`, and `cancel` operations for this capability; each request identifies
+one of these resource kinds.
 
 | Operation | Modes | Shape |
 |---|---|---|
@@ -1003,3 +1008,34 @@ provable without a provider, because a kit that needed credentials would make
 every connector author's first encounter with the SPI a secrets problem. That is
 `conformance.py`'s stated reason for existing, and it applies unchanged to all
 four surfaces.
+
+---
+
+## Dated update 2026-08-17 — exact managed-service authorization
+
+The statements above that no connector distribution was authorized were true at
+this inventory's 2026-08-15 revision and remain the history of the gate.
+[ADR-0033](../adr/0033-exact-managed-service-connectors-are-authorized.md) now
+amends ADR-0030 section 6 for exactly seven managed-service distributions:
+`dotmac-connector-contabo`, `dotmac-connector-keycloak-admin`,
+`dotmac-connector-mailcow`, `dotmac-connector-nextcloud`,
+`dotmac-connector-dotmac-erp`, `dotmac-connector-dotmac-academy`, and
+`dotmac-connector-dotmac-host-agent`. It grants no wildcard and does not waive
+owner contracts, provider-free conformance, SPI conformance, release, adoption,
+or cutover evidence.
+
+The managed-service Rule-24 evidence and per-provider rulings are recorded in
+[`managed-service-connector-sources.md`](managed-service-connector-sources.md).
+For DNS, that newer inventory carries forward this dossier's authoritative
+family unchanged: `dns.authoritative.v1`. Integration SPI 1.2 supplies the
+engine operations `plan`, `apply`, `observe`, and `cancel`; `zone`, `recordset`,
+and `observation` are typed resource kinds inside those operation schemas. A
+distribution may implement IaaS and DNS/PTR, but their capability bindings
+remain independent.
+
+The earlier secret-resolver blocker is also closed in the current Integrator
+lineage: `dotmac_integrator` revision `783baf23cbf5` contains
+`src/dotmac_integrator/secret_loading.py`,
+`src/dotmac_integrator/secret_resolver.py`, and
+`tests/unit/test_secret_resolver.py`. That closes one prerequisite; it does not
+substitute for SPI 1.2 publication, an owner contract, or connector conformance.

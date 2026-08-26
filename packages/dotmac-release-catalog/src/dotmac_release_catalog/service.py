@@ -37,11 +37,19 @@ from sqlalchemy.orm import Session
 
 from dotmac_release_catalog.identity import Digest, pinned_reference
 from dotmac_release_catalog.models import ArtifactAttestation, ReleaseArtifact
-from dotmac_release_catalog.vocabulary import ArtifactKind, AttestationKind
+from dotmac_release_catalog.vocabulary import (
+    ArtifactKind,
+    ArtifactOrigin,
+    AttestationKind,
+)
 
 
 class UnknownArtifactError(LookupError):
     """No artifact with that id, so there is nothing to attest."""
+
+
+class AttestationOriginError(ValueError):
+    """An attestation kind contradicts the artifact's immutable origin."""
 
 
 def publish_artifact(
@@ -50,6 +58,7 @@ def publish_artifact(
     product_code: str,
     version: str,
     artifact_kind: ArtifactKind,
+    origin: ArtifactOrigin,
     digest: str | Digest,
     artifact_ref: str,
     size_bytes: int | None = None,
@@ -76,6 +85,7 @@ def publish_artifact(
         product_code=product_code,
         version=version,
         artifact_kind=ArtifactKind(artifact_kind).value,
+        origin_class=ArtifactOrigin(origin).value,
         digest=str(parsed),
         artifact_ref=reference,
         size_bytes=size_bytes,
@@ -105,15 +115,37 @@ def attest_artifact(
     `uri` is stored and never fetched: ADR-0009's rule that a held reference is
     not a network call applies here too.
     """
-    if db.get(ReleaseArtifact, artifact_id) is None:
+    artifact = db.get(ReleaseArtifact, artifact_id)
+    if artifact is None:
         raise UnknownArtifactError(
             f"no artifact {artifact_id}; attest only a published artifact"
+        )
+
+    kind = AttestationKind(attestation_kind)
+    origin = ArtifactOrigin(artifact.origin_class)
+    upstream_only = {
+        AttestationKind.VULNERABILITY_POLICY_RESULT,
+        AttestationKind.COMPATIBILITY_RESULT,
+    }
+    dotmac_only = {
+        AttestationKind.PRODUCT_MANIFEST,
+        AttestationKind.CAPABILITY_CONTRACT,
+        AttestationKind.CAPABILITY_SCHEMA,
+        AttestationKind.CAPABILITY_COMPOSITION,
+    }
+    if kind in dotmac_only and origin is not ArtifactOrigin.DOTMAC_PRODUCT:
+        raise AttestationOriginError(
+            "an upstream artifact cannot carry a Dotmac product-owned attestation"
+        )
+    if kind in upstream_only and origin is not ArtifactOrigin.UPSTREAM_THIRD_PARTY:
+        raise AttestationOriginError(
+            "a Dotmac artifact cannot carry upstream admission results"
         )
 
     parsed = digest if isinstance(digest, Digest) else Digest.parse(digest)
     attestation = ArtifactAttestation(
         artifact_id=artifact_id,
-        attestation_kind=AttestationKind(attestation_kind).value,
+        attestation_kind=kind.value,
         uri=uri,
         digest=str(parsed),
     )
@@ -122,4 +154,9 @@ def attest_artifact(
     return attestation
 
 
-__all__ = ["UnknownArtifactError", "attest_artifact", "publish_artifact"]
+__all__ = [
+    "AttestationOriginError",
+    "UnknownArtifactError",
+    "attest_artifact",
+    "publish_artifact",
+]

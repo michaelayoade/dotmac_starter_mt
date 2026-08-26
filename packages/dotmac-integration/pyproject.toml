@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-integration"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -18,12 +18,14 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# The floor is the release that allocates `mod_intg` in
-# `MIGRATION_OWNER_LEDGER`. That same release must carry
-# `ModuleManifest.platform_tables` (ADR-0023), which this module is the first to
-# use with an EMPTY tenant `tables` tuple — so an earlier kernel cannot import
-# the manifest at all, let alone register it.
-dotmac-kernel = ">=0.1.0a66"
+# a69 publishes the product-owned CapabilityContractSnapshot consumed by every
+# PROVISION declaration. The older a58 namespace/a66 prerequisite floors are
+# therefore necessary but no longer sufficient.
+dotmac-kernel = ">=0.1.0a69"
+# Product owners publish full Draft 2020-12 schemas. Validation is deliberately
+# generic here; a hand-written subset would turn each unsupported keyword into
+# an accidental provider/product branch.
+jsonschema = ">=4.23,<5"
 sqlalchemy = "^2.0"
 
 # No `fastapi`, and deliberately no `httpx`. This module is the control plane,

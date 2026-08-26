@@ -356,6 +356,7 @@ def _validate_dossier(
         for consumer in contract_consumers
     ):
         problems.append("contract_consumers must be a string list")
+        contract_consumers = []
 
     package = dossier.get("package")
     if package != directory_name or package != distribution_name:
@@ -480,14 +481,11 @@ def _validate_dossier(
         ):
             problems.append(f"{label}: candidate_consumers must be a string list")
             candidates = []
-        elif not set(candidates):
-            # ADR-0006 (2026-08-12): `audit-complete` requires "at least one
-            # concrete candidate consumer". ONE is the floor, and the amendment
-            # says why it was lowered rather than dropped: a dossier with no
-            # named candidate is a package built for nobody. TWO is the
-            # threshold for `reuse-proven`, and it counts CONTRACT consumers,
-            # not candidates -- requiring two candidates here was stricter than
-            # the decision this gate enforces.
+        elif not set(candidates) and not set(entry_consumers):
+            # ADR-0006 (2026-08-12): an unadopted slice requires "at least one
+            # concrete candidate consumer". Once a contract consumer exists,
+            # that evidence replaces the candidate; keeping the same product in
+            # both sets would describe it as future and current at once.
             problems.append(
                 f"{label}: candidate_consumers must name at least one concrete "
                 "product this slice is being built for"
@@ -717,7 +715,7 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
     dossier.update(
         {
             "status": "adopted",
-            "candidate_consumers": ["dotmac_vendor_control_plane"],
+            "candidate_consumers": [],
             "contract_consumers": ["dotmac_vendor_control_plane"],
         }
     )
@@ -727,6 +725,24 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
         directory_name="dotmac-ticketing",
         distribution_name="dotmac-ticketing",
     )
+
+
+def test_an_existing_consumer_cannot_also_be_a_package_candidate() -> None:
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    dossier.update(
+        {
+            "status": "adopted",
+            "candidate_consumers": ["dotmac_vendor_control_plane"],
+            "contract_consumers": ["dotmac_vendor_control_plane"],
+        }
+    )
+
+    with pytest.raises(ExtractionDossierError, match="already consume"):
+        _validate_dossier(
+            dossier,
+            directory_name="dotmac-ticketing",
+            distribution_name="dotmac-ticketing",
+        )
 
 
 def test_audit_complete_cannot_be_claimed_without_the_inventory() -> None:
@@ -893,10 +909,14 @@ def test_deleting_a_slice_cannot_restore_a_stronger_headline() -> None:
         _validate_ui(dossier)
 
 
-def test_a_slice_must_name_its_own_candidates() -> None:
+def test_an_unadopted_slice_must_name_its_own_candidates() -> None:
     """Package-level candidates say nothing about a particular contract."""
     dossier = _ui_dossier()
     components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["contract_consumers"] = []
+    components["status"] = "audit-complete"
+    dossier["status"] = "audit-complete"
+    dossier["contract_consumers"] = ["dotmac_sub", "dotmac_academy_app"]
 
     del components["candidate_consumers"]
     with pytest.raises(ExtractionDossierError, match="candidate_consumers"):
@@ -918,7 +938,20 @@ def test_one_concrete_candidate_is_enough_for_a_slice() -> None:
     """
     dossier = _ui_dossier()
     components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["contract_consumers"] = []
+    components["status"] = "audit-complete"
     components["candidate_consumers"] = ["dotmac_crm"]
+    dossier["status"] = "audit-complete"
+    dossier["contract_consumers"] = ["dotmac_sub", "dotmac_academy_app"]
+
+    _validate_ui(dossier)
+
+
+def test_an_adopted_slice_needs_no_speculative_candidate() -> None:
+    """A real consumer is stronger evidence than a future candidate."""
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["candidate_consumers"] = []
 
     _validate_ui(dossier)
 

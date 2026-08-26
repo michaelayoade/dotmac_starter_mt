@@ -4,7 +4,7 @@ classification = "universal-facility"
 status = "historical-pre-rule"
 source_mode = "historical-mixed"
 owner = "Dotmac platform foundation"
-contract = "Universal assembly facilities and versioned cross-product contracts"
+contract = "Universal assembly facilities, product manifests, and versioned product-owned capability contracts"
 source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
 source_paths = [
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel",
@@ -38,6 +38,7 @@ preserved_tests = [
   "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
   "dotmac_sub:tests/architecture/test_composition.py",
   "dotmac_starter_mt:tests/unit/test_product_manifest.py",
+  "dotmac_starter_mt:tests/unit/test_capability_contract_snapshot.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -58,4 +59,4 @@ inventory_evidence = [
 first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
 local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
-next_action = "Publish the demand-pulled product-manifest contract, make Sub's release path emit it from SUB_ASSEMBLY, and replace Vendor's configured capability lists and duplicate catalogue protocol with digest-verified snapshots before the Entitlement Allocation writer cutover. The broader adoption sequence remains Sub settings first, then ERP."
+next_action = "Publish the demand-pulled product-manifest, capability-contract, canonical capability-schema and value-free capability-composition contracts; make each product release emit its own declared documents; and replace Vendor's configured capability lists and composition mappings with digest-verified snapshots before the Entitlement Allocation writer cutover. The broader adoption sequence remains Sub settings first, then ERP."

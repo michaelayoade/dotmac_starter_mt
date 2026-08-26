@@ -36,6 +36,30 @@ Pass `app:latest` as the reference and it raises. Pass a reference that pins a
 *different* digest than the `digest` argument and it raises — that is the
 failure which passes every syntactic check and still deploys the wrong bytes.
 
+## Origin selects the evidence contract
+
+The catalogue records whether exact bytes are a Dotmac product or an admitted
+upstream artifact. That is publication evidence, not a label a deployment
+request may choose:
+
+- `dotmac_product` may carry a canonical `product_manifest` and one or more
+  canonical `capability_contract`, `capability_schema` and
+  `capability_composition` attestations.
+- `upstream_third_party` may carry distinct
+  `vulnerability_policy_result` and `compatibility_result` attestations.
+
+SBOM, provenance and signature claims are admissible for either origin. The
+two upstream results stay separate because "this vulnerability policy accepted
+these bytes" and "this managed profile is compatible with these bytes" are
+different claims with different versioned documents.
+
+`rl_0002_artifact_origin` enforces those combinations in Postgres, including
+raw SQL and later offline repairs. It backfills the previously published rows
+as Dotmac products and then removes the column default so every new publisher
+must classify the artifact explicitly. Vendor CP selects immutable catalogue
+row and attestation identities; it never accepts request-carried admission
+claims or invents a product manifest for upstream software.
+
 ## Immutability is enforced, not promised
 
 Three layers, only the first of which is code you could forget to call:
@@ -96,3 +120,34 @@ transport, verifies the digest, and parses through the kernel contract.
 Do not record this as `PROVENANCE`. Provenance says how an artifact was built;
 the product manifest says which product and capability vocabulary that build
 declares. Conflating them makes presence of one appear to prove the other.
+
+## Capability-contract attestations
+
+`AttestationKind.CAPABILITY_CONTRACT` associates one canonical
+`dotmac_kernel.CapabilityContractSnapshot` with exact Dotmac product bytes.
+The owning product may publish several contracts, so the attestation kind is
+not unique per artifact; the row identity and document digest select the exact
+one. The product manifest proves the capability code is declared, while the
+capability contract proves its typed operations and evidence grammar. Neither
+claim substitutes for the other.
+
+`AttestationKind.CAPABILITY_SCHEMA` binds the exact canonical schema bytes
+named by a contract operation, configuration field, endpoint or activation
+check. The contract records a schema reference and digest; the separate schema
+attestation proves which held bytes satisfy that digest. A consumer must verify
+exact coverage, including each schema document's canonical `$id`, rather than
+trusting a URI or request-carried document.
+
+These attestations are refused for `upstream_third_party` artifacts. Mailcow,
+Nextcloud or Keycloak bytes are admitted by vulnerability and compatibility
+results; the Dotmac managed-service contract and schemas they implement are
+released as their own Dotmac-owned contract artifact rather than relabelling
+upstream software.
+
+`AttestationKind.CAPABILITY_COMPOSITION` binds one canonical
+`dotmac_kernel.CapabilityCompositionSnapshot`. A composition-only suite
+artifact may declare no capabilities of its own: its Product Manifest owns the
+composition, while exact-pinned dependency contract artifacts own every source
+and target capability/schema. The document approves only an abstract,
+public/non-secret APPLY-output to APPLY-input path; it carries no deployment
+binding or runtime evidence value.
