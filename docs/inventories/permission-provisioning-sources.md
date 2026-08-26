@@ -18,7 +18,7 @@ release, adoption, deployment, or production-state claim.
 | Repository | Revision |
 | --- | --- |
 | `dotmac_starter_mt` | `b17c9af728ad5642d43bbd64cc49bce1428b5baf` |
-| `dotmac_erp` | `7b62974b366eead1b32bead380e47d9cf10ec4c7` |
+| `dotmac_erp` | `623c6d588c9b6df4ed9a162d5b0f07155c0f7314` |
 | `dotmac_sub` | `1a3edf0eb567fe02665606d368f8f342536f548c` |
 | `dotmac_workspace` | `dfbec84103fded5fa08a9c37fd6159674dabd0fa` |
 | `dotmac_academy_app` | `a5e25e4e829350e503e66a03d73739529ba7da7f` |
@@ -72,24 +72,39 @@ Sources:
 - `app/models/rbac.py`
 - `app/services/rbac.py`
 - `app/api/rbac.py`
+- `app/authz/expense.py`
+- `app/authz/payment_execution.py`
+- `app/authz/profile.py`
+- `app/startup.py`
 - `scripts/seed_rbac.py`
 - `scripts/deploy.sh`
 - `alembic/versions/20260311_seed_ap_permissions.py`
 - `alembic/versions/20260723_seed_driver_fleet_rbac.py`
+- `alembic/versions/20260826_provision_expense_permissions.py`
 - `tests/test_rbac_services.py`
 - `tests/migrations/test_driver_fleet_rbac.py`
+- `tests/migrations/test_expense_permission_provisioning.py`
+- `tests/architecture/test_authz_declarations_are_pure.py`
 - `tests/architecture/test_money_routes_reject_read_permissions.py`
 
 ERP persists a global permission catalogue and role-permission links. Its
-`ROLE_PERMISSIONS` dictionary is an untyped assembly profile. The normal deploy
-runs Alembic and never runs `seed_rbac.py`, so a permission declared only in the
-seed can ship dark. Expense has 35 such declarations and guarded routes but no
-matching Alembic grant migration.
+legacy `ROLE_PERMISSIONS` dictionary is an untyped assembly profile. The normal
+deploy runs Alembic and never runs `seed_rbac.py`, so a permission declared only
+in the seed can ship dark. The candidate implementation at the audited revision
+makes Expense and payment-execution declarations import-light, validates their
+references at startup, and adds a self-contained Alembic migration for Expense's
+35 permission keys and baseline grants.
 
-ERP's existing grant writes are additive and therefore preserve unknown links.
-Its schema records no owner or source on a role-permission link. Global role
-names, the admin/token-scope bypass, and silent skipping of a missing role are
-product behavior and must not become kernel policy.
+That migration is additive: it preserves unknown permissions, descriptions,
+roles, memberships, direct grants, and role-permission links; refuses inactive
+desired state; and makes downgrade a no-op instead of guessing what another
+owner intended. ERP's schema still records no owner or source on a
+role-permission link. Global role names and the admin/token-scope bypass are
+product behavior and must not become kernel policy. GitHub Actions run
+`32969624189` passed the unit, migration, PostgreSQL integration, Docker,
+security, type, lint, and pre-commit jobs for the exact audited revision. ERP
+PR #370 subsequently merged that revision. This is not a release, deployment,
+shared-package adoption, or production claim.
 
 ## Sub
 
@@ -197,7 +212,11 @@ and retirements remain explicit reviewed migrations.
 ## Non-claims
 
 - No production permission catalogue or grant was inspected.
-- No test was executed during this inventory.
-- ERP Expense is not repaired by this document.
+- Starter's new planner tests were not executed locally; CI owns their first
+  acceptance run. ERP's candidate implementation was exercised by GitHub
+  Actions run `32969624189` at the exact audited revision.
+- ERP PR #370 is merged; it is not released or deployed by this inventory and
+  does not consume the shared package.
 - No role-grant provenance exists in the audited products.
-- No shared package is reuse-proven; ERP is the named first adopter.
+- No shared package is released or reuse-proven; ERP is the first merged
+  persistence implementation and does not yet consume the shared package.
