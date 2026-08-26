@@ -30,8 +30,10 @@
     {% endif %}
 
     {# hx-post so `static/js/csrf.js` can attach the X-CSRF-Token header. #}
-    <form hx-post="/platform/login" hx-swap="none"
+    <form method="post" action="{{ surface_url('login_submit') }}"
+          hx-post="{{ surface_url('login_submit') }}" hx-swap="none"
           style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="email" name="email" placeholder="Email" autocomplete="username"
              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);

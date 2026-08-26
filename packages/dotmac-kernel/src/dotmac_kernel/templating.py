@@ -41,7 +41,7 @@ explicit route context > per-request tenant override > static global.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from functools import lru_cache
@@ -52,12 +52,13 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from jinja2 import ChoiceLoader, FileSystemLoader, pass_context
+from jinja2 import ChoiceLoader, FileSystemLoader, PrefixLoader, pass_context
 
 from dotmac_kernel.branding import get_brand
 from dotmac_kernel.display import DisplaySettings, default_display
 from dotmac_kernel.features import NavItem
 from dotmac_kernel.modules import AnyManifest
+from dotmac_kernel.web_surfaces import SurfaceContext, surface_route_name
 
 # Templates and static assets are shipped as KERNEL PACKAGE DATA and resolved
 # by package path — NOT the process CWD (kernel-boundary Task 1b). A
@@ -82,18 +83,22 @@ def compose_templates(
     *,
     assembly_dir: Path | None = None,
     packaged_dirs: Sequence[Path] = (),
+    namespaced_dirs: Mapping[str, Path] | None = None,
 ) -> None:
-    """Rebuild the ONE template loader from a composition, most specific first:
-    the assembly's own directory, then any installed packages' directories in
-    declaration order, then the kernel's packaged templates.
+    """Rebuild the ONE template loader from a validated composition.
+
+    Contract-v2 module templates resolve first through their declared namespace,
+    so an assembly file cannot silently shadow a module-owned template. Legacy
+    anonymous layers retain their historical precedence: assembly, installed
+    presentation packages, then the kernel.
 
     Called once by ``create_app`` with ``assembly_template_dir`` and
-    ``packaged_template_dirs``. A template the assembly ships (e.g.
-    ``admin/dashboard.html``) shadows a packaged module's same-named one, which
-    in turn shadows the kernel's; anything nobody overrides still resolves from
-    the kernel. That ordering is the same authority rule the static mount uses
-    (`create_app`): the product's own source wins over versioned package data it
-    composes but must not edit.
+    ``packaged_template_dirs``. In the anonymous compatibility layers, a
+    template the assembly ships (e.g. ``admin/dashboard.html``) shadows a
+    presentation package's same-named one, which in turn shadows the kernel's;
+    anything nobody overrides still resolves from the kernel. A v2 module is
+    not in those layers: its declared namespace resolves through the prefix
+    loader first and cannot be silently replaced by an assembly file.
 
     ONE function rather than a setter per layer, and it always rebuilds from the
     ORIGINAL kernel loader: two independent setters would each have to guess
@@ -106,8 +111,24 @@ def compose_templates(
     layers = [FileSystemLoader(str(d)) for d in (assembly_dir,) if d is not None]
     layers += [FileSystemLoader(str(d)) for d in packaged_dirs]
     kernel_loader = FileSystemLoader(str(TEMPLATES_DIR))
+    namespace_loader = (
+        PrefixLoader(
+            {
+                namespace: FileSystemLoader(str(directory))
+                for namespace, directory in (namespaced_dirs or {}).items()
+            },
+            delimiter="/",
+        )
+        if namespaced_dirs
+        else None
+    )
+    all_layers = [
+        *([namespace_loader] if namespace_loader else []),
+        *layers,
+        kernel_loader,
+    ]
     templates.env.loader = (
-        ChoiceLoader([*layers, kernel_loader]) if layers else kernel_loader
+        ChoiceLoader(all_layers) if len(all_layers) > 1 else kernel_loader
     )
 
 
@@ -120,6 +141,13 @@ def use_assembly_templates(directory: Path) -> None:
     duplicating the loader construction is what keeps the two from drifting.
     """
     compose_templates(assembly_dir=directory)
+
+
+def validate_template_names(names: Sequence[str]) -> None:
+    """Resolve required composition templates now, never on first request."""
+
+    for name in names:
+        templates.env.get_template(name)
 
 
 def _context_display(context: Any) -> DisplaySettings:
@@ -159,14 +187,12 @@ templates.env.filters["local_date"] = local_date
 def install_surface_globals(
     manifests: Sequence[AnyManifest], disabled: set[str], web_enabled: bool
 ) -> None:
-    """Set the process-static `enabled_features`/`nav_items` Jinja globals
-    from the loaded manifests — the ONE place templates learn which
-    features are on and what the sidebar contains (F1/F5 capability model;
-    see `dotmac_kernel.features`'s module docstring). Called once from
-    `app.main` (module import time, right after `load_manifests`) — config
-    is process-static, so these globals are correct for the process
-    lifetime; a config change requires a restart, same as every other
-    process-static setting in this app.
+    """Install contract-v1 fallback globals for direct template consumers.
+
+    `create_app` resets these values and supplies real composition state through
+    an immutable request-scoped `SurfaceContext`. This helper remains public for
+    the contract-v1 window and for a bare FastAPI test app that mounts legacy
+    routers without the surface runtime.
 
     `enabled_features` always reflects the real enabled-feature set
     (`DISABLED_FEATURES` + each manifest's `enabled_by_default`), regardless
@@ -197,16 +223,12 @@ def install_surface_globals(
 
 
 def install_stylesheets(hrefs: Sequence[str]) -> None:
-    """Set the process-static `extra_stylesheets` Jinja global — the ONE place
-    a deployment adds a stylesheet to every page's `<head>`.
+    """Set the contract-v1 process-static stylesheet fallback.
 
-    Called once from `create_app` with `ProductAssemblySpec.stylesheets`. The
-    kernel deliberately does not know what those URLs are for: this is the seam
-    an assembly uses to load an installed presentation package's compiled CSS
-    (a `dotmac-ui` release, a packaged theme) WITHOUT the kernel importing,
-    naming, or depending on that package — ADR-0006 § 2's one-way dependency
-    (`assembly → module → dotmac-ui → dotmac-kernel`) forbids the kernel
-    reaching the other way.
+    Contract-v2 `create_app` resets this global and puts the assembly's links in
+    every request's `SurfaceContext`. The kernel still does not know what those
+    URLs represent; the assembly independently composes the kernel, modules and
+    presentation packages without any of those packages importing one another.
 
     Order is the caller's: these render AFTER the kernel's own stylesheet
     links, so a later sheet wins on equal specificity. That is the whole
@@ -264,6 +286,25 @@ templates.env.globals["static_asset_url"] = static_asset_url
 templates.env.globals["current_year"] = current_year
 
 
+@pass_context
+def surface_url(context: Any, local_route_name: str, **path_params: object) -> str:
+    """Build a URL within the module surface handling the current request."""
+
+    request = context.get("request")
+    if request is None:
+        raise RuntimeError("surface_url requires a request template context")
+    surface = getattr(request.state, "surface_context", SurfaceContext.empty())
+    route_name = (
+        surface_route_name(surface, local_route_name)
+        if surface.facet
+        else local_route_name
+    )
+    return str(request.url_for(route_name, **path_params))
+
+
+templates.env.globals["surface_url"] = surface_url
+
+
 def render(
     request: Request,
     name: str,
@@ -287,6 +328,30 @@ def render(
     this up.
     """
     ctx = dict(context or {})
+    surface: SurfaceContext | None = getattr(request.state, "surface_context", None)
+    if surface is None:
+        app = getattr(request, "app", None)
+        app_state = getattr(app, "state", None)
+        candidate = getattr(app_state, "default_surface_context", None)
+        surface = candidate if isinstance(candidate, SurfaceContext) else None
+    # `surface` itself is always present — `components/sidebar.html` reads
+    # `surface.landing_path` unconditionally — but the surface-DERIVED keys are
+    # injected only when a surface actually exists.
+    #
+    # A per-render context key ALWAYS beats a Jinja env global, so injecting an
+    # empty `SurfaceContext`'s values here is not a fallback: it permanently
+    # shadows `install_surface_globals`, which this module's own docstring
+    # promises stays usable "for a bare FastAPI test app that mounts legacy
+    # routers without the surface runtime". Leaving the keys ABSENT is what lets
+    # the v1 globals resolve for the contract-v1 window. Production is
+    # unaffected: `mount_web_surfaces` sets both the per-request context and
+    # `app.state.default_surface_context`, so `surface` is never None there.
+    ctx.setdefault("surface", surface or SurfaceContext.empty())
+    if surface is not None:
+        ctx.setdefault("enabled_features", surface.enabled_modules)
+        ctx.setdefault("nav_items", surface.navigation)
+        ctx.setdefault("extra_stylesheets", surface.stylesheets)
+    ctx.setdefault("csrf_token", getattr(request.state, "csrf_token", ""))
     branding = getattr(request.state, "branding", None)
     if branding is not None:
         ctx.setdefault("brand", branding)
@@ -300,4 +365,5 @@ __all__ = [
     "render",
     "static_dir",
     "use_assembly_templates",
+    "validate_template_names",
 ]

@@ -30,6 +30,7 @@ as every other canary in this directory).
 
 from __future__ import annotations
 
+from dotmac_kernel.middleware.csrf import CSRF_HEADER
 from dotmac_kernel.models import Role
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -37,28 +38,11 @@ from sqlalchemy.orm import Session
 
 from tests.conftest import client_for, provision_owner
 
-PASSWORD = "correct horse battery staple"
-
-
-def _web_login(client: TestClient, email: str) -> str:
-    """Cookie-based web login, replicating the browser's CSRF header bridge
-    (see `tests/test_admin_portal_e2e.py`'s module docstring for the full
-    rationale — copied here rather than imported since none of the existing
-    canaries export it as a shared helper)."""
-    login_page = client.get("/admin/login")
-    assert login_page.status_code == 200
-    csrf_token = login_page.cookies.get("csrf_token")
-    assert csrf_token, "CSRFMiddleware did not set a csrf_token cookie on the login GET"
-
-    login_resp = client.post(
-        "/admin/login",
-        data={"username": email, "password": PASSWORD},
-        headers={"x-csrf-token": csrf_token},
-        follow_redirects=False,
-    )
-    assert login_resp.status_code == 302, login_resp.text
-    assert "access_token" in login_resp.cookies
-    return csrf_token
+# The browser CSRF bridge lives in ONE place — `web_login` logs in through
+# the real (now CSRF-protected) login form and hands back a token issued
+# AFTER the session cookie exists, because tokens are session-bound and the
+# pre-auth one dies with the login. See that module's docstring.
+from tests.test_admin_portal_e2e import web_login
 
 
 def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
@@ -79,7 +63,7 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
     # Provisioned, not registered — registration no longer grants the
     # "admin" role the web login below requires (Task 2).
     provision_owner(admin_session, tenant_a, admin_email)
-    csrf = _web_login(a, admin_email)
+    csrf = web_login(a, admin_email)
 
     create_a = a.post(
         "/admin/parties/people",
@@ -88,7 +72,7 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
             "last_name": "Alpha",
             "email": "dup-target@tenant-a.example.com",
         },
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
     assert create_a.status_code == 302, create_a.text
@@ -100,7 +84,7 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
             "last_name": "Beta",
             "email": "party-b@tenant-a.example.com",
         },
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
     assert create_b.status_code == 302, create_b.text
@@ -115,7 +99,7 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
             "last_name": "Beta",
             "email": "dup-target@tenant-a.example.com",
         },
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
 
@@ -152,7 +136,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     a = client_for(app_client, tenant_a.slug)
     admin_email = "conflict-rbac-admin@tenant-a.example.com"
     provision_owner(admin_session, tenant_a, admin_email)
-    csrf = _web_login(a, admin_email)
+    csrf = web_login(a, admin_email)
 
     create_resp = a.post(
         "/admin/parties/people",
@@ -161,7 +145,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
             "last_name": "Target",
             "email": "grant-target@tenant-a.example.com",
         },
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
     assert create_resp.status_code == 302, create_resp.text
@@ -170,7 +154,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     role_resp = a.post(
         "/admin/roles",
         data={"slug": "manager", "name": "Manager"},
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
     assert role_resp.status_code == 302, role_resp.text
@@ -184,7 +168,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     first_grant = a.post(
         "/admin/role-grants",
         data={"party_id": party_id, "role_id": role_id},
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
     assert first_grant.status_code == 302, first_grant.text
@@ -194,7 +178,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     dup_grant = a.post(
         "/admin/role-grants",
         data={"party_id": party_id, "role_id": role_id},
-        headers={"x-csrf-token": csrf},
+        headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
 

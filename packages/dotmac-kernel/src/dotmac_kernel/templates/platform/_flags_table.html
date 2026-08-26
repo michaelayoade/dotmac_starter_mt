@@ -50,26 +50,26 @@
         <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); white-space:nowrap;">
           {# Every control is hx-post so `static/js/csrf.js` attaches the
              X-CSRF-Token header — a bare form has no hook for it. #}
-          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"set","value":"on"}'
+          <button hx-post="{{ surface_url('set_flag', code=row.spec.code) }}" hx-vals='{"action":"set","value":"on"}'
                   hx-target="#flags-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
                          background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
                          padding:var(--dmui-space-3xs) var(--dmui-space-xs);
                          font-size:var(--dmui-font-size-xs); cursor:pointer;">on</button>
-          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"set","value":"off"}'
+          <button hx-post="{{ surface_url('set_flag', code=row.spec.code) }}" hx-vals='{"action":"set","value":"off"}'
                   hx-target="#flags-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
                          background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
                          padding:var(--dmui-space-3xs) var(--dmui-space-xs);
                          font-size:var(--dmui-font-size-xs); cursor:pointer;">off</button>
-          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"kill"}'
+          <button hx-post="{{ surface_url('set_flag', code=row.spec.code) }}" hx-vals='{"action":"kill"}'
                   hx-target="#flags-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-status-negative-border); border-radius:var(--dmui-radius-sm);
                          background:var(--dmui-status-negative-surface);
                          color:var(--dmui-status-negative-foreground);
                          padding:var(--dmui-space-3xs) var(--dmui-space-xs);
                          font-size:var(--dmui-font-size-xs); cursor:pointer;">kill</button>
-          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"clear"}'
+          <button hx-post="{{ surface_url('set_flag', code=row.spec.code) }}" hx-vals='{"action":"clear"}'
                   hx-target="#flags-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
                          background:transparent; color:var(--dmui-text-muted);

@@ -42,14 +42,14 @@
           {% endif %}
         </td>
         <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); white-space:nowrap;">
-          <button hx-post="/platform/entitlements/{{ tenant.id }}/{{ code }}"
+          <button hx-post="{{ surface_url('set_entitlement', tenant_id=tenant.id, code=code) }}"
                   hx-vals='{"granted":"on"}'
                   hx-target="#entitlements-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
                          background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
                          padding:var(--dmui-space-3xs) var(--dmui-space-xs);
                          font-size:var(--dmui-font-size-xs); cursor:pointer;">grant</button>
-          <button hx-post="/platform/entitlements/{{ tenant.id }}/{{ code }}"
+          <button hx-post="{{ surface_url('set_entitlement', tenant_id=tenant.id, code=code) }}"
                   hx-vals='{"granted":"off"}'
                   hx-target="#entitlements-table" hx-swap="outerHTML"
                   style="border:1px solid var(--dmui-status-negative-border); border-radius:var(--dmui-radius-sm);

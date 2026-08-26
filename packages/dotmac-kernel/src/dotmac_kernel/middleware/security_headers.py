@@ -16,11 +16,9 @@ The Content-Security-Policy default (`_STRICT_CSP`) is computed from this
 codebase's ACTUAL asset inventory (Task 5 required the inventory first —
 see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
 
-- `script-src 'self' 'unsafe-eval'`: every script is a local /static file
-  (htmx, Alpine, components.js, csrf.js — the old inline toast bridge in
-  base.html was MOVED into components.js so 'unsafe-inline' is not needed).
-  'unsafe-eval' is required by the standard Alpine.js build, which compiles
-  `x-data`/`x-show` expressions with `new Function`.
+- `script-src 'self'`: every script is a local /static file (htmx, the Alpine
+  CSP build, components.js, csrf.js). No inline handler or evaluated string is
+  needed, so neither unsafe script grant is present.
 - `style-src 'self' 'unsafe-inline'`: Tailwind + vendored fonts.css are
   local. 'unsafe-inline' is NOT for tenant CSS -- tenant-supplied `custom_css`
   was retired on 2026-08-13 (ADR-0006 D8) and no response carries a
@@ -37,30 +35,136 @@ see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
   (mirrors X-Frame-Options DENY), `base-uri 'self'`, `form-action 'self'`,
   `connect-src 'self'` (htmx XHR is same-origin).
 
-Operators override via the `CONTENT_SECURITY_POLICY` env knob (everything
-by config); `SECURITY_HEADERS_ENABLED=false` disables the middleware when a
-fronting proxy owns these headers instead.
+Operators may tighten this baseline through the `CONTENT_SECURITY_POLICY` env
+compatibility knob: every baseline directive must remain and sources may only
+be removed. Partial or wider policies fail application construction, even when
+no typed capability happens to be active. `SECURITY_HEADERS_ENABLED=false`
+disables the middleware when a fronting proxy owns these headers instead.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-_STRICT_CSP = (
-    "default-src 'self'; "
-    "script-src 'self' 'unsafe-eval'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data: https:; "
-    "font-src 'self'; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "frame-ancestors 'none'; "
-    "base-uri 'self'; "
-    "form-action 'self'"
+from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
+
+_CSP_BASELINE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("default-src", ("'self'",)),
+    ("script-src", ("'self'",)),
+    ("style-src", ("'self'", "'unsafe-inline'")),
+    ("img-src", ("'self'", "data:", "https:")),
+    ("font-src", ("'self'",)),
+    ("connect-src", ("'self'",)),
+    ("object-src", ("'none'",)),
+    ("frame-ancestors", ("'none'",)),
+    ("base-uri", ("'self'",)),
+    ("form-action", ("'self'",)),
 )
 
+_CSP_REQUIREMENT_SOURCES: dict[BrowserSecurityRequirement, tuple[str, str]] = {
+    BrowserSecurityRequirement.WORKER_SELF: ("worker-src", "'self'"),
+    BrowserSecurityRequirement.WORKER_BLOB: ("worker-src", "blob:"),
+    BrowserSecurityRequirement.MEDIA_SELF: ("media-src", "'self'"),
+    BrowserSecurityRequirement.MEDIA_BLOB: ("media-src", "blob:"),
+    BrowserSecurityRequirement.FRAME_SELF: ("frame-src", "'self'"),
+}
+
+
+def compose_content_security_policy(
+    requirements: Iterable[BrowserSecurityRequirement] = (),
+) -> str:
+    """Resolve the deterministic CSP for active, typed browser capabilities."""
+
+    directives = {name: list(sources) for name, sources in _CSP_BASELINE}
+    for requirement in sorted(
+        (BrowserSecurityRequirement(value) for value in requirements),
+        key=str,
+    ):
+        directive, source = _CSP_REQUIREMENT_SOURCES[requirement]
+        values = directives.setdefault(directive, [])
+        if source not in values:
+            values.append(source)
+    return "; ".join(
+        f"{directive} {' '.join(sources)}" for directive, sources in directives.items()
+    )
+
+
+_STRICT_CSP = compose_content_security_policy()
+
 _HSTS = "max-age=63072000; includeSubDomains"
+
+
+def _parse_content_security_policy(policy: str) -> dict[str, tuple[str, ...]]:
+    directives: dict[str, tuple[str, ...]] = {}
+    if "\r" in policy or "\n" in policy:
+        raise ValueError("CSP override must be one HTTP header value")
+    for raw_directive in policy.split(";"):
+        parts = raw_directive.split()
+        if not parts:
+            continue
+        name = parts[0].lower()
+        sources = tuple(parts[1:])
+        if not sources:
+            raise ValueError(f"CSP override directive {name!r} has no sources")
+        if name in directives:
+            raise ValueError(f"CSP override repeats directive {name!r}")
+        if len(set(sources)) != len(sources):
+            raise ValueError(f"CSP override repeats a source in {name!r}")
+        if "'none'" in sources and sources != ("'none'",):
+            raise ValueError(f"CSP override mixes 'none' with sources in {name!r}")
+        directives[name] = sources
+    if not directives:
+        raise ValueError("CSP override must declare a policy")
+    return directives
+
+
+def _validate_content_security_policy_override(
+    policy: str,
+    requirements: Iterable[BrowserSecurityRequirement] = (),
+) -> None:
+    """Allow a raw compatibility policy only when it tightens the baseline.
+
+    Raw policy is intentionally a bounded compatibility seam, not a second CSP
+    composition language.  It must retain every baseline directive, may remove
+    allowed sources (or replace them with ``'none'``), and may add neither a
+    directive nor a source.  Browser capabilities that need new mechanics use
+    the typed requirement vocabulary instead.
+    """
+
+    if not policy:
+        return
+    typed_requirements = frozenset(
+        BrowserSecurityRequirement(value) for value in requirements
+    )
+    if typed_requirements:
+        raise ValueError(
+            "a raw CSP override cannot replace active typed browser-security "
+            "requirements"
+        )
+    baseline = _parse_content_security_policy(_STRICT_CSP)
+    candidate = _parse_content_security_policy(policy)
+    missing = sorted(set(baseline) - set(candidate))
+    if missing:
+        raise ValueError(
+            "raw CSP override is missing required directives: " + ", ".join(missing)
+        )
+    extra = sorted(set(candidate) - set(baseline))
+    if extra:
+        raise ValueError(
+            "raw CSP override adds untyped directives: " + ", ".join(extra)
+        )
+    for directive, sources in candidate.items():
+        if sources == ("'none'",):
+            continue
+        unexpected = sorted(set(sources) - set(baseline[directive]))
+        if unexpected:
+            raise ValueError(
+                "raw CSP override would weaken the computed baseline at "
+                f"{directive!r}: {', '.join(unexpected)}"
+            )
 
 
 def _is_secure_request(request: Request) -> bool:
@@ -78,12 +182,19 @@ class SecurityHeadersMiddleware:
         *,
         enabled: bool = True,
         content_security_policy: str = "",
+        browser_security_requirements: Iterable[BrowserSecurityRequirement] = (),
         cross_origin_opener_policy: str = "",
         cross_origin_resource_policy: str = "",
     ) -> None:
         self.app = app
         self.enabled = enabled
-        self.csp = content_security_policy or _STRICT_CSP
+        requirements = frozenset(browser_security_requirements)
+        _validate_content_security_policy_override(
+            content_security_policy, requirements
+        )
+        self.csp = content_security_policy or compose_content_security_policy(
+            requirements
+        )
         self.cross_origin_opener_policy = cross_origin_opener_policy
         self.cross_origin_resource_policy = cross_origin_resource_policy
 
@@ -137,4 +248,5 @@ class SecurityHeadersMiddleware:
 
 __all__ = [
     "SecurityHeadersMiddleware",
+    "compose_content_security_policy",
 ]

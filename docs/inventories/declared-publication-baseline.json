@@ -113,8 +113,13 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a96",
-      "reason": "MACHINE-ATTRIBUTION RELEASE PENDING THE PROTECTED WORKFLOW. Main already claimed a95 for the response_obligations allocation, so the additive source-application attribution, zero-drop credential rotation and 0028_machine_attribution migration are a96 rather than silently broadening a95. The response-obligations module's >=0.1.0a95 floor remains valid because a96 carries that allocation. Remove this row in the a96 release-record change; do not edit the declared version down.",
+      "declared": "0.1.0a97",
+      "reason": "DECLARED BY THE FACET-RUNTIME AND CSRF SECURITY SLICE, NOT YET RELEASED. a96 already names the separate machine-attribution release, so the versioned browser contract, request-scoped surface runtime and signed session-bound CSRF correction require a97 rather than silently broadening a96. Remove this row only in an oracle-backed a97 release record; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-template-studio": {
+      "declared": "0.2.0a4",
+      "reason": "DECLARED BY THE WEB-SURFACE CONTRACT MIGRATION, NOT YET RELEASED. a3 remains the previously authorized supply-only content; a4 adds the module-contract-v2 surface and requires kernel a97, so it must not be folded into a3. Remove this row only in an oracle-backed a4 release record; preserve the Sub adoption gates in EXTRACTION.toml.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

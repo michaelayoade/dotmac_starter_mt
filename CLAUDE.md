@@ -290,9 +290,9 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   DEPENDENCY-FREE — no kernel, no ORM, no web framework, no Jinja — which is
   what lets a product adopt the design system without adopting anything
   else. The whole integration is two lines in `app/assembly.py`
-  (`packaged_static_dirs` + `stylesheets`); the kernel never imports it
-  (dependency direction is `assembly → module → dotmac-ui →
-  dotmac-kernel`) and fills those two anonymous spec slots instead.
+  (`packaged_static_dirs` + `stylesheets`); the kernel never imports it. The
+  assembly independently composes modules, the kernel and `dotmac-ui`, while
+  `dotmac-ui` imports none of them.
   Consumers run NO Tailwind/PostCSS/npm step and need no particular
   Tailwind major (ADR-0006 D3). Author against `var(--dmui-<role>)` — the
   190 role-named tokens — not raw hex; the compiled asset is COMMITTED and
@@ -306,21 +306,22 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - **Fragment composition, not imports** — see Extension points above
   (values-panel pattern) for how one feature's admin page shows another
   feature's data without a Python import.
-- **CSRF header-bridge contract.** `CSRFMiddleware` validates the
-  `X-CSRF-Token` HEADER against the `csrf_token` COOKIE (double-submit;
-  the cookie is deliberately not `HttpOnly` so JS can read it).
+- **CSRF transport contract.** Every composed browser route carries the explicit
+  `require_csrf` dependency. It validates a signed, expiring, session-bound
+  token against the CSRF cookie; the proof may arrive through the
+  `X-CSRF-Token` header or a hidden `csrf_token` form field.
   `static/js/csrf.js` copies the cookie onto that header for every htmx
   request (`htmx:configRequest`) and every `fetch()` call (monkey-patched).
-  A plain `<form method="post">` has no hook to attach a custom header, so
-  **every mutating form/link MUST use `hx-post`/`hx-put`/`hx-delete`**, never
-  bare `method="post"` — enforced by
-  `tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`.
+  A native `<form method="post">` is supported only with the hidden field;
+  htmx-only controls use `hx-post`/`hx-put`/`hx-delete` and the header bridge.
+  Enforced by `test_native_post_forms_carry_hidden_csrf_proof` and the composed
+  route dependency canary.
 - **Session-mutating routes are POST, CSRF-bridged.** A GET must never
   mutate session/auth state — a bare `<a href="/admin/logout">` was exactly
   this mistake (F7): a CSRF-exempt safe method that a third-party page could
   trigger just by loading it (`<img src=...>`), forcing a victim's logout.
   `POST /admin/logout` (`app.features.auth.web`) fixed it by putting logout
-  back under the CSRF header-bridge above, same as every other mutation —
+  back under the CSRF contract above, same as every other mutation —
   there is no separate "logout is special" exemption.
 - **Template escaping / `| safe` rule.** Jinja2 autoescapes by default;
   `| safe` opts a value OUT of escaping and must only be used on a value

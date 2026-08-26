@@ -3,11 +3,11 @@
   Context: `template`, `versions` — see dotmac_template_studio.web.template_detail.
   Token-styled; see index.html's header comment for why.
 #}
-{% extends "layouts/admin.html" %}
+{% extends surface.shell or "layouts/admin.html" %}
 
 {% block admin_content %}
 <div style="margin-bottom:var(--dmui-space-lg);">
-  <a href="/admin/templates"
+  <a href="{{ surface_url('list') }}"
      style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted); text-decoration:none;">
     &larr; Templates
   </a>
@@ -26,12 +26,14 @@
     <h2 style="font-size:var(--dmui-font-size-lg); font-weight:var(--dmui-font-weight-semibold);
                color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-md);">New version</h2>
     {#
-      Posts to this module's own route and swaps the versions panel below.
-      hx-post, not a bare form — the CSRF header-bridge has no hook otherwise.
+      Posts to this module's own route and swaps the versions panel below. The
+      hidden proof and htmx header are the two supported CSRF transports.
     #}
-    <form hx-post="/admin/templates/{{ template.id }}/versions"
+    <form method="post" action="{{ surface_url('create_version', template_id=template.id) }}"
+          hx-post="{{ surface_url('create_version', template_id=template.id) }}"
           hx-target="#versions-panel" hx-swap="outerHTML"
           style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="text" name="subject" placeholder="Subject"
              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
@@ -71,6 +73,6 @@
     </form>
   </section>
 
-  {% include "admin/template_studio/_versions_panel.html" %}
+  {% include "template_studio/admin/template_studio/_versions_panel.html" %}
 </div>
 {% endblock %}

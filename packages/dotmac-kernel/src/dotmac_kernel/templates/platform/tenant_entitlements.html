@@ -1,9 +1,9 @@
 {# One tenant's entitlements. Context: `tenant`, `capabilities`, `granted`. #}
-{% extends "layouts/platform.html" %}
+{% extends surface.shell or "layouts/platform.html" %}
 
 {% block platform_content %}
 <p style="margin-bottom:var(--dmui-space-md);">
-  <a href="/platform/entitlements"
+  <a href="{{ surface_url('entitlements') }}"
      style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted); text-decoration:none;">
     &larr; All tenants
   </a>

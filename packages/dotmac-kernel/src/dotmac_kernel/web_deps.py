@@ -7,13 +7,12 @@ validation seam the bearer path uses (`dotmac_kernel.deps.authenticate_request`)
 so token/session/tenant/party_type checking has exactly ONE implementation
 for both the API (bearer header) and the web portal (cookie).
 
-`require_web_auth` layers two things `authenticate_request` does not do
-(they're web-portal-specific, not part of the generic token/session
-contract): (1) reads the token from the `access_token` COOKIE rather than an
-`Authorization` header — no header fallback, this is web-only; (2) requires
-role `"admin"` on top of `party_type == person` — this app's default-deny
-shape for phase 2b (every portal page is admin-only until phase 3 adds
-per-portal roles; see the inline comment below).
+`require_web_party` adds the browser transport: it reads the assembly-declared
+session cookie rather than an `Authorization` header, then decides no
+authorization. A `WebFacetMount` owns broad admission through a declared
+permission and each v2 route keeps its own granular permission. The historical
+`require_web_auth` spelling remains a contract-v1 adapter that returns the
+party and role list without hardcoding a role.
 
 It ALSO (Task 4 / F4 fix) is one of the three call sites for
 `dotmac_kernel.branding.get_request_branding` — since every authenticated
@@ -27,17 +26,31 @@ other two call sites are the pre-auth `GET`/`POST /admin/login` routes
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.branding import get_request_branding
-from dotmac_kernel.deps import authenticate_request, get_db
+from dotmac_kernel.deps import authenticate_request, get_db, permission_guard
 from dotmac_kernel.display import get_request_display
-from dotmac_kernel.models import PartyRoleGrant, Role
+from dotmac_kernel.models import Party, PartyRoleGrant, Role
+from dotmac_kernel.web_surfaces import (
+    BrowserAuthenticationProvider,
+    BrowserCredentialTransport,
+    BrowserSessionPolicy,
+    WebSurfaceError,
+    current_session_policy,
+)
 
 
-def safe_next_url(url: str | None, default: str = "/admin") -> str:
+def safe_next_url(
+    url: str | None,
+    default: str = "/admin",
+    *,
+    allowed_prefix: str | None = None,
+) -> str:
     """Open-redirect guard for any `?next=` query param a web.py route reads.
 
     Generic HTTP utility (Task 3 review's required fix relocated this from
@@ -46,13 +59,20 @@ def safe_next_url(url: str | None, default: str = "/admin") -> str:
     accepted: must start with a single `/` (rejects protocol-relative
     `//evil.example.com`) and must not contain `://` anywhere (rejects
     `/x?u=http://evil.example.com` style smuggling as well as a bare
-    `http://evil.example.com` value). Anything else falls back to `default`.
+    `http://evil.example.com` value). A composed login also passes its facet
+    prefix, preventing a valid same-origin path from becoming a cross-portal
+    post-login destination. Anything else falls back to `default`.
     """
     if not url:
         return default
-    if url.startswith("/") and not url.startswith("//") and "://" not in url:
-        return url
-    return default
+    if not (url.startswith("/") and not url.startswith("//") and "://" not in url):
+        return default
+    if allowed_prefix is not None:
+        prefix = allowed_prefix.rstrip("/") or "/"
+        path = urlsplit(url).path
+        if prefix != "/" and path != prefix and not path.startswith(f"{prefix}/"):
+            return default
+    return url
 
 
 def is_secure_request(request: Request) -> bool:
@@ -76,38 +96,37 @@ class WebAuthRedirect(HTTPException):
     `HTTPException(302, ...)` FastAPI would otherwise render as a JSON/HTML
     error envelope, not an actual redirect).
 
-    `login_path` is where the handler sends the visitor. It defaults to the
-    tenant portal's login, and the PLATFORM surface passes its own — one
-    redirect concept with two front doors, rather than a second exception and a
-    second handler that would drift apart the first time one of them is fixed.
+    `login_path` is an explicit compatibility override for a contract-v1
+    router. Contract-v2 routes leave it unset; the error handler resolves the
+    owning facet's declared `login_route` from the qualified route name. One
+    redirect concept therefore supports any assembly-owned prefix without a
+    kernel-authored portal path.
     """
 
     def __init__(
-        self, next_url: str = "/admin", *, login_path: str = "/admin/login"
+        self, next_url: str = "/admin", *, login_path: str | None = None
     ) -> None:
         self.next_url = next_url
         self.login_path = login_path
         super().__init__(status_code=302, detail="Not authenticated")
 
 
-def require_web_auth(
+def require_web_party(
     request: Request,
     db: Session = Depends(get_db),
-) -> dict:
-    """Cookie-based guard for `/admin/*` portal routes.
+) -> Party:
+    """Authenticate the tenant browser cookie and decide no authorization.
 
-    Returns `{"party": Party, "roles": list[str]}` on success. Raises
+    Returns the authenticated ``Party`` on success. Raises
     `WebAuthRedirect(next_url=request.url.path)` on any failure — missing
-    cookie, invalid/expired token, tenant mismatch, non-person party, or
-    missing the `"admin"` role. Never a bare 401/403 and never a 500: an
-    unauthenticated/unauthorized portal visit is always a redirect to login.
-
-    NOTE (phase 3 TODO): every portal page requires the `"admin"` role today
-    — this repo has no other portal-facing role yet. Loosen this per-route
-    once non-admin portal surfaces exist (e.g. a self-service party view),
-    per the task brief's "sub's default-deny shape" note.
+    cookie, invalid/expired token, tenant mismatch, or non-person party. Authorization
+    belongs to the facet admission permission and each route's granular guard.
     """
-    token = request.cookies.get("access_token")
+    try:
+        session = current_session_policy(request)
+    except WebSurfaceError:
+        session = BrowserSessionPolicy(cookie_name="access_token")
+    token = request.cookies.get(session.cookie_name)
     if not token:
         raise WebAuthRedirect(next_url=request.url.path)
 
@@ -122,8 +141,6 @@ def require_web_auth(
     # is guaranteed non-None here; re-deriving it via `require_tenant(request)`
     # would just re-check an invariant already proven by the successful
     # `authenticate_request` call above.
-    tenant = request.state.tenant
-
     # Call site 1/3 (Task 4 / F4 fix) — warms `request.state.branding` for
     # every authenticated portal page in one place; see this module's and
     # `dotmac_kernel.branding`'s docstrings for the other two (login GET/POST).
@@ -136,6 +153,22 @@ def require_web_auth(
     # `dotmac_kernel.templating` covers any future accident.
     get_request_display(request, db)
 
+    return party
+
+
+def require_web_auth(
+    request: Request,
+    party: Party = Depends(require_web_party),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Contract-v1 adapter returning the historical party/roles mapping.
+
+    This no longer hardcodes the ``admin`` role. A composed facet owns broad
+    portal admission through a declared permission; v2 routes use
+    :func:`require_web_permission` for their own decisions.
+    """
+
+    tenant = request.state.tenant
     roles = list(
         db.scalars(
             select(Role.slug)
@@ -148,15 +181,35 @@ def require_web_auth(
             .where(PartyRoleGrant.party_id == party.id)
         ).all()
     )
-    if "admin" not in roles:
-        raise WebAuthRedirect(next_url=request.url.path)
-
     return {"party": party, "roles": roles}
+
+
+def require_web_permission(code: str):
+    """Cookie-browser binding of the shared permission decision seam."""
+
+    return permission_guard(code, authenticated_party=require_web_party)
+
+
+class TenantCookieAuthenticationProvider(BrowserAuthenticationProvider):
+    """Typed provider selected by an assembly's tenant browser profile."""
+
+    transport = BrowserCredentialTransport.COOKIE_SESSION
+
+    @property
+    def dependency(self):
+        return require_web_party
+
+
+TENANT_COOKIE_AUTHENTICATION = TenantCookieAuthenticationProvider()
 
 
 __all__ = [
     "WebAuthRedirect",
+    "TENANT_COOKIE_AUTHENTICATION",
+    "TenantCookieAuthenticationProvider",
     "is_secure_request",
     "require_web_auth",
+    "require_web_party",
+    "require_web_permission",
     "safe_next_url",
 ]

@@ -65,7 +65,12 @@ document.addEventListener('alpine:init', function () {
         return {
             open: false,
             toggle: function () { this.open = !this.open; },
-            close: function () { this.open = false; }
+            close: function () { this.open = false; },
+            closeAndFocus: function () {
+                this.close();
+                var trigger = document.getElementById('user-menu-trigger');
+                if (trigger) trigger.focus();
+            }
         };
     });
 
@@ -73,8 +78,47 @@ document.addEventListener('alpine:init', function () {
     Alpine.data('sidebarToggle', function () {
         return {
             open: false,
-            toggle: function () { this.open = !this.open; },
-            close: function () { this.open = false; }
+            toggle: function () {
+                if (this.open) {
+                    this.close();
+                    return;
+                }
+                this.open = true;
+                var trigger = document.getElementById('mobile-navigation-trigger');
+                if (trigger) trigger.setAttribute('aria-expanded', 'true');
+                setTimeout(function () {
+                    var first = document.querySelector('#mobile-navigation [aria-label="Close navigation"]:not([tabindex="-1"])');
+                    if (first) first.focus();
+                }, 0);
+            },
+            close: function () {
+                this.open = false;
+                var trigger = document.getElementById('mobile-navigation-trigger');
+                if (trigger) {
+                    trigger.setAttribute('aria-expanded', 'false');
+                    trigger.focus();
+                }
+            },
+            closeIfOpen: function () {
+                if (this.open) this.close();
+            },
+            trapFocus: function (event) {
+                var panel = document.querySelector('[data-mobile-navigation-panel]');
+                if (!panel) return;
+                var controls = Array.prototype.slice.call(panel.querySelectorAll(
+                    'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                ));
+                if (!controls.length) return;
+                var first = controls[0];
+                var last = controls[controls.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            }
         };
     });
 
@@ -91,6 +135,18 @@ window.showToast = function (message, type, duration) {
 };
 
 document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('click', function (evt) {
+        if (!(evt.target instanceof Element)) return;
+        var control = evt.target.closest('[data-dmui-browser-action]');
+        if (!control) return;
+        var action = control.getAttribute('data-dmui-browser-action');
+        if (action === 'back') {
+            history.back();
+        } else if (action === 'reload') {
+            window.location.reload();
+        }
+    });
+
     document.body.addEventListener('htmx:afterRequest', function (evt) {
         var trigger = evt.detail.xhr.getResponseHeader('HX-Trigger');
         if (!trigger) return;

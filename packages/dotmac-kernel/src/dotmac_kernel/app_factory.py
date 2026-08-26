@@ -47,7 +47,10 @@ from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
-from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
+from dotmac_kernel.middleware.security_headers import (
+    SecurityHeadersMiddleware,
+    _validate_content_security_policy_override,
+)
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
 from dotmac_kernel.outbox_event_types import (
@@ -60,8 +63,12 @@ from dotmac_kernel.permissions import (
     UndeclaredPermissionError,
     install_permissions,
 )
-from dotmac_kernel.platform_auth import platform_auth_router
-from dotmac_kernel.platform_web import router as platform_web_router
+from dotmac_kernel.platform_auth import (
+    PLATFORM_COOKIE,
+    PLATFORM_COOKIE_AUTHENTICATION,
+    platform_auth_router,
+)
+from dotmac_kernel.platform_web import PLATFORM_WEB_SURFACE
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
@@ -84,9 +91,43 @@ from dotmac_kernel.templating import (
     install_stylesheets,
     install_surface_globals,
     static_dir,
+    validate_template_names,
+)
+from dotmac_kernel.web_runtime import mount_web_surfaces
+from dotmac_kernel.web_surfaces import (
+    AuthenticationProfileBinding,
+    BrowserSecurityPlane,
+    BrowserSessionPolicy,
+    NavigationRegion,
+    TemplateRef,
+    WebFacetMount,
+    WebRouteRef,
+    WebSurfaceRegistry,
 )
 
 logger = logging.getLogger(__name__)
+
+_PLATFORM_COMPATIBILITY_PROFILE = AuthenticationProfileBinding(
+    code="kernel_platform_session",
+    provider=PLATFORM_COOKIE_AUTHENTICATION,
+    session=BrowserSessionPolicy(cookie_name=PLATFORM_COOKIE, cookie_path="/platform"),
+    security_plane=BrowserSecurityPlane.PLATFORM,
+)
+_PLATFORM_COMPATIBILITY_FACET = WebFacetMount(
+    code="platform_admin",
+    url_prefix="/platform",
+    # Jinja template declaration, not subprocess shell execution.
+    shell=TemplateRef("layouts/platform.html"),  # nosec B604
+    authentication_profile=_PLATFORM_COMPATIBILITY_PROFILE.code,
+    navigation_regions=(NavigationRegion("primary"),),
+    entry_routes=(
+        WebRouteRef("kernel_platform", "control_plane", "login_form"),
+        WebRouteRef("kernel_platform", "control_plane", "login_submit"),
+    ),
+    login_route=WebRouteRef("kernel_platform", "control_plane", "login_form"),
+    landing_route=WebRouteRef("kernel_platform", "control_plane", "inventory"),
+    logout_route=WebRouteRef("kernel_platform", "control_plane", "logout"),
+)
 
 
 class LayeredStaticFiles(StaticFiles):
@@ -286,6 +327,13 @@ def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
 
 def _product_startup_errors(spec: ProductAssemblySpec) -> list[str]:
     errors: list[str] = []
+    if settings.is_production:
+        for profile in spec.authentication_profiles:
+            if profile.session is not None and not profile.session.secure_in_production:
+                errors.append(
+                    f"browser authentication profile {profile.code!r} must use "
+                    "Secure cookies in production"
+                )
     for check in spec.startup_checks:
         errors.extend(check())
     return errors
@@ -497,6 +545,40 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # module must not make an existing grant unexplainable.
     capability_catalogue = CapabilityCatalogue.from_manifests(manifests)
     install_capabilities(capability_catalogue)
+
+    effective_facets = tuple(spec.web_facets) if web_enabled else ()
+    effective_profiles = tuple(spec.authentication_profiles) if web_enabled else ()
+    effective_ui_contract_version = spec.ui_contract_version if web_enabled else None
+    platform_facet_declared = any(
+        facet.code == "platform_admin" for facet in effective_facets
+    )
+    platform_web_enabled = web_enabled and spec.platform_surface_enabled
+    if platform_web_enabled and not platform_facet_declared:
+        # Before facet composition, ``platform_surface_enabled=True`` mounted
+        # the kernel's secured platform UI for every HTML assembly. Preserve
+        # that exact audience and guard during the migration window. Unlike the
+        # forbidden staff fallback, this profile does not invent authorization:
+        # its provider is the existing platform-admin identity boundary.
+        effective_facets = (*effective_facets, _PLATFORM_COMPATIBILITY_FACET)
+        effective_profiles = (
+            *effective_profiles,
+            _PLATFORM_COMPATIBILITY_PROFILE,
+        )
+        if effective_ui_contract_version is None:
+            effective_ui_contract_version = 1
+    surface_registry = WebSurfaceRegistry(
+        manifests=enabled_manifests if web_enabled else (),
+        facets=effective_facets,
+        authentication_profiles=effective_profiles,
+        browser_capabilities=spec.browser_capabilities if web_enabled else (),
+        ui_contract_version=effective_ui_contract_version,
+        built_in_surfaces=(
+            (("kernel_platform", PLATFORM_WEB_SURFACE),) if platform_web_enabled else ()
+        ),
+    )
+    for facet in surface_registry.facets:
+        if facet.admission_permission is not None:
+            permission_catalogue.require(facet.admission_permission)
     # Feature flags (step 5). Same installed-not-enabled rule: an override row
     # references a flag code and outlives any deployment's enabled set.
     install_flags(FlagCatalogue.from_manifests(manifests))
@@ -513,16 +595,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # module fallback anyway while looking configured on the settings screen.
     _install_profile_defaults(spec.setting_defaults)
 
-    # Process-static Jinja globals (enabled_features / nav_items) — must be set
-    # before any template renders. Fed the FULL installed set in startup order
-    # (it applies the same enabled rule itself), so the sidebar order matches
-    # the mount order instead of being derived separately.
-    install_surface_globals(manifests, disabled, web_enabled)
-
-    # Extra stylesheet links for every page's <head> (installed presentation
-    # packages' compiled CSS — see `install_stylesheets`). Empty in API-only
-    # mode: there is no <head> to add them to.
-    install_stylesheets(spec.stylesheets if web_enabled else ())
+    # Contract-v2 surface state is request-scoped. Reset the contract-v1 Jinja
+    # fallback so a second app in the same process cannot inherit another
+    # assembly's navigation or stylesheet cascade; `render()` injects the real
+    # values from SurfaceContext on every composed browser request.
+    install_surface_globals((), set(), False)
+    install_stylesheets(())
 
     # Template precedence, most specific first: the assembly's own directory,
     # then installed packages' (an installable module's admin screens, a
@@ -532,6 +610,13 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     compose_templates(
         assembly_dir=spec.assembly_template_dir,
         packaged_dirs=spec.packaged_template_dirs,
+        namespaced_dirs={
+            package.namespace: package.root
+            for package in surface_registry.template_packages
+        },
+    )
+    validate_template_names(
+        tuple(facet.shell.qualified_name for facet in surface_registry.facets)
     )
 
     @asynccontextmanager
@@ -572,7 +657,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     # FastAPI/Starlette runs the LAST added middleware first — order preserved
     # from the reference app (innermost CSRF → outermost SecurityHeaders).
-    app.add_middleware(CSRFMiddleware, enabled=settings.csrf_enabled)
+    app.add_middleware(
+        CSRFMiddleware,
+        enabled=settings.csrf_enabled,
+        secret=settings.csrf_secret,
+        production=settings.is_production,
+        max_age_seconds=settings.csrf_token_ttl_seconds,
+        session_cookie_names=surface_registry.session_cookie_names,
+    )
     app.add_middleware(
         RateLimitMiddleware,
         enabled=settings.rate_limit_enabled,
@@ -588,14 +680,21 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         ObservabilityMiddleware,
         trust_inbound_request_id=settings.trust_inbound_request_id,
     )
+    configured_csp = (
+        settings.content_security_policy or spec.security_policy.content_security_policy
+    )
+    # Validate synchronously during construction. Starlette instantiates its
+    # middleware stack lazily, which is too late for a security-policy error:
+    # the first production request must not be the CSP configuration canary.
+    _validate_content_security_policy_override(
+        configured_csp, surface_registry.browser_security_requirements
+    )
     # OUTERMOST: security headers + CSP on every response.
     app.add_middleware(
         SecurityHeadersMiddleware,
         enabled=settings.security_headers_enabled,
-        content_security_policy=(
-            settings.content_security_policy
-            or spec.security_policy.content_security_policy
-        ),
+        content_security_policy=configured_csp,
+        browser_security_requirements=(surface_registry.browser_security_requirements),
         cross_origin_opener_policy=(spec.security_policy.cross_origin_opener_policy),
         cross_origin_resource_policy=(
             spec.security_policy.cross_origin_resource_policy
@@ -611,6 +710,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # vendoring the rest of it. Absent in API-only mode (web_enabled=False),
     # exactly like the reference app.
     if web_enabled:
+        for package in surface_registry.static_packages:
+            app.mount(
+                f"/static/{package.namespace}",
+                StaticFiles(directory=str(package.root)),
+                name=f"static:{package.namespace}",
+            )
         static: StaticFiles
         layers = [
             str(directory)
@@ -635,18 +740,20 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # control plane must exist even with every feature disabled.
     if spec.platform_surface_enabled:
         app.include_router(platform_auth_router)
-    # The platform ADMINISTRATION surface (step 6). Gated on `web_enabled` like
-    # every other HTML surface — an API-only deployment serves no portal of
-    # either plane — while the platform JSON API above stays mounted regardless.
-    if spec.platform_surface_enabled and web_enabled:
-        app.include_router(platform_web_router)
-
     mount_features(
         app,
         manifests=enabled_manifests,
         disabled=disabled,
-        web_enabled=web_enabled,
+        web_enabled=False,
     )
+
+    if web_enabled:
+        mount_web_surfaces(
+            app,
+            registry=surface_registry,
+            enabled_modules=frozenset(manifest.code for manifest in enabled_manifests),
+            stylesheets=tuple(spec.stylesheets),
+        )
 
     # AFTER mounting: every route that now exists must reference only declared
     # permission codes. Fails the boot, before the app is ever returned.

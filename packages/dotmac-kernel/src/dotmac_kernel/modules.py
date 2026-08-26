@@ -73,6 +73,7 @@ from dotmac_kernel.planes import (
     supported_plane_sets as _supported_plane_sets,
 )
 from dotmac_kernel.prerequisites import validate_prerequisites
+from dotmac_kernel.web_surfaces import WebSurfaceContribution
 
 if TYPE_CHECKING:
     # Type-only: `capabilities` imports THIS module for `AnyManifest`, so a
@@ -92,8 +93,15 @@ if TYPE_CHECKING:
 # SUPPORTED_MODULE_CONTRACT_VERSIONS only when support genuinely ends — an
 # installed module built for an unsupported generation must fail loudly at
 # startup, never load half-understood.
-KERNEL_MODULE_CONTRACT_VERSION: Final[int] = 1
-SUPPORTED_MODULE_CONTRACT_VERSIONS: Final[frozenset[int]] = frozenset({1})
+KERNEL_MODULE_CONTRACT_VERSION: Final[int] = 2
+# Contract 1 is the bounded compatibility generation for absolute
+# ``web_routers`` + path-based ``nav``.  Contract 2 replaces that anonymous
+# surface with typed ``web_surfaces``.  Both load during the migration window.
+# An omitted version is inferred from the authored shape: legacy browser fields
+# mean 1, while v2 surfaces and headless manifests mean the current generation.
+# This private sentinel never survives ``ModuleManifest.__post_init__``.
+_INFER_MODULE_CONTRACT_VERSION: Final[int] = -1
+SUPPORTED_MODULE_CONTRACT_VERSIONS: Final[frozenset[int]] = frozenset({1, 2})
 
 # The version recorded for a module adapted from a `FeatureManifest`, which
 # declares no version of its own. It is deliberately a real, sortable version
@@ -141,7 +149,7 @@ class ModuleManifest:
 
     code: str
     version: str
-    contract_version: int = KERNEL_MODULE_CONTRACT_VERSION
+    contract_version: int = _INFER_MODULE_CONTRACT_VERSION
     # Module codes that must be installed (and, at mount time, enabled) for this
     # module to work. Edges, not imports: modules still never import each other.
     dependencies: Sequence[str] = field(default_factory=tuple)
@@ -151,6 +159,10 @@ class ModuleManifest:
     # HTML/HTMX admin-portal routers — mounted only when `web_enabled` is True.
     web_routers: Sequence[APIRouter] = field(default_factory=tuple)
     nav: Sequence[NavItem] = field(default_factory=tuple)
+    # Contract 2's interactive-browser declarations.  A surface owns relative
+    # routers, named-route navigation, namespaced package data and its supported
+    # UI generations; the assembly supplies the facet prefix/auth/profile.
+    web_surfaces: Sequence[WebSurfaceContribution] = field(default_factory=tuple)
     # Capability codes this module declares (see `dotmac_kernel.capabilities`).
     # A bare code or a `CapabilitySpec` — see `dotmac_kernel.capabilities`.
     capabilities: Sequence[str | CapabilitySpec] = field(default_factory=tuple)
@@ -249,11 +261,18 @@ class ModuleManifest:
             raise ModuleRegistryError(
                 f"module {self.code!r} requires a non-empty `version`"
             )
+        if self.contract_version == _INFER_MODULE_CONTRACT_VERSION:
+            object.__setattr__(
+                self,
+                "contract_version",
+                1 if self.web_routers or self.nav else KERNEL_MODULE_CONTRACT_VERSION,
+            )
         for name in (
             "dependencies",
             "api_routers",
             "web_routers",
             "nav",
+            "web_surfaces",
             "capabilities",
             "permissions",
             "audit_actions",
@@ -272,6 +291,22 @@ class ModuleManifest:
             "platform_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        if self.web_surfaces and (self.web_routers or self.nav):
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares both legacy and v2 web surfaces; "
+                "use exactly one contract shape"
+            )
+        if self.contract_version < 2 and self.web_surfaces:
+            raise ModuleRegistryError(
+                f"module {self.code!r} uses module contract "
+                f"{self.contract_version}; `web_surfaces` requires contract 2"
+            )
+        if self.contract_version >= 2 and (self.web_routers or self.nav):
+            raise ModuleRegistryError(
+                f"module {self.code!r} uses module contract "
+                f"{self.contract_version}; contract 2 web UI must use "
+                "`web_surfaces`, not legacy `web_routers`/`nav`"
+            )
         object.__setattr__(
             self,
             "supported_plane_sets",
@@ -451,7 +486,7 @@ class ModuleManifest:
         manifest: FeatureManifest,
         *,
         version: str = UNVERSIONED,
-        contract_version: int = KERNEL_MODULE_CONTRACT_VERSION,
+        contract_version: int | None = None,
         dependencies: Sequence[str] = (),
         short_code: str | None = None,
         migration_prefix: str | None = None,
@@ -469,10 +504,17 @@ class ModuleManifest:
         tables live in the `public` compatibility namespace, owned by the
         `assembly` migration owner, not by the feature.
         """
+        selected_contract = contract_version
+        if selected_contract is None:
+            selected_contract = (
+                1
+                if manifest.web_routers or manifest.nav
+                else KERNEL_MODULE_CONTRACT_VERSION
+            )
         return cls(
             code=manifest.name,
             version=version,
-            contract_version=contract_version,
+            contract_version=selected_contract,
             dependencies=dependencies,
             short_code=short_code,
             migration_prefix=migration_prefix,

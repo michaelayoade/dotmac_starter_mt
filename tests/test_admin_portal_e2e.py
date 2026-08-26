@@ -9,23 +9,44 @@ web form, set its value via the values panel, list settings — then a FRESH
 login on tenant B's host sees NONE of it, and logout kills the cookie (a
 subsequent guarded GET redirects to login).
 
-CSRF cookie-ordering convention (`test_settings_isolation.py`'s docstring,
-`test_custom_fields_isolation.py`'s inline comment on the same subject):
-`CSRFMiddleware` (`dotmac_kernel.middleware.csrf`) double-submit-checks any
-non-safe method the moment a `csrf_token` cookie exists on the request.
-Every existing Postgres canary dodges this by doing every mutation on a
-client BEFORE that client's first GET. This test cannot do that — the whole
-point is dashboard GET (200) THEN mutate via forms — so instead it
-replicates the browser-side bridge (`static/js/csrf.js`) directly in the
-test client: capture the `csrf_token` cookie value from the very first GET
-response (`GET /admin/login`) and attach it as the `x-csrf-token` header on
-every subsequent mutating request on that client. The cookie never rotates
-once set (`CSRFMiddleware` only sets it when absent from the request), so
-one captured value is valid for the whole session.
+CSRF bridge (shared by every portal canary in this directory).
+`fix(security): CSRF by declared transport` moved validation out of
+`CSRFMiddleware` and into a `require_csrf` dependency that
+`dotmac_kernel.web_runtime` attaches to EVERY composed browser-surface
+route — so an unsafe browser request is checked whether or not it happened
+to carry a cookie, and the pre-auth `POST /admin/login` is protected too
+(it previously was not). Tokens are HMAC-signed and SESSION-BOUND: the
+signature covers the browser session cookies present when the token was
+issued, so the token handed out by a pre-auth `GET /admin/login` stops
+being valid the instant login sets `access_token`.
+
+`csrf_proof` and `web_login` below replicate exactly what a browser does,
+and the other canaries (`test_auth_email_authority`,
+`test_branding_portal_e2e`, `test_conflict_rls_context`,
+`test_web_auth_isolation`) import them from here rather than each keeping a
+private copy that can drift:
+
+  * the login page's native `<form method="post">` carries its proof in the
+    hidden `csrf_token` field (`templates/auth/login.html`), so `web_login`
+    submits that transport — the one a browser with no JS would use;
+  * every mutation afterwards is `hx-post`/`hx-delete`, whose proof travels
+    as the `X-CSRF-Token` header copied off the cookie by
+    `static/js/csrf.js` — so the tests send that header;
+  * a token is re-issued by any safe GET on a composed browser route, which
+    is how a browser silently picks up the rotated cookie after login.
+    Call `csrf_proof` again after ANYTHING that changes `access_token`.
+
+Cookie name is `csrf_token` here and `__Host-csrf_token` in production
+(`dotmac_kernel.middleware.csrf`); these clients are non-production, and the
+constants are imported rather than spelled out so a rename cannot rot this
+silently.
 """
 
 from __future__ import annotations
 
+import re
+
+from dotmac_kernel.middleware.csrf import CSRF_COOKIE, CSRF_FORM_FIELD, CSRF_HEADER
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -33,32 +54,60 @@ from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
 
+#: The hidden field a native (JS-free) form submit sends as its proof.
+_HIDDEN_CSRF_FIELD = re.compile(rf'name="{CSRF_FORM_FIELD}"\s+value="([^"]+)"')
 
-def _web_login(client: TestClient, email: str) -> str:
-    """Cookie-based web login, replicating the browser's CSRF header bridge.
 
-    `GET /admin/login` first — a safe method, so `CSRFMiddleware` sets the
-    `csrf_token` cookie on the response with no check performed. The
-    following `POST /admin/login` DOES carry cookies by then (the just-set
-    `csrf_token`), so it must present a matching `x-csrf-token` header or
-    the double-submit check 403s. Returns the captured csrf token so the
-    caller can reuse it for every further mutating request on this same
-    client (see module docstring: the cookie never rotates once set).
+def csrf_proof(client: TestClient, path: str = "/admin/login") -> str:
+    """Return a CSRF token bound to this client's CURRENT session cookies.
+
+    A safe GET on a composed browser route is what makes `CSRFMiddleware`
+    issue (or rotate) the signed cookie — the same thing a browser gets for
+    free by navigating. Because the token is session-bound, this MUST be
+    re-called after login/logout: the previously held token is no longer
+    valid once the `access_token` cookie changes.
+    """
+    page = client.get(path)
+    assert page.status_code == 200, page.text
+    token = client.cookies.get(CSRF_COOKIE)
+    assert token, f"no {CSRF_COOKIE} cookie after a safe GET on {path}"
+    return token
+
+
+def web_login(
+    client: TestClient,
+    email: str,
+    password: str = PASSWORD,
+    *,
+    landing: str = "/admin",
+) -> str:
+    """Cookie login through the real form; returns a POST-LOGIN csrf token.
+
+    `POST /admin/login` is CSRF-protected now, so the proof rendered into
+    the login page's hidden field is submitted with the credentials, as a
+    browser without JS would. The returned token is re-issued AFTER the
+    session cookie exists, and is what every subsequent mutating request on
+    this client sends as the `X-CSRF-Token` header.
     """
     login_page = client.get("/admin/login")
-    assert login_page.status_code == 200
-    csrf_token = login_page.cookies.get("csrf_token")
-    assert csrf_token, "CSRFMiddleware did not set a csrf_token cookie on the login GET"
+    assert login_page.status_code == 200, login_page.text
+    hidden = _HIDDEN_CSRF_FIELD.search(login_page.text)
+    assert hidden, "the login form rendered no hidden csrf_token proof"
 
     login_resp = client.post(
         "/admin/login",
-        data={"username": email, "password": PASSWORD},
-        headers={"x-csrf-token": csrf_token},
+        data={
+            "username": email,
+            "password": password,
+            CSRF_FORM_FIELD: hidden.group(1),
+        },
         follow_redirects=False,
     )
     assert login_resp.status_code == 302, login_resp.text
+    assert login_resp.headers["location"] == landing, login_resp.headers["location"]
     assert "access_token" in login_resp.cookies
-    return csrf_token
+    # Session-bound: the pre-auth token above died with this login.
+    return csrf_proof(client)
 
 
 def test_admin_portal_end_to_end_canary(
@@ -70,7 +119,7 @@ def test_admin_portal_end_to_end_canary(
     a = client_for(app_client, tenant_a.slug)
     admin_email_a = "portal-admin-a@tenant-a.example.com"
     provision_owner(admin_session, tenant_a, admin_email_a)
-    csrf_a = _web_login(a, admin_email_a)
+    csrf_a = web_login(a, admin_email_a)
 
     dashboard_resp = a.get("/admin")
     assert dashboard_resp.status_code == 200
@@ -87,7 +136,7 @@ def test_admin_portal_end_to_end_canary(
             "last_name": "Lovelace",
             "email": "ada@tenant-a.example.com",
         },
-        headers={"x-csrf-token": csrf_a},
+        headers={CSRF_HEADER: csrf_a},
         follow_redirects=False,
     )
     assert create_resp.status_code == 302, create_resp.text
@@ -119,7 +168,7 @@ def test_admin_portal_end_to_end_canary(
             "show_in_form": "true",
             "show_in_detail": "true",
         },
-        headers={"x-csrf-token": csrf_a},
+        headers={CSRF_HEADER: csrf_a},
         follow_redirects=False,
     )
     assert field_resp.status_code == 302, field_resp.text
@@ -134,7 +183,7 @@ def test_admin_portal_end_to_end_canary(
     panel_post_resp = a.post(
         f"/admin/custom-fields/party/{party_id}/values-panel",
         data={"nickname": "Ada the Enchantress"},
-        headers={"x-csrf-token": csrf_a},
+        headers={CSRF_HEADER: csrf_a},
     )
     assert panel_post_resp.status_code == 200
     assert "Ada the Enchantress" in panel_post_resp.text
@@ -153,7 +202,7 @@ def test_admin_portal_end_to_end_canary(
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     admin_email_b = "portal-admin-b@tenant-b.example.org"
     provision_owner(admin_session, tenant_b, admin_email_b)
-    _web_login(b, admin_email_b)
+    web_login(b, admin_email_b)
 
     b_parties_resp = b.get("/admin/parties")
     assert b_parties_resp.status_code == 200
@@ -183,9 +232,9 @@ def test_admin_portal_end_to_end_canary(
     # third-party page can trigger a cookie-carrying POST, e.g. via an
     # auto-submitting form, but it cannot read this tenant's `csrf_token`
     # cookie to mint a matching header). `a`'s cookie jar already carries
-    # both `access_token` and `csrf_token` (set on the very first GET
-    # `_web_login` made), so this genuinely exercises the double-submit
-    # mismatch, not "no cookies at all".
+    # both `access_token` and a LIVE, session-bound `csrf_token` (re-issued
+    # by `web_login`'s post-login safe GET), so this genuinely exercises a
+    # missing proof on a fully-cookied session, not "no cookies at all".
     forged_logout_resp = a.post("/admin/logout", follow_redirects=False)
     assert forged_logout_resp.status_code == 403
     assert forged_logout_resp.json()["code"] == "csrf_failed"
@@ -196,10 +245,11 @@ def test_admin_portal_end_to_end_canary(
     assert still_logged_in_resp.status_code == 200
 
     # F7: logout is now POST (was a CSRF-exempt GET) — reuse `csrf_a`,
-    # captured by `_web_login` above, same bridge as every other mutation
-    # in this canary.
+    # which `web_login` issued AFTER the session cookie existed (a
+    # pre-auth token would no longer verify), same bridge as every other
+    # mutation in this canary.
     logout_resp = a.post(
-        "/admin/logout", headers={"x-csrf-token": csrf_a}, follow_redirects=False
+        "/admin/logout", headers={CSRF_HEADER: csrf_a}, follow_redirects=False
     )
     assert logout_resp.status_code == 302
 

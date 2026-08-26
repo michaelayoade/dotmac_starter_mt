@@ -141,10 +141,10 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence — import this rather than `idempotency` when you only need identity) |
 | `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of` (re-export of `fingerprints`), `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
 | `dotmac_kernel.idempotency_models` | `IdempotencyRecord`, `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE` |
-| `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
+| `dotmac_kernel.middleware.csrf` | `CSRFMiddleware`, `CSRFTokenSigner`, `CSRFValidationError`, `require_csrf`, `CSRF_COOKIE`, `CSRF_HOST_COOKIE`, `CSRF_HEADER`, `CSRF_FORM_FIELD`, `CSRF_PROTECTED_ATTR` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
 | `dotmac_kernel.middleware.rate_limit` | `RateLimitMiddleware`, `RateLimitStore`, `MemoryStore` |
-| `dotmac_kernel.middleware.security_headers` | `SecurityHeadersMiddleware` |
+| `dotmac_kernel.middleware.security_headers` | `SecurityHeadersMiddleware`, `compose_content_security_policy` |
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
@@ -159,7 +159,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.planes` | `ModulePlane`, `ModulePlaneSelection`, `ModulePlaneSelectionError`, `install_module_plane_selections`, `installed_module_plane_selections`, `selected_module_planes`, `supported_plane_sets`, `validate_module_plane_selections` (explicit per-module persistence-plane composition; ADR-0028) |
-| `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
+| `dotmac_kernel.platform_auth` | `require_platform_admin`, `require_platform_web_auth`, `platform_auth_router`, `PLATFORM_AUDIENCE`, `PLATFORM_COOKIE`, `PLATFORM_LOGIN_PATH`, `PLATFORM_COOKIE_AUTHENTICATION` |
 | `dotmac_kernel.product_manifest` | `PRODUCT_MANIFEST_SCHEMA`, `ProductManifestSnapshot`, `ProductManifestError`, `ProductManifestDigestMismatchError` (canonical release-bound product/capability document; also top-level) |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
@@ -171,13 +171,14 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.settings_cache` | `MISS`, `install_settings_cache`, `active_settings_cache`, `cached`, `store_resolved`, `invalidate`, `setting_cache_key`, `setting_key_prefix` (scoped read cache for resolved settings; OFF until a store is installed) |
 | `dotmac_kernel.settings_crypto` | `ENCRYPTED_PREFIX`, `DEFAULT_KEY_ID`, `KEYRING_ENV_VAR`, `KEY_ENV_VAR`, `KEY_FILE_ENV_VAR`, `EncryptionKey`, `KeyStatus`, `Keyring`, `KeyringError`, `SettingsEncryptionError`, `encrypt_value`, `decrypt_value`, `encrypted_key_id`, `encryption_configured`, `is_encrypted`, `keyring`, `reencrypt_secrets` (at-rest encryption of secret settings, with a rotatable keyring; needs the `settings-crypto` extra) |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
-| `dotmac_kernel.templating` | `render`, `install_surface_globals`, `install_stylesheets`, `static_dir`, `use_assembly_templates` |
+| `dotmac_kernel.templating` | `render`, `compose_templates`, `validate_template_names`, `install_surface_globals`, `install_stylesheets`, `static_dir`, `use_assembly_templates` |
 | `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract`, `FakeLicenceSigner` (see "Testing kit" below) |
 | `dotmac_kernel.testing.harness` | `create_test_engine`, `isolated_session`, `assembly_test_client` |
 | `dotmac_kernel.testing.fakes` | `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding` |
 | `dotmac_kernel.testing.licensing` | `FakeLicenceSigner` (ephemeral in-memory Ed25519 test signer — the ONLY signer in the kernel; needs the `cryptography` dependency at instantiation) |
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
-| `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
+| `dotmac_kernel.web_deps` | `require_web_party`, `require_web_auth`, `require_web_permission`, `TENANT_COOKIE_AUTHENTICATION`, `TenantCookieAuthenticationProvider`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
+| `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
 
 ### Module manifest and registry (`dotmac_kernel.modules`)
 
@@ -187,7 +188,7 @@ in-memory, like `capabilities` and `profiles`: it **describes installed code**;
 it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
-  `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
+  `dependencies`, `api_routers`, `web_surfaces`, `capabilities`,
   `permissions`, `audit_actions`, `outbox_event_types`, `feature_flags`, `setting_domains`,
   `short_code`, `migration_prefix`,
   `migration_branch`, `tables`, `platform_tables`, `core`, `enabled_by_default`,
@@ -196,6 +197,18 @@ it never grants entitlement and it never deploys anything.
   a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
   `contract_version` is the kernel manifest generation it was built against —
   independent facts, and only the latter gates loading.
+  Contract generation 2 declares browser UI through `web_surfaces`; generation
+  1's absolute `web_routers` / path-based `nav` remains a supported, bounded
+  compatibility shape and cannot be mixed with generation 2. When
+  `contract_version` is omitted, the manifest infers generation 1 from legacy
+  `web_routers`/`nav`; v2 surfaces and headless manifests infer the current
+  generation. An explicitly declared generation is never rewritten.
+
+  The legacy browser adapter has no implicit authorization fallback. An
+  assembly composing any generation-1 browser router must explicitly declare a
+  `staff_admin` facet with both an authentication profile and an admission
+  permission. Missing any of those refuses application construction rather
+  than silently broadening `/admin` access.
 - **`ModuleRegistry(manifests)`** — construction IS validation, fail-closed on
   all four:
   - a duplicate `code` → `DuplicateModuleError`;
@@ -650,7 +663,8 @@ release.
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
 (`name`, `modules`, `module_planes`, `setting_defaults`, `branding`, `providers`, `tenancy`,
 `platform_surface_enabled`, `web_enabled`, `startup_checks`, `startup_hooks`,
-`security_policy`, `disabled_modules`, `assembly_template_dir`,
+`ui_contract_version`, `web_facets`, `authentication_profiles`,
+`browser_capabilities`, `security_policy`, `disabled_modules`, `assembly_template_dir`,
 `assembly_static_dir`, `packaged_static_dirs`, `packaged_template_dirs`,
 `stylesheets`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
@@ -663,17 +677,28 @@ assembly's own templates/static OVER the kernel's (first-match-wins, via `use_as
 and `LayeredStaticFiles`).
 
 `platform_surface_enabled` is independent of `web_enabled`: the former decides
-whether the online kernel platform control plane exists at all, while the
-latter decides whether HTML/static surfaces are mounted. Product configuration
-checks and initialization belong in `startup_checks` / `startup_hooks`, not in
-a wrapper that mutates kernel settings before `create_app`; checks warn in
-development and fail startup in production, then sync or async hooks run in
-declaration order inside the lifespan and any exception fails startup.
+whether the online kernel platform authentication/control-plane routes exist at
+all, while the latter decides whether HTML/static surfaces are mounted. The new
+contract-v2 platform UI contribution uses the assembly's `platform_admin` facet
+when declared. During the migration window, an assembly without one receives a
+bounded kernel compatibility facet wired to the existing platform-admin cookie
+provider, preserving the formerly direct platform UI without inferring tenant
+authorization. Product configuration checks and initialization belong in
+`startup_checks` / `startup_hooks`, not in a wrapper that mutates kernel settings
+before `create_app`; checks warn in development and fail startup in production,
+then sync or async hooks run in declaration order inside the lifespan and any
+exception fails startup.
 
 `security_policy=ProductSecurityPolicy(...)` supplies product-owned CSP, COOP,
 and CORP defaults to the one kernel-owned security-header middleware. An
-operator's `CONTENT_SECURITY_POLICY` value wins over the product CSP. Policy
-values must be single, Latin-1 HTTP header values and reject CR/LF injection.
+operator's `CONTENT_SECURITY_POLICY` value wins over the product CSP only after
+validation against the computed strict baseline. Policy values must be single,
+Latin-1 HTTP header values, retain every baseline directive, and may only remove
+sources; partial policies, new directives, new sources and CR/LF injection fail
+application construction. The raw seam is refused entirely if an enabled
+surface uses a browser capability with typed `BrowserSecurityRequirement`s.
+Only active capability providers contribute those requirements; unused
+providers cannot widen CSP, and modules cannot contribute directives or origins.
 
 **Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
 `stylesheets` are the two slots an assembly fills to adopt an installed
@@ -682,12 +707,14 @@ presentation package — a `dotmac-ui` release, a packaged theme.
 assembly's own and *over* the kernel's, so their assets are reachable;
 `stylesheets` adds their compiled CSS URLs to every page's `<head>` (after the
 kernel's own links, in declaration order — later wins on equal specificity),
-installed as the `extra_stylesheets` Jinja global by `install_stylesheets`. Both
-are ignored in API-only mode (`web_enabled=False`).
+carried in the request-scoped `SurfaceContext`. `install_stylesheets` is the
+contract-1 direct-consumer fallback. Both are ignored in API-only mode
+(`web_enabled=False`).
 
-The kernel deliberately does not know what fills them. ADR-0006 § 2 fixes the
-dependency direction as `assembly → module → dotmac-ui → dotmac-kernel`, so these
-are anonymous slots: the kernel never imports, names, or resolves a presentation
+The kernel deliberately does not know what fills them. ADR-0006 § 2's corrected
+dependency graph has the assembly independently importing the kernel, modules
+and presentation packages; `dotmac-ui` imports none of them. These are therefore
+anonymous slots: the kernel never imports, names, or resolves a presentation
 package (import-linter contract "Kernel must not import the UI package"), and
 `stylesheets` takes URLs rather than paths because the assembly owns the mapping
 from a package's static directory to a URL.
@@ -703,15 +730,15 @@ undeclared code fails the boot. `provision_tenant` applies
 `default_granted_codes()` in the transaction that creates the tenant, so a new
 tenant is usable without an operator granting each capability by hand.
 
-**Packaged templates (0.1.0a13).** `packaged_template_dirs` is the template
-counterpart, and the reason an installable MODULE can ship an `/admin/...`
-screen: its Jinja files are package data outside any assembly's template root.
-`dotmac_kernel.templating.compose_templates` is the one loader authority —
-assembly directory, then packaged directories in declaration order, then the
-kernel's — and `create_app` calls it unconditionally. `use_assembly_templates`
-remains published and delegates to it. Note the consequence of "unconditional":
-an empty composition resets to kernel-only, so a second `create_app` in one
-process does not inherit a previous spec's override.
+**Packaged templates.** Contract-1 `packaged_template_dirs` retains the anonymous
+legacy precedence: assembly directory, presentation-package directories, then
+kernel. Contract-2 surfaces instead declare `TemplatePackage(namespace, root)`.
+The namespace loader resolves before every anonymous layer, so an assembly file
+cannot silently shadow module-owned template bytes. No extension-slot override
+surface is published yet; absence fails closed. `compose_templates` is the one
+loader authority and `create_app` calls it unconditionally, so an empty
+composition resets to kernel-only and a second app cannot inherit the previous
+loader.
 
 `spec.modules` accepts `ModuleManifest`s and/or `FeatureManifest`s. `create_app`
 validates them into a `ModuleRegistry` **before mounting anything** — an
@@ -1100,6 +1127,10 @@ moving a caller from the first to the second is one identifier.
 - `dotmac_kernel.display` — consumed only within the kernel (by `templating` /
   `web_deps`). Display formatting reaches templates through the registered Jinja
   filters, not a consumer import.
+- `dotmac_kernel.route_metadata` / `dotmac_kernel.web_runtime` — internal
+  stamping and mounting mechanics for the public `web_surfaces` declarations.
+  Consumers declare surfaces and call `create_app`; they do not mount or stamp
+  a parallel graph.
 - The `settings_resolver` **write helpers** are private *as `settings_resolver`
   names* — reach them via `settings_admin` (above).
 - Import-time singletons (`templating.templates` the Jinja environment,

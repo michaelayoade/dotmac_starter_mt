@@ -2,12 +2,10 @@
   PLATFORM shell layout — the operator's plane, deliberately not the tenant
   portal's.
 
-  It does NOT include `components/sidebar.html`. That sidebar renders from the
-  `nav_items` Jinja global, which is built from the assembly's FEATURE manifests
-  — tenant-plane navigation. Reusing it here would put a tenant admin's links
-  (Parties, Roles, Templates) into the platform operator's chrome, pointing at
-  routes that 404 on the platform host. The platform nav is fixed and short
-  because the plane itself is: modules, flags, entitlements.
+  It does NOT include `components/sidebar.html`. `SurfaceContext.navigation`
+  contains only the current facet's route-derived entries, so this shell renders
+  the platform contribution's modules/flags/entitlements links and can never
+  inherit tenant-plane navigation.
 
   It also carries its own visual identity on purpose. An operator who can change
   every tenant's entitlements should never be one glance away from believing
@@ -21,31 +19,33 @@
 {% block title %}{{ page_title }} · Platform{% endblock %}
 
 {% block content %}
+<a href="#main-content"
+   class="sr-only focus:not-sr-only fixed top-2 left-2 z-50 rounded-lg bg-[var(--dmui-surface-elevated)] px-4 py-2 text-[var(--dmui-text-primary)]">
+  Skip to main content
+</a>
 <div style="min-height:100vh; background:var(--dmui-surface-background);">
   <header style="background:var(--dmui-color-semantic-neutral-900);
                  color:var(--dmui-text-inverted);
                  padding:var(--dmui-space-sm) var(--dmui-space-lg);
-                 display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:var(--dmui-space-lg);">
+                 display:flex; align-items:center; justify-content:space-between;
+                 flex-wrap:wrap; gap:var(--dmui-space-sm);">
+    <div style="display:flex; align-items:center; gap:var(--dmui-space-lg); flex-wrap:wrap;">
       <strong style="font-size:var(--dmui-font-size-base);">Platform administration</strong>
-      <nav style="display:flex; gap:var(--dmui-space-md); font-size:var(--dmui-font-size-sm);">
-        {% for item in [
-             ("inventory", "/platform", "Modules"),
-             ("flags", "/platform/flags", "Feature flags"),
-             ("entitlements", "/platform/entitlements", "Entitlements")
-           ] %}
-        <a href="{{ item[1] }}"
-           style="color:{% if active_nav == item[0] %}var(--dmui-text-inverted){% else %}var(--dmui-color-semantic-neutral-300){% endif %};
+      <nav aria-label="Platform navigation" style="display:flex; flex-wrap:wrap; gap:var(--dmui-space-md); font-size:var(--dmui-font-size-sm);">
+        {% for item in nav_items %}
+        <a href="{{ item.path }}"
+           {% if request.url.path == item.path %}aria-current="page"{% endif %}
+           style="color:{% if request.url.path == item.path %}var(--dmui-text-inverted){% else %}var(--dmui-color-semantic-neutral-300){% endif %};
                   text-decoration:none;
-                  {% if active_nav == item[0] %}font-weight:var(--dmui-font-weight-semibold);{% endif %}">
-          {{ item[2] }}
+                  {% if request.url.path == item.path %}font-weight:var(--dmui-font-weight-semibold);{% endif %}">
+          {{ item.label }}
         </a>
         {% endfor %}
       </nav>
     </div>
     {# hx-post, never a link: a GET logout is a CSRF-exempt safe method a
        third-party page could trigger with an <img src=...>. #}
-    <button hx-post="/platform/logout"
+    <button hx-post="{{ surface.logout_path or surface_url('logout') }}"
             style="background:transparent; border:1px solid var(--dmui-color-semantic-neutral-600);
                    color:var(--dmui-color-semantic-neutral-300);
                    border-radius:var(--dmui-radius-md);
@@ -55,7 +55,7 @@
     </button>
   </header>
 
-  <main style="padding:var(--dmui-space-lg);">
+  <main id="main-content" tabindex="-1" style="padding:var(--dmui-space-lg);">
     <h1 style="font-size:var(--dmui-font-size-xl);
                font-weight:var(--dmui-font-weight-semibold);
                color:var(--dmui-text-primary);

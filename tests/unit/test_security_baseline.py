@@ -17,13 +17,19 @@ from dotmac_kernel.middleware.rate_limit import MemoryStore, RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import (
     _STRICT_CSP,
     SecurityHeadersMiddleware,
+    compose_content_security_policy,
 )
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant, UserCredential
+from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest
+
+_TIGHTER_CSP = _STRICT_CSP.replace(
+    "img-src 'self' data: https:", "img-src 'self' data:"
+)
 
 
 def _legacy_pbkdf2_hash(password: str) -> str:
@@ -158,6 +164,23 @@ def _headers_app(**mw_kwargs) -> TestClient:
         raise HTTPException(status_code=500, detail="handled")
 
     app.add_middleware(SecurityHeadersMiddleware, **mw_kwargs)
+    # Build the stack EAGERLY. Starlette instantiates middleware lazily, on the
+    # first request, so `SecurityHeadersMiddleware.__init__` — and the CSP
+    # override validation it performs — would otherwise run inside the
+    # TestClient transport, where `raise_server_exceptions=False` catches the
+    # `ValueError` and converts it into a synthetic bare 500. A
+    # `pytest.raises` around the request then reports DID NOT RAISE and the CSP
+    # guard looks absent when it is working correctly.
+    #
+    # The flag stays because `test_headers_on_success_and_404_and_handled_500`
+    # needs it. `build_middleware_stack()` does not assign
+    # `self.middleware_stack`, so Starlette still rebuilds on first call and
+    # nothing else about these tests changes.
+    #
+    # This mirrors production: `create_app` validates the override at BOOT
+    # (`app_factory`), not per request, so a construction-time contract belongs
+    # asserted at construction time.
+    app.build_middleware_stack()
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -182,12 +205,12 @@ class TestSecurityHeaders:
 
     def test_csp_override_and_disable(self):
         client = _headers_app(
-            content_security_policy="default-src 'none'",
+            content_security_policy=_TIGHTER_CSP,
             cross_origin_opener_policy="same-origin",
             cross_origin_resource_policy="same-origin",
         )
         headers = client.get("/ok").headers
-        assert headers["content-security-policy"] == "default-src 'none'"
+        assert headers["content-security-policy"] == _TIGHTER_CSP
         assert headers["cross-origin-opener-policy"] == "same-origin"
         assert headers["cross-origin-resource-policy"] == "same-origin"
         off = _headers_app(enabled=False)
@@ -202,6 +225,41 @@ class TestSecurityHeaders:
         # https: appears ONLY as the img-src scheme source for tenant logos.
         assert _STRICT_CSP.count("https:") == 1
         assert "img-src 'self' data: https:" in _STRICT_CSP
+        assert "'unsafe-eval'" not in _STRICT_CSP
+        assert "'unsafe-inline'" not in _STRICT_CSP.split("style-src", 1)[0]
+
+    def test_typed_capabilities_compose_only_closed_security_requirements(self):
+        policy = compose_content_security_policy(
+            (
+                BrowserSecurityRequirement.WORKER_BLOB,
+                BrowserSecurityRequirement.WORKER_SELF,
+                BrowserSecurityRequirement.WORKER_BLOB,
+            )
+        )
+
+        assert policy.endswith("worker-src blob: 'self'")
+        assert "unsafe" not in policy.split("worker-src", 1)[1]
+        assert "http:" not in policy.split("worker-src", 1)[1]
+
+    def test_raw_csp_cannot_replace_active_typed_requirements(self):
+        with pytest.raises(ValueError, match="raw CSP override"):
+            _headers_app(
+                content_security_policy="default-src 'none'",
+                browser_security_requirements=(BrowserSecurityRequirement.WORKER_SELF,),
+            ).get("/ok")
+
+    def test_raw_csp_cannot_weaken_the_baseline_without_typed_requirements(self):
+        weakened = _STRICT_CSP.replace(
+            "script-src 'self'", "script-src 'self' 'unsafe-eval' *"
+        )
+        with pytest.raises(ValueError, match="weaken.*baseline"):
+            _headers_app(
+                content_security_policy=weakened,
+            ).get("/ok")
+
+    def test_raw_csp_must_retain_every_baseline_directive(self):
+        with pytest.raises(ValueError, match="missing required directives"):
+            _headers_app(content_security_policy="default-src 'none'").get("/ok")
 
 
 class TestBoundedRateLimitStore:

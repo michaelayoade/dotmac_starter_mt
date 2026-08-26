@@ -20,13 +20,17 @@
 {% block title %}{{ page_title }} · {{ brand.name if brand and brand.name else "Admin" }}{% endblock %}
 
 {% block content %}
+<a href="#main-content"
+   class="sr-only focus:not-sr-only fixed top-2 left-2 z-50 rounded-lg bg-[var(--dmui-surface-elevated)] px-4 py-2 text-[var(--dmui-text-primary)]">
+    Skip to main content
+</a>
 <div class="flex min-h-screen bg-[var(--dmui-surface-background)]">
     {% include "components/sidebar.html" %}
 
     <div class="flex-1 flex flex-col lg:ml-64">
         {% include "components/topbar.html" %}
 
-        <main class="flex-1 p-6">
+        <main id="main-content" tabindex="-1" class="flex-1 p-4 sm:p-6">
             {% if success_message %}
             <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-positive-surface)] text-[var(--dmui-status-positive-foreground)] text-sm">
                 {{ success_message }}
@@ -45,12 +49,25 @@
 <!-- Mobile sidebar overlay -->
 <div x-data="sidebarToggle"
      x-on:toggle-sidebar.window="toggle()"
+     x-on:keydown.escape.window="closeIfOpen()"
+     x-on:keydown.tab="trapFocus($event)"
      x-show="open"
      x-cloak
+     id="mobile-navigation"
+     role="dialog"
+     aria-modal="true"
+     aria-label="Mobile navigation"
      class="lg:hidden fixed inset-0 z-50">
-    <div x-on:click="close()" class="absolute inset-0 bg-[var(--dmui-surface-overlay)] opacity-50"></div>
-    <div class="relative w-64 h-full">
-        {% include "components/sidebar.html" %}
+    <button type="button" tabindex="-1" x-on:click="close()" aria-label="Close navigation"
+            class="absolute inset-0 w-full bg-[var(--dmui-surface-overlay)] opacity-50"></button>
+    <div class="relative w-64 h-full" data-mobile-navigation-panel>
+        <button type="button" x-on:click="close()" aria-label="Close navigation"
+                class="absolute right-2 top-2 z-50 rounded-lg bg-[var(--dmui-surface-elevated)] p-2 text-[var(--dmui-text-primary)]">
+            <span aria-hidden="true">×</span>
+        </button>
+        {% with mobile_sidebar = true %}
+          {% include "components/sidebar.html" %}
+        {% endwith %}
     </div>
 </div>
 {% endblock %}

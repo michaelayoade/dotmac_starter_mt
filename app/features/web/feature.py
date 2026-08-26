@@ -19,6 +19,7 @@ feature), not this dashboard shell's.
 """
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.permissions import PermissionSpec
 
 from app.features.web.web import router
 
@@ -26,5 +27,11 @@ feature = FeatureManifest(
     name="web",
     web_routers=[router],
     nav=[NavItem("Dashboard", "/admin")],
+    permissions=(
+        PermissionSpec(
+            code="web.portal.staff.access",
+            description="Enter the tenant staff administration portal.",
+        ),
+    ),
     core=False,
 )

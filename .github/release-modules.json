@@ -1531,7 +1531,7 @@
       "package_dir": "packages/dotmac-template-studio",
       "import_name": "dotmac_template_studio",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
+      "kernel_floor": "0.1.0a97",
       "db_schema": "mod_tstudio",
       "tag_prefix": "dotmac-template-studio-v",
       "wheel_contents": {

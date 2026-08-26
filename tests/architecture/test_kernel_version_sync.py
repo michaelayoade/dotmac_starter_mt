@@ -207,7 +207,13 @@ CAPABILITY_RAISED_FLOORS = {
     # consumes selected_module_planes.
     "dotmac-files": ("0.1.0a61", "0.1.0a54"),
     "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
-    "dotmac-template-studio": ("0.1.0a56", "0.1.0a13"),
+    # a56 raised this one first (the prerequisite contract). a97 raises it
+    # again: 0.2.0a4 declares a `WebSurfaceContribution` at module contract
+    # generation 2, and a kernel below a97 has neither the type nor generation 2
+    # in `SUPPORTED_MODULE_CONTRACT_VERSIONS`, so it refuses the manifest at
+    # import. Per this table's rule the floor is the highest capability the
+    # module actually consumes, while a13 stays as the allocation evidence.
+    "dotmac-template-studio": ("0.1.0a97", "0.1.0a13"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
