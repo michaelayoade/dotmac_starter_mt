@@ -43,6 +43,11 @@ import dotmac_ui
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
+from dotmac_kernel.permission_provisioning import (
+    RoleDefinition,
+    RoleGrant,
+    RoleGrantProfile,
+)
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from dotmac_kernel.platform_auth import (
     PLATFORM_COOKIE,
@@ -130,6 +135,29 @@ assembly = ProductAssemblySpec(
         dotmac_template_studio.module,
         dotmac_ticketing.module,
     ],
+    role_definitions=(RoleDefinition("admin"),),
+    # Exact compatibility shadow of today's PermissionSpec.default_roles
+    # authorization. Modules declare the questions; this product owns the role
+    # mapping. This explicit list must not be derived as "admin gets all
+    # installed permissions", because a future operator-only declaration is a
+    # valid permission and must not silently widen administrator authority.
+    role_grant_profiles=(
+        RoleGrantProfile(
+            code="starter.admin",
+            version=1,
+            grants=(
+                RoleGrant("admin", "web.portal.staff.access"),
+                RoleGrant("admin", "rbac.roles.read"),
+                RoleGrant("admin", "rbac.roles.manage"),
+                RoleGrant("admin", "rbac.grants.manage"),
+                RoleGrant("admin", "rbac.audit.read"),
+                RoleGrant("admin", "template_studio.templates.read"),
+                RoleGrant("admin", "template_studio.templates.manage"),
+                RoleGrant("admin", "template_studio.templates.publish"),
+                RoleGrant("admin", "template_studio.templates.render"),
+            ),
+        ),
+    ),
     # ADR-0028: a selectable module's planes are DECLARED here, never inferred
     # from which prerequisites happen to be bound. This assembly is a tenant
     # product that also keeps control-plane ticket state, so it selects both;
