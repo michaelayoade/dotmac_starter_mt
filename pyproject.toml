@@ -224,6 +224,13 @@ python-multipart = "^0.0.32"
 argon2-cffi = "^25.1.0"
 
 [tool.poetry.group.dev.dependencies]
+# The deployment facility is a BUILD-TIME tool, so it belongs here and not
+# in `main`: the Dockerfile runs `poetry install --only main`, and a
+# renderer that ships inside every production image is a dependency nobody
+# audits protecting nothing. CI and deployment hosts install the RELEASED
+# distribution by exact version; this path entry is what makes the source
+# testable in the repository that owns it (ADR-0070).
+dotmac-deployment-foundation = { path = "packages/dotmac-deployment-foundation", develop = true }
 pytest = "^8.3"
 pytest-asyncio = "^0.24"
 httpx = "^0.27"
@@ -403,6 +410,7 @@ markers = [
 [tool.importlinter]
 root_packages = [
     "app",
+    "dotmac_deployment_foundation",
     "dotmac_kernel",
     "dotmac_ui",
     "dotmac_template_studio",
@@ -491,6 +499,31 @@ root_packages = [
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
 ]
+
+[[tool.importlinter.contracts]]
+# ADR-0070. The deployment facility runs on a build runner, a CI job and a
+# deployment host — none of which has a database, a web framework or a tenant,
+# and none of which should acquire one in order to validate a descriptor. This
+# is the same one-way shape `dotmac-ui` holds, for the same reason.
+#
+# Stated as its own contract rather than folded into "Modules must not import
+# the assembly" because the facility is NOT a module: it has no manifest, no
+# `mod_*` namespace and no lineage, and filing it with the modules would send
+# the next reader looking for all three.
+name = "The deployment foundation must not import the kernel, the UI or the assembly"
+type = "forbidden"
+source_modules = ["dotmac_deployment_foundation"]
+forbidden_modules = ["app", "dotmac_kernel", "dotmac_ui"]
+
+[[tool.importlinter.contracts]]
+# The other direction, and the one that actually decays. Nothing stops an
+# application service from importing a renderer "just to read the descriptor",
+# and the first one that does makes the facility a runtime dependency of the
+# product it is supposed to deploy.
+name = "The assembly and the kernel must not import the deployment foundation"
+type = "forbidden"
+source_modules = ["app", "dotmac_kernel"]
+forbidden_modules = ["dotmac_deployment_foundation"]
 
 [[tool.importlinter.contracts]]
 name = "Kernel must not import the assembly"

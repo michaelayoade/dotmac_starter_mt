@@ -1,0 +1,78 @@
+"""``dotmac-deployment-foundation`` — one build-and-deploy facility for the fleet.
+
+A product assembly declares `deploy/product.toml` and nothing else. Everything a
+deployment needs is rendered or derived from it: the Compose file, the ingress
+site, the collector configuration, the alert rules, and the ordered deployment
+plan with its gates.
+
+Read ADR-0070 for the boundary and `EXTRACTION.toml` for what was extracted from
+which product and, as importantly, what was deliberately left behind.
+
+## Three properties this package holds on purpose
+
+**Zero runtime dependencies.** Not the kernel, not SQLAlchemy, not FastAPI, not
+Jinja, not a YAML library. Standard library only — the same shape as
+`dotmac-ui`, for the same reason: a build runner that renders a Compose file has
+no database and no web framework, and must not acquire them to validate a
+descriptor.
+
+**No state.** No `ModuleManifest`, no models, no migrations, no lineage, no
+tenant. A facility that decides how a deployment is built cannot be a table
+inside one of the deployments it builds.
+
+**Nothing here runs anything.** The plan is data and the executor talks to an
+injected `Effects` provider. That is what makes the failure-injection matrix —
+wrong digest, failed backup, candidate never ready, maintenance-required
+release attempted online — ordinary unit tests instead of disposable-VM
+exercises, and a gate that has never been shown to fire is a gate nobody should
+trust.
+"""
+
+from __future__ import annotations
+
+from .conformance import check_all, check_rendered_assets_match
+from .drift import DriftReport, Observation, Verdict, compare
+from .errors import (
+    DeploymentFoundationError,
+    DriftDetected,
+    RenderDrift,
+    SecretValueError,
+    SpecError,
+    UnknownFieldError,
+    UnknownSchemaError,
+)
+from .image import AuditReport, audit_image
+from .spec import SCHEMA, ProductDeploymentSpec
+from .telemetry import (
+    RESOURCE_ATTRIBUTES,
+    Annotation,
+    ResourceAttributes,
+    resource_attributes,
+)
+
+__version__ = "0.1.0a1"
+
+__all__ = [
+    "RESOURCE_ATTRIBUTES",
+    "SCHEMA",
+    "Annotation",
+    "AuditReport",
+    "DeploymentFoundationError",
+    "DriftDetected",
+    "DriftReport",
+    "Observation",
+    "ProductDeploymentSpec",
+    "RenderDrift",
+    "ResourceAttributes",
+    "SecretValueError",
+    "SpecError",
+    "UnknownFieldError",
+    "UnknownSchemaError",
+    "Verdict",
+    "__version__",
+    "audit_image",
+    "check_all",
+    "check_rendered_assets_match",
+    "compare",
+    "resource_attributes",
+]

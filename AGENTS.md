@@ -949,6 +949,53 @@ specifics) points here and must never fork these rules.
     sibling claim that landed later.
     (`tests/architecture/test_adr_numbering.py`)
 
+41. **Deployment is a stateless versioned FACILITY, and a product declares one
+    descriptor.** `dotmac-deployment-foundation` is classified
+    `universal-facility`: no `ModuleManifest`, no models, no migrations, no
+    lineage, no tenant, and ZERO runtime dependencies — not the kernel, not
+    SQLAlchemy, not FastAPI, not Jinja, not a YAML library. A build runner that
+    renders a Compose file has no database and no web framework and must not
+    acquire them to validate a descriptor; that is `dotmac-ui`'s shape, held for
+    the same reason. Two import-linter contracts hold it in both directions, and
+    the classification guard carries planted-defect proofs for each property.
+
+    A product owns exactly one deployment artifact, `deploy/product.toml`
+    (`ProductDeploymentSpec.v1`), holding material NAMES and approved pointers
+    and never a secret value (ADR-0009, refused at PARSE time). Every other
+    deployment asset is RENDERED from it, and `render --check` is a byte
+    comparison a product's own CI runs — so a hand-edited Compose file fails
+    review rather than a host at 3am. Variation enters through the typed
+    descriptor or a declared extension point; `if product == "erp"` in the
+    shared facility is refused by an AST guard.
+
+    The boundary, in four lines: the KERNEL owns in-process contracts and
+    mechanics; the FOUNDATION owns build- and deploy-time execution for one
+    release on one host; `dotmac-deployment-control` owns durable fleet intent —
+    desired state, plans, approvals, rollouts, acknowledgements, drift — and
+    gains no Docker, Nginx, SSH, cloud, migration, backup or monitoring
+    implementation; the ASSEMBLY owns declarative product input only.
+    `dotmac-platform-health` may own normalized health observations; it owns no
+    raw signal and no deployment decision. Nginx is the first dedicated-VM
+    ingress PROVIDER and decides no tenant, domain, TLS or business lifecycle;
+    dynamic customer domains need a domain/DNS/TLS reconciler and are out of its
+    scope.
+
+    Three refusals are load-bearing and are not preferences. A
+    `maintenance_required` release may not take the online path, because that
+    path leaves the previous image querying a schema it cannot read. An image
+    rollback is permitted only when the release's own compatibility declaration
+    permits it, and a migration is NEVER automatically downgraded. And a backup
+    is `COMPLETED`, `VERIFIED`, `RESTORABLE` or `PROVED` — only the last supports
+    a recovery claim. `set -euo pipefail` already makes a failing `pg_dump` fail
+    the backup in all three products, so COMPLETED is genuinely established;
+    what none of them establish is anything after it — no checksum is recorded
+    at write time, nothing decompresses the archive, and no product has ever
+    restored one.
+    (ADR-0070; `tests/architecture/test_deployment_foundation_facility.py`,
+    `tests/unit/test_deployment_foundation_failure_injection.py`;
+    `docs/inventories/deployment-foundation-sources.md` for the eighteen defects
+    deliberately NOT extracted)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

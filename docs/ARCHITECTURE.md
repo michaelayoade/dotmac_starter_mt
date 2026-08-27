@@ -546,6 +546,79 @@ entitlement grants. Billing may update subscription state, and metering may
 feed quota and/or billing, but request handlers consult local entitlement and
 quota decisions—not payment providers or raw license payloads.
 
+### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-26)
+
+ADR-0003 § "Infrastructure provisioning and deployment execution" declared
+profile-specific deployment assets and reusable providers. It was never built,
+and in the meantime four repositories implemented the same seven mechanisms four
+times with four different sets of defects — one of them, this repository's own
+`scripts/deploy.sh`, a self-declared hand-port that dropped the deployment lock,
+the digest and evidence gates, the dirty-tree refusal, the migration preflight
+and the warm candidate.
+
+`packages/dotmac-deployment-foundation` is the concrete facility. It is
+classified `universal-facility`, which is a real classification with
+consequences rather than a label: `check_allocation_serialized.py` exempts it
+from the migration-ledger gate because it legitimately owns no lineage, and
+`tests/architecture/test_deployment_foundation_facility.py` holds it to five
+properties with a planted-defect proof for each.
+
+**Ownership, and where each line's boundary is drawn.**
+
+| Owner | Owns | Explicitly does not own |
+|---|---|---|
+| `dotmac-kernel` | in-process contracts and mechanics: sessions and transaction boundaries, tenant priming, conflict savepoints, public error contracts, manifest contracts, migration-graph orchestration, the liveness/readiness and telemetry *interfaces*, the provisioning protocols | anything that renders infrastructure |
+| `dotmac-deployment-foundation` | one release on one host: the descriptor and its refusals, the deterministic renderers, the hardened image contract and its audit, the ordered plan and its gates, backup/restore assurance, ingress providers, resource attributes and deployment annotations, the common alert catalogue, the conformance kit | durable fleet records, health status, signal storage, any in-process runtime contract |
+| `dotmac-deployment-control` | durable fleet intent: desired state, immutable plans, approvals, rollout decisions and attempts, authenticated acknowledgements, drift-as-authority | Docker, Nginx, SSH, cloud providers, migrations, backup, monitoring — its own `EXTRACTION.toml` contract already says so, and ADR-0070 does not widen it |
+| the product assembly | declarative input: identity, manifest reference, process roles and commands, worker/queue topology, image system packages, migration command, readiness dependencies, exposed ports, product hooks, domain alert rules, justified capability exceptions | the deployment engine, the renderers, any infrastructure alert |
+| `dotmac-platform-health` | authenticated normalized health *observations* and their projection | raw logs, metrics, traces, deployment decisions, monitoring infrastructure |
+| the external Observability platform | storage, queries, dashboards, alert delivery, operator access | alert *definitions*, which are the foundation's and the product's |
+
+**Zero runtime dependencies is the load-bearing property.** Not the kernel, not
+SQLAlchemy, not FastAPI, not Jinja, not a YAML library — rendering is explicit
+Python emitting text. Two consequences: a build runner adopts the facility
+without adopting a runtime, and `dotmac-deploy render --check` is a byte
+comparison a reviewer reads as an ordinary diff. This is `dotmac-ui`'s shape and
+it is here for the same reason.
+
+**The plan is data.** `engine/plan.py` builds an ordered tuple of typed steps
+whose first seven mutate nothing, and `engine/run.py` executes it against an
+injected `Effects` protocol. That is what makes the twenty-case
+failure-injection matrix a unit-test file rather than a disposable-VM exercise —
+and a gate that has never been shown to fire is a gate nobody should trust. Two
+of the source engine's gates were in fact found to be wrong only in production.
+
+**The provider seam is where a host lives, and there is exactly one provider.**
+`engine/run.py` defines `Effects` — nineteen methods, no implementation — and
+`providers/compose_host.py` is the dedicated-VM Docker Compose implementation of
+it. Everything the facility can do to a host goes through one `subprocess.run`
+seam with `shell=False` and an argv list, so a descriptor value containing `;`
+or `$(…)` reaches the child as one literal argument. Forty constructor knobs,
+each with a documented default, so no binary name, path, port, timeout or
+service name is unoverridable.
+
+The seam is what makes the failure matrix testable without infrastructure, and
+it is also what stops the copying: a product that had to write its own provider
+would write a slightly different one, which is the fork this facility exists to
+prevent. A Kubernetes or cloud-runner provider is a second implementation of the
+same protocol and changes no step of the plan.
+
+**Nginx is a provider, not the architecture.** It is first because Sub's
+warm-candidate handoff is the proven production behaviour and is Nginx-shaped.
+It renders an upstream pair and a candidate handoff, and decides no tenant,
+domain, TLS or business lifecycle. Static Nginx serves a KNOWN host set; dynamic
+customer domains are explicitly out of scope and need a domain/DNS/TLS
+reconciler, for which Caddy, Traefik, cert-manager or a managed load balancer
+remain available.
+
+**Adoption status.** Built, statically validated, and NOT published, NOT pinned
+by any product, NOT run anywhere (`AGENTS.md` rule 30). Descriptors exist on
+unmerged branches for this repository, `dotmac_erp`, `dotmac_integrator` and
+`dotmac_sub`; none retires its product's existing engine, and retirement is
+gated on proven parity per product. Decision: ADR-0070. Sources and the
+eighteen defects deliberately not extracted:
+`docs/inventories/deployment-foundation-sources.md`.
+
 ### Target tenant lifecycle and global commercial foundations
 
 The application currently has tenant creation and `Tenant.is_active`/

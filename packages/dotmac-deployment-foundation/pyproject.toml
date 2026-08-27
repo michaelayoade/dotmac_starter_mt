@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-deployment-foundation"
+version = "0.1.0a1"
+description = "Stateless build- and deploy-time facility for Dotmac product assemblies"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_deployment_foundation", from = "src" }]
+include = [
+  { path = "src/dotmac_deployment_foundation/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+
+[tool.poetry.scripts]
+dotmac-deploy = "dotmac_deployment_foundation.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
