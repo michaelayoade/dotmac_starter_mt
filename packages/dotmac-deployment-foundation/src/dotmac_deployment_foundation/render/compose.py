@@ -487,11 +487,21 @@ def _resource_lines(
 
     An ABSENT `pids` under `limits` counts as disagreeing, so emitting
     `pids_limit` beside a `limits` block that lists only cpus and memory —
-    which is what this function used to do — produces a file no engine will
-    load. Nothing in this repository could have caught that: the renderer
-    emits text, and only a real engine knows which text it accepts. The
-    disposable-host rehearsal did, on its first run
-    (`docs/inventories/deployment-foundation-rehearsal.md`, Lane 2).
+    which is what this function used to do — produced a file the engine
+    refused to load.
+
+    SCOPE OF THAT CLAIM. It is observed on **Docker 29.4.3 with Compose
+    v5.1.3**, the engine the rehearsal runner and CI carry today, and it
+    follows from the Compose specification treating the two keys as aliases.
+    No other engine or Compose version has been tested here, so this is
+    evidence from one engine rather than a statement about all of them. There
+    is no supported-version matrix yet; before any product cutover, census the
+    adopter hosts' engine versions and record them
+    (`docs/inventories/deployment-foundation-rehearsal.md`).
+
+    Nothing in this repository could have caught it: the renderer emits text,
+    and only an engine knows which text it accepts. The disposable-host
+    rehearsal did, on its first run (same document, Lane 2).
 
     Both keys are written rather than just the nested one, so an engine that
     reads only the legacy key still gets the limit. Writing both is safe

@@ -289,6 +289,54 @@ jobs:
       SMOKE_CONTAINER: "smoke"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The deployment renderer emits TEXT. Nothing in `make check` can say
+      # whether an engine loads that text — and `make check` must stay
+      # Docker-free and offline, so it never will. This is the only job in
+      # REQUIRED PR CI with a Docker daemon, which makes it the only place the
+      # question can be asked before merge.
+      #
+      # It is asked here rather than only in `deployment-conformance.yml`
+      # because that workflow is `workflow_call`-only and its single caller,
+      # `deployment-adopter.yml`, is `workflow_dispatch`-only. The reusable
+      # check is what every CONSUMING product runs; this is what THIS
+      # repository runs on every pull request. Both are kept:
+      # `tests/architecture/test_engine_parse_is_required_ci.py` fails the
+      # build if either disappears.
+      #
+      # Real defect this exists for: `pids_limit` was emitted beside a
+      # `deploy.resources.limits` block listing only cpus and memory, and
+      # because those two keys are ALIASES, Compose rejected every project the
+      # facility rendered. Sixty-six unit tests asserting rendered keys could
+      # not see it; the first disposable-host rehearsal found it 45 minutes in.
+      #
+      # `config` parses, interpolates and validates WITHOUT starting anything:
+      # no pull, no container, no network. Runtime variables are interpolated
+      # with the literal string "ci-placeholder" because interpolation fails
+      # closed on an unset variable, and that error would mask the structural
+      # verdict this step exists for. Placeholder VALUES leak nothing — a real
+      # value never reaches a rendered asset, which is what `secrets_guard`
+      # enforces.
+      - name: The rendered compose file parses on the engine CI runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose="deploy/rendered/docker-compose.yml"
+          if [ ! -f "${compose}" ]; then
+            echo "::error::no rendered compose file at ${compose}"
+            exit 1
+          fi
+          docker version --format 'engine {{.Server.Version}}'
+          docker compose version --short | sed 's/^/compose /'
+          env_args=()
+          while read -r name; do
+            [ -n "${name}" ] || continue
+            env_args+=("${name}=ci-placeholder")
+          done < <(grep -oE '\$\{[A-Z_][A-Z0-9_]*' "${compose}" | sed 's/\${//' | sort -u)
+          echo "interpolating ${#env_args[@]} runtime variable(s) with placeholders"
+          env "${env_args[@]}" docker compose -f "${compose}" config >/dev/null
+          echo "the engine on this runner accepts the rendered project"
+
       - run: docker build --build-arg APP_PORT=${{ env.APP_PORT }} -t ${{ env.IMAGE_TAG }} .
       - run: |
           docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \

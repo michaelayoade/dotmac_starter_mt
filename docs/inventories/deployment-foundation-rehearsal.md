@@ -16,6 +16,27 @@ an exact commit in a fresh checkout; the local tree is not the evidence.
 still binds Lane 2 completely, and it binds any PUBLICATION claim — see the
 closing section.
 
+## Engine evidence, and what has NOT been established
+
+The rehearsal and CI both run on **Docker 29.4.3 / Compose v5.1.3**. Every
+statement in this document about "what the engine accepts" is evidence from
+that one engine.
+
+| Question | State |
+|---|---|
+| the rendered project loads on Docker 29.4.3 / Compose v5.1.3 | **yes**, checked on every PR (`ci.yml` `docker-build`) and by every consuming product (`deployment-conformance.yml`) |
+| a supported Compose-version matrix exists | **no** |
+| the adopter hosts' engine versions are known | **no — census before any cutover** |
+| Podman / podman-compose or any non-Docker engine | **untested** |
+
+The first rehearsal found that `pids_limit` beside a `deploy.resources.limits`
+block listing only cpus and memory is rejected, because the two keys are
+aliases and an absent `pids` counts as disagreeing. That is a Compose
+*specification* property, so it very likely generalises — but "likely
+generalises" is not the same as tested, and this document does not upgrade one
+to the other. Before retiring any product's existing deployment engine, record
+that product's host engine versions here and re-run the parse against them.
+
 ## What is already proven, and by what
 
 | Claim | Proven by | Where |
