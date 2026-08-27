@@ -972,6 +972,20 @@ type = "directory"
 url = "packages/dotmac-deployment-control"
 
 [[package]]
+name = "dotmac-deployment-foundation"
+version = "0.1.0a1"
+description = "Stateless build- and deploy-time facility for Dotmac product assemblies"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deployment-foundation"
+
+[[package]]
 name = "dotmac-document-rendering"
 version = "0.1.0a1"
 description = "Deterministic issued-document projection and rendering from immutable facts"
@@ -4330,4 +4344,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "81db2f2ee585ebdf67a0e6d0424cc416390a55e066a2b558e9ca8dfb1c337ecb"
+content-hash = "c8edafddeb73c6ab0804f856ec56d6468625dde991e3c5b88dcfca8c3e70af4a"

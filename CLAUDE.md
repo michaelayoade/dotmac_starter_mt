@@ -535,6 +535,14 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     named for (`AGENTS.md` rule **39**; ADR-0018 amendment 2026-08-26;
     enforcement `none yet`).
 
+31. Deployment is a stateless `universal-facility`
+    (`dotmac-deployment-foundation`), a product declares one
+    `deploy/product.toml`, every other asset is rendered, and `render --check`
+    is a byte comparison. Zero runtime dependencies; no product branch in the
+    shared facility. Kernel owns in-process contracts, the foundation owns one
+    release on one host, `dotmac-deployment-control` owns fleet intent, the
+    assembly owns declarative input. — `AGENTS.md` rule **41**; ADR-0070.
+
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
 

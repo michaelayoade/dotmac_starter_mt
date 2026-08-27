@@ -97,6 +97,11 @@
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-deployment-foundation": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE FIRST RELEASE RUN. The lane now exists \u2014 `.github/workflows/release-facility.yml` with `.github/release-facilities.json` and `scripts/release_facility.py` \u2014 so the earlier reason for this row (\"no existing release allowlist accepts a universal facility\") is no longer true and has been replaced rather than left standing. What remains is that the lane has not been RUN: publication needs the source on protected `main`, which it is not, and it needs the disposable-host rehearsal to have run against that exact SHA \u2014 this package executes migrations, backup, handoff and rollback, so a first publication whose only evidence is fakes is not acceptable. Package publication is machine-authorized (AGENTS.md rule 31 as amended 2026-08-26); the gate here is evidence, not a reviewer. Remove this row in the SAME change as the release. Do not edit the declared version down to make the gates agree.",
+      "state": "never-published"
+    },
     "dotmac-inbox": {
       "declared": "0.1.0a2",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION. Version a2 adds the typed history-import owner required to replace Sub's temporary direct-mapped-class backfill; source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a2 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
