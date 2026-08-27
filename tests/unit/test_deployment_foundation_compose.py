@@ -748,10 +748,11 @@ def test_the_two_pids_keys_never_disagree(spec: ProductDeploymentSpec) -> None:
     taught us, so the same class fails in a second rather than in a
     45-minute rehearsal.
 
-    Observed on Docker 29.4.3 / Compose v5.1.3 — the engine CI and the
-    rehearsal runner carry today, and the only one tested. This test asserts
-    the INVARIANT (the two aliases agree), which holds regardless; the engine
-    parse in CI is what checks a specific engine still agrees.
+    Observed on Docker 28.0.4 / Compose 2.38.2 (the runner the rehearsal hit
+    it on) and reproduced on Docker 29.4.3 / Compose v5.1.3. This test asserts
+    the INVARIANT — the two aliases agree — which holds regardless of engine;
+    the parse in CI is what checks a specific engine still agrees, and it
+    prints the version it used.
 
     Every service is checked, not just `app` — `migrate`, the managed
     dependencies and the collector all render through `_resource_lines`.

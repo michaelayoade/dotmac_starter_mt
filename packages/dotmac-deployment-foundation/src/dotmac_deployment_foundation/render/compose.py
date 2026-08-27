@@ -490,14 +490,15 @@ def _resource_lines(
     which is what this function used to do — produced a file the engine
     refused to load.
 
-    SCOPE OF THAT CLAIM. It is observed on **Docker 29.4.3 with Compose
-    v5.1.3**, the engine the rehearsal runner and CI carry today, and it
+    SCOPE OF THAT CLAIM. Observed on **Docker 28.0.4 / Compose 2.38.2** (the
+    GitHub runner, where the rehearsal hit it) and independently reproduced on
+    **Docker 29.4.3 / Compose v5.1.3**; the repair is accepted by both. It also
     follows from the Compose specification treating the two keys as aliases.
-    No other engine or Compose version has been tested here, so this is
-    evidence from one engine rather than a statement about all of them. There
-    is no supported-version matrix yet; before any product cutover, census the
-    adopter hosts' engine versions and record them
-    (`docs/inventories/deployment-foundation-rehearsal.md`).
+    That is two versions agreeing, roughly a major apart — not a matrix, and
+    not a statement about engines nobody has run. Before any product cutover,
+    census the adopter hosts' engine versions and record them
+    (`docs/inventories/deployment-foundation-rehearsal.md`, "Engine
+    evidence").
 
     Nothing in this repository could have caught it: the renderer emits text,
     and only an engine knows which text it accepts. The disposable-host
