@@ -1598,8 +1598,9 @@ def _exact_classification_replay(
 ) -> TaxSubjectClassificationV1:
     contract = _classification_contract(row)
     if _classification_contract_content(contract) != expected:
+        conflict_identity = "source identity" if identity == "source" else identity
         raise TaxConflict(
-            f"tax classification {identity} identity exists with different "
+            f"tax classification {conflict_identity} exists with different "
             "current content"
         )
     return contract
