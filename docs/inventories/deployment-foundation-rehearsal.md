@@ -16,6 +16,43 @@ an exact commit in a fresh checkout; the local tree is not the evidence.
 still binds Lane 2 completely, and it binds any PUBLICATION claim — see the
 closing section.
 
+## Engine evidence, and what has NOT been established
+
+Every statement in this document about "what the engine accepts" is evidence
+from a named engine, and there are two — they are NOT the same version, which
+is worth more than it looks.
+
+| Engine | Where | Role |
+|---|---|---|
+| **Docker 28.0.4 / Compose 2.38.2** | GitHub-hosted runner | runs the rehearsal (Lane 2) and the required per-PR parse in `ci.yml` |
+| **Docker 29.4.3 / Compose v5.1.3** | Observer | where the `pids` alias behaviour was isolated and the three candidate shapes compared |
+
+The `pids_limit` defect was REJECTED by 28.0.4/2.38.2 (that is how the rehearsal
+found it) and independently reproduced on 29.4.3/5.1.3. The repair is ACCEPTED
+by both. Two independent versions, roughly a major apart, agreeing in both
+directions is meaningfully stronger than one — but it is still two data points,
+not a matrix.
+
+| Question | State |
+|---|---|
+| the rendered project loads on Docker 28.0.4 / Compose 2.38.2 | **yes**, checked on every PR (`ci.yml` `docker-build`) and by every consuming product (`deployment-conformance.yml`) |
+| the rendered project loads on Docker 29.4.3 / Compose v5.1.3 | **yes**, checked by hand |
+| a supported Compose-version matrix exists | **no** |
+| the adopter hosts' engine versions are known | **no — census before any cutover** |
+| Podman / podman-compose or any non-Docker engine | **untested** |
+
+The per-PR step prints `engine <version>` and `compose <version>` before it
+parses, so the version this evidence rests on is recorded in every run's log
+rather than inferred from this table months later.
+
+The first rehearsal found that `pids_limit` beside a `deploy.resources.limits`
+block listing only cpus and memory is rejected, because the two keys are
+aliases and an absent `pids` counts as disagreeing. That is a Compose
+*specification* property, so it very likely generalises — but "likely
+generalises" is not the same as tested, and this document does not upgrade one
+to the other. Before retiring any product's existing deployment engine, record
+that product's host engine versions here and re-run the parse against them.
+
 ## What is already proven, and by what
 
 | Claim | Proven by | Where |

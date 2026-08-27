@@ -476,12 +476,42 @@ def _logging_lines(level: int) -> list[str]:
 def _resource_lines(
     level: int, resources: Resources, *, replicas: int | None = None
 ) -> list[str]:
-    """`deploy.resources.limits` (cpus/memory) plus the sibling
-    `pids_limit` — two separate compose keys, not one nested tree, because
-    `pids_limit` is a top-level service key rather than part of the
-    swarm-oriented `deploy` block. `replicas` is a role property with no
-    equivalent on `migrate` (a one-shot job has no scale), so it is only
-    added under `deploy:` when the caller passes one."""
+    """`deploy.resources.limits` (cpus/memory/pids) AND the legacy top-level
+    `pids_limit`, carrying the SAME number.
+
+    `pids_limit` and `deploy.resources.limits.pids` are ALIASES for one
+    setting, and Compose refuses a project where they disagree:
+
+        services.app: can't set distinct values on 'pids_limit' and
+        'deploy.resources.limits.pids': invalid compose project
+
+    An ABSENT `pids` under `limits` counts as disagreeing, so emitting
+    `pids_limit` beside a `limits` block that lists only cpus and memory —
+    which is what this function used to do — produced a file the engine
+    refused to load.
+
+    SCOPE OF THAT CLAIM. Observed on **Docker 28.0.4 / Compose 2.38.2** (the
+    GitHub runner, where the rehearsal hit it) and independently reproduced on
+    **Docker 29.4.3 / Compose v5.1.3**; the repair is accepted by both. It also
+    follows from the Compose specification treating the two keys as aliases.
+    That is two versions agreeing, roughly a major apart — not a matrix, and
+    not a statement about engines nobody has run. Before any product cutover,
+    census the adopter hosts' engine versions and record them
+    (`docs/inventories/deployment-foundation-rehearsal.md`, "Engine
+    evidence").
+
+    Nothing in this repository could have caught it: the renderer emits text,
+    and only an engine knows which text it accepts. The disposable-host
+    rehearsal did, on its first run (same document, Lane 2).
+
+    Both keys are written rather than just the nested one, so an engine that
+    reads only the legacy key still gets the limit. Writing both is safe
+    EXACTLY as long as the values are identical, which
+    `test_the_two_pids_keys_never_disagree` holds.
+
+    `replicas` is a role property with no equivalent on `migrate` (a one-shot
+    job has no scale), so it is only added under `deploy:` when the caller
+    passes one."""
     lines = [_line(level, "deploy:")]
     if replicas is not None:
         lines.append(_line(level + 1, f"replicas: {replicas}"))
@@ -489,6 +519,7 @@ def _resource_lines(
     lines.append(_line(level + 2, "limits:"))
     lines.append(_line(level + 3, f"cpus: {_scalar(resources.cpus)}"))
     lines.append(_line(level + 3, f"memory: {_scalar(resources.memory)}"))
+    lines.append(_line(level + 3, f"pids: {resources.pids}"))
     lines.append(_line(level, f"pids_limit: {resources.pids}"))
     return lines
 
