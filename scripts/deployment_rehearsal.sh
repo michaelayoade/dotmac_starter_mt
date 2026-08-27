@@ -93,6 +93,29 @@ REHEARSAL_DIR="${SCRIPT_DIR}/rehearsal"
 # ── knobs: timeouts ───────────────────────────────────────────────────────────
 
 : "${WAIT_DB_TIMEOUT_SECONDS:=60}"
+# Consecutive successful probes required before the database counts as ready.
+# See `wait_for_stable`. Everything by config (AGENTS.md) — but this knob only
+# goes UP. The loopback-TCP probe is what actually closes the init-restart
+# window (the temporary server runs with `listen_addresses=''` and serves no
+# TCP at all); the streak is defence in depth behind it, for the restarts TCP
+# alone does not describe — a crashed backend, a container the daemon
+# restarts. Tuning it to 1 would quietly restore "accept the first success",
+# which is the exact bug this pair of changes exists to remove, so the floor is
+# enforced below rather than documented and hoped for.
+: "${WAIT_DB_STABLE_PROBES:=3}"
+readonly WAIT_DB_STABLE_PROBES_FLOOR=3
+case "${WAIT_DB_STABLE_PROBES}" in
+  ''|*[!0-9]*)
+    printf 'WAIT_DB_STABLE_PROBES must be a whole number, got %s\n' \
+      "${WAIT_DB_STABLE_PROBES}" >&2
+    exit 2
+    ;;
+esac
+if [ "${WAIT_DB_STABLE_PROBES}" -lt "${WAIT_DB_STABLE_PROBES_FLOOR}" ]; then
+  printf 'WAIT_DB_STABLE_PROBES must be at least %s, got %s: fewer consecutive probes reopens the init-restart race this knob exists to close\n' \
+    "${WAIT_DB_STABLE_PROBES_FLOOR}" "${WAIT_DB_STABLE_PROBES}" >&2
+  exit 2
+fi
 : "${WAIT_HTTP_TIMEOUT_SECONDS:=30}"
 : "${MIGRATE_TIMEOUT_SECONDS:=30}"
 # app.py's `--migrate` mode always issues `SET lock_timeout = '5s'`
@@ -241,6 +264,44 @@ wait_for() {
   until "$@" >/dev/null 2>&1; do
     if [ "${waited}" -ge "${timeout}" ]; then
       log "timed out after ${timeout}s waiting for: ${description}"
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
+wait_for_stable() {
+  # wait_for_stable <timeout-seconds> <consecutive-successes> <description> <command...>
+  #
+  # `wait_for` accepts the FIRST success, which is wrong for anything whose
+  # readiness can regress. Postgres' official entrypoint is exactly that: on a
+  # fresh volume it starts a TEMPORARY server to run initdb and any
+  # /docker-entrypoint-initdb.d scripts, then SHUTS IT DOWN and starts the real
+  # one. A probe that fires during the temporary phase succeeds, and the socket
+  # then disappears underneath whatever runs next.
+  #
+  # That is not hypothetical here: rehearsal run 33088709577 passed
+  # `pg_isready` and the very next `psql` failed with
+  #   connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed
+  # Requiring N CONSECUTIVE successes, spaced a second apart, spans the restart
+  # instead of racing it.
+  local timeout="$1"
+  local needed="$2"
+  local description="$3"
+  shift 3
+  local waited=0
+  local streak=0
+  while [ "${streak}" -lt "${needed}" ]; do
+    if "$@" >/dev/null 2>&1; then
+      streak=$((streak + 1))
+    else
+      streak=0
+    fi
+    [ "${streak}" -ge "${needed}" ] && return 0
+    if [ "${waited}" -ge "${timeout}" ]; then
+      log "timed out after ${timeout}s waiting for: ${description} (needed ${needed} consecutive successes, reached ${streak})"
       return 1
     fi
     sleep 1
@@ -427,8 +488,26 @@ cmd_up() {
   local db_cid
   db_cid="$("${COMPOSE[@]}" ps -q db)"
   [ -n "${db_cid}" ] || die "the compose-managed 'db' service never started"
-  wait_for "${WAIT_DB_TIMEOUT_SECONDS}" "primary database ready" \
-    "${DOCKER_BIN}" exec "${db_cid}" pg_isready -U "${DB_SUPERUSER}" \
+  # Probe with REAL SQL over LOOPBACK TCP. Both halves matter and neither is
+  # sufficient alone:
+  #
+  #   * not `pg_isready` — it answers "is a server accepting connections",
+  #     which the entrypoint's temporary init server also answers yes to.
+  #     Running SQL as the superuser is what the next line actually needs.
+  #   * not the Unix SOCKET — the temporary server can serve socket SQL
+  #     perfectly well, and for longer than any streak this script is willing
+  #     to wait. The official image starts it with `listen_addresses=''`, so
+  #     it accepts NO TCP at all. A loopback TCP probe therefore cannot be
+  #     satisfied by the temporary server: it succeeds only once the real
+  #     server is listening. That turns a narrowed race into no race.
+  #
+  # `-h 127.0.0.1` inside `docker exec` is the CONTAINER's loopback and
+  # `DB_PORT` its in-container port (5432) — not a host-published port.
+  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "primary database ready" \
+    "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${db_cid}" \
+    psql -h 127.0.0.1 -p "${DB_PORT}" \
+    -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d "${DB1_NAME}" -c 'SELECT 1' \
     || die "the primary scratch database never became ready"
 
   local db_network
@@ -586,8 +665,11 @@ run_step_7_live_vs_ready_with_db_down() {
   ready="$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready")"
 
   "${DOCKER_BIN}" start "${DB1_CONTAINER}" >/dev/null
-  wait_for "${WAIT_DB_TIMEOUT_SECONDS}" "primary database ready again" \
-    "${DOCKER_BIN}" exec "${DB1_CONTAINER}" pg_isready -U "${DB_SUPERUSER}"
+  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "primary database ready again" \
+    "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB1_CONTAINER}" \
+    psql -h 127.0.0.1 -p "${DB_PORT}" \
+    -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d "${DB1_NAME}" -c 'SELECT 1' 
 
   if [ "${live}" = "200" ] && [ "${ready}" = "503" ]; then
     step_pass "with the database stopped: /health/live=200, /health/ready=503 (the ERP defect, inverted)"
@@ -742,8 +824,15 @@ run_step_10_backup_verify_restore() {
     -e "POSTGRES_DB=${DB2_NAME}" \
     -e "POSTGRES_USER=${DB_SUPERUSER}" \
     "${DB_IMAGE}" >/dev/null
-  wait_for "${WAIT_DB_TIMEOUT_SECONDS}" "restore-target database ready" \
-    "${DOCKER_BIN}" exec "${DB2_CONTAINER}" pg_isready -U "${DB_SUPERUSER}"
+  # Same init-restart race as the primary (see `wait_for_stable`): this
+  # container is created FRESH each time, so it always runs the entrypoint's
+  # temporary-server phase — the restore that follows would fail on a
+  # vanished socket.
+  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "restore-target database ready" \
+    "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB2_CONTAINER}" \
+    psql -h 127.0.0.1 -p "${DB_PORT}" \
+    -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d postgres -c 'SELECT 1' 
 
   if ! gunzip -c "${dump}" \
       | "${DOCKER_BIN}" exec -i -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB2_CONTAINER}" \
@@ -1192,8 +1281,15 @@ inject_failed_restore_verification() {
     -e "POSTGRES_DB=${DB2_NAME}" \
     -e "POSTGRES_USER=${DB_SUPERUSER}" \
     "${DB_IMAGE}" >/dev/null
-  wait_for "${WAIT_DB_TIMEOUT_SECONDS}" "restore-target database ready" \
-    "${DOCKER_BIN}" exec "${DB2_CONTAINER}" pg_isready -U "${DB_SUPERUSER}"
+  # Same init-restart race as the primary (see `wait_for_stable`): this
+  # container is created FRESH each time, so it always runs the entrypoint's
+  # temporary-server phase — the restore that follows would fail on a
+  # vanished socket.
+  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "restore-target database ready" \
+    "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB2_CONTAINER}" \
+    psql -h 127.0.0.1 -p "${DB_PORT}" \
+    -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d postgres -c 'SELECT 1' 
 
   local rc=0
   gunzip -c "${truncated}" 2>/dev/null \
