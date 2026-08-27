@@ -7,11 +7,13 @@ disposable host adds that a unit test cannot. Read that document first — it
 states which claims this rehearsal exists to establish and why a fake
 `Effects` implementation cannot establish them.
 
-**Status: nothing here has been run.** Every file in this directory and the
-driving script were written and are unrun, exactly as the inventory document
-says of the rest of `dotmac-deployment-foundation`. This rehearsal runs ONLY
-when Michael has explicitly authorised the run, and ONLY against disposable
-infrastructure it creates and destroys itself.
+**Status as of 2026-08-27: the rehearsal has run four times, but no exact-SHA
+run has passed yet.** The latest run, `33111496459` at main commit `9cc24b1e`,
+passed steps 1-12 and failed in step 13 because the harness looked for an
+alert-instance label that correctly disappears when an alert recovers. The
+current branch repairs that verdict and still requires a new disposable-host
+run. The rehearsal runs ONLY against infrastructure it creates and destroys
+itself.
 
 ## What it touches, and what it never touches
 
@@ -68,6 +70,12 @@ Every path, port, image tag, database name, network name and timeout is a
 `: "${VAR:=default}"` knob at the top of `scripts/deployment_rehearsal.sh` —
 override any of them by exporting the variable before invoking the script.
 The one thing NOT overridable away is the disposable-name check itself.
+
+Step 13's alert proof is conjunctive. Firing requires the one named rule to be
+`firing` while the exact configured target is `down`. Recovery requires that
+same rule to be `inactive`, that same target to remain present and be `up`, and
+the restarted app to be HTTP-ready and Docker-healthy. A missing rule, a
+missing target, or an app that is merely live is not recovery.
 
 ## Three cases are SKIPPED, honestly, and why
 

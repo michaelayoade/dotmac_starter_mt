@@ -331,67 +331,82 @@ def test_no_wait_loop_hardcodes_its_bound() -> None:
     assert not literal_loops, f"hardcoded loop bound(s) {literal_loops}: use a knob"
 
 
-# ── alert state is parsed, not grepped ──────────────────────────────────────
+# ── alert recovery is conjunctive and structurally parsed ──────────────────
+
+
+def _function(name: str) -> str:
+    code = _code_only()
+    match = re.search(rf"^{re.escape(name)}\(\)[^\n]*\n(?:.*?\n)*?^}}", code, re.M)
+    assert match, f"could not read {name}'s body"
+    return match.group(0)
 
 
 def test_alert_state_is_read_from_the_rule_not_an_alert_instance() -> None:
-    """`alertname` lives in `alerts[]`, which is EMPTY once the alert recovers.
+    """`alertname` disappears with the active instance on recovery.
 
-    The original recovery condition required `"alertname":"RehearsalTargetDown"`
-    to still be present AND not firing. On recovery Prometheus removes the
-    instance, so the first half is false forever: step 13 was not slow, it was
-    unsatisfiable, and reported `recovered=0` on every run that reached it.
-
-    Confirmed against a real Prometheus (v2.54.1, isolated bridge network):
-
-        firing     -> rule state "firing",   1 instance,  alertname present
-        recovered  -> rule state "inactive", 0 instances, alertname ABSENT
+    Exact-main run 33111496459 and an independent Observer reproduction both
+    ended with the stable rule named ``RehearsalTargetDown`` inactive and its
+    ``alerts`` list empty. The old grep therefore described an impossible
+    recovered state.
     """
+    code = _code_only()
+    assert "prom_rule_is()" in code
+    assert 'grep -q \'"alertname"' not in code
+    assert "prom_rule_is inactive" in code
+    assert "prom_rule_is firing" in code
+
+
+def test_the_real_wait_path_executes_the_fixture_tested_json_probe() -> None:
     code = _code_only()
     assert (
-        "prom_rule_state()" in code
-    ), "alert state must be read through a helper that parses the rules API"
-    assert 'grep -q \'"alertname"' not in code, (
-        "alert state must not be decided by grepping for an alert instance's "
-        "labels — they are gone exactly when recovery is what you are testing"
-    )
+        '.*"state":"firing"' not in code
+    ), "a greedy match can pair one rule's name with another rule's state"
+    assert 'PROM_PROBE="${REHEARSAL_DIR}/prometheus_probe.py"' in code
+    assert '"${PYTHON_BIN}" "${PROM_PROBE}"' in code
 
 
-def test_the_rules_api_is_parsed_as_json_not_matched_with_a_greedy_regex() -> None:
-    """`"alertname":"X".*"state":"firing"` spans a single-line JSON document.
+def test_a_vanished_rule_or_target_is_not_treated_as_recovery() -> None:
+    """An inactive rule with no scrape target is a monitoring outage.
 
-    The `.*` can match `X` in one rule and `firing` from a DIFFERENT rule
-    further along. It was only ever correct here because this Prometheus
-    evaluates exactly one rule — an accident, not a property.
+    ``up == 0`` evaluates to an empty vector when the target disappears. The
+    executable parser fixtures prove each named object refuses zero and
+    duplicate matches; this composition test pins both halves into recovery.
     """
-    code = _code_only()
-    assert '.*"state":"firing"' not in code, (
-        "a greedy match across the rules document can pair one rule's name "
-        "with another rule's state"
-    )
-    helper = re.search(r"prom_rule_state\(\)[^\n]*\n(?:.*?\n)*?^}", code, re.M)
-    assert helper, "prom_rule_state must exist"
-    assert "json" in helper.group(0), "the helper must parse JSON"
+    recovery = _function("prom_recovery_proved")
+    assert "prom_rule_is inactive" in recovery
+    assert "prom_target_is up" in recovery
 
 
-def test_a_vanished_rule_is_not_treated_as_recovery() -> None:
-    """A rule that disappeared means the rule file stopped loading.
+def test_fire_requires_the_same_target_to_be_down() -> None:
+    fire = _function("prom_fire_proved")
+    assert "prom_rule_is firing" in fire
+    assert "prom_target_is down" in fire
 
-    That is a failure wearing recovery's clothes, so `absent` must not satisfy
-    the recovery condition.
-    """
-    code = _code_only()
-    recovery = re.search(
-        r'while \[ "\$\{waited\}" -lt "\$\{WAIT_ALERT_RECOVER_SECONDS\}" \]'
-        r"[^\n]*\n(?:.*?\n)*?^  done",
-        code,
-        re.M,
-    )
-    assert recovery, "could not locate the recovery loop"
-    assert '= "inactive"' in recovery.group(
-        0
-    ), "recovery must require the rule to be INACTIVE specifically"
-    assert "absent" not in recovery.group(0), (
-        "`absent` must not count as recovery — a vanished rule is a broken "
-        "rule file, not a healthy one"
+
+def test_restart_restores_application_readiness_before_claiming_recovery() -> None:
+    """The tmpfs readiness marker disappears across the injected stop/start."""
+    step = _function("run_step_13_alert_fires_and_recovers")
+    marker = step.find(": > /tmp/rehearsal-ready")
+    ready = step.find("app readiness=200 after restart")
+    healthy = step.find("app Docker health healthy after restart")
+    recovery = step.find("prom_recovery_proved")
+    assert -1 not in (marker, ready, healthy, recovery)
+    assert marker < ready < healthy < recovery
+
+
+def test_alert_transition_failures_emit_rule_target_and_app_diagnostics() -> None:
+    helper = _function("diagnose_prometheus_transition")
+    for evidence in (
+        "rule-summary",
+        "target-summary",
+        "/health/live",
+        "/health/ready",
+        "diagnose_container",
+    ):
+        assert evidence in helper, f"alert diagnostics omit {evidence}"
+
+    step = _function("run_step_13_alert_fires_and_recovers")
+    assert step.count("diagnose_prometheus_transition") >= 3, (
+        "baseline, fire and recovery failures must print the evidence that "
+        "distinguishes a missing rule, missing target and unhealthy app"
     )

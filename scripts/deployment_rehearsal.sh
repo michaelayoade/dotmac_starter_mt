@@ -6,12 +6,13 @@
 # migration-head verification) real bytes on disk — not a fake `Effects`
 # implementation.
 #
-# STATUS: NOTHING BELOW HAS BEEN EXECUTED (docs/inventories/
-# deployment-foundation-rehearsal.md, "Status as of 2026-08-26"). This script
-# is written and unrun. It runs ONLY on the disposable infrastructure it
-# creates and tears down itself — never against a named environment, never
-# against a production host — and only when Michael has explicitly
-# authorised the run. See scripts/rehearsal/README.md before running it.
+# STATUS as of 2026-08-27: Lane 2 has run four times on disposable
+# infrastructure. The latest exact-main run, 33111496459 at 9cc24b1e, passed
+# steps 1-12 and exposed an unsatisfiable alert-recovery predicate in step 13.
+# This branch repairs that predicate; a successful exact-SHA run is still
+# required before publication. The script runs ONLY on the disposable
+# infrastructure it creates and tears down itself — never against a named
+# environment or production host. See scripts/rehearsal/README.md first.
 #
 # Subcommands:
 #   up               create the disposable registry, build+push the image
@@ -167,6 +168,9 @@ fi
 : "${PROM_CONTAINER:=dotmac-deployment-rehearsal-prometheus}"
 : "${PROM_HTTP_PORT:=19090}"
 : "${PROM_ALERT_FOR:=5s}"
+readonly PROM_RULE_NAME="RehearsalTargetDown"
+readonly PROM_SCRAPE_URL="http://app:${APP_PORT}/metrics"
+readonly PROM_PROBE="${REHEARSAL_DIR}/prometheus_probe.py"
 
 # ── knobs: exit-code policy ───────────────────────────────────────────────────
 
@@ -269,6 +273,12 @@ container_running() {
   local state
   state="$("${DOCKER_BIN}" inspect -f '{{.State.Running}}' "$1" 2>/dev/null || echo false)"
   [ "${state}" = "true" ]
+}
+
+container_healthy() {
+  local state
+  state="$("${DOCKER_BIN}" inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo unknown)"
+  [ "${state}" = "healthy" ]
 }
 
 remove_container() {
@@ -408,42 +418,52 @@ observe_for() {
   _wait_for "${timeout}" "${description}" "$@"
 }
 
-prom_rule_state() {
-  # prom_rule_state <rule-name> — prints firing | pending | inactive | absent
-  #
-  # Reads the RULE's own state, not an alert INSTANCE's labels, and parses the
-  # JSON rather than grepping it. Both halves are load-bearing:
-  #
-  #   * `"alertname"` appears only inside `alerts[]`, the list of ACTIVE alert
-  #     instances. When the target comes back the instance is REMOVED, so the
-  #     old recovery condition — which required `"alertname":"..."` to still be
-  #     present AND not firing — could never be satisfied. Step 13 was not
-  #     slow; it was unsatisfiable, and reported `recovered=0` every run.
-  #     Confirmed against a real Prometheus: firing => rule state `firing`,
-  #     1 instance, alertname present; recovered => rule state `inactive`,
-  #     0 instances, alertname absent.
-  #
-  #   * `grep '"alertname":"X".*"state":"firing"'` is greedy across a
-  #     single-line JSON document, so it can match X in one rule and `firing`
-  #     from a DIFFERENT rule further along. It happened to be correct here
-  #     only because this Prometheus evaluates exactly one rule.
-  local rule_name="$1"
-  curl -s --max-time 5 "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" \
-    | "${PYTHON_BIN}" -c '
-import json, sys
-name = sys.argv[1]
-try:
-    document = json.load(sys.stdin)
-except (json.JSONDecodeError, ValueError):
-    print("absent")
-    raise SystemExit(0)
-for group in document.get("data", {}).get("groups", []):
-    for rule in group.get("rules", []):
-        if rule.get("name") == name:
-            print(rule.get("state", "absent"))
-            raise SystemExit(0)
-print("absent")
-' "${rule_name}" 2>/dev/null || echo absent
+prom_api() {
+  # prom_api <endpoint> <prometheus_probe.py args...>
+  local endpoint="$1"
+  shift
+  curl -sf --max-time 5 \
+    "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/${endpoint}" \
+    | "${PYTHON_BIN}" "${PROM_PROBE}" "$@"
+}
+
+prom_rule_is() {
+  prom_api rules rule-is "${PROM_RULE_NAME}" "$1"
+}
+
+prom_target_is() {
+  prom_api targets target-is "${PROM_SCRAPE_URL}" "$1"
+}
+
+prom_fire_proved() {
+  prom_rule_is firing && prom_target_is down
+}
+
+prom_recovery_proved() {
+  # `inactive` alone is not recovery: a vanished target makes `up == 0`
+  # produce no vector and therefore also looks inactive. Require the same
+  # expected target to remain present and scrape successfully.
+  prom_rule_is inactive && prom_target_is up
+}
+
+diagnose_prometheus_transition() {
+  # diagnose_prometheus_transition <app-container> <transition>
+  local app_container="$1"
+  local transition="$2"
+  local rule_summary target_summary marker
+  rule_summary="$(prom_api rules rule-summary "${PROM_RULE_NAME}" 2>&1 || true)"
+  target_summary="$(prom_api targets target-summary "${PROM_SCRAPE_URL}" 2>&1 || true)"
+  [ -n "${rule_summary}" ] || rule_summary="unavailable"
+  [ -n "${target_summary}" ] || target_summary="unavailable"
+  marker="absent"
+  if "${DOCKER_BIN}" exec "${app_container}" test -f /tmp/rehearsal-ready \
+      >/dev/null 2>&1; then
+    marker="present"
+  fi
+  log "  ${transition} rule: ${rule_summary}"
+  log "  ${transition} target: ${target_summary}"
+  log "  ${transition} app: live=$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/live") ready=$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready") marker=${marker}"
+  diagnose_container "${app_container}" "app during Prometheus ${transition}"
 }
 
 http_status() {
@@ -1141,7 +1161,7 @@ run_step_13_alert_fires_and_recovers() {
 groups:
   - name: rehearsal
     rules:
-      - alert: RehearsalTargetDown
+      - alert: ${PROM_RULE_NAME}
         expr: up{job="rehearsal-app"} == 0
         for: ${PROM_ALERT_FOR}
         labels:
@@ -1186,51 +1206,85 @@ YAML
     return 1
   fi
 
-  # The app is already up (from step 8) and answering /metrics with
-  # `rehearsal_up 1` because the ready marker is set. Stop it so the target
-  # goes down and the rule genuinely fires.
-  "${COMPOSE[@]}" stop app >/dev/null
-
-  local fired=0
-  local waited=0
-  while [ "${waited}" -lt "${WAIT_ALERT_FIRE_SECONDS}" ]; do
-    if [ "$(prom_rule_state RehearsalTargetDown)" = "firing" ]; then
-      fired=1
-      break
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-  [ "${fired}" -eq 1 ] || log "  rule never reached firing; last state: $(prom_rule_state RehearsalTargetDown)"
-
-  "${COMPOSE[@]}" start app >/dev/null
-  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "$("${COMPOSE[@]}" ps -q app)" \
-    "app answering again" \
-    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
-
-  # Recovery is the rule returning to `inactive`. NOT "the alertname is still
-  # there but not firing" — the instance is gone by then, which is what made
-  # the old condition unsatisfiable. `absent` is deliberately NOT accepted: a
-  # rule that vanished from Prometheus entirely means the rule file stopped
-  # loading, which is a failure wearing recovery's clothes.
-  local recovered=0
-  waited=0
-  while [ "${waited}" -lt "${WAIT_ALERT_RECOVER_SECONDS}" ]; do
-    if [ "$(prom_rule_state RehearsalTargetDown)" = "inactive" ]; then
-      recovered=1
-      break
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-  [ "${recovered}" -eq 1 ] || log "  rule never returned to inactive; last state: $(prom_rule_state RehearsalTargetDown)"
-
-  if [ "${fired}" -eq 1 ] && [ "${recovered}" -eq 1 ]; then
-    step_pass "RehearsalTargetDown fired against a real Prometheus and recovered when the target came back"
-  else
-    step_fail "alert fires and recovers" "fired=${fired} recovered=${recovered}"
+  local app_cid
+  app_cid="$("${COMPOSE[@]}" ps -q app)"
+  if [ -z "${app_cid}" ]; then
+    step_fail "alert evaluation" "no app container exists before the fire/recovery proof"
     return 1
   fi
+
+  # Establish the healthy baseline before injecting the outage. An inactive
+  # rule with no target is not a healthy baseline; it is a missing subject.
+  if ! wait_for_container "${WAIT_PROMETHEUS_TIMEOUT_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "Prometheus baseline: ${PROM_RULE_NAME} inactive and target up" \
+    prom_recovery_proved; then
+    diagnose_prometheus_transition "${app_cid}" "baseline"
+    step_fail "alert baseline" "the named rule and target never became healthy"
+    return 1
+  fi
+
+  # The app is already up (from step 8) and ready. Stop it so the expected
+  # target remains configured but reports DOWN and the named rule genuinely
+  # reaches FIRING.
+  "${COMPOSE[@]}" stop app >/dev/null
+  if ! wait_for_container "${WAIT_ALERT_FIRE_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "${PROM_RULE_NAME} firing while ${PROM_SCRAPE_URL} is down" \
+    prom_fire_proved; then
+    diagnose_prometheus_transition "${app_cid}" "fire"
+    step_fail "alert fires" "the rule and target never reached firing/down together"
+    return 1
+  fi
+
+  "${COMPOSE[@]}" start app >/dev/null
+  app_cid="$("${COMPOSE[@]}" ps -q app)"
+  if [ -z "${app_cid}" ]; then
+    step_fail "alert recovers" "the app container did not return"
+    return 1
+  fi
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app answering liveness after restart" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
+
+  # /tmp is a tmpfs, so the harness-controlled readiness marker is correctly
+  # lost when the container stops. Re-arm the fixture after restart and prove
+  # BOTH its HTTP readiness contract and Docker's derived health state before
+  # accepting Prometheus recovery. The previous predicate would have passed
+  # with the app still unhealthy.
+  if ! "${DOCKER_BIN}" exec "${app_cid}" sh -c \
+      'mkdir -p /tmp && : > /tmp/rehearsal-ready'; then
+    diagnose_prometheus_transition "${app_cid}" "recovery"
+    step_fail "alert recovers" "could not restore the harness readiness marker"
+    return 1
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app readiness=200 after restart" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = \"200\" ]"; then
+    step_fail "alert recovers" "the app never became ready after restart"
+    return 1
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app Docker health healthy after restart" \
+    container_healthy "${app_cid}"; then
+    step_fail "alert recovers" "the app never became Docker-healthy after restart"
+    return 1
+  fi
+
+  # Recovery is conjunctive. The stable named rule must be INACTIVE, the
+  # expected scrape target must still exist and be UP, and the app readiness
+  # checks above must already have succeeded. A missing rule or target is a
+  # monitoring failure, never recovery.
+  if ! wait_for_container "${WAIT_ALERT_RECOVER_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "${PROM_RULE_NAME} inactive while ${PROM_SCRAPE_URL} is up" \
+    prom_recovery_proved; then
+    diagnose_prometheus_transition "${app_cid}" "recovery"
+    step_fail "alert recovers" "rule, target and app never recovered together"
+    return 1
+  fi
+
+  step_pass "${PROM_RULE_NAME} fired with its target down, then the rule, target and app all recovered"
 }
 
 cmd_run() {
