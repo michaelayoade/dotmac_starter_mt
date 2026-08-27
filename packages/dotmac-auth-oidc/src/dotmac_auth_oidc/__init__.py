@@ -1,4 +1,4 @@
-"""DotMac OIDC relying-party client.
+"""DotMac server-side OIDC protocol adapter.
 
 The SINGLE CANONICAL public-surface manifest, deliberately shaped like
 `dotmac_kernel.__init__` and `dotmac_ui.__init__` so the packages are governed
@@ -6,8 +6,10 @@ the same way. The prose companion is `COMPATIBILITY.md`.
 
 ## What this package is
 
-An OIDC relying party that runs the Authorization Code flow with PKCE and hands
-back a **verified external subject**. That is the whole output:
+One entry point runs a confidential Authorization Code flow with PKCE. A second
+verifies the ID token obtained by a public native client without taking over
+that client's PKCE ceremony. Both hand back a **verified external subject**.
+That is the whole output:
 
     dotmac-auth-oidc                 →  verified (issuer, subject)
     dotmac_kernel.external_identity  →  which local Party is that, here?
@@ -63,6 +65,12 @@ from dotmac_auth_oidc.errors import (
     TokenExchangeError,
     UnsupportedAlgorithmError,
 )
+from dotmac_auth_oidc.native import (
+    NATIVE_ID_TOKEN_ALGORITHMS,
+    NativeIDTokenVerifier,
+    NonceBinding,
+    PublicNativeClientConfig,
+)
 from dotmac_auth_oidc.state import (
     DEFAULT_STATE_TTL_SECONDS,
     PER_REQUEST_STATE_STORE,
@@ -84,7 +92,7 @@ from dotmac_auth_oidc.transport import (
 # Not read from `importlib.metadata`: the package must import from a bare source
 # checkout, where installed metadata may be absent or stale. Kept in sync with
 # pyproject by `tests/architecture/test_auth_oidc_public_surface.py`.
-__version__: Final[str] = "0.1.0a1"
+__version__: Final[str] = "0.1.0a2"
 
 # The exhaustive list of submodules a consumer may import from. A name is public
 # only if it is also in that module's own `__all__`.
@@ -93,12 +101,13 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
         "dotmac_auth_oidc.client",
         "dotmac_auth_oidc.discovery",
         "dotmac_auth_oidc.errors",
+        "dotmac_auth_oidc.native",
         "dotmac_auth_oidc.state",
         "dotmac_auth_oidc.transport",
     }
 )
 
-INTERNAL_MODULES: Final[frozenset[str]] = frozenset()
+INTERNAL_MODULES: Final[frozenset[str]] = frozenset({"dotmac_auth_oidc._token"})
 
 __all__ = [
     "ALLOWED_ALGORITHMS",
@@ -107,6 +116,7 @@ __all__ = [
     "DEFAULT_STATE_TTL_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
     "INTERNAL_MODULES",
+    "NATIVE_ID_TOKEN_ALGORITHMS",
     "PER_REQUEST_STATE_STORE",
     "SUPPORTED_MODULES",
     "AuthorizationRedirect",
@@ -118,6 +128,8 @@ __all__ = [
     "IssuerMismatchError",
     "JWKSError",
     "LoginState",
+    "NativeIDTokenVerifier",
+    "NonceBinding",
     "NonceMismatchError",
     "OIDCClient",
     "OIDCError",
@@ -125,10 +137,11 @@ __all__ = [
     "PerRequestStateStore",
     "ProviderCache",
     "ProviderMetadata",
+    "PublicNativeClientConfig",
     "RelyingPartyConfig",
     "StateError",
-    "StateUnavailableError",
     "StateStore",
+    "StateUnavailableError",
     "TokenExchangeError",
     "Transport",
     "UnsupportedAlgorithmError",
