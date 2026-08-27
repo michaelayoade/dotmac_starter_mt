@@ -77,7 +77,7 @@
   "adapters": {
   "dotmac-auth-oidc": {
     "$comment": [
-      "The fleet's OIDC relying party (ADR-0006's 2026-08-14 stateless-protocol-adapter amendment).",
+      "The fleet's server-side OIDC protocol adapter (ADR-0006 and ADR-0069).",
       "",
       "LISTED NOW BECAUSE THE PILOT RAN. This lane was built shut in PR #180 and the",
       "reason was explicit: absence from this file is the safety mechanism until a real",
@@ -99,7 +99,9 @@
       "relationship that does not exist.",
       "",
       "Required wheel contents, each earning its place rather than listing the directory:",
-      "  client.py    -- the flow, the algorithm allowlist and the state-pair check",
+      "  client.py    -- the confidential flow and its published contract",
+      "  native.py    -- the public-native backend verifier and typed nonce binding",
+      "  _token.py    -- the one shared signature, JWK-purpose and claim-verification core",
       "  state.py     -- the StateStore contract, S256 PKCE, the per-request sentinel",
       "  discovery.py -- metadata and JWKS with TTLs and rate-limited kid refetch",
       "  transport.py -- the one place this package touches a network, redirects refused",
@@ -111,9 +113,9 @@
       "concerns ADR-0006 says cannot be faked. python-jose is deliberately absent -- see",
       "COMPATIBILITY.md for why the fleet's 3.3.0 pin was not inherited.",
       "",
-      "Publication is not adoption. EXTRACTION.toml's status stays audit-complete and",
-      "contract_consumers stays empty until Workspace PR #2 merges against the published",
-      "wheel; a release moves neither."
+      "Publication is not adoption. Workspace already consumes a1 for the confidential",
+      "flow. Publishing a2 does not make Sub a native-verifier consumer: that requires",
+      "an exact pin, deletion of Sub's local verifier and a green real exchange path."
     ],
     "package_dir": "packages/dotmac-auth-oidc",
     "import_name": "dotmac_auth_oidc",
@@ -121,7 +123,9 @@
     "wheel_contents": {
       "required": [
         "dotmac_auth_oidc/py.typed",
+        "dotmac_auth_oidc/_token.py",
         "dotmac_auth_oidc/client.py",
+        "dotmac_auth_oidc/native.py",
         "dotmac_auth_oidc/state.py",
         "dotmac_auth_oidc/discovery.py",
         "dotmac_auth_oidc/transport.py",

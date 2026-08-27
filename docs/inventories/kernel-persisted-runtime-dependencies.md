@@ -116,7 +116,7 @@ tag").
 | --- | --- | --- | --- | --- |
 | `dotmac-application-directory` | `dotmac-application-directory-v0.1.0a3` | `0.1.0a3` | `release-modules.json` | yes |
 | `dotmac-approvals` | `dotmac-approvals-v0.1.0a4` | `0.1.0a4` | `release-modules.json` | yes |
-| `dotmac-auth-oidc` | `dotmac-auth-oidc-v0.1.0a1` | `0.1.0a1` | `release-adapters.json` | yes |
+| `dotmac-auth-oidc` | `dotmac-auth-oidc-v0.1.0a1` | `0.1.0a2` | `release-adapters.json` | a1 yes; a2 outstanding |
 | `dotmac-entitlement-allocation` | `dotmac-entitlement-allocation-v0.1.0a4` | `0.1.0a4` | `release-modules.json` | yes |
 | `dotmac-files` | `dotmac-files-v0.1.0a2` | `0.1.0a2` | `release-modules.json` | yes |
 | `dotmac-integration` | `dotmac-integration-v0.1.0a3` | `0.1.0a3` | `release-modules.json` | yes |
@@ -131,6 +131,12 @@ Both unpublished distributions carry a reasoned row in
 is described there as "the still-unlisted stand-in the allowlist gate's own
 sensitivity proof uses", and in `docs/MODULE_CATALOG.md:57` as `not
 allowlisted`, `0.2.0a3`.
+
+**Release-truth update — 2026-08-27.** The `dotmac-auth-oidc` row above now
+records the declared `0.1.0a2` public-native verifier supply version. Its newest
+oracle remains the `0.1.0a1` tag, so a2 is outstanding in the declared-
+publication baseline; this release-state correction does not change this
+inventory's historical package-count or persistence conclusions.
 
 **Why this matters here and nowhere else in the report:** the undeclarable
 runtime dependency only bites a FOREIGN adopter that installs a wheel and runs

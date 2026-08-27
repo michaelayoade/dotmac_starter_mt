@@ -715,6 +715,13 @@ schema ownership into an optional check. `.github/release-adapters.json` owns
 the separate question for `stateless-protocol-adapter` distributions, which
 have no `ModuleManifest` or kernel floor and are gated, built and verified by
 `release-adapter.yml` instead (ADR-0006's 2026-08-14 amendment).
+`dotmac-auth-oidc` is one such server-side protocol adapter. Its confidential
+web client and public-native ID-token verifier are separate public roles over
+one private discovery/JWKS and token-verification core; it owns no mobile PKCE
+verifier, product ceremony, local identity mapping, authorization decision or
+product session. The native surface is declared in unreleased `0.1.0a2`, so
+Sub remains a candidate until the protected adapter release exists, Sub pins
+that exact artifact and its local verifier is deleted with exchange-path proof.
 `.github/release-contracts.json` owns the fourth lane, for
 `stateless-contract-catalogue` distributions — a product owner's capability
 contracts as canonical schema bytes and digests. It shares the adapter's four

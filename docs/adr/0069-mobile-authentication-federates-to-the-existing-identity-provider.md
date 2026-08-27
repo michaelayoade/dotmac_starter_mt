@@ -294,6 +294,34 @@ an unset bound**, and that is what is recorded. A date written without them
 would be a guess presented as a plan. Producing the counts is the named next
 action; the bound is set in the same change that records them.
 
+## Amendment — 2026-08-27: the backend verifier is not the confidential client
+
+The prohibition in § 4 applies unchanged to `OIDCClient`: its client secret,
+code exchange, server-side state store and browser-cookie binding remain a
+confidential web flow and none of them enters Flutter.
+
+It does not require each product backend to implement a second JWKS cache and
+ID-token decoder. `dotmac-auth-oidc` `0.1.0a2` declares a separate
+**server-side** `NativeIDTokenVerifier` for the assertion-exchange half of this
+decision. The mobile application still performs Authorization Code + PKCE; the
+backend verifier receives only the resulting ID token and a trusted
+`NonceBinding`. It has no client secret, code exchange, cookie or state store.
+
+The verifier owns discovery/static-JWKS retrieval, attempt-bounded unknown-key
+refresh, key-purpose and algorithm checks, signature validation, exact issuer,
+`aud` derived from the one configured client id, multi-audience `azp`,
+`exp`/`iat`/optional `nbf`, maximum assertion age and nonce comparison. A
+product may construct the nonce binding from raw ceremony state or from a
+structurally validated `sha256(raw_nonce)` digest; the package hashes the
+verified claim and compares digests in constant time, so Sub does not need to
+store the raw nonce.
+
+The product still owns everything on either side: ceremony creation and burn,
+subject-to-local-identity resolution, authorization and its own session. The
+surface is declared but unreleased in `0.1.0a2`; Sub remains a candidate until
+it exact-pins the released artifact, deletes its local JWKS/verifier copy and
+proves the real exchange path. Source presence is not adoption.
+
 ---
 
 ## Named risks

@@ -17,14 +17,20 @@ private and may change or disappear without a deprecation cycle.
 | Module | Public names |
 |---|---|
 | `dotmac_auth_oidc.client` | `OIDCClient`, `RelyingPartyConfig`, `VerifiedSubject`, `AuthorizationRedirect`, `ALLOWED_ALGORITHMS`, `DEFAULT_LEEWAY_SECONDS`, `DEFAULT_SCOPES` |
+| `dotmac_auth_oidc.native` | `NativeIDTokenVerifier`, `PublicNativeClientConfig`, `NonceBinding`, `NATIVE_ID_TOKEN_ALGORITHMS` |
 | `dotmac_auth_oidc.state` | `StateStore`, `InMemoryStateStore`, `PerRequestStateStore`, `PER_REQUEST_STATE_STORE`, `LoginState`, `PKCEPair`, `generate_pkce`, `generate_state_id`, `claim_state`, `DEFAULT_STATE_TTL_SECONDS` |
 | `dotmac_auth_oidc.discovery` | `ProviderCache`, `ProviderMetadata`, `fetch_metadata`, `discovery_url`, and the three TTL defaults |
 | `dotmac_auth_oidc.transport` | `Transport`, `HttpxTransport`, `DEFAULT_TIMEOUT_SECONDS`, `MAX_RESPONSE_BYTES` |
 | `dotmac_auth_oidc.errors` | `OIDCError` and every subclass |
 
+`dotmac_auth_oidc._token` is declared internal. It is the single PyJWT security
+core shared by both public protocol roles; consumers import neither it nor its
+functions.
+
 ## The contract boundary
 
-This package returns a `VerifiedSubject` and nothing else. It never:
+Both protocol roles return a `VerifiedSubject` and nothing else. The package
+never:
 
 - queries a local identity table, or creates an account;
 - issues a session, a token or a cookie;
@@ -42,15 +48,15 @@ would turn it into a per-deployment mistake.
 
 | Constant | Value | Why it is fixed |
 |---|---|---|
-| `ALLOWED_ALGORITHMS` | asymmetric only (RS/ES/PS) | a relying party that accepts `HS256` can be defeated by signing with the provider's published public key as the HMAC secret |
+| `ALLOWED_ALGORITHMS` | asymmetric only (RS/ES/PS) | the confidential general relying party accepts only asymmetric signatures |
+| `NATIVE_ID_TOKEN_ALGORITHMS` | `RS256` only | the public-native authorization-server registration is pinned to RS256; widening the backend would make that server-side pin incomplete |
 | PKCE method | `S256` | `plain` sends the verifier in the authorization request, which is the interception PKCE exists to defeat |
 | the `state` parameter | a random opaque id | the ceremony (verifier, nonce, return path) is held server-side and never serialized, so the front channel has nothing to read and nothing to encrypt |
 | endpoint scheme | `https` only | an `http` token endpoint carries the client secret in clear; an `http` JWKS means the key set that decides identity is whatever the network says |
 
-## What the CONSUMER owns
+## What the consumer owns
 
-Three things this package will not do for you, each because doing it would
-require knowledge the package does not have:
+The confidential `OIDCClient` consumer owns three things the package cannot:
 
 1. **`return_to` validation** — it is carried opaquely through the ceremony.
    Only your application knows which paths are safe.
@@ -99,6 +105,23 @@ made the store optional and signed the ceremony into the state parameter
 instead; that put the verifier on the wire, readable by anything that saw the
 URL, and was withdrawn.
 
+### What the public-native backend owns
+
+`NativeIDTokenVerifier` receives one ID token and a `NonceBinding`. The consumer
+owns the backend ceremony that generated that nonce, local subject resolution
+and its product session. `NonceBinding.from_plaintext` hashes immediately;
+`from_sha256_hex` accepts a structurally validated persisted digest. The raw
+nonce need never be stored, and the package hashes the verified claim before a
+constant-time digest comparison. The public-native surface has no client
+secret, authorization-code exchange, cookie or `StateStore`; adding one would
+merge the device's PKCE participant with the confidential server flow.
+
+Construct one verifier per registration and retain it for the process lifetime.
+It owns a `ProviderCache`; rebuilding it per request discards the unknown-key
+refresh bound and turns every login into discovery/JWKS traffic. A failed
+unknown-key refresh advances the attempt floor and leaves still-fresh known
+keys usable.
+
 ## Dependencies
 
 Two, and each is a concern that cannot be faked: `pyjwt[crypto]` for signature
@@ -125,12 +148,16 @@ provider name appears; that no local-identity or session concern appears; the
 algorithm allowlist rejecting `HS256`, `none` and an unknown `alg`; `kid`
 handling; nonce mismatch; audience, issuer, expiry and `azp`; state single-use and
 expiry; the state parameter carrying no ceremony data; discovery issuer
-mismatch; and the https rule on both discovered endpoints and the override.
+mismatch; and the https rule on both discovered endpoints and the override. The
+native surface additionally checks its absence of confidential-flow identifiers,
+RS256-only policy, exact issuer/client-id-derived audience, multi-audience `azp`, nonce,
+`exp`/`iat`/optional `nbf`, maximum assertion age, attempt-bounded unknown-key
+refresh, and survival of still-fresh working keys after a failed refresh.
 
-**Not claimed:** this package has no production deployment anywhere. Nothing has
-run a real login through it against a real identity provider. `EXTRACTION.toml`
-records `status = "audit-complete"` and `contract_consumers = []`, which is the
-honest state — a passing test suite is not a pilot.
+**Adoption state:** `0.1.0a1` is published and adopted by Workspace for the
+confidential flow. The native verifier is declared in unreleased `0.1.0a2` and
+has no released consumer yet. Sub becomes one only after exact-pin cutover and
+real exchange-path evidence; source tests are not adoption.
 
 ## Versioning and deprecation
 

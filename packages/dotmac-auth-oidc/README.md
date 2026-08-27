@@ -1,8 +1,10 @@
 # dotmac-auth-oidc
 
-An OIDC relying-party client. It runs the Authorization Code flow with PKCE and
-returns a **verified external subject** — an `(issuer, subject)` pair — and
-stops there.
+An OIDC protocol adapter with two server-side entry points. `OIDCClient` runs a
+confidential web Authorization Code flow with PKCE; `NativeIDTokenVerifier`
+verifies the ID token a public native client obtained with its own PKCE flow.
+Both return a **verified external subject** — an `(issuer, subject)` pair — and
+stop there.
 
 ```
 dotmac-auth-oidc                 →  verified (issuer, subject)
@@ -47,7 +49,7 @@ if the behaviour regresses:
 | state signed with the host's **session-JWT secret** | no key at all — the ceremony never leaves the server |
 | `python-jose` pinned at 3.3.0 since 2021 (pulls `ecdsa`) | `pyjwt[crypto] >=2.13` (2.13 is a security floor — GHSA-jq35-7prp-9v3f) |
 
-## Using it
+## Confidential web relying party
 
 ```python
 from dotmac_auth_oidc import OIDCClient, RelyingPartyConfig
@@ -72,6 +74,53 @@ subject = client.complete_login(
 # subject.issuer, subject.subject → dotmac_kernel.external_identity
 # subject.return_to came from YOUR stored state — still validate it
 ```
+
+## Public-native backend verification
+
+The mobile application performs Authorization Code + PKCE in the OS browser.
+Its backend receives the resulting ID token plus the backend-owned binding to
+its ceremony nonce and verifies them without a client secret or a second code
+exchange:
+
+```python
+from dotmac_auth_oidc import (
+    NativeIDTokenVerifier,
+    NonceBinding,
+    PublicNativeClientConfig,
+)
+
+verifier = NativeIDTokenVerifier(
+    PublicNativeClientConfig(
+        issuer="https://idp.example.com/realms/mobile",
+        client_id="io.example.field",
+        max_token_age_seconds=300,
+    )
+)
+
+subject = verifier.verify(
+    id_token,
+    nonce_binding=NonceBinding.from_sha256_hex(ceremony_nonce_hash),
+)
+# Resolve subject.issuer + subject.subject through YOUR local identity owner,
+# then issue YOUR product session. Provider claims grant no local permission.
+```
+
+Construct one verifier per registration and retain it for the process lifetime;
+that is what retains the bounded discovery/JWKS cache. `RS256` is the fixed
+native-client policy. `aud` is derived from and must contain the exact client
+id; `exp`, `iat`, optional `nbf`, exact issuer, multi-audience `azp`, nonce and
+maximum assertion age are all enforced.
+
+`NonceBinding.from_sha256_hex(...)` lets a ceremony persist only
+`sha256(raw_nonce)`: the package hashes the verified claim and constant-time
+compares it to that binding. A caller that still holds plaintext may use
+`NonceBinding.from_plaintext(...)`; the object immediately hashes it and never
+retains the raw value.
+
+This verifier runs on the backend. It is not a Flutter library and carries no
+OAuth client credential, token exchange, cookie or state store. The device
+still owns its PKCE verifier, and the product backend still owns its ceremony,
+subject-to-local-identity mapping and session.
 
 ### The ceremony never travels
 
@@ -99,100 +148,18 @@ Two things a consumer owns and this package deliberately does not:
   worker cannot be completed on another, and it fails loudly rather than
   degrading.
 
-## Testing against an unpublished wheel
+## Releases and exact pins
 
-This package is **not published**. It is absent from
-`.github/release-adapters.json`, and absence is the safety mechanism: the entry
-lands with the proof, never ahead of it, and the proof owed is a real pilot
-consumer. `dotmac_workspace` is that pilot, which leaves a chicken-and-egg
-problem — it must run against this code before there is anything to pin.
+`0.1.0a1` is published and adopted by Workspace for the confidential flow.
+`0.1.0a2` is the declared, unreleased native-verifier supply version. A product
+must not pin `0.1.0a2` until the protected adapter workflow installs the exact
+artifact back from the private registry and writes
+`dotmac-auth-oidc-v0.1.0a2`.
 
-The answer is a **local wheel built at an exact SHA**, installed as an ordinary
-version-pinned distribution. Not a path dependency: a path dependency across
-repositories is forbidden (see the comment above `dotmac-release-catalog` in the
-root `pyproject.toml`, and `dotmac_workspace/AGENTS.md`), because it makes one
-repository's working tree part of another's build, and nothing then records
-WHICH bytes the pilot proved.
-
-### 1. Build the wheel, in this repository, at the SHA under test
-
-```sh
-git -C dotmac_starter_mt rev-parse HEAD          # record this; it IS the pin
-cd dotmac_starter_mt/packages/dotmac-auth-oidc
-poetry build -f wheel
-```
-
-The artifact lands in `packages/dotmac-auth-oidc/dist/`:
-
-```
-dotmac_auth_oidc-0.1.0a1-py3-none-any.whl
-```
-
-Poetry builds a wheel that is **reproducible in content but not named by SHA** —
-the filename carries only `0.1.0a1`. So record the commit and the file's
-`sha256` together, because the version alone does not distinguish two builds of
-an unreleased alpha:
-
-```sh
-shasum -a 256 dist/dotmac_auth_oidc-0.1.0a1-py3-none-any.whl
-```
-
-Both values — commit and digest — go in the pilot's own notes and in its PR
-description. That pair is what makes "the pilot was green" a statement about
-specific bytes rather than about a version number that has not stabilised.
-
-### 2. Consume it WITHOUT relaxing the pin
-
-Copy the wheel into a directory the consuming repository controls (a
-gitignored `vendor/wheels/`, or a CI artifact — do **not** commit the binary),
-and point the resolver at it as an extra source. The version constraint stays
-EXACT; only where the artifact comes from changes.
-
-Poetry, in `dotmac_workspace/pyproject.toml`:
-
-```toml
-[[tool.poetry.source]]
-name = "local-wheels"
-url = "file:///abs/path/to/vendor/wheels"   # a simple-index directory
-priority = "supplemental"
-
-[tool.poetry.dependencies]
-dotmac-auth-oidc = "0.1.0a1"                # EXACT, not ^ and not >=
-```
-
-pip, equivalently — `--find-links` supplies the artifact while the requirement
-stays exact and the public index still resolves `pyjwt`/`httpx`:
-
-```sh
-pip install --find-links vendor/wheels 'dotmac-auth-oidc==0.1.0a1'
-```
-
-Three properties this preserves, and each is the point:
-
-- **the version pin is untouched.** `==0.1.0a1` resolves the same way before and
-  after publication; only the source moves. Nothing in the consuming repository
-  has to be relaxed and then remembered back;
-- **no path dependency crosses a repository boundary.** The consumer installs a
-  built distribution, exactly as it will from the index;
-- **the cutover is a one-line diff.** When the adapter is finally listed and
-  published, delete the `[[tool.poetry.source]]` block (or the `--find-links`)
-  and the identical `==0.1.0a1` requirement resolves from
-  `registry.dotmac.io`. If the pilot's behaviour changes at that moment,
-  something other than the source changed — which is precisely the signal the
-  recorded `sha256` lets you check.
-
-### 3. What the pilot still owes before an allowlist entry
-
-- a **shared, atomic `StateStore`** — `InMemoryStateStore` cannot complete a
-  login started on another worker (see "The ceremony never travels" above);
-- the client secret **resolved by the product and installed at startup**, never
-  dereferenced on a request path (ADR-0009);
-- the verified subject resolved through `dotmac_kernel.external_identity`, with
-  the pilot issuing its **own** session.
-
-Only then does `.github/release-adapters.json` gain an entry. Publication is
-still not adoption: `EXTRACTION.toml`'s `status` and `contract_consumers` count
-CONSUMERS, and a release moves neither.
+Consumers pin an exact released version—never a branch, range or
+cross-repository path dependency. Sub becomes the second adopter only after it
+pins the released artifact, replaces its local JWKS/verifier copy with the
+surface above, and proves the real exchange path against that pin.
 
 ## Documents
 
