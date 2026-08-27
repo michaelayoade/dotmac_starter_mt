@@ -725,3 +725,55 @@ def test_scalar_quoting_follows_the_special_char_and_ambiguity_rules() -> None:
         assert _SCALAR_SPECIAL_CHAR_RE.search(value) is not None
         assert _scalar(value).startswith('"'), char
     assert not _scalar("plainvalue").startswith('"')
+
+
+# ── the pids alias, found by the real engine ────────────────────────────────
+
+
+def test_the_two_pids_keys_never_disagree(spec: ProductDeploymentSpec) -> None:
+    """`pids_limit` and `deploy.resources.limits.pids` are ALIASES.
+
+    Compose refuses a project where they carry different values — and an
+    ABSENT `pids` under `limits` counts as different, so a `limits` block
+    listing only cpus and memory beside a top-level `pids_limit` is rejected
+    outright:
+
+        services.app: can't set distinct values on 'pids_limit' and
+        'deploy.resources.limits.pids': invalid compose project
+
+    That is what the renderer emitted until the disposable-host rehearsal ran
+    for the first time and the engine threw it out. No test in this file could
+    have known: asserting a rendered key proves the key is there, never that
+    the engine accepts the document. This one encodes the RULE the engine
+    taught us, so the same class fails in a second rather than in a
+    45-minute rehearsal.
+
+    Every service is checked, not just `app` — `migrate`, the managed
+    dependencies and the collector all render through `_resource_lines`.
+    """
+    rendered = render_compose(spec, image=_IMAGE)
+    doc = yaml.safe_load(rendered)
+
+    checked = 0
+    for name, service in doc["services"].items():
+        legacy = service.get("pids_limit")
+        nested = (
+            service.get("deploy", {}).get("resources", {}).get("limits", {}).get("pids")
+        )
+        if legacy is None and nested is None:
+            continue
+        checked += 1
+        assert legacy is not None and nested is not None, (
+            f"service {name!r} sets only one of the two pids aliases "
+            f"(pids_limit={legacy!r}, limits.pids={nested!r}); Compose treats "
+            "the missing one as a disagreement and refuses the project"
+        )
+        assert int(legacy) == int(nested), (
+            f"service {name!r} sets pids_limit={legacy} but "
+            f"deploy.resources.limits.pids={nested}; these are one setting"
+        )
+
+    assert checked, (
+        "no service declared a pids limit, so this test proved nothing — the "
+        "fixture must render at least one resource-limited service"
+    )

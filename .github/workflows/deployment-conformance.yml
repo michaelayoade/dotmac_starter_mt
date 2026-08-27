@@ -262,6 +262,43 @@ jobs:
           fi
           dotmac-deploy "${args[@]}"
 
+      # The renderer emits TEXT. Nothing in the foundation's own test suite can
+      # say whether an engine will load that text — a unit test asserting a
+      # rendered key proves the key is present, never that the document is
+      # valid. That gap shipped a real defect: `pids_limit` was emitted beside
+      # a `deploy.resources.limits` block listing only cpus and memory, and
+      # because the two keys are ALIASES, Compose rejected every project with
+      #   can't set distinct values on 'pids_limit' and
+      #   'deploy.resources.limits.pids'
+      # It was caught by the first disposable-host rehearsal, 45 minutes in.
+      # This asks the engine the same question in about a second.
+      #
+      # `config` parses, interpolates and validates WITHOUT starting anything —
+      # no image is pulled, no container runs, no network is created. The
+      # descriptor's runtime variables are supplied as obvious placeholders
+      # because interpolation fails closed on an unset variable, and an
+      # interpolation error would mask the structural verdict this step exists
+      # for. Placeholder VALUES cannot leak anything: real values never appear
+      # in a rendered asset (that is what `secrets_guard` enforces), and these
+      # are literally the string "conformance-placeholder".
+      - name: The rendered compose file is valid to a real engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose='${{ inputs.rendered-dir }}/docker-compose.yml'
+          if [ ! -f "${compose}" ]; then
+            echo "::error::no rendered compose file at ${compose}"
+            exit 1
+          fi
+          env_args=()
+          while read -r name; do
+            [ -n "${name}" ] || continue
+            env_args+=("${name}=conformance-placeholder")
+          done < <(grep -oE '\$\{[A-Z_][A-Z0-9_]*' "${compose}" | sed 's/\${//' | sort -u)
+          echo "interpolating ${#env_args[@]} runtime variable(s) with placeholders"
+          env "${env_args[@]}" docker compose -f "${compose}" config >/dev/null
+          echo "the engine accepts the rendered project"
+
       - name: Show the deployment plan
         # Not a gate — a reviewer artefact. The plan draws the boundary between
         # the steps that mutate nothing and the steps that can change the world,
