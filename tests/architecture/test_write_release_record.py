@@ -415,6 +415,41 @@ def test_the_only_successful_exits_are_a_record_opened_or_already_complete() -> 
     assert set(exits) <= {"exit 0", "exit 1", "exit 2"}, exits
 
 
+def _record_auto_merge_problems(script: str) -> list[str]:
+    problems: list[str] = []
+    command = 'gh pr merge "${BRANCH}" --auto --squash'
+    if command not in script:
+        problems.append("the record PR must enable squash auto-merge")
+        return problems
+    if script.index(command) < script.index("gh pr create"):
+        problems.append("auto-merge is enabled before the record PR is opened")
+    if 'give_up "could not enable auto-merge for ${BRANCH}"' not in script:
+        problems.append("an auto-merge refusal must fail the release loudly")
+    return problems
+
+
+def test_a_record_pr_auto_merges_only_after_protected_ci_is_green() -> None:
+    """The recorder removes the bookkeeping gesture, never the CI authority."""
+    script = (PROJECT_ROOT / "scripts" / "open_release_record_pr.sh").read_text(
+        encoding="utf-8"
+    )
+    assert _record_auto_merge_problems(script) == []
+
+
+def test_record_auto_merge_guard_detects_a_manual_merge_regression() -> None:
+    """Sensitivity: opening a PR without ``--auto`` is the retired wait."""
+    script = (PROJECT_ROOT / "scripts" / "open_release_record_pr.sh").read_text(
+        encoding="utf-8"
+    )
+    planted = script.replace(
+        'gh pr merge "${BRANCH}" --auto --squash',
+        'gh pr merge "${BRANCH}" --squash',
+    )
+    assert _record_auto_merge_problems(planted) == [
+        "the record PR must enable squash auto-merge"
+    ]
+
+
 # ── Refusals ────────────────────────────────────────────────────────────────
 
 

@@ -10,9 +10,9 @@
 # made it expensive to diagnose rather than expensive to fix.
 #
 # So the record stops being remembered. `scripts/write_release_record.py` makes
-# the edits; this opens them for review. `main` is protected, so this cannot
-# and should not push to it directly: what it removes is the MEMORY step, not
-# the review step.
+# the edits; this opens them and enables squash auto-merge. `main` is protected,
+# so the recorder cannot push to it directly: required CI remains the merge
+# authority, while the redundant human bookkeeping gesture is removed.
 #
 # Idempotent by construction: the writer reports "nothing to do" when the
 # record is already complete, and this exits 0 without opening an empty PR.
@@ -48,19 +48,20 @@
 # The repaired failure path is proven by kernel 0.1.0a93 (run 32622991682): the
 # script pushed the correct record branch, failed RED when the workflow token
 # could not open the pull request, and Michael opened #372 from that branch.
-# The broad repository switch that lets GitHub Actions both CREATE and APPROVE
-# pull requests remains disabled deliberately. More importantly, the tagging
-# job's ordinary workflow token has contents:write ONLY — even a later settings
-# change cannot silently make the publisher the PR writer. The target automatic
+# The broad repository switch that lets an appropriately scoped GitHub Actions
+# token create or approve pull requests is enabled for recorder automation.
+# More importantly, the tagging job's ordinary workflow token has
+# contents:write ONLY, so that repository setting cannot make the publisher the
+# PR writer. The target automatic
 # path is a dedicated recorder GitHub App with contents:write and
 # pull_requests:write, and no Actions, deployment, environment or administration
 # authority. GitHub does not split PR creation from its review API, so the hard
 # separation is that the App authors and last-pushes the PR while protected main
-# requires a fresh approval from another actor with no bypass. The release
-# workflows prefer that App's short-lived token for BOTH the branch push and PR,
-# and fall back to `GITHUB_TOKEN` only to push the correct branch before PR
-# creation fails loudly. Until the App identity is installed, that red run plus
-# the one-click URL is the fail-closed bridge.
+# requires the complete strict CI set with no bypass. The App enables auto-merge
+# but cannot waive a check. The release workflows prefer that App's short-lived
+# token for BOTH the branch push and PR, and fall back to `GITHUB_TOKEN` only to
+# push the correct branch before PR creation fails loudly. Until the App identity
+# is installed, that red run plus the one-click URL is the fail-closed bridge.
 #
 # A CONNECTOR release has a THIRD ledger: a published connector's manifest
 # digest is what an installation adopts by, and
@@ -213,10 +214,14 @@ $(echo "${OUTPUT}" | sed 's/^/- /')
 
 Both edits are mechanical. The publication-ledger row is removed as *text*, so the file's prose is untouched; any migration digests are read from the tag rather than the working tree, because a digest taken from the tree would agree with an edit made after publication.
 
-Review it as bookkeeping, and merge as soon as it is green." \
+This bookkeeping pull request is configured to squash-merge automatically as
+soon as every protected-main check is green." \
     || give_up "could not open the pull request (branch ${BRANCH} is pushed)"
 else
   echo "a pull request for ${BRANCH} already exists — updated it"
 fi
 
-echo "post-release record opened for ${TAG}"
+gh pr merge "${BRANCH}" --auto --squash \
+  || give_up "could not enable auto-merge for ${BRANCH}"
+
+echo "post-release record opened with auto-merge enabled for ${TAG}"

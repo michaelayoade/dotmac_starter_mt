@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "package_release_environments": {
+    "pypi-release": {
+      "allowed_branches": [
+        "main"
+      ],
+      "required_reviewer_count": 0,
+      "wait_timer_minutes": 0
+    },
+    "registry-release": {
+      "allowed_branches": [
+        "main"
+      ],
+      "required_reviewer_count": 0,
+      "wait_timer_minutes": 0
+    }
+  },
+  "production_deployments": {
+    "human_approval_required": true,
+    "note": "Package publication automation does not authorize a production deployment."
+  }
+}

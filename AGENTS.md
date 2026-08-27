@@ -709,60 +709,64 @@ specifics) points here and must never fork these rules.
     (`scripts/declared_publication_sweep.py`;
     `tests/architecture/test_declared_publication.py`)
 
-31. **Protected-environment approval is NON-DELEGABLE, and chat authorization
-    does not transfer it.** A `registry-release` (or any protected-environment)
-    approval is a control that exists to put a human between an authenticated
-    credential and an irreversible publication. An agent holding a credential
-    that CAN approve defeats it — the approval record then names a person who
-    did not perform the action, which is the one fact the record exists to
-    establish.
+31. **Package publication is machine-authorized; production deployment is
+    not.** `registry-release` and `pypi-release` are secret and branch-policy
+    boundaries, not human-review queues: they allow `main` only and have zero
+    required reviewers and zero wait timer. Publication authority is the
+    conjunction of protected `main`, every required CI check, a closed release
+    allowlist, an explicit version equal to package metadata, build-once
+    artifact inspection, and `assert_current_main.sh` immediately before the
+    first irreversible registry write. Publish and install-back verification
+    proceed without a second human gesture; verification still precedes the
+    tag. The generated release-record pull request enables auto-merge and may
+    merge only after the protected branch's complete required-check set is
+    green.
 
-    "Michael said approve it in chat" is NOT equivalent. The gate's premise is
-    that approval happens at the gate, by the reviewer, against the tree the
-    gate is showing. Chat authorization is given earlier, against a different
-    tree, and cannot be re-checked at the moment of publication — the failed
-    a91 attempt (`32596599849`) is the proof: main moved between the
-    authorization and the gate, and only the gate's own re-check caught it.
+    An `environment:` declaration remains mandatory on jobs that read release
+    credentials, but it must not be described as evidence of human approval.
+    GitHub environment protection is mutable external state, so a release
+    captain reads back the zero-reviewer, zero-wait, `main`-only policy after a
+    settings change and whenever an unexpected wait occurs. The checked-in
+    contract is `.github/release-environments.json`; repository tests check its
+    shape and workflow coverage, not GitHub's live settings.
 
-    **An agent stops at the gate.** It dispatches the run, waits, and hands
-    over the approval URL. It does not call
-    `POST /actions/runs/{id}/pending_deployments`, whatever it has been told
-    in conversation. The technical backstop is that the agent-accessible
-    credential must lack the permission to approve deployments; until that is
-    in place this rule is discipline, and discipline is the weaker half.
+    This automation applies only to package publication and its mechanical Git
+    bookkeeping. A production deployment remains human-gated unless its owning
+    product adopts a separate dated architecture decision with equivalent
+    deployment-specific controls. An agent still stops at any protected
+    production approval gate and hands the real gate to its named reviewer.
 
-    Exceptions on record: `docs/CONTROL_EXCEPTIONS.md`, 2026-08-22 kernel
-    `0.1.0a91` and 2026-08-23 kernel `0.1.0a93`.
+    The retired publication-approval control and its historical attribution
+    exceptions remain recorded in `docs/CONTROL_EXCEPTIONS.md`.
 
 32. **A release holds a short, named freeze.** `publish` re-asserts that the
-    run's SHA is still the tip of protected `main`, and that check runs AFTER
-    the approval wait — so any merge between dispatch and verification voids
-    the run. One release captain holds every merge except the generated release
+    run's SHA is still the tip of protected `main` immediately before the
+    irreversible write. Any merge between dispatch and that check voids the
+    run. One release captain holds every merge except the generated release
     record from dispatch through verification, tagging, the record pull
-    request's green merge, and verification that protected `main` contains the
-    truthful record and is green. The captain announces both ends of the
-    window. A tag is not the closing event: it is the instant the checked-in
-    publication baseline becomes false.
+    request's automatic green merge, and verification that protected `main`
+    contains the truthful record and is green. The captain announces both ends
+    of the window. A tag is not the closing event: it is the instant the
+    checked-in publication baseline becomes false.
 
     This is a real control, not ceremony: the first a91 attempt was voided
-    mid-flight by a merge landing during the approval wait, and it stopped
-    BEFORE publication. Keep the check; the freeze is what stops it from
-    costing a wasted build every time. If record automation fails after the
-    tag, the freeze stays open while the already-pushed branch is opened,
-    reviewed and merged; publication is never re-run to repair bookkeeping.
+    mid-flight by a merge landing before publication, and it stopped BEFORE
+    publication. Keep the check; automated publication makes the race window
+    short but does not make it zero. If record automation fails after the tag,
+    the freeze stays open while the already-pushed branch is repaired and
+    merged; publication is never re-run to repair bookkeeping.
 
     The record branch push and pull request use one dedicated recorder App,
     not the publisher's persisted checkout credential. GitHub's required
     pull-request-write permission also reaches the review API, so do not claim
     the token is review-incapable. Enforce the real separation instead: the App
-    authors and last-pushes its PR; protected `main` requires one fresh approval
-    from another actor, dismisses stale approvals, requires approval of the most
-    recent reviewable push and permits no bypass. The App receives contents and
-    pull-request write only — never Actions, deployment, environment or
-    administration authority. The tagging job's ordinary workflow token has
-    exactly `contents: write`, never pull-request write; the loud fallback can
-    push the truthful record branch but cannot become a second automatic PR
-    identity if a repository setting changes.
+    authors and last-pushes its PR and enables squash auto-merge; protected
+    `main` requires the complete strict CI set and permits no bypass. The App
+    receives contents and pull-request write only — never Actions, deployment,
+    environment or administration authority. The tagging job's ordinary
+    workflow token has exactly `contents: write`, never pull-request write; the
+    loud fallback can push the truthful record branch but cannot become a
+    second automatic PR identity if a repository setting changes.
     (`scripts/assert_current_main.sh`)
 
 33. **A writer claim is TYPED and COMPLETE.**

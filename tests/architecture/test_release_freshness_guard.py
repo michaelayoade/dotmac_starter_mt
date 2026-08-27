@@ -1,11 +1,9 @@
-"""The release workflow re-checks its source AFTER the approval wait.
+"""The release workflow re-checks its source at the irreversible boundary.
 
 `release-kernel.yml` builds on the exact current tip of protected main, then
-parks at the `registry-release` environment for a human approval that can sit
-pending for hours. An approval is a decision about a SHA, not about a run id —
-so if main advances during the wait, publishing the already-built artifact ships
-a release that silently omits those commits and tags a SHA that is no longer the
-tip.
+enters the `registry-release` credential environment. A queued publish job can
+start after main advances, so publishing without a second check could ship an
+artifact from a SHA that is no longer the tip.
 
 Two things are pinned here, because the guard is worthless if either drifts:
 
@@ -46,7 +44,7 @@ def test_the_guard_passes_when_the_run_is_the_current_tip() -> None:
 
 
 def test_the_guard_blocks_a_moved_main_ref() -> None:
-    """The sensitivity proof: simulate main advancing during the approval wait
+    """The sensitivity proof: simulate main advancing after dispatch
     and require publication to fail closed."""
     result = _run(SHA, MOVED)
     assert result.returncode != 0, "a moved main ref must block the release"
@@ -65,7 +63,7 @@ def _jobs() -> dict:
 
 
 def test_both_build_and_publish_assert_the_current_main_sha() -> None:
-    """`publish` is the load-bearing one — it runs after the human gate, at the
+    """`publish` is the load-bearing one — it runs at the
     irreversible boundary. `build` alone is the gap this closes."""
     jobs = _jobs()
     for name in ("build", "publish"):
@@ -75,7 +73,7 @@ def test_both_build_and_publish_assert_the_current_main_sha() -> None:
         ), (
             f"the {name!r} job no longer asserts it is on the current protected "
             "main SHA — see scripts/assert_current_main.sh for why publish needs "
-            "its own check after the approval wait"
+            "its own check at the irreversible boundary"
         )
 
 

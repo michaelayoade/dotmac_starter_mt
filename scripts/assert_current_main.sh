@@ -4,12 +4,11 @@
 #
 # Used TWICE by .github/workflows/release-kernel.yml: once in `build` (a stale
 # or side-branch dispatch cannot publish) and again in `publish`, AFTER the
-# protected-environment approval wait and before anything irreversible happens.
-# The second call is not redundant: a protected environment can sit pending for
-# hours, and an approval is a decision about a SHA, not about a run id. Without
-# it, commits landing during the wait are silently absent from a release that
-# claims to be current, and the tag would point at a SHA that is no longer the
-# tip.
+# build/queue boundary and before anything irreversible happens.
+# The second call is not redundant: a publish job may queue after build. Without
+# it, commits landing during that interval are silently absent from a release
+# that claims to be current, and the tag would point at a SHA that is no longer
+# the tip.
 #
 # Extracted from inline YAML so the comparison is executable — and therefore
 # testable — outside a workflow run: see
@@ -32,7 +31,7 @@ if [ -z "${MAIN_SHA}" ]; then
 fi
 
 if [ "${RUN_SHA}" != "${MAIN_SHA}" ]; then
-  echo "::error::release run SHA ${RUN_SHA} is not the current protected main ${MAIN_SHA} — main moved (possibly during an approval wait). Re-dispatch on the current tip."
+  echo "::error::release run SHA ${RUN_SHA} is not the current protected main ${MAIN_SHA} — main moved after dispatch. Re-dispatch on the current tip."
   exit 1
 fi
 

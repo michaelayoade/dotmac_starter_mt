@@ -444,7 +444,7 @@ def test_the_release_sequence_matches_the_other_release_workflows() -> None:
 
     assert (
         source.count("assert_current_main.sh") == 2
-    ), "main must be asserted at build AND re-asserted after the approval wait"
+    ), "main must be asserted at build AND re-asserted before publication"
     assert "environment: registry-release" in source
     assert "download-artifact" in source, "publish must use the built bytes"
     assert source.index("poetry build") < source.index("twine upload")

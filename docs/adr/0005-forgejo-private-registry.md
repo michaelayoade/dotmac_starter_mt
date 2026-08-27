@@ -141,6 +141,43 @@ legitimate release opens its App-authored record PR and triggers required CI
 without manual intervention. Because GitHub settings are mutable external
 state, the release captain refreshes this observation before that dispatch.
 
+## Decision amendment — 2026-08-26 (automated package publication)
+
+Michael retired the human-review queue for **package publication**. This
+amendment supersedes only the human-approval and independent record-PR review
+requirements in the 2026-08-23 amendment; it preserves the authority split,
+credential scopes, build-once rule, exact-main guard, registry install-back,
+tag-after-verification order, durable record, strict required CI and no-bypass
+branch protection.
+
+`registry-release` and the retained `pypi-release` environment are now
+main-only credential boundaries with zero required reviewers and zero wait
+timer. An explicit dispatch does not publish merely because it was requested:
+the workflow must still prove the run is the exact protected-main revision,
+resolve a closed allowlist entry, match the exact declared version, inspect and
+smoke the immutable artifact, re-check current main immediately before the
+registry write, install the published bytes back, and verify them before
+tagging. A failure at any seam remains closed and visible.
+
+The recorder App opens the mechanical release-record pull request and enables
+squash auto-merge. It cannot waive branch protection; the record lands only
+after the complete required-check set succeeds. The App retains contents and
+pull-request write only and receives no Actions, deployment, environment or
+administration permission. The ordinary tag-writing workflow token remains
+exactly contents-write. The repository-wide Actions PR switch is enabled, but
+cannot expand that job's explicit token permissions.
+
+The checked-in mutable-settings contract is
+`.github/release-environments.json`. Repository tests validate that contract
+and release-workflow coverage; they do not claim to inspect GitHub's live
+settings. The release captain reads the live settings back after each change
+and whenever a package release unexpectedly waits.
+
+This decision does **not** authorize unattended production deployment.
+Production remains behind a named human approval until the owning product
+accepts a separate, dated deployment decision with deployment-specific
+evidence and rollback controls.
+
 ## Follow-ups
 
 1. Stand up per `deploy/forgejo/RUNBOOK.md`; publish + verify `dotmac-kernel

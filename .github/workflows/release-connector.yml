@@ -4,7 +4,7 @@ name: Release connector
 # registry.dotmac.io. The same security sequence as `release-kernel.yml`,
 # `release-ui.yml`, `release-module.yml` and `release-adapter.yml` — build once
 # on the exact current protected-main SHA -> inspect the bytes -> conform them
-# -> AWAIT environment approval -> re-assert the approved SHA is still main's
+# -> enter the main-only release environment -> re-assert the run SHA is still main's
 # tip -> publish THOSE SAME bytes -> install the published release from the
 # index and verify -> tag only then.
 #
@@ -12,9 +12,9 @@ name: Release connector
 #
 # `.github/release-connectors.json` is the authorization boundary. The
 # workflow input is an exact choice list, but the reviewed allowlist is still
-# re-evaluated before build and again after protected-environment approval.
+# re-evaluated before build and again at the irreversible publication boundary.
 # The presence of this workflow is not authorization to publish an unlisted
-# connector or to skip the protected-environment approval.
+# connector or to skip the release-environment credential boundary.
 #
 # The lane was first merged shut because publish permissions, freshness checks
 # and artifact handling are a different review from the first provider
@@ -219,19 +219,18 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: registry-release    # protected: main-only + required review
+    environment: registry-release    # main-only release credential boundary; no reviewer wait
     permissions:
       contents: read
     steps:
-      # RE-check freshness AFTER the approval wait, before anything is
-      # published. `build` proved this run was main's tip at dispatch time, but
-      # a protected environment can sit pending for hours — and the approval is
-      # a decision about a SHA, not about a run id. First step in the job, so it
-      # fails before the artifact is fetched or the publish token is used.
+      # RE-check freshness at the irreversible boundary. `build` proved this
+      # run was main's tip at dispatch time, but a queued job can start after
+      # main moves. First step in the job, so it fails before the artifact is
+      # fetched or the publish token is used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Re-assert the approved SHA is still the current protected main
+      - name: Re-assert the run SHA is still the current protected main
         run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
       # Defence in depth: the allowlist is re-checked on the publish side, so a

@@ -66,8 +66,8 @@ def _coverage_problems(
         )
         if job.get("environment") != "registry-release":
             problems.append(
-                f"{subject} must name the protected registry-release environment; "
-                "live reviewer protection is verified separately before dispatch"
+                f"{subject} must name the main-only registry-release credential "
+                "environment"
             )
         if len(record_steps) != 1:
             problems.append(
@@ -169,7 +169,7 @@ def test_the_publisher_workflow_token_cannot_write_pull_requests() -> None:
 def test_a_tag_writer_without_the_release_environment_is_refused(
     tmp_path: Path,
 ) -> None:
-    """Sensitivity: tag creation remains behind the declared human gate."""
+    """Sensitivity: tag creation remains inside the credential boundary."""
     planted = tmp_path / "release-ungated.yml"
     planted.write_text(
         """jobs:
@@ -193,9 +193,8 @@ def test_a_tag_writer_without_the_release_environment_is_refused(
     )
     problems = _coverage_problems(_tagging_jobs(tmp_path), relative_to=tmp_path)
     assert problems == [
-        "release-ungated.yml:verify must name the protected registry-release "
-        "environment; live reviewer protection is verified separately before "
-        "dispatch"
+        "release-ungated.yml:verify must name the main-only registry-release "
+        "credential environment"
     ]
 
 

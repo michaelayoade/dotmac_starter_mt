@@ -934,7 +934,7 @@ def test_the_workflow_matches_the_release_security_sequence() -> None:
     assert source.index("poetry build") < source.index("twine upload")
     assert "release_connector.py inspect" in source
     assert source.index("release_connector.py inspect") < source.index("twine upload")
-    # Defence in depth: the gate is re-run after the approval wait.
+    # Defence in depth: the gate is re-run at the publication boundary.
     publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
     assert "release_connector.py resolve" in publish
     # The tag is written only after registry verification.
