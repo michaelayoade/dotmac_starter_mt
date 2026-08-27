@@ -389,7 +389,11 @@ def test_restart_restores_application_readiness_before_claiming_recovery() -> No
     marker = step.find(": > /tmp/rehearsal-ready")
     ready = step.find("app readiness=200 after restart")
     healthy = step.find("app Docker health healthy after restart")
-    recovery = step.find("prom_recovery_proved")
+    # Step 13 invokes the same conjunctive predicate once before the injected
+    # outage to prove a healthy baseline. Select the invocation after the
+    # restart; otherwise this assertion mistakes the intended baseline for the
+    # recovery whose ordering it exists to protect.
+    recovery = step.find("prom_recovery_proved", healthy)
     assert -1 not in (marker, ready, healthy, recovery)
     assert marker < ready < healthy < recovery
 
