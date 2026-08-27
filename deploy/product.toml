@@ -1,0 +1,115 @@
+# The Starter's own deployment descriptor — the MINIMAL reference adopter.
+#
+# ProductDeploymentSpec.v1. Everything a deployment of this repository needs is
+# rendered from this file by `dotmac-deploy render`; there is no second place to
+# edit. See docs/adr/0070-deployment-is-a-stateless-versioned-foundation.md.
+#
+# Minimal is the point. The Starter has one role, one database and no ingress
+# of its own, so this file shows the SMALLEST descriptor that is still complete
+# — a product adopting the facility can start here and add only what it has.
+
+schema = "ProductDeploymentSpec.v1"
+product = "dotmac_starter_mt"
+environment = "reference"
+
+[assembly]
+manifest_path = "deploy/product-manifest.json"
+# Placeholder until `dotmac-deploy` generates the manifest from the real
+# ProductAssemblySpec; the digest is checked for SHAPE here and for VALUE by the
+# drift command against a running deployment.
+manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[image]
+# A digest, never a tag. `docker compose up -d` against a mutable tag is how a
+# production deployment silently went five weeks backwards (inventory D5).
+reference = "ghcr.io/michaelayoade/dotmac_starter_mt@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+source_revision = "ac5e439e622ec5adba94cf52f4f961f2c39a2d30"
+
+[runtime_materials]
+names = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]
+
+[[roles]]
+code = "app"
+command = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+replicas = 1
+stop_grace_seconds = 30
+materials = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]
+
+[roles.resources]
+cpus = "2.0"
+memory = "1g"
+pids = 256
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+# Two probes, two paths, and they may not be the same one. `/health/live` must
+# not touch the database — a liveness probe that fails on a database blip
+# restarts a process that was fine. `/health/ready` must fail when a dependency
+# is down, or the warm-candidate gate degenerates into a timer.
+[roles.health.live]
+path = "/health/live"
+port = 8000
+interval_seconds = 10
+timeout_seconds = 3
+retries = 3
+start_period_seconds = 10
+
+[roles.health.ready]
+path = "/health/ready"
+port = 8000
+interval_seconds = 5
+timeout_seconds = 3
+retries = 6
+start_period_seconds = 15
+
+[migration]
+command = ["alembic", "upgrade", "heads"]
+# How to READ the heads the database is at. Declared rather than derived: the
+# read verb cannot be inferred from the upgrade command, and a provider that
+# guessed it by swapping `upgrade` for `current` is right for Alembic and wrong
+# for any product whose entry point is not Alembic-shaped.
+heads_command = ["alembic", "current"]
+owner_material = "MIGRATION_DATABASE_URL"
+expected_heads = ["a003"]
+compatibility = "online"
+lock_timeout_seconds = 300
+lock_retries = 4
+preflight_command = ["python", "-m", "app.verify_migration_role"]
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 14
+checksum = "sha256"
+encryption = "none"
+restore_proof_max_age_days = 30
+verify = ["schema", "row_counts", "migration_heads"]
+
+[telemetry]
+logs = true
+metrics = true
+traces = false
+app_direct_shipping = false
+deployment_annotations = true
+# Declaring the image is what turns "we render a collector configuration" into
+# "signals leave this host". Without it the rendered otel-collector.yaml sits
+# beside a deployment that runs no collector — a specification of what one would
+# need, in a place a reader reasonably takes for telemetry.
+collector_image = "otel/opentelemetry-collector-contrib:0.109.0"
+
+[[external_dependencies]]
+code = "postgres"
+kind = "postgres"
+required_for = ["ready", "migrate", "backup"]
+material = "DATABASE_URL"
+
+[rollout]
+stability_window_seconds = 120
+rollback_images_retained = 2

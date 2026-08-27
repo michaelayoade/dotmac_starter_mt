@@ -1,0 +1,58 @@
+name: Deployment conformance (reference adopter)
+
+# The Starter runs the SAME gate it publishes. That is not symmetry for its own
+# sake: a reusable workflow its own repository does not execute is a workflow
+# whose first real exercise happens in somebody else's pull request.
+#
+# DELIBERATELY `workflow_dispatch` ONLY, and DELIBERATELY NOT a required check
+# yet. This job used to run on every push and pull request and could not pass:
+# `dotmac-deployment-foundation` had no release lane that accepted its
+# `universal-facility` classification, so `foundation-version: "0.1.0a1"`
+# named a version nothing could ever publish, and the descriptor this job
+# points at (`deploy/product.toml`) still carries the all-zeros placeholder
+# digest every adapter in this repository has today. Running that on every PR
+# taught reviewers to expect this check red and look past it — a gate that
+# cannot pass teaches people to ignore red, which is worse than no gate at
+# all.
+#
+# THE EXACT CONDITION FOR RE-ENABLING `on: push`/`on: pull_request` (and for
+# adding this job to the required-checks list):
+#
+#   1. `dotmac-deployment-foundation` has been published through
+#      `release-facility.yml` at the version named below, so
+#      `foundation-version` resolves to something installable from the
+#      private Forgejo index; AND
+#   2. `deploy/product.toml`'s placeholder all-zeros image reference and
+#      manifest digest have been replaced with real values, so
+#      `require-real-digests` (on by default in `deployment-conformance.yml`)
+#      does not fail this job by design.
+#
+# Until BOTH are true, this workflow is dispatch-only: a human can run it on
+# demand to see exactly where it stands, but nobody's merge is blocked on a
+# check that is structurally unable to go green.
+#
+# The pin below points at this repository's own HEAD rather than a released
+# revision, which is legitimate ONLY here — a product repository must pin an
+# immutable revision of the merged workflow (Governance ADR 0006). Re-pin this
+# to the merged `main` revision in the same change that makes the job
+# required.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    uses: ./.github/workflows/deployment-conformance.yml
+    with:
+      descriptor: deploy/product.toml
+      rendered-dir: deploy/rendered
+      thresholds: deploy/alerts/thresholds.json
+      # Still the unpublished pre-release version. Re-point this at the
+      # first version actually published through `release-facility.yml` in
+      # the same change that flips `on:` back to `push`/`pull_request`.
+      foundation-version: "0.1.0a1"
+    secrets:
+      FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}

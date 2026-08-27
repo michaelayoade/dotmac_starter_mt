@@ -1,0 +1,306 @@
+name: Release facility
+
+# Publish ONE universal facility to the PRIVATE Forgejo index at
+# registry.dotmac.io. The same security sequence as `release-kernel.yml`,
+# `release-ui.yml`, `release-module.yml` and `release-adapter.yml` — build once
+# on the exact current protected-main SHA -> require a successful rehearsal on
+# that SHA -> inspect the bytes -> smoke the CLI -> re-assert the run SHA is
+# STILL main's tip -> publish THOSE SAME bytes -> install the published release
+# from the index and re-smoke the CLI -> tag only then.
+#
+# WHY THIS LANE HAD TO EXIST BEFORE THE PACKAGE COULD SHIP
+#
+# `dotmac-deployment-foundation` is `EXTRACTION.toml`'s fourth classification,
+# `universal-facility` (ADR-0070). No existing lane accepted it:
+# `release-modules.json` wants a `db_schema`/`manifest_attr`/`kernel_floor` a
+# facility does not have, and `release-adapters.json` proves an IMPORT
+# surface (`__all__` on the installed bytes) for a package that is CALLED
+# FROM a product's own process — a facility is the opposite shape, a
+# build-time CLI a product's CI shells out to and never imports. Before this
+# file existed, `dotmac-deployment-foundation` could not be published by
+# anything in this repository, which made `deployment-conformance.yml`'s
+# `pip install dotmac-deployment-foundation==<version>` gated shut by
+# construction: it named a version nothing could ever publish. This lane
+# closes that loop.
+#
+# WHY A CLI SMOKE, NOT AN IMPORT SMOKE
+#
+# `scripts/release_facility.py`'s docstring makes the full argument; the short
+# version is that an importable module proves nothing about a console
+# script. `pip install` can produce a wheel whose `[project.scripts]` entry
+# point is broken — a missing `console_scripts` line, a typo'd target — while
+# `import dotmac_deployment_foundation` still succeeds cleanly. So this lane
+# never imports the package. It installs the wheel into a clean venv and runs
+# the INSTALLED `dotmac-deploy` binary: `--help` (needs nothing but a working
+# entry point) and `validate` against a real descriptor (needs the whole
+# parse/refuse path intact).
+#
+# THE LANE IS CLOSED, AND OPEN FOR EXACTLY ONE FACILITY. The target is
+# resolved from `.github/release-facilities.json`, which lists
+# `dotmac-deployment-foundation` and nothing else; every other dispatch value
+# fails at the gate. Unlike `release-adapters.json`'s history, this entry is
+# not gated behind a pilot consumer — `.github/release-facilities.json`'s own
+# `$comment` explains why: the package decides no business fact and holds no
+# rows, and its own `EXTRACTION.toml next_action` names a first release as
+# the immediately next, unblocked step.
+#
+# `facility` is a `choice` for the same reason `adapter` is one in
+# `release-adapter.yml`: a `workflow_dispatch` choice must offer at least one
+# option, and `tests/architecture/test_deployment_release_lane.py` requires
+# the `choice` list to match the allowlist exactly, so neither half can drift
+# from the other. The enforced layer is `resolve`, not the input.
+#
+# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
+# environment secret whose canonical source is OpenBao
+# (secret/dotmac/forgejo/ci-publisher-token). Third-party actions are pinned
+# to the same reviewed full commit SHAs as the other release workflows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      facility:
+        description: >-
+          Which allowlisted universal facility to publish. The list below is
+          a convenience; the enforced layer is `resolve`, which reads
+          `.github/release-facilities.json` and fails closed.
+        required: true
+        type: choice
+        options:
+          - dotmac-deployment-foundation
+      version:
+        description: "Version to publish (MUST equal the package's pyproject version)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # `actions: read` is REQUIRED, not tidiness: the rehearsal oracle below
+    # calls the workflow-runs API, and the job token's default `contents: read`
+    # gets HTTP 403 there. The checker fails closed on an unreadable oracle, so
+    # without this the FIRST release refuses — correctly, and for a reason that
+    # has nothing to do with the rehearsal.
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot
+      # publish. AGENTS.md rule 32: a protected environment can sit pending
+      # for hours, so freshness is asserted again in `publish`, below.
+      - name: Assert run is on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      # THE REHEARSAL ORACLE. This package executes migrations, backup, the
+      # warm-candidate handoff and rollback. Every one of those is covered
+      # in-repo against a FAKE `Effects`, which cannot tell anyone whether a
+      # real Docker daemon honours `service_completed_successfully`, whether a
+      # real `pg_dump` produced restorable bytes, or whether nginx drained the
+      # old upstream.
+      #
+      # `docs/inventories/deployment-foundation-rehearsal.md` required the
+      # disposable-host rehearsal before publication IN PROSE. Prose is
+      # bypassed by anyone who does not read it. This asks the Actions API for
+      # a COMPLETED, SUCCESSFUL run of `deployment-rehearsal.yml` whose
+      # `head_sha` is byte-identical to ${GITHUB_SHA}, and fails closed on
+      # every ambiguity — no runs, a run in flight, any other conclusion, any
+      # SHA mismatch, or an oracle that cannot be read at all. A rehearsal
+      # that passed on a different commit is not evidence about this one, and
+      # that substitution is the likeliest way this gate is defeated while
+      # still looking green.
+      #
+      # First gate after freshness, so it runs before anything is built and
+      # long before the publish token exists. AGENTS.md rule 30.
+      - name: Require a successful rehearsal on this exact SHA
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/require_rehearsal.py "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      # THE GATE. Refuses an unallowlisted distribution, a pyproject whose
+      # name disagrees with the dispatch, a version that was not typed
+      # exactly, an entry carrying module-only facts, and a package whose
+      # dossier does not declare the universal-facility classification.
+      # Everything after this step uses only its output.
+      - name: Resolve the allowlisted facility
+        id: resolve
+        run: |
+          python scripts/release_facility.py resolve \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Build wheel + sdist
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+
+      # Wheel-content policy: the declared surface and py.typed present, no
+      # assembly/test/tooling content, NO migration lineage anywhere under the
+      # import package, zero third-party dependencies (this package declares
+      # none), no secret-shaped files.
+      - name: Inspect artifacts
+        run: |
+          python scripts/release_facility.py inspect "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
+      # Release-artifact smoke: install the freshly built wheel into a clean
+      # venv and prove the CONSOLE SCRIPT it exposes runs against a real
+      # descriptor. `deploy/product.toml` is this repository's own descriptor
+      # and doubles as the fixture — `packages/dotmac-deployment-foundation`
+      # carries none of its own (it is a library and a CLI, not a product),
+      # and this file is deliberately the smallest COMPLETE descriptor in the
+      # repository, so it needs no digest realism to prove the CLI's whole
+      # parse/validate path. Digest realism is `require-real-digests`'s job
+      # in `deployment-conformance.yml`, a separate concern from "does the
+      # entry point work".
+      - name: Release wheel CLI smoke
+        run: |
+          python scripts/release_facility.py verify-wheel "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --descriptor deploy/product.toml
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.facility }}-dist
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release    # main-only credential boundary; no reviewer wait
+    permissions:
+      contents: read
+    steps:
+      # RE-check freshness at the irreversible boundary, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, and
+      # that is no longer enough by the time this job starts: `registry-release`
+      # is now a credential boundary with no reviewer wait (AGENTS.md rule 31 as
+      # amended), but a job still QUEUES, and main can move while it waits for a
+      # runner or while `build` is running. Removing the reviewer shortened that
+      # window; it did not close it. Without this check, commits landing in the
+      # gap are silently absent from a release that claims to be current, and
+      # the tag `verify` writes would point at a SHA that is no longer the tip.
+      # First step in the job, so it fails before the artifact is fetched or the
+      # publish token is used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the run SHA is still the current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      # Defence in depth: the allowlist is re-checked on the publish side, so
+      # a tampered `build` output cannot smuggle a target past the gate.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Re-assert the target is allowlisted
+        run: |
+          python scripts/release_facility.py resolve \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" >/dev/null
+
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.facility }}-dist
+          path: dist
+
+      # Publish the SAME bytes `build` inspected and smoked — downloaded,
+      # never rebuilt.
+      - name: Publish to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The index may lag a few seconds after publish.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.facility }}/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
+            fi
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
+          done
+          echo "::error::${{ inputs.facility }} ${{ inputs.version }} did not appear in time"
+          exit 1
+
+      # Install the PUBLISHED release from the index into a clean venv and
+      # re-run the CLI smoke. Unlike the adapter lane this needs no
+      # `--extra-index-url`: the package declares zero runtime dependencies,
+      # so there is nothing for pip to resolve from the public index.
+      - name: Install from the Forgejo registry and re-smoke the CLI
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_facility.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.facility }}==${{ inputs.version }}" \
+            --descriptor deploy/product.toml
+
+      # Only AFTER registry verification: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" \
+            -m "${{ inputs.facility }} ${{ inputs.version }} (verified on the Forgejo registry; installed and CLI entry point proved alone)" \
+            "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"
+
+      # Universal facilities own no migration lineage, but publication still
+      # retires their declared-unpublished row. Keep the same tag -> record
+      # consequence as every other release family.
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        if: always()
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --package-dir "${{ needs.build.outputs.package_dir }}"

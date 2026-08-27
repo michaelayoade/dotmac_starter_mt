@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Refuse to publish the deployment facility unless a disposable-host rehearsal
+SUCCEEDED against the exact SHA being published.
+
+Why this exists as CODE and not as a sentence in a document
+-----------------------------------------------------------
+`dotmac-deployment-foundation` executes migrations, takes and verifies backups,
+performs the warm-candidate handoff and rolls back. Every one of those paths is
+covered in-repo by a fake `Effects` implementation, which is exactly the right
+tool for asserting that the PLAN refuses at the right step — and is incapable of
+telling anyone whether a real Docker daemon honours
+`service_completed_successfully`, whether a real `pg_dump` produced restorable
+bytes, or whether nginx actually drained the old upstream.
+
+`docs/inventories/deployment-foundation-rehearsal.md` said the rehearsal must
+run before publication. A prose requirement is bypassed by anyone who does not
+read it, including a future automation that has no eyes. AGENTS.md rule 30 is
+explicit that a release claim needs an authoritative EXTERNAL oracle carrying
+immutable coordinates; this is that oracle for the rehearsal.
+
+The oracle is the GitHub Actions API: the MOST RECENT run of the rehearsal
+workflow whose `head_sha` is byte-identical to the SHA under release, which
+must itself be completed with conclusion `success`. Newest-then-check, never
+check-then-newest — otherwise an old green run masks a newer one that failed,
+was cancelled or is still queued. Not a committed file — a committed file is written by
+the same hand that wants to publish. Not "a rehearsal ran recently" — a
+rehearsal that passed on a different commit says nothing about this one, and
+that substitution is the single most likely way this gate would be defeated
+while still appearing green.
+
+Fails CLOSED on every ambiguity: a transport error, an unparseable body, zero
+runs, a run still in progress, any conclusion other than `success`, and any
+`head_sha` mismatch. There is deliberately no `--allow-missing` escape hatch;
+the way to publish without a rehearsal is to run the rehearsal.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from datetime import UTC, datetime
+from typing import Any
+
+EXIT_OK = 0
+EXIT_REFUSED = 1
+EXIT_USAGE = 2
+
+API_ROOT = "https://api.github.com"
+
+
+class RehearsalMissing(Exception):
+    """The oracle did not affirmatively prove a rehearsal for this SHA."""
+
+
+def _ordering_key(run: dict[str, Any]) -> tuple[datetime, int]:
+    """The coordinate runs are ordered by, or a refusal.
+
+    `run_started_at` is the only field that says WHEN, and `id` breaks ties
+    monotonically. If a run carries neither in a usable form the ordering is
+    not trustworthy, and an untrustworthy ordering is exactly how an older
+    success ends up masking a newer failure — so it refuses instead of falling
+    back to list order, which the API does not promise.
+    """
+    started = run.get("run_started_at")
+    if not isinstance(started, str) or not started:
+        raise RehearsalMissing(
+            f"rehearsal run {run.get('id')} carries no `run_started_at`, so "
+            "'newest' cannot be established. Refusing rather than guessing "
+            "which run is current"
+        )
+    try:
+        when = datetime.fromisoformat(started.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RehearsalMissing(
+            f"rehearsal run {run.get('id')} has an unparseable "
+            f"`run_started_at` {started!r}; refusing rather than ordering on a "
+            "value nothing understood"
+        ) from exc
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    identifier = run.get("id")
+    if not isinstance(identifier, int):
+        raise RehearsalMissing(
+            f"rehearsal run at {started} carries no integer `id` to break ties "
+            "with; refusing rather than ordering non-deterministically"
+        )
+    return (when, identifier)
+
+
+def decide(runs: list[dict[str, Any]], sha: str) -> dict[str, Any]:
+    """Pure decision over the API's `workflow_runs` array.
+
+    LATEST-RUN SEMANTICS, and the order of these two operations is the whole
+    point. Select the NEWEST run for this SHA, THEN require that run to be
+    completed and successful.
+
+    Filtering to successes first and taking the newest of those was the
+    original shape and it was wrong: an old green rehearsal would mask a newer
+    one that failed, was cancelled, or is still queued. The newest run is the
+    current statement about this commit — if somebody re-rehearsed and it
+    broke, that is the answer, and an earlier success does not overrule it.
+    The one case that must still pass is the honest repair: an older failure
+    followed by a newer success.
+
+    Separated from the fetch so this logic is unit-testable without a network,
+    which is the half that has to be right.
+    """
+    if not sha or len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+        raise RehearsalMissing(
+            "the SHA under release must be a full 40-character hex commit "
+            f"id, got {sha!r}"
+        )
+    if not runs:
+        raise RehearsalMissing(
+            f"no rehearsal run exists for {sha}. Run the disposable-host "
+            "rehearsal workflow against this exact commit before publishing"
+        )
+
+    for run in runs:
+        head = run.get("head_sha")
+        if head != sha:
+            # The API was asked to filter by head_sha; if it returned something
+            # else, do not trust the filter — say so rather than accepting it.
+            raise RehearsalMissing(
+                f"rehearsal run {run.get('id')} reports head_sha {head!r}, which "
+                f"is not the SHA under release {sha!r}. A rehearsal that passed "
+                "on another commit is not evidence about this one"
+            )
+
+    newest = max(runs, key=_ordering_key)
+    status, conclusion = newest.get("status"), newest.get("conclusion")
+    if status != "completed" or conclusion != "success":
+        raise RehearsalMissing(
+            f"the most recent rehearsal for {sha} (run {newest.get('id')}, "
+            f"started {newest.get('run_started_at')}) is {status}/{conclusion}, "
+            "not completed/success. An earlier successful run does not "
+            "overrule the current one — re-run the rehearsal and let it pass"
+        )
+    return {
+        "run_id": newest.get("id"),
+        "head_sha": newest.get("head_sha"),
+        "html_url": newest.get("html_url"),
+        "run_started_at": newest.get("run_started_at"),
+    }
+
+
+def _fetch(repo: str, workflow: str, sha: str, token: str) -> list[dict[str, Any]]:
+    url = (
+        f"{API_ROOT}/repos/{repo}/actions/workflows/{workflow}/runs"
+        f"?head_sha={sha}&per_page=100"
+    )
+    request = urllib.request.Request(url)  # noqa: S310 - fixed https API root
+    request.add_header("Accept", "application/vnd.github+json")
+    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:  # fail closed, loudly
+        raise RehearsalMissing(
+            f"the rehearsal oracle is unreachable (HTTP {exc.code} for {workflow}). "
+            "Refusing to publish: an oracle that cannot be read has not said yes"
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        raise RehearsalMissing(
+            f"the rehearsal oracle could not be read ({exc}). Refusing to publish"
+        ) from exc
+    runs = body.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise RehearsalMissing(
+            "the rehearsal oracle returned no `workflow_runs` array; refusing to "
+            "treat an unrecognised response as approval"
+        )
+    return runs
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="require_rehearsal.py",
+        description=(
+            "Fail unless a disposable-host rehearsal succeeded on the exact SHA."
+        ),
+    )
+    parser.add_argument("sha", help="the full 40-character commit under release")
+    parser.add_argument(
+        "--repo",
+        default=os.environ.get("GITHUB_REPOSITORY", ""),
+        help="owner/name; defaults to $GITHUB_REPOSITORY",
+    )
+    parser.add_argument(
+        "--workflow",
+        default="deployment-rehearsal.yml",
+        help="the rehearsal workflow file name",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.repo:
+        print("error: --repo (or $GITHUB_REPOSITORY) is required", file=sys.stderr)
+        return EXIT_USAGE
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    try:
+        proof = decide(_fetch(args.repo, args.workflow, args.sha, token), args.sha)
+    except RehearsalMissing as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+
+    print(f"rehearsal_run_id={proof['run_id']}")
+    print(f"rehearsal_run_url={proof['html_url']}")
+    print(f"rehearsal_head_sha={proof['head_sha']}")
+    return EXIT_OK
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

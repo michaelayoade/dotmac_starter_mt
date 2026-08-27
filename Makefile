@@ -12,6 +12,10 @@ TEST_DB_PLATFORM_PASSWORD ?= platform_api
 TEST_DB_HOST ?= localhost
 TEST_DB_NAME ?= starter_test
 
+DEPLOY_DESCRIPTOR ?= deploy/product.toml
+DEPLOY_RENDERED ?= deploy/rendered
+DEPLOY_THRESHOLDS ?= deploy/alerts/thresholds.json
+
 IMAGE_NAME ?= dotmac_starter_mt
 IMAGE_TAG ?= dev
 APP_PORT ?= 8000
@@ -71,6 +75,16 @@ manifest-digest-verify: ## Cross-check every recorded digest against its tag (ne
 RELEASE_RUN ?=
 manifest-digest-record: ## Record one published tag's manifest digest: make manifest-digest-record TAG=... [RELEASE_RUN=...]
 	poetry run python scripts/released_manifest_sweep.py --record --tag "$(TAG)" --release-run "$(RELEASE_RUN)"
+deployment-check: ## Validate deploy/product.toml and prove the rendered assets match it
+	poetry run dotmac-deploy -f $(DEPLOY_DESCRIPTOR) validate
+	poetry run dotmac-deploy -f $(DEPLOY_DESCRIPTOR) render --check -o $(DEPLOY_RENDERED) --thresholds $(DEPLOY_THRESHOLDS)
+
+deployment-render: ## Re-render every deployment asset (commit the diff in the same change)
+	poetry run dotmac-deploy -f $(DEPLOY_DESCRIPTOR) render -o $(DEPLOY_RENDERED) --thresholds $(DEPLOY_THRESHOLDS)
+
+deployment-plan: ## Print the ordered deployment plan, gates marked (never deploys)
+	poetry run dotmac-deploy -f $(DEPLOY_DESCRIPTOR) plan
+
 product-writer-check: ## Require one typed, exact-pinned writer claim for every inventoried product
 	poetry run python scripts/product_writer_check.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
@@ -82,7 +96,7 @@ poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
 	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
