@@ -137,6 +137,29 @@ fi
 : "${OTEL_COLLECTOR_IMAGE:=otel/opentelemetry-collector-contrib:0.110.0}"
 : "${OTEL_COLLECTOR_CONTAINER:=dotmac-deployment-rehearsal-otelcol}"
 : "${OTEL_HTTP_PORT:=14318}"
+# One knob per service, NOT one shared "infrastructure" timeout. A single knob
+# spanning the registry, the collector and Prometheus cannot be tuned for any
+# of them: raising it for a slow collector pull silently doubles how long a
+# dead registry takes to report, and lowering it for a fast registry makes the
+# collector flaky. These three also fail for different reasons and at different
+# speeds, which is exactly why they get different numbers.
+: "${WAIT_REGISTRY_TIMEOUT_SECONDS:=30}"
+# The collector pulls a ~150MB image on a cold runner and then starts; the
+# original hardcoded 20s could not distinguish "slow cold pull" from "dead".
+: "${WAIT_COLLECTOR_TIMEOUT_SECONDS:=60}"
+: "${WAIT_PROMETHEUS_TIMEOUT_SECONDS:=60}"
+# Step 13 watches a rule fire and then recover. Both were hardcoded 60s loops.
+# They are separate knobs because they are separate questions: firing waits out
+# the rule's `for:` duration, while recovery additionally waits for the target
+# to come back and be scraped again.
+: "${WAIT_ALERT_FIRE_SECONDS:=60}"
+: "${WAIT_ALERT_RECOVER_SECONDS:=60}"
+# How much of a failed container's log to print. Enough to carry a stack or a
+# startup refusal, short enough not to bury the run.
+: "${DIAGNOSTIC_LOG_LINES:=40}"
+# How long to watch for a killed container to come back. Deliberately short:
+# this is an observation window, not a readiness gate.
+: "${WAIT_RESTART_OBSERVATION_SECONDS:=20}"
 
 # ── knobs: the rehearsal's OWN Prometheus, for the fire/recover alert step ──
 
@@ -255,8 +278,8 @@ remove_container() {
   fi
 }
 
-wait_for() {
-  # wait_for <timeout-seconds> <description> <command...>
+_wait_for() {
+  # _wait_for <timeout-seconds> <description> <command...>
   local timeout="$1"
   local description="$2"
   shift 2
@@ -272,8 +295,8 @@ wait_for() {
   return 0
 }
 
-wait_for_stable() {
-  # wait_for_stable <timeout-seconds> <consecutive-successes> <description> <command...>
+_wait_for_stable() {
+  # _wait_for_stable <timeout-seconds> <consecutive-successes> <description> <command...>
   #
   # `wait_for` accepts the FIRST success, which is wrong for anything whose
   # readiness can regress. Postgres' official entrypoint is exactly that: on a
@@ -308,6 +331,81 @@ wait_for_stable() {
     waited=$((waited + 1))
   done
   return 0
+}
+
+diagnose_container() {
+  # diagnose_container <name-or-id> <what-was-being-waited-for>
+  #
+  # A container wait that times out and prints nothing is close to useless: it
+  # says a thing did not happen and withholds the one place the reason is
+  # written down. Rehearsal run 33095822846 spent twenty minutes to report
+  #
+  #   timed out after 20s waiting for: the rehearsal's own collector on :14318
+  #
+  # while `docker logs` had, the whole time, said
+  #
+  #   Error: cannot start pipelines: open /sink/otel-sink.json: permission denied
+  #
+  # Every container wait in this script routes its failure through here, so the
+  # next unknown failure costs one run instead of one run per guess.
+  local target="$1"
+  local waiting_for="$2"
+  log "DIAGNOSTICS for: ${waiting_for}"
+  if ! "${DOCKER_BIN}" inspect "${target}" >/dev/null 2>&1; then
+    log "  container ${target} does not exist — it was never created, or was removed"
+    return 0
+  fi
+  log "  state: $("${DOCKER_BIN}" inspect -f \
+    '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}' \
+    "${target}" 2>/dev/null || echo unknown)"
+  log "  --- last ${DIAGNOSTIC_LOG_LINES} log line(s) ---"
+  "${DOCKER_BIN}" logs --tail "${DIAGNOSTIC_LOG_LINES}" "${target}" 2>&1 \
+    | sed 's/^/    /' || log "    (no logs available)"
+  log "  --- end diagnostics ---"
+}
+
+wait_for_container() {
+  # wait_for_container <timeout> <container> <description> <command...>
+  #
+  # A readiness wait on something backed by a container. On failure it ALWAYS
+  # prints that container's state and logs, because a timeout without them is
+  # a report that something did not happen with the reason withheld.
+  #
+  # `_wait_for` and `_wait_for_stable` are underscore-prefixed to make
+  # "internal" structural rather than a convention: calling them directly is
+  # how a wait ends up silent, and
+  # `test_every_readiness_wait_goes_through_a_wrapper` bans it.
+  local timeout="$1" container="$2" description="$3"
+  shift 3
+  if ! _wait_for "${timeout}" "${description}" "$@"; then
+    diagnose_container "${container}" "${description}"
+    return 1
+  fi
+  return 0
+}
+
+wait_for_stable_container() {
+  # wait_for_stable_container <timeout> <probes> <container> <description> <command...>
+  local timeout="$1" probes="$2" container="$3" description="$4"
+  shift 4
+  if ! _wait_for_stable "${timeout}" "${probes}" "${description}" "$@"; then
+    diagnose_container "${container}" "${description}"
+    return 1
+  fi
+  return 0
+}
+
+observe_for() {
+  # observe_for <timeout> <description> <command...>
+  #
+  # An OBSERVATION WINDOW, not a readiness gate. The question is "did this
+  # happen promptly", a timeout is a legitimate answer, and there is nothing to
+  # diagnose. Distinct from `wait_for_container` so that "no diagnostics here"
+  # is a DECLARED choice a reader can check, rather than an omission that looks
+  # exactly like the bug this whole helper family exists to prevent.
+  local timeout="$1" description="$2"
+  shift 2
+  _wait_for "${timeout}" "${description}" "$@"
 }
 
 http_status() {
@@ -424,7 +522,8 @@ cmd_up() {
   "${DOCKER_BIN}" run -d --name "${REGISTRY_CONTAINER}" \
     -p "127.0.0.1:${REGISTRY_PORT}:5000" \
     "${REGISTRY_IMAGE}" >/dev/null
-  wait_for 20 "local registry on ${REGISTRY_HOST}" \
+  wait_for_container "${WAIT_REGISTRY_TIMEOUT_SECONDS}" "${REGISTRY_CONTAINER}" \
+    "local registry on ${REGISTRY_HOST}" \
     curl -sf "http://${REGISTRY_HOST}/v2/" \
     || die "the disposable local registry never became reachable"
 
@@ -503,8 +602,8 @@ cmd_up() {
   #
   # `-h 127.0.0.1` inside `docker exec` is the CONTAINER's loopback and
   # `DB_PORT` its in-container port (5432) — not a host-published port.
-  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
-    "primary database ready" \
+  wait_for_stable_container "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "${db_cid}" "primary database ready" \
     "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${db_cid}" \
     psql -h 127.0.0.1 -p "${DB_PORT}" \
     -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d "${DB1_NAME}" -c 'SELECT 1' \
@@ -656,7 +755,8 @@ run_step_7_live_vs_ready_with_db_down() {
   "${DOCKER_BIN}" stop "${DB1_CONTAINER}" >/dev/null
 
   "${COMPOSE[@]}" up -d --no-deps app >/dev/null
-  wait_for "${WAIT_HTTP_TIMEOUT_SECONDS}" "app to answer on :${APP_HOST_PORT}" \
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "$("${COMPOSE[@]}" ps -q app)" \
+    "app to answer on :${APP_HOST_PORT}" \
     bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" != \"000\" ]" \
     || true
 
@@ -665,8 +765,8 @@ run_step_7_live_vs_ready_with_db_down() {
   ready="$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready")"
 
   "${DOCKER_BIN}" start "${DB1_CONTAINER}" >/dev/null
-  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
-    "primary database ready again" \
+  wait_for_stable_container "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "${DB1_CONTAINER}" "primary database ready again" \
     "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB1_CONTAINER}" \
     psql -h 127.0.0.1 -p "${DB_PORT}" \
     -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d "${DB1_NAME}" -c 'SELECT 1' 
@@ -693,10 +793,11 @@ run_step_8_switch_and_verify() {
   local cid
   cid="$("${COMPOSE[@]}" ps -q app)"
   [ -n "${cid}" ] || { step_fail "switch" "no app container after 'compose up -d app'"; return 1; }
-  wait_for "${WAIT_HTTP_TIMEOUT_SECONDS}" "app container running" \
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" "app container running" \
     bash -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${cid} 2>/dev/null)\" = \"true\" ]"
   "${DOCKER_BIN}" exec "${cid}" sh -c 'mkdir -p /tmp && : > /tmp/rehearsal-ready' 2>/dev/null || true
-  wait_for "${WAIT_HTTP_TIMEOUT_SECONDS}" "app answering /health/ready=200 after the marker is set" \
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "app answering /health/ready=200 after the marker is set" \
     bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = \"200\" ]"
 
   local running digest restarts
@@ -828,8 +929,8 @@ run_step_10_backup_verify_restore() {
   # container is created FRESH each time, so it always runs the entrypoint's
   # temporary-server phase — the restore that follows would fail on a
   # vanished socket.
-  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
-    "restore-target database ready" \
+  wait_for_stable_container "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "${DB2_CONTAINER}" "restore-target database ready" \
     "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB2_CONTAINER}" \
     psql -h 127.0.0.1 -p "${DB_PORT}" \
     -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d postgres -c 'SELECT 1' 
@@ -928,13 +1029,29 @@ service:
 YAML
   remove_container "${OTEL_COLLECTOR_CONTAINER}"
   touch "${sink_file}"
+  # `--user` is REQUIRED, not hygiene. The collector image runs as a non-root
+  # user, `${sink_file}` is created here as whoever runs this script, and the
+  # `file` exporter opens it FOR WRITING AT STARTUP — so without this the
+  # collector exits immediately with
+  #   cannot start pipelines: open /sink/otel-sink.json: permission denied
+  # and the wait below reports a timeout that says nothing about permissions.
+  # Running the container as the identity that owns the directory is the fix
+  # that needs no world-writable file.
   "${DOCKER_BIN}" run -d --name "${OTEL_COLLECTOR_CONTAINER}" \
+    --user "$(id -u):$(id -g)" \
     -p "127.0.0.1:${OTEL_HTTP_PORT}:4318" \
     -v "${collector_config}:/etc/otelcol/config.yaml:ro" \
     -v "${WORK_DIR}:/sink" \
     "${OTEL_COLLECTOR_IMAGE}" --config /etc/otelcol/config.yaml >/dev/null
-  wait_for 20 "the rehearsal's own collector on :${OTEL_HTTP_PORT}" \
-    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${OTEL_HTTP_PORT}/v1/logs -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null)\" != \"000\" ]"
+  if ! wait_for_container "${WAIT_COLLECTOR_TIMEOUT_SECONDS}" \
+    "${OTEL_COLLECTOR_CONTAINER}" \
+    "the rehearsal's own collector on :${OTEL_HTTP_PORT}" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${OTEL_HTTP_PORT}/v1/logs -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null)\" != \"000\" ]"; then
+    diagnose_container "${OTEL_COLLECTOR_CONTAINER}" \
+      "the rehearsal's own collector on :${OTEL_HTTP_PORT}"
+    step_fail "telemetry collector" "the collector never accepted OTLP"
+    return 1
+  fi
 
   local attrs
   attrs="$(dotmac_deploy -f "${DESCRIPTOR}" observe --deployment-id "rehearsal-run" --host "observer-rehearsal" \
@@ -1022,8 +1139,14 @@ YAML
     -v "${prom_config}:/etc/prometheus/prometheus.yml:ro" \
     -v "${rules}:/etc/prometheus/rehearsal.rules.yml:ro" \
     "${PROM_IMAGE}" >/dev/null
-  wait_for 20 "Prometheus on :${PROM_HTTP_PORT}" \
-    curl -sf "http://127.0.0.1:${PROM_HTTP_PORT}/-/ready"
+  if ! wait_for_container "${WAIT_PROMETHEUS_TIMEOUT_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "Prometheus on :${PROM_HTTP_PORT}" \
+    curl -sf "http://127.0.0.1:${PROM_HTTP_PORT}/-/ready"; then
+    diagnose_container "${PROM_CONTAINER}" "Prometheus on :${PROM_HTTP_PORT}"
+    step_fail "alert evaluation" "Prometheus never became ready"
+    return 1
+  fi
 
   # The app is already up (from step 8) and answering /metrics with
   # `rehearsal_up 1` because the ready marker is set. Stop it so the target
@@ -1032,7 +1155,7 @@ YAML
 
   local fired=0
   local waited=0
-  while [ "${waited}" -lt 60 ]; do
+  while [ "${waited}" -lt "${WAIT_ALERT_FIRE_SECONDS}" ]; do
     if curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" \
         | grep -q '"alertname":"RehearsalTargetDown".*"state":"firing"'; then
       fired=1
@@ -1043,12 +1166,13 @@ YAML
   done
 
   "${COMPOSE[@]}" start app >/dev/null
-  wait_for "${WAIT_HTTP_TIMEOUT_SECONDS}" "app answering again" \
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "$("${COMPOSE[@]}" ps -q app)" \
+    "app answering again" \
     bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
 
   local recovered=0
   waited=0
-  while [ "${waited}" -lt 60 ]; do
+  while [ "${waited}" -lt "${WAIT_ALERT_RECOVER_SECONDS}" ]; do
     if curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" | grep -q '"alertname":"RehearsalTargetDown"' \
       && ! curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" | grep -q '"alertname":"RehearsalTargetDown".*"state":"firing"'; then
       recovered=1
@@ -1285,8 +1409,8 @@ inject_failed_restore_verification() {
   # container is created FRESH each time, so it always runs the entrypoint's
   # temporary-server phase — the restore that follows would fail on a
   # vanished socket.
-  wait_for_stable "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
-    "restore-target database ready" \
+  wait_for_stable_container "${WAIT_DB_TIMEOUT_SECONDS}" "${WAIT_DB_STABLE_PROBES}" \
+    "${DB2_CONTAINER}" "restore-target database ready" \
     "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB2_CONTAINER}" \
     psql -h 127.0.0.1 -p "${DB_PORT}" \
     -v ON_ERROR_STOP=1 -U "${DB_SUPERUSER}" -d postgres -c 'SELECT 1' 
@@ -1317,8 +1441,13 @@ inject_primary_fails_after_handoff() {
   local before
   before="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}")"
   "${DOCKER_BIN}" kill "${cid}" >/dev/null
-  wait_for 20 "the crashed role to be observed restarting" \
-    bash -c "[ \"\$(docker inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
+  # An OBSERVATION WINDOW, not a readiness gate — note the `|| true`. The
+  # question is "was a restart observed promptly", so a short bound is the
+  # point and a timeout is a legitimate answer rather than a failure to
+  # diagnose. Still a knob, because everything is (AGENTS.md).
+  observe_for "${WAIT_RESTART_OBSERVATION_SECONDS}" \
+    "the crashed role to be observed restarting" \
+    bash -c "[ \"\$(\"${DOCKER_BIN}\" inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
     || true
   local after
   after="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo "${before}")"

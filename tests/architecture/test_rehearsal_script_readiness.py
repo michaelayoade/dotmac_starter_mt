@@ -73,10 +73,10 @@ def test_database_readiness_uses_the_stable_wait() -> None:
     container can restart the connection pool underneath it.
     """
     code = _code_only()
-    stable = len(re.findall(r"wait_for_stable\s+", code))
-    assert stable >= 2, (
-        f"expected both database readiness waits to use wait_for_stable, "
-        f"found {stable} call(s)"
+    stable = len(re.findall(r"wait_for_stable_container\s+", code))
+    assert stable >= 4, (
+        f"expected all four database readiness waits to use "
+        f"wait_for_stable_container, found {stable} call(s)"
     )
 
 
@@ -195,3 +195,137 @@ def test_the_probe_count_floor_is_enforced_in_the_script() -> None:
         "the script must reject a non-numeric WAIT_DB_STABLE_PROBES; an "
         "unquoted comparison against a word is a shell error, not a refusal"
     )
+
+
+# ── a failed wait must say WHY ──────────────────────────────────────────────
+
+
+def test_a_failed_container_wait_reports_diagnostics() -> None:
+    """A timeout that prints nothing costs a whole rehearsal run to learn one line.
+
+    Run 33095822846 spent twenty minutes to report
+
+        timed out after 20s waiting for: the rehearsal's own collector on :14318
+
+    while `docker logs` had said, the whole time,
+
+        cannot start pipelines: open /sink/otel-sink.json: permission denied
+
+    Every wait that GATES the run — as opposed to an observation window, which
+    ends in `|| true` and where a timeout is a legitimate answer — must route
+    its failure through `diagnose_container`.
+    """
+    code = _code_only()
+    assert "diagnose_container()" in code, "the diagnostic helper must exist"
+
+    helper = re.search(r"diagnose_container\(\)[^\n]*\n(?:.*?\n)*?^}", code, re.M)
+    assert helper, "could not read diagnose_container's body"
+    body = helper.group(0)
+    assert "logs" in body, "diagnostics must include the container's logs"
+    assert "inspect" in body, "diagnostics must include the container's state"
+
+    # NOT by scanning for one syntactic shape. The first version of this test
+    # looked for `if ! wait_for ... fi` blocks and therefore only ever saw the
+    # two waits written that way — the registry, both databases and all four
+    # app waits used other forms and were silently uncovered while this test
+    # reported success. A guard that discovers one shape measures the shape,
+    # not the property.
+    #
+    # The property is enforced STRUCTURALLY instead: the primitives are
+    # underscore-prefixed and every call site goes through a wrapper that
+    # diagnoses, or through `observe_for`, which declares that it does not.
+    for wrapper in ("wait_for_container()", "wait_for_stable_container()"):
+        body_match = re.search(
+            rf"{re.escape(wrapper)}[^\n]*\n(?:.*?\n)*?^}}", code, re.M
+        )
+        assert body_match, f"{wrapper} must exist"
+        assert "diagnose_container" in body_match.group(0), (
+            f"{wrapper} must diagnose on failure — it is the only reason it "
+            "exists rather than calling the primitive directly"
+        )
+
+
+def test_no_readiness_timeout_is_a_hardcoded_literal() -> None:
+    """Everything by config. A tuned timeout nobody can tune is a guess."""
+    code = _code_only()
+    literals = re.findall(r"wait_for\s+(\d+)\s", code)
+    assert not literals, (
+        f"hardcoded wait timeout(s) {literals}: every bound must be an "
+        "overridable knob with a documented default"
+    )
+
+
+# ── the wrappers are the ONLY way to wait ───────────────────────────────────
+
+
+def test_every_readiness_wait_goes_through_a_wrapper() -> None:
+    """A raw primitive call is how a wait ends up silent.
+
+    `_wait_for` / `_wait_for_stable` are underscore-prefixed so "internal" is
+    structural rather than a naming convention nobody enforces. Every call site
+    must use `wait_for_container` / `wait_for_stable_container` (which
+    diagnose) or `observe_for` (which declares that it deliberately does not).
+    """
+    code = _code_only()
+    outside = re.sub(
+        r"^(?:_wait_for|_wait_for_stable|wait_for_container|"
+        r"wait_for_stable_container|observe_for)\(\)[^\n]*\n(?:.*?\n)*?^}",
+        "",
+        code,
+        flags=re.M,
+    )
+    # Ban the PREFIXED names. Banning the bare `wait_for ` bans nothing: the
+    # primitives ARE `_wait_for` / `_wait_for_stable`, so a mutation that
+    # swapped a wrapper for the raw primitive sailed straight through the first
+    # version of this assertion. The sensitivity proof is what said so — the
+    # mutation ran, the suite stayed green, and the guard was measuring a name
+    # nothing is called.
+    raw = re.findall(r"(?<![\w])_wait_for(?:_stable)?\s", outside)
+    assert not raw, (
+        f"{len(raw)} raw primitive wait call(s) outside the wrappers — those "
+        "fail without diagnostics. Use wait_for_container / "
+        "wait_for_stable_container, or observe_for for a deliberate window"
+    )
+
+
+def test_observation_windows_are_declared_not_omitted() -> None:
+    """`observe_for` exists so "no diagnostics here" is a CHOICE, not a gap.
+
+    Without a distinct name, an observation window and a forgotten diagnostic
+    look identical in the source — which is precisely how the uncovered waits
+    survived the first version of this file.
+    """
+    code = _code_only()
+    assert "observe_for()" in code, "the observation-window wrapper must exist"
+    calls = re.findall(r"(?<![_a-z])observe_for\s+\"", code)
+    assert calls, "observe_for must actually be used, or it is dead reassurance"
+
+
+def test_each_service_has_its_own_timeout_knob() -> None:
+    """One shared "infrastructure" timeout cannot be tuned for any of them.
+
+    Raising it for a slow collector pull silently doubles how long a dead
+    registry takes to report; lowering it for a fast registry makes the
+    collector flaky.
+    """
+    body = _body()
+    for knob in (
+        "WAIT_REGISTRY_TIMEOUT_SECONDS",
+        "WAIT_COLLECTOR_TIMEOUT_SECONDS",
+        "WAIT_PROMETHEUS_TIMEOUT_SECONDS",
+        "WAIT_ALERT_FIRE_SECONDS",
+        "WAIT_ALERT_RECOVER_SECONDS",
+        "WAIT_DB_TIMEOUT_SECONDS",
+        "WAIT_HTTP_TIMEOUT_SECONDS",
+        "WAIT_RESTART_OBSERVATION_SECONDS",
+    ):
+        assert re.search(
+            rf':\s*"\$\{{{knob}:=\d+\}}"', body
+        ), f"{knob} must be an overridable knob with a documented default"
+
+
+def test_no_wait_loop_hardcodes_its_bound() -> None:
+    """The alert fire/recover loops were `while [ waited -lt 60 ]`."""
+    code = _code_only()
+    literal_loops = re.findall(r'while \[ "\$\{waited\}" -lt (\d+) \]', code)
+    assert not literal_loops, f"hardcoded loop bound(s) {literal_loops}: use a knob"
