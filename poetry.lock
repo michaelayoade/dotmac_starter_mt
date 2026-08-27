@@ -631,8 +631,8 @@ url = "packages/dotmac-assets"
 
 [[package]]
 name = "dotmac-auth-oidc"
-version = "0.1.0a1"
-description = "DotMac OIDC relying-party client — discovery, JWKS, Authorization Code + PKCE, single-use server-side state, and ID-token validation. Returns a verified external subject and nothing else."
+version = "0.1.0a2"
+description = "DotMac OIDC protocol adapter — confidential Authorization Code + PKCE and server-side public-native ID-token verification, ending at a verified external subject."
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["main"]

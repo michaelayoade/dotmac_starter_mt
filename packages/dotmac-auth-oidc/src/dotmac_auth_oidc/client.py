@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
+from dotmac_auth_oidc._token import decode_verified_id_token
 from dotmac_auth_oidc.discovery import ProviderCache, require_https_url
 from dotmac_auth_oidc.errors import (
     ConfigurationError,
@@ -30,7 +31,6 @@ from dotmac_auth_oidc.errors import (
     NonceMismatchError,
     StateError,
     TokenExchangeError,
-    UnsupportedAlgorithmError,
 )
 from dotmac_auth_oidc.state import (
     DEFAULT_STATE_TTL_SECONDS,
@@ -385,80 +385,15 @@ class OIDCClient:
         tests, so none of the checks below has ever been exercised there. Here it
         runs against a real key pair in the suite.
         """
-        import jwt
-
-        try:
-            header = jwt.get_unverified_header(id_token)
-        except Exception as exc:
-            raise IDTokenError(f"ID token header is unreadable: {exc}") from exc
-
-        algorithm = header.get("alg")
-        # Checked BEFORE the key is fetched, so an `alg: none` token never even
-        # reaches key selection.
-        if not isinstance(algorithm, str) or algorithm not in ALLOWED_ALGORITHMS:
-            raise UnsupportedAlgorithmError(
-                f"ID token algorithm {algorithm!r} is not permitted — only "
-                "asymmetric signatures are accepted"
-            )
-        kid = header.get("kid")
-        if not isinstance(kid, str) or not kid:
-            raise IDTokenError(
-                "ID token names no `kid` — the signing key is unaddressable, and "
-                "trying every published key until one verifies is not validation"
-            )
-
-        jwk = self._cache.signing_key(kid)
-        try:
-            key = jwt.PyJWK(jwk)
-        except Exception as exc:
-            raise IDTokenError(f"provider key {kid!r} is unusable: {exc}") from exc
-
-        try:
-            claims = jwt.decode(
-                id_token,
-                # The PyJWK ITSELF, not its unwrapped `.key`. The JWK carries the
-                # key's own `kty`/`alg` binding, so PyJWT can refuse a token whose
-                # algorithm does not match the key it names — an EC signature
-                # verified against an RSA key, say. Unwrapping to `.key` throws
-                # that binding away and leaves `algorithms=` as the only check.
-                key=key,
-                # The single verified algorithm, not the whole allowlist: a token
-                # must be verified with the algorithm it declared and that we
-                # accepted, never merely one of several we would tolerate.
-                algorithms=[algorithm],
-                audience=self._config.client_id,
-                issuer=self._cache.metadata().issuer,
-                leeway=self._leeway,
-                options={
-                    "require": ["exp", "iat", "sub", "aud", "iss"],
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_iat": True,
-                    "verify_nbf": True,
-                    "verify_aud": True,
-                    "verify_iss": True,
-                },
-            )
-        except jwt.PyJWTError as exc:
-            raise IDTokenError(f"ID token failed validation: {exc}") from exc
-
-        if not isinstance(claims, dict):
-            raise IDTokenError("ID token payload is not an object")
-
-        # `azp` matters exactly when `aud` is multi-valued: the token was issued
-        # for several audiences, and `azp` names the one it was actually
-        # authorized for. PyJWT is satisfied by our client_id appearing anywhere
-        # in `aud`, which would let a token minted for a DIFFERENT relying party
-        # that merely lists us be replayed here.
-        audience = claims.get("aud")
-        if isinstance(audience, list) and len(audience) > 1:
-            authorized = claims.get("azp")
-            if authorized != self._config.client_id:
-                raise IDTokenError(
-                    "ID token has multiple audiences and its `azp` is not this "
-                    "client — it was authorized for a different relying party"
-                )
-        return claims
+        return decode_verified_id_token(
+            id_token,
+            cache=self._cache,
+            issuer=self._cache.metadata().issuer,
+            audience=self._config.client_id,
+            client_id=self._config.client_id,
+            allowed_algorithms=ALLOWED_ALGORITHMS,
+            leeway_seconds=self._leeway,
+        )
 
 
 __all__ = [

@@ -137,8 +137,10 @@ class ProviderCache:
         "_discovery_ttl",
         "_issuer",
         "_jwks",
+        "_jwks_attempted_at",
         "_jwks_fetched_at",
         "_jwks_min_refetch",
+        "_jwks_override",
         "_jwks_ttl",
         "_metadata",
         "_metadata_fetched_at",
@@ -153,6 +155,7 @@ class ProviderCache:
         *,
         transport: Transport,
         discovery_override: str | None = None,
+        jwks_override: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         discovery_ttl: float = DEFAULT_DISCOVERY_TTL_SECONDS,
         jwks_ttl: float = DEFAULT_JWKS_TTL_SECONDS,
@@ -161,6 +164,15 @@ class ProviderCache:
         self._issuer = issuer
         self._transport = transport
         self._override = discovery_override
+        self._jwks_override = (
+            require_https_url(
+                jwks_override,
+                field="jwks_uri override",
+                error=JWKSError,
+            )
+            if jwks_override is not None
+            else None
+        )
         self._timeout = timeout
         self._discovery_ttl = discovery_ttl
         self._jwks_ttl = jwks_ttl
@@ -168,6 +180,7 @@ class ProviderCache:
         self._metadata: ProviderMetadata | None = None
         self._metadata_fetched_at = 0.0
         self._jwks: dict[str, dict[str, Any]] = {}
+        self._jwks_attempted_at = 0.0
         self._jwks_fetched_at = 0.0
 
     @property
@@ -197,11 +210,20 @@ class ProviderCache:
         return fetched
 
     def _refresh_jwks(self, *, clock: float) -> None:
-        metadata = self.metadata(now=clock)
-        document = self._transport.get_json(metadata.jwks_uri, timeout=self._timeout)
+        # The amplification bound applies to ATTEMPTS, including failures. If
+        # this moved only after success, an unavailable IdP could be hit once
+        # for every hostile token carrying a random kid.
+        self._jwks_attempted_at = clock
+        try:
+            uri = self._jwks_override or self.metadata(now=clock).jwks_uri
+            document = self._transport.get_json(uri, timeout=self._timeout)
+        except Exception as exc:
+            # Do not clear `_jwks`: a failed rotation fetch must not invalidate
+            # still-fresh keys that were already working.
+            raise JWKSError(f"provider key-set refresh failed: {exc}") from exc
         keys = document.get("keys")
         if not isinstance(keys, list) or not keys:
-            raise JWKSError(f"key set at {metadata.jwks_uri!r} contains no keys")
+            raise JWKSError(f"key set at {uri!r} contains no keys")
 
         by_kid: dict[str, dict[str, Any]] = {}
         for key in keys:
@@ -216,9 +238,7 @@ class ProviderCache:
                 by_kid[kid] = key
 
         if not by_kid:
-            raise JWKSError(
-                f"key set at {metadata.jwks_uri!r} has no key carrying a `kid`"
-            )
+            raise JWKSError(f"key set at {uri!r} has no key carrying a `kid`")
         self._jwks = by_kid
         self._jwks_fetched_at = clock
 
@@ -233,15 +253,25 @@ class ProviderCache:
         """
         clock = time.monotonic() if now is None else now
         stale = clock - self._jwks_fetched_at >= self._jwks_ttl
+        attempted = False
 
         if not self._jwks or stale:
+            if (
+                self._jwks_attempted_at
+                and clock - self._jwks_attempted_at < self._jwks_min_refetch
+            ):
+                raise JWKSError(
+                    "provider key set needs refresh, but a refresh was attempted "
+                    "inside the configured minimum interval"
+                )
             self._refresh_jwks(clock=clock)
+            attempted = True
 
         key = self._jwks.get(kid)
         if key is not None:
             return key
 
-        if clock - self._jwks_fetched_at >= self._jwks_min_refetch:
+        if not attempted and clock - self._jwks_attempted_at >= self._jwks_min_refetch:
             self._refresh_jwks(clock=clock)
             key = self._jwks.get(kid)
             if key is not None:

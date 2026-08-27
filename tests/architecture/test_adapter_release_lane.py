@@ -116,7 +116,7 @@ def _synthetic(tmp_path: Path, adapters: dict[str, dict]) -> Any:
 
 
 def _auth_oidc_entry() -> dict:
-    """What `dotmac-auth-oidc`'s entry will look like when it is finally listed."""
+    """The complete security-relevant wheel surface for `dotmac-auth-oidc`."""
     return {
         "package_dir": "packages/dotmac-auth-oidc",
         "import_name": "dotmac_auth_oidc",
@@ -124,7 +124,13 @@ def _auth_oidc_entry() -> dict:
         "wheel_contents": {
             "required": [
                 "dotmac_auth_oidc/py.typed",
+                "dotmac_auth_oidc/_token.py",
                 "dotmac_auth_oidc/client.py",
+                "dotmac_auth_oidc/native.py",
+                "dotmac_auth_oidc/state.py",
+                "dotmac_auth_oidc/discovery.py",
+                "dotmac_auth_oidc/transport.py",
+                "dotmac_auth_oidc/errors.py",
             ],
             "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
             "allowed_requires": ["pyjwt", "httpx", "python"],
@@ -216,9 +222,9 @@ def test_the_listed_adapter_resolves() -> None:
     a lane whose one entry did not resolve would fail at dispatch, which is the
     worst moment to discover it.
     """
-    result = _resolve("dotmac-auth-oidc", version="0.1.0a1")
+    result = _resolve("dotmac-auth-oidc", version="0.1.0a2")
     assert result.returncode == 0, result.stderr
-    assert "tag=dotmac-auth-oidc-v0.1.0a1" in result.stdout
+    assert "tag=dotmac-auth-oidc-v0.1.0a2" in result.stdout
 
 
 # ── The gate is not merely refusing everything ───────────────────────────────
@@ -303,12 +309,12 @@ def test_resolve_emits_no_stateful_facts(tmp_path: Path, capsys) -> None:
 
     module = _synthetic(tmp_path, {"dotmac-auth-oidc": _auth_oidc_entry()})
     module.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-auth-oidc", version="0.1.0a1")
+        argparse.Namespace(distribution="dotmac-auth-oidc", version="0.1.0a2")
     )
     emitted = dict(
         line.split("=", 1) for line in capsys.readouterr().out.strip().splitlines()
     )
-    assert emitted["tag"] == "dotmac-auth-oidc-v0.1.0a1"
+    assert emitted["tag"] == "dotmac-auth-oidc-v0.1.0a2"
     assert emitted["package_dir"] == "packages/dotmac-auth-oidc"
     for absent in ("db_schema", "manifest_attr", "kernel_floor"):
         assert absent not in emitted
