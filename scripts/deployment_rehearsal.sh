@@ -137,6 +137,16 @@ fi
 : "${OTEL_COLLECTOR_IMAGE:=otel/opentelemetry-collector-contrib:0.110.0}"
 : "${OTEL_COLLECTOR_CONTAINER:=dotmac-deployment-rehearsal-otelcol}"
 : "${OTEL_HTTP_PORT:=14318}"
+# The collector pulls a ~150MB image on a cold runner and then starts; 20s was
+# hardcoded and too tight to distinguish "slow" from "dead". Everything by
+# config (AGENTS.md).
+: "${WAIT_COLLECTOR_TIMEOUT_SECONDS:=60}"
+# How much of a failed container's log to print. Enough to carry a stack or a
+# startup refusal, short enough not to bury the run.
+: "${DIAGNOSTIC_LOG_LINES:=40}"
+# How long to watch for a killed container to come back. Deliberately short:
+# this is an observation window, not a readiness gate.
+: "${WAIT_RESTART_OBSERVATION_SECONDS:=20}"
 
 # ── knobs: the rehearsal's OWN Prometheus, for the fire/recover alert step ──
 
@@ -310,6 +320,37 @@ wait_for_stable() {
   return 0
 }
 
+diagnose_container() {
+  # diagnose_container <name-or-id> <what-was-being-waited-for>
+  #
+  # A container wait that times out and prints nothing is close to useless: it
+  # says a thing did not happen and withholds the one place the reason is
+  # written down. Rehearsal run 33095822846 spent twenty minutes to report
+  #
+  #   timed out after 20s waiting for: the rehearsal's own collector on :14318
+  #
+  # while `docker logs` had, the whole time, said
+  #
+  #   Error: cannot start pipelines: open /sink/otel-sink.json: permission denied
+  #
+  # Every container wait in this script routes its failure through here, so the
+  # next unknown failure costs one run instead of one run per guess.
+  local target="$1"
+  local waiting_for="$2"
+  log "DIAGNOSTICS for: ${waiting_for}"
+  if ! "${DOCKER_BIN}" inspect "${target}" >/dev/null 2>&1; then
+    log "  container ${target} does not exist — it was never created, or was removed"
+    return 0
+  fi
+  log "  state: $("${DOCKER_BIN}" inspect -f \
+    '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}' \
+    "${target}" 2>/dev/null || echo unknown)"
+  log "  --- last ${DIAGNOSTIC_LOG_LINES} log line(s) ---"
+  "${DOCKER_BIN}" logs --tail "${DIAGNOSTIC_LOG_LINES}" "${target}" 2>&1 \
+    | sed 's/^/    /' || log "    (no logs available)"
+  log "  --- end diagnostics ---"
+}
+
 http_status() {
   # http_status <url> — prints the status code, or "000" on connection failure
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || echo "000"
@@ -424,7 +465,7 @@ cmd_up() {
   "${DOCKER_BIN}" run -d --name "${REGISTRY_CONTAINER}" \
     -p "127.0.0.1:${REGISTRY_PORT}:5000" \
     "${REGISTRY_IMAGE}" >/dev/null
-  wait_for 20 "local registry on ${REGISTRY_HOST}" \
+  wait_for "${WAIT_COLLECTOR_TIMEOUT_SECONDS}" "local registry on ${REGISTRY_HOST}" \
     curl -sf "http://${REGISTRY_HOST}/v2/" \
     || die "the disposable local registry never became reachable"
 
@@ -928,13 +969,28 @@ service:
 YAML
   remove_container "${OTEL_COLLECTOR_CONTAINER}"
   touch "${sink_file}"
+  # `--user` is REQUIRED, not hygiene. The collector image runs as a non-root
+  # user, `${sink_file}` is created here as whoever runs this script, and the
+  # `file` exporter opens it FOR WRITING AT STARTUP — so without this the
+  # collector exits immediately with
+  #   cannot start pipelines: open /sink/otel-sink.json: permission denied
+  # and the wait below reports a timeout that says nothing about permissions.
+  # Running the container as the identity that owns the directory is the fix
+  # that needs no world-writable file.
   "${DOCKER_BIN}" run -d --name "${OTEL_COLLECTOR_CONTAINER}" \
+    --user "$(id -u):$(id -g)" \
     -p "127.0.0.1:${OTEL_HTTP_PORT}:4318" \
     -v "${collector_config}:/etc/otelcol/config.yaml:ro" \
     -v "${WORK_DIR}:/sink" \
     "${OTEL_COLLECTOR_IMAGE}" --config /etc/otelcol/config.yaml >/dev/null
-  wait_for 20 "the rehearsal's own collector on :${OTEL_HTTP_PORT}" \
-    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${OTEL_HTTP_PORT}/v1/logs -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null)\" != \"000\" ]"
+  if ! wait_for "${WAIT_COLLECTOR_TIMEOUT_SECONDS}" \
+    "the rehearsal's own collector on :${OTEL_HTTP_PORT}" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${OTEL_HTTP_PORT}/v1/logs -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null)\" != \"000\" ]"; then
+    diagnose_container "${OTEL_COLLECTOR_CONTAINER}" \
+      "the rehearsal's own collector on :${OTEL_HTTP_PORT}"
+    step_fail "telemetry collector" "the collector never accepted OTLP"
+    return 1
+  fi
 
   local attrs
   attrs="$(dotmac_deploy -f "${DESCRIPTOR}" observe --deployment-id "rehearsal-run" --host "observer-rehearsal" \
@@ -1022,8 +1078,13 @@ YAML
     -v "${prom_config}:/etc/prometheus/prometheus.yml:ro" \
     -v "${rules}:/etc/prometheus/rehearsal.rules.yml:ro" \
     "${PROM_IMAGE}" >/dev/null
-  wait_for 20 "Prometheus on :${PROM_HTTP_PORT}" \
-    curl -sf "http://127.0.0.1:${PROM_HTTP_PORT}/-/ready"
+  if ! wait_for "${WAIT_COLLECTOR_TIMEOUT_SECONDS}" \
+    "Prometheus on :${PROM_HTTP_PORT}" \
+    curl -sf "http://127.0.0.1:${PROM_HTTP_PORT}/-/ready"; then
+    diagnose_container "${PROM_CONTAINER}" "Prometheus on :${PROM_HTTP_PORT}"
+    step_fail "alert evaluation" "Prometheus never became ready"
+    return 1
+  fi
 
   # The app is already up (from step 8) and answering /metrics with
   # `rehearsal_up 1` because the ready marker is set. Stop it so the target
@@ -1317,8 +1378,13 @@ inject_primary_fails_after_handoff() {
   local before
   before="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}")"
   "${DOCKER_BIN}" kill "${cid}" >/dev/null
-  wait_for 20 "the crashed role to be observed restarting" \
-    bash -c "[ \"\$(docker inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
+  # An OBSERVATION WINDOW, not a readiness gate — note the `|| true`. The
+  # question is "was a restart observed promptly", so a short bound is the
+  # point and a timeout is a legitimate answer rather than a failure to
+  # diagnose. Still a knob, because everything is (AGENTS.md).
+  wait_for "${WAIT_RESTART_OBSERVATION_SECONDS}" \
+    "the crashed role to be observed restarting" \
+    bash -c "[ \"\$(\"${DOCKER_BIN}\" inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
     || true
   local after
   after="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo "${before}")"

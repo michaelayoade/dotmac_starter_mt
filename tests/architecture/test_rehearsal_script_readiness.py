@@ -195,3 +195,48 @@ def test_the_probe_count_floor_is_enforced_in_the_script() -> None:
         "the script must reject a non-numeric WAIT_DB_STABLE_PROBES; an "
         "unquoted comparison against a word is a shell error, not a refusal"
     )
+
+
+# ── a failed wait must say WHY ──────────────────────────────────────────────
+
+
+def test_a_failed_container_wait_reports_diagnostics() -> None:
+    """A timeout that prints nothing costs a whole rehearsal run to learn one line.
+
+    Run 33095822846 spent twenty minutes to report
+
+        timed out after 20s waiting for: the rehearsal's own collector on :14318
+
+    while `docker logs` had said, the whole time,
+
+        cannot start pipelines: open /sink/otel-sink.json: permission denied
+
+    Every wait that GATES the run — as opposed to an observation window, which
+    ends in `|| true` and where a timeout is a legitimate answer — must route
+    its failure through `diagnose_container`.
+    """
+    code = _code_only()
+    assert "diagnose_container()" in code, "the diagnostic helper must exist"
+
+    helper = re.search(r"diagnose_container\(\)[^\n]*\n(?:.*?\n)*?^}", code, re.M)
+    assert helper, "could not read diagnose_container's body"
+    body = helper.group(0)
+    assert "logs" in body, "diagnostics must include the container's logs"
+    assert "inspect" in body, "diagnostics must include the container's state"
+
+    gating = re.findall(r"if ! wait_for[^\n]*\n(?:.*?\n)*?^  fi", code, re.M)
+    assert gating, "expected at least one gating container wait"
+    for block in gating:
+        assert "diagnose_container" in block, (
+            "a gating wait fails without printing why:\n" + block
+        )
+
+
+def test_no_readiness_timeout_is_a_hardcoded_literal() -> None:
+    """Everything by config. A tuned timeout nobody can tune is a guess."""
+    code = _code_only()
+    literals = re.findall(r"wait_for\s+(\d+)\s", code)
+    assert not literals, (
+        f"hardcoded wait timeout(s) {literals}: every bound must be an "
+        "overridable knob with a documented default"
+    )
