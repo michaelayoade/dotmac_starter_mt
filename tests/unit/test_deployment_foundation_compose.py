@@ -28,6 +28,7 @@ Five roles carry the fixture's coverage on purpose:
 from __future__ import annotations
 
 import hashlib
+import pathlib
 import re
 from collections.abc import Mapping
 
@@ -782,4 +783,48 @@ def test_the_two_pids_keys_never_disagree(spec: ProductDeploymentSpec) -> None:
     assert checked, (
         "no service declared a pids limit, so this test proved nothing — the "
         "fixture must render at least one resource-limited service"
+    )
+
+
+def test_the_rendered_collector_carries_no_uid_override(
+    spec: ProductDeploymentSpec,
+) -> None:
+    """The rehearsal's `--user $(id -u):$(id -g)` is HARNESS-ONLY.
+
+    The rehearsal runs its own throwaway collector with a `file` exporter
+    writing into a host-mounted directory, so it must run as the identity that
+    owns that directory or it cannot start. That is a property of the
+    REHEARSAL, not a contract the product's collector carries: the rendered
+    collector service mounts only its config, read-only, and writes no file at
+    all, so it has no reason to want a uid — and pinning one here would bake a
+    host's numeric identity into every product's deployment.
+
+    This test is the one-way valve. It exists so a future reader who hits the
+    permission error in the harness does not "fix" it by teaching the renderer
+    to emit `user:`.
+    """
+    # The shared fixture declares no `collector_image`, so it renders no
+    # collector service at all. Use this repository's OWN descriptor, which
+    # does — the thing under test is what a real product gets.
+    own = ProductDeploymentSpec.loads(
+        pathlib.Path("deploy/product.toml").read_text(),
+        source="deploy/product.toml",
+    )
+    doc = yaml.safe_load(render_compose(own, image=_IMAGE))
+    collector = doc["services"].get("otel-collector")
+    assert collector is not None, (
+        "deploy/product.toml must declare a collector_image, or this proves " "nothing"
+    )
+    assert "user" not in collector, (
+        "the rendered collector must not pin a uid — that is the rehearsal "
+        "harness's workaround for its own writable sink, not a product contract"
+    )
+    writable = [
+        volume
+        for volume in collector.get("volumes", [])
+        if not str(volume).endswith(":ro")
+    ]
+    assert not writable, (
+        f"the collector mounts {writable} writable; a read-only config mount is "
+        "what makes the uid question moot in the first place"
     )
