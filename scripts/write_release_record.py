@@ -30,11 +30,14 @@ mechanical rather than remembered.
 
 It does not decide anything. It removes a row that a tag has already made
 false, and records digests read from that tag. On a distribution's first
-release it also enrols that lineage in every migration-history map, using only
-the package identity and migration prefix carried by the reviewed release
-inputs. It refuses when the tag does not exist or when the declared version and
-the tag disagree. A missing ledger row is a no-op so a partial repair can
-converge.
+enrolment it records EVERY published tag already visible in the repository,
+then enrols that lineage in every migration-history map. That distinction is
+load-bearing: a module can be published before this guard monitors it, and
+recording only the newest tag would immediately fail the bidirectional tag
+oracle. The history is derived only from peeled tags, package identity and the
+migration prefix carried by the reviewed release inputs. It refuses when the
+requested tag does not exist or the declared version and tag disagree. A
+missing ledger row is a no-op so a partial repair can converge.
 
 It is deliberately runnable BY HAND for repair: the same command that the
 workflow runs closes an older gap, which is how the a11 and a12 records were
@@ -86,8 +89,8 @@ def _git(*args: str) -> str:
 
 
 def tag_commit(tag: str) -> str:
-    """The commit a tag points at, abbreviated the way the map records it."""
-    return _git("rev-parse", "--short=8", f"{tag}^{{commit}}").strip()
+    """The exact peeled commit a tag points at."""
+    return _git("rev-parse", f"{tag}^{{commit}}").strip()
 
 
 def migration_digests(tag: str, package_dir: str, import_name: str) -> dict[str, str]:
@@ -112,6 +115,33 @@ def migration_digests(tag: str, package_dir: str, import_name: str) -> dict[str,
         ).stdout
         digests[name] = hashlib.sha256(blob).hexdigest()
     return digests
+
+
+def published_release_history(
+    distribution: str, package_dir: str, import_name: str
+) -> dict[str, tuple[str, dict[str, str]]]:
+    """Every published tag for ``distribution``, newest first.
+
+    A first enrolment may be delayed until the second or later release. The
+    local tag set is the same fail-closed oracle consumed by
+    ``test_released_migrations`` (CI checks out full history), so discovering
+    the complete prefix here is stronger than pretending the tag passed to the
+    current release is the distribution's first.
+    """
+    tags = _git(
+        "tag", "--list", "--sort=-version:refname", f"{distribution}-v*"
+    ).splitlines()
+    if not tags:
+        raise ReleaseRecordError(
+            f"{distribution} has no published tags available for first enrolment"
+        )
+    return {
+        historical_tag: (
+            tag_commit(historical_tag),
+            migration_digests(historical_tag, package_dir, import_name),
+        )
+        for historical_tag in tags
+    }
 
 
 def remove_ledger_row(text: str, distribution: str) -> tuple[str, bool]:
@@ -299,8 +329,9 @@ def _first_release_entries(
     digests: dict[str, str],
     package_dir: str | None,
     import_name: str | None,
+    historical_releases: dict[str, tuple[str, dict[str, str]]] | None = None,
 ) -> dict[str, str]:
-    """Render deterministic enrolment rows for a distribution's first tag."""
+    """Render deterministic rows for a distribution's first enrolment."""
     if package_dir is None or import_name is None:
         raise ReleaseRecordError(
             f"{distribution} has no RELEASED_TAGS anchor; package_dir and "
@@ -314,7 +345,29 @@ def _first_release_entries(
             f"{expected_package_dir} / {expected_import_name}, got "
             f"{package_dir} / {import_name}"
         )
-    prefix = _migration_prefix(digests)
+    releases = historical_releases or {tag: (commit, digests)}
+    if releases.get(tag) != (commit, digests):
+        raise ReleaseRecordError(
+            f"first enrolment history does not contain requested tag {tag} "
+            "with its resolved coordinates and digests"
+        )
+    expected_tag_prefix = f"{distribution}-v"
+    unexpected = sorted(
+        historical_tag
+        for historical_tag in releases
+        if not historical_tag.startswith(expected_tag_prefix)
+    )
+    if unexpected:
+        raise ReleaseRecordError(
+            f"first enrolment history for {distribution} contains foreign tags: "
+            f"{unexpected}"
+        )
+    all_digests = {
+        filename: digest
+        for _, release_digests in releases.values()
+        for filename, digest in release_digests.items()
+    }
+    prefix = _migration_prefix(all_digests)
     versions_path = f"{package_dir}/src/{import_name}/migrations/versions"
     # Three tiers, because the generated file is format-checked in CI and a
     # record PR that fails `ruff format --check` blocks a release that has
@@ -343,7 +396,18 @@ def _first_release_entries(
         "TAG_PREFIXES": f'    "{distribution}": "{distribution}-v",\n',
         "RELEASED_TAGS": (
             f"    # ── {distribution} ──\n"
-            + _rendered_entry(tag, distribution, commit, digests)
+            + "".join(
+                _rendered_entry(
+                    historical_tag,
+                    distribution,
+                    historical_commit,
+                    historical_digests,
+                )
+                for historical_tag, (
+                    historical_commit,
+                    historical_digests,
+                ) in releases.items()
+            )
         ),
         "UNRELEASED": f'    "{distribution}": frozenset(),\n',
     }
@@ -358,8 +422,9 @@ def add_released_tag(
     *,
     package_dir: str | None = None,
     import_name: str | None = None,
+    historical_releases: dict[str, tuple[str, dict[str, str]]] | None = None,
 ) -> tuple[str, bool]:
-    """Insert one release entry, enrolling a first distribution when needed."""
+    """Reconcile one owner's published history, enrolling it when needed."""
     releases = _released_tags(text)
     existing = releases.get(tag)
     if existing is not None and existing != (distribution, commit, digests):
@@ -376,6 +441,7 @@ def add_released_tag(
             digests=digests,
             package_dir=package_dir,
             import_name=import_name,
+            historical_releases=historical_releases,
         )
         for mapping, entry in entries.items():
             if f'"{distribution}":' in _mapping_text(text, mapping):
@@ -385,6 +451,78 @@ def add_released_tag(
                 )
             text = _insert_mapping_entry(text, mapping, entry)
         return text, True
+
+    if historical_releases is not None:
+        recorded_owner_tags = {
+            recorded_tag
+            for recorded_tag, (owner, _, _) in releases.items()
+            if owner == distribution
+        }
+        absent_from_oracle = sorted(recorded_owner_tags - set(historical_releases))
+        if absent_from_oracle:
+            raise ReleaseRecordError(
+                f"{distribution} records tags absent from the published oracle: "
+                f"{absent_from_oracle}"
+            )
+        for historical_tag, (
+            historical_commit,
+            historical_digests,
+        ) in historical_releases.items():
+            recorded = releases.get(historical_tag)
+            expected = (distribution, historical_commit, historical_digests)
+            if recorded is not None and recorded != expected:
+                raise ReleaseRecordError(
+                    f"{historical_tag} is already recorded with different "
+                    "coordinates or digests"
+                )
+
+        missing = [
+            (historical_tag, historical_commit, historical_digests)
+            for historical_tag, (
+                historical_commit,
+                historical_digests,
+            ) in historical_releases.items()
+            if historical_tag not in releases
+        ]
+        previously_released = {
+            filename
+            for owner, _, files in releases.values()
+            if owner == distribution
+            for filename in files
+        }
+        text, retired_current = _retire_unreleased(
+            text,
+            distribution,
+            set(digests) - previously_released,
+            require_all=existing is None,
+        )
+        repair_files = {
+            filename
+            for _, _, historical_digests in missing
+            for filename in historical_digests
+        }
+        text, retired_history = _retire_unreleased(
+            text,
+            distribution,
+            repair_files,
+            require_all=False,
+        )
+        if not missing:
+            return text, retired_current or retired_history
+
+        anchor = re.search(rf'\n    "{name}-v[^"]+": \(', text)
+        if anchor is None:  # pragma: no cover - the mapping edit cannot remove it
+            raise ReleaseRecordError(
+                f"lost the RELEASED_TAGS anchor for {distribution}"
+            )
+        at = anchor.start() + 1
+        entries = "".join(
+            _rendered_entry(
+                historical_tag, distribution, historical_commit, historical_digests
+            )
+            for historical_tag, historical_commit, historical_digests in missing
+        )
+        return text[:at] + entries + text[at:], True
 
     previously_released = {
         filename
@@ -421,6 +559,11 @@ def write_record(
     import_name: str | None,
 ) -> list[str]:
     """Apply both halves of the record. Returns what changed, for the caller."""
+    expected_tag = f"{distribution}-v{version}"
+    if tag != expected_tag:
+        raise ReleaseRecordError(
+            f"tag/version identity mismatch: expected {expected_tag!r}, got {tag!r}"
+        )
     try:
         commit = tag_commit(tag)
     except ReleaseRecordError as failure:
@@ -452,6 +595,15 @@ def write_record(
     if package_dir and import_name:
         digests = migration_digests(tag, package_dir, import_name)
         if digests:
+            historical_releases = published_release_history(
+                distribution, package_dir, import_name
+            )
+            if historical_releases.get(tag) != (commit, digests):
+                raise ReleaseRecordError(
+                    f"published history for {distribution} does not contain "
+                    f"requested tag {tag} with its resolved coordinates and "
+                    "digests"
+                )
             new_module, added = add_released_tag(
                 module_text,
                 tag,
@@ -460,11 +612,13 @@ def write_record(
                 digests,
                 package_dir=package_dir,
                 import_name=import_name,
+                historical_releases=historical_releases,
             )
             if added:
                 changed.append(
-                    f"recorded {tag} in RELEASED_TAGS "
-                    f"({len(digests)} migration digest(s) read from the tag)"
+                    f"reconciled {distribution} in RELEASED_TAGS with "
+                    f"{len(historical_releases)} published tag(s) read from "
+                    "the tag oracle"
                 )
 
     # Validate every premise before either file changes. A refused first

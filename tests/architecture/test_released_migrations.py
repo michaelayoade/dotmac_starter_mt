@@ -2,11 +2,11 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-approvals` has been published five times, `dotmac-integration` nine,
-and `dotmac-entitlement-allocation` five. Every migration file present at any
-of those nineteen tags is inside a wheel on the registry, and has therefore RUN,
-unmodified, in at least one database this repository does not own and cannot
-inspect.
+Every migration file present at any tag recorded below is inside a wheel on the
+registry, and has therefore RUN, unmodified, in at least one database this
+repository does not own and cannot inspect. The owner and tag counts are
+derived by the guards; prose does not freeze a census that becomes false with
+the next release.
 
 Allocation is the sharper case, and the reason the guard grew a second
 distribution rather than staying a one-module special. Its first four releases
@@ -73,14 +73,11 @@ tagged meaning and proves its additive upgrade on PostgreSQL.
 
 ## Scope
 
-Three distributions: `dotmac-approvals`, `dotmac-integration`, and
-`dotmac-entitlement-allocation`.
-Each was added by the change that was tempted to edit its released bytes —
-integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
-digests were read out of the tags in that same change. That is the enrolment
-rule, and it is the reason this is still not generalised to "every allowlisted
-module": a distribution enters when somebody has actually verified its tags,
-because a guard populated by guesswork is worse than an absent one.
+Every distribution named in ``DISTRIBUTIONS``. Each entry's digests were read
+from its published tags when that lineage enrolled. That is the enrolment rule,
+and it is the reason this is still not generalised to "every allowlisted
+module": a distribution enters when the tag oracle has actually verified its
+history, because a guard populated by guesswork is worse than an absent one.
 
 Enrolment is therefore a data edit — a row in `DISTRIBUTIONS`, its tags in
 `RELEASED_TAGS`, and its still-editable files in `UNRELEASED`. The
@@ -246,6 +243,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-template-studio"
         / "src/dotmac_template_studio/migrations/versions"
     ),
+    "dotmac-commercial-agreements": (
+        REPO_ROOT
+        / "packages/dotmac-commercial-agreements"
+        / "src/dotmac_commercial_agreements/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -282,6 +284,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-service-access-policy": "sap_*.py",
     "dotmac-services": "se_*.py",
     "dotmac-template-studio": "ts_*.py",
+    "dotmac-commercial-agreements": "cg_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -315,16 +318,17 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-service-access-policy": "dotmac-service-access-policy-v",
     "dotmac-services": "dotmac-services-v",
     "dotmac-template-studio": "dotmac-template-studio-v",
+    "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
 VERSIONS = DISTRIBUTIONS["dotmac-integration"]
 
-#: `tag -> (distribution, tagged commit, {filename: sha256 at that tag})`.
+#: `tag -> (distribution, exact peeled commit, {filename: sha256 at that tag})`.
 #:
 #: Every one is an annotated tag created by `release-module.yml` and present on
-#: `origin`; the commit is recorded so a reviewer can locate the release without
-#: resolving the tag object.
+#: `origin`; the full peeled commit is recorded and cross-checked so the tag
+#: object and unchanged migration bytes cannot hide a moved coordinate.
 RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-approvals ────────────────────────────────────────────────────
     # ap_0001 was edited in place twice before this guard enrolled the module.
@@ -332,7 +336,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # grandfathered-divergence ledger below decides which one the tree retains.
     "dotmac-approvals-v0.1.0a1": (
         "dotmac-approvals",
-        "221f686",
+        "221f6868651426397e6e8443ca8b544234648247",
         {
             "ap_0001_approvals.py": (
                 "ec5e1aa9e504de8143eebaafacb0615cf24b6ea930648f5b9cfd1a9afc2db70e"
@@ -341,7 +345,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-approvals-v0.1.0a2": (
         "dotmac-approvals",
-        "3e1f801",
+        "3e1f8012c4f45369b6801a709a270d71c5c95a8d",
         {
             "ap_0001_approvals.py": (
                 "6c7b3263e05f860982dda125439171f62bba716d36d95b21e2c3a3224f19ad6a"
@@ -350,7 +354,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-approvals-v0.1.0a3": (
         "dotmac-approvals",
-        "16f11a9",
+        "16f11a9ef0df7697558904efa969294bafc3fab3",
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
@@ -359,7 +363,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-approvals-v0.1.0a4": (
         "dotmac-approvals",
-        "f013c7e",
+        "f013c7e0e0be9f704d3afbc13e233fde8950a1be",
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
@@ -368,7 +372,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-approvals-v0.1.0a5": (
         "dotmac-approvals",
-        "8d4ddfd",
+        "8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c",
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
@@ -380,7 +384,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a16": (
         "dotmac-integration",
-        "dcab4559",
+        "dcab4559b6dcc2c38737dd65ce6bb2f5ba59df0e",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -428,7 +432,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a15": (
         "dotmac-integration",
-        "bd8d2262",
+        "bd8d2262c26f62041cc22a813916066b9af85c7f",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -470,7 +474,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a14": (
         "dotmac-integration",
-        "70459efd",
+        "70459efd468dd2dcc9e31693b9910b04fec21447",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -512,7 +516,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a13": (
         "dotmac-integration",
-        "46926fa4",
+        "46926fa4f4243f7cd0c00230684eef8ab25cf723",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -551,7 +555,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a1": (
         "dotmac-integration",
-        "1b1d62b",
+        "1b1d62bebc4651273b2587fb607c49485fed123a",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -563,7 +567,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a2": (
         "dotmac-integration",
-        "aaa3b54",
+        "aaa3b5435732f0b1bebdf894778d6615c05e3c12",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -590,7 +594,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # change" is a claim, and an entry per tag is what checks it.
     "dotmac-integration-v0.1.0a3": (
         "dotmac-integration",
-        "b14f66e",
+        "b14f66e65642ec636936ea649ad0e86249b6de5a",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -616,7 +620,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # now published history and may not remain in the editable set below.
     "dotmac-integration-v0.1.0a4": (
         "dotmac-integration",
-        "306a40e",
+        "306a40e29da8fa63a6ee9346f29665731b558cc5",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -645,7 +649,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # is still a release-history fact rather than permission to omit the tag.
     "dotmac-integration-v0.1.0a5": (
         "dotmac-integration",
-        "7828697",
+        "7828697ef11fb1ae765a5397dfa7dc221ae6207a",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -675,7 +679,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # deliberately absent from this immutable release record.
     "dotmac-integration-v0.1.0a6": (
         "dotmac-integration",
-        "7e05430",
+        "7e0543004864845f0035c9ec325e3f5064c281cc",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -709,7 +713,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # editable after this release record is reconciled.
     "dotmac-integration-v0.1.0a7": (
         "dotmac-integration",
-        "c669b24",
+        "c669b24ee8be09677e92f85b11619f6626ad998d",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -745,7 +749,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # index, registered its manifest and only then created this tag.
     "dotmac-integration-v0.1.0a8": (
         "dotmac-integration",
-        "4b1e867",
+        "4b1e86753b010a60be38bb5346f89e493936d2f4",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -784,7 +788,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # exact wheel from the private index before creating this tag.
     "dotmac-integration-v0.1.0a9": (
         "dotmac-integration",
-        "92ae7a6",
+        "92ae7a6f9c8307797704deb615a24e59420a73c4",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -830,7 +834,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # manifest and only then created this tag.
     "dotmac-integration-v0.1.0a12": (
         "dotmac-integration",
-        "9f59d02b",
+        "9f59d02b47ec9aa6a594705e12b2032a7168ae46",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -869,7 +873,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a11": (
         "dotmac-integration",
-        "d6087285",
+        "f25df1adf7076634abc735546158c374eedd6c31",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -908,7 +912,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-integration-v0.1.0a10": (
         "dotmac-integration",
-        "7a59864",
+        "7a5986420881e3e49945efc1dc51c653070e73b3",
         {
             "ig_0001_connector_control_plane.py": (
                 "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
@@ -960,7 +964,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # head instead of a `require_prerequisites` line appended to `ea_0001`.
     "dotmac-entitlement-allocation-v0.1.0a1": (
         "dotmac-entitlement-allocation",
-        "847ce0b",
+        "847ce0b5ea89dabdc34c26029df86173da80a4ab",
         {
             "ea_0001_allocations.py": (
                 "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
@@ -969,7 +973,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-entitlement-allocation-v0.1.0a2": (
         "dotmac-entitlement-allocation",
-        "5ded880",
+        "5ded8808e376b2eeaf6150bf095077ba1ba3de5b",
         {
             "ea_0001_allocations.py": (
                 "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
@@ -978,7 +982,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-entitlement-allocation-v0.1.0a3": (
         "dotmac-entitlement-allocation",
-        "c371b0f",
+        "c371b0fdbb22bd3d51fd34d36922b9bc1e9dae68",
         {
             "ea_0001_allocations.py": (
                 "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
@@ -987,7 +991,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-entitlement-allocation-v0.1.0a4": (
         "dotmac-entitlement-allocation",
-        "67bdfb8",
+        "67bdfb8b404a92fd455473806a256995bb507524",
         {
             "ea_0001_allocations.py": (
                 "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
@@ -998,7 +1002,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # verifier revisions alongside the unchanged allocation table revision.
     "dotmac-entitlement-allocation-v0.1.0a6": (
         "dotmac-entitlement-allocation",
-        "7e05430",
+        "7e0543004864845f0035c9ec325e3f5064c281cc",
         {
             "ea_0001_allocations.py": (
                 "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
@@ -1017,7 +1021,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # installation converge through an ordinary Alembic upgrade.
     "dotmac-files-v0.1.0a2": (
         "dotmac-files",
-        "b3e47855",
+        "b3e47855f14433c626b4ac3e7723414f7834601a",
         {
             "fi_0001_stored_files.py": (
                 "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
@@ -1026,7 +1030,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-files-v0.1.0a3": (
         "dotmac-files",
-        "c6ef6cd",
+        "c6ef6cd7b13105bd95c3faf354ffee9032077625",
         {
             "fi_0001_stored_files.py": (
                 "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
@@ -1046,7 +1050,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # to reconstruct and no divergence to grandfather.
     "dotmac-forms-v0.1.0a1": (
         "dotmac-forms",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "fm_0001_forms.py": (
                 "0778d4f950acf049851c6876dcd5d34bb6ef23f37a4dcc35c6af38af3e6b8267"
@@ -1055,7 +1059,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-workflow-runtime-v0.1.0a1": (
         "dotmac-workflow-runtime",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "wr_0001_runtime.py": (
                 "f959ef451f951e8c1bf314f8e1e4438731685f5aaf040c8a01bae4da3bb8311f"
@@ -1064,7 +1068,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-platform-health-v0.1.0a1": (
         "dotmac-platform-health",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "ph_0001_platform_health.py": (
                 "ed2be6b9a295f0e5a25f45c8d32e4168a33a25ecc4a59a69b0633606c1d52b9e"
@@ -1073,7 +1077,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-support-access-v0.1.0a1": (
         "dotmac-support-access",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "sup_0001_support_access.py": (
                 "22b75f92e04756cf05bffce76e303b06a7afbb3170b527f180477657351890a9"
@@ -1082,7 +1086,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-remote-access-v0.1.0a1": (
         "dotmac-remote-access",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "ra_0001_remote_access.py": (
                 "8958e4cb85ac62a1c923a62b7a4b4b25691e32a085dc81639f5f642b283f377a"
@@ -1091,7 +1095,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-compliance-reporting-v0.1.0a1": (
         "dotmac-compliance-reporting",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "cr_0001_compliance_reporting.py": (
                 "82e16095b9ae50f397010657755fb95b18444052aca9222490f0c2dd6a7fcf31"
@@ -1100,7 +1104,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-ai-operations-v0.1.0a1": (
         "dotmac-ai-operations",
-        "8f52abc",
+        "8f52abc4f903d001f9fbb5dfd9bfe87434e1f2ce",
         {
             "ao_0001_ai_operations.py": (
                 "211d35dfd814d6c93a5e984053c60a1a2444c176b5aa8d08066261f9cfd96538"
@@ -1110,7 +1114,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-payments ──
     "dotmac-payments-v0.1.0a1": (
         "dotmac-payments",
-        "04b97713",
+        "04b9771320b865b66d1322660fc6d3590605c973",
         {
             "pm_0001_payment_intents.py": (
                 "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
@@ -1120,7 +1124,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-imports ──
     "dotmac-imports-v0.1.0a2": (
         "dotmac-imports",
-        "5876ffd0",
+        "5876ffd0bce17172fa2dc6ac6d09b48d877fadf8",
         {
             "im_0001_import_runs.py": (
                 "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
@@ -1130,7 +1134,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-inbox-operations ──
     "dotmac-inbox-operations-v0.1.0a3": (
         "dotmac-inbox-operations",
-        "5b2798b8",
+        "5b2798b80f6ac903fb132a0b1c205dd1dde3c528",
         {
             "io_0001_inbox_operations.py": (
                 "180e422c920b43cadbd05a52ac2c72b423a952a9f70094f5372ff29f1b932aa0"
@@ -1146,7 +1150,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-operational-escalations ──
     "dotmac-operational-escalations-v0.1.0a1": (
         "dotmac-operational-escalations",
-        "c006da75",
+        "c006da75d4c04eb6e5b2f9fec715edebcbcdea30",
         {
             "oe_0001_escalation_policy.py": (
                 "05928af9f19dd89c98d082c79076510d6519c6d418f3e907f080f56e9a394d3a"
@@ -1156,7 +1160,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-service-changes ──
     "dotmac-service-changes-v0.1.0a1": (
         "dotmac-service-changes",
-        "c7571b9c",
+        "c7571b9cbe3ddc9f5687f208a39930001ace8401",
         {
             "sch_0001_service_changes.py": (
                 "a01c0e1056246ab39a7420e1364b644c7c2d56a4959fe5ac76298fd612cda20a"
@@ -1166,7 +1170,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-subscriptions ──
     "dotmac-subscriptions-v0.1.0a3": (
         "dotmac-subscriptions",
-        "ad6c5824",
+        "ad6c5824086f6f550447caeabe820e860cdfe23c",
         {
             "su_0001_subscriptions.py": (
                 "bbc6a1da801259a734988c976800c404ce30f4a3b8cf3f24a48410f557e3f252"
@@ -1181,7 +1185,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-subscriptions-v0.1.0a2": (
         "dotmac-subscriptions",
-        "f91253d5",
+        "f91253d5e193918507e9f2e0768a76aefe5bbce0",
         {
             "su_0001_subscriptions.py": (
                 "bbc6a1da801259a734988c976800c404ce30f4a3b8cf3f24a48410f557e3f252"
@@ -1193,7 +1197,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-subscriptions-v0.1.0a1": (
         "dotmac-subscriptions",
-        "ffe483fb",
+        "ffe483fb53f12dd7aee400a39e0c85ecf308470f",
         {
             "su_0001_subscriptions.py": (
                 "bbc6a1da801259a734988c976800c404ce30f4a3b8cf3f24a48410f557e3f252"
@@ -1203,7 +1207,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-billing ──
     "dotmac-billing-v0.1.0a1": (
         "dotmac-billing",
-        "92a1626b",
+        "92a1626b16d7e068f92536d8cfcb2ef9b6f270c2",
         {
             "bi_0001_billing.py": (
                 "f82a962e7c0745cf11e2c8187042a5af412dd80a254be5b2e0975d0c7aa36373"
@@ -1213,7 +1217,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-collections ──
     "dotmac-collections-v0.1.0a1": (
         "dotmac-collections",
-        "6ecf518a",
+        "6ecf518a6985b8bf4b163eccb3de2fef171ecccc",
         {
             "cl_0001_collections.py": (
                 "f718c94d4044bb925da92aa9e186ee1c0765d4e5d67b1bbc6bc66ccf161d86f4"
@@ -1223,7 +1227,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-fulfillment ──
     "dotmac-fulfillment-v0.1.0a1": (
         "dotmac-fulfillment",
-        "be02e28d",
+        "be02e28d11a0ba849b4974273f5a2d4bd7806a4a",
         {
             "fu_0001_fulfillment.py": (
                 "fa41945d34a08fc7f96d529f7ccc1f103a2b90b5c7095153dcc08f4283afe254"
@@ -1233,7 +1237,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-tax ──
     "dotmac-tax-v0.1.0a3": (
         "dotmac-tax",
-        "531f7f8c",
+        "531f7f8c37ce2fdf41ecbf2f9a7a9940264a18f9",
         {
             "tx_0001_tax.py": (
                 "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
@@ -1248,7 +1252,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-tax-v0.1.0a2": (
         "dotmac-tax",
-        "bd8d2262",
+        "bd8d2262c26f62041cc22a813916066b9af85c7f",
         {
             "tx_0001_tax.py": (
                 "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
@@ -1260,7 +1264,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-tax-v0.1.0a1": (
         "dotmac-tax",
-        "20d2470",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
         {
             "tx_0001_tax.py": (
                 "bf3091556eb5eac401e64cfe342a2d59c17b7d511c0c772aef034340b07012ab"
@@ -1270,7 +1274,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-service-catalog ──
     "dotmac-service-catalog-v0.1.0a1": (
         "dotmac-service-catalog",
-        "f91253d5",
+        "f91253d5e193918507e9f2e0768a76aefe5bbce0",
         {
             "sc_0001_technical_catalog.py": (
                 "7fc940ad1ddb48adb2fec31201756b48b48fae90b466fc2aca1d0901eb0c6547"
@@ -1280,7 +1284,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-customers ──
     "dotmac-customers-v0.1.0a1": (
         "dotmac-customers",
-        "2e2e0eff",
+        "2e2e0eff49aafc54a84885007402cd6012073330",
         {
             "cu_0001_customer_accounts.py": (
                 "0a6ba209d80c4dabf40e40dd4023b1d08803c92ed904fde95869ad9e480256c9"
@@ -1290,7 +1294,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-fx-policy ──
     "dotmac-fx-policy-v0.1.0a1": (
         "dotmac-fx-policy",
-        "a0901915",
+        "a0901915c6dcc5cd0580cb86d942dd3e91507d76",
         {
             "fx_0001_fx_policy.py": (
                 "e8e89ed213ff468efba088b20b4dce0e81940d7abbfeb2bff580330948d9b134"
@@ -1300,7 +1304,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-qualification ──
     "dotmac-qualification-v0.1.0a1": (
         "dotmac-qualification",
-        "39222359",
+        "3922235907ae83ab0d241d07793a7db2830c7366",
         {
             "qu_0001_qualification_evidence.py": (
                 "85afb29ec41ab7dde076ddd3e6d64e1b959563ee8ea54ac776a5ff295e5ef930"
@@ -1310,7 +1314,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-response-obligations ──
     "dotmac-response-obligations-v0.1.0a1": (
         "dotmac-response-obligations",
-        "8afbd7db",
+        "8afbd7db7a3c9cdf2b47a54355fd67da4c38f45d",
         {
             "ro_0001_response_obligations.py": (
                 "24f9755152d8a688a96f4416173e64bc1ad337ee90cdf21c56f550a0260620a5"
@@ -1320,7 +1324,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-sales ──
     "dotmac-sales-v0.1.0a1": (
         "dotmac-sales",
-        "1eef66ed",
+        "1eef66eddcde3cb051886e5a2a61bdb30dc972a5",
         {
             "sa_0001_sales.py": (
                 "25d918ceda444edf244ca96096d02283682f8f46c014171138ae47900cfa2553"
@@ -1330,7 +1334,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-service-access-policy ──
     "dotmac-service-access-policy-v0.1.0a1": (
         "dotmac-service-access-policy",
-        "1029354b",
+        "1029354b0619fa356cc43651c7f26a4ebaf0ac60",
         {
             "sap_0001_access_policy.py": (
                 "7dc2cb8f39891bc2b963a77771cf33f8ce3f5c5d5010007a445af4ed7dccec54"
@@ -1340,7 +1344,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-services ──
     "dotmac-services-v0.1.0a1": (
         "dotmac-services",
-        "63169d01",
+        "63169d01bff8a93503100464ca16aaa450fe0557",
         {
             "se_0001_service_lifecycle.py": (
                 "6daef5fde446a943b5cbab8d2dd2948c75d432a177217ffef0ffe495dc0a00bb"
@@ -1350,7 +1354,7 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # ── dotmac-template-studio ──
     "dotmac-template-studio-v0.2.0a4": (
         "dotmac-template-studio",
-        "ac5e439e",
+        "ac5e439e622ec5adba94cf52f4f961f2c39a2d30",
         {
             "ts_0001_templates.py": (
                 "511073d3225c8fa9be09c687500e0515efbb5d8fdc4859791e1e4f16ed7308f4"
@@ -1362,13 +1366,32 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     ),
     "dotmac-template-studio-v0.2.0a3": (
         "dotmac-template-studio",
-        "5777ceb5",
+        "5777ceb5b41414c389036342ed58262bbfb97f31",
         {
             "ts_0001_templates.py": (
                 "511073d3225c8fa9be09c687500e0515efbb5d8fdc4859791e1e4f16ed7308f4"
             ),
             "ts_0002_notification_identity.py": (
                 "b50c2387f54a877cf0f0ff772bcfc84083a973595c490d6facf6bf7a8f196088"
+            ),
+        },
+    ),
+    # ── dotmac-commercial-agreements ──
+    "dotmac-commercial-agreements-v0.1.0a1": (
+        "dotmac-commercial-agreements",
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            ),
+        },
+    ),
+    "dotmac-commercial-agreements-v0.1.0a2": (
+        "dotmac-commercial-agreements",
+        "42acc8b30f1bcaed1580d312fd33d7b5ef358817",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
             ),
         },
     ),
@@ -1429,9 +1452,9 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Approvals a5, Integration a10, Allocation a6 and Files a3 are published, so their
-#: editable sets are empty; the next migration must enter this map before it
-#: can ship. The release lane does not wait for an open branch, which is why
+#: An empty set means every current migration shipped. A non-empty set names
+#: the exact files that remain editable; Integration's ig_0015 is one current
+#: example. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
@@ -1466,6 +1489,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
+    "dotmac-commercial-agreements": frozenset(),
 }
 
 
@@ -1966,6 +1990,24 @@ def test_the_tag_inventory_rejects_an_unrecorded_future_release(
 
 
 @pytest.mark.parametrize("tag", sorted(RELEASED_TAGS))
+def test_each_recorded_commit_is_the_exact_peeled_tag(tag: str) -> None:
+    """A digest match cannot substitute for the tag's immutable coordinate."""
+    recorded = RELEASED_TAGS[tag][1]
+    argv = ["git", "rev-parse", f"{tag}^{{commit}}"]
+    peeled = subprocess.run(  # noqa: S603 # nosec B603 B607
+        argv,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert peeled.returncode == 0, peeled.stderr
+    assert (
+        len(recorded) == 40 and recorded == peeled.stdout.strip()
+    ), f"{tag}: map records {recorded!r}, peeled tag is {peeled.stdout.strip()!r}"
+
+
+@pytest.mark.parametrize("tag", sorted(RELEASED_TAGS))
 def test_the_recorded_digests_are_what_the_tag_actually_holds(tag: str) -> None:
     """The half that makes the map hard to doctor.
 
@@ -2011,15 +2053,16 @@ def test_the_cross_check_would_catch_a_doctored_map() -> None:
     otherwise the comparison is not reading git at all, which is exactly how a
     cross-check degrades into a second copy of the thing it checks.
     """
-    for tag, name in (
-        ("dotmac-integration-v0.1.0a1", "ig_0001_connector_control_plane.py"),
-        # Every enrolled distribution, because `_blob_digest` resolves the
-        # directory from the tag's owner. Reading only integration's would
-        # leave the other rows compared against a path nothing checks.
-        ("dotmac-entitlement-allocation-v0.1.0a1", "ea_0001_allocations.py"),
-        ("dotmac-approvals-v0.1.0a1", "ap_0001_approvals.py"),
-        ("dotmac-files-v0.1.0a2", "fi_0001_stored_files.py"),
-    ):
+    # One derived example per enrolled distribution. A hardcoded spot-check
+    # stopped at four owners while the registry grew past thirty, so its claim
+    # of covering every path silently became false.
+    examples: dict[str, tuple[str, str]] = {}
+    for tag, (owner, _, files) in sorted(RELEASED_TAGS.items()):
+        if files:
+            examples.setdefault(owner, (tag, sorted(files)[0]))
+    assert set(examples) == set(DISTRIBUTIONS)
+
+    for tag, name in examples.values():
         actual = _blob_digest(tag, name)
         assert actual == RELEASED_TAGS[tag][2][name]
         assert actual != "0" * 64

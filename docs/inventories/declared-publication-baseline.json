@@ -67,11 +67,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-commercial-agreements": {
-      "declared": "0.1.0a2",
-      "reason": "OUTSTANDING FOR THE NEXT VENDOR AGREEMENT-ESTATE RECONCILIATION PREREQUISITE. a1 IS published (peeled tag dotmac-commercial-agreements-v0.1.0a1 -> fead57bc93d6551450f5e6ae1c9de1296e27b0ae) and remains Vendor's exact adopted pin; this declaration does not reopen or weaken that completed greenfield cutover. a2 preserves the inclusive expiry_date contract, adds one derived end_exclusive boundary and exposes a bounded deterministic UUID-keyset owner reader returning detached agreement values. Source presence is not registry evidence and does not move Vendor from a1. Remove this row only when the protected module release workflow installs, verifies, registers and tags exact 0.1.0a2; only then may Vendor exact-pin and separately prove any future data-bearing backfill, parity and sealed-watermark gates. Do not edit the declaration down or claim a2 adoption from this source change.",
-      "state": "declared-unpublished"
-    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -81,6 +76,11 @@
       "declared": "0.1.0a2",
       "reason": "DECLARED BY THE OUTBOUND MESSAGING SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-meta-social-v0.1.0a1 -> c1921f6c4b9360c8b0005bddbf85e04e86d29a73), and messaging.send.v1, the per-capability modes, three additional secret bindings, two Graph egress hosts and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 ingress manifest is preserved as INGRESS_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
+    },
+    "dotmac-connector-nira": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED AND MECHANICALLY HELD BACK. The greenfield NiRA/CoCCA EPP transport has no published tag and release_enabled is false, so it is available only to development composition and both release resolves refuse it. Authenticated OT&E login still requires the Integrator source-IP whitelist; the exact production egress hostname has not been reviewed into the manifest; and dotmac-domains has not yet published the provider-neutral command/result contracts. Remove this row only in the same change that satisfies those gates, enables the reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source conformance is not adoption and must not be used to bypass the hold or edit the declaration down.",
+      "state": "never-published"
     },
     "dotmac-connector-paystack": {
       "declared": "0.1.0a3",

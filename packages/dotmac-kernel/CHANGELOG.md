@@ -220,7 +220,15 @@ separately.
   partial policies, new directives and widened sources fail application
   construction.
 
-## 0.1.0a96 — 2026-08-25
+## 0.1.0a96 — 2026-08-25 — UNRELEASED / SKIPPED
+
+> Release oracle: protected `release_run` `32931542586` succeeded for
+> `0.1.0a97` from commit `548084fd74779ccf1ad436e1201e03cb9239631a`, and
+> `dotmac-kernel-v0.1.0a97^{commit}` peels to that exact commit. As of that
+> verification, the tag history skipped `0.1.0a96`; the kernel release captain
+> owns refreshing this observation if release history changes. `0.1.0a96` is
+> permanently retired and must not be backfilled. The changes recorded below
+> first became installable in `0.1.0a97`.
 
 **A machine credential now says WHOSE it is, and rotates without dropping a
 call.** Continues the a90 machine-credential facility (`0027_machine_credential`)

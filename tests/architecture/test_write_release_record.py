@@ -43,6 +43,11 @@ KNOWN_DISTRIBUTION = "dotmac-integration"
 KNOWN_PACKAGE_DIR = "packages/dotmac-integration"
 KNOWN_IMPORT_NAME = "dotmac_integration"
 
+AGREEMENTS_TAG = "dotmac-commercial-agreements-v0.1.0a1"
+AGREEMENTS_DISTRIBUTION = "dotmac-commercial-agreements"
+AGREEMENTS_PACKAGE_DIR = "packages/dotmac-commercial-agreements"
+AGREEMENTS_IMPORT_NAME = "dotmac_commercial_agreements"
+
 
 def _writer():
     spec = importlib.util.spec_from_file_location("write_release_record", SCRIPT)
@@ -99,6 +104,52 @@ def test_digests_read_from_the_tag_reproduce_a_hand_built_record() -> None:
         writer.migration_digests(KNOWN_TAG, KNOWN_PACKAGE_DIR, KNOWN_IMPORT_NAME)
         == digests
     )
+
+
+def test_first_enrolment_history_reads_every_published_matching_tag() -> None:
+    """The Commercial Agreements regression: a1 shipped before enrolment.
+
+    The next release must not pretend its requested tag is the first tag. The
+    repository tag set is the oracle, and a1's peeled coordinates and bytes
+    must be part of the history the recorder supplies to first enrolment.
+    """
+    writer = _writer()
+    history = writer.published_release_history(
+        AGREEMENTS_DISTRIBUTION,
+        AGREEMENTS_PACKAGE_DIR,
+        AGREEMENTS_IMPORT_NAME,
+    )
+
+    assert history[AGREEMENTS_TAG] == (
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "cg_0001_agreements.py": (
+                "ac9e5f698f1814381a5987274131b186e9b0c0237b03314164cd69aa3806ec38"
+            )
+        },
+    )
+
+
+def test_published_history_discovers_every_matching_tag_newest_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sensitivity: discovery itself owns completeness and version ordering."""
+    writer = _writer()
+    newest = "dotmac-nonesuch-v0.1.0a2"
+    oldest = "dotmac-nonesuch-v0.1.0a1"
+    monkeypatch.setattr(writer, "_git", lambda *_args: f"{newest}\n{oldest}\n")
+    monkeypatch.setattr(writer, "tag_commit", lambda tag: f"commit:{tag}")
+    monkeypatch.setattr(writer, "migration_digests", lambda tag, *_args: {tag: tag})
+
+    history = writer.published_release_history(
+        "dotmac-nonesuch", "packages/dotmac-nonesuch", "dotmac_nonesuch"
+    )
+
+    assert list(history) == [newest, oldest]
+    assert history == {
+        newest: (f"commit:{newest}", {newest: newest}),
+        oldest: (f"commit:{oldest}", {oldest: oldest}),
+    }
 
 
 def test_an_entry_renders_in_the_shape_the_map_already_uses() -> None:
@@ -375,14 +426,30 @@ def test_a_record_is_refused_before_its_tag_exists() -> None:
         writer.write_record(
             distribution=KNOWN_DISTRIBUTION,
             version="9.9.9",
-            tag="dotmac-integration-v9.9.9-never-tagged",
+            tag="dotmac-integration-v9.9.9",
             package_dir=KNOWN_PACKAGE_DIR,
             import_name=KNOWN_IMPORT_NAME,
         )
     assert "does not resolve to a commit" in str(refusal.value)
 
 
-def test_a_row_describing_a_different_version_is_refused() -> None:
+def test_a_tag_describing_a_different_version_is_refused() -> None:
+    """The tag and version are one coordinate, even after ledger repair."""
+    writer = _writer()
+    with pytest.raises(writer.ReleaseRecordError) as refusal:
+        writer.write_record(
+            distribution=KNOWN_DISTRIBUTION,
+            version="9.9.9",
+            tag=KNOWN_TAG,
+            package_dir=None,
+            import_name=None,
+        )
+    assert "tag/version identity mismatch" in str(refusal.value)
+
+
+def test_a_row_describing_a_different_version_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The sharpest refusal. A row excusing `0.1.0a5` is a LIVE exemption when
     `0.1.0a4` is published; deleting it would silently promise a version nobody
     can install — the exact defect the ledger exists to prevent, committed by
@@ -390,28 +457,38 @@ def test_a_row_describing_a_different_version_is_refused() -> None:
     writer = _writer()
     ledger = json.loads(_ledger_text(writer))["unpublished"]
     distribution, row = next(iter(sorted(ledger.items())))
+    wrong_version = row["declared"] + "-not-this-one"
+    monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     with pytest.raises(writer.ReleaseRecordError) as refusal:
         writer.write_record(
             distribution=distribution,
-            version=row["declared"] + "-not-this-one",
-            tag=KNOWN_TAG,  # resolves, so the version check is what fires
+            version=wrong_version,
+            tag=f"{distribution}-v{wrong_version}",
             package_dir=None,
             import_name=None,
         )
     assert "describes a different" in str(refusal.value)
 
 
-def test_a_first_release_enrols_every_migration_guard_map() -> None:
-    """The release workflow must be able to record a module's first tag.
+def test_a_first_enrolment_records_history_and_every_migration_guard_map() -> None:
+    """The release workflow must be able to enrol after a prior release.
 
     Appending only ``RELEASED_TAGS`` is not enough: the guard then rejects the
-    unknown owner and still leaves main red. First-release enrolment is one
-    mechanical operation over all four owner maps plus the immutable tag map.
+    unknown owner and still leaves main red. Recording only the requested tag
+    is also insufficient when an older tag already exists. First enrolment is
+    one mechanical operation over the complete published history, all four
+    owner maps and the immutable tag map.
     """
     writer = _writer()
     text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
     distribution = "dotmac-nonesuch"
-    tag = "dotmac-nonesuch-v1.0.0"
+    tag = "dotmac-nonesuch-v2.0.0"
+    historical_tag = "dotmac-nonesuch-v1.0.0"
+    digests = {"ns_0001_nonesuch.py": "a" * 64}
+    historical_releases = {
+        tag: ("abcdef12", digests),
+        historical_tag: ("12345678", digests),
+    }
     assert distribution not in _mapping_keys(text, "DISTRIBUTIONS")
 
     updated, added = writer.add_released_tag(
@@ -419,9 +496,10 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
         tag,
         distribution,
         "abcdef12",
-        {"ns_0001_nonesuch.py": "a" * 64},
+        digests,
         package_dir="packages/dotmac-nonesuch",
         import_name="dotmac_nonesuch",
+        historical_releases=historical_releases,
     )
 
     assert added
@@ -429,6 +507,7 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
     for mapping in ("DISTRIBUTIONS", "LINEAGE_GLOBS", "TAG_PREFIXES", "UNRELEASED"):
         assert distribution in _mapping_keys(updated, mapping)
     assert tag in _mapping_keys(updated, "RELEASED_TAGS")
+    assert historical_tag in _mapping_keys(updated, "RELEASED_TAGS")
     assert '"dotmac-nonesuch": "ns_*.py"' in updated
     assert '"dotmac-nonesuch": "dotmac-nonesuch-v"' in updated
     assert "packages/dotmac-nonesuch" in updated
@@ -439,7 +518,7 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
         tag,
         distribution,
         "abcdef12",
-        {"ns_0001_nonesuch.py": "a" * 64},
+        digests,
     )
     assert not added_again
     assert unchanged == updated
@@ -455,6 +534,45 @@ def test_a_first_release_enrols_every_migration_guard_map() -> None:
     assert max(map(len, long_entry.splitlines())) <= 88
     assert '/ "packages/dotmac-operational-escalations"' in long_entry
     assert '/ "src/dotmac_operational_escalations/migrations/versions"' in long_entry
+
+
+def test_an_existing_partial_enrolment_backfills_older_published_tags() -> None:
+    """Rerunning the recorder must converge after the old one-tag defect."""
+    writer = _writer()
+    text = writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    distribution = "dotmac-nonesuch"
+    current_tag = "dotmac-nonesuch-v2.0.0"
+    older_tag = "dotmac-nonesuch-v1.0.0"
+    digests = {"ns_0001_nonesuch.py": "a" * 64}
+    partial_history = {current_tag: ("a" * 40, digests)}
+    complete_history = {
+        current_tag: ("a" * 40, digests),
+        older_tag: ("b" * 40, digests),
+    }
+    partial, _ = writer.add_released_tag(
+        text,
+        current_tag,
+        distribution,
+        "a" * 40,
+        digests,
+        package_dir="packages/dotmac-nonesuch",
+        import_name="dotmac_nonesuch",
+        historical_releases=partial_history,
+    )
+
+    repaired, changed = writer.add_released_tag(
+        partial,
+        current_tag,
+        distribution,
+        "a" * 40,
+        digests,
+        historical_releases=complete_history,
+    )
+
+    releases = writer._released_tags(repaired)
+    assert changed
+    assert releases[older_tag] == (distribution, "b" * 40, digests)
+    assert releases[current_tag] == (distribution, "a" * 40, digests)
 
 
 def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
@@ -489,13 +607,15 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
     monkeypatch.setattr(writer, "LEDGER", ledger)
     monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "abcdef12")
+    synthetic_digests = {
+        "ns_0001_nonesuch.py": "a" * 64,
+        "wrong_0002_second_lineage.py": "b" * 64,
+    }
+    monkeypatch.setattr(writer, "migration_digests", lambda *_args: synthetic_digests)
     monkeypatch.setattr(
         writer,
-        "migration_digests",
-        lambda *_args: {
-            "ns_0001_nonesuch.py": "a" * 64,
-            "wrong_0002_second_lineage.py": "b" * 64,
-        },
+        "published_release_history",
+        lambda *_args: {"dotmac-nonesuch-v1.0.0": ("abcdef12", synthetic_digests)},
     )
 
     with pytest.raises(writer.ReleaseRecordError) as refusal:

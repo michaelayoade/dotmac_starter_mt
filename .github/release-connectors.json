@@ -2,8 +2,11 @@
   "$comment": [
     "The CLOSED set of CONNECTOR PLUGIN distributions this repository may",
     "publish, and the conformance every entry must have passed first.",
+    "Every entry declares `release_enabled` explicitly. `false` keeps a",
+    "connector available to development composition while making both the",
+    "initial resolve and the post-approval re-resolve refuse publication.",
     "`scripts/release_connector.py resolve` gates on it and fails closed, so",
-    "listing a connector is a reviewed diff rather than a dispatch-time string —",
+    "enabling a connector is a reviewed diff rather than a dispatch-time string —",
     "the doctrine of `.github/release-modules.json` and",
     "`.github/release-adapters.json`, applied to a third shape.",
     "",
@@ -180,6 +183,7 @@
         "review does not ship."
       ],
       "package_dir": "packages/dotmac-connector-flutterwave",
+      "release_enabled": true,
       "import_name": "dotmac_connector_flutterwave",
       "plugin_attr": "PLUGIN",
       "connector_key": "flutterwave",
@@ -221,6 +225,7 @@
         "in their lowest denomination; ERP decides every accounting consequence."
       ],
       "package_dir": "packages/dotmac-connector-mono",
+      "release_enabled": true,
       "import_name": "dotmac_connector_mono",
       "plugin_attr": "PLUGIN",
       "connector_key": "mono",
@@ -260,6 +265,7 @@
         "this wheel."
       ],
       "package_dir": "packages/dotmac-connector-meta-social",
+      "release_enabled": true,
       "import_name": "dotmac_connector_meta_social",
       "plugin_attr": "PLUGIN",
       "connector_key": "meta_social",
@@ -293,6 +299,7 @@
         "deny-all egress and imports no product."
       ],
       "package_dir": "packages/dotmac-connector-linkedin",
+      "release_enabled": true,
       "import_name": "dotmac_connector_linkedin",
       "plugin_attr": "PLUGIN",
       "connector_key": "linkedin",
@@ -333,6 +340,7 @@
         "money."
       ],
       "package_dir": "packages/dotmac-connector-paystack",
+      "release_enabled": true,
       "import_name": "dotmac_connector_paystack",
       "plugin_attr": "PLUGIN",
       "connector_key": "paystack",
@@ -361,6 +369,59 @@
         ]
       }
     },
+    "dotmac-connector-nira": {
+      "$comment": [
+        "NiRA .ng registry transport over CoCCA EPP. It serves the eight",
+        "registry.* DELIVERY capabilities (domain/host/contact check, create,",
+        "info, renew, update, transfer) and registry.message.v1 over EPP poll,",
+        "through SPI 1.4, owns no rows and imports no product. The wire shape",
+        "follows the CoCCA reference module NiRA distributes to registrars; the",
+        "domain lifecycle, price and retry all stay with the owning application",
+        "and the engine.",
+        "",
+        "HELD BACK, deliberately, not a gap: `release_enabled` is false, so",
+        "the release gate refuses this connector before build and again after",
+        "protected-environment approval. It is composable in the root dev",
+        "environment but is NOT selectable or releasable.",
+        "It has not been proven against a live registry — OT&E EPP login from",
+        "the Integrator host returns 2202 until that host's IP is whitelisted",
+        "in the CoCCA console, and its capability owner (dotmac-domains) is",
+        "greenfield with no runtime consumer. It also has no third-party",
+        "dependency: the EPP transport is Python stdlib (socket/ssl/struct/",
+        "ElementTree), so its allowed wheel requires are dotmac-integration and",
+        "python only. Release once the OT&E round-trip is green and a consumer",
+        "exists."
+      ],
+      "package_dir": "packages/dotmac-connector-nira",
+      "release_enabled": false,
+      "import_name": "dotmac_connector_nira",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "nira",
+      "spi_range": ">=1.4,<2.0",
+      "integration_floor": "0.1.0a14",
+      "tag_prefix": "dotmac-connector-nira-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_nira/__init__.py",
+          "dotmac_connector_nira/plugin.py",
+          "dotmac_connector_nira/delivery.py",
+          "dotmac_connector_nira/polling.py",
+          "dotmac_connector_nira/frames.py",
+          "dotmac_connector_nira/epp.py",
+          "dotmac_connector_nira/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "python"
+        ]
+      }
+    },
     "dotmac-connector-remita": {
       "$comment": [
         "Remita RRR status polling and neutral observation translation. It",
@@ -377,6 +438,7 @@
         "than being discarded by a fire-and-forget dispatch."
       ],
       "package_dir": "packages/dotmac-connector-remita",
+      "release_enabled": true,
       "import_name": "dotmac_connector_remita",
       "plugin_attr": "PLUGIN",
       "connector_key": "remita",
@@ -415,6 +477,7 @@
         "py.typed keeps the handler contract typed in the Integrator assembly."
       ],
       "package_dir": "packages/dotmac-connector-whatsapp",
+      "release_enabled": true,
       "import_name": "dotmac_connector_whatsapp",
       "plugin_attr": "PLUGIN",
       "connector_key": "meta_whatsapp",

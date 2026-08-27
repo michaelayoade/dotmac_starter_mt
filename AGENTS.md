@@ -934,6 +934,17 @@ specifics) points here and must never fork these rules.
     (ADR-0018 amendment 2026-08-26; enforcement: **none yet** in this repository —
     the pipeline this governs lives in `dotmac_sub`)
 
+40. **An ADR number is one claim in the merged catalogue.** A number written on
+    a branch is not a reservation: the first decision to reach `main` keeps it,
+    and a later decision renumbers before merge regardless of when its source
+    commit was authored. Every `docs/adr/<number>-*.md` filename has a unique
+    four-digit number. Renumbering updates citations by meaning, never with a
+    catalogue-wide text replacement, because one ambiguous number can already
+    have inbound references to both decisions. The gate is rerun against the
+    current merge result after the base moves; a green stale branch cannot see a
+    sibling claim that landed later.
+    (`tests/architecture/test_adr_numbering.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
