@@ -25,6 +25,10 @@ import json
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
+    from .engine.run import DeploymentOutcome, Effects
 
 from .errors import DeploymentFoundationError, RenderDrift, SpecError
 from .spec import SCHEMA, ProductDeploymentSpec
@@ -35,6 +39,14 @@ EXIT_USAGE = 2
 
 DEFAULT_DESCRIPTOR = "deploy/product.toml"
 DEFAULT_OUTPUT_DIR = "deploy/rendered"
+DEFAULT_DEPLOY_DIR = "."
+# The only provider this package ships (`providers/compose_host.py`) — the
+# dedicated-VM Docker Compose profile. `--provider` is still a real flag,
+# not a decoration: `build_parser`'s `choices=[...]` refuses an unknown value
+# as a usage error rather than silently falling back to this one, so a typo
+# fails loudly instead of quietly deploying through the wrong provider.
+PROVIDER_COMPOSE_HOST = "compose-host"
+
 
 # ── rendering registry ──────────────────────────────────────────────────────
 
@@ -72,6 +84,25 @@ def _load(path: str) -> ProductDeploymentSpec:
     return ProductDeploymentSpec.load(path)
 
 
+def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Effects:
+    """The `Effects` implementation `--execute` runs the plan against.
+
+    `args.provider` is constrained to `PROVIDER_COMPOSE_HOST` by argparse's
+    own `choices=[...]` (`build_parser`), so an unrecognised value never
+    reaches here — it fails as a usage error before the descriptor is even
+    loaded. This function exists only to keep the one `if` legible as the
+    facility grows a second provider, and to keep the import lazy like every
+    other `cmd_*` handler in this module.
+    """
+    if args.provider == PROVIDER_COMPOSE_HOST:
+        from .providers.compose_host import ComposeHostEffects
+
+        return ComposeHostEffects(spec, Path(args.deploy_dir))
+    raise SpecError(
+        f"unknown provider {args.provider!r}"
+    )  # pragma: no cover - unreachable
+
+
 def _thresholds(path: str | None) -> dict[str, str]:
     """Alert thresholds, which live OUTSIDE the process.
 
@@ -107,8 +138,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
     print(f"  backup         {datasets or '(none declared)'}")
     if not spec.backup_datasets:
         print(
-            "  NOTE: no backup dataset is declared, so a deployment would run no "
-            "backup. If this product has durable state, that is a defect in "
+            "  NOTE: no backup dataset is declared, so `dotmac-deploy deploy` will "
+            "run no backup. If this product has durable state, that is a defect in "
             "the descriptor rather than a property of the deployment."
         )
     return EXIT_OK
@@ -184,6 +215,102 @@ def cmd_image_audit(args: argparse.Namespace) -> int:
     return EXIT_OK if report.passed else EXIT_REFUSED
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    from .engine.plan import build_plan, format_plan
+
+    spec = _load(args.descriptor)
+    plan = build_plan(spec, previous_image=args.previous_image or "")
+    sys.stdout.write(format_plan(plan))
+    return EXIT_OK
+
+
+def cmd_deploy(args: argparse.Namespace) -> int:
+    from .engine.plan import build_plan, format_plan
+
+    spec = _load(args.descriptor)
+    plan = build_plan(
+        spec,
+        previous_image=args.previous_image or "",
+        skip_backup=args.skip_backup,
+        skip_backup_reason=args.skip_backup_reason or "",
+    )
+    sys.stdout.write(format_plan(plan))
+    if not args.execute:
+        print("\nDRY RUN. Nothing was executed. Re-run with --execute to deploy.")
+        return EXIT_OK
+
+    from .engine.lock import deployment_lock
+    from .engine.run import Executor
+
+    effects = _build_effects(spec, args)
+    executor = Executor(spec, effects)
+    # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
+    # `_do_release_lock` are no-op steps that say so in their own detail text
+    # (`engine/run.py`) — a lock released when the first step returns is not
+    # a lock, it is a lock-shaped gap between the check and the mutation the
+    # 2026-07-12 incident (`engine/lock.py`) actually needed closed.
+    with deployment_lock(
+        spec.product, label=f"dotmac-deploy deploy {plan.image_digest}"
+    ):
+        outcome = executor.run(plan)
+    print()
+    _print_outcome(outcome)
+    if outcome.succeeded:
+        print(f"\nDEPLOYED {plan.image_digest}")
+        return EXIT_OK
+    failed = outcome.failed_step.value if outcome.failed_step else "(unknown step)"
+    print(
+        f"\nDEPLOY REFUSED at {failed}: {outcome.failure}\n"
+        f"world mutated: {outcome.mutated}",
+        file=sys.stderr,
+    )
+    return EXIT_REFUSED
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    from .backup import verification_plan
+
+    spec = _load(args.descriptor)
+    if not spec.backup_datasets:
+        print(
+            "no backup dataset is declared in the descriptor. That is a claim "
+            "that nothing needs backing up — if the product has durable state, "
+            "fix the descriptor rather than this command",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    for dataset in spec.backup_datasets:
+        checks = verification_plan(dataset)
+        print(f"{dataset.code} ({dataset.kind}, material {dataset.material})")
+        print(f"  retention        {dataset.retention_days} days")
+        print(f"  encryption       {dataset.encryption}")
+        print(f"  offsite          {dataset.offsite or '(none declared)'}")
+        print(f"  verified when    {checks.describe()}")
+        print(
+            f"  restore proof    at most {dataset.restore_proof_max_age_days} days old"
+        )
+    return EXIT_OK
+
+
+def cmd_restore_rehearsal(args: argparse.Namespace) -> int:
+    from .backup import restore_rehearsal
+
+    spec = _load(args.descriptor)
+    codes = [args.dataset] if args.dataset else [d.code for d in spec.backup_datasets]
+    if not codes:
+        print("no backup dataset is declared", file=sys.stderr)
+        return EXIT_REFUSED
+    for code in codes:
+        rehearsal = restore_rehearsal(spec, code)
+        print(rehearsal.describe())
+        print(
+            "  the target MUST be disposable and destroyed afterwards. A "
+            "rehearsal that restores anywhere the product can reach is not a "
+            "rehearsal, it is a restore"
+        )
+    return EXIT_OK
+
+
 def cmd_observe(args: argparse.Namespace) -> int:
     from .telemetry import RESOURCE_ATTRIBUTES, resource_attributes
 
@@ -225,6 +352,93 @@ def cmd_drift(args: argparse.Namespace) -> int:
     )
     sys.stdout.write(report.render())
     return EXIT_OK if report.clean else EXIT_REFUSED
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    from .engine.plan import build_plan, steps_for_rollback
+
+    spec = _load(args.descriptor)
+    plan = build_plan(spec, previous_image=args.previous_image or "")
+    steps = steps_for_rollback(plan)
+    if not steps:
+        print(f"rollback REFUSED: {plan.rollback_reason}", file=sys.stderr)
+        if not spec.migration.is_online:
+            print(
+                "Recovery for a maintenance_required release is a restore from "
+                "the pre-migration backup. A migration is never automatically "
+                "downgraded: `downgrade()` correctness is an assumption no "
+                "deployment tool may make on a production database.",
+                file=sys.stderr,
+            )
+        return EXIT_REFUSED
+    print(f"rollback permitted: {plan.rollback_reason}\n")
+    for index, step in enumerate(steps, start=1):
+        print(f"{index}. {step.kind.value} — {step.description}")
+    if not args.execute:
+        print("\nDRY RUN. Nothing was executed. Re-run with --execute to roll back.")
+        return EXIT_OK
+
+    from .engine.lock import deployment_lock
+    from .engine.run import Executor
+
+    effects = _build_effects(spec, args)
+    executor = Executor(spec, effects)
+    # Same rule as `cmd_deploy`: the lock wraps the whole run.
+    with deployment_lock(
+        spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
+    ):
+        outcome = executor.rollback(plan)
+    print()
+    _print_outcome(outcome)
+    if outcome.succeeded:
+        print(f"\nROLLED BACK to {plan.previous_image}")
+        return EXIT_OK
+    failed = outcome.failed_step.value if outcome.failed_step else "(unknown step)"
+    print(f"\nROLLBACK REFUSED at {failed}: {outcome.failure}", file=sys.stderr)
+    return EXIT_REFUSED
+
+
+def _print_outcome(outcome: DeploymentOutcome) -> None:
+    """The step-by-step record every executed run prints, deploy or rollback."""
+    for record in outcome.records:
+        status = "ok" if record.ok else "FAILED"
+        print(f"{record.kind.value:<24} {status:<6} {record.detail}")
+    for note in outcome.notes:
+        print(f"NOTE  {note}")
+    print(f"evidence: {outcome.evidence_path or '(not written; see notes)'}")
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    from .engine.plan import build_plan
+
+    spec = _load(args.descriptor)
+    plan = build_plan(spec)
+    print(f"{len(plan.gate_steps)} gate(s) run before anything is mutated:\n")
+    for index, step in enumerate(plan.gate_steps, start=1):
+        print(f"{index}. {step.kind.value}: {step.description}")
+        if step.command:
+            print(f"   $ {' '.join(step.command)}")
+    return EXIT_OK
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    spec = _load(args.descriptor)
+    migration = spec.migration
+    print(f"command          {' '.join(migration.command)}")
+    print(f"owner material   {migration.owner_material}")
+    print(f"expected heads   {list(migration.expected_heads)}")
+    print(f"compatibility    {migration.compatibility}")
+    print(
+        f"lock             {migration.lock_timeout_seconds}s, "
+        f"{migration.lock_retries} attempt(s), retried ONLY on lock contention"
+    )
+    if not migration.is_online:
+        print(
+            "\nThis release is maintenance_required. Ingress, the application, "
+            "every worker and the scheduler stop BEFORE DDL, and the previous "
+            "image is NOT a valid rollback target afterwards."
+        )
+    return EXIT_OK
 
 
 # ── argument parsing ────────────────────────────────────────────────────────
@@ -272,6 +486,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--layers", help="newline-separated filesystem listing")
 
+    add("preflight", cmd_preflight, "show the gates that run before any mutation")
+    add("migrate", cmd_migrate, "show the migration contract")
+    add("backup", cmd_backup, "show the backup policy and what verification means")
+
+    rehearse = add(
+        "restore-rehearsal", cmd_restore_rehearsal, "show the restore proof required"
+    )
+    rehearse.add_argument("--dataset")
+
+    plan = add("plan", cmd_plan, "build and print the ordered deployment plan")
+    plan.add_argument("--previous-image")
+
+    deploy = add("deploy", cmd_deploy, "deploy (DRY RUN unless --execute)")
+    deploy.add_argument("--previous-image")
+    deploy.add_argument("--execute", action="store_true")
+    deploy.add_argument("--skip-backup", action="store_true")
+    deploy.add_argument("--skip-backup-reason", default="")
+    deploy.add_argument(
+        "--deploy-dir",
+        default=DEFAULT_DEPLOY_DIR,
+        help=(
+            "the host directory `--execute` runs against, "
+            f"default {DEFAULT_DEPLOY_DIR!r}"
+        ),
+    )
+    deploy.add_argument(
+        "--provider",
+        default=PROVIDER_COMPOSE_HOST,
+        choices=[PROVIDER_COMPOSE_HOST],
+        help="the Effects implementation `--execute` runs the plan against",
+    )
+
     observe = add(
         "observe", cmd_observe, "show the resource attributes each role stamps"
     )
@@ -281,6 +527,26 @@ def build_parser() -> argparse.ArgumentParser:
     drift_cmd = add("drift", cmd_drift, "compare running state with the approved plan")
     drift_cmd.add_argument("--observed", required=True, help="JSON of observed digests")
     drift_cmd.add_argument("--thresholds")
+
+    rollback = add(
+        "rollback", cmd_rollback, "show the rollback plan, or why it is refused"
+    )
+    rollback.add_argument("--previous-image")
+    rollback.add_argument("--execute", action="store_true")
+    rollback.add_argument(
+        "--deploy-dir",
+        default=DEFAULT_DEPLOY_DIR,
+        help=(
+            "the host directory `--execute` runs against, "
+            f"default {DEFAULT_DEPLOY_DIR!r}"
+        ),
+    )
+    rollback.add_argument(
+        "--provider",
+        default=PROVIDER_COMPOSE_HOST,
+        choices=[PROVIDER_COMPOSE_HOST],
+        help="the Effects implementation `--execute` runs the plan against",
+    )
 
     return parser
 
