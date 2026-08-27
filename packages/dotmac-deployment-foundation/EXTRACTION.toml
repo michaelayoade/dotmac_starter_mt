@@ -71,11 +71,7 @@ preserved_tests = [
   "dotmac_integrator:scripts/audit_image.sh",
   "dotmac_integrator:tests/architecture/test_the_assembly_stays_thin.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_secrets_guard.py",
-  # NOTE: the failure-injection and compose-host parity tests arrive with the
-  # engine they exercise, in lane B. Listing them before they exist would
-  # make this dossier name a file the repository does not have, which is the
-  # exact defect `test_every_shared_distribution_has_a_valid_extraction_dossier`
-  # is for.
+  "dotmac_starter_mt:tests/unit/test_deployment_foundation_failure_injection.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_nginx.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_alerts.py",
   "dotmac_starter_mt:tests/unit/test_deployment_foundation_compose.py",

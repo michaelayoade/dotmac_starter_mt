@@ -1,0 +1,149 @@
+# The disposable product `scripts/deployment_rehearsal.sh` deploys to prove
+# Lane 2 of docs/inventories/deployment-foundation-rehearsal.md: what a
+# disposable host adds that a unit test cannot. See that document and
+# scripts/rehearsal/README.md before running anything against this file.
+#
+# ProductDeploymentSpec.v1, same schema every real product descriptor uses
+# (compare deploy/product.toml) — this is not a special-cased fixture format.
+#
+# Six placeholders the script substitutes into a WORKING COPY before every
+# `dotmac-deploy` invocation, because none of them is knowable until the
+# rehearsal actually runs:
+#   @@PRODUCT@@          — the REHEARSAL_PRODUCT knob (default
+#                          "deployment_rehearsal"); also the compose project
+#                          name and the network-name prefix
+#   @@IMAGE_REFERENCE@@  — the built image's REAL repo@sha256 digest, set
+#                          after step 1 builds it once and pushes it to the
+#                          rehearsal's disposable local registry
+#   @@SOURCE_REVISION@@  — the exact commit under test (`git rev-parse HEAD`)
+#   @@MANIFEST_DIGEST@@  — sha256 of this file's own UNsubstituted bytes,
+#                          computed once by `up` so the "wrong manifest
+#                          digest" injection case has a real value to corrupt
+#   @@DB_NAME@@          — the DB1_NAME knob (default "rehearsal_primary")
+#   @@APP_HOST_PORT@@    — the APP_HOST_PORT knob (default 18180)
+#
+# One role, no ingress: nginx is out of scope on the Observer host (no
+# reverse proxy is provisioned there), so this descriptor deliberately
+# cannot exercise the warm-candidate/ingress-gated path — the script marks
+# every case that needs one SKIPPED, loudly, with that reason.
+
+schema = "ProductDeploymentSpec.v1"
+product = "@@PRODUCT@@"
+environment = "rehearsal"
+
+[assembly]
+manifest_path = "scripts/rehearsal/product.toml"
+manifest_digest = "@@MANIFEST_DIGEST@@"
+
+[image]
+reference = "@@IMAGE_REFERENCE@@"
+source_revision = "@@SOURCE_REVISION@@"
+
+[runtime_materials]
+names = ["DATABASE_URL"]
+
+[[roles]]
+code = "app"
+command = ["python", "/app/app.py", "--serve"]
+replicas = 1
+stop_grace_seconds = 10
+depends_on = ["db"]
+materials = ["DATABASE_URL"]
+
+[roles.resources]
+cpus = "0.5"
+memory = "256m"
+pids = 64
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+# Two probes, two paths — never the same one. Step 7 of the ordered
+# rehearsal stops the database and expects `/health/live` to keep answering
+# 200 while `/health/ready` answers 503: the ERP defect (one endpoint trying
+# to be both), inverted into a fixture.
+[roles.health.live]
+path = "/health/live"
+port = 8000
+interval_seconds = 5
+timeout_seconds = 2
+retries = 3
+start_period_seconds = 5
+
+[roles.health.ready]
+path = "/health/ready"
+port = 8000
+interval_seconds = 3
+timeout_seconds = 2
+retries = 5
+start_period_seconds = 5
+
+# Published on loopback for the same reason `spec.py`'s `PortPublication`
+# docstring gives for Sub's syslog listener: there is no `[ingress]` route
+# (nginx is out of scope on Observer), so without this section the role is
+# reachable only from inside the compose network, and the rehearsal script's
+# own `curl` checks (steps 7, 8 and 13) have no way to reach it from the
+# host.
+[[roles.ports]]
+container = 8000
+host = @@APP_HOST_PORT@@
+protocol = "tcp"
+bind = "127.0.0.1"
+
+[migration]
+command = ["python", "/app/app.py", "--migrate"]
+owner_material = "MIGRATION_DATABASE_URL"
+expected_heads = ["0001"]
+heads_command = ["python", "/app/app.py", "--heads"]
+compatibility = "online"
+lock_timeout_seconds = 30
+lock_retries = 2
+
+[backup]
+[[backup.datasets]]
+code = "primary"
+kind = "postgres"
+material = "BACKUP_DATABASE_URL"
+retention_days = 1
+checksum = "sha256"
+encryption = "none"
+restore_proof_max_age_days = 1
+verify = ["schema", "row_counts", "migration_heads"]
+
+[telemetry]
+logs = false
+metrics = true
+traces = false
+app_direct_shipping = false
+deployment_annotations = true
+metrics_material = "METRICS_TOKEN"
+endpoint_material = "OTEL_EXPORTER_OTLP_ENDPOINT"
+# Deliberately no `collector_image`: the real collector-container render
+# path needs a TLS-terminating platform endpoint
+# (`telemetry.py:render_collector_config` hardcodes `tls.insecure: false`),
+# which this disposable rehearsal has no business standing up. Step 12
+# proves the underlying claim — a real signal arrives at a real collector
+# carrying the nine resource attributes `dotmac-deploy observe` derives —
+# against the rehearsal's OWN plaintext collector config instead. See
+# scripts/deployment_rehearsal.sh's `run_step_12`.
+
+[[external_dependencies]]
+code = "db"
+kind = "postgres"
+required_for = ["ready", "migrate", "backup"]
+material = "DATABASE_URL"
+image = "postgres:16-alpine"
+materials = ["POSTGRES_PASSWORD"]
+health_probe = ["pg_isready", "-U", "postgres"]
+
+[external_dependencies.environment]
+POSTGRES_DB = "@@DB_NAME@@"
+POSTGRES_USER = "postgres"
+
+[rollout]
+stability_window_seconds = 15
+rollback_images_retained = 1
