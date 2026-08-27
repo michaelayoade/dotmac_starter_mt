@@ -408,6 +408,44 @@ observe_for() {
   _wait_for "${timeout}" "${description}" "$@"
 }
 
+prom_rule_state() {
+  # prom_rule_state <rule-name> — prints firing | pending | inactive | absent
+  #
+  # Reads the RULE's own state, not an alert INSTANCE's labels, and parses the
+  # JSON rather than grepping it. Both halves are load-bearing:
+  #
+  #   * `"alertname"` appears only inside `alerts[]`, the list of ACTIVE alert
+  #     instances. When the target comes back the instance is REMOVED, so the
+  #     old recovery condition — which required `"alertname":"..."` to still be
+  #     present AND not firing — could never be satisfied. Step 13 was not
+  #     slow; it was unsatisfiable, and reported `recovered=0` every run.
+  #     Confirmed against a real Prometheus: firing => rule state `firing`,
+  #     1 instance, alertname present; recovered => rule state `inactive`,
+  #     0 instances, alertname absent.
+  #
+  #   * `grep '"alertname":"X".*"state":"firing"'` is greedy across a
+  #     single-line JSON document, so it can match X in one rule and `firing`
+  #     from a DIFFERENT rule further along. It happened to be correct here
+  #     only because this Prometheus evaluates exactly one rule.
+  local rule_name="$1"
+  curl -s --max-time 5 "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" \
+    | "${PYTHON_BIN}" -c '
+import json, sys
+name = sys.argv[1]
+try:
+    document = json.load(sys.stdin)
+except (json.JSONDecodeError, ValueError):
+    print("absent")
+    raise SystemExit(0)
+for group in document.get("data", {}).get("groups", []):
+    for rule in group.get("rules", []):
+        if rule.get("name") == name:
+            print(rule.get("state", "absent"))
+            raise SystemExit(0)
+print("absent")
+' "${rule_name}" 2>/dev/null || echo absent
+}
+
 http_status() {
   # http_status <url> — prints the status code, or "000" on connection failure
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || echo "000"
@@ -1156,31 +1194,36 @@ YAML
   local fired=0
   local waited=0
   while [ "${waited}" -lt "${WAIT_ALERT_FIRE_SECONDS}" ]; do
-    if curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" \
-        | grep -q '"alertname":"RehearsalTargetDown".*"state":"firing"'; then
+    if [ "$(prom_rule_state RehearsalTargetDown)" = "firing" ]; then
       fired=1
       break
     fi
     sleep 2
     waited=$((waited + 2))
   done
+  [ "${fired}" -eq 1 ] || log "  rule never reached firing; last state: $(prom_rule_state RehearsalTargetDown)"
 
   "${COMPOSE[@]}" start app >/dev/null
   wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "$("${COMPOSE[@]}" ps -q app)" \
     "app answering again" \
     bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
 
+  # Recovery is the rule returning to `inactive`. NOT "the alertname is still
+  # there but not firing" — the instance is gone by then, which is what made
+  # the old condition unsatisfiable. `absent` is deliberately NOT accepted: a
+  # rule that vanished from Prometheus entirely means the rule file stopped
+  # loading, which is a failure wearing recovery's clothes.
   local recovered=0
   waited=0
   while [ "${waited}" -lt "${WAIT_ALERT_RECOVER_SECONDS}" ]; do
-    if curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" | grep -q '"alertname":"RehearsalTargetDown"' \
-      && ! curl -s "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" | grep -q '"alertname":"RehearsalTargetDown".*"state":"firing"'; then
+    if [ "$(prom_rule_state RehearsalTargetDown)" = "inactive" ]; then
       recovered=1
       break
     fi
     sleep 2
     waited=$((waited + 2))
   done
+  [ "${recovered}" -eq 1 ] || log "  rule never returned to inactive; last state: $(prom_rule_state RehearsalTargetDown)"
 
   if [ "${fired}" -eq 1 ] && [ "${recovered}" -eq 1 ]; then
     step_pass "RehearsalTargetDown fired against a real Prometheus and recovered when the target came back"
