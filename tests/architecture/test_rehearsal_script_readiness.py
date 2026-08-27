@@ -11,10 +11,23 @@ very next `psql` failed with:
     connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed:
     No such file or directory
 
+Two changes close it, and the ORDER of importance is the opposite of the order
+they were written in:
+
+1. **Loopback TCP, not the Unix socket.** The official image starts the
+   temporary server with `listen_addresses=''`, so it accepts NO TCP at all.
+   A loopback TCP probe therefore CANNOT be satisfied by it — the probe
+   succeeds only once the real server is listening. That is what removes the
+   race. A socket probe cannot distinguish the two servers and can be
+   satisfied by the temporary one for longer than any streak is willing to
+   wait.
+2. **A consecutive-success streak**, as defence in depth behind it, for the
+   restarts TCP alone does not describe: a crashed backend, a container the
+   daemon restarts.
+
 `wait_for` accepts the FIRST success, which is correct for something that only
 ever becomes ready — a listening port, a pushed image — and wrong for anything
-whose readiness can go backwards. `wait_for_stable` requires N consecutive
-successes spaced a second apart, which spans the restart instead of racing it.
+whose readiness can go backwards.
 
 These are static checks on a shell script the unit suite cannot execute. They
 are cheap and they encode a lesson that cost a 20-minute rehearsal run.
@@ -119,4 +132,66 @@ def test_the_guard_reads_code_not_comments() -> None:
     assert "Postgres" not in stripped, (
         "_code_only is not removing comment lines, so every check above is "
         "reading documentation rather than code"
+    )
+
+
+# ── loopback TCP is what actually closes the window ─────────────────────────
+
+
+def _stable_calls() -> list[str]:
+    calls = re.findall(r"wait_for_stable[^\n]*\n(?:\s+[^\n]*\n)+", _code_only())
+    assert calls, "no wait_for_stable call found to inspect"
+    return calls
+
+
+def _db_calls() -> list[str]:
+    calls = [c for c in _stable_calls() if "psql" in c]
+    assert len(calls) == 4, (
+        f"expected 4 database readiness probes (primary, primary re-check, and "
+        f"the restore target at both call sites), found {len(calls)}"
+    )
+    return calls
+
+
+def test_every_database_probe_connects_over_loopback_tcp() -> None:
+    """The socket cannot tell the two servers apart; TCP can.
+
+    Postgres' entrypoint runs its temporary init server with
+    `listen_addresses=''`. It serves the Unix socket and NO TCP, so a socket
+    probe can be satisfied by a server that is about to be shut down, while a
+    loopback TCP probe cannot be satisfied until the real server listens.
+
+    All four sites, because the one that bit was not the first one written.
+    """
+    for call in _db_calls():
+        assert "-h 127.0.0.1" in call, (
+            "a database readiness probe is using the Unix socket, which the "
+            "temporary init server also serves:\n" + call
+        )
+        assert '-p "${DB_PORT}"' in call, (
+            "the probe must name the in-container port explicitly:\n" + call
+        )
+
+
+def test_the_probe_count_floor_is_enforced_in_the_script() -> None:
+    """A knob that can be tuned to 1 is `wait_for` again, wearing a new name.
+
+    The floor is CHECKED, not documented — `AGENTS.md` rule 25: a guard whose
+    premise is not enforceable is an unmonitored region.
+    """
+    body = _body()
+    assert "WAIT_DB_STABLE_PROBES_FLOOR=3" in body, (
+        "the consecutive-probe floor must be a named constant, not a literal "
+        "buried in a comparison"
+    )
+    refusal = (
+        r'if \[ "\$\{WAIT_DB_STABLE_PROBES\}" -lt '
+        r'"\$\{WAIT_DB_STABLE_PROBES_FLOOR\}" \]'
+    )
+    assert re.search(
+        refusal, body
+    ), "the script must REFUSE a probe count below the floor, not warn about it"
+    assert re.search(r"''\|\*\[!0-9\]\*\)", body), (
+        "the script must reject a non-numeric WAIT_DB_STABLE_PROBES; an "
+        "unquoted comparison against a word is a shell error, not a refusal"
     )
