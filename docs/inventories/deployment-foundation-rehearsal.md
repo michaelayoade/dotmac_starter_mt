@@ -248,8 +248,26 @@ newly find — and only then add the facility's authority row.
   exists is not a publication. Publication needs a `release_run` oracle (rule
   30), and no run has been dispatched, so no version of this distribution is
   published or pinnable.
-- **Lane 2 gates the first PUBLICATION, not merely production adoption.** This
-  package executes migrations, backup, handoff and rollback; shipping a version
-  whose only evidence is fakes would put those code paths in someone's hands
-  having never met a real engine. The disposable-host rehearsal runs before the
-  release lane is dispatched, not after.
+- **Lane 2 gates the first PUBLICATION, not merely production adoption, and
+  that is now ENCODED rather than written down.** This package executes
+  migrations, backup, handoff and rollback; shipping a version whose only
+  evidence is fakes would put those paths in someone's hands having never met a
+  real engine.
+
+  `release-facility.yml` calls `scripts/require_rehearsal.py` as its first gate
+  after the current-main freshness check — before anything is built, and long
+  before the publish token exists. It asks the Actions API for a COMPLETED,
+  SUCCESSFUL run of `deployment-rehearsal.yml` whose `head_sha` is
+  byte-identical to the SHA under release, and fails closed on every ambiguity:
+  no runs, a run in flight, any other conclusion, any SHA mismatch, or an
+  oracle that cannot be read at all. There is no `--allow-missing`.
+
+  A GitHub-hosted runner is the disposable host — real Docker daemon, destroyed
+  after the job, and the script creates and tears down everything it uses
+  (teardown is `if: always()`).
+
+  The requirement stayed prose for one revision of this document, which was a
+  defect: prose is bypassed by anyone who does not read it, including a future
+  automation with no eyes. `tests/architecture/test_deployment_rehearsal_oracle.py`
+  holds the gate in place, and every refusal case there carries a negative
+  control so the suite cannot pass by refusing everything.

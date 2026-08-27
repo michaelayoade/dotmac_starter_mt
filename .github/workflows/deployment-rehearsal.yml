@@ -1,0 +1,62 @@
+# The disposable-host rehearsal — Lane 2 of
+# docs/inventories/deployment-foundation-rehearsal.md.
+#
+# A GitHub-hosted runner IS the disposable host: it has a real Docker daemon,
+# it is destroyed after the job, and `scripts/deployment_rehearsal.sh` creates
+# and tears down every container, volume, network and scratch database it uses.
+# It refuses to start against any name that does not contain "rehearsal", which
+# is what keeps it away from anything real.
+#
+# This workflow exists to be an ORACLE. `scripts/require_rehearsal.py` reads
+# its runs through the Actions API and refuses to let
+# `release-facility.yml` publish unless one SUCCEEDED on the exact SHA being
+# released. That is why it records nothing itself and writes no file: the run's
+# own conclusion, bound to `head_sha` by GitHub, is the evidence.
+name: Deployment rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "why this rehearsal is being run"
+        required: false
+        default: "pre-publication rehearsal"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One rehearsal per commit. Never cancel one in flight: a half-torn-down
+  # rehearsal leaves containers behind, and the teardown is the part that
+  # protects the runner.
+  group: deployment-rehearsal-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      - name: Install the facility from source
+        run: poetry install --with dev --no-interaction
+
+      - name: Show what will run
+        run: poetry run bash scripts/deployment_rehearsal.sh list-cases
+
+      # `all` = up; the 14 ordered steps; every failure-injection case; down.
+      # `down` is idempotent and runs again below even if this fails, because a
+      # failed rehearsal that leaves a container behind is a worse outcome than
+      # a failed rehearsal.
+      - name: Rehearse against a real engine
+        run: poetry run bash scripts/deployment_rehearsal.sh all
+
+      - name: Tear down (idempotent)
+        if: always()
+        run: poetry run bash scripts/deployment_rehearsal.sh down

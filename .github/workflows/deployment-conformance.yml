@@ -1,0 +1,358 @@
+name: Deployment conformance
+
+# The reusable cross-repository gate. Every product that adopts
+# `dotmac-deployment-foundation` calls THIS workflow, pinned by immutable
+# commit, and the Governance profile requires the resulting check on protected
+# `main`.
+#
+# Why a reusable workflow rather than a documented recipe: a recipe is copied,
+# and a copy is a fork with good intentions. `dotmac_starter_mt:scripts/deploy.sh`
+# is the proof — it is a hand-port of Sub's engine that dropped the deployment
+# lock, the digest and evidence gates, the dirty-tree refusal, the migration
+# preflight and the warm candidate, every one of which the source added after an
+# incident. A copied CI recipe drifts the same way and just as silently.
+#
+# Why pinned by commit rather than by tag: Governance ADR 0006 already settles
+# this for the standards action, and the reasoning transfers unchanged. A tag is
+# mutable, so a pin to one is a pin to whatever that name points at today, and
+# the whole point of the pin is that CI executes the revision that was reviewed.
+#
+# A product calls it like this:
+#
+#     jobs:
+#       deployment:
+#         uses: michaelayoade/dotmac_starter_mt/.github/workflows/deployment-conformance.yml@<40-char-sha>
+#         with:
+#           descriptor: deploy/product.toml
+#           rendered-dir: deploy/rendered
+#         secrets:
+#           FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}
+#
+# What this gate does NOT do: it does not deploy, and it does not name a
+# target. It DOES read one secret — `FORGEJO_READ_TOKEN`, declared explicitly
+# under `workflow_call.secrets` below rather than assumed via `secrets:
+# inherit` — because the facility it is conformance-checking against lives on
+# a PRIVATE index and there is no other way to install it. A calling product
+# supplies its OWN `ci-reader` credential; this workflow never carries one of
+# its own. See "Where the package comes from", below, for exactly what that
+# credential can and cannot do.
+#
+# WHERE THE PACKAGE COMES FROM
+#
+# `dotmac-deployment-foundation` is published ONLY to the private Forgejo
+# index at registry.dotmac.io (`release-facility.yml`). It does not exist on
+# public PyPI, and a bare `pip install dotmac-deployment-foundation==<version>`
+# — no `--index-url` at all — would resolve against PyPI by default: at best a
+# hard failure ("no matching distribution"), at worst a NAME-SQUAT installing
+# arbitrary code into this gate under the real package's name. So every
+# install below is `--index-url` against the private registry, authenticated
+# as `ci-reader` — a READ-only identity (`secrets.FORGEJO_READ_TOKEN`,
+# canonical source `secret/dotmac/forgejo/ci-reader-token` in OpenBao) that
+# holds no publish scope. `FORGEJO_PUBLISH_TOKEN` never appears in this file;
+# `tests/architecture/test_deployment_release_lane.py` walks the parsed YAML
+# for every string value and fails the build if it ever does, so this is not
+# merely a convention.
+#
+# `--index-url` REPLACES pip's default index rather than adding to it, which
+# is exactly the property wanted here: the package has ZERO runtime
+# dependencies (its own `pyproject.toml` names nothing beyond a Python
+# version), so there is nothing for pip to need from anywhere else. A plain
+# authenticated `--index-url` install is therefore correct and complete on
+# its own — no `--extra-index-url` and, deliberately, no `--no-deps` flag
+# either, since there are no deps for that flag to be suppressing.
+#
+# `--extra-index-url https://pypi.org/simple` is DELIBERATELY ABSENT and must
+# stay that way. Pairing a public index alongside the private one is how a
+# resolver ends up considering a public release for a name that is only ever
+# supposed to resolve privately — the exact name-squat risk this section
+# opened with. This distribution exists ONLY on the private index; giving pip
+# a second place to look for it is a hole, not a convenience.
+
+on:
+  workflow_call:
+    inputs:
+      descriptor:
+        description: Path to the product's ProductDeploymentSpec.v1 descriptor.
+        required: false
+        type: string
+        default: deploy/product.toml
+      rendered-dir:
+        description: Directory holding the committed rendered deployment assets.
+        required: false
+        type: string
+        default: deploy/rendered
+      thresholds:
+        description: >-
+          JSON file supplying the product's alert thresholds. Thresholds live in
+          the deployment, never in the process: "how late is too late" is a
+          deployment's decision, and a number compiled into the code would fork
+          from the rule that fires on it.
+        required: false
+        type: string
+        default: deploy/alerts/thresholds.json
+      foundation-version:
+        description: >-
+          The EXACT released dotmac-deployment-foundation version this product
+          pins. A range is refused: a conformance gate that resolves to
+          "whatever is newest" cannot tell a product that drifted from a
+          foundation that changed.
+        required: true
+        type: string
+      python-version:
+        required: false
+        type: string
+        default: "3.12"
+      strict-image-audit:
+        description: >-
+          Fail when the image audit cannot be performed. Off by default because
+          a pull-request build has no built image yet; the release lane turns it
+          on, where the image exists and skipping would be a hole.
+        required: false
+        type: boolean
+        default: false
+      require-real-digests:
+        description: >-
+          Fail when the descriptor's image reference or manifest digest is the
+          all-zeros placeholder. On by default: an all-zeros digest PARSES (it
+          satisfies spec.py's sha256-shape pattern) but is not a real digest,
+          and every adapter descriptor in this repository still carries one
+          today. Turn this off only for a deliberately-not-yet-real reference
+          descriptor, never for a release gate.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      FORGEJO_READ_TOKEN:
+        description: >-
+          The `ci-reader` read-only Forgejo credential. REQUIRED: this
+          workflow installs `dotmac-deployment-foundation` from the private
+          registry.dotmac.io index and has no other way to reach it. Declared
+          explicitly here rather than relied on via `secrets: inherit` so a
+          calling product's own workflow file states, in one visible line,
+          exactly which secret this reusable workflow needs.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  descriptor:
+    name: Deployment descriptor conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the evaluated product revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Refuse a non-exact foundation pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ inputs.foundation-version }}'
+          # A release is identified by an exact version, never a range. The
+          # rule is the one AGENTS.md rule 30 states for every other release
+          # claim: a coordinate, or it is not evidence.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([ab][0-9]+)?$'; then
+            echo "::error::foundation-version '$version' is not an exact version." >&2
+            echo "A conformance gate pinned to a range cannot distinguish a product" >&2
+            echo "that drifted from a foundation that changed." >&2
+            exit 2
+          fi
+          echo "pinned to dotmac-deployment-foundation==$version"
+
+      # Private index only, read-only identity. See the file header
+      # ("Where the package comes from") for the full reasoning; this step is
+      # the one place that reasoning is executed rather than merely stated.
+      - name: Install the pinned foundation from the private Forgejo index
+        shell: bash
+        env:
+          FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            --index-url "https://ci-reader:${FORGEJO_READ_TOKEN}@registry.dotmac.io/api/packages/dotmac/pypi/simple" \
+            "dotmac-deployment-foundation==${{ inputs.foundation-version }}"
+
+      - name: Validate the descriptor
+        shell: bash
+        run: dotmac-deploy -f '${{ inputs.descriptor }}' validate
+
+      # The parse succeeding is necessary, not sufficient. `check_all` runs
+      # every descriptor-level CONFORMANCE rule — liveness/readiness
+      # separation, credential separation, digest pinning, no duplicate log
+      # shipping, justified security exceptions — the actual gate this
+      # workflow exists to be, not merely a demonstration that the TOML is
+      # well-formed. `check_all` returns a LIST rather than raising
+      # specifically so every finding is reported together, in one review
+      # cycle rather than five.
+      - name: Run the descriptor conformance checks
+        shell: bash
+        env:
+          DESCRIPTOR: ${{ inputs.descriptor }}
+        run: |
+          python <<'PY'
+          import os
+          import sys
+
+          from dotmac_deployment_foundation.conformance import check_all
+          from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+          spec = ProductDeploymentSpec.load(os.environ["DESCRIPTOR"])
+          problems = check_all(spec)
+          if problems:
+              print("::error::deployment conformance checks failed:")
+              for problem in problems:
+                  print(f"::error::  - {problem}")
+              sys.exit(1)
+          print(f"{len(problems)} conformance findings — all checks passed")
+          PY
+
+      # An all-zeros digest PARSES (it satisfies spec.py's sha256-shape
+      # pattern) but is not a real digest — it is the placeholder every
+      # adapter descriptor in this repository still carries today. A
+      # conformance gate that only checks shape would pass a descriptor that
+      # can never actually be deployed.
+      - name: Refuse placeholder all-zero digests
+        if: inputs.require-real-digests
+        shell: bash
+        env:
+          DESCRIPTOR: ${{ inputs.descriptor }}
+        run: |
+          python <<'PY'
+          import os
+          import sys
+
+          from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+          spec = ProductDeploymentSpec.load(os.environ["DESCRIPTOR"])
+          placeholder = "0" * 64
+          problems = []
+          if placeholder in spec.image:
+              problems.append(f"image reference is a placeholder digest: {spec.image}")
+          if spec.manifest_digest.endswith(placeholder):
+              problems.append(
+                  "assembly manifest_digest is a placeholder digest: "
+                  f"{spec.manifest_digest}"
+              )
+          if problems:
+              print(
+                  "::error::require-real-digests is on and the descriptor "
+                  "still carries a placeholder:"
+              )
+              for problem in problems:
+                  print(f"::error::  - {problem}")
+              sys.exit(1)
+          print("no placeholder all-zero digests found")
+          PY
+
+      - name: The rendered assets match the descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-f '${{ inputs.descriptor }}' render --check -o '${{ inputs.rendered-dir }}')
+          if [ -f '${{ inputs.thresholds }}' ]; then
+            args+=(--thresholds '${{ inputs.thresholds }}')
+          else
+            echo "::notice::no thresholds file at ${{ inputs.thresholds }}"
+          fi
+          dotmac-deploy "${args[@]}"
+
+      - name: Show the deployment plan
+        # Not a gate — a reviewer artefact. The plan draws the boundary between
+        # the steps that mutate nothing and the steps that can change the world,
+        # which is the one fact somebody authorising a run needs first.
+        shell: bash
+        run: dotmac-deploy -f '${{ inputs.descriptor }}' plan
+
+      - name: Show the gates that run before any mutation
+        shell: bash
+        run: dotmac-deploy -f '${{ inputs.descriptor }}' preflight
+
+      - name: Show the backup policy and what verification means
+        shell: bash
+        run: dotmac-deploy -f '${{ inputs.descriptor }}' backup
+
+  image:
+    name: Hardened image contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: descriptor
+    steps:
+      - name: Check out the evaluated product revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # Same private-index, read-only install as the `descriptor` job. See
+      # the file header ("Where the package comes from") for the full
+      # reasoning.
+      - name: Install the pinned foundation from the private Forgejo index
+        shell: bash
+        env:
+          FORGEJO_READ_TOKEN: ${{ secrets.FORGEJO_READ_TOKEN }}
+        run: |
+          python -m pip install --disable-pip-version-check \
+            --index-url "https://ci-reader:${FORGEJO_READ_TOKEN}@registry.dotmac.io/api/packages/dotmac/pypi/simple" \
+            "dotmac-deployment-foundation==${{ inputs.foundation-version }}"
+
+      - name: Audit the image the descriptor pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          reference="$(python - <<'PY'
+          import os
+          from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+          print(ProductDeploymentSpec.load(os.environ["DESCRIPTOR"]).image)
+          PY
+          )"
+          echo "descriptor pins $reference"
+
+          if ! docker image inspect "$reference" >/dev/null 2>&1; then
+            if ! docker pull "$reference" >/dev/null 2>&1; then
+              # An unbuilt image on a pull request is the normal case, not a
+              # failure. It IS a failure in the release lane, and the flag
+              # says which lane this is rather than the check quietly
+              # deciding. Whichever way it goes, the outcome must be
+              # UNMISTAKABLE: a non-strict skip must never read as a pass —
+              # `::warning::` (not `::notice::`, which a quiet green run can
+              # bury) on stdout AND a job-summary line, so both the log and
+              # the run's summary page say SKIPPED rather than passed.
+              if [ '${{ inputs.strict-image-audit }}' = 'true' ]; then
+                echo "::error::the pinned image is not available and strict-image-audit is on" >&2
+                exit 1
+              fi
+              echo "::warning::image audit SKIPPED — the pinned image is not available. This is NOT a pass."
+              {
+                echo "### :warning: Image audit SKIPPED — NOT a pass"
+                echo
+                echo "The pinned image \`$reference\` could not be inspected or pulled, and"
+                echo "\`strict-image-audit\` is off (the normal pull-request case, where the"
+                echo "image has not been built yet). The hardened image contract was NOT"
+                echo "checked. The release lane sets \`strict-image-audit: true\`, where the"
+                echo "image exists and skipping would be a hole rather than a convenience."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          docker image inspect "$reference" > /tmp/inspect.json
+          docker history --no-trunc --format '{{.CreatedBy}}' "$reference" \
+            | python -c 'import json,sys; print(json.dumps(sys.stdin.read().splitlines()))' \
+            > /tmp/history.json
+          docker run --rm --entrypoint sh "$reference" -c 'find / -xdev -type f 2>/dev/null' \
+            > /tmp/layers.txt || : > /tmp/layers.txt
+
+          dotmac-deploy image-audit "$reference" \
+            --inspect /tmp/inspect.json \
+            --history /tmp/history.json \
+            --layers /tmp/layers.txt
+        env:
+          DESCRIPTOR: ${{ inputs.descriptor }}
