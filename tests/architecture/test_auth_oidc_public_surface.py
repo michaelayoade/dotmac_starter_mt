@@ -50,6 +50,13 @@ FORBIDDEN_CONCERNS = (
     "issue_access_token",
 )
 
+# This narrower surface verifies an assertion a public native client already
+# obtained. Seeing any one of these identifiers in its executable AST would
+# mean it had quietly become a second confidential flow.
+NATIVE_VERIFIER_FORBIDDEN = frozenset(
+    {"client_secret", "code_verifier", "post_form", "set_cookie", "state_store"}
+)
+
 # ADR-0024: shared execution paths carry no provider branches. A provider quirk
 # is fixed at the protocol level or not at all.
 PROVIDER_NAMES = (
@@ -107,6 +114,22 @@ def find_forbidden_concerns(rel_path: str, source: str) -> list[str]:
     return violations
 
 
+def find_native_verifier_flow_concerns(rel_path: str, source: str) -> list[str]:
+    violations: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Name):
+            identifier = node.id
+        elif isinstance(node, ast.Attribute):
+            identifier = node.attr
+        elif isinstance(node, ast.arg):
+            identifier = node.arg
+        else:
+            continue
+        if identifier in NATIVE_VERIFIER_FORBIDDEN:
+            violations.append(f"{rel_path}:{node.lineno} references {identifier!r}")
+    return violations
+
+
 def test_the_package_imports_nothing_it_must_not() -> None:
     violations: list[str] = []
     for path in _source_files():
@@ -127,6 +150,17 @@ def test_the_package_holds_no_local_identity_or_session_concern() -> None:
         + "\n\nThis package ends at a verified (issuer, subject). Resolving a "
         "local party is `dotmac_kernel.external_identity`; issuing a session is "
         "the product's identity facet."
+    )
+
+
+def test_the_public_native_verifier_contains_no_confidential_flow() -> None:
+    path = PACKAGE_ROOT / "native.py"
+    violations = find_native_verifier_flow_concerns(path.name, path.read_text())
+    assert not violations, (
+        "\n".join(violations)
+        + "\n\nThe server-side native surface receives one ID token and an "
+        "opaque trusted nonce binding. Code exchange, client credentials, "
+        "cookies and state stores belong to a different protocol participant."
     )
 
 
@@ -289,3 +323,18 @@ def test_the_concern_checker_is_not_fooled_by_prose() -> None:
     its own explanation."""
     prose = '"""This module never resolves a Party and sets no cookie."""\n'
     assert find_forbidden_concerns("clean.py", prose) == []
+
+
+def test_the_native_verifier_flow_checker_fires_on_a_planted_secret() -> None:
+    bad = "def verify(client_secret):\n    return transport.post_form(client_secret)\n"
+    found = find_native_verifier_flow_concerns("planted.py", bad)
+    assert {"client_secret", "post_form"} <= {
+        violation.rsplit("'", 2)[1] for violation in found
+    }
+    assert (
+        find_native_verifier_flow_concerns(
+            "clean.py",
+            "def verify(id_token, expected_nonce):\n    return id_token\n",
+        )
+        == []
+    )

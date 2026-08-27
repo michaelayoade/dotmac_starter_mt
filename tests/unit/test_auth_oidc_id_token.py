@@ -31,7 +31,7 @@ from typing import Any
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from dotmac_auth_oidc import (
     IDTokenError,
     InMemoryStateStore,
@@ -156,6 +156,36 @@ def _validate(client: OIDCClient, token: str) -> dict[str, Any]:
 def test_a_correctly_signed_token_validates(keypair: Any, jwks: dict[str, Any]) -> None:
     client = _client(FakeTransport(jwks, {}))
     claims = _validate(client, _sign(keypair, _claims()))
+    assert claims["sub"] == "subject-abc-123"
+
+
+@pytest.mark.parametrize("algorithm", ["PS256", "ES256"])
+def test_the_confidential_client_retains_each_asymmetric_algorithm_family(
+    algorithm: str,
+) -> None:
+    """The shared security core must not narrow the existing web contract.
+
+    Public-native clients are RS256-only, but the confidential surface already
+    publishes RSA-PSS and ECDSA support. Moving validation into one private core
+    must preserve those families.
+    """
+    if algorithm == "ES256":
+        signing_key = ec.generate_private_key(ec.SECP256R1())
+        public_jwk = json.loads(
+            jwt.algorithms.ECAlgorithm.to_jwk(signing_key.public_key())
+        )
+    else:
+        signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_jwk = json.loads(
+            jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key())
+        )
+    public_jwk.update({"kid": KID, "use": "sig", "alg": algorithm})
+    token = jwt.encode(
+        _claims(), signing_key, algorithm=algorithm, headers={"kid": KID}
+    )
+
+    claims = _validate(_client(FakeTransport({"keys": [public_jwk]}, {})), token)
+
     assert claims["sub"] == "subject-abc-123"
 
 

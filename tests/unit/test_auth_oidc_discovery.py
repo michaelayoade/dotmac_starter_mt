@@ -36,12 +36,15 @@ class RecordingTransport:
         self.keys = keys if keys is not None else [{"kid": "k1", "kty": "RSA"}]
         self.discovery_fetches = 0
         self.jwks_fetches = 0
+        self.fail_jwks = False
 
     def get_json(self, url: str, *, timeout: float) -> dict[str, object]:
         if url.endswith("/.well-known/openid-configuration"):
             self.discovery_fetches += 1
             return dict(self.document)
         self.jwks_fetches += 1
+        if self.fail_jwks:
+            raise RuntimeError("provider unavailable")
         return {"keys": list(self.keys)}
 
     def post_form(self, url: str, **kwargs: Any) -> dict[str, object]:
@@ -219,6 +222,49 @@ def test_a_stream_of_unknown_kids_does_not_amplify_into_the_provider() -> None:
             cache.signing_key(f"random-{i}", now=100.0)
 
     assert transport.jwks_fetches == before, "each unknown kid cost a fetch"
+
+
+def test_a_failed_unknown_kid_refresh_is_rate_limited_by_attempt() -> None:
+    """A failed fetch must move the bound too.
+
+    Stamping only successful refreshes lets an unavailable provider be called
+    once for every hostile token, which is the amplifier the floor exists to
+    prevent.
+    """
+    transport = RecordingTransport()
+    cache = ProviderCache(ISSUER, transport=transport, jwks_min_refetch=60.0)
+    cache.signing_key("k1", now=100.0)
+    transport.fail_jwks = True
+
+    with pytest.raises(JWKSError):
+        cache.signing_key("rotated-1", now=200.0)
+    after_failure = transport.jwks_fetches
+    with pytest.raises(JWKSError):
+        cache.signing_key("rotated-2", now=201.0)
+
+    assert transport.jwks_fetches == after_failure
+
+
+def test_a_failed_unknown_kid_refresh_keeps_the_working_keys() -> None:
+    """A rotation fetch is additive until it succeeds.
+
+    A failed attempt for a new key must not turn a provider outage into the
+    invalidation of a known key that remains inside its cache TTL.
+    """
+    transport = RecordingTransport()
+    cache = ProviderCache(
+        ISSUER,
+        transport=transport,
+        jwks_ttl=3600.0,
+        jwks_min_refetch=60.0,
+    )
+    assert cache.signing_key("k1", now=100.0)["kid"] == "k1"
+    transport.fail_jwks = True
+
+    with pytest.raises(JWKSError):
+        cache.signing_key("rotated", now=200.0)
+
+    assert cache.signing_key("k1", now=201.0)["kid"] == "k1"
 
 
 # ── The redirect boundary ───────────────────────────────────────────────────
