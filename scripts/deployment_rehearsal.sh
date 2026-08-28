@@ -1293,6 +1293,24 @@ reset_compose_runtime() {
   "${COMPOSE[@]}" rm -sf app migrate >/dev/null 2>&1 || true
 }
 
+database_schema_fingerprint() {
+  # A gate-phase refusal must leave the scratch database's schema equivalent.
+  # Checking for one table is invalid after the ordered rehearsal has already
+  # migrated successfully. A real schema-only dump includes relations,
+  # columns, constraints, indexes, sequences and grants, so hashing it refuses
+  # subtler DDL than a relation-name census can see. PostgreSQL 16+ emits a
+  # fresh random token in the dump's `\restrict`/`\unrestrict` safety commands
+  # on every invocation. Those two psql commands protect replay; their nonce is
+  # not database state, so remove only those complete command lines before
+  # hashing.
+  "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" \
+    "${DB1_CONTAINER}" pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
+    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" \
+    --schema-only --no-owner --no-privileges \
+    | awk '$1 != "\\restrict" && $1 != "\\unrestrict"' \
+    | sha256sum | awk '{print $1}'
+}
+
 inject_wrong_image_digest() {
   local bogus="${IMAGE_REPOSITORY}@sha256:$(printf '0%.0s' $(seq 1 64))"
   if "${DOCKER_BIN}" image inspect "${bogus}" >/dev/null 2>&1; then
@@ -1324,18 +1342,23 @@ JSON
 
 inject_missing_migration_credentials() {
   reset_compose_runtime
+  local before after out
+  before="$(database_schema_fingerprint)"
   local rc=0
-  MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
+  out="$(MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
     -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" run --rm --no-deps migrate \
-    >/dev/null 2>&1 || rc=$?
-  local table_exists
-  table_exists="$("${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB1_CONTAINER}" \
-    psql -tAc "SELECT to_regclass('public.rehearsal_ledger') IS NOT NULL" \
-    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" 2>/dev/null | tr -d '[:space:]')"
-  if [ "${rc}" -ne 0 ] && [ "${table_exists}" != "t" ]; then
-    case_pass "missing-migration-credentials: compose refused (required var unset) before any DDL ran"
+    2>&1)" || rc=$?
+  after="$(database_schema_fingerprint)"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -q 'MIGRATION_DATABASE_URL' \
+      && [ "${before}" = "${after}" ]; then
+    case_pass "missing-migration-credentials: compose named the missing owner material and the complete schema fingerprint stayed unchanged"
   else
-    case_fail "missing-migration-credentials: rc=${rc} table_exists=${table_exists}"
+    local named_material schema_unchanged
+    named_material="$(printf '%s' "${out}" | grep -c 'MIGRATION_DATABASE_URL' || true)"
+    schema_unchanged=no
+    [ "${before}" = "${after}" ] && schema_unchanged=yes
+    case_fail "missing-migration-credentials: rc=${rc} named_material=${named_material} schema_unchanged=${schema_unchanged}"
   fi
 }
 
@@ -1366,8 +1389,9 @@ inject_migration_failure() {
   psql_super -c "ALTER DATABASE ${DB1_NAME} OWNER TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT USAGE ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT ALL ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
-  if [ "${rc}" -ne 0 ] && ! printf '%s' "${out}" | grep -qi 'lock'; then
-    case_pass "migration-failure: a genuine, non-lock-shaped permission failure stopped the migration"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -qi 'permission denied for schema public'; then
+    case_pass "migration-failure: a genuine schema-permission failure stopped the migration and is not classified from incidental SQL text"
   else
     case_fail "migration-failure: rc=${rc} out=${out}"
   fi
@@ -1389,7 +1413,8 @@ inject_migration_lock_contention() {
   local out
   out="$("${COMPOSE[@]}" run --rm --no-deps migrate 2>&1)" || rc=$?
   sleep 14  # let the holder's pg_sleep(15) release the lock
-  if [ "${rc}" -ne 0 ] && printf '%s' "${out}" | grep -qi 'lock'; then
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -qi 'canceling statement due to lock timeout'; then
     case_pass "migration-lock-contention: a real conflicting lock produced a real lock-timeout failure"
   else
     case_fail "migration-lock-contention: rc=${rc} out=${out}"
@@ -1410,9 +1435,18 @@ inject_missing_migration_head() {
 }
 
 inject_failed_backup() {
+  # Do not exec the client inside Postgres: the official image deliberately
+  # trusts its own loopback addresses, so even TCP to 127.0.0.1 accepts a bad
+  # password. Run pg_dump from the migration image across the Compose network;
+  # that reaches the server's scram-sha-256 host rule and makes this a real
+  # credential failure rather than a transport-only assertion.
   local rc=0
-  "${DOCKER_BIN}" exec -e PGPASSWORD="wrong-password-on-purpose" "${DB1_CONTAINER}" \
-    pg_dump -U "${DB_OWNER_USER}" -d "${DB1_NAME}" > "${WORK_DIR}/should_not_exist.sql.gz" 2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
+  "${COMPOSE[@]}" run --rm --no-deps \
+    -e PGPASSWORD="wrong-password-on-purpose" migrate \
+    pg_dump -h "${DB_SERVICE_NAME}" -p "${DB_PORT}" \
+      -U "${DB_OWNER_USER}" -d "${DB1_NAME}" \
+      > "${WORK_DIR}/should_not_exist.sql.gz" \
+      2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
   local size
   size="$(stat -f%z "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || stat -c%s "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || echo 0)"
   rm -f "${WORK_DIR}/should_not_exist.sql.gz"
@@ -1475,10 +1509,30 @@ inject_candidate_never_ready() {
 }
 
 inject_primary_fails_after_handoff() {
+  # Earlier credential/migration cases deliberately remove the runtime role.
+  # This case owns its precondition: restore one app container from the same
+  # deploying digest, re-arm the harness readiness marker, and prove it ready
+  # before injecting the post-handoff crash.
+  reset_compose_runtime
+  "${COMPOSE[@]}" up -d --no-deps app >/dev/null
   local cid
   cid="$("${COMPOSE[@]}" ps -q app)"
   if [ -z "${cid}" ]; then
     case_fail "primary-fails-after-handoff: no app container is running (run '$0 run' through step 8 first)"
+    return
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app liveness baseline" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"; then
+    case_fail "primary-fails-after-handoff: app did not reach its liveness baseline"
+    return
+  fi
+  "${DOCKER_BIN}" exec "${cid}" sh -c \
+    'mkdir -p /tmp && : > /tmp/rehearsal-ready'
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app readiness baseline" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = \"200\" ]"; then
+    case_fail "primary-fails-after-handoff: app did not reach its readiness baseline"
     return
   fi
   local before

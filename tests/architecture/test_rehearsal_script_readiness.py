@@ -395,3 +395,61 @@ def test_a_vanished_rule_is_not_treated_as_recovery() -> None:
         "`absent` must not count as recovery — a vanished rule is a broken "
         "rule file, not a healthy one"
     )
+
+
+# ── injection cases own and prove their preconditions ─────────────────────
+
+
+def _function(name: str) -> str:
+    match = re.search(
+        rf"^{re.escape(name)}\(\)[^\n]*\n(?:.*?\n)*?^}}", _code_only(), re.M
+    )
+    assert match, f"could not read {name}'s body"
+    return match.group(0)
+
+
+def test_missing_migration_material_compares_the_complete_schema_before_and_after() -> (
+    None
+):
+    case = _function("inject_missing_migration_credentials")
+    helper = _function("database_schema_fingerprint")
+    assert case.count("database_schema_fingerprint") == 2
+    assert "grep -q 'MIGRATION_DATABASE_URL'" in case
+    assert '"${before}" = "${after}"' in case
+    assert "to_regclass('public.rehearsal_ledger')" not in case
+    assert "pg_dump -h 127.0.0.1" in helper
+    assert "--schema-only --no-owner --no-privileges" in helper
+    assert '$1 != "\\\\restrict"' in helper
+    assert '$1 != "\\\\unrestrict"' in helper
+    assert "sha256sum" in helper
+
+
+def test_migration_cases_match_outcomes_not_incidental_lock_text() -> None:
+    failure = _function("inject_migration_failure")
+    contention = _function("inject_migration_lock_contention")
+    assert "permission denied for schema public" in failure
+    assert "grep -qi 'lock'" not in failure
+    assert "canceling statement due to lock timeout" in contention
+    assert "grep -qi 'lock'" not in contention
+
+
+def test_failed_backup_forces_password_authentication_across_the_compose_network() -> (
+    None
+):
+    case = _function("inject_failed_backup")
+    assert "wrong-password-on-purpose" in case
+    assert '"${COMPOSE[@]}" run --rm --no-deps' in case
+    assert 'pg_dump -h "${DB_SERVICE_NAME}"' in case
+    assert '"${DOCKER_BIN}" exec' not in case
+    assert '-p "${DB_PORT}"' in case
+
+
+def test_post_handoff_failure_case_establishes_its_own_ready_app() -> None:
+    case = _function("inject_primary_fails_after_handoff")
+    reset = case.find("reset_compose_runtime")
+    start = case.find("up -d --no-deps app")
+    marker = case.find(": > /tmp/rehearsal-ready")
+    ready = case.find("post-handoff app readiness baseline")
+    crash = case.find('kill "${cid}"')
+    assert -1 not in (reset, start, marker, ready, crash)
+    assert reset < start < marker < ready < crash

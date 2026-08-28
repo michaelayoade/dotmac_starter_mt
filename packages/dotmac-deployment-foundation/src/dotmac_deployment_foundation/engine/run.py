@@ -831,7 +831,6 @@ _LOCK_MARKERS: tuple[str, ...] = (
     "canceling statement due to lock",
     "could not obtain lock",
     "deadlock detected",
-    "lock_timeout",
 )
 
 
