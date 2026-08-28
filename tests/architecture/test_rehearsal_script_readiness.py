@@ -490,6 +490,8 @@ def test_previously_skipped_role_cases_drive_the_real_compose_effects() -> None:
     assert '"${candidate_digest}" = "${IMAGE_DIGEST}"' in candidate
     assert '"${candidate_digest}" = "${IMAGE_REFERENCE}"' not in candidate
     assert "primary_still_ready}" in candidate
+    assert 'http://127.0.0.1:${APP_PORT}/health/ready' in candidate
+    assert 'http://127.0.0.1:${APP_HOST_PORT}/health/ready' not in candidate
 
     worker = _function("inject_worker_unhealthy")
     assert "case_skip" not in worker

@@ -1883,7 +1883,7 @@ inject_candidate_never_ready() {
   local primary_after
   primary_after="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
   local primary_still_ready
-  primary_still_ready="$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready")"
+  primary_still_ready="$(http_status "http://127.0.0.1:${APP_PORT}/health/ready")"
   remove_container "${candidate_name}"
 
   # Effects returns the canonical digest, not the repository-qualified image
