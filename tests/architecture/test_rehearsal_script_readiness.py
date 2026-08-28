@@ -329,3 +329,69 @@ def test_no_wait_loop_hardcodes_its_bound() -> None:
     code = _code_only()
     literal_loops = re.findall(r'while \[ "\$\{waited\}" -lt (\d+) \]', code)
     assert not literal_loops, f"hardcoded loop bound(s) {literal_loops}: use a knob"
+
+
+# ── alert state is parsed, not grepped ──────────────────────────────────────
+
+
+def test_alert_state_is_read_from_the_rule_not_an_alert_instance() -> None:
+    """`alertname` lives in `alerts[]`, which is EMPTY once the alert recovers.
+
+    The original recovery condition required `"alertname":"RehearsalTargetDown"`
+    to still be present AND not firing. On recovery Prometheus removes the
+    instance, so the first half is false forever: step 13 was not slow, it was
+    unsatisfiable, and reported `recovered=0` on every run that reached it.
+
+    Confirmed against a real Prometheus (v2.54.1, isolated bridge network):
+
+        firing     -> rule state "firing",   1 instance,  alertname present
+        recovered  -> rule state "inactive", 0 instances, alertname ABSENT
+    """
+    code = _code_only()
+    assert (
+        "prom_rule_state()" in code
+    ), "alert state must be read through a helper that parses the rules API"
+    assert 'grep -q \'"alertname"' not in code, (
+        "alert state must not be decided by grepping for an alert instance's "
+        "labels — they are gone exactly when recovery is what you are testing"
+    )
+
+
+def test_the_rules_api_is_parsed_as_json_not_matched_with_a_greedy_regex() -> None:
+    """`"alertname":"X".*"state":"firing"` spans a single-line JSON document.
+
+    The `.*` can match `X` in one rule and `firing` from a DIFFERENT rule
+    further along. It was only ever correct here because this Prometheus
+    evaluates exactly one rule — an accident, not a property.
+    """
+    code = _code_only()
+    assert '.*"state":"firing"' not in code, (
+        "a greedy match across the rules document can pair one rule's name "
+        "with another rule's state"
+    )
+    helper = re.search(r"prom_rule_state\(\)[^\n]*\n(?:.*?\n)*?^}", code, re.M)
+    assert helper, "prom_rule_state must exist"
+    assert "json" in helper.group(0), "the helper must parse JSON"
+
+
+def test_a_vanished_rule_is_not_treated_as_recovery() -> None:
+    """A rule that disappeared means the rule file stopped loading.
+
+    That is a failure wearing recovery's clothes, so `absent` must not satisfy
+    the recovery condition.
+    """
+    code = _code_only()
+    recovery = re.search(
+        r'while \[ "\$\{waited\}" -lt "\$\{WAIT_ALERT_RECOVER_SECONDS\}" \]'
+        r"[^\n]*\n(?:.*?\n)*?^  done",
+        code,
+        re.M,
+    )
+    assert recovery, "could not locate the recovery loop"
+    assert '= "inactive"' in recovery.group(
+        0
+    ), "recovery must require the rule to be INACTIVE specifically"
+    assert "absent" not in recovery.group(0), (
+        "`absent` must not count as recovery — a vanished rule is a broken "
+        "rule file, not a healthy one"
+    )
