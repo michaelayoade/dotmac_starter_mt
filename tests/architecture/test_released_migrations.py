@@ -248,6 +248,9 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-commercial-agreements"
         / "src/dotmac_commercial_agreements/migrations/versions"
     ),
+    "dotmac-people": (
+        REPO_ROOT / "packages/dotmac-people" / "src/dotmac_people/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -285,6 +288,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-services": "se_*.py",
     "dotmac-template-studio": "ts_*.py",
     "dotmac-commercial-agreements": "cg_*.py",
+    "dotmac-people": "pe_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -319,6 +323,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-services": "dotmac-services-v",
     "dotmac-template-studio": "dotmac-template-studio-v",
     "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
+    "dotmac-people": "dotmac-people-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1446,6 +1451,25 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-people ──
+    "dotmac-people-v0.1.0a2": (
+        "dotmac-people",
+        "636a97f95a2648e5f10a6e945578630a7499a989",
+        {
+            "pe_0001_people_directory.py": (
+                "ce988433dc698af381ff8b9968ed127b9d3090d373c6b6c12115759113e6ec7f"
+            ),
+        },
+    ),
+    "dotmac-people-v0.1.0a1": (
+        "dotmac-people",
+        "459569afdc6df6b78357d10277cee15820142fc9",
+        {
+            "pe_0001_people_directory.py": (
+                "ce988433dc698af381ff8b9968ed127b9d3090d373c6b6c12115759113e6ec7f"
+            ),
+        },
+    ),
 }
 
 
@@ -1541,6 +1565,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
+    "dotmac-people": frozenset(),
 }
 
 
