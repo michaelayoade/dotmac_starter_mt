@@ -430,6 +430,8 @@ def test_missing_migration_material_compares_the_complete_schema_before_and_afte
     assert "to_regclass('public.rehearsal_ledger')" not in case
     assert "pg_dump -h 127.0.0.1" in helper
     assert "--schema-only --no-owner --no-privileges" in helper
+    assert '$1 != "\\\\restrict"' in helper
+    assert '$1 != "\\\\unrestrict"' in helper
     assert "sha256sum" in helper
 
 

@@ -1352,11 +1352,17 @@ database_schema_fingerprint() {
   # Checking for one table is invalid after the ordered rehearsal has already
   # migrated successfully. A real schema-only dump includes relations,
   # columns, constraints, indexes, sequences and grants, so hashing it refuses
-  # subtler DDL than a relation-name census can see.
+  # subtler DDL than a relation-name census can see. PostgreSQL 16.15 emits a
+  # fresh random token in the dump's `\restrict`/`\unrestrict` safety commands
+  # on every invocation. Those two psql commands protect replay; their nonce is
+  # not database state, so remove only those complete command lines before
+  # hashing. Without this normalization two consecutive dumps of an untouched
+  # database always disagree and the no-DDL proof can never pass.
   "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" \
     "${DB1_CONTAINER}" pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
     -U "${DB_SUPERUSER}" -d "${DB1_NAME}" \
     --schema-only --no-owner --no-privileges \
+    | awk '$1 != "\\restrict" && $1 != "\\unrestrict"' \
     | sha256sum | awk '{print $1}'
 }
 
