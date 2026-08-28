@@ -507,9 +507,11 @@ def test_ordered_switch_proves_the_rendered_nginx_handoff_on_a_real_parser() -> 
     assert "nginx_identity_is candidate" in proof
     assert "nginx -T" in proof
     assert "server 127.0.0.1:18001 backup" in proof
-    assert proof.find("nginx_identity_is primary") < proof.find(
-        'stop "${primary}"'
-    ) < proof.find("nginx_identity_is candidate")
+    assert (
+        proof.find("nginx_identity_is primary")
+        < proof.find('stop "${primary}"')
+        < proof.find("nginx_identity_is candidate")
+    )
 
 
 def test_invalid_nginx_case_is_a_real_parser_refusal_not_a_skip() -> None:
