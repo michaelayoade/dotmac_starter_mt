@@ -79,7 +79,7 @@ that product's host engine versions here and re-run the parse against them.
 | the descriptor parses, refuses what it says it refuses | `ProductDeploymentSpec` exercised directly | `test_deployment_foundation_*`, run on Observer |
 | the plan's gate half mutates nothing | `first_mutating_index` vs the step list | `test_deployment_foundation_failure_injection.py` |
 | twenty failure cases refuse at the right step | fake `Effects`, one knob per test | same file |
-| the image audit fires on a planted image | driven against planted `docker inspect` JSON — nine violations, including the build-context rule whose prefix-matching bug this found | `image/audit.py` |
+| the image audit accepts a conforming image and every declared rule fires on its own planted defect | `audit_image` is driven directly against inspect, history and filesystem fixtures; the workflow collector is executed with a fake Docker boundary to prove its inspection-only root override and explicit refusal on a partial walk | `test_deployment_foundation_image_audit.py`, `test_deployment_image_audit_collector.py` |
 | `render --check` fails on a one-line hand-edit | run on Observer against all four descriptors | `deploy/rendered` |
 | drift reports DRIFT, UNKNOWN and MATCH apart, with the right exit codes | planted observations, run on Observer | `drift.py` |
 | the facility imports no kernel, ORM or web framework | AST guard with planted-defect proofs | `test_deployment_foundation_facility.py` |

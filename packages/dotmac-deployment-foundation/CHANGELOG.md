@@ -1,6 +1,15 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.2.0a1 — unreleased
+## 0.2.0a2 — unreleased
+
+Make the strict image-audit filesystem collector run as an inspection-only
+uid/gid 0 while continuing to validate the image's configured runtime
+`Config.User` as numeric and non-root. A failed filesystem walk now refuses
+the gate explicitly and preserves its partial output and diagnostics instead
+of truncating the listing to empty evidence. Add executable negative controls
+and one planted failure for every hardened-image rule.
+
+## 0.2.0a1 — 2026-08-28
 
 Normalize the Nginx renderer to exactly one trailing newline. The first ERP
 adopter proved that `end-of-file-fixer` rewrites the 0.1 output while

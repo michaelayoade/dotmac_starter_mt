@@ -152,7 +152,11 @@ def rule_non_root(inspect: Mapping[str, Any]) -> list[Finding]:
     image that only behaves when deployed carefully is an image that will
     eventually be deployed carelessly.
 
-    The UID is required to be NUMERIC and non-zero. A named user is resolved
+    The UID is required to be NUMERIC and non-zero. The reusable workflow may
+    override the user to uid/gid 0 for its one-shot filesystem INSPECTION; that
+    does not weaken this rule, because the rule reads the image's configured
+    ``Config.User`` from inspect rather than the collector process's identity.
+    A named user is resolved
     against the image's own `/etc/passwd`, so a `USER app` whose entry was
     dropped in a later layer silently becomes root again, and a numeric uid also
     lets a host map volume ownership without introspecting the image.
@@ -410,7 +414,9 @@ def audit_image(
 
     ``inspect`` is what `docker image inspect` produces, ``history`` the
     `CreatedBy` strings from `docker history --no-trunc`, and ``layers`` a
-    filesystem listing when one is available.
+    complete filesystem listing collected as inspection evidence. The
+    collector's privilege is deliberately independent of the configured
+    runtime user, which this function audits from ``inspect``.
 
     Nothing here talks to a daemon, which is the point: this function is
     exercised by unit tests with planted violations, so each rule has a
