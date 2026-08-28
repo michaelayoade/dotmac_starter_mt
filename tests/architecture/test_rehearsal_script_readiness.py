@@ -502,7 +502,12 @@ def test_ordered_switch_proves_the_rendered_nginx_handoff_on_a_real_parser() -> 
     assert "prove_nginx_handoff" in step
     assert '"${NGINX_IMAGE}" nginx -t' in parser
     assert "effects_probe start-candidate" in proof
-    assert "effects_probe candidate-ready" in proof
+    assert "effects_candidate_ready" in proof
+    assert "effects_probe candidate-ready" in _function("effects_candidate_ready")
+    assert "the Nginx candidate readiness premise" in proof
+    assert proof.find(": > /tmp/rehearsal-ready") < proof.find(
+        "effects_candidate_ready"
+    )
     assert "nginx_identity_is primary" in proof
     assert "nginx_identity_is candidate" in proof
     assert "nginx -T" in proof

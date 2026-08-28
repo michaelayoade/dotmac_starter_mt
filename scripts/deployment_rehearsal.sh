@@ -1515,6 +1515,10 @@ PYEOF
   )
 }
 
+effects_candidate_ready() {
+  [ "$(effects_probe candidate-ready)" = true ]
+}
+
 NGINX_CERT_ROOT=""
 NGINX_SITE=""
 
@@ -1605,10 +1609,14 @@ prove_nginx_handoff() {
         'printf candidate > /tmp/rehearsal-instance; : > /tmp/rehearsal-ready'
     fi
   fi
+  if [ "${failed}" -eq 0 ] && [ "${candidate_digest}" != "${IMAGE_DIGEST}" ]; then
+    log "  Nginx handoff: candidate runs ${candidate_digest}, expected ${IMAGE_DIGEST}"
+    failed=1
+  fi
   if [ "${failed}" -eq 0 ] \
-      && { [ "${candidate_digest}" != "${IMAGE_DIGEST}" ] \
-        || [ "$(effects_probe candidate-ready)" != true ]; }; then
-    log "  Nginx handoff: candidate digest/readiness premise failed"
+      && ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${candidate_name}" \
+        "the Nginx candidate readiness premise" \
+        effects_candidate_ready; then
     failed=1
   fi
   if [ "${failed}" -eq 0 ]; then
