@@ -375,6 +375,8 @@ class ComposeHostEffects:
         return [
             self._docker_bin,
             "compose",
+            "--project-name",
+            self._spec.product,
             "--project-directory",
             str(self._deploy_dir),
             "--env-file",
