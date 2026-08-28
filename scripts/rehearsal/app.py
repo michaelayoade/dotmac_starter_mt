@@ -65,9 +65,21 @@ SCHEDULER_PAUSE = os.environ.get(
     "SCHEDULER_PAUSE",
     "/tmp/rehearsal-scheduler-paused",  # noqa: S108
 )
+IDENTITY_MARKER = os.environ.get(
+    "IDENTITY_MARKER",
+    "/tmp/rehearsal-instance",  # noqa: S108
+)
 PORT = int(os.environ.get("PORT", "8000"))
 SCHEMA_HEAD = os.environ.get("SCHEMA_HEAD", "0001")
 LOCK_TIMEOUT = os.environ.get("MIGRATE_LOCK_TIMEOUT", "5s")
+
+
+def instance_identity() -> str:
+    try:
+        with open(IDENTITY_MARKER, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except FileNotFoundError:
+        return "unknown"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -112,6 +124,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if self.path == "/identity":
+            self._respond_json(200, {"identity": instance_identity()})
             return
         self._respond_json(404, {"error": "not found"})
 

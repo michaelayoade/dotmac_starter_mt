@@ -455,6 +455,11 @@ def test_post_handoff_failure_case_establishes_its_own_ready_app() -> None:
     crash = case.find('kill "${cid}"')
     assert -1 not in (reset, start, marker, healthy, crash)
     assert reset < start < marker < healthy < crash
+    transition = _function("container_stopped_or_restarted")
+    assert "{{.State.Running}}" in transition
+    assert "{{.RestartCount}}" in transition
+    assert "container_stopped_or_restarted" in case
+    assert "remained stopped" in case
 
 
 def test_previously_skipped_role_cases_drive_the_real_compose_effects() -> None:
@@ -487,3 +492,30 @@ def test_previously_skipped_role_cases_drive_the_real_compose_effects() -> None:
     assert scheduler.count("effects_probe scheduler-age") == 2
     assert "--scheduler-make-stale" in scheduler
     assert 'container_running "${cid}"' in scheduler
+
+
+def test_ordered_switch_proves_the_rendered_nginx_handoff_on_a_real_parser() -> None:
+    step = _function("run_step_8_switch_and_verify")
+    proof = _function("prove_nginx_handoff")
+    parser = _function("nginx_config_accepted")
+
+    assert "prove_nginx_handoff" in step
+    assert '"${NGINX_IMAGE}" nginx -t' in parser
+    assert "effects_probe start-candidate" in proof
+    assert "effects_probe candidate-ready" in proof
+    assert "nginx_identity_is primary" in proof
+    assert "nginx_identity_is candidate" in proof
+    assert "nginx -T" in proof
+    assert "server 127.0.0.1:18001 backup" in proof
+    assert proof.find("nginx_identity_is primary") < proof.find(
+        'stop "${primary}"'
+    ) < proof.find("nginx_identity_is candidate")
+
+
+def test_invalid_nginx_case_is_a_real_parser_refusal_not_a_skip() -> None:
+    case = _function("inject_invalid_nginx_configuration")
+    assert "case_skip" not in case
+    assert "this_is_not_a_valid_nginx_directive" in case
+    assert '"${NGINX_IMAGE}" nginx -t' in case
+    assert "unknown directive" in case
+    assert "invalid-nginx-configuration) inject_invalid_nginx_configuration" in SCRIPT

@@ -57,3 +57,16 @@ def test_scheduler_probe_changes_from_fresh_to_stale_without_stopping_the_role(
     assert rehearsal_app.cmd_scheduler_make_stale() == 0
     assert pause.is_file()
     assert tick.read_text(encoding="utf-8") == "400"
+
+
+def test_identity_marker_is_a_distinct_runtime_subject(
+    rehearsal_app: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "identity"
+    monkeypatch.setattr(rehearsal_app, "IDENTITY_MARKER", str(marker))
+
+    assert rehearsal_app.instance_identity() == "unknown"
+    marker.write_text("primary", encoding="utf-8")
+    assert rehearsal_app.instance_identity() == "primary"
+    marker.write_text("candidate", encoding="utf-8")
+    assert rehearsal_app.instance_identity() == "candidate"

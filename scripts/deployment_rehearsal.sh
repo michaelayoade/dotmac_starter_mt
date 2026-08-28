@@ -172,6 +172,13 @@ readonly PROM_RULE_NAME="RehearsalTargetDown"
 readonly PROM_SCRAPE_URL="http://app:${APP_PORT}/metrics"
 readonly PROM_PROBE="${REHEARSAL_DIR}/prometheus_probe.py"
 
+# ── knobs: the real Nginx parser and handoff subject ────────────────────────
+
+: "${NGINX_IMAGE:=nginx:1.27-alpine}"
+: "${NGINX_CONTAINER:=dotmac-deployment-rehearsal-nginx}"
+: "${WAIT_NGINX_TIMEOUT_SECONDS:=30}"
+readonly NGINX_REHEARSAL_HOST="rehearsal.invalid"
+
 # ── knobs: exit-code policy ───────────────────────────────────────────────────
 
 : "${ALLOW_SKIPS:=0}"     # 1 = a skipped case does not fail the overall run
@@ -261,6 +268,7 @@ verify_disposable_targets() {
   require_disposable_name "REGISTRY_CONTAINER" "${REGISTRY_CONTAINER}"
   require_disposable_name "OTEL_COLLECTOR_CONTAINER" "${OTEL_COLLECTOR_CONTAINER}"
   require_disposable_name "PROM_CONTAINER" "${PROM_CONTAINER}"
+  require_disposable_name "NGINX_CONTAINER" "${NGINX_CONTAINER}"
 }
 
 # ── small utilities ───────────────────────────────────────────────────────────
@@ -279,6 +287,15 @@ container_healthy() {
   local state
   state="$("${DOCKER_BIN}" inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo unknown)"
   [ "${state}" = "healthy" ]
+}
+
+container_stopped_or_restarted() {
+  local container="$1"
+  local previous_restarts="$2"
+  local running restarts
+  running="$("${DOCKER_BIN}" inspect -f '{{.State.Running}}' "${container}" 2>/dev/null || echo false)"
+  restarts="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${container}" 2>/dev/null || echo -1)"
+  [ "${running}" != true ] || [ "${restarts}" != "${previous_restarts}" ]
 }
 
 remove_container() {
@@ -863,12 +880,17 @@ run_step_8_switch_and_verify() {
   digest="$("${DOCKER_BIN}" inspect -f '{{index .Config.Image}}' "${cid}")"
   restarts="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}")"
 
-  if [ "${running}" = "true" ] && [ "${digest}" = "${IMAGE_REFERENCE}" ] && [ "${restarts}" = "0" ]; then
-    step_pass "the app role runs the one deploying digest with zero restarts"
-  else
+  if [ "${running}" != "true" ] || [ "${digest}" != "${IMAGE_REFERENCE}" ] \
+      || [ "${restarts}" != "0" ]; then
     step_fail "switch + verify roles" "running=${running} digest=${digest} restarts=${restarts} (expected ${IMAGE_REFERENCE})"
     return 1
   fi
+  if ! prove_nginx_handoff; then
+    step_fail "Nginx handoff" \
+      "the real parser, live config and primary-to-candidate failover did not all pass"
+    return 1
+  fi
+  step_pass "every role runs the one digest with zero restarts; real Nginx parsed the rendered site and promoted the ready candidate when primary stopped"
 }
 
 run_step_9_drift() {
@@ -1329,6 +1351,7 @@ ALL_CASES=(
   primary-fails-after-handoff
   worker-unhealthy
   scheduler-stale
+  invalid-nginx-configuration
   telemetry-collector-unavailable
   secrets-unavailable
   untracked-override
@@ -1379,6 +1402,12 @@ prepare_effects_fixture() {
   EFFECTS_DESCRIPTOR="${WORK_DIR}/effects-product.toml"
   EFFECTS_COMPOSE_FILE="${WORK_DIR}/effects-rendered/docker-compose.yml"
   cp "${DESCRIPTOR}" "${EFFECTS_DESCRIPTOR}"
+  # The derived ingress fixture publishes the same loopback port its Nginx
+  # upstream names. The ordered HTTP-only fixture keeps its high host port.
+  local rewritten="${EFFECTS_DESCRIPTOR}.tmp"
+  sed -E "s/^host = [0-9]+$/host = ${APP_PORT}/" \
+    "${EFFECTS_DESCRIPTOR}" > "${rewritten}"
+  mv "${rewritten}" "${EFFECTS_DESCRIPTOR}"
   cat >> "${EFFECTS_DESCRIPTOR}" <<'TOML'
 
 [ingress]
@@ -1484,6 +1513,143 @@ else:
     raise SystemExit(f"unknown effects probe: {action}")
 PYEOF
   )
+}
+
+NGINX_CERT_ROOT=""
+NGINX_SITE=""
+
+prepare_nginx_files() {
+  NGINX_CERT_ROOT="${WORK_DIR}/nginx-certs"
+  NGINX_SITE="${WORK_DIR}/effects-rendered/nginx/${NGINX_REHEARSAL_HOST}.conf"
+  local cert_dir="${NGINX_CERT_ROOT}/${NGINX_REHEARSAL_HOST}"
+  mkdir -p "${cert_dir}"
+  if [ ! -s "${cert_dir}/fullchain.pem" ] || [ ! -s "${cert_dir}/privkey.pem" ]; then
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+      -subj "/CN=${NGINX_REHEARSAL_HOST}" \
+      -keyout "${cert_dir}/privkey.pem" \
+      -out "${cert_dir}/fullchain.pem" >/dev/null 2>&1
+  fi
+  [ -s "${NGINX_SITE}" ]
+}
+
+nginx_config_accepted() {
+  local site="$1"
+  "${DOCKER_BIN}" run --rm --network host \
+    -v "${site}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" nginx -t >/dev/null 2>&1
+}
+
+start_nginx_harness() {
+  remove_container "${NGINX_CONTAINER}"
+  "${DOCKER_BIN}" run -d --name "${NGINX_CONTAINER}" --network host \
+    -v "${NGINX_SITE}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" >/dev/null
+  wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+    "the real Nginx process to remain running" \
+    container_running "${NGINX_CONTAINER}"
+}
+
+nginx_identity_is() {
+  local expected="$1"
+  local body
+  body="$(curl --noproxy '*' -sk --max-time 3 \
+    --resolve "${NGINX_REHEARSAL_HOST}:443:127.0.0.1" \
+    "https://${NGINX_REHEARSAL_HOST}/identity" 2>/dev/null || true)"
+  printf '%s' "${body}" | grep -q "\"identity\": \"${expected}\""
+}
+
+restore_ordered_app() {
+  "${EFFECTS_COMPOSE[@]}" rm -sf app >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" up -d app >/dev/null
+  local cid
+  cid="$("${COMPOSE[@]}" ps -q app)"
+  [ -n "${cid}" ] || return 1
+  "${DOCKER_BIN}" exec "${cid}" sh -c ': > /tmp/rehearsal-ready'
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "the ordered app to be ready after the Nginx proof" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = 200 ]"
+}
+
+prove_nginx_handoff() {
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf app >/dev/null 2>&1 || true
+  remove_container "${NGINX_CONTAINER}"
+  local candidate_name="${REHEARSAL_PRODUCT}_app_candidate"
+  remove_container "${candidate_name}"
+
+  local failed=0
+  local primary=""
+  local candidate_digest=""
+  if ! "${EFFECTS_COMPOSE[@]}" up -d --no-deps app >/dev/null; then
+    log "  Nginx handoff: primary failed to start"
+    failed=1
+  else
+    primary="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    "${DOCKER_BIN}" exec "${primary}" sh -c \
+      'printf primary > /tmp/rehearsal-instance; : > /tmp/rehearsal-ready'
+    if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${primary}" \
+        "the Nginx primary premise" container_healthy "${primary}"; then
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    if ! candidate_digest="$(effects_probe start-candidate)"; then
+      log "  Nginx handoff: candidate failed to start"
+      failed=1
+    else
+      "${DOCKER_BIN}" exec "${candidate_name}" sh -c \
+        'printf candidate > /tmp/rehearsal-instance; : > /tmp/rehearsal-ready'
+    fi
+  fi
+  if [ "${failed}" -eq 0 ] \
+      && { [ "${candidate_digest}" != "${IMAGE_DIGEST}" ] \
+        || [ "$(effects_probe candidate-ready)" != true ]; }; then
+    log "  Nginx handoff: candidate digest/readiness premise failed"
+    failed=1
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    if ! prepare_nginx_files || ! nginx_config_accepted "${NGINX_SITE}"; then
+      log "  Nginx handoff: the real parser rejected the rendered site"
+      failed=1
+    elif ! start_nginx_harness; then
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ] \
+      && ! wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+        "Nginx to serve the primary" nginx_identity_is primary; then
+    failed=1
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    local live_config
+    live_config="$("${DOCKER_BIN}" exec "${NGINX_CONTAINER}" nginx -T 2>&1 || true)"
+    if ! printf '%s' "${live_config}" \
+        | grep -q "upstream ${REHEARSAL_PRODUCT}_app" \
+      || ! printf '%s' "${live_config}" \
+        | grep -q 'server 127.0.0.1:18001 backup'; then
+      log "  Nginx handoff: live config omits the candidate contract"
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    "${DOCKER_BIN}" stop "${primary}" >/dev/null
+    if ! wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+        "Nginx to promote the ready backup" nginx_identity_is candidate; then
+      failed=1
+    fi
+  fi
+
+  remove_container "${NGINX_CONTAINER}"
+  remove_container "${candidate_name}"
+  if ! restore_ordered_app; then
+    log "  Nginx handoff: ordered app was not restored after the proof"
+    failed=1
+  fi
+  [ "${failed}" -eq 0 ]
 }
 
 inject_wrong_image_digest() {
@@ -1759,15 +1925,18 @@ inject_primary_fails_after_handoff() {
   # point and a timeout is a legitimate answer rather than a failure to
   # diagnose. Still a knob, because everything is (AGENTS.md).
   observe_for "${WAIT_RESTART_OBSERVATION_SECONDS}" \
-    "the crashed role to be observed restarting" \
-    bash -c "[ \"\$(\"${DOCKER_BIN}\" inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
+    "the crashed role to be observed stopped or restarting" \
+    container_stopped_or_restarted "${cid}" "${before}" \
     || true
-  local after
+  local after running
   after="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo "${before}")"
-  if [ "${after}" != "${before}" ] || ! container_running "${cid}"; then
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  if [ "${after}" != "${before}" ]; then
     case_pass "primary-fails-after-handoff: the killed role's restart count changed (${before} -> ${after}) — a real verify_roles-style check catches this"
+  elif [ "${running}" = no ]; then
+    case_pass "primary-fails-after-handoff: the killed role remained stopped with restart count ${after} — a real verify_roles-style running check catches this"
   else
-    case_fail "primary-fails-after-handoff: restart count did not change (${before})"
+    case_fail "primary-fails-after-handoff: role still running and restart count did not change (${before})"
   fi
 }
 
@@ -1820,6 +1989,26 @@ inject_scheduler_stale() {
     case_pass "scheduler-stale: the real tick probe was fresh, then exceeded its declared budget while the same container remained running"
   else
     case_fail "scheduler-stale: age_before=${before} age_after=${after} running=${running}"
+  fi
+}
+
+inject_invalid_nginx_configuration() {
+  prepare_effects_fixture
+  prepare_nginx_files
+  local broken="${WORK_DIR}/invalid-nginx.conf"
+  cp "${NGINX_SITE}" "${broken}"
+  printf '\nthis_is_not_a_valid_nginx_directive;\n' >> "${broken}"
+  local rc=0
+  local out
+  out="$("${DOCKER_BIN}" run --rm --network host \
+    -v "${broken}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" nginx -t 2>&1)" || rc=$?
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -q 'unknown directive'; then
+    case_pass "invalid-nginx-configuration: the real Nginx parser rejected a planted unknown directive before any live config changed"
+  else
+    case_fail "invalid-nginx-configuration: rc=${rc} out=${out}"
   fi
 }
 
@@ -1964,6 +2153,7 @@ cmd_inject() {
     primary-fails-after-handoff) inject_primary_fails_after_handoff ;;
     worker-unhealthy) inject_worker_unhealthy ;;
     scheduler-stale) inject_scheduler_stale ;;
+    invalid-nginx-configuration) inject_invalid_nginx_configuration ;;
     telemetry-collector-unavailable) inject_telemetry_collector_unavailable ;;
     secrets-unavailable) inject_secrets_unavailable ;;
     untracked-override) inject_untracked_override ;;
@@ -1996,7 +2186,7 @@ cmd_down() {
   fi
 
   for name in "${DB2_CONTAINER}" "${OTEL_COLLECTOR_CONTAINER}" "${PROM_CONTAINER}" \
-              "${REGISTRY_CONTAINER}"; do
+              "${NGINX_CONTAINER}" "${REGISTRY_CONTAINER}"; do
     remove_container "${name}"
   done
   if [ -n "${DB1_CONTAINER}" ]; then
