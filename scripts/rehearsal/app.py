@@ -54,13 +54,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 READY_MARKER = os.environ.get("READY_MARKER", "/tmp/rehearsal-ready")  # noqa: S108
 WORKER_MARKER = os.environ.get(
-    "WORKER_MARKER", "/tmp/rehearsal-worker-healthy"  # noqa: S108
+    "WORKER_MARKER",
+    "/tmp/rehearsal-worker-healthy",  # noqa: S108
 )
 SCHEDULER_TICK = os.environ.get(
-    "SCHEDULER_TICK", "/tmp/rehearsal-scheduler-tick"  # noqa: S108
+    "SCHEDULER_TICK",
+    "/tmp/rehearsal-scheduler-tick",  # noqa: S108
 )
 SCHEDULER_PAUSE = os.environ.get(
-    "SCHEDULER_PAUSE", "/tmp/rehearsal-scheduler-paused"  # noqa: S108
+    "SCHEDULER_PAUSE",
+    "/tmp/rehearsal-scheduler-paused",  # noqa: S108
 )
 PORT = int(os.environ.get("PORT", "8000"))
 SCHEMA_HEAD = os.environ.get("SCHEMA_HEAD", "0001")
