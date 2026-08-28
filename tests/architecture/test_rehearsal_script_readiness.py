@@ -41,10 +41,20 @@ import re
 SCRIPT = (
     pathlib.Path(__file__).resolve().parents[2] / "scripts" / "deployment_rehearsal.sh"
 )
+DOCKERFILE = SCRIPT.parent / "rehearsal" / "Dockerfile"
 
 
 def _body() -> str:
     return SCRIPT.read_text()
+
+
+def test_revision_metadata_does_not_invalidate_the_dependency_layer() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    dependency = dockerfile.find("apt-get install")
+    revision = dockerfile.find("ARG REVISION")
+    copy = dockerfile.find("COPY app.py")
+    assert -1 not in (dependency, revision, copy)
+    assert dependency < revision < copy
 
 
 def _code_only() -> str:

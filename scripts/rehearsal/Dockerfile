@@ -27,14 +27,6 @@
 
 FROM python:3.13-slim
 
-ARG REVISION=0000000000000000000000000000000000000000
-ARG SOURCE=https://github.com/michaelayoade/dotmac_starter_mt
-ARG VERSION=0.0.0-rehearsal
-
-LABEL org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.source="${SOURCE}" \
-      org.opencontainers.image.version="${VERSION}"
-
 # `postgresql-client` is a genuine runtime dependency — the migration and
 # head-reading modes of app.py shell out to `psql` — not build tooling.
 # Nothing here compiles anything, so there is no builder stage to leak: a
@@ -53,6 +45,18 @@ RUN groupadd --gid 10001 rehearsal \
        --shell /usr/sbin/nologin rehearsal \
     && mkdir -p /app \
     && chown -R 10001:10001 /app
+
+# Revision metadata changes on every exact-SHA run. Declare it only after the
+# dependency and user layers so a new commit does not invalidate apt and force
+# the same runtime dependencies to be downloaded again. The final image still
+# carries the exact labels the audit verifies; only cache authority changes.
+ARG REVISION=0000000000000000000000000000000000000000
+ARG SOURCE=https://github.com/michaelayoade/dotmac_starter_mt
+ARG VERSION=0.0.0-rehearsal
+
+LABEL org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.version="${VERSION}"
 
 WORKDIR /app
 COPY app.py /app/app.py
