@@ -713,6 +713,13 @@ def test_rendering_the_same_spec_twice_produces_identical_bytes(
     assert render_nginx(spec) == render_nginx(spec)
 
 
+def test_rendered_nginx_has_exactly_one_trailing_newline(rendered: str) -> None:
+    """Generated files must survive end-of-file-fixer byte-for-byte."""
+
+    assert rendered.endswith("\n")
+    assert not rendered.endswith("\n\n")
+
+
 def test_the_digest_is_the_sha256_of_the_rendered_bytes(
     spec: ProductDeploymentSpec, rendered: str
 ) -> None:

@@ -474,7 +474,6 @@ def _render_https_server(spec: ProductDeploymentSpec) -> list[str]:
     lines.append("        log_not_found off;")
     lines.append("    }")
     lines.append("}")
-    lines.append("")
     return lines
 
 
