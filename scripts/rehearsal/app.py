@@ -9,7 +9,7 @@ of the fourteen ordered rehearsal steps in
 `docs/inventories/deployment-foundation-rehearsal.md` needs it to be true
 against real bytes, not asserted against a fake.
 
-Three modes, selected by argv (never by inspecting the environment — the
+Modes are selected by argv (never by inspecting the environment — the
 compose `command:` array in `scripts/rehearsal/product.toml` says explicitly
 which one runs, the same way `deploy/product.toml` does for the real app):
 
@@ -30,6 +30,12 @@ which one runs, the same way `deploy/product.toml` does for the real app):
   `ComposeHostEffects._parse_heads` already tolerates from real Alembic
   output, so the rehearsal's head-comparison logic exercises the identical
   parsing path.
+- `--worker` / `--worker-ping` — a long-lived custom worker plus the declared
+  in-container ping that proves it is doing more than merely running.
+- `--scheduler` / `--scheduler-last-tick` — a long-lived scheduler that writes
+  a successful-tick timestamp plus the declared command that reads it. The
+  `*-make-unhealthy`/`*-make-stale` modes are injection-only controls used to
+  break those premises while leaving the role processes running.
 
 No third-party dependency. `psql` (the `postgresql-client` package) is the
 only thing this image needs beyond the stdlib, and it is a genuine runtime
@@ -43,12 +49,37 @@ import json
 import os
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 READY_MARKER = os.environ.get("READY_MARKER", "/tmp/rehearsal-ready")  # noqa: S108
+WORKER_MARKER = os.environ.get(
+    "WORKER_MARKER",
+    "/tmp/rehearsal-worker-healthy",  # noqa: S108
+)
+SCHEDULER_TICK = os.environ.get(
+    "SCHEDULER_TICK",
+    "/tmp/rehearsal-scheduler-tick",  # noqa: S108
+)
+SCHEDULER_PAUSE = os.environ.get(
+    "SCHEDULER_PAUSE",
+    "/tmp/rehearsal-scheduler-paused",  # noqa: S108
+)
+IDENTITY_MARKER = os.environ.get(
+    "IDENTITY_MARKER",
+    "/tmp/rehearsal-instance",  # noqa: S108
+)
 PORT = int(os.environ.get("PORT", "8000"))
 SCHEMA_HEAD = os.environ.get("SCHEMA_HEAD", "0001")
 LOCK_TIMEOUT = os.environ.get("MIGRATE_LOCK_TIMEOUT", "5s")
+
+
+def instance_identity() -> str:
+    try:
+        with open(IDENTITY_MARKER, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except FileNotFoundError:
+        return "unknown"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -93,6 +124,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if self.path == "/identity":
+            self._respond_json(200, {"identity": instance_identity()})
             return
         self._respond_json(404, {"error": "not found"})
 
@@ -172,11 +206,80 @@ def cmd_serve() -> int:
     return 0
 
 
+def _write_marker(path: str, value: str = "") -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(value)
+
+
+def cmd_worker() -> int:
+    """Stay alive while exposing a real in-container ping premise."""
+
+    _write_marker(WORKER_MARKER)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:  # pragma: no cover - interactive use only
+        return 0
+
+
+def cmd_worker_ping() -> int:
+    return 0 if os.path.isfile(WORKER_MARKER) else 1
+
+
+def cmd_worker_make_unhealthy() -> int:
+    try:
+        os.unlink(WORKER_MARKER)
+    except FileNotFoundError:
+        pass
+    return 0
+
+
+def cmd_scheduler() -> int:
+    """Record successful ticks while remaining a distinct long-lived role."""
+
+    try:
+        while True:
+            if not os.path.isfile(SCHEDULER_PAUSE):
+                _write_marker(SCHEDULER_TICK, str(int(time.time())))
+            time.sleep(1)
+    except KeyboardInterrupt:  # pragma: no cover - interactive use only
+        return 0
+
+
+def cmd_scheduler_last_tick() -> int:
+    try:
+        with open(SCHEDULER_TICK, encoding="utf-8") as handle:
+            print(handle.read().strip())
+    except FileNotFoundError:
+        return 1
+    return 0
+
+
+def cmd_scheduler_make_stale() -> int:
+    # Pause first so the long-lived scheduler cannot race this injected old
+    # timestamp and make the case accidentally healthy again.
+    _write_marker(SCHEDULER_PAUSE)
+    _write_marker(SCHEDULER_TICK, str(int(time.time()) - 3600))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if "--migrate" in argv:
         return cmd_migrate()
     if "--heads" in argv:
         return cmd_heads()
+    if "--worker-ping" in argv:
+        return cmd_worker_ping()
+    if "--worker-make-unhealthy" in argv:
+        return cmd_worker_make_unhealthy()
+    if "--worker" in argv:
+        return cmd_worker()
+    if "--scheduler-last-tick" in argv:
+        return cmd_scheduler_last_tick()
+    if "--scheduler-make-stale" in argv:
+        return cmd_scheduler_make_stale()
+    if "--scheduler" in argv:
+        return cmd_scheduler()
     return cmd_serve()
 
 

@@ -1,20 +1,38 @@
-# Deployment foundation — Lane 1 is run, Lane 2 is not
+# Deployment foundation — both implementations exercised; release oracle remains exact-main
 
-**Status as of 2026-08-27. Lane 1 RAN on Observer; Lane 2 has NOT run.** The
-two lanes prove different things and only one of them has evidence, so they are
-reported separately rather than under one word.
+**Status as of 2026-08-28. Lane 1 ran green in an isolated environment. Lane 2
+has exercised every ordered subject and all 21 injection subjects on an
+explicitly authorised disposable test host.** The lanes prove different things
+and remain reported separately. Neither branch evidence is a release oracle:
+the first publication still requires a successful GitHub rehearsal at the
+exact merged main SHA being released.
 
 | Lane | What it proves | State |
 |---|---|---|
 | **Lane 1** — the written suites | the code does what its own tests say | **RUN.** Observer, commit `484d3ac6`: `tests/unit tests/architecture` exit 0, **zero failures**; **12/12** quality targets pass. All three adapter descriptors `validate`, and `render --check` confirms the committed output matches byte-for-byte. |
-| **Lane 2** — the disposable host | a real engine, a real database, a real handoff | **NOT RUN.** `scripts/deployment_rehearsal.sh` is written and has never been executed against a host. |
+| **Lane 2** — the disposable host | a real engine, database, Nginx handoff, restore and observability loop | **IMPLEMENTATION EXERCISED.** The 2026-08-28 branch run used Docker 29.1.3 / Compose 2.40.3 and reached the complete 13-step ordered lane plus the 21-case zero-skip matrix. Publication still waits for the encoded exact-main GitHub oracle. |
 
-Tests are never run on the workstation. Lane 1's evidence is an Observer run at
-an exact commit in a fresh checkout; the local tree is not the evidence.
+Workstation runs are never accepted as test evidence. Lane 1's evidence is an
+Observer run at an exact commit in a fresh checkout; the local tree is not the
+evidence.
 
 `AGENTS.md` rule 30: a repository-local fact is not evidence of a run. That
 still binds Lane 2 completely, and it binds any PUBLICATION claim — see the
 closing section.
+
+The Lane 2 runs found real defects rather than producing false green:
+
+| Run | Furthest proved point | Finding |
+|---|---|---|
+| first | rendered project load | Compose rejected disagreeing `pids_limit` and `deploy.resources.limits.pids` aliases |
+| second | database start | a first-success readiness wait raced Postgres' temporary init server |
+| third | backup and drift proofs | the non-root collector could not write its harness-owned sink, and timeout diagnostics hid the reason |
+| `33111496459` | steps 1-12 | recovery required `alertname` to remain in an active-instance array after recovery had correctly removed the instance |
+| authorised test host, 2026-08-28 | ordered lane + injection matrix | four injections had false premises; schema dumps carry random `restrict` tokens; three declared cases were skipped; Compose project identity came from a directory basename; and the written Nginx handoff claim had never loaded Nginx |
+
+The latest run proved real drift refusal, backup restore to `PROVED`, truncated
+backup rejection, and the nine required attributes on a real collector signal.
+Those are disposable-harness results, not adopter or production wiring.
 
 ## Engine evidence, and what has NOT been established
 
@@ -26,6 +44,7 @@ is worth more than it looks.
 |---|---|---|
 | **Docker 28.0.4 / Compose 2.38.2** | GitHub-hosted runner | runs the rehearsal (Lane 2) and the required per-PR parse in `ci.yml` |
 | **Docker 29.4.3 / Compose v5.1.3** | Observer | where the `pids` alias behaviour was isolated and the three candidate shapes compared |
+| **Docker 29.1.3 / Compose 2.40.3** | explicitly authorised disposable test host | ran the complete branch rehearsal, including live Nginx handoff and all failure subjects |
 
 The `pids_limit` defect was REJECTED by 28.0.4/2.38.2 (that is how the rehearsal
 found it) and independently reproduced on 29.4.3/5.1.3. The repair is ACCEPTED
@@ -160,14 +179,16 @@ refresh · untracked override or source bind mount · previous image reused afte
 an incompatible migration · a `maintenance_required` migration attempted through
 the online path.
 
-## Observability is DEFINITION-ONLY, and that is the honest word for it
+## Product observability is DEFINITION-ONLY; the harness is not the product
 
-Reviewed 2026-08-26; amended 2026-08-27. The facility generates a collector
-configuration and a set of alert rules. Nothing consumes either. Stated plainly
-because a directory containing well-formed alert rules reads, to anyone who
-does not check, as working alerts — and the whole point of this programme is
-that a control which cannot fire is worse than an absent one, because it is
-counted.
+Reviewed 2026-08-26; amended 2026-08-27. The facility generates a product
+collector configuration and a set of product alert rules. No adopter consumes
+either. The disposable rehearsal separately starts a harness-owned collector,
+Prometheus and one synthetic rule. That proves the execution primitives against
+real processes; it does not connect the 22 rendered catalogue rules or an
+adopter's signal path. A directory containing well-formed rules is not working
+monitoring, and a control which cannot fire is worse than an absent one because
+it is counted.
 
 **The vocabulary is load-bearing. These are RENDERABLE DEFINITIONS, not enabled
 alerts:**
@@ -184,7 +205,7 @@ rather than rendered with a `dotmac_unbacked` label, because an evaluator reads
 neither labels nor comments. Calling the remaining 22 "enabled" would retire
 the last two rows of that table by implication.
 
-| Link in the chain | State |
+| Product/adopter link in the chain | State |
 |---|---|
 | collector configuration rendered | yes |
 | a collector actually deployed | **no** |
@@ -192,7 +213,7 @@ the last two rows of that table by implication.
 | alert rules loaded by a rule evaluator | **no** |
 | alerts routed anywhere | **no** |
 | deployment annotations emitted | **no** — `Annotation` is a type nothing calls |
-| resource attributes on a real signal | **no** — `missing_attributes` checks an observation; nothing produces one |
+| resource attributes on an adopter signal | **no** — the disposable harness proved its own nine attributes, not an adopter's export |
 | backup/restore evidence reaching a dashboard | **no** |
 
 **Measured 2026-08-26: 22 of the 64 are backed, 42 are not.** The backed ones
@@ -224,9 +245,13 @@ and produced by nothing today. An alert on a metric with no producer never
 fires: it is not a quiet alert, it is a decoration that reports coverage.
 
 The honest reading of the catalogue is therefore: it is a specification of what
-must be emitted, not a monitoring system. Turning it into one is its own piece
-of work with its own proof, and belongs after a product is actually deploying
-through this facility — the sequence is:
+must be emitted, not a monitoring system. Lane 2 step 12 has proved nine
+attributes on a real harness signal. Step 13 has proved the synthetic rule can
+fire; the exact-main run's old predicate could not recognise recovery, and the
+corrected predicate still needs its exact-SHA run. Neither result changes the
+catalogue counts. Turning the product definitions into working monitoring is
+its own piece of work with its own proof, after a product actually deploys
+through this facility:
 
 1. deploy the collector as part of the rendered deployment;
 2. authenticate the export to the Observability platform;
@@ -239,7 +264,7 @@ through this facility — the sequence is:
    and see them on a dashboard;
 7. run the dead-man signal and prove it fires when the pipeline stops.
 
-None of that has been done, and none of it is claimed.
+None of that adopter chain has been done, and none of it is claimed.
 
 ## The Governance re-pin is NOT part of this branch, and here is the evidence
 

@@ -6,12 +6,14 @@
 # migration-head verification) real bytes on disk — not a fake `Effects`
 # implementation.
 #
-# STATUS: NOTHING BELOW HAS BEEN EXECUTED (docs/inventories/
-# deployment-foundation-rehearsal.md, "Status as of 2026-08-26"). This script
-# is written and unrun. It runs ONLY on the disposable infrastructure it
-# creates and tears down itself — never against a named environment, never
-# against a production host — and only when Michael has explicitly
-# authorised the run. See scripts/rehearsal/README.md before running it.
+# STATUS as of 2026-08-28: every ordered subject and all 21 injection subjects
+# have run on an explicitly authorised disposable test host, including real
+# Nginx parse/failover, restore, telemetry and alert recovery. This is branch
+# implementation evidence, not publication authority: release-facility.yml
+# still requires a successful GitHub rehearsal whose head_sha is the exact
+# merged main SHA being released. The script runs ONLY on the disposable
+# infrastructure it creates and tears down itself — never against a named
+# product environment or production host. See scripts/rehearsal/README.md.
 #
 # Subcommands:
 #   up               create the disposable registry, build+push the image
@@ -167,6 +169,16 @@ fi
 : "${PROM_CONTAINER:=dotmac-deployment-rehearsal-prometheus}"
 : "${PROM_HTTP_PORT:=19090}"
 : "${PROM_ALERT_FOR:=5s}"
+readonly PROM_RULE_NAME="RehearsalTargetDown"
+readonly PROM_SCRAPE_URL="http://app:${APP_PORT}/metrics"
+readonly PROM_PROBE="${REHEARSAL_DIR}/prometheus_probe.py"
+
+# ── knobs: the real Nginx parser and handoff subject ────────────────────────
+
+: "${NGINX_IMAGE:=nginx:1.27-alpine}"
+: "${NGINX_CONTAINER:=dotmac-deployment-rehearsal-nginx}"
+: "${WAIT_NGINX_TIMEOUT_SECONDS:=30}"
+readonly NGINX_REHEARSAL_HOST="rehearsal.invalid"
 
 # ── knobs: exit-code policy ───────────────────────────────────────────────────
 
@@ -257,6 +269,7 @@ verify_disposable_targets() {
   require_disposable_name "REGISTRY_CONTAINER" "${REGISTRY_CONTAINER}"
   require_disposable_name "OTEL_COLLECTOR_CONTAINER" "${OTEL_COLLECTOR_CONTAINER}"
   require_disposable_name "PROM_CONTAINER" "${PROM_CONTAINER}"
+  require_disposable_name "NGINX_CONTAINER" "${NGINX_CONTAINER}"
 }
 
 # ── small utilities ───────────────────────────────────────────────────────────
@@ -269,6 +282,21 @@ container_running() {
   local state
   state="$("${DOCKER_BIN}" inspect -f '{{.State.Running}}' "$1" 2>/dev/null || echo false)"
   [ "${state}" = "true" ]
+}
+
+container_healthy() {
+  local state
+  state="$("${DOCKER_BIN}" inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo unknown)"
+  [ "${state}" = "healthy" ]
+}
+
+container_stopped_or_restarted() {
+  local container="$1"
+  local previous_restarts="$2"
+  local running restarts
+  running="$("${DOCKER_BIN}" inspect -f '{{.State.Running}}' "${container}" 2>/dev/null || echo false)"
+  restarts="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${container}" 2>/dev/null || echo -1)"
+  [ "${running}" != true ] || [ "${restarts}" != "${previous_restarts}" ]
 }
 
 remove_container() {
@@ -408,42 +436,52 @@ observe_for() {
   _wait_for "${timeout}" "${description}" "$@"
 }
 
-prom_rule_state() {
-  # prom_rule_state <rule-name> — prints firing | pending | inactive | absent
-  #
-  # Reads the RULE's own state, not an alert INSTANCE's labels, and parses the
-  # JSON rather than grepping it. Both halves are load-bearing:
-  #
-  #   * `"alertname"` appears only inside `alerts[]`, the list of ACTIVE alert
-  #     instances. When the target comes back the instance is REMOVED, so the
-  #     old recovery condition — which required `"alertname":"..."` to still be
-  #     present AND not firing — could never be satisfied. Step 13 was not
-  #     slow; it was unsatisfiable, and reported `recovered=0` every run.
-  #     Confirmed against a real Prometheus: firing => rule state `firing`,
-  #     1 instance, alertname present; recovered => rule state `inactive`,
-  #     0 instances, alertname absent.
-  #
-  #   * `grep '"alertname":"X".*"state":"firing"'` is greedy across a
-  #     single-line JSON document, so it can match X in one rule and `firing`
-  #     from a DIFFERENT rule further along. It happened to be correct here
-  #     only because this Prometheus evaluates exactly one rule.
-  local rule_name="$1"
-  curl -s --max-time 5 "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/rules" \
-    | "${PYTHON_BIN}" -c '
-import json, sys
-name = sys.argv[1]
-try:
-    document = json.load(sys.stdin)
-except (json.JSONDecodeError, ValueError):
-    print("absent")
-    raise SystemExit(0)
-for group in document.get("data", {}).get("groups", []):
-    for rule in group.get("rules", []):
-        if rule.get("name") == name:
-            print(rule.get("state", "absent"))
-            raise SystemExit(0)
-print("absent")
-' "${rule_name}" 2>/dev/null || echo absent
+prom_api() {
+  # prom_api <endpoint> <prometheus_probe.py args...>
+  local endpoint="$1"
+  shift
+  curl -sf --max-time 5 \
+    "http://127.0.0.1:${PROM_HTTP_PORT}/api/v1/${endpoint}" \
+    | "${PYTHON_BIN}" "${PROM_PROBE}" "$@"
+}
+
+prom_rule_is() {
+  prom_api rules rule-is "${PROM_RULE_NAME}" "$1"
+}
+
+prom_target_is() {
+  prom_api targets target-is "${PROM_SCRAPE_URL}" "$1"
+}
+
+prom_fire_proved() {
+  prom_rule_is firing && prom_target_is down
+}
+
+prom_recovery_proved() {
+  # `inactive` alone is not recovery: a vanished target makes `up == 0`
+  # produce no vector and therefore also looks inactive. Require the same
+  # expected target to remain present and scrape successfully.
+  prom_rule_is inactive && prom_target_is up
+}
+
+diagnose_prometheus_transition() {
+  # diagnose_prometheus_transition <app-container> <transition>
+  local app_container="$1"
+  local transition="$2"
+  local rule_summary target_summary marker
+  rule_summary="$(prom_api rules rule-summary "${PROM_RULE_NAME}" 2>&1 || true)"
+  target_summary="$(prom_api targets target-summary "${PROM_SCRAPE_URL}" 2>&1 || true)"
+  [ -n "${rule_summary}" ] || rule_summary="unavailable"
+  [ -n "${target_summary}" ] || target_summary="unavailable"
+  marker="absent"
+  if "${DOCKER_BIN}" exec "${app_container}" test -f /tmp/rehearsal-ready \
+      >/dev/null 2>&1; then
+    marker="present"
+  fi
+  log "  ${transition} rule: ${rule_summary}"
+  log "  ${transition} target: ${target_summary}"
+  log "  ${transition} app: live=$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/live") ready=$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready") marker=${marker}"
+  diagnose_container "${app_container}" "app during Prometheus ${transition}"
 }
 
 http_status() {
@@ -843,12 +881,17 @@ run_step_8_switch_and_verify() {
   digest="$("${DOCKER_BIN}" inspect -f '{{index .Config.Image}}' "${cid}")"
   restarts="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}")"
 
-  if [ "${running}" = "true" ] && [ "${digest}" = "${IMAGE_REFERENCE}" ] && [ "${restarts}" = "0" ]; then
-    step_pass "the app role runs the one deploying digest with zero restarts"
-  else
+  if [ "${running}" != "true" ] || [ "${digest}" != "${IMAGE_REFERENCE}" ] \
+      || [ "${restarts}" != "0" ]; then
     step_fail "switch + verify roles" "running=${running} digest=${digest} restarts=${restarts} (expected ${IMAGE_REFERENCE})"
     return 1
   fi
+  if ! prove_nginx_handoff; then
+    step_fail "Nginx handoff" \
+      "the real parser, live config and primary-to-candidate failover did not all pass"
+    return 1
+  fi
+  step_pass "every role runs the one digest with zero restarts; real Nginx parsed the rendered site and promoted the ready candidate when primary stopped"
 }
 
 run_step_9_drift() {
@@ -1141,7 +1184,7 @@ run_step_13_alert_fires_and_recovers() {
 groups:
   - name: rehearsal
     rules:
-      - alert: RehearsalTargetDown
+      - alert: ${PROM_RULE_NAME}
         expr: up{job="rehearsal-app"} == 0
         for: ${PROM_ALERT_FOR}
         labels:
@@ -1186,51 +1229,85 @@ YAML
     return 1
   fi
 
-  # The app is already up (from step 8) and answering /metrics with
-  # `rehearsal_up 1` because the ready marker is set. Stop it so the target
-  # goes down and the rule genuinely fires.
-  "${COMPOSE[@]}" stop app >/dev/null
-
-  local fired=0
-  local waited=0
-  while [ "${waited}" -lt "${WAIT_ALERT_FIRE_SECONDS}" ]; do
-    if [ "$(prom_rule_state RehearsalTargetDown)" = "firing" ]; then
-      fired=1
-      break
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-  [ "${fired}" -eq 1 ] || log "  rule never reached firing; last state: $(prom_rule_state RehearsalTargetDown)"
-
-  "${COMPOSE[@]}" start app >/dev/null
-  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "$("${COMPOSE[@]}" ps -q app)" \
-    "app answering again" \
-    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
-
-  # Recovery is the rule returning to `inactive`. NOT "the alertname is still
-  # there but not firing" — the instance is gone by then, which is what made
-  # the old condition unsatisfiable. `absent` is deliberately NOT accepted: a
-  # rule that vanished from Prometheus entirely means the rule file stopped
-  # loading, which is a failure wearing recovery's clothes.
-  local recovered=0
-  waited=0
-  while [ "${waited}" -lt "${WAIT_ALERT_RECOVER_SECONDS}" ]; do
-    if [ "$(prom_rule_state RehearsalTargetDown)" = "inactive" ]; then
-      recovered=1
-      break
-    fi
-    sleep 2
-    waited=$((waited + 2))
-  done
-  [ "${recovered}" -eq 1 ] || log "  rule never returned to inactive; last state: $(prom_rule_state RehearsalTargetDown)"
-
-  if [ "${fired}" -eq 1 ] && [ "${recovered}" -eq 1 ]; then
-    step_pass "RehearsalTargetDown fired against a real Prometheus and recovered when the target came back"
-  else
-    step_fail "alert fires and recovers" "fired=${fired} recovered=${recovered}"
+  local app_cid
+  app_cid="$("${COMPOSE[@]}" ps -q app)"
+  if [ -z "${app_cid}" ]; then
+    step_fail "alert evaluation" "no app container exists before the fire/recovery proof"
     return 1
   fi
+
+  # Establish the healthy baseline before injecting the outage. An inactive
+  # rule with no target is not a healthy baseline; it is a missing subject.
+  if ! wait_for_container "${WAIT_PROMETHEUS_TIMEOUT_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "Prometheus baseline: ${PROM_RULE_NAME} inactive and target up" \
+    prom_recovery_proved; then
+    diagnose_prometheus_transition "${app_cid}" "baseline"
+    step_fail "alert baseline" "the named rule and target never became healthy"
+    return 1
+  fi
+
+  # The app is already up (from step 8) and ready. Stop it so the expected
+  # target remains configured but reports DOWN and the named rule genuinely
+  # reaches FIRING.
+  "${COMPOSE[@]}" stop app >/dev/null
+  if ! wait_for_container "${WAIT_ALERT_FIRE_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "${PROM_RULE_NAME} firing while ${PROM_SCRAPE_URL} is down" \
+    prom_fire_proved; then
+    diagnose_prometheus_transition "${app_cid}" "fire"
+    step_fail "alert fires" "the rule and target never reached firing/down together"
+    return 1
+  fi
+
+  "${COMPOSE[@]}" start app >/dev/null
+  app_cid="$("${COMPOSE[@]}" ps -q app)"
+  if [ -z "${app_cid}" ]; then
+    step_fail "alert recovers" "the app container did not return"
+    return 1
+  fi
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app answering liveness after restart" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"
+
+  # /tmp is a tmpfs, so the harness-controlled readiness marker is correctly
+  # lost when the container stops. Re-arm the fixture after restart and prove
+  # BOTH its HTTP readiness contract and Docker's derived health state before
+  # accepting Prometheus recovery. The previous predicate would have passed
+  # with the app still unhealthy.
+  if ! "${DOCKER_BIN}" exec "${app_cid}" sh -c \
+      'mkdir -p /tmp && : > /tmp/rehearsal-ready'; then
+    diagnose_prometheus_transition "${app_cid}" "recovery"
+    step_fail "alert recovers" "could not restore the harness readiness marker"
+    return 1
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app readiness=200 after restart" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = \"200\" ]"; then
+    step_fail "alert recovers" "the app never became ready after restart"
+    return 1
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${app_cid}" \
+    "app Docker health healthy after restart" \
+    container_healthy "${app_cid}"; then
+    step_fail "alert recovers" "the app never became Docker-healthy after restart"
+    return 1
+  fi
+
+  # Recovery is conjunctive. The stable named rule must be INACTIVE, the
+  # expected scrape target must still exist and be UP, and the app readiness
+  # checks above must already have succeeded. A missing rule or target is a
+  # monitoring failure, never recovery.
+  if ! wait_for_container "${WAIT_ALERT_RECOVER_SECONDS}" \
+    "${PROM_CONTAINER}" \
+    "${PROM_RULE_NAME} inactive while ${PROM_SCRAPE_URL} is up" \
+    prom_recovery_proved; then
+    diagnose_prometheus_transition "${app_cid}" "recovery"
+    step_fail "alert recovers" "rule, target and app never recovered together"
+    return 1
+  fi
+
+  step_pass "${PROM_RULE_NAME} fired with its target down, then the rule, target and app all recovered"
 }
 
 cmd_run() {
@@ -1275,6 +1352,7 @@ ALL_CASES=(
   primary-fails-after-handoff
   worker-unhealthy
   scheduler-stale
+  invalid-nginx-configuration
   telemetry-collector-unavailable
   secrets-unavailable
   untracked-override
@@ -1291,6 +1369,296 @@ reset_compose_runtime() {
   # Every case starts from the same known state: db up (from `up`/`run`),
   # app/migrate down. Never touches the database or the network.
   "${COMPOSE[@]}" rm -sf app migrate >/dev/null 2>&1 || true
+}
+
+database_schema_fingerprint() {
+  # A gate-phase refusal must leave the scratch database's schema equivalent.
+  # Checking for one table is invalid after the ordered rehearsal has already
+  # migrated successfully. A real schema-only dump includes relations,
+  # columns, constraints, indexes, sequences and grants, so hashing it refuses
+  # subtler DDL than a relation-name census can see. PostgreSQL 16.15 emits a
+  # fresh random token in the dump's `\restrict`/`\unrestrict` safety commands
+  # on every invocation. Those two psql commands protect replay; their nonce is
+  # not database state, so remove only those complete command lines before
+  # hashing. Without this normalization two consecutive dumps of an untouched
+  # database always disagree and the no-DDL proof can never pass.
+  "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" \
+    "${DB1_CONTAINER}" pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
+    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" \
+    --schema-only --no-owner --no-privileges \
+    | awk '$1 != "\\restrict" && $1 != "\\unrestrict"' \
+    | sha256sum | awk '{print $1}'
+}
+
+EFFECTS_DESCRIPTOR=""
+EFFECTS_COMPOSE_FILE=""
+EFFECTS_COMPOSE=()
+
+prepare_effects_fixture() {
+  # The ordered lane deliberately stays a one-role product. These three
+  # injection cases need the real provider contracts that a minimal HTTP-only
+  # descriptor cannot express, so derive a disposable working copy with an
+  # ingress route, a custom worker and a scheduler. The image and every other
+  # deployment fact remain the ones produced by `up` at this exact SHA.
+  EFFECTS_DESCRIPTOR="${WORK_DIR}/effects-product.toml"
+  EFFECTS_COMPOSE_FILE="${WORK_DIR}/effects-rendered/docker-compose.yml"
+  cp "${DESCRIPTOR}" "${EFFECTS_DESCRIPTOR}"
+  # The derived ingress fixture publishes the same loopback port its Nginx
+  # upstream names. The ordered HTTP-only fixture keeps its high host port.
+  local rewritten="${EFFECTS_DESCRIPTOR}.tmp"
+  sed -E "s/^host = [0-9]+$/host = ${APP_PORT}/" \
+    "${EFFECTS_DESCRIPTOR}" > "${rewritten}"
+  mv "${rewritten}" "${EFFECTS_DESCRIPTOR}"
+  cat >> "${EFFECTS_DESCRIPTOR}" <<'TOML'
+
+[ingress]
+host = "rehearsal.invalid"
+redirect_http = false
+
+[[ingress.routes]]
+path = "/"
+role = "app"
+port = 8000
+
+[[roles]]
+code = "worker"
+command = ["python", "/app/app.py", "--worker"]
+replicas = 1
+stop_grace_seconds = 5
+
+[roles.resources]
+cpus = "0.25"
+memory = "128m"
+pids = 32
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+[roles.worker]
+kind = "custom"
+ping_command = ["python", "/app/app.py", "--worker-ping"]
+heartbeat_max_age_seconds = 30
+max_backlog = 1
+
+[[roles]]
+code = "scheduler"
+command = ["python", "/app/app.py", "--scheduler"]
+replicas = 1
+stop_grace_seconds = 5
+
+[roles.resources]
+cpus = "0.25"
+memory = "128m"
+pids = 32
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+[roles.scheduler]
+last_tick_max_age_seconds = 10
+tick_command = ["python", "/app/app.py", "--scheduler-last-tick"]
+TOML
+  dotmac_deploy -f "${EFFECTS_DESCRIPTOR}" render \
+    --output-dir "${WORK_DIR}/effects-rendered" \
+    --thresholds "${REHEARSAL_DIR}/thresholds.json" >/dev/null
+  EFFECTS_COMPOSE=(
+    "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}"
+    --project-name "${REHEARSAL_PRODUCT}"
+    --project-directory "${WORK_DIR}"
+    --env-file "${ENV_FILE}"
+    -f "${EFFECTS_COMPOSE_FILE}"
+  )
+}
+
+effects_probe() {
+  # Drive the real ComposeHostEffects implementation against the derived
+  # descriptor. Output is intentionally one scalar so shell call sites cannot
+  # mistake provider diagnostics for the verdict they are checking.
+  local action="$1"
+  ( cd "${REPO_ROOT}" && "${PYTHON_BIN}" - \
+      "${action}" "${EFFECTS_DESCRIPTOR}" "${WORK_DIR}" \
+      "${EFFECTS_COMPOSE_FILE}" "${ENV_FILE}" <<'PYEOF'
+import sys
+from pathlib import Path
+
+from dotmac_deployment_foundation.providers.compose_host import ComposeHostEffects
+from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+action, descriptor, deploy_dir, compose_file, env_file = sys.argv[1:]
+spec = ProductDeploymentSpec.load(descriptor)
+effects = ComposeHostEffects(
+    spec,
+    Path(deploy_dir),
+    compose_file=Path(compose_file),
+    env_file=Path(env_file),
+)
+
+if action == "start-candidate":
+    print(effects.start_candidate("app", timeout_seconds=30))
+elif action == "candidate-ready":
+    print("true" if effects.candidate_ready("app") else "false")
+elif action == "worker-responds":
+    print("true" if effects.worker_responds("worker") else "false")
+elif action == "scheduler-age":
+    age = effects.scheduler_last_tick_age_seconds("scheduler")
+    print("none" if age is None else age)
+else:
+    raise SystemExit(f"unknown effects probe: {action}")
+PYEOF
+  )
+}
+
+effects_candidate_ready() {
+  [ "$(effects_probe candidate-ready)" = true ]
+}
+
+NGINX_CERT_ROOT=""
+NGINX_SITE=""
+
+prepare_nginx_files() {
+  NGINX_CERT_ROOT="${WORK_DIR}/nginx-certs"
+  NGINX_SITE="${WORK_DIR}/effects-rendered/nginx/${NGINX_REHEARSAL_HOST}.conf"
+  local cert_dir="${NGINX_CERT_ROOT}/${NGINX_REHEARSAL_HOST}"
+  mkdir -p "${cert_dir}"
+  if [ ! -s "${cert_dir}/fullchain.pem" ] || [ ! -s "${cert_dir}/privkey.pem" ]; then
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+      -subj "/CN=${NGINX_REHEARSAL_HOST}" \
+      -keyout "${cert_dir}/privkey.pem" \
+      -out "${cert_dir}/fullchain.pem" >/dev/null 2>&1
+  fi
+  [ -s "${NGINX_SITE}" ]
+}
+
+nginx_config_accepted() {
+  local site="$1"
+  "${DOCKER_BIN}" run --rm --network host \
+    -v "${site}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" nginx -t >/dev/null 2>&1
+}
+
+start_nginx_harness() {
+  remove_container "${NGINX_CONTAINER}"
+  "${DOCKER_BIN}" run -d --name "${NGINX_CONTAINER}" --network host \
+    -v "${NGINX_SITE}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" >/dev/null
+  wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+    "the real Nginx process to remain running" \
+    container_running "${NGINX_CONTAINER}"
+}
+
+nginx_identity_is() {
+  local expected="$1"
+  local body
+  body="$(curl --noproxy '*' -sk --max-time 3 \
+    --resolve "${NGINX_REHEARSAL_HOST}:443:127.0.0.1" \
+    "https://${NGINX_REHEARSAL_HOST}/identity" 2>/dev/null || true)"
+  printf '%s' "${body}" | grep -q "\"identity\": \"${expected}\""
+}
+
+restore_ordered_app() {
+  "${EFFECTS_COMPOSE[@]}" rm -sf app >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" up -d app >/dev/null
+  local cid
+  cid="$("${COMPOSE[@]}" ps -q app)"
+  [ -n "${cid}" ] || return 1
+  "${DOCKER_BIN}" exec "${cid}" sh -c ': > /tmp/rehearsal-ready'
+  wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "the ordered app to be ready after the Nginx proof" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/ready 2>/dev/null)\" = 200 ]"
+}
+
+prove_nginx_handoff() {
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf app >/dev/null 2>&1 || true
+  remove_container "${NGINX_CONTAINER}"
+  local candidate_name="${REHEARSAL_PRODUCT}_app_candidate"
+  remove_container "${candidate_name}"
+
+  local failed=0
+  local primary=""
+  local candidate_digest=""
+  if ! "${EFFECTS_COMPOSE[@]}" up -d --no-deps app >/dev/null; then
+    log "  Nginx handoff: primary failed to start"
+    failed=1
+  else
+    primary="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    "${DOCKER_BIN}" exec "${primary}" sh -c \
+      'printf primary > /tmp/rehearsal-instance; : > /tmp/rehearsal-ready'
+    if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${primary}" \
+        "the Nginx primary premise" container_healthy "${primary}"; then
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    if ! candidate_digest="$(effects_probe start-candidate)"; then
+      log "  Nginx handoff: candidate failed to start"
+      failed=1
+    else
+      "${DOCKER_BIN}" exec "${candidate_name}" sh -c \
+        'printf candidate > /tmp/rehearsal-instance; : > /tmp/rehearsal-ready'
+    fi
+  fi
+  if [ "${failed}" -eq 0 ] && [ "${candidate_digest}" != "${IMAGE_DIGEST}" ]; then
+    log "  Nginx handoff: candidate runs ${candidate_digest}, expected ${IMAGE_DIGEST}"
+    failed=1
+  fi
+  if [ "${failed}" -eq 0 ] \
+      && ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${candidate_name}" \
+        "the Nginx candidate readiness premise" \
+        effects_candidate_ready; then
+    failed=1
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    if ! prepare_nginx_files || ! nginx_config_accepted "${NGINX_SITE}"; then
+      log "  Nginx handoff: the real parser rejected the rendered site"
+      failed=1
+    elif ! start_nginx_harness; then
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ] \
+      && ! wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+        "Nginx to serve the primary" nginx_identity_is primary; then
+    failed=1
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    local live_config
+    live_config="$("${DOCKER_BIN}" exec "${NGINX_CONTAINER}" nginx -T 2>&1 || true)"
+    if ! printf '%s' "${live_config}" \
+        | grep -q "upstream ${REHEARSAL_PRODUCT}_app" \
+      || ! printf '%s' "${live_config}" \
+        | grep -q 'server 127.0.0.1:18001 backup'; then
+      log "  Nginx handoff: live config omits the candidate contract"
+      failed=1
+    fi
+  fi
+  if [ "${failed}" -eq 0 ]; then
+    "${DOCKER_BIN}" stop "${primary}" >/dev/null
+    if ! wait_for_container "${WAIT_NGINX_TIMEOUT_SECONDS}" "${NGINX_CONTAINER}" \
+        "Nginx to promote the ready backup" nginx_identity_is candidate; then
+      failed=1
+    fi
+  fi
+
+  remove_container "${NGINX_CONTAINER}"
+  remove_container "${candidate_name}"
+  if ! restore_ordered_app; then
+    log "  Nginx handoff: ordered app was not restored after the proof"
+    failed=1
+  fi
+  [ "${failed}" -eq 0 ]
 }
 
 inject_wrong_image_digest() {
@@ -1324,18 +1692,23 @@ JSON
 
 inject_missing_migration_credentials() {
   reset_compose_runtime
+  local before after out
+  before="$(database_schema_fingerprint)"
   local rc=0
-  MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
+  out="$(MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
     -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" run --rm --no-deps migrate \
-    >/dev/null 2>&1 || rc=$?
-  local table_exists
-  table_exists="$("${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB1_CONTAINER}" \
-    psql -tAc "SELECT to_regclass('public.rehearsal_ledger') IS NOT NULL" \
-    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" 2>/dev/null | tr -d '[:space:]')"
-  if [ "${rc}" -ne 0 ] && [ "${table_exists}" != "t" ]; then
-    case_pass "missing-migration-credentials: compose refused (required var unset) before any DDL ran"
+    2>&1)" || rc=$?
+  after="$(database_schema_fingerprint)"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -q 'MIGRATION_DATABASE_URL' \
+      && [ "${before}" = "${after}" ]; then
+    case_pass "missing-migration-credentials: compose named the missing owner material and the complete schema fingerprint stayed unchanged"
   else
-    case_fail "missing-migration-credentials: rc=${rc} table_exists=${table_exists}"
+    local named_material schema_unchanged
+    named_material="$(printf '%s' "${out}" | grep -c 'MIGRATION_DATABASE_URL' || true)"
+    schema_unchanged=no
+    [ "${before}" = "${after}" ] && schema_unchanged=yes
+    case_fail "missing-migration-credentials: rc=${rc} named_material=${named_material} schema_unchanged=${schema_unchanged}"
   fi
 }
 
@@ -1366,8 +1739,9 @@ inject_migration_failure() {
   psql_super -c "ALTER DATABASE ${DB1_NAME} OWNER TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT USAGE ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT ALL ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
-  if [ "${rc}" -ne 0 ] && ! printf '%s' "${out}" | grep -qi 'lock'; then
-    case_pass "migration-failure: a genuine, non-lock-shaped permission failure stopped the migration"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -qi 'permission denied for schema public'; then
+    case_pass "migration-failure: a genuine schema-permission failure stopped the migration and is not classified from incidental SQL text"
   else
     case_fail "migration-failure: rc=${rc} out=${out}"
   fi
@@ -1410,9 +1784,18 @@ inject_missing_migration_head() {
 }
 
 inject_failed_backup() {
+  # Do not exec the client inside Postgres: the official image deliberately
+  # trusts its own loopback addresses, so even TCP to 127.0.0.1 accepts a bad
+  # password. Run pg_dump from the migration image across the Compose network;
+  # that reaches the server's scram-sha-256 host rule and makes this a real
+  # credential failure rather than a transport-only assertion.
   local rc=0
-  "${DOCKER_BIN}" exec -e PGPASSWORD="wrong-password-on-purpose" "${DB1_CONTAINER}" \
-    pg_dump -U "${DB_OWNER_USER}" -d "${DB1_NAME}" > "${WORK_DIR}/should_not_exist.sql.gz" 2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
+  "${COMPOSE[@]}" run --rm --no-deps \
+    -e PGPASSWORD="wrong-password-on-purpose" migrate \
+    pg_dump -h "${DB_SERVICE_NAME}" -p "${DB_PORT}" \
+      -U "${DB_OWNER_USER}" -d "${DB1_NAME}" \
+      > "${WORK_DIR}/should_not_exist.sql.gz" \
+      2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
   local size
   size="$(stat -f%z "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || stat -c%s "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || echo 0)"
   rm -f "${WORK_DIR}/should_not_exist.sql.gz"
@@ -1470,15 +1853,77 @@ inject_failed_restore_verification() {
 }
 
 inject_candidate_never_ready() {
-  case_skip "candidate-never-ready" \
-    "scripts/rehearsal/product.toml declares no [ingress] route (nginx is out of scope on Observer). ComposeHostEffects.start_candidate/candidate_ready derive their loopback port from an ingress route (providers/compose_host.py's _candidate_ports) and raise PreconditionFailed without one, so there is no warm-candidate mechanism this disposable product can exercise. Already proven against a fake in test_a_candidate_that_never_becomes_ready_is_not_handed_traffic."
+  reset_compose_runtime
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps app >/dev/null
+  local primary
+  primary="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  if [ -z "${primary}" ]; then
+    case_fail "candidate-never-ready: could not establish the primary app premise"
+    return
+  fi
+  "${DOCKER_BIN}" exec "${primary}" sh -c ': > /tmp/rehearsal-ready'
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${primary}" \
+      "primary ready before candidate injection" container_healthy "${primary}"; then
+    case_fail "candidate-never-ready: primary never became healthy"
+    return
+  fi
+
+  local candidate_name="${REHEARSAL_PRODUCT}_app_candidate"
+  local candidate_digest
+  candidate_digest="$(effects_probe start-candidate)"
+  local stayed_unready=yes
+  local probe
+  for probe in 1 2 3; do
+    if [ "$(effects_probe candidate-ready)" != "false" ]; then
+      stayed_unready=no
+      break
+    fi
+    sleep 1
+  done
+  local primary_after
+  primary_after="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  local primary_still_ready
+  primary_still_ready="$(http_status "http://127.0.0.1:${APP_PORT}/health/ready")"
+  remove_container "${candidate_name}"
+
+  # Effects returns the canonical digest, not the repository-qualified image
+  # reference. The engine compares the same surface to spec.image_digest.
+  if [ "${candidate_digest}" = "${IMAGE_DIGEST}" ] \
+      && [ "${stayed_unready}" = yes ] \
+      && [ "${primary_after}" = "${primary}" ] \
+      && [ "${primary_still_ready}" = 200 ]; then
+    case_pass "candidate-never-ready: the real provider started the deploying digest, refused readiness three times, and the ready primary remained the traffic subject"
+  else
+    case_fail "candidate-never-ready: digest=${candidate_digest} unready=${stayed_unready} primary_same=$([ "${primary_after}" = "${primary}" ] && echo yes || echo no) primary_ready=${primary_still_ready}"
+  fi
 }
 
 inject_primary_fails_after_handoff() {
+  # Earlier credential/migration cases deliberately remove the runtime role.
+  # This case owns its precondition: restore one app container from the same
+  # deploying digest, re-arm the harness readiness marker, and prove it ready
+  # before injecting the post-handoff crash.
+  reset_compose_runtime
+  "${COMPOSE[@]}" up -d --no-deps app >/dev/null
   local cid
   cid="$("${COMPOSE[@]}" ps -q app)"
   if [ -z "${cid}" ]; then
     case_fail "primary-fails-after-handoff: no app container is running (run '$0 run' through step 8 first)"
+    return
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app liveness baseline" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"; then
+    case_fail "primary-fails-after-handoff: app did not reach its liveness baseline"
+    return
+  fi
+  "${DOCKER_BIN}" exec "${cid}" sh -c \
+    'mkdir -p /tmp && : > /tmp/rehearsal-ready'
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app readiness baseline" \
+    container_healthy "${cid}"; then
+    case_fail "primary-fails-after-handoff: app did not reach its healthy baseline"
     return
   fi
   local before
@@ -1489,26 +1934,91 @@ inject_primary_fails_after_handoff() {
   # point and a timeout is a legitimate answer rather than a failure to
   # diagnose. Still a knob, because everything is (AGENTS.md).
   observe_for "${WAIT_RESTART_OBSERVATION_SECONDS}" \
-    "the crashed role to be observed restarting" \
-    bash -c "[ \"\$(\"${DOCKER_BIN}\" inspect -f '{{.RestartCount}}' ${cid} 2>/dev/null || echo -1)\" != \"${before}\" ]" \
+    "the crashed role to be observed stopped or restarting" \
+    container_stopped_or_restarted "${cid}" "${before}" \
     || true
-  local after
+  local after running
   after="$("${DOCKER_BIN}" inspect -f '{{.RestartCount}}' "${cid}" 2>/dev/null || echo "${before}")"
-  if [ "${after}" != "${before}" ] || ! container_running "${cid}"; then
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  if [ "${after}" != "${before}" ]; then
     case_pass "primary-fails-after-handoff: the killed role's restart count changed (${before} -> ${after}) — a real verify_roles-style check catches this"
+  elif [ "${running}" = no ]; then
+    case_pass "primary-fails-after-handoff: the killed role remained stopped with restart count ${after} — a real verify_roles-style running check catches this"
   else
-    case_fail "primary-fails-after-handoff: restart count did not change (${before})"
+    case_fail "primary-fails-after-handoff: role still running and restart count did not change (${before})"
   fi
 }
 
 inject_worker_unhealthy() {
-  case_skip "worker-unhealthy" \
-    "the disposable product declares one plain HTTP role with no [roles.worker] contract — WorkerContract.ping_command has nothing to attach to on a minimal reference product. Already proven against a fake in test_an_unhealthy_worker_fails_the_deployment_even_though_its_container_is_up; exercising the real Effects.worker_responds seam for real would need a Celery-shaped role, out of scope for the minimal product this rehearsal deploys."
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf worker >/dev/null 2>&1 || true
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps worker >/dev/null
+  local cid
+  cid="$("${EFFECTS_COMPOSE[@]}" ps -q worker)"
+  if [ -z "${cid}" ] || ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" \
+      "${cid}" "worker running before unhealthy injection" container_running "${cid}"; then
+    case_fail "worker-unhealthy: worker never established its running premise"
+    return
+  fi
+  local before after running
+  before="$(effects_probe worker-responds)"
+  "${EFFECTS_COMPOSE[@]}" exec -T worker \
+    python /app/app.py --worker-make-unhealthy >/dev/null
+  after="$(effects_probe worker-responds)"
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  "${EFFECTS_COMPOSE[@]}" rm -sf worker >/dev/null 2>&1 || true
+  if [ "${before}" = true ] && [ "${after}" = false ] && [ "${running}" = yes ]; then
+    case_pass "worker-unhealthy: the real worker ping passed, then failed while the same container remained running"
+  else
+    case_fail "worker-unhealthy: ping_before=${before} ping_after=${after} running=${running}"
+  fi
 }
 
 inject_scheduler_stale() {
-  case_skip "scheduler-stale" \
-    "the disposable product declares no [roles.scheduler] contract, for the same reason as worker-unhealthy above. Already proven against a fake in test_a_stale_scheduler_fails_the_deployment."
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf scheduler >/dev/null 2>&1 || true
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps scheduler >/dev/null
+  local cid
+  cid="$("${EFFECTS_COMPOSE[@]}" ps -q scheduler)"
+  if [ -z "${cid}" ] || ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" \
+      "${cid}" "scheduler running before stale injection" container_running "${cid}"; then
+    case_fail "scheduler-stale: scheduler never established its running premise"
+    return
+  fi
+  local before after running
+  before="$(effects_probe scheduler-age)"
+  "${EFFECTS_COMPOSE[@]}" exec -T scheduler \
+    python /app/app.py --scheduler-make-stale >/dev/null
+  after="$(effects_probe scheduler-age)"
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  "${EFFECTS_COMPOSE[@]}" rm -sf scheduler >/dev/null 2>&1 || true
+  if [ "${before}" != none ] && [ "${before}" -le 10 ] 2>/dev/null \
+      && [ "${after}" != none ] && [ "${after}" -gt 10 ] 2>/dev/null \
+      && [ "${running}" = yes ]; then
+    case_pass "scheduler-stale: the real tick probe was fresh, then exceeded its declared budget while the same container remained running"
+  else
+    case_fail "scheduler-stale: age_before=${before} age_after=${after} running=${running}"
+  fi
+}
+
+inject_invalid_nginx_configuration() {
+  prepare_effects_fixture
+  prepare_nginx_files
+  local broken="${WORK_DIR}/invalid-nginx.conf"
+  cp "${NGINX_SITE}" "${broken}"
+  printf '\nthis_is_not_a_valid_nginx_directive;\n' >> "${broken}"
+  local rc=0
+  local out
+  out="$("${DOCKER_BIN}" run --rm --network host \
+    -v "${broken}:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${NGINX_CERT_ROOT}:/etc/letsencrypt/live:ro" \
+    "${NGINX_IMAGE}" nginx -t 2>&1)" || rc=$?
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -q 'unknown directive'; then
+    case_pass "invalid-nginx-configuration: the real Nginx parser rejected a planted unknown directive before any live config changed"
+  else
+    case_fail "invalid-nginx-configuration: rc=${rc} out=${out}"
+  fi
 }
 
 inject_telemetry_collector_unavailable() {
@@ -1652,6 +2162,7 @@ cmd_inject() {
     primary-fails-after-handoff) inject_primary_fails_after_handoff ;;
     worker-unhealthy) inject_worker_unhealthy ;;
     scheduler-stale) inject_scheduler_stale ;;
+    invalid-nginx-configuration) inject_invalid_nginx_configuration ;;
     telemetry-collector-unavailable) inject_telemetry_collector_unavailable ;;
     secrets-unavailable) inject_secrets_unavailable ;;
     untracked-override) inject_untracked_override ;;
@@ -1684,7 +2195,7 @@ cmd_down() {
   fi
 
   for name in "${DB2_CONTAINER}" "${OTEL_COLLECTOR_CONTAINER}" "${PROM_CONTAINER}" \
-              "${REGISTRY_CONTAINER}"; do
+              "${NGINX_CONTAINER}" "${REGISTRY_CONTAINER}"; do
     remove_container "${name}"
   done
   if [ -n "${DB1_CONTAINER}" ]; then

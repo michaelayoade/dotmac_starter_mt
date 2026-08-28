@@ -231,6 +231,21 @@ def test_compose_host_effects_satisfies_the_runtime_checkable_protocol(
     assert isinstance(effects, Effects)
 
 
+def test_compose_project_identity_comes_from_the_product_not_the_directory(
+    tmp_path: Path,
+) -> None:
+    first = ComposeHostEffects(load(), tmp_path / "first" / "deploy")
+    second = ComposeHostEffects(load(), tmp_path / "second" / "deploy")
+
+    assert first._compose_argv[:4] == [
+        "docker",
+        "compose",
+        "--project-name",
+        "example",
+    ]
+    assert second._compose_argv[:4] == first._compose_argv[:4]
+
+
 # ── the seam: argv list, shell=False ────────────────────────────────────────
 
 
