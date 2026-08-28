@@ -4,39 +4,56 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import date
+from dataclasses import FrozenInstanceError
+from datetime import UTC, date, datetime
 
 import pytest
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_people.contracts import (
+    ActivateEmploymentType,
     AssignmentType,
     Conflict,
     CreateCatalogEntry,
     CreateEmployee,
+    CreateEmploymentType,
     CreatePosition,
+    DeactivateEmploymentType,
     EmployeeStatus,
+    EmploymentTypeQuery,
     InvalidLifecycle,
     NotFound,
     PositionAssignmentCommand,
+    ReconcileAction,
+    ReconcileEmploymentType,
     RehireEmployee,
+    ReviseEmploymentType,
     VacancyRoutingPolicy,
 )
-from dotmac_people.models import TENANT_TABLES, Employee, Position
+from dotmac_people.models import TENANT_TABLES, Employee, EmploymentType, Position
 from dotmac_people.service import (
+    activate_employment_type,
     assign_position,
     create_department,
     create_designation,
     create_employee,
     create_employment_type,
     create_position,
+    deactivate_employment_type,
+    employment_type_fingerprint,
     end_assignment,
+    list_employment_types,
     position_is_vacant,
+    read_employment_type,
+    reconcile_employment_type,
+    register_employment_type,
     rehire_employee,
+    require_active_employment_type,
     resolve_approval_chain,
     resolve_department_head,
     resolve_direct_reports,
     resolve_manager,
+    revise_employment_type,
     search_employees,
 )
 from sqlalchemy import create_engine
@@ -394,3 +411,332 @@ def test_department_head_and_person_backed_search_are_derived_not_copied(
 
 def test_position_model_does_not_persist_the_erp_vacancy_cache() -> None:
     assert "is_vacant" not in Position.__table__.c
+
+
+def test_employment_type_typed_reads_are_immutable_tenant_scoped_and_paged(
+    db: Session,
+) -> None:
+    alpha = register_employment_type(
+        db,
+        scope=TenantScope(TENANT_A),
+        command=CreateEmploymentType(" full ", " Full time ", "Permanent"),
+    )
+    register_employment_type(
+        db,
+        scope=TenantScope(TENANT_A),
+        command=CreateEmploymentType("contract", "Contractor"),
+    )
+    register_employment_type(
+        db,
+        scope=TenantScope(TENANT_B),
+        command=CreateEmploymentType("full", "Other tenant"),
+    )
+
+    assert alpha.code == "FULL"
+    assert alpha.tenant_id == TENANT_A
+    assert alpha.name == "Full time"
+    assert (
+        read_employment_type(
+            db, scope=TenantScope(TENANT_A), employment_type_id=alpha.id
+        )
+        == alpha
+    )
+    with pytest.raises(FrozenInstanceError):
+        alpha.name = "mutable"  # type: ignore[misc]
+    with pytest.raises(NotFound):
+        read_employment_type(
+            db, scope=TenantScope(TENANT_B), employment_type_id=alpha.id
+        )
+
+    page = list_employment_types(
+        db,
+        scope=TenantScope(TENANT_A),
+        query=EmploymentTypeQuery(search="t", offset=1, limit=1),
+    )
+    assert page.total == 2
+    assert page.offset == 1
+    assert page.limit == 1
+    assert tuple(item.code for item in page.items) == ("FULL",)
+
+    exact = list_employment_types(
+        db,
+        scope=TenantScope(TENANT_A),
+        query=EmploymentTypeQuery(code=" full ", limit=1),
+    )
+    assert exact.total == 1
+    assert tuple(item.id for item in exact.items) == (alpha.id,)
+
+
+def test_employment_type_codes_are_bounded_and_never_reused_after_deactivation(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    record = register_employment_type(
+        db, scope=scope, command=CreateEmploymentType("full", "Full time")
+    )
+    deactivate_employment_type(
+        db, scope=scope, command=DeactivateEmploymentType(record.id)
+    )
+
+    with pytest.raises(Conflict, match="already exists"):
+        register_employment_type(
+            db, scope=scope, command=CreateEmploymentType("FULL", "Replacement")
+        )
+    with pytest.raises(ValueError, match="at most 20"):
+        register_employment_type(
+            db, scope=scope, command=CreateEmploymentType("x" * 21, "Too long")
+        )
+    with pytest.raises(ValueError, match="at most 100"):
+        register_employment_type(
+            db, scope=scope, command=CreateEmploymentType("ok", "x" * 101)
+        )
+
+
+def test_employment_type_revision_and_lifecycle_are_idempotent(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    created = register_employment_type(
+        db,
+        scope=scope,
+        command=CreateEmploymentType("contract", "Contractor", "Temporary"),
+    )
+    revised = revise_employment_type(
+        db,
+        scope=scope,
+        command=ReviseEmploymentType(created.id, " vendor ", " Vendor ", None),
+    )
+    assert (revised.code, revised.name, revised.description) == (
+        "VENDOR",
+        "Vendor",
+        None,
+    )
+
+    first_inactive = deactivate_employment_type(
+        db, scope=scope, command=DeactivateEmploymentType(created.id)
+    )
+    replayed_inactive = deactivate_employment_type(
+        db, scope=scope, command=DeactivateEmploymentType(created.id)
+    )
+    assert first_inactive == replayed_inactive
+    with pytest.raises(InvalidLifecycle, match="inactive"):
+        require_active_employment_type(db, scope=scope, employment_type_id=created.id)
+
+    first_active = activate_employment_type(
+        db, scope=scope, command=ActivateEmploymentType(created.id)
+    )
+    replayed_active = activate_employment_type(
+        db, scope=scope, command=ActivateEmploymentType(created.id)
+    )
+    assert first_active == replayed_active
+    assert require_active_employment_type(
+        db, scope=scope, employment_type_id=created.id
+    ).is_active
+
+
+def test_new_employee_assignment_refuses_an_inactive_employment_type(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    employment_type = register_employment_type(
+        db, scope=scope, command=CreateEmploymentType("former", "Former")
+    )
+    deactivate_employment_type(
+        db, scope=scope, command=DeactivateEmploymentType(employment_type.id)
+    )
+
+    with pytest.raises(InvalidLifecycle, match="inactive"):
+        create_employee(
+            db,
+            scope=scope,
+            command=CreateEmployee(
+                party_id=PERSON_A,
+                employee_code="inactive-type",
+                employment_type_id=employment_type.id,
+                date_of_joining=date(2026, 1, 1),
+            ),
+        )
+
+
+def test_employment_type_reconciliation_preserves_source_id_and_is_repeatable(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    source_id = uuid.uuid4()
+    source_fingerprint = "a" * 64
+    source_created_at = datetime(2020, 3, 4, 5, 6, tzinfo=UTC)
+    source_updated_at = datetime(2021, 4, 5, 6, 7, tzinfo=UTC)
+    command = ReconcileEmploymentType(
+        source_id=source_id,
+        source_fingerprint=source_fingerprint,
+        source_created_at=source_created_at,
+        source_updated_at=source_updated_at,
+        code="perm",
+        name="Permanent",
+        description=None,
+        is_active=True,
+    )
+
+    created = reconcile_employment_type(db, scope=scope, command=command)
+    assert created.action == ReconcileAction.CREATED
+    assert created.record.id == source_id
+    assert created.record.created_at == source_created_at
+    assert created.record.updated_at == source_updated_at
+    assert created.source_fingerprint == source_fingerprint
+    assert created.target_fingerprint.startswith("et1:")
+
+    replayed = reconcile_employment_type(db, scope=scope, command=command)
+    assert replayed.action == ReconcileAction.UNCHANGED
+    assert replayed.target_fingerprint == created.target_fingerprint
+
+    updated = reconcile_employment_type(
+        db,
+        scope=scope,
+        command=ReconcileEmploymentType(
+            source_id=source_id,
+            source_fingerprint="b" * 64,
+            source_created_at=source_created_at,
+            source_updated_at=datetime(2022, 5, 6, 7, 8, tzinfo=UTC),
+            code="perm",
+            name="Permanent staff",
+            description="Imported",
+            is_active=False,
+        ),
+    )
+    assert updated.action == ReconcileAction.UPDATED
+    assert not updated.record.is_active
+    assert updated.target_fingerprint != created.target_fingerprint
+
+    with pytest.raises(Conflict, match="source update is stale"):
+        reconcile_employment_type(db, scope=scope, command=command)
+
+
+def test_employment_type_reconciliation_refuses_identity_and_code_collisions(
+    db: Session,
+) -> None:
+    source_id = uuid.uuid4()
+    register_employment_type(
+        db,
+        scope=TenantScope(TENANT_A),
+        command=CreateEmploymentType("occupied", "Occupied"),
+    )
+    db.add(
+        EmploymentType(
+            id=source_id,
+            tenant_id=TENANT_B,
+            code="FOREIGN",
+            name="Foreign tenant",
+            is_active=True,
+        )
+    )
+    db.flush()
+
+    with pytest.raises(Conflict):
+        reconcile_employment_type(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=ReconcileEmploymentType(
+                source_id=source_id,
+                source_fingerprint="c" * 64,
+                source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                source_updated_at=None,
+                code="new",
+                name="Conflicting identity",
+                description=None,
+                is_active=True,
+            ),
+        )
+    with pytest.raises(Conflict, match="code"):
+        reconcile_employment_type(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=ReconcileEmploymentType(
+                source_id=uuid.uuid4(),
+                source_fingerprint="d" * 64,
+                source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                source_updated_at=None,
+                code="occupied",
+                name="Conflicting code",
+                description=None,
+                is_active=True,
+            ),
+        )
+    with pytest.raises(ValueError, match="source fingerprint"):
+        reconcile_employment_type(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=ReconcileEmploymentType(
+                source_id=uuid.uuid4(),
+                source_fingerprint="not-a-digest",
+                source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                source_updated_at=None,
+                code="valid",
+                name="Valid",
+                description=None,
+                is_active=True,
+            ),
+        )
+
+
+def test_employment_type_reconciliation_requires_aware_source_timestamps(
+    db: Session,
+) -> None:
+    base = {
+        "source_id": uuid.uuid4(),
+        "source_fingerprint": "e" * 64,
+        "code": "aware",
+        "name": "Aware",
+        "description": None,
+        "is_active": True,
+    }
+    with pytest.raises(ValueError, match="source_created_at must be timezone-aware"):
+        reconcile_employment_type(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=ReconcileEmploymentType(
+                **base,
+                source_created_at=datetime(2020, 1, 1),
+                source_updated_at=None,
+            ),
+        )
+    with pytest.raises(ValueError, match="source_updated_at must be timezone-aware"):
+        reconcile_employment_type(
+            db,
+            scope=TenantScope(TENANT_A),
+            command=ReconcileEmploymentType(
+                **base,
+                source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                source_updated_at=datetime(2020, 1, 2),
+            ),
+        )
+
+
+def test_employment_type_fingerprint_binds_scope_identity_state_and_typed_absence(
+    db: Session,
+) -> None:
+    del db
+    row_id = uuid.uuid4()
+    base = employment_type_fingerprint(
+        scope=TenantScope(TENANT_A),
+        employment_type_id=row_id,
+        code="FULL",
+        name="Full time",
+        description=None,
+        is_active=True,
+    )
+    assert base.startswith("et1:")
+    assert len(base) == 68
+    assert base != employment_type_fingerprint(
+        scope=TenantScope(TENANT_A),
+        employment_type_id=row_id,
+        code="FULL",
+        name="Full time",
+        description="<absent>",
+        is_active=True,
+    )
+    assert base != employment_type_fingerprint(
+        scope=TenantScope(TENANT_B),
+        employment_type_id=row_id,
+        code="FULL",
+        name="Full time",
+        description=None,
+        is_active=True,
+    )

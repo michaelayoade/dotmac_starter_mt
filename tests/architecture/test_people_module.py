@@ -113,6 +113,10 @@ def test_services_never_own_transactions_or_construct_sessions() -> None:
     }
     assert not ({"commit", "rollback"} & calls)
     assert not ({"Session", "SessionLocal", "sessionmaker"} & names)
+    assert not any(
+        isinstance(node, ast.ImportFrom) and node.module == "dotmac_kernel.db"
+        for node in ast.walk(tree)
+    )
 
 
 def test_root_migration_declares_effects_and_creates_the_whole_secure_plane() -> None:
@@ -183,5 +187,6 @@ def test_the_product_first_dossier_ships_with_the_package() -> None:
     dossier = (ROOT.parents[1] / "EXTRACTION.toml").read_text(encoding="utf-8")
     assert 'source_mode = "product-first"' in dossier
     assert 'source_repositories = ["dotmac_erp"' in dossier
-    assert "131 foreign-key" in dossier
-    assert "compatibility projection" in dossier
+    assert "Employment Type catalogue administration" in dossier
+    assert "physical foreign-key ledger" in dossier
+    assert "compatibility table" in dossier

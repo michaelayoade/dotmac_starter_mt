@@ -2409,13 +2409,14 @@
     "dotmac-people": {
       "$comment": [
         "Tenant employment-directory owner extracted product-first from ERP.",
-        "Kernel a71 allocates mod_people and names party_person_catalog.v1;",
-        "Backoffice is the first exact-pin consumer after this a1 release."
+        "Kernel a71 allocates mod_people; a98 first publishes the engine-free",
+        "transaction surface consumed by a2. dotmac-erp is the candidate exact-pin",
+        "consumer; publication alone does not activate its authority cutover."
       ],
       "package_dir": "packages/dotmac-people",
       "import_name": "dotmac_people",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a71",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_people",
       "tag_prefix": "dotmac-people-v",
       "wheel_contents": {

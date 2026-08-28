@@ -5,11 +5,21 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from dotmac_kernel.cache import TenantScope
+from dotmac_people.contracts import (
+    Conflict,
+    EmploymentTypeQuery,
+    ReconcileAction,
+    ReconcileEmploymentType,
+)
+from dotmac_people.service import list_employment_types, reconcile_employment_type
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -283,6 +293,77 @@ def test_app_user_cannot_insert_for_another_tenant(
                     ),
                     {"id": uuid.uuid4(), "tenant": tenant_a},
                 )
+    finally:
+        engine.dispose()
+
+
+def test_employment_type_reconcile_conflict_preserves_rls_scope_and_transaction(
+    migrated_people: tuple[str, str],
+) -> None:
+    """A hidden cross-tenant UUID collision rolls back only its savepoint."""
+    admin_url, app_url = migrated_people
+    tenant_a, tenant_b = _seed_plane(admin_url)
+    admin = create_engine(admin_url)
+    try:
+        with admin.connect() as conn:
+            tenant_b_type = conn.execute(
+                text(
+                    "SELECT id FROM mod_people.employment_types "
+                    "WHERE tenant_id = :tenant"
+                ),
+                {"tenant": tenant_b},
+            ).scalar_one()
+    finally:
+        admin.dispose()
+
+    engine = create_engine(app_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_a)},
+            )
+            with Session(bind=connection) as db:
+                with pytest.raises(Conflict):
+                    reconcile_employment_type(
+                        db,
+                        scope=TenantScope(tenant_a),
+                        command=ReconcileEmploymentType(
+                            source_id=tenant_b_type,
+                            source_fingerprint="a" * 64,
+                            source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                            source_updated_at=None,
+                            code="COLLISION",
+                            name="Collision",
+                            description=None,
+                            is_active=True,
+                        ),
+                    )
+
+                created = reconcile_employment_type(
+                    db,
+                    scope=TenantScope(tenant_a),
+                    command=ReconcileEmploymentType(
+                        source_id=uuid.uuid4(),
+                        source_fingerprint="b" * 64,
+                        source_created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                        source_updated_at=datetime(2020, 2, 1, tzinfo=UTC),
+                        code="CASUAL",
+                        name="Casual",
+                        description=None,
+                        is_active=True,
+                    ),
+                )
+                assert created.action == ReconcileAction.CREATED
+                page = list_employment_types(
+                    db,
+                    scope=TenantScope(tenant_a),
+                    query=EmploymentTypeQuery(limit=20),
+                )
+                assert {item.code for item in page.items} == {"alpha-type", "CASUAL"}
+                assert connection.scalar(
+                    text("SELECT current_setting('app.current_tenant', true)")
+                ) == str(tenant_a)
     finally:
         engine.dispose()
 

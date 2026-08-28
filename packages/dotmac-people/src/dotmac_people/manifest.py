@@ -11,7 +11,7 @@ from dotmac_people.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="people",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="people",
     migration_prefix="pe",

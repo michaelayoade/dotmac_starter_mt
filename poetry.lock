@@ -1572,7 +1572,7 @@ url = "packages/dotmac-payroll"
 
 [[package]]
 name = "dotmac-people"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant employment directory, positions, and temporal reporting resolution"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1581,7 +1581,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]
