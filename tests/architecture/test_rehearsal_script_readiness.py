@@ -520,4 +520,7 @@ def test_invalid_nginx_case_is_a_real_parser_refusal_not_a_skip() -> None:
     assert "this_is_not_a_valid_nginx_directive" in case
     assert '"${NGINX_IMAGE}" nginx -t' in case
     assert "unknown directive" in case
-    assert "invalid-nginx-configuration) inject_invalid_nginx_configuration" in SCRIPT
+    assert (
+        "invalid-nginx-configuration) inject_invalid_nginx_configuration"
+        in _code_only()
+    )
