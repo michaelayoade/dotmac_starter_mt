@@ -1347,6 +1347,19 @@ reset_compose_runtime() {
   "${COMPOSE[@]}" rm -sf app migrate >/dev/null 2>&1 || true
 }
 
+database_schema_fingerprint() {
+  # A gate-phase refusal must leave the scratch database's schema equivalent.
+  # Checking for one table is invalid after the ordered rehearsal has already
+  # migrated successfully. A real schema-only dump includes relations,
+  # columns, constraints, indexes, sequences and grants, so hashing it refuses
+  # subtler DDL than a relation-name census can see.
+  "${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" \
+    "${DB1_CONTAINER}" pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
+    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" \
+    --schema-only --no-owner --no-privileges \
+    | sha256sum | awk '{print $1}'
+}
+
 inject_wrong_image_digest() {
   local bogus="${IMAGE_REPOSITORY}@sha256:$(printf '0%.0s' $(seq 1 64))"
   if "${DOCKER_BIN}" image inspect "${bogus}" >/dev/null 2>&1; then
@@ -1378,18 +1391,23 @@ JSON
 
 inject_missing_migration_credentials() {
   reset_compose_runtime
+  local before after out
+  before="$(database_schema_fingerprint)"
   local rc=0
-  MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
+  out="$(MIGRATION_DATABASE_URL="" "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}" -p "${REHEARSAL_PRODUCT}" \
     -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" run --rm --no-deps migrate \
-    >/dev/null 2>&1 || rc=$?
-  local table_exists
-  table_exists="$("${DOCKER_BIN}" exec -e PGPASSWORD="${DB_SUPERUSER_PASSWORD}" "${DB1_CONTAINER}" \
-    psql -tAc "SELECT to_regclass('public.rehearsal_ledger') IS NOT NULL" \
-    -U "${DB_SUPERUSER}" -d "${DB1_NAME}" 2>/dev/null | tr -d '[:space:]')"
-  if [ "${rc}" -ne 0 ] && [ "${table_exists}" != "t" ]; then
-    case_pass "missing-migration-credentials: compose refused (required var unset) before any DDL ran"
+    2>&1)" || rc=$?
+  after="$(database_schema_fingerprint)"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -q 'MIGRATION_DATABASE_URL' \
+      && [ "${before}" = "${after}" ]; then
+    case_pass "missing-migration-credentials: compose named the missing owner material and the complete schema fingerprint stayed unchanged"
   else
-    case_fail "missing-migration-credentials: rc=${rc} table_exists=${table_exists}"
+    local named_material schema_unchanged
+    named_material="$(printf '%s' "${out}" | grep -c 'MIGRATION_DATABASE_URL' || true)"
+    schema_unchanged=no
+    [ "${before}" = "${after}" ] && schema_unchanged=yes
+    case_fail "missing-migration-credentials: rc=${rc} named_material=${named_material} schema_unchanged=${schema_unchanged}"
   fi
 }
 
@@ -1420,8 +1438,9 @@ inject_migration_failure() {
   psql_super -c "ALTER DATABASE ${DB1_NAME} OWNER TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT USAGE ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
   psql_super -c "GRANT ALL ON SCHEMA public TO ${DB_OWNER_USER};" >/dev/null
-  if [ "${rc}" -ne 0 ] && ! printf '%s' "${out}" | grep -qi 'lock'; then
-    case_pass "migration-failure: a genuine, non-lock-shaped permission failure stopped the migration"
+  if [ "${rc}" -ne 0 ] \
+      && printf '%s' "${out}" | grep -qi 'permission denied for schema public'; then
+    case_pass "migration-failure: a genuine schema-permission failure stopped the migration and is not classified from incidental SQL text"
   else
     case_fail "migration-failure: rc=${rc} out=${out}"
   fi
@@ -1466,7 +1485,10 @@ inject_missing_migration_head() {
 inject_failed_backup() {
   local rc=0
   "${DOCKER_BIN}" exec -e PGPASSWORD="wrong-password-on-purpose" "${DB1_CONTAINER}" \
-    pg_dump -U "${DB_OWNER_USER}" -d "${DB1_NAME}" > "${WORK_DIR}/should_not_exist.sql.gz" 2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
+    pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
+      -U "${DB_OWNER_USER}" -d "${DB1_NAME}" \
+      > "${WORK_DIR}/should_not_exist.sql.gz" \
+      2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
   local size
   size="$(stat -f%z "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || stat -c%s "${WORK_DIR}/should_not_exist.sql.gz" 2>/dev/null || echo 0)"
   rm -f "${WORK_DIR}/should_not_exist.sql.gz"
@@ -1529,10 +1551,30 @@ inject_candidate_never_ready() {
 }
 
 inject_primary_fails_after_handoff() {
+  # Earlier credential/migration cases deliberately remove the runtime role.
+  # This case owns its precondition: restore one app container from the same
+  # deploying digest, re-arm the harness readiness marker, and prove it ready
+  # before injecting the post-handoff crash.
+  reset_compose_runtime
+  "${COMPOSE[@]}" up -d --no-deps app >/dev/null
   local cid
   cid="$("${COMPOSE[@]}" ps -q app)"
   if [ -z "${cid}" ]; then
     case_fail "primary-fails-after-handoff: no app container is running (run '$0 run' through step 8 first)"
+    return
+  fi
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app liveness baseline" \
+    bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:${APP_HOST_PORT}/health/live 2>/dev/null)\" = \"200\" ]"; then
+    case_fail "primary-fails-after-handoff: app did not reach its liveness baseline"
+    return
+  fi
+  "${DOCKER_BIN}" exec "${cid}" sh -c \
+    'mkdir -p /tmp && : > /tmp/rehearsal-ready'
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${cid}" \
+    "post-handoff app readiness baseline" \
+    container_healthy "${cid}"; then
+    case_fail "primary-fails-after-handoff: app did not reach its healthy baseline"
     return
   fi
   local before

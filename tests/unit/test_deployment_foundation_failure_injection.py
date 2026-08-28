@@ -522,6 +522,33 @@ def test_a_migration_failure_that_is_not_lock_contention_is_not_retried() -> Non
     assert "not lock contention" in outcome.failure
 
 
+def test_sql_that_sets_lock_timeout_does_not_make_a_permission_error_retryable() -> (
+    None
+):
+    """Postgres repeats the failed SQL text underneath a real permission error.
+
+    The rehearsal migration begins with ``SET lock_timeout``. Treating that
+    setting name as evidence of contention retries every later permission,
+    syntax or constraint failure merely because the statement carried its
+    safety bound with it.
+    """
+    spec = load()
+    effects = FakeEffects(
+        command_results={
+            "alembic": CommandResult(
+                1,
+                stderr=(
+                    "ERROR: permission denied for schema public\n"
+                    "LINE 1: SET lock_timeout = '5s'; CREATE TABLE example"
+                ),
+            )
+        }
+    )
+    _, outcome = run(spec, effects)
+    assert outcome.failed_step is not None and outcome.failed_step.value == "migrate"
+    assert "not lock contention" in outcome.failure
+
+
 def test_migration_lock_contention_is_retried_and_then_gives_up() -> None:
     spec = load()
     effects = FakeEffects(

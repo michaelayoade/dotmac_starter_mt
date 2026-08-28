@@ -414,3 +414,38 @@ def test_alert_transition_failures_emit_rule_target_and_app_diagnostics() -> Non
         "baseline, fire and recovery failures must print the evidence that "
         "distinguishes a missing rule, missing target and unhealthy app"
     )
+
+
+# ── injection cases own and prove their preconditions ─────────────────────
+
+
+def test_missing_migration_material_compares_the_complete_schema_before_and_after() -> (
+    None
+):
+    case = _function("inject_missing_migration_credentials")
+    helper = _function("database_schema_fingerprint")
+    assert case.count("database_schema_fingerprint") == 2
+    assert "grep -q 'MIGRATION_DATABASE_URL'" in case
+    assert '"${before}" = "${after}"' in case
+    assert "to_regclass('public.rehearsal_ledger')" not in case
+    assert "pg_dump -h 127.0.0.1" in helper
+    assert "--schema-only --no-owner --no-privileges" in helper
+    assert "sha256sum" in helper
+
+
+def test_failed_backup_forces_password_authentication_over_tcp() -> None:
+    case = _function("inject_failed_backup")
+    assert "wrong-password-on-purpose" in case
+    assert "pg_dump -h 127.0.0.1" in case
+    assert '-p "${DB_PORT}"' in case
+
+
+def test_post_handoff_failure_case_establishes_its_own_ready_app() -> None:
+    case = _function("inject_primary_fails_after_handoff")
+    reset = case.find("reset_compose_runtime")
+    start = case.find("up -d --no-deps app")
+    marker = case.find(": > /tmp/rehearsal-ready")
+    healthy = case.find("container_healthy")
+    crash = case.find('kill "${cid}"')
+    assert -1 not in (reset, start, marker, healthy, crash)
+    assert reset < start < marker < healthy < crash
