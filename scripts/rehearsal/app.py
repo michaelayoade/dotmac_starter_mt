@@ -192,7 +192,7 @@ def cmd_serve() -> int:
 
 
 def _write_marker(path: str, value: str = "") -> None:
-    with open(path, "w", encoding="utf-8") as handle:  # noqa: PTH123
+    with open(path, "w", encoding="utf-8") as handle:
         handle.write(value)
 
 
@@ -233,7 +233,7 @@ def cmd_scheduler() -> int:
 
 def cmd_scheduler_last_tick() -> int:
     try:
-        with open(SCHEDULER_TICK, encoding="utf-8") as handle:  # noqa: PTH123
+        with open(SCHEDULER_TICK, encoding="utf-8") as handle:
             print(handle.read().strip())
     except FileNotFoundError:
         return 1
