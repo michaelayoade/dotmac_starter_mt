@@ -331,6 +331,11 @@ jobs:
           PY
           )"
           echo "descriptor pins $reference"
+          audit_dir="${RUNNER_TEMP:-/tmp}/dotmac-image-audit"
+          mkdir -p "$audit_dir"
+          inspect_file="$audit_dir/inspect.json"
+          history_file="$audit_dir/history.json"
+          layers_file="$audit_dir/layers.txt"
 
           if ! docker image inspect "$reference" >/dev/null 2>&1; then
             if ! docker pull "$reference" >/dev/null 2>&1; then
@@ -360,16 +365,29 @@ jobs:
             fi
           fi
 
-          docker image inspect "$reference" > /tmp/inspect.json
+          docker image inspect "$reference" > "$inspect_file"
           docker history --no-trunc --format '{{.CreatedBy}}' "$reference" \
             | python -c 'import json,sys; print(json.dumps(sys.stdin.read().splitlines()))' \
-            > /tmp/history.json
-          docker run --rm --entrypoint sh "$reference" -c 'find / -xdev -type f 2>/dev/null' \
-            > /tmp/layers.txt || : > /tmp/layers.txt
+            > "$history_file"
+          # Filesystem enumeration is INSPECTION, not the runtime security
+          # context. Run this one-shot collector as uid/gid 0 so an otherwise
+          # compliant image's numeric non-root USER cannot hide root-owned
+          # base-image paths. `image-audit` still evaluates Config.User from
+          # the inspect evidence and will refuse a root runtime declaration.
+          #
+          # Do not suppress `find` diagnostics or turn a failed, partial walk
+          # into an empty file. An incomplete filesystem inventory is not
+          # evidence; fail this gate explicitly and preserve both the partial
+          # listing and Docker/find's stderr in the job log for diagnosis.
+          if ! docker run --rm --user 0:0 --entrypoint sh "$reference" \
+            -c 'find / -xdev -type f' > "$layers_file"; then
+            echo "::error::filesystem inspection failed; image audit was not run against partial evidence" >&2
+            exit 1
+          fi
 
           dotmac-deploy image-audit "$reference" \
-            --inspect /tmp/inspect.json \
-            --history /tmp/history.json \
-            --layers /tmp/layers.txt
+            --inspect "$inspect_file" \
+            --history "$history_file" \
+            --layers "$layers_file"
         env:
           DESCRIPTOR: ${{ inputs.descriptor }}

@@ -546,7 +546,7 @@ entitlement grants. Billing may update subscription state, and metering may
 feed quota and/or billing, but request handlers consult local entitlement and
 quota decisions—not payment providers or raw license payloads.
 
-### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-26)
+### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-28)
 
 ADR-0003 § "Infrastructure provisioning and deployment execution" declared
 profile-specific deployment assets and reusable providers. It was never built,
@@ -611,12 +611,21 @@ customer domains are explicitly out of scope and need a domain/DNS/TLS
 reconciler, for which Caddy, Traefik, cert-manager or a managed load balancer
 remain available.
 
-**Adoption status.** Built, statically validated, and NOT published, NOT pinned
-by any product, NOT run anywhere (`AGENTS.md` rule 30). Descriptors exist on
-unmerged branches for this repository, `dotmac_erp`, `dotmac_integrator` and
-`dotmac_sub`; none retires its product's existing engine, and retirement is
-gated on proven parity per product. Decision: ADR-0070. Sources and the
-eighteen defects deliberately not extracted:
+**Filesystem inspection is not the runtime identity.** The reusable strict
+image gate enumerates image files in a one-shot uid/gid 0 container so a
+configured non-root user cannot make root-owned base-image paths invisible.
+The audit independently reads `Config.User` from `docker image inspect` and
+still refuses a missing, named, root or system-range runtime user. A failed
+filesystem walk is a failed evidence collection: the gate preserves its
+partial listing and diagnostics, then refuses instead of truncating the input
+and auditing an empty file.
+
+**Adoption status.** Version `0.2.0a1` is published, registry-install-verified
+and tagged; `0.2.0a2` is declared for the strict image-collector repair and is
+not published yet. No product has completed adoption or retired its existing
+engine. ERP is the first candidate and may pin a2 only after its protected
+release oracle succeeds; Integrator and Sub remain later candidates. Decision:
+ADR-0070. Sources and the eighteen defects deliberately not extracted:
 `docs/inventories/deployment-foundation-sources.md`.
 
 ### Target tenant lifecycle and global commercial foundations
