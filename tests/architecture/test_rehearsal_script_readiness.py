@@ -472,6 +472,8 @@ def test_previously_skipped_role_cases_drive_the_real_compose_effects() -> None:
     assert "case_skip" not in candidate
     assert "effects_probe start-candidate" in candidate
     assert candidate.count("effects_probe candidate-ready") == 1
+    assert '"${candidate_digest}" = "${IMAGE_DIGEST}"' in candidate
+    assert '"${candidate_digest}" = "${IMAGE_REFERENCE}"' not in candidate
     assert "primary_still_ready}" in candidate
 
     worker = _function("inject_worker_unhealthy")

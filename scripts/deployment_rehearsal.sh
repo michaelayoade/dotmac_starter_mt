@@ -1712,7 +1712,9 @@ inject_candidate_never_ready() {
   primary_still_ready="$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready")"
   remove_container "${candidate_name}"
 
-  if [ "${candidate_digest}" = "${IMAGE_REFERENCE}" ] \
+  # Effects returns the canonical digest, not the repository-qualified image
+  # reference. The engine compares the same surface to spec.image_digest.
+  if [ "${candidate_digest}" = "${IMAGE_DIGEST}" ] \
       && [ "${stayed_unready}" = yes ] \
       && [ "${primary_after}" = "${primary}" ] \
       && [ "${primary_still_ready}" = 200 ]; then
