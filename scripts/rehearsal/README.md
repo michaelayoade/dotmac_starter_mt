@@ -7,13 +7,14 @@ disposable host adds that a unit test cannot. Read that document first — it
 states which claims this rehearsal exists to establish and why a fake
 `Effects` implementation cannot establish them.
 
-**Status as of 2026-08-27: the rehearsal has run four times, but no exact-SHA
-run has passed yet.** The latest run, `33111496459` at main commit `9cc24b1e`,
-passed steps 1-12 and failed in step 13 because the harness looked for an
-alert-instance label that correctly disappears when an alert recovers. The
-current branch repairs that verdict and still requires a new disposable-host
-run. The rehearsal runs ONLY against infrastructure it creates and destroys
-itself.
+**Status as of 2026-08-28: every ordered subject and all 21 injection subjects
+have executed on an explicitly authorised disposable test host.** That includes
+real Nginx parse and primary-to-candidate failover, restore, telemetry, alert
+fire/recovery, custom-worker health and scheduler freshness. This branch
+evidence does not authorise publication: the release lane still requires a
+successful GitHub rehearsal whose `head_sha` is byte-identical to the merged
+main SHA under release. The rehearsal runs ONLY against infrastructure it
+creates and destroys itself.
 
 ## What it touches, and what it never touches
 
@@ -39,10 +40,10 @@ itself.
   `${TMPDIR:-/tmp}/dotmac-deployment-rehearsal`). `down` is idempotent —
   safe to run again if a prior run was interrupted.
 
-## How to run it, on Observer
+## How to run it, on an explicitly authorised disposable host
 
 ```
-ssh observe
+ssh <authorised-test-host>
 # a fresh isolated writable checkout pinned to the exact commit under test —
 # a shared checkout is not test evidence (docs/inventories/
 # deployment-foundation-rehearsal.md, Lane 1)
@@ -77,32 +78,19 @@ same rule to be `inactive`, that same target to remain present and be `up`, and
 the restarted app to be HTTP-ready and Docker-healthy. A missing rule, a
 missing target, or an app that is merely live is not recovery.
 
-## Three cases are SKIPPED, honestly, and why
+## Zero skipped cases
 
-`scripts/deployment_rehearsal.sh inject` genuinely exercises seventeen of
-the twenty required failure-injection cases against real infrastructure.
-Three print `SKIPPED: <case> — <reason>` instead, because this disposable
-product structurally cannot exercise them:
+`scripts/deployment_rehearsal.sh inject` exercises all 21 cases against real
+infrastructure. The ordered descriptor stays a minimal HTTP product. For the
+three role-shaped injections and the Nginx handoff, the script derives a
+working descriptor that adds a real ingress route, custom worker and scheduler;
+it then drives the public `ComposeHostEffects` seams against live containers.
+The worker ping is healthy before its marker is removed, the scheduler tick is
+fresh before it is made stale, and the candidate is a distinct HTTP subject.
 
-- **`candidate-never-ready`** — this product declares no `[ingress]` route
-  (nginx is out of scope on Observer, per this rehearsal's own design). The
-  warm-candidate mechanism (`ComposeHostEffects.start_candidate`/
-  `candidate_ready`) derives its port from an ingress route and raises
-  without one, so there is no candidate to gate.
-- **`worker-unhealthy`** and **`scheduler-stale`** — this product declares
-  one plain HTTP role with no `[roles.worker]`/`[roles.scheduler]`
-  contract. Proving these against real infrastructure would need a
-  Celery-shaped role, out of scope for the minimal reference product this
-  rehearsal deploys.
-
-All three are already proven against a scripted fake in
-`tests/unit/test_deployment_foundation_failure_injection.py`
-(`test_a_candidate_that_never_becomes_ready_is_not_handed_traffic`,
-`test_an_unhealthy_worker_fails_the_deployment_even_though_its_container_is_up`,
-`test_a_stale_scheduler_fails_the_deployment`). Because a silent skip is
-exactly what this whole programme exists to remove, the script exits
-non-zero whenever any case is skipped unless `ALLOW_SKIPS=1` is set — a
-skip is a fact to report, never a fact to hide behind a green exit code.
+`ALLOW_SKIPS` remains a fail-closed policy knob for future additions: the
+default run exits non-zero if a new case is registered as a skip. It is not set
+by CI and is not needed by the current matrix.
 
 ## What "wrong-manifest-digest" actually proves
 
@@ -122,7 +110,7 @@ alongside `drift`.
 |---|---|
 | `product.toml` | A real `ProductDeploymentSpec.v1` descriptor, same schema as `deploy/product.toml`, with six `@@NAME@@` placeholders the driving script substitutes into a working copy — never edit a substituted copy, edit this file and re-run. |
 | `Dockerfile` | Builds the disposable product's image to the same hardened contract `dotmac_deployment_foundation.image.audit` checks against every real product image. |
-| `app.py` | The disposable product itself: `/health/live` (DB-free, always 200), `/health/ready` (503 until a marker file exists), `/metrics` (one gauge), `--migrate` and `--heads` modes that speak to Postgres via `psql`. |
+| `app.py` | The disposable product itself: HTTP liveness/readiness/metrics/identity, migration and heads, plus custom worker and scheduler modes with real health/freshness probes. |
 | `thresholds.json` | Product-threshold alert placeholder values, same shape as `deploy/alerts/thresholds.json`, scoped to this rehearsal's own short-fused values. |
 
 ## If it fails

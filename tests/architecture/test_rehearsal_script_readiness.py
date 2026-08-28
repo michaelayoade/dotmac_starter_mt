@@ -541,3 +541,13 @@ def test_invalid_nginx_case_is_a_real_parser_refusal_not_a_skip() -> None:
         "invalid-nginx-configuration) inject_invalid_nginx_configuration"
         in _code_only()
     )
+
+
+def test_the_current_matrix_has_twenty_one_real_cases_and_no_skip_callers() -> None:
+    body = _code_only()
+    array = re.search(r"ALL_CASES=\(\n(?P<body>.*?)\n\)", body, re.DOTALL)
+    assert array is not None
+    cases = [line.strip() for line in array.group("body").splitlines() if line.strip()]
+    assert len(cases) == 21
+    assert len(cases) == len(set(cases))
+    assert body.count("case_skip") == 1, "only the fail-closed helper may remain"

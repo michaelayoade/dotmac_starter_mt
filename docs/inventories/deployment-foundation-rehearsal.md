@@ -1,13 +1,16 @@
-# Deployment foundation — Lane 1 is green, Lane 2 is running but not green
+# Deployment foundation — both implementations exercised; release oracle remains exact-main
 
-**Status as of 2026-08-27. Lane 1 RAN green on Observer; Lane 2 has run four
-times and has not yet produced a successful exact-SHA oracle record.** The
-lanes prove different things and remain reported separately.
+**Status as of 2026-08-28. Lane 1 ran green in an isolated environment. Lane 2
+has exercised every ordered subject and all 21 injection subjects on an
+explicitly authorised disposable test host.** The lanes prove different things
+and remain reported separately. Neither branch evidence is a release oracle:
+the first publication still requires a successful GitHub rehearsal at the
+exact merged main SHA being released.
 
 | Lane | What it proves | State |
 |---|---|---|
 | **Lane 1** — the written suites | the code does what its own tests say | **RUN.** Observer, commit `484d3ac6`: `tests/unit tests/architecture` exit 0, **zero failures**; **12/12** quality targets pass. All three adapter descriptors `validate`, and `render --check` confirms the committed output matches byte-for-byte. |
-| **Lane 2** — the disposable host | a real engine, a real database, a real handoff | **RUN, NOT YET PASSED.** Four exact-main GitHub runs progressively reached further. The latest, `33111496459` at `9cc24b1e`, passed steps 1-12 and exposed an unsatisfiable step-13 recovery predicate. A corrected exact-SHA run is still owed. |
+| **Lane 2** — the disposable host | a real engine, database, Nginx handoff, restore and observability loop | **IMPLEMENTATION EXERCISED.** The 2026-08-28 branch run used Docker 29.1.3 / Compose 2.40.3 and reached the complete 13-step ordered lane plus the 21-case zero-skip matrix. Publication still waits for the encoded exact-main GitHub oracle. |
 
 Workstation runs are never accepted as test evidence. Lane 1's evidence is an
 Observer run at an exact commit in a fresh checkout; the local tree is not the
@@ -17,7 +20,7 @@ evidence.
 still binds Lane 2 completely, and it binds any PUBLICATION claim — see the
 closing section.
 
-The four Lane 2 runs found real defects rather than producing false green:
+The Lane 2 runs found real defects rather than producing false green:
 
 | Run | Furthest proved point | Finding |
 |---|---|---|
@@ -25,6 +28,7 @@ The four Lane 2 runs found real defects rather than producing false green:
 | second | database start | a first-success readiness wait raced Postgres' temporary init server |
 | third | backup and drift proofs | the non-root collector could not write its harness-owned sink, and timeout diagnostics hid the reason |
 | `33111496459` | steps 1-12 | recovery required `alertname` to remain in an active-instance array after recovery had correctly removed the instance |
+| authorised test host, 2026-08-28 | ordered lane + injection matrix | four injections had false premises; schema dumps carry random `restrict` tokens; three declared cases were skipped; Compose project identity came from a directory basename; and the written Nginx handoff claim had never loaded Nginx |
 
 The latest run proved real drift refusal, backup restore to `PROVED`, truncated
 backup rejection, and the nine required attributes on a real collector signal.
@@ -40,6 +44,7 @@ is worth more than it looks.
 |---|---|---|
 | **Docker 28.0.4 / Compose 2.38.2** | GitHub-hosted runner | runs the rehearsal (Lane 2) and the required per-PR parse in `ci.yml` |
 | **Docker 29.4.3 / Compose v5.1.3** | Observer | where the `pids` alias behaviour was isolated and the three candidate shapes compared |
+| **Docker 29.1.3 / Compose 2.40.3** | explicitly authorised disposable test host | ran the complete branch rehearsal, including live Nginx handoff and all failure subjects |
 
 The `pids_limit` defect was REJECTED by 28.0.4/2.38.2 (that is how the rehearsal
 found it) and independently reproduced on 29.4.3/5.1.3. The repair is ACCEPTED

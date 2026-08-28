@@ -6,13 +6,14 @@
 # migration-head verification) real bytes on disk — not a fake `Effects`
 # implementation.
 #
-# STATUS as of 2026-08-27: Lane 2 has run four times on disposable
-# infrastructure. The latest exact-main run, 33111496459 at 9cc24b1e, passed
-# steps 1-12 and exposed an unsatisfiable alert-recovery predicate in step 13.
-# This branch repairs that predicate; a successful exact-SHA run is still
-# required before publication. The script runs ONLY on the disposable
+# STATUS as of 2026-08-28: every ordered subject and all 21 injection subjects
+# have run on an explicitly authorised disposable test host, including real
+# Nginx parse/failover, restore, telemetry and alert recovery. This is branch
+# implementation evidence, not publication authority: release-facility.yml
+# still requires a successful GitHub rehearsal whose head_sha is the exact
+# merged main SHA being released. The script runs ONLY on the disposable
 # infrastructure it creates and tears down itself — never against a named
-# environment or production host. See scripts/rehearsal/README.md first.
+# product environment or production host. See scripts/rehearsal/README.md.
 #
 # Subcommands:
 #   up               create the disposable registry, build+push the image
