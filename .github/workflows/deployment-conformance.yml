@@ -112,12 +112,13 @@ on:
         default: false
       require-real-digests:
         description: >-
-          Fail when the descriptor's image reference or manifest digest is the
-          all-zeros placeholder. On by default: an all-zeros digest PARSES (it
-          satisfies spec.py's sha256-shape pattern) but is not a real digest,
-          and every adapter descriptor in this repository still carries one
-          today. Turn this off only for a deliberately-not-yet-real reference
-          descriptor, never for a release gate.
+          Keep the aggregate conformance check's placeholder-digest findings.
+          On by default: an all-zeros digest PARSES (it satisfies spec.py's
+          sha256-shape pattern) but is not a real digest. False removes only
+          findings returned by check_no_placeholder_digests, for a
+          deliberately-not-yet-real reference descriptor; every other
+          conformance finding still fails. Never turn it off for a release
+          gate.
         required: false
         type: boolean
         default: true
@@ -194,60 +195,39 @@ jobs:
         shell: bash
         env:
           DESCRIPTOR: ${{ inputs.descriptor }}
+          REQUIRE_REAL_DIGESTS: ${{ inputs.require-real-digests }}
         run: |
           python <<'PY'
           import os
           import sys
 
-          from dotmac_deployment_foundation.conformance import check_all
+          from dotmac_deployment_foundation.conformance import (
+              check_all,
+              check_no_placeholder_digests,
+          )
           from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
           spec = ProductDeploymentSpec.load(os.environ["DESCRIPTOR"])
           problems = check_all(spec)
+          require_real_digests = os.environ["REQUIRE_REAL_DIGESTS"].lower()
+          if require_real_digests not in {"true", "false"}:
+              print(
+                  "::error::REQUIRE_REAL_DIGESTS must be the workflow boolean "
+                  f"true or false, got {require_real_digests!r}"
+              )
+              sys.exit(2)
+          if require_real_digests == "false":
+              # Remove only the findings from the dedicated placeholder check.
+              # Calling the same function rather than matching prose keeps every
+              # other aggregate finding load-bearing if its wording changes.
+              for permitted in check_no_placeholder_digests(spec):
+                  problems.remove(permitted)
           if problems:
               print("::error::deployment conformance checks failed:")
               for problem in problems:
                   print(f"::error::  - {problem}")
               sys.exit(1)
           print(f"{len(problems)} conformance findings — all checks passed")
-          PY
-
-      # An all-zeros digest PARSES (it satisfies spec.py's sha256-shape
-      # pattern) but is not a real digest — it is the placeholder every
-      # adapter descriptor in this repository still carries today. A
-      # conformance gate that only checks shape would pass a descriptor that
-      # can never actually be deployed.
-      - name: Refuse placeholder all-zero digests
-        if: inputs.require-real-digests
-        shell: bash
-        env:
-          DESCRIPTOR: ${{ inputs.descriptor }}
-        run: |
-          python <<'PY'
-          import os
-          import sys
-
-          from dotmac_deployment_foundation.spec import ProductDeploymentSpec
-
-          spec = ProductDeploymentSpec.load(os.environ["DESCRIPTOR"])
-          placeholder = "0" * 64
-          problems = []
-          if placeholder in spec.image:
-              problems.append(f"image reference is a placeholder digest: {spec.image}")
-          if spec.manifest_digest.endswith(placeholder):
-              problems.append(
-                  "assembly manifest_digest is a placeholder digest: "
-                  f"{spec.manifest_digest}"
-              )
-          if problems:
-              print(
-                  "::error::require-real-digests is on and the descriptor "
-                  "still carries a placeholder:"
-              )
-              for problem in problems:
-                  print(f"::error::  - {problem}")
-              sys.exit(1)
-          print("no placeholder all-zero digests found")
           PY
 
       - name: The rendered assets match the descriptor

@@ -47,6 +47,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -204,7 +205,8 @@ def test_deployment_conformance_runs_check_all() -> None:
     CI job can report every finding in one pass."""
     workflow = _load_yaml(CONFORMANCE_WORKFLOW)
     blob = "\n".join(_string_values(workflow))
-    assert "conformance import check_all" in blob
+    assert "from dotmac_deployment_foundation.conformance import (" in blob
+    assert "check_all," in blob
     assert "check_all(spec)" in blob
 
 
@@ -219,6 +221,72 @@ def test_deployment_conformance_has_a_require_real_digests_input_default_true() 
     inputs = workflow[True]["workflow_call"]["inputs"]
     assert inputs["require-real-digests"]["default"] is True
     assert inputs["require-real-digests"]["type"] == "boolean"
+
+
+def _descriptor_conformance_script() -> str:
+    workflow = _load_yaml(CONFORMANCE_WORKFLOW)
+    step = next(
+        item
+        for item in workflow["jobs"]["descriptor"]["steps"]
+        if item.get("name") == "Run the descriptor conformance checks"
+    )
+    wrapper = step["run"]
+    prefix = "python <<'PY'\n"
+    assert wrapper.startswith(prefix)
+    assert wrapper.endswith("\nPY\n")
+    return wrapper.removeprefix(prefix).removesuffix("\nPY\n")
+
+
+def _execute_descriptor_conformance_script() -> None:
+    resolved_workflow = CONFORMANCE_WORKFLOW.resolve()
+    assert resolved_workflow.is_relative_to(PROJECT_ROOT.resolve())
+    # This sensitivity test intentionally executes the exact checked-in body;
+    # the path assertion above is the enforceable premise for the exemption.
+    exec(  # noqa: S102
+        compile(_descriptor_conformance_script(), resolved_workflow, "exec")
+    )
+
+
+def test_non_strict_digest_mode_removes_only_placeholder_findings(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Execute the workflow's actual script against its real placeholder.
+
+    This is the control the original implementation lacked: setting the input
+    false must change the verdict of the aggregate check, not merely skip a
+    later duplicate after ``check_all`` has already failed.
+    """
+
+    monkeypatch.setenv("DESCRIPTOR", str(PROJECT_ROOT / "deploy" / "product.toml"))
+    monkeypatch.setenv("REQUIRE_REAL_DIGESTS", "false")
+    monkeypatch.syspath_prepend(
+        str(PROJECT_ROOT / "packages" / "dotmac-deployment-foundation" / "src")
+    )
+
+    _execute_descriptor_conformance_script()
+
+    assert "0 conformance findings" in capsys.readouterr().out
+
+
+def test_strict_digest_mode_still_refuses_the_same_real_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The opposite verdict proves non-strict mode did not weaken the check."""
+
+    monkeypatch.setenv("DESCRIPTOR", str(PROJECT_ROOT / "deploy" / "product.toml"))
+    monkeypatch.setenv("REQUIRE_REAL_DIGESTS", "true")
+    monkeypatch.syspath_prepend(
+        str(PROJECT_ROOT / "packages" / "dotmac-deployment-foundation" / "src")
+    )
+
+    with pytest.raises(SystemExit, match="1"):
+        _execute_descriptor_conformance_script()
+
+    output = capsys.readouterr().out
+    assert "image.reference is pinned to the placeholder" in output
+    assert "assembly.manifest_digest is the placeholder" in output
 
 
 def test_deployment_conformance_starters_own_descriptor_is_still_all_zero() -> None:
