@@ -455,3 +455,33 @@ def test_post_handoff_failure_case_establishes_its_own_ready_app() -> None:
     crash = case.find('kill "${cid}"')
     assert -1 not in (reset, start, marker, healthy, crash)
     assert reset < start < marker < healthy < crash
+
+
+def test_previously_skipped_role_cases_drive_the_real_compose_effects() -> None:
+    fixture = _function("prepare_effects_fixture")
+    for contract in (
+        "[ingress]",
+        'code = "worker"',
+        "[roles.worker]",
+        'code = "scheduler"',
+        "[roles.scheduler]",
+    ):
+        assert contract in fixture
+
+    candidate = _function("inject_candidate_never_ready")
+    assert "case_skip" not in candidate
+    assert "effects_probe start-candidate" in candidate
+    assert candidate.count("effects_probe candidate-ready") == 1
+    assert 'primary_still_ready}' in candidate
+
+    worker = _function("inject_worker_unhealthy")
+    assert "case_skip" not in worker
+    assert worker.count("effects_probe worker-responds") == 2
+    assert "--worker-make-unhealthy" in worker
+    assert 'container_running "${cid}"' in worker
+
+    scheduler = _function("inject_scheduler_stale")
+    assert "case_skip" not in scheduler
+    assert scheduler.count("effects_probe scheduler-age") == 2
+    assert "--scheduler-make-stale" in scheduler
+    assert 'container_running "${cid}"' in scheduler

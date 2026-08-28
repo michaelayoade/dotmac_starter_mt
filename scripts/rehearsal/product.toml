@@ -22,10 +22,12 @@
 #   @@DB_NAME@@          — the DB1_NAME knob (default "rehearsal_primary")
 #   @@APP_HOST_PORT@@    — the APP_HOST_PORT knob (default 18180)
 #
-# One role, no ingress: nginx is out of scope on the Observer host (no
-# reverse proxy is provisioned there), so this descriptor deliberately
-# cannot exercise the warm-candidate/ingress-gated path — the script marks
-# every case that needs one SKIPPED, loudly, with that reason.
+# The ordered lane stays the smallest honest HTTP product: one role and no
+# ingress. The failure-injection lane derives a working copy that adds a real
+# ingress declaration plus custom worker and scheduler roles. That lets the
+# real ComposeHostEffects seams execute without pretending the test host owns
+# a product Nginx installation or burdening the ordered backup/restore proof
+# with unrelated long-lived roles.
 
 schema = "ProductDeploymentSpec.v1"
 product = "@@PRODUCT@@"

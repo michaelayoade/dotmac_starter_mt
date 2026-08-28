@@ -1366,6 +1366,126 @@ database_schema_fingerprint() {
     | sha256sum | awk '{print $1}'
 }
 
+EFFECTS_DESCRIPTOR=""
+EFFECTS_COMPOSE_FILE=""
+EFFECTS_COMPOSE=()
+
+prepare_effects_fixture() {
+  # The ordered lane deliberately stays a one-role product. These three
+  # injection cases need the real provider contracts that a minimal HTTP-only
+  # descriptor cannot express, so derive a disposable working copy with an
+  # ingress route, a custom worker and a scheduler. The image and every other
+  # deployment fact remain the ones produced by `up` at this exact SHA.
+  EFFECTS_DESCRIPTOR="${WORK_DIR}/effects-product.toml"
+  EFFECTS_COMPOSE_FILE="${WORK_DIR}/effects-rendered/docker-compose.yml"
+  cp "${DESCRIPTOR}" "${EFFECTS_DESCRIPTOR}"
+  cat >> "${EFFECTS_DESCRIPTOR}" <<'TOML'
+
+[ingress]
+host = "rehearsal.invalid"
+redirect_http = false
+
+[[ingress.routes]]
+path = "/"
+role = "app"
+port = 8000
+
+[[roles]]
+code = "worker"
+command = ["python", "/app/app.py", "--worker"]
+replicas = 1
+stop_grace_seconds = 5
+
+[roles.resources]
+cpus = "0.25"
+memory = "128m"
+pids = 32
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+[roles.worker]
+kind = "custom"
+ping_command = ["python", "/app/app.py", "--worker-ping"]
+heartbeat_max_age_seconds = 30
+max_backlog = 1
+
+[[roles]]
+code = "scheduler"
+command = ["python", "/app/app.py", "--scheduler"]
+replicas = 1
+stop_grace_seconds = 5
+
+[roles.resources]
+cpus = "0.25"
+memory = "128m"
+pids = 32
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+[roles.scheduler]
+last_tick_max_age_seconds = 10
+tick_command = ["python", "/app/app.py", "--scheduler-last-tick"]
+TOML
+  dotmac_deploy -f "${EFFECTS_DESCRIPTOR}" render \
+    --output-dir "${WORK_DIR}/effects-rendered" \
+    --thresholds "${REHEARSAL_DIR}/thresholds.json" >/dev/null
+  EFFECTS_COMPOSE=(
+    "${DOCKER_BIN}" "${COMPOSE_SUBCOMMAND}"
+    --project-name "${REHEARSAL_PRODUCT}"
+    --project-directory "${WORK_DIR}"
+    --env-file "${ENV_FILE}"
+    -f "${EFFECTS_COMPOSE_FILE}"
+  )
+}
+
+effects_probe() {
+  # Drive the real ComposeHostEffects implementation against the derived
+  # descriptor. Output is intentionally one scalar so shell call sites cannot
+  # mistake provider diagnostics for the verdict they are checking.
+  local action="$1"
+  ( cd "${REPO_ROOT}" && "${PYTHON_BIN}" - \
+      "${action}" "${EFFECTS_DESCRIPTOR}" "${WORK_DIR}" \
+      "${EFFECTS_COMPOSE_FILE}" "${ENV_FILE}" <<'PYEOF'
+import sys
+from pathlib import Path
+
+from dotmac_deployment_foundation.providers.compose_host import ComposeHostEffects
+from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+action, descriptor, deploy_dir, compose_file, env_file = sys.argv[1:]
+spec = ProductDeploymentSpec.load(descriptor)
+effects = ComposeHostEffects(
+    spec,
+    Path(deploy_dir),
+    compose_file=Path(compose_file),
+    env_file=Path(env_file),
+)
+
+if action == "start-candidate":
+    print(effects.start_candidate("app", timeout_seconds=30))
+elif action == "candidate-ready":
+    print("true" if effects.candidate_ready("app") else "false")
+elif action == "worker-responds":
+    print("true" if effects.worker_responds("worker") else "false")
+elif action == "scheduler-age":
+    age = effects.scheduler_last_tick_age_seconds("scheduler")
+    print("none" if age is None else age)
+else:
+    raise SystemExit(f"unknown effects probe: {action}")
+PYEOF
+  )
+}
+
 inject_wrong_image_digest() {
   local bogus="${IMAGE_REPOSITORY}@sha256:$(printf '0%.0s' $(seq 1 64))"
   if "${DOCKER_BIN}" image inspect "${bogus}" >/dev/null 2>&1; then
@@ -1558,8 +1678,48 @@ inject_failed_restore_verification() {
 }
 
 inject_candidate_never_ready() {
-  case_skip "candidate-never-ready" \
-    "scripts/rehearsal/product.toml declares no [ingress] route (nginx is out of scope on Observer). ComposeHostEffects.start_candidate/candidate_ready derive their loopback port from an ingress route (providers/compose_host.py's _candidate_ports) and raise PreconditionFailed without one, so there is no warm-candidate mechanism this disposable product can exercise. Already proven against a fake in test_a_candidate_that_never_becomes_ready_is_not_handed_traffic."
+  reset_compose_runtime
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps app >/dev/null
+  local primary
+  primary="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  if [ -z "${primary}" ]; then
+    case_fail "candidate-never-ready: could not establish the primary app premise"
+    return
+  fi
+  "${DOCKER_BIN}" exec "${primary}" sh -c ': > /tmp/rehearsal-ready'
+  if ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" "${primary}" \
+      "primary ready before candidate injection" container_healthy "${primary}"; then
+    case_fail "candidate-never-ready: primary never became healthy"
+    return
+  fi
+
+  local candidate_name="${REHEARSAL_PRODUCT}_app_candidate"
+  local candidate_digest
+  candidate_digest="$(effects_probe start-candidate)"
+  local stayed_unready=yes
+  local probe
+  for probe in 1 2 3; do
+    if [ "$(effects_probe candidate-ready)" != "false" ]; then
+      stayed_unready=no
+      break
+    fi
+    sleep 1
+  done
+  local primary_after
+  primary_after="$("${EFFECTS_COMPOSE[@]}" ps -q app)"
+  local primary_still_ready
+  primary_still_ready="$(http_status "http://127.0.0.1:${APP_HOST_PORT}/health/ready")"
+  remove_container "${candidate_name}"
+
+  if [ "${candidate_digest}" = "${IMAGE_REFERENCE}" ] \
+      && [ "${stayed_unready}" = yes ] \
+      && [ "${primary_after}" = "${primary}" ] \
+      && [ "${primary_still_ready}" = 200 ]; then
+    case_pass "candidate-never-ready: the real provider started the deploying digest, refused readiness three times, and the ready primary remained the traffic subject"
+  else
+    case_fail "candidate-never-ready: digest=${candidate_digest} unready=${stayed_unready} primary_same=$([ "${primary_after}" = "${primary}" ] && echo yes || echo no) primary_ready=${primary_still_ready}"
+  fi
 }
 
 inject_primary_fails_after_handoff() {
@@ -1610,13 +1770,55 @@ inject_primary_fails_after_handoff() {
 }
 
 inject_worker_unhealthy() {
-  case_skip "worker-unhealthy" \
-    "the disposable product declares one plain HTTP role with no [roles.worker] contract — WorkerContract.ping_command has nothing to attach to on a minimal reference product. Already proven against a fake in test_an_unhealthy_worker_fails_the_deployment_even_though_its_container_is_up; exercising the real Effects.worker_responds seam for real would need a Celery-shaped role, out of scope for the minimal product this rehearsal deploys."
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf worker >/dev/null 2>&1 || true
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps worker >/dev/null
+  local cid
+  cid="$("${EFFECTS_COMPOSE[@]}" ps -q worker)"
+  if [ -z "${cid}" ] || ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" \
+      "${cid}" "worker running before unhealthy injection" container_running "${cid}"; then
+    case_fail "worker-unhealthy: worker never established its running premise"
+    return
+  fi
+  local before after running
+  before="$(effects_probe worker-responds)"
+  "${EFFECTS_COMPOSE[@]}" exec -T worker \
+    python /app/app.py --worker-make-unhealthy >/dev/null
+  after="$(effects_probe worker-responds)"
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  "${EFFECTS_COMPOSE[@]}" rm -sf worker >/dev/null 2>&1 || true
+  if [ "${before}" = true ] && [ "${after}" = false ] && [ "${running}" = yes ]; then
+    case_pass "worker-unhealthy: the real worker ping passed, then failed while the same container remained running"
+  else
+    case_fail "worker-unhealthy: ping_before=${before} ping_after=${after} running=${running}"
+  fi
 }
 
 inject_scheduler_stale() {
-  case_skip "scheduler-stale" \
-    "the disposable product declares no [roles.scheduler] contract, for the same reason as worker-unhealthy above. Already proven against a fake in test_a_stale_scheduler_fails_the_deployment."
+  prepare_effects_fixture
+  "${EFFECTS_COMPOSE[@]}" rm -sf scheduler >/dev/null 2>&1 || true
+  "${EFFECTS_COMPOSE[@]}" up -d --no-deps scheduler >/dev/null
+  local cid
+  cid="$("${EFFECTS_COMPOSE[@]}" ps -q scheduler)"
+  if [ -z "${cid}" ] || ! wait_for_container "${WAIT_HTTP_TIMEOUT_SECONDS}" \
+      "${cid}" "scheduler running before stale injection" container_running "${cid}"; then
+    case_fail "scheduler-stale: scheduler never established its running premise"
+    return
+  fi
+  local before after running
+  before="$(effects_probe scheduler-age)"
+  "${EFFECTS_COMPOSE[@]}" exec -T scheduler \
+    python /app/app.py --scheduler-make-stale >/dev/null
+  after="$(effects_probe scheduler-age)"
+  running="$(container_running "${cid}" && echo yes || echo no)"
+  "${EFFECTS_COMPOSE[@]}" rm -sf scheduler >/dev/null 2>&1 || true
+  if [ "${before}" != none ] && [ "${before}" -le 10 ] 2>/dev/null \
+      && [ "${after}" != none ] && [ "${after}" -gt 10 ] 2>/dev/null \
+      && [ "${running}" = yes ]; then
+    case_pass "scheduler-stale: the real tick probe was fresh, then exceeded its declared budget while the same container remained running"
+  else
+    case_fail "scheduler-stale: age_before=${before} age_after=${after} running=${running}"
+  fi
 }
 
 inject_telemetry_collector_unavailable() {
