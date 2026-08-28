@@ -13,6 +13,10 @@ P11 met and does not authorize any other gap-list candidate.
 [ADR-0024](0024-apps-compose-by-synchronizing-data.md).
 **Amended:** 2026-08-23 — production bill of materials, provider selections
 and the Domains/Hosting allocation (see the amendment below).
+**Amended:** 2026-08-28 — §G's "first cutover" label is reassigned to
+`dotmac_sub` for **Billing and Payments only**, by applying §G's own definition
+of the term. Subscriptions is expressly NOT reassigned: Vendor CP holds a real
+`offer_versions` writer to retire. See the amendment below.
 **Evidence:**
 [`cloud-commerce-owner-sources.md`](../inventories/cloud-commerce-owner-sources.md),
 [`numbering-sources.md`](../inventories/numbering-sources.md),
@@ -466,6 +470,107 @@ note amends the operative contract without rewriting the historical proposals.
 
 These rulings complete the three contract gates recorded in §5e. They do not
 release either package and do not establish a product adoption or deployment.
+
+## Amendment 2026-08-28 — Sub is first cutover for Billing and Payments
+
+This amendment reassigns the term "first cutover" **for Billing and Payments
+only** from the vendor control plane to `dotmac_sub`. **It changes the outcome
+of §G in part, and §G is five days old and is Michael's own recorded ruling**,
+so it states the reason rather than quietly superseding it.
+
+**Subscriptions is expressly NOT reassigned.** An earlier draft of this
+amendment extended the same reasoning to Subscriptions; that was wrong, and the
+error is recorded here because the reasoning that produced it is seductive. See
+"Where this reasoning stops" below.
+
+### The two statements that cannot both hold
+
+§G rules: *"KEEP the recorded product-first cutover order. Vendor CP remains
+first cutover for Billing and Subscriptions; Sub remains first cutover for
+Orders and Collections."*
+
+§G also **defines** the term, in the sentence immediately following:
+
+> *"First cutover" names the application that migrates authority away from an
+> EXISTING local writer and retires it. Cloud is greenfield and displaces no
+> writer, so installing a published module is an adoption, never a cutover.*
+
+[ADR-0020](0020-billing-owns-operational-receivables.md) §6 says of the vendor
+control plane: it *"has a live invoicing need and **no invoice rows or writer to
+migrate**."*
+
+Apply §G's own definition to ADR-0020's own description and the conclusion is
+forced **for billing**: the vendor control plane cannot be first *cutover* for
+billing, because it has nothing to cut over. Its billing work is an adoption, by
+the same reasoning §G already applied to Cloud. Both documents are internally
+correct; only the label was attached to the wrong application.
+
+`dotmac_sub` holds the only billing writer in the fleet that can be retired —
+`billing/payments.py` (6 814 L), `billing/invoices.py` (3 262 L),
+`billing_automation.py` (2 629 L) and the rest of the writers in
+[`commercial-retirement-ledger.md`](../inventories/commercial-retirement-ledger.md).
+
+### Where this reasoning stops — Subscriptions
+
+The premise is "Vendor CP has no writer to retire". That premise is TRUE for
+billing and **FALSE for subscriptions**, and the canonical dossier says so:
+`packages/dotmac-subscriptions/EXTRACTION.toml` `first_cutover` reads
+
+> *"dotmac_vendor_control_plane is cutover 1 on the platform plane; **it retires
+> its local offer-version writer and capability-code column.** dotmac_sub is
+> cutover 2 on the tenant plane…"*
+
+and its `local_copy_retirement` names the artifacts: *"Vendor removes
+`vendor_cp.offers` writers/models/routes and the local `offer_versions` table
+after zero drift."* That is a genuine local writer and a genuine retirement.
+Vendor CP is therefore a real first **cutover** for Subscriptions under §G's
+definition, and this amendment leaves that assignment untouched.
+
+The generalisable lesson is the check, not the outcome: **the question is always
+"does the named first cutover hold a writer to retire?", asked per module.** The
+answer differed between two modules in the same programme. A reassignment that
+travels from one module to its neighbours by momentum is not applying the
+definition; it is assuming the answer.
+
+If Sub should also go first for Subscriptions, that is a deliberate **sequencing
+reversal** and must be recorded as one — with its own rationale about risk,
+cohort size and evidence — never as a consequence of Vendor CP lacking an
+invoice writer.
+
+### Decision
+
+1. **`dotmac_sub` is first cutover for Billing and Payments**, and remains first
+   cutover for Collections and Orders (unchanged from §G). It already composes
+   these as digest-pinned wheels with their lineages in `alembic.ini`, and has
+   moved no authority.
+2. **The vendor control plane remains first cutover for Subscriptions**, on the
+   platform plane, retiring `vendor_cp.offers` and its local `offer_versions`
+   table. `dotmac_sub` is Subscriptions cutover 2 on the tenant plane, exactly
+   as `packages/dotmac-subscriptions/EXTRACTION.toml` already records.
+3. **The vendor control plane's Billing work is an ADOPTION**, not a cutover,
+   sequenced independently. It does not gate Sub, and Sub does not gate it —
+   the plane separation ADR-0023 already describes.
+4. **§G's residual-risk mitigation is unchanged and now also applies to Sub**: a
+   contract can move during its first genuine cutover, so every adopter pins
+   EXACT immutable versions and re-pins deliberately. It never tracks a range.
+
+### What this amendment does not do
+
+- It does **not** claim a module cutover has happened. Two collections writers
+  are retired (`COL-R5`, `COL-R7` — see the ledger § 3.1), and neither moves a
+  table's owner: one re-routes an in-process writer to its owning service, the
+  other deletes dead code. **No authority has moved to a composed module**, and
+  the ledger's module-cutover count remains zero.
+- It does **not** release, re-release or re-version any package.
+- It does **not** relieve Sub of ADR-0031. Vendor CP's approvals cutover was
+  greenfield — the legacy estate was empty, so there was nothing to seal. Sub
+  has live money data, so every Sub money slice is a cutover **with** data and
+  ADR-0031 applies in full: observation, verification and switch in one
+  transaction, under `LOCK TABLE … IN SHARE MODE`.
+- It does **not** unblock the vendor control plane's billing cutover, which
+  remains blocked by gap G4 (`InvoiceArtifactReconciler` has no module owner).
+  That blocker is now simply off Sub's critical path.
+
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It

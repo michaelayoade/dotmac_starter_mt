@@ -395,6 +395,22 @@ that Sub is the first adopter of **kernel persistence**. Sub remains the
 qualifying source for most billing behavior and follows through a measured
 shadow-and-cutover migration.
 
+> **Amended 2026-08-28 — "first adopter" and "first cutover" are different
+> claims, and this paragraph supplies the reason.** The clause above — the
+> vendor control plane has *"no invoice rows or writer to migrate"* — is exactly
+> what disqualifies it as first **cutover**, under
+> [ADR-0030](0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
+> §G's own definition: a cutover *"migrates authority away from an EXISTING
+> local writer and retires it"*, and *"installing a published module is an
+> adoption, never a cutover."* ADR-0030's 2026-08-28 amendment therefore makes
+> `dotmac_sub` first **cutover** for **Billing and Payments**. This paragraph's
+> recommendation — Vendor CP as first **adopter** — is unchanged and unaffected.
+>
+> The reasoning is module-scoped and does **not** carry to Subscriptions:
+> `packages/dotmac-subscriptions/EXTRACTION.toml` records that Vendor CP
+> *"retires its local offer-version writer and capability-code column"*, so
+> there it holds a real writer and remains cutover 1.
+
 ## Consequences
 
 - Products can install one-off billing without a subscription engine and can

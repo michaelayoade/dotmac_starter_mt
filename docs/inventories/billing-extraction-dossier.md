@@ -18,6 +18,44 @@ ADR-0024, ADR-0022, ADR-0016, ADR-0014
 
 ---
 
+## Amendment, 2026-08-28 — Sub is cutover 1; Vendor CP is the first ADOPTER
+
+The `first_cutover` field below still reads *"dotmac_vendor_control_plane is
+cutover 1 on the PLATFORM plane"*. **That assignment is superseded** by the
+ADR-0030 amendment of 2026-08-28, and this dossier's own evidence is what
+supersedes it:
+
+> *"It is greenfield on invoicing: an exhaustive grep of src/ and tests/ for
+> invoice, payment, receivable, settlement, credit-note, allocation and ledger
+> returns no table, model, service or writer."*
+
+ADR-0030 § G defines a first cutover as the application that *"migrates
+authority away from an EXISTING local writer and retires it"*, and says
+explicitly that *"installing a published module is an adoption, never a
+cutover."* An application proven to have no writer cannot be the first cutover.
+The paragraph below was, in the same breath, naming Vendor CP cutover 1 and
+proving it had nothing to cut over.
+
+**Corrected assignment:**
+
+| | Role | Plane |
+|---|---|---|
+| `dotmac_sub` | first **cutover** — retires ~36 000 LOC of live money writers | tenant |
+| `dotmac_vendor_control_plane` | first **adopter** — adds a writer through the module, never a second generic invoice facade | platform |
+
+Everything else in the field stands: the plane selection, the absence of a
+sentinel tenant, the GRANT/REVOKE isolation, and Sub's characterisation as the
+product-first source. The `local_copy_retirement` field needs no change — it
+already says *"Vendor CP has no local financial writer to retire"*, which is the
+same fact stated correctly.
+
+**Scope note.** This reasoning is module-scoped. In
+`packages/dotmac-subscriptions/EXTRACTION.toml` Vendor CP **does** hold a local
+`offer_versions` writer it retires, and correctly remains cutover 1 there. The
+question is asked per module, never per programme.
+
+---
+
 ## Why this is a markdown document and not `packages/dotmac-billing/EXTRACTION.toml`
 
 Repository convention locates a dossier at its package root. **`packages/dotmac-billing/`

@@ -1,14 +1,24 @@
 # Commercial retirement ledger
 
-**As of:** 2026-08-14
+**As of:** 2026-08-14, **re-measured 2026-08-28** (§ 0.1)
 **Starter:** `49f9ccf` (`origin/main`); the four teams' documents read from the
 uncommitted working tree at `b55c9a5`
 **Sub:** `origin/dev` `27c76aaee` · **ERP:** `origin/main` `4df1190d` ·
 **Vendor CP:** `origin/main` `63acff1`
-**Gate:** ADR-0017 P11 is **UNMET** — see
-[`p11-adoption-status.md`](p11-adoption-status.md). **Not one row below may
-begin.** This ledger exists so the work is countable before it is authorised,
-per ADR-0017 decision 5: *measure, freeze, then improve.*
+**Re-measurement coordinates (2026-08-28):** Starter `origin/main` `c072e1f5` ·
+Sub `origin/dev` `ad3b32152` · Vendor CP `origin/main` `94c0b73`
+**Gate:** ADR-0017 P11 is **MET** since 2026-08-17 — see
+[`p11-adoption-status.md`](p11-adoption-status.md), which records Michael's
+acceptance on Vendor CP production evidence. **The rows below may begin**, in
+the order [ADR-0030's 2026-08-28 amendment](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
+sets, which is assigned PER MODULE and not per programme. This ledger exists so the work is countable before it is authorised, per
+ADR-0017 decision 5: *measure, freeze, then improve.*
+
+> **The gate line above said UNMET until 2026-08-28, fourteen days after it
+> stopped being true.** `p11-adoption-status.md` is guarded by
+> `tests/architecture/test_p11_production_lineage_evidence.py`; this ledger is
+> guarded by no test at all, which is exactly how it drifted. Treat every
+> coordinate below as measured-then, not true-now, until § 0.1 says otherwise.
 
 **Sources consolidated:** `billing-extraction-dossier.md` § 3 (R1-R9),
 `collections-sources.md` § 7 (R1-R10),
@@ -45,6 +55,121 @@ Two corollaries this ledger applies without exception:
 
 ---
 
+## 0.1 Re-measurement, 2026-08-28
+
+Measured against Sub `origin/dev` `ad3b32152`. **No named writer has
+disappeared or been renamed**, so every row below still describes real code.
+What has changed is size and position, and three writers turn out never to have
+been in any inventory at all.
+
+### Coordinates that drifted
+
+| Row | Ledger says | Measured 2026-08-28 |
+|---|---|---|
+| BIL-R4 | `payment_reconciliation.py` 811 L | **1300 L** (+60 %) |
+| BIL-R4 | `PaymentUpdate.amount` at `app/schemas/billing.py:715` | **`:788`** — `:715` is now a different class. The field, and the hazard, still exist |
+| BIL-R4 | `billing/payments.py` 6 731 L | 6 814 L |
+| BIL-R5 | `opening_balance_history.py` 343 L | **570 L** (+66 %) |
+| BIL-R5 | `billing/ledger.py` 342 L | 374 L |
+| BIL-R6 | `topup_intents.py` 1 509 L | **1 919 L** (+27 %) |
+| BIL-R7 | `billing/reporting.py` 1 559 L | **2 068 L** (+33 %) |
+| BIL-R7 | `web_subscriber_details.py` `current_balance` `:385`, `float()` `:502` | unchanged, byte-exact |
+| SUB-S5a | `BillingObligation` has **44** columns | **51** mapped columns. The 18 `rating_*` provenance columns pre-date 2026-08-14, so 44 was wrong when written, not drifted |
+| SUB-S5b | dedupe string built at `billing_automation.py:1777` | `:1759-1760` |
+| SUB-S6b | `account_lifecycle.py:1394`, `:1423` | `:194`/`:209` and `:1563`/`:1592` |
+| SUB-S7b | `billing_profile.py` 359 L | **404 L** — it grew; there is no retirement progress |
+| COL-R5 | credential writes `_core.py:918-921`, `:1475-1476` | `:939-940`, `:1495-1496` |
+
+**Consequence:** any ratchet baseline copied from a line count above is stale.
+Re-derive it from the code at the slice that installs it.
+
+### Writers in no inventory at all
+
+Each would be missed by a ratchet built from the files this ledger names.
+
+| Writer | Belongs to | Why it matters |
+|---|---|---|
+| `app/services/gateway_topup_intents.py` (566 L) | **BIL-R6** | A sixth prepaid-funding writer. BIL-R6 is already flagged as *"the slice most likely to be under-scoped"*; this is the evidence. |
+| `app/services/cutover_balance_audit.py` | **BIL-R5** | A **fifth** `ledger_entries` writer — it constructs `LedgerEntry(...)` at `:752`. BIL-R5 names four. |
+| `app/services/billing/cadence.py` | **SUB-S4** | A **tenth** cadence implementation — and it is the source `dotmac_subscriptions/cadence.py` was ported from. See § 0.2. |
+
+### One drift note is now falsified
+
+§ 3 states, as a drift source the collections shadow must account for, that
+*"Sub's postpaid run commits once for the whole run with no per-account error
+isolation."* **That is no longer true.** Sub PR #2458 (`c017d44e6`, merged
+2026-08-17 — three days after this ledger's measurement) rewrote
+`DunningWorkflow.run` to stage each account through
+`_run_dunning_account`/`DunningAccountRunCommand`, committing or rolling back
+**per account**, with explicit `errors` counting and
+`_record_dunning_account_failure` evidence on failure. The shadow no longer has
+to model this divergence.
+
+## 0.2 SUB-S4 is ten implementations, not nine
+
+`app/services/billing/cadence.py` (`BillingCadence`, ADR-0007 Phase 1,
+2026-07-27) is a tenth cadence owner that SUB-S4 does not name — and it is the
+one the module came from. `dotmac_subscriptions/cadence.py`'s own docstring
+says: *"The source is `dotmac_sub:app/services/billing/cadence.py` at
+`27c76aaeebb7`"* — which is this ledger's own Sub baseline commit. The calendar
+math is byte-identical apart from enum vocabulary and imports.
+
+So the module already *is* Sub's code, round-tripped, and **the nine legacy
+owners were never switched to either copy**. All nine, and all five secondary
+consumers SUB-S4 names, are still live on `origin/dev`.
+
+Two things the row does not say, and that gate it:
+
+1. **Legacy `BillingCycle` (`app/models/catalog.py:46`) is flat** —
+   `daily/weekly/monthly/quarterly/annual` — carrying no interval count,
+   alignment, end-of-month rule, proration policy or timezone. `BillingCadence`
+   requires all of them, so a mapping layer must synthesize a default for every
+   existing subscription and offer row. **A wrong `EndOfMonthRule` default
+   silently moves the billing date of every subscription anchored on the
+   29th–31st**, which makes the default an owner decision, not an
+   implementation detail.
+2. **Nothing proves the nine agree with each other today.**
+   `test_billing_cadence.py` and `test_subscription_billing_cadence.py` exercise
+   the new and legacy paths *separately*, never against one another. A parity
+   harness is owed before any of the ten is deleted.
+
+### The mapping, ruled 2026-08-28
+
+Legacy contracts map to **`clamp_to_month_end`, `Africa/Lagos`,
+`CadenceAlignment.contract_anniversary`, `ProrationPolicy.none`**, with the
+flat cycle expanded by interval count (`quarterly → (month, 3)`).
+
+This is not a new invention — it is already the checked-in Sub shadow
+convention, at `app/services/billing/contracts.py:398-415`
+(`_CYCLE_INTERVAL` plus the `BillingCadence(...)` construction), and both legacy
+`_add_months` implementations already clamp an overflowing day.
+
+**These are adapter-supplied MIGRATION FACTS, not defaults in the shared
+module.** `dotmac-subscriptions` must keep requiring every field explicitly; a
+default in the module would silently answer the question for every future
+adopter that has a different one. New contracts still declare all four.
+
+### The anchor nuance — and the cohort it decides
+
+**Derive the anchor from the original contract/subscription start, never from
+the mutable `next_billing_at` cursor.** They are not equivalent, and the
+difference is systematic:
+
+- Legacy iterative clamping walks the cursor forward and **loses the day**:
+  Jan 31 → Feb 28 → **Mar 28**.
+- The target cadence anchors on the contract start and **recovers it**:
+  Jan 31 → Feb 28 → **Mar 31**.
+
+So every subscription anchored on the 29th–31st that has passed through a short
+month has a cursor that disagrees with its own contract. Feeding the cursor in
+as the anchor would preserve the drift and hide it inside a "no change"
+result.
+
+**Shadow every 29th–31st cohort and classify the difference explicitly.** Do not
+silently preserve it, and do not silently correct it — the choice is a customer
+billing-date change either way, and it needs to be a recorded decision with a
+counted cohort, not a side effect of which input the adapter happened to read.
+
 ## 1. How to read a row
 
 | Column | Meaning |
@@ -80,9 +205,50 @@ see § 7.1.
 | **BIL-R4** | `app/services/billing/payments.py` (6 731); `provider_payment_settlements.py` (437); `financial_import_batch_reversals.py` (727); `payment_reconciliation.py` (811); **`app/schemas/billing.py:715`** (`amount` on `PaymentUpdate`); tables `payment_allocations`, `payment_settlements`, `payment_refunds`, `payment_reversals` | `AcceptSettlementV1` + immutable posting groups; **structural absence** of any money-field update command | enumeration of settled payments whose `amount` differs from settlement evidence, and every `PaymentStatus.pending` payment that produced a never-reversed ledger credit — **"a cutover blocker requiring quarantine and a Finance decision"** | writes to the four tables outside the module, **plus a schema-level assertion** that no update contract exposes a money field on a settled fact | |
 | **BIL-R5** | `app/services/billing/customer_subledger.py` (614); `subledger_opening.py` (642); `billing/ledger.py` (342); `customer_financial_position.py` (368); `customer_financial_ledger.py` (1 088); `opening_balance_history.py` (343); tables `customer_posting_groups`, `customer_position_effects`, `ledger_entries` | module posting groups + derived per-currency positions (`ReceivablePositionV1`) | exact per-account/per-currency position **rebuild hash**; three consecutive complete reconciliations with **zero** unclassified drift and **no money tolerance** | writes to the three tables outside the module, **plus a "no balance formula" detector** — any site computing a position by summing rows rather than reading the derived projection | |
 | **BIL-R6** | `app/services/billing/account_credit.py` (1 710); `billing/adjustments.py` (1 233); `account_credit_deposits.py` (993); `quote_deposits.py` (1 066); `topup_intents.py` (1 509) | module credit + funding effects | per-account credit/funding delta table | sites creating available credit or prepaid funding outside the module. **"the slice most likely to be under-scoped"** — prepaid top-up is spread across five services | |
-| **BIL-R7** | `app/services/web_subscriber_details.py` (1 015; `current_balance` at `:385`, `float()` at `:502`); `billing/reporting.py` (1 559) | three separate `Money` values on `ReceivablePositionV1`, **and no fourth combined field** | per-account `current_balance` delta table: changes at all / changes sign / multi-currency accounts | sites that add, subtract or combine two of {receivable, credit, prepaid funding}, and sites casting money to `float` → zero | |
+| **BIL-R7** | `app/services/web_subscriber_details.py` (1 015; `current_balance` at `:385`, `float()` at `:502`); `billing/reporting.py` (**2 068**) | three separate `Money` values on `ReceivablePositionV1`, **and no fourth combined field**. **The combined balance is DELETED, not replaced** — ruling 2026-08-28, § 2.1 | per-account `current_balance` delta table: changes at all / changes sign / multi-currency accounts | sites that add, subtract or combine two of {receivable, credit, prepaid funding}, and sites casting money to `float` → zero | |
 | **BIL-R8** | `app/services/payment_provider_events.py` (1 335); `payment_webhook_commands.py` (654); `api_billing_webhooks.py` (244); `integrations/connectors/payment_gateway.py` (403); `payment_gateway_adapter.py` (354); `autopay.py` (467) | **the INTEGRATOR, not billing** (ADR-0024 § 6, ADR-0020 A3) | n/a — different programme | counts provider clients, credentials, signature verifiers and webhook routes in Sub's runtime. **This is the Integrator adoption's ratchet**; listed only so a billing cutover does not absorb it. The fleet-wide form already exists: `docs/inventories/external-connector-baseline.json` records `dotmac_sub` at `http_client 37, connector_task 18, webhook_surface 4, delivery_retry 8, sync_checkpoint 8, provider_credential 2` | |
 | **BIL-R9** | `app/models/billing.py:856` (`InvoicePdfExport`, table `invoice_pdf_exports`) + `:71` (`InvoicePdfExportStatus`); `billing_invoice_pdf.py` (1 434); `invoice_bank_details.py` | **splits three ways**: relation → billing `document_artifacts`/`platform_document_artifacts`; rendering → the documents workstream; **job-state → NOTHING** (ADR-0014 forbids a second at-most-once mechanism) | see DOC rows | writers of `invoice_pdf_exports` and callers of `billing_invoice_pdf` → zero, and **no replacement job table on any side** | **⚑⚑** |
+
+---
+
+## 2.1 BIL-R7 ruling, 2026-08-28 — the combined balance is deleted
+
+**BIL-R7 is not blocked.** An earlier reading treated the module's refusal to
+carry a fourth combined field as a missing capability. It is the opposite: the
+refusal is the decision, and it is already enforced —
+`tests/architecture/test_billing_module.py` asserts
+
+```python
+assert not position_fields & {"balance", "current_balance", "funding_available"}
+```
+
+so `balance` and `current_balance` cannot enter `ReceivablePositionV1` by
+construction. Adding a module symbol to restore them would be defeating a guard,
+not satisfying a requirement.
+
+**The formula being retired is wrong, not merely unowned.**
+`web_subscriber_details.py:385` computes
+
+```python
+current_balance = balance_due + available_credit
+```
+
+which **adds positive credit to debt**. `collectible_receivable` already
+reflects actual allocations. Subtracting unused credit instead would describe a
+hypothetical allocation; adding it is simply incorrect.
+
+**The portal shows three labelled lanes and no total:**
+
+| Label | Source |
+|---|---|
+| Amount due | `collectible_receivable` |
+| Available credit | `available_credit` |
+| Prepaid funds | `prepaid_funding`, where relevant |
+
+**If the product later needs "amount payable after applying eligible credit"**,
+that is a Billing-owned **allocation decision or quote** — a real decision with
+an owner, evidence and a transaction — never another arithmetic field on a
+projection.
 
 ---
 
@@ -98,9 +264,9 @@ Phase 5 shadow implementation.
 | **COL-R2** | `prepaid_balance_sweep` (`scheduler_config.py:733-745`, `collections/prepaid_balance_sweep.py`, 758 L) + `prepaid_enforcement_planner.py` (725 L) | the same single lifecycle, driven by `advance`-timing policy data | additionally: every typed skip/shield reason, funded-restore outcomes, budget-deferred accounts, the full candidate cohort per cycle | same baseline file | |
 | **COL-R3** | `PrepaidSweepCycleState` (`models/collections.py:267-293`) | **nothing** — a timer has no cycle, so the cursor has no successor | prove every account the cursor would have visited has a timer **or a typed no-timer reason** | table drop once the row count reaches zero and stays there; its docstring already marks it `TRANSITIONAL` | |
 | **COL-R4** | `Subscriber.prepaid_low_balance_at`, `Subscriber.prepaid_deactivation_at`, `services/prepaid_enforcement_state.py` (111 L; writes `:59-72`, `:75-88`, `:99-100`) | one `DurableTimer` per `(owner, entity, purpose)` with a generation — **P3, which has no owner** | for every account with a non-null column, exactly one module timer with the same due instant; clearing the column ⇔ cancelling the timer | two-directional count over non-null occurrences of both columns | |
-| **COL-R5** | direct credential writes at `_core.py:918-921` (throttle) and `:1475-1476` (un-throttle); columns `credential.pre_throttle_radius_profile_id`, `credential.radius_profile_id` | a typed consequence request whose owner is `services/account_lifecycle.py` | the owner's receipt matches the previously-written credential state for every throttle/un-throttle in the cohort | assignments to `radius_profile_id`/`pre_throttle_radius_profile_id` outside `account_lifecycle` | |
+| **COL-R5 — RETIRED 2026-08-28** | ~~direct credential writes at `_core.py:918-921` (throttle) and `:1475-1476` (un-throttle)~~ (measured `:939-940`, `:1495-1496`); columns `credential.pre_throttle_radius_profile_id`, `credential.radius_profile_id` | a typed consequence request, split across **two** owners — see § 3.1 | the ported S1 invariants in `tests/test_access_enforcement_strays.py` assert remember/restore/re-throttle against the new owner; the 409 refusal wording is preserved unchanged | **ratchet scope corrected** — see § 3.1. `tests/architecture/test_collections_credential_writer_ratchet.py` + `collections_credential_writer_baseline.txt` | |
 | **COL-R6** | `Invoices.mark_overdue_system(...)` called from the dunning scan (`_core.py:2562-2567`); `apply_prepaid_overlap_hold` (`_core.py:2554`) | **billing** owns invoice lifecycle; collections reads a position and writes nothing | prove no invoice changes status as a side effect of a collections run, and that overdue-ness is derived from the position | collections-module writes to `Invoice.*` | ⚑ |
-| **COL-R7** | `_throttle_account`/`_restore_throttle` (`_core.py:1637-1777`); `DunningWorkflow.resolve_cases_for_account` (`:2823-2857`); `"enforcement_health_blocked"` (`:1953`) | **nothing — dead code** | none needed; confirm zero callers at the retirement commit | folded into COL-R5's count; the dead outcome string is a one-line delete | |
+| **COL-R7 — RETIRED 2026-08-28** | ~~`_throttle_account`/`_restore_throttle`; `DunningWorkflow.resolve_cases_for_account`; `"enforcement_health_blocked"`~~ — all four **deleted** | **nothing — dead code**, confirmed: zero production callers under `app/`, only tests that existed to exercise them | zero callers confirmed at the retirement commit, twice and independently | its OWN ratchet, not folded into COL-R5's: `test_retired_dead_symbols_have_no_references`, with a sensitivity proof | |
 | **COL-R8** | tables/writers `dunning_cases`, `dunning_action_logs`, shadow `collections_cases` writers, `policy_dunning_steps`; the reading of mutable `PolicySet` fields (`models/catalog.py:368-403`, steps `:406-419`) | module-owned policy **versions**, cases and append-only step attempts | full-cohort parity per R1/R2 **plus a total row-disposition classifier with no default bucket** | imports of the local models outside an archive reader | |
 | **COL-R9** | notice literals + subject-string dedupe (`_core.py:1780-1883`; dedupe SQL `:1852-1869`) | policy-declared `template_id` + `channel_preference` through `dotmac_kernel.channel_policy`, consent via `dotmac_kernel.consent`, derived idempotency key | per cohort notice: same recipient set, same channel decision, same suppression outcome, and a dedupe decision **that no longer depends on a subject string** | string literals used as notification subjects in the collections tree | |
 | **COL-R10** | the shadow stack itself — `collections/lifecycle.py` (397 L), `collections/postpaid_policy.py` (61 L), `collections/prepaid_policy.py` (116 L), `collections_cases` writers | the module's single engine | its tests are ported and pass against the module | delete at cutover; **a product-local copy of the extracted engine is itself a ratchet entry** | ⚑ |
@@ -124,6 +290,98 @@ comparison records whether the live run completed; (b) fleet-wide
 `_core.py:714 → :741`, so a fleet-scoped observation invalidates fingerprints
 for reasons outside the entity, and shadow fingerprints deliberately will not
 move with it.
+
+---
+
+## 3.1 COL-R5 and COL-R7, as retired — and two corrections they forced
+
+### The revision this claim is made against
+
+| | |
+|---|---|
+| **Sub revision carrying the work** | `f7368650e7f392661ca28fa5e07d90894e819735` |
+| Branch | `feat/collections-credential-consequence-owner` |
+| Parent (`origin/dev` at rebase) | `0c6bf29ab54e42e37375fe5e709f7cc55a2e195e` |
+| Merged? | **No — committed, not yet merged.** |
+| CI verdict | **Pending.** Static gates pass locally; that is not test evidence. |
+
+**Do not cite `ad3b32152` for these two rows.** That is the coordinate the
+§ 0.1 re-measurement was taken at, and it *precedes* the work — it is where the
+writers still existed. A retirement claim has to name a revision that actually
+contains the retirement, or it is a claim about a tree nobody can inspect.
+
+The rows are marked retired **on this branch**. They become a fleet fact when
+the revision merges and CI is green; until then this table is the honest
+statement of what has and has not happened.
+
+Both corrections below are to THIS ledger, discovered by trying to execute its
+rows.
+
+### The consequence has two owners, not one
+
+COL-R5 named `services/account_lifecycle.py` as the consequence owner. Measured,
+that file contained **zero** occurrences of either credential column — it was
+the planned owner, not a current one, so the row as written meant building the
+capability from nothing. Meanwhile `app/services/radius_access_state.py` already
+held `stage_subscription_radius_profile()`: a typed, validated, single-credential
+profile writer whose docstring already stated the ownership boundary.
+
+ADR-0030's own collections design resolves it, and both layers are real:
+*"A collections request is not permission or a service-state write. The service
+owner revalidates and permits/refuses/applies the transition."*
+
+| Layer | Owner | What it does |
+|---|---|---|
+| Requests | `collections/_core.py` | Builds the preview and submits a typed `CredentialThrottleCommand` / `CredentialRestoreCommand`. Writes nothing. |
+| **Decides** | `account_lifecycle` | Takes the row locks, revalidates against the state the preview promised, permits or refuses (`CredentialConsequenceRefused`). |
+| **Applies** | `radius_access_state` | Writes the two profile columns, including the remember/restore anchor. |
+
+Collections keeps its *reads* of both columns — the preview is a decision input,
+and a read is not a write. The ratchet counts assignments only, and has a test
+proving it does not count references.
+
+The declarations live in Sub's `app/services/collections_authority.py`, and the
+Sub SOT registry entries `access.subscription_lifecycle` and
+`access.radius_state` were updated to say which half each holds. The
+`access.radius_state` note previously claimed it *"writes neither lifecycle rows
+nor external RADIUS"*, which was already understating a credential writer it had
+before this slice.
+
+### The ratchet as written would have fired on day one
+
+COL-R5's ratchet — *"assignments to `radius_profile_id`/
+`pre_throttle_radius_profile_id` outside `account_lifecycle`"* — was measured
+across Sub `origin/dev`: **eighteen assignment sites in eight modules**, of which
+only eight were collections'. The other ten belong to
+`access_credential_binding` (2), `catalog/subscriptions` (2), `radius` (2),
+`enforcement` (1, fair-use-policy speed throttle — a different enforcement
+domain entirely), `pppoe_credentials` (1), `radius_access_state` (1) and
+`web_catalog_subscriptions` (1). None is a collections consequence; none is
+migrating. And since `account_lifecycle` wrote neither column, the literal
+predicate counted all ten as debt immediately.
+
+**The corrected predicate names the writer by location, not the column across
+the tree**: assignments inside `app/services/collections/**` → zero, with the
+other seven files recorded in a two-directional shrink-only baseline that names
+each one's real owner. That is the difference between *"not collections' debt"*
+and *"nobody looked"*, which ADR-0018 § 23 requires a guard to be able to state.
+
+### One extra fix, because COL-R1/R2 rest on it
+
+§ 8.2 recorded that `billing_scheduled_sweep_baseline.txt`'s guard had no
+sensitivity proof. Still true on 2026-08-28. That baseline carries
+`dunning_runner` and `prepaid_balance_sweep` — COL-R1's and COL-R2's entire
+retirement evidence — so a detector that had silently stopped scanning would
+have been indistinguishable from a clean run at the exact moment those rows
+started depending on it. `scheduled_financial_sweeps()` gained an explicit
+source seam and a planted-sweep proof in this slice, ahead of the rows that
+need it.
+
+### What this slice is NOT
+
+It moves an in-process writer and deletes dead code. **No table changes owner**,
+so ADR-0031's sealed-evidence protocol does not apply here — there is nothing to
+lock, digest or seal. BIL-R5 is the first row that needs the full protocol.
 
 ---
 
@@ -253,7 +511,8 @@ are recorded here with their measured counts:
 | Module | Baseline artifact | Status |
 |---|---|---|
 | document rendering | **`docs/inventories/document-render-baseline.json`** + `scripts/document_render_sweep.py` (proposed): counts `engine_call_sites`, `render_path_storage_writes`, `render_time_money_derivations`, `render_path_settings_reads`, `fabricated_document_numbers`, `currency_symbol_literals`, `fallback_renderer_paths` | **Proposed, and the best-specified of the four.** It enumerates entry-point families (`app/services/**`, `app/web/**`, `app/tasks/**`, `scripts/**`, any CLI or worker module) rather than one directory — ADR-0018 decision 1 — and its sensitivity proof plants `HTML(string=x).write_pdf()`, a `get_s3_storage()` call and `f"#RCP-{uid.hex[:8]}"` under **each** family and asserts every count rose. It also **abstains rather than scoring zero** when `dotmac_sub` is not checked out. |
-| collections | **`tests/architecture/billing_scheduled_sweep_baseline.txt`** (12 names incl. `dunning_runner`, `prepaid_balance_sweep`), enforced by `tests/architecture/test_billing_target_architecture.py::test_no_new_scheduled_financial_sweep` (`:117-132`) | **EXISTS — and is non-conformant.** See § 8.2. |
+| collections | **`tests/architecture/billing_scheduled_sweep_baseline.txt`** (12 names incl. `dunning_runner`, `prepaid_balance_sweep`), enforced by `tests/architecture/test_billing_target_architecture.py::test_no_new_scheduled_financial_sweep` | **EXISTS — conformant since 2026-08-28.** Was non-conformant (no sensitivity proof); see § 8.2. |
+| collections | **`tests/architecture/collections_credential_writer_baseline.txt`**, enforced by `test_collections_credential_writer_ratchet.py` | **EXISTS and conformant.** Two-directional on additions, removals and per-file count movement in both directions; two sensitivity proofs (a planted write, a revived retired symbol) plus a proof it counts assignments and not references. Added by COL-R5/COL-R7 (§ 3.1). |
 | subscriptions | none named; reuses the mechanism of `test_billing_target_architecture.py::test_sweep_baseline_is_sorted_and_unique` | **Mechanism identified, artifact not created.** |
 | billing | **none named for any of R1-R9** | **Gap.** Nine described counters with no frozen artifact. |
 
@@ -261,9 +520,19 @@ are recorded here with their measured counts:
 without a frozen number is a described intention. ADR-0017 decision 5: *"A
 convergence area that cannot state its current number is not ready to start."*
 
-### 8.2 An existing ratchet that violates ADR-0018 today
+### 8.2 An existing ratchet that violated ADR-0018 — FIXED 2026-08-28
 
-`tests/architecture/billing_scheduled_sweep_baseline.txt` in `dotmac_sub` is
+> **Resolved.** `scheduled_financial_sweeps()` (`scripts/architecture/
+> billing_target_guards.py`) gained an explicit `source` seam, and
+> `test_billing_target_architecture.py::test_scheduled_sweep_detector_is_sensitive`
+> now plants a financial sweep and asserts the detector sees it — while a
+> scheduled task outside the financial task prefixes is asserted NOT to be
+> swept up, so the proof also shows the detector discriminates rather than
+> matching every scheduled task it can find. Landed in the COL-R5/COL-R7
+> slice (§ 3.1), deliberately ahead of the rows that depend on it. The
+> finding below is kept as the record of why.
+
+`tests/architecture/billing_scheduled_sweep_baseline.txt` in `dotmac_sub` was
 two-directional but, as the collections team measured (`collections-sources.md`
 § 7.1):
 
@@ -271,12 +540,15 @@ two-directional but, as the collections team measured (`collections-sources.md`
 > still fires. A clean run is currently indistinguishable from
 > `scheduled_sweep_names()` returning an empty set."
 
-This is ADR-0018 decision 5 unmet, in a live guard, in the exact file two
+That was ADR-0018 decision 5 unmet, in a live guard, in the exact file two
 retirement rows (COL-R1, COL-R2) depend on to prove they happened. Its own
 header already says *"This is migration debt, not permission."*
 
-**This must be fixed before COL-R1/R2 can be evidenced**, and it is cheap: plant
-a scheduled financial sweep in a fixture and assert the count rose.
+It had to be fixed before COL-R1/R2 could be evidenced, and it was cheap —
+which is why it was folded into the first slice rather than left for the rows
+that needed it. The general lesson holds for every row still to come: a guard
+whose sensitivity is never demonstrated is not evidence, and the cheapest
+moment to prove it is before anything depends on it.
 
 ### 8.3 The conformance checklist every row's ratchet must meet
 
@@ -385,12 +657,53 @@ funded collectible amount, preserves financial state/authority/projection
 provenance, and has no `funding_available` or competing money type. The
 assembly mapping and its conformance canary replace the incompatible same-name
 contracts. This resolves these two contract gaps; it is not cutover evidence.
-| **G3** | **Two contradictory official-artifact relations.** Billing Part 5: partial unique `(tenant_id, fact_id, media_type) WHERE superseded_at IS NULL`, repair by **appending a row** with `supersession_reason`, idempotency key **includes the checksum**, digest field `presentation_model_digest`, plus `withdrawn_at`. Rendering § 6.4: composite unique `(scope, invoice_id, fact_version, media_type)`, *"the unique constraint refuses a second row"*, repair updates only `file_id`/`checksum`/`byte_length`, key **excludes** the checksum, digest field `projection_digest`, no withdrawal column. Both are PROPOSED; both defer to Michael. **The field lists and key compositions cannot both ship.** | **BIL-R9, DOC-R6.** |
+| ~~**G3**~~ **RESOLVED** | ~~Two contradictory official-artifact relations~~ — **the shipped code picked one, and it is Billing's Part 5 shape.** Ruled by ADR-0030's *"Contract-completion follow-up — 2026-08-23"* amendment (*"Repair appends a new current relation and supersedes the former row in the same transaction… This replaces both contradictory draft key compositions"*), and confirmed shipped in `dotmac-billing==0.1.0a1`: partial unique `uq_artifacts_tenant_current` on `(tenant_id, document_fact_id, media_type) WHERE superseded_at IS NULL` (`models.py:1067-1073`); repair appends and supersedes rather than updating in place (`service.py:2651-2730`); the idempotency key **includes** the checksum (`service.py:2664`); the digest field is `presentation_model_digest`; `withdrawn_at`/`withdrawal_reason`/`supersession_reason` all exist. Rendering's `projection_digest` survives only as that package's own internal render-determinism field — billing owns the relation (ADR-0030 Q2), so this is an assembly-boundary translation, not a live collision. | ~~BIL-R9, DOC-R6~~ — unblocked. |
 | **G4** | **`InvoiceArtifactReconciler` has no module owner** — both teams say it is assembly-owned, and rendering § 6.6 rejects that as a resting place: *"An assembly-owned relation table is assembly-local state with no module owning its tests, its migration or its drift repair."* Billing's plan makes it **required before the Vendor CP cutover**. | The whole Vendor CP billing cutover. |
-| **G5** | **Named-vocabulary collisions.** `document_profile_code` (billing) vs `template_profile_code` (rendering) — substance identical, still open. ~~`external_finance` vs `manual_erp`~~ as the third `source_authority` member — **RESOLVED 2026-08-14 (ADR-0020 § A7): `external_finance`; `manual_erp` retires.** Retained as history so the resolution is traceable, not as a live collision. `RatedObligationOutputV1` (subscriptions dossier/spec) vs `RecurringObligationDueV1` (subscriptions plan) vs `subscriptions.recurring_obligation_due.v1` (sources) — **three names for one output**, still open. `ConsequenceRequestV1` (collections spec) vs `CollectionActionRequested` (collections plan) — still open; *"One name must win before any code."* | Every contract-bearing row. |
-| **G6** | **Byte-for-byte equivalence is not achievable.** Rendering § 8 requests a correction to billing's § 2.5 invariant 2 (*"re-render the document byte-for-byte-equivalent"*) → *"semantically equivalent under the canonical semantic projection (`projection_digest`)"*. Reported, not edited. | **DOC-R1, DOC-R4** and their shadow. |
-| **G7** | **Case lifecycle has three vocabularies for one concept**: the plan's `active\|paused\|resolved\|cancelled`, the live `DunningCaseStatus` `open\|paused\|resolved\|closed` (`models/collections.py:25-29`), and the shadow `CollectionsCaseState` `open\|warned\|escalated\|consequence_requested` (`models/collections_case.py:41-47`). A **total classifier with no default bucket** is owed at cutover stage S0. | **COL-R8.** |
-| **G8** | **ERP does not consume `AccountingFactV1` and its checked-in contract forbids the mechanism.** ERP has zero occurrences of `AccountingFact`. Its live integration is a **document-level HTTP pull** (`app/tasks/dotmac_sub.py` → `sync_invoices`/`sync_payments` → `post_unposted_*`, watermarked by `models/finance/ar/dotmac_sub_sync_watermark.py`), and `docs/dotmac_sub_tax_accounting_contract.md` says: *"ERP **pulls** immutable or versioned source facts from Sub… **No second push/outbox path is permitted for the same accounting decisions.**"* Billing's `AccountingFactV1` is push-after-commit through the kernel outbox. | Every row that ends with billing owning the accounting effects — and it is an **authority-migration decision**, not an integration detail. |
+| ~~**G5**~~ **SPLIT 2026-08-28** | The row bundled three unrelated collisions with one status, so it could be neither closed nor tracked. Split into **G5a** (resolved) and **G5b** (open) below. A gap whose sub-items disagree must be split, or its single status is wrong for at least one of them. | — |
+| **G5a** **RESOLVED** | Naming collisions the shipped packages settled. (i) `RatedObligationOutputV1` vs `RecurringObligationDueV1` vs `subscriptions.recurring_obligation_due.v1` — `dotmac-subscriptions==0.1.0a3` ships `RatedObligationOutputV1`, `dotmac-billing==0.1.0a1` ships `AcceptRatedObligationV1`, the two agree, and the other two names appear in neither package. (ii) `document_profile_code` (billing) vs `template_profile_code` (rendering) — `template_profile_code` appears **nowhere in `packages/`**; `document_profile_code` is used by BOTH `dotmac-billing` and `dotmac-document-rendering`. Billing's name won and rendering's shipped package adopted it. | — |
+| **G5b** **OPEN** | `ConsequenceRequestV1` (collections spec) vs `CollectionActionRequested` (collections plan). **The code converged; the spec did not.** `dotmac-collections==0.1.0a1` ships `CollectionActionRequestedV1` exclusively and `ConsequenceRequestV1` exists in no package — but `docs/superpowers/specs/2026-08-14-collections-policy-consequence-and-timer-contracts.md` § 11 still lists it as an open question *("Blocks the outbound contract")*, and no ADR amendment closes it. *"One name must win before any code"* was satisfied by the code shipping first and the spec never being amended after the fact — which is the failure mode, not the fix. Amend the spec to `CollectionActionRequestedV1` and close. | Every contract-bearing row that cites the consequence request. |
+| ~~**G6**~~ **RESOLVED** | ~~Byte-for-byte equivalence is not achievable~~ — **the correction was already made, and this row was recording a request that had already been granted.** `docs/superpowers/specs/2026-08-14-billing-authority-profile-contract.md:503-514` carries the corrected wording in its own text, with its own note: *"Corrected 2026-08-14, at the Documents workstream's request. An earlier draft said 'byte-for-byte-equivalent'. That is not achievable."* No live "byte-for-byte" requirement exists anywhere. Confirmed in shipped code: `dotmac-document-rendering`'s `COMPATIBILITY.md` states it *"does not guarantee byte-for-byte PDF identity"* and guarantees an *"invariant semantic projection"*; its `conformance.py` asserts projection-digest identity, never byte equality between two renders. | ~~DOC-R1, DOC-R4~~ — unblocked. |
+| **G7** | **Case lifecycle has three vocabularies for one concept**: the plan's `active\|paused\|resolved\|cancelled`, the live `DunningCaseStatus` `open\|paused\|resolved\|closed` (`models/collections.py:25-29`), and the shadow `CollectionsCaseState` `open\|warned\|escalated\|consequence_requested\|closed` (`models/collections_case.py:41-47` — **five** members; this row previously listed four, omitting `closed`). A **total classifier with no default bucket** is owed at cutover stage S0. **Still open after the module shipped**, and the module does not close it: `dotmac-collections==0.1.0a1` ships `CaseLifecycle = active\|paused\|resolved\|cancelled`, confirming the plan's vocabulary is the survivor — but the classifier mapping the two Sub vocabularies onto it remains Sub's to write, and no module symbol supplies it. | **COL-R8.** |
+| **G8** | **ERP does not consume `AccountingFactV1` and its checked-in contract forbids the mechanism.** ERP has zero occurrences of `AccountingFact`. Its live integration is a **document-level HTTP pull** (`app/tasks/dotmac_sub.py` → `sync_invoices`/`sync_payments` → `post_unposted_*`, watermarked by `models/finance/ar/dotmac_sub_sync_watermark.py`), and `docs/dotmac_sub_tax_accounting_contract.md` says: *"ERP **pulls** immutable or versioned source facts from Sub… **No second push/outbox path is permitted for the same accounting decisions.**"* Billing's `AccountingFactV1` is push-after-commit through the kernel outbox. **G8 is TWO gates, not one — see § 10.3.** | Every row that ends with billing owning the accounting effects — and it is an **authority-migration decision**, not an integration detail. |
+
+---
+
+## 10.3 G8 is two gates — ruled 2026-08-28
+
+An earlier draft proposed re-pointing Sub's sync endpoints at Billing-owned
+projections and called G8 closed. That closes the **direct-table dependency**
+only. It does not close G8, because it leaves ERP's pull as an independent
+accounting writer — the exact second writer the programme exists to remove.
+
+### Gate 1 — the compatibility re-point (new, and a prerequisite)
+
+`GET /invoices/sync` and `GET /payments/sync` read Sub's local tables today, and
+more deeply than this ledger recorded: `PaymentSyncRead`
+(`app/schemas/billing.py:988`) **embeds `allocations` and `settlement`**, and
+`PaymentSettlementRead` carries `unallocated_ledger_entry_id`,
+`prepaid_ledger_entry_id` and `billing_account_ledger_entry_id`. So the pull
+reads **BIL-R4's tables directly and BIL-R5's transitively**.
+
+Re-point both endpoints' READERS at Billing-owned projections, responses held
+byte-identical.
+
+**BIL-R4 and BIL-R5 are therefore coupled behind ONE watermark.** They cannot
+cut over separately: `/payments/sync` exposes settlement and allocation together
+in a single response, so a split cutover would serve one from the module and one
+from the legacy tables, in the same payload, to an accounting consumer.
+
+### Gate 2 — the transport migration, already accepted
+
+ADR-0020's amendment table already rules this and fixes its order:
+
+> Pull remains authoritative → push shadow comparison → single watermark cutover
+> → disable pull posting → enable inbox posting → retire the pull decision path.
+> *"A pull reconciler may afterwards detect gaps and request replay, but **it may
+> never post independently** — that would restore the second writer the sequence
+> exists to remove."*
+
+So the compatibility endpoints may survive gate 1 **as diagnostics**, and must
+not keep posting once gate 2 lands. G8 closes at the end of gate 2, not gate 1.
 
 ---
 
@@ -399,20 +712,63 @@ contracts. This resolves these two contract gaps; it is not cutover evidence.
 | | Rows | With a named baseline | Contested | State |
 |---|---|---|---|---|
 | billing (Sub) | 9 | 0 | 5 | not-started |
-| collections (Sub) | 10 (+5 unrowed) | 1 (non-conformant) | 2 | not-started |
+| collections (Sub) | 10 (+5 unrowed) | 2 (one now sensitivity-proven) | 2 | **2 retired** (COL-R5, COL-R7), 8 not-started |
 | subscriptions (Sub) | 14 | 0 | 5 | not-started |
 | subscriptions (Vendor CP) | 3 | 0 | 0 | not-started |
 | document rendering (Sub) | 13 | 1 (proposed) | 5 | not-started |
 | ERP | 1 (to the kernel, not to a commercial module) | n/a | 0 | not-started |
-| **Total** | **50** | **2** | **0 contested** (10 split into 16 assigned, § 9.1) | **0 retired** |
+| **Total** | **53** (§ 0.1) | **3** | **0 contested** (10 split into 16 assigned, § 9.1) | **2 retired on a branch, 0 merged** (§ 3.1) |
 
-Fifty local writers, two frozen baselines, eight contract gaps, and one gate.
-**Nothing has been retired, and nothing may start.** That sentence is the current
-state of the commercial programme, and recording it accurately is this ledger's
-whole job.
+Fifty local writers, two frozen baselines, eight contract gaps, and one gate —
+**as measured on 2026-08-14.** Three of those numbers have since moved, and the
+fourth is the reason this paragraph is no longer the last word.
+
+**Restated 2026-08-28:**
+
+- **Fifty-three writers**, not fifty. § 0.1 found three in no inventory at all
+  (`gateway_topup_intents.py`, `cutover_balance_audit.py`,
+  `billing/cadence.py`).
+- **Four open contract gaps**, not eight, and not the five an earlier draft of
+  this re-measurement claimed. Re-audited against shipped package code on
+  2026-08-28, because a gap count assembled from prose is not evidence:
+  - **Resolved:** G1, G2 (ADR-0030 amendment 2026-08-23); **G3** (same
+    amendment's contract-completion follow-up, confirmed shipped in
+    `dotmac-billing==0.1.0a1`); **G6** (corrected in the spec's own text on
+    2026-08-14 — the row was recording a request that had already been
+    granted); **G5a** (both naming collisions settled by the shipped packages).
+  - **Open:** **G4**, **G5b**, **G7**, **G8**. G7 is **not** closed by the
+    module existing — it ships the winning vocabulary but no classifier. G8 is
+    **two gates**, not one (§ 10.3).
+  - The earlier draft's list — *"G3, G4, G6, G7 and G8"* — was wrong on two of
+    five. It was assembled by re-reading the 2026-08-14 rows rather than by
+    checking what the packages ship, which is the same failure that left the
+    P11 banner stale for fourteen days.
+- **The gate is MET.** ADR-0017 P11 has been met since 2026-08-17. The header's
+  *"not one row below may begin"* was false for fourteen days.
+- **Two retired on a branch; zero merged.** `COL-R5` and `COL-R7` (§ 3.1) are
+  the first rows to reach `retired` — the local writer is gone in both, one
+  moved to its owner and one deleted outright — at Sub revision
+  `f7368650e7f392661ca28fa5e07d90894e819735`, which is **not merged and has no
+  CI verdict yet**. Fifty-one to go, and these two are not a fleet fact until
+  that revision lands green.
+
+So the accurate current sentence is: *two writers are retired on an unmerged
+branch, and the rest may now start* — in the order [ADR-0030's 2026-08-28 amendment](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
+sets: Sub is first cutover for **Billing and Payments** (and remains so for
+Collections and Orders), while **Vendor CP remains first cutover for
+Subscriptions** — it holds a real `offer_versions` writer to retire, per
+`packages/dotmac-subscriptions/EXTRACTION.toml`. Recording that
+accurately is this ledger's whole job, and the fourteen-day-stale gate line is
+the argument for giving it a guard rather than a re-read.
 
 What changed on 2026-08-14 is ownership, not progress: the ten contested claims
 were split by symbol or owned decision into sixteen rows with exactly one lead
 owner each (§ 9.1). Two carry ordering constraints and one is still blocked on a
-contract gap. **A row with an owner is not a row that is done** — the retired
-count is still zero, and it stays zero until a local writer is deleted.
+contract gap. **A row with an owner is not a row that is done** — a row is done
+when its local writer is deleted, and exactly two are.
+
+**What executing the first two rows cost this ledger:** two corrections to its
+own text (§ 3.1) — a named owner that did not exist, and a ratchet predicate
+that would have failed on unrelated work the day it was switched on. Both were
+found by trying to run the row, not by re-reading it. Expect the same rate from
+the rows that follow; the coordinates in § 0.1 are measurements, not warranties.
