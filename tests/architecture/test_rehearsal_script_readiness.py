@@ -435,10 +435,14 @@ def test_missing_migration_material_compares_the_complete_schema_before_and_afte
     assert "sha256sum" in helper
 
 
-def test_failed_backup_forces_password_authentication_over_tcp() -> None:
+def test_failed_backup_forces_password_authentication_across_the_compose_network() -> (
+    None
+):
     case = _function("inject_failed_backup")
     assert "wrong-password-on-purpose" in case
-    assert "pg_dump -h 127.0.0.1" in case
+    assert '"${COMPOSE[@]}" run --rm --no-deps' in case
+    assert 'pg_dump -h "${DB_SERVICE_NAME}"' in case
+    assert '"${DOCKER_BIN}" exec' not in case
     assert '-p "${DB_PORT}"' in case
 
 

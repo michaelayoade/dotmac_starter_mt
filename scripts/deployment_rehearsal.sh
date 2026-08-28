@@ -1489,9 +1489,15 @@ inject_missing_migration_head() {
 }
 
 inject_failed_backup() {
+  # Do not exec the client inside Postgres: the official image deliberately
+  # trusts its own loopback addresses, so even TCP to 127.0.0.1 accepts a bad
+  # password. Run pg_dump from the migration image across the Compose network;
+  # that reaches the server's scram-sha-256 host rule and makes this a real
+  # credential failure rather than a transport-only assertion.
   local rc=0
-  "${DOCKER_BIN}" exec -e PGPASSWORD="wrong-password-on-purpose" "${DB1_CONTAINER}" \
-    pg_dump -h 127.0.0.1 -p "${DB_PORT}" \
+  "${COMPOSE[@]}" run --rm --no-deps \
+    -e PGPASSWORD="wrong-password-on-purpose" migrate \
+    pg_dump -h "${DB_SERVICE_NAME}" -p "${DB_PORT}" \
       -U "${DB_OWNER_USER}" -d "${DB1_NAME}" \
       > "${WORK_DIR}/should_not_exist.sql.gz" \
       2>"${WORK_DIR}/backup_stderr.txt" || rc=$?
