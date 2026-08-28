@@ -1,6 +1,14 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.1.0a1 — unreleased
+## 0.2.0a1 — unreleased
+
+Normalize the Nginx renderer to exactly one trailing newline. The first ERP
+adopter proved that `end-of-file-fixer` rewrites the 0.1 output while
+`render --check` requires those original bytes, making the consumer's two gates
+mutually exclusive. This is a minor release because rendered bytes are public
+contract even when the behavioral configuration is unchanged.
+
+## 0.1.0a1 — 2026-08-28
 
 First cut. `ProductDeploymentSpec.v1`, the deterministic renderers, the
 hardened image contract and its audit, the deployment state machine as data
@@ -14,4 +22,5 @@ contract, `dotmac_erp`'s migration-role preflight and backup-before-migrate —
 with eighteen defects recorded as deliberate non-goals in `EXTRACTION.toml` and
 the inventory.
 
-Not published and not adopted. See `EXTRACTION.toml` `next_action`.
+Published through the protected facility lane after an exact-main disposable
+host rehearsal completed with 34 passes, zero failures and zero skips.

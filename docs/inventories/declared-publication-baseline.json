@@ -97,6 +97,11 @@
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-deployment-foundation": {
+      "declared": "0.2.0a1",
+      "reason": "DECLARED FOR THE NGINX EOF CONTRACT FIX, NOT YET RELEASED. ERP's first adopter proved 0.1.0a1 emits two trailing newlines, while ERP's required end-of-file-fixer normalizes that to one and render --check then refuses the normalized bytes. COMPATIBILITY.md requires a minor release for every rendered-byte change, so this is 0.2.0a1 rather than an a2 patch. Remove this row only after the exact-main rehearsal, protected facility publication, registry install verification and annotated tag all succeed; ERP must never pin the declaration before that tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox": {
       "declared": "0.1.0a2",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION. Version a2 adds the typed history-import owner required to replace Sub's temporary direct-mapped-class backfill; source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a2 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
