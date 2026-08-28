@@ -76,14 +76,13 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# People consumes no kernel feature newer than its allocation release. If it
-# adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
-# retaining the allocation release as evidence there. Durable timers was
-# allocated in a72. Immutable a73 belongs to the caller-session transaction
-# release, a74-a77 to the vendor cohort, a78-a81 to the marketing cohort, and
-# referrals and reseller management are ALLOCATED in a84 — never published,
-# so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
-# consolidated ERP/Backoffice/general allocation follows in a85.
+# Durable timers was allocated in a72. Immutable a73 belongs to the
+# caller-session transaction release, a74-a77 to the vendor cohort, a78-a81 to
+# the marketing cohort, and referrals and reseller management are ALLOCATED in
+# a84 — never published, so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather
+# than here — and the consolidated ERP/Backoffice/general allocation follows
+# in a85. People moved to CAPABILITY_RAISED_FLOORS when a2 adopted a98's public
+# engine-free transaction surface; its a71 allocation remains recorded there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # The commerce cohort: kernel a89 added BILLING/COLLECTIONS/ORDERS/
     # SUBSCRIPTIONS to MIGRATION_OWNER_LEDGER, and Billing and Collections
@@ -107,7 +106,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-party": "0.1.0a85",
     "dotmac-payables": "0.1.0a85",
     "dotmac-payroll": "0.1.0a85",
-    "dotmac-people": "0.1.0a71",
     "dotmac-procurement": "0.1.0a85",
     "dotmac-projects": "0.1.0a85",
     "dotmac-records": "0.1.0a85",
@@ -177,6 +175,12 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # a71 allocated mod_people and remained a1's effective floor. a2 imports
+    # `dotmac_kernel.transactions.conflict_savepoint`, the public engine-free
+    # transaction surface first published in a98. An earlier kernel has the
+    # allocation but not that supported seam, so the consumed capability now
+    # outranks the allocation while a71 remains the provenance coordinate.
+    "dotmac-people": ("0.1.0a98", "0.1.0a71"),
     # Allocated with the rest of the commerce cohort in a89, but guarded writes
     # consume the manifest-owned `charge_models` and `obligation_sources`
     # declarations that land in a94. The highest consumed capability wins, so

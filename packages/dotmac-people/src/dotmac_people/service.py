@@ -7,7 +7,8 @@ notification, provisions an account, or writes a consuming domain.
 
 from __future__ import annotations
 
-from datetime import date
+import hashlib
+from datetime import UTC, date, datetime
 from typing import TypeVar, cast
 from uuid import UUID
 
@@ -19,18 +20,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_people.contracts import (
+    ActivateEmploymentType,
     AssignmentType,
     Conflict,
     CreateCatalogEntry,
     CreateEmployee,
+    CreateEmploymentType,
     CreatePosition,
+    DeactivateEmploymentType,
     EmployeeStatus,
+    EmploymentTypePage,
+    EmploymentTypeQuery,
+    EmploymentTypeReconcileOutcome,
+    EmploymentTypeRecord,
     InvalidHierarchy,
     InvalidLifecycle,
     NotFound,
     PositionAssignmentCommand,
+    ReconcileAction,
+    ReconcileEmploymentType,
     RehireEmployee,
     ResolutionResult,
+    ReviseEmploymentType,
     VacancyRoutingAlert,
     VacancyRoutingPolicy,
 )
@@ -71,6 +82,28 @@ def _name(value: str, *, field: str) -> str:
     return normalized
 
 
+def _employment_type_code(value: str) -> str:
+    normalized = _code(value, field="employment type code")
+    if len(normalized) > 20:
+        raise ValueError("employment type code must be at most 20 characters")
+    return normalized
+
+
+def _employment_type_name(value: str) -> str:
+    normalized = _name(value, field="employment type name")
+    if len(normalized) > 100:
+        raise ValueError("employment type name must be at most 100 characters")
+    return normalized
+
+
+def _source_timestamp(value: datetime, *, field: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field} must be a datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return value.astimezone(UTC)
+
+
 def _one(db: Session, statement: Select[tuple[_Model]], *, detail: str) -> _Model:
     result = db.scalar(statement)
     if result is None:
@@ -79,7 +112,7 @@ def _one(db: Session, statement: Select[tuple[_Model]], *, detail: str) -> _Mode
 
 
 def _flush_new(db: Session, record: _Model, *, detail: str) -> _Model:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -88,6 +121,111 @@ def _flush_new(db: Session, record: _Model, *, detail: str) -> _Model:
     except IntegrityError as exc:
         raise Conflict(detail) from exc
     return record
+
+
+def _write_employment_type(
+    db: Session,
+    *,
+    row: EmploymentType,
+    code: str,
+    name: str,
+    description: str | None,
+    is_active: bool,
+    detail: str,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+) -> None:
+    from dotmac_kernel.transactions import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            row.code = code
+            row.name = name
+            row.description = description
+            row.is_active = is_active
+            if created_at is not None:
+                row.created_at = created_at
+            if updated_at is not None:
+                row.updated_at = updated_at
+            db.flush()
+    except IntegrityError as exc:
+        raise Conflict(detail) from exc
+
+
+def _employment_type_record(row: EmploymentType) -> EmploymentTypeRecord:
+    def utc(value: datetime) -> datetime:
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    return EmploymentTypeRecord(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        code=row.code,
+        name=row.name,
+        description=row.description,
+        is_active=row.is_active,
+        created_at=utc(row.created_at),
+        updated_at=utc(row.updated_at),
+    )
+
+
+def _fingerprint_part(name: str, kind: str, value: bytes) -> bytes:
+    """Length-prefix a named, typed field for the ``et1`` semantic digest."""
+    name_bytes = name.encode("utf-8")
+    kind_bytes = kind.encode("ascii")
+    return b"".join(
+        (
+            len(name_bytes).to_bytes(2, "big"),
+            name_bytes,
+            len(kind_bytes).to_bytes(1, "big"),
+            kind_bytes,
+            len(value).to_bytes(8, "big"),
+            value,
+        )
+    )
+
+
+def employment_type_fingerprint(
+    *,
+    scope: TenantScope,
+    employment_type_id: UUID,
+    code: str,
+    name: str,
+    description: str | None,
+    is_active: bool,
+) -> str:
+    """Bind all normalized Employment Type decision evidence under ``et1``."""
+    tenant_id = _tenant(scope)
+    if not isinstance(employment_type_id, UUID):
+        raise TypeError("employment_type_id must be a UUID")
+    if not isinstance(is_active, bool):
+        raise TypeError("is_active must be a bool")
+    normalized_code = _employment_type_code(code)
+    normalized_name = _employment_type_name(name)
+    encoded = b"".join(
+        (
+            _fingerprint_part("owner", "str", b"dotmac-people"),
+            _fingerprint_part("entity", "str", b"employment-type"),
+            _fingerprint_part("tenant_id", "uuid", tenant_id.bytes),
+            _fingerprint_part("id", "uuid", employment_type_id.bytes),
+            _fingerprint_part("code", "str", normalized_code.encode("utf-8")),
+            _fingerprint_part("name", "str", normalized_name.encode("utf-8")),
+            _fingerprint_part(
+                "description",
+                "none" if description is None else "str",
+                b"" if description is None else description.encode("utf-8"),
+            ),
+            _fingerprint_part("is_active", "bool", b"1" if is_active else b"0"),
+        )
+    )
+    return f"et1:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _validate_source_fingerprint(value: str) -> str:
+    if len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError("source fingerprint must be a lowercase SHA-256 digest")
+    return value
 
 
 def create_department(
@@ -142,23 +280,274 @@ def create_designation(
 def create_employment_type(
     db: Session, *, scope: TenantScope, command: CreateCatalogEntry
 ) -> EmploymentType:
+    """Deprecated a1 ORM adapter; new callers use ``register_employment_type``."""
     tenant_id = _tenant(scope)
-    code = _code(command.code, field="employment type code")
+    code = _employment_type_code(command.code)
+    name = _employment_type_name(command.name)
+    return _create_employment_type(
+        db,
+        tenant_id=tenant_id,
+        code=code,
+        name=name,
+        description=command.description,
+    )
+
+
+def _create_employment_type(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    code: str,
+    name: str,
+    description: str | None,
+    row_id: UUID | None = None,
+    is_active: bool = True,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+) -> EmploymentType:
     if db.scalar(
         select(EmploymentType.id).where(
             EmploymentType.tenant_id == tenant_id, EmploymentType.code == code
         )
     ):
         raise Conflict(f"employment type code {code!r} already exists")
+    row = EmploymentType(
+        **({"id": row_id} if row_id is not None else {}),
+        tenant_id=tenant_id,
+        code=code,
+        name=name,
+        description=description,
+        is_active=is_active,
+    )
+    if created_at is not None:
+        row.created_at = created_at
+    if updated_at is not None:
+        row.updated_at = updated_at
     return _flush_new(
         db,
-        EmploymentType(
-            tenant_id=tenant_id,
-            code=code,
-            name=_name(command.name, field="employment type name"),
-            description=command.description,
-        ),
+        row,
         detail=f"employment type code {code!r} conflicts",
+    )
+
+
+def register_employment_type(
+    db: Session, *, scope: TenantScope, command: CreateEmploymentType
+) -> EmploymentTypeRecord:
+    tenant_id = _tenant(scope)
+    row = _create_employment_type(
+        db,
+        tenant_id=tenant_id,
+        code=_employment_type_code(command.code),
+        name=_employment_type_name(command.name),
+        description=command.description,
+    )
+    return _employment_type_record(row)
+
+
+def read_employment_type(
+    db: Session, *, scope: TenantScope, employment_type_id: UUID
+) -> EmploymentTypeRecord:
+    return _employment_type_record(
+        _employment_type(db, _tenant(scope), employment_type_id)
+    )
+
+
+def list_employment_types(
+    db: Session, *, scope: TenantScope, query: EmploymentTypeQuery
+) -> EmploymentTypePage:
+    tenant_id = _tenant(scope)
+    if query.offset < 0:
+        raise ValueError("employment type offset must be non-negative")
+    if not 1 <= query.limit <= 200:
+        raise ValueError("employment type limit must be between 1 and 200")
+    predicates: list[sa.ColumnElement[bool]] = [EmploymentType.tenant_id == tenant_id]
+    if query.code is not None:
+        predicates.append(EmploymentType.code == _employment_type_code(query.code))
+    if query.active is not None:
+        predicates.append(EmploymentType.is_active.is_(query.active))
+    if query.search is not None and query.search.strip():
+        term = f"%{query.search.strip()}%"
+        predicates.append(
+            or_(EmploymentType.code.ilike(term), EmploymentType.name.ilike(term))
+        )
+    total = int(
+        db.scalar(
+            select(sa.func.count()).select_from(EmploymentType).where(*predicates)
+        )
+        or 0
+    )
+    rows = db.scalars(
+        select(EmploymentType)
+        .where(*predicates)
+        .order_by(EmploymentType.code, EmploymentType.id)
+        .offset(query.offset)
+        .limit(query.limit)
+    )
+    return EmploymentTypePage(
+        items=tuple(_employment_type_record(row) for row in rows),
+        total=total,
+        offset=query.offset,
+        limit=query.limit,
+    )
+
+
+def revise_employment_type(
+    db: Session, *, scope: TenantScope, command: ReviseEmploymentType
+) -> EmploymentTypeRecord:
+    tenant_id = _tenant(scope)
+    row = _employment_type(db, tenant_id, command.employment_type_id)
+    code = _employment_type_code(command.code)
+    name = _employment_type_name(command.name)
+    occupied = db.scalar(
+        select(EmploymentType.id).where(
+            EmploymentType.tenant_id == tenant_id,
+            EmploymentType.code == code,
+            EmploymentType.id != row.id,
+        )
+    )
+    if occupied is not None:
+        raise Conflict(f"employment type code {code!r} already exists")
+    _write_employment_type(
+        db,
+        row=row,
+        code=code,
+        name=name,
+        description=command.description,
+        is_active=row.is_active,
+        detail=f"employment type code {code!r} conflicts",
+    )
+    return _employment_type_record(row)
+
+
+def _set_employment_type_active(
+    db: Session,
+    *,
+    scope: TenantScope,
+    employment_type_id: UUID,
+    active: bool,
+) -> EmploymentTypeRecord:
+    row = _employment_type(db, _tenant(scope), employment_type_id)
+    if row.is_active != active:
+        row.is_active = active
+        db.flush()
+    return _employment_type_record(row)
+
+
+def deactivate_employment_type(
+    db: Session, *, scope: TenantScope, command: DeactivateEmploymentType
+) -> EmploymentTypeRecord:
+    return _set_employment_type_active(
+        db, scope=scope, employment_type_id=command.employment_type_id, active=False
+    )
+
+
+def activate_employment_type(
+    db: Session, *, scope: TenantScope, command: ActivateEmploymentType
+) -> EmploymentTypeRecord:
+    return _set_employment_type_active(
+        db, scope=scope, employment_type_id=command.employment_type_id, active=True
+    )
+
+
+def require_active_employment_type(
+    db: Session, *, scope: TenantScope, employment_type_id: UUID
+) -> EmploymentTypeRecord:
+    row = _employment_type(db, _tenant(scope), employment_type_id)
+    if not row.is_active:
+        raise InvalidLifecycle(f"employment type {employment_type_id} is inactive")
+    return _employment_type_record(row)
+
+
+def reconcile_employment_type(
+    db: Session, *, scope: TenantScope, command: ReconcileEmploymentType
+) -> EmploymentTypeReconcileOutcome:
+    tenant_id = _tenant(scope)
+    source_fingerprint = _validate_source_fingerprint(command.source_fingerprint)
+    source_created_at = _source_timestamp(
+        command.source_created_at, field="source_created_at"
+    )
+    source_updated_at = (
+        source_created_at
+        if command.source_updated_at is None
+        else _source_timestamp(command.source_updated_at, field="source_updated_at")
+    )
+    code = _employment_type_code(command.code)
+    name = _employment_type_name(command.name)
+    if not isinstance(command.is_active, bool):
+        raise TypeError("is_active must be a bool")
+
+    row = db.scalar(
+        select(EmploymentType).where(
+            EmploymentType.tenant_id == tenant_id,
+            EmploymentType.id == command.source_id,
+        )
+    )
+    occupied = db.scalar(
+        select(EmploymentType.id).where(
+            EmploymentType.tenant_id == tenant_id,
+            EmploymentType.code == code,
+            EmploymentType.id != command.source_id,
+        )
+    )
+    if occupied is not None:
+        raise Conflict(f"employment type code {code!r} already exists")
+
+    if row is None:
+        row = _create_employment_type(
+            db,
+            tenant_id=tenant_id,
+            row_id=command.source_id,
+            code=code,
+            name=name,
+            description=command.description,
+            is_active=command.is_active,
+            created_at=source_created_at,
+            updated_at=source_updated_at,
+        )
+        action = ReconcileAction.CREATED
+    else:
+        current_record = _employment_type_record(row)
+        if source_updated_at < current_record.updated_at:
+            raise Conflict(
+                f"employment type {command.source_id} source update is stale"
+            )
+        changed = (
+            row.code != code
+            or row.name != name
+            or row.description != command.description
+            or row.is_active != command.is_active
+            or current_record.created_at != source_created_at
+            or current_record.updated_at != source_updated_at
+        )
+        if changed:
+            _write_employment_type(
+                db,
+                row=row,
+                code=code,
+                name=name,
+                description=command.description,
+                is_active=command.is_active,
+                detail=f"employment type code {code!r} conflicts",
+                created_at=source_created_at,
+                updated_at=source_updated_at,
+            )
+            action = ReconcileAction.UPDATED
+        else:
+            action = ReconcileAction.UNCHANGED
+
+    record = _employment_type_record(row)
+    return EmploymentTypeReconcileOutcome(
+        action=action,
+        record=record,
+        source_fingerprint=source_fingerprint,
+        target_fingerprint=employment_type_fingerprint(
+            scope=scope,
+            employment_type_id=record.id,
+            code=record.code,
+            name=record.name,
+            description=record.description,
+            is_active=record.is_active,
+        ),
     )
 
 
@@ -244,7 +633,11 @@ def create_employee(
     if command.designation_id is not None:
         _designation(db, tenant_id, command.designation_id)
     if command.employment_type_id is not None:
-        _employment_type(db, tenant_id, command.employment_type_id)
+        employment_type = _employment_type(db, tenant_id, command.employment_type_id)
+        if not employment_type.is_active:
+            raise InvalidLifecycle(
+                f"employment type {command.employment_type_id} is inactive"
+            )
     if (
         command.probation_end_date is not None
         and command.probation_end_date < command.date_of_joining
@@ -652,18 +1045,27 @@ def search_employees(
 
 
 __all__ = [
+    "activate_employment_type",
     "assign_position",
     "create_department",
     "create_designation",
     "create_employee",
     "create_employment_type",
     "create_position",
+    "deactivate_employment_type",
+    "employment_type_fingerprint",
     "end_assignment",
+    "list_employment_types",
     "position_is_vacant",
+    "read_employment_type",
+    "reconcile_employment_type",
+    "register_employment_type",
     "rehire_employee",
+    "require_active_employment_type",
     "resolve_approval_chain",
     "resolve_department_head",
     "resolve_direct_reports",
     "resolve_manager",
+    "revise_employment_type",
     "search_employees",
 ]

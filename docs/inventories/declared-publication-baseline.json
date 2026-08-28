@@ -112,6 +112,11 @@
       "reason": "OUTSTANDING FOR THE ADDITIVE PERMISSION-PROVISIONING CONTRACT. a98 IS published (peeled tag dotmac-kernel-v0.1.0a98 -> ae7320876ad91d5bf4639d634d65a6e8fd36bb00); a99 adds the storage-neutral PermissionPlan, assembly-owned role definitions and versioned grant profiles. Source presence is not registry evidence, and products must not pin a99 until the protected kernel release installs and verifies the artifact from the private index and tags the exact revision. Remove this row only in the a99 oracle-backed release record; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-people": {
+      "declared": "0.1.0a2",
+      "reason": "OUTSTANDING FOR ERP'S EMPLOYMENT TYPE AUTHORITY CUTOVER. 0.1.0a1 IS published (peeled tag dotmac-people-v0.1.0a1 -> 459569afdc6df6b78357d10277cee15820142fc9); a2 adds immutable Employment Type reads and commands, active-reference validation and source-ID-preserving reconciliation over the unchanged pe_0001 lineage. Source presence and local candidate hashes are not registry evidence. Remove this row only in the a2 oracle-backed release record after the protected workflow installs, verifies and tags exact 0.1.0a2; ERP must not pin or activate a2 before that release exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-tax": {
       "declared": "0.1.0a4",
       "reason": "C3 POLICY-ADOPTION SUPPLY RELEASE. Version a4 adds immutable ORM-free authority, jurisdiction, code, rule/band and classification reads plus exact-replay ensure commands required for ERP to bind reviewed policy identities without importing module models. It does not run ERP's backfill or shadow, move tax authority, or make inclusive, foreign-currency or historical PAYE cohorts admissible. Remove this row only in the oracle-backed a4 release-record change after the protected workflow installs the artifact back and tags the exact revision; ERP must not pin a4 before that release exists.",

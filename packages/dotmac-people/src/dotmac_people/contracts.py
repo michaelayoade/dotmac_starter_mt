@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 
@@ -50,12 +50,92 @@ class VacancyRoutingPolicy(enum.StrEnum):
     NOTIFY_HR_THEN_SKIP = "NOTIFY_HR_THEN_SKIP"
 
 
+class ReconcileAction(enum.StrEnum):
+    CREATED = "CREATED"
+    UPDATED = "UPDATED"
+    UNCHANGED = "UNCHANGED"
+
+
 @dataclass(frozen=True, slots=True)
 class CreateCatalogEntry:
     code: str
     name: str
     description: str | None = None
     parent_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmploymentTypeRecord:
+    id: UUID
+    tenant_id: UUID
+    code: str
+    name: str
+    description: str | None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class EmploymentTypeQuery:
+    search: str | None = None
+    code: str | None = None
+    active: bool | None = None
+    offset: int = 0
+    limit: int = 50
+
+
+@dataclass(frozen=True, slots=True)
+class EmploymentTypePage:
+    items: tuple[EmploymentTypeRecord, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+@dataclass(frozen=True, slots=True)
+class CreateEmploymentType:
+    code: str
+    name: str
+    description: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReviseEmploymentType:
+    employment_type_id: UUID
+    code: str
+    name: str
+    description: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DeactivateEmploymentType:
+    employment_type_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ActivateEmploymentType:
+    employment_type_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ReconcileEmploymentType:
+    source_id: UUID
+    source_fingerprint: str
+    source_created_at: datetime
+    source_updated_at: datetime | None
+    code: str
+    name: str
+    description: str | None
+    is_active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EmploymentTypeReconcileOutcome:
+    action: ReconcileAction
+    record: EmploymentTypeRecord
+    source_fingerprint: str
+    target_fingerprint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,19 +190,29 @@ class ResolutionResult:
 
 
 __all__ = [
+    "ActivateEmploymentType",
     "AssignmentType",
     "Conflict",
     "CreateCatalogEntry",
     "CreateEmployee",
+    "CreateEmploymentType",
     "CreatePosition",
+    "DeactivateEmploymentType",
     "EmployeeStatus",
+    "EmploymentTypePage",
+    "EmploymentTypeQuery",
+    "EmploymentTypeReconcileOutcome",
+    "EmploymentTypeRecord",
     "InvalidHierarchy",
     "InvalidLifecycle",
     "NotFound",
     "PeopleError",
     "PositionAssignmentCommand",
+    "ReconcileAction",
+    "ReconcileEmploymentType",
     "RehireEmployee",
     "ResolutionResult",
+    "ReviseEmploymentType",
     "VacancyRoutingAlert",
     "VacancyRoutingPolicy",
 ]
