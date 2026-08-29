@@ -85,14 +85,37 @@ Where the plan is applied, snapshotted, re-observed and rolled back.
 deployment lock, hold a pre-change snapshot, re-observe its own sockets,
 `docker-proxy` processes and firewall chains, and roll back to the snapshot.
 
-### Role B — independent IPv6-capable external probe vantage — **NOT NAMED**
+### Role B — independent IPv6-capable external probe vantage — **`94.72.99.155`**
 
-**Authorization for Role A did not carry Role B**, and the target may not stand
-in for it. A probe originating on the machine under test never leaves that
-host's own stack, so it cannot distinguish a loopback bind from a routable one
-— which is the single fact the external half exists to establish. Using the
-target as its own vantage converts a two-role rehearsal into a one-role one
-that looks complete, which is worse than not running it.
+**Status: named and VERIFIED, 2026-08-29.** Sources: v4 `94.72.99.155`,
+v6 `2a02:c204:2353:7605::1`.
+
+The target may still not stand in for it. A probe originating on the machine
+under test never leaves that host's own stack, so it cannot distinguish a
+loopback bind from a routable one — the single fact the external half exists to
+establish. Using the target as its own vantage converts a two-role rehearsal
+into a one-role one that looks complete, which is worse than not running it.
+
+#### What was verified, and why the last line is the load-bearing one
+
+| Condition | Evidence |
+|---|---|
+| global IPv6 with a default route | `2a02:c204:2353:7605::1/64`, default via `fe80::1` dev eth0 |
+| IPv6 egress actually works | `[2606:4700:4700::1111]:443` and `[2001:4860:4860::8888]:53` both OPEN |
+| **outside every Dotmac allowlist** | OpenBao `8200`, ERP `9001`, ERP `6391` all **refused** |
+| **the refusals mean something** | **ERP `443` is OPEN from the same vantage** |
+| holds no fleet credentials | no `/opt/openbao`, zero `BAO`/`VAULT` environment variables |
+| can reach Role A | `85.190.246.211:22` reachable |
+
+**The fourth row is why the third can be believed.** Three refusals on their own
+are equally consistent with a vantage that cannot reach anything — a broken
+probe and a working allowlist produce identical output. One reachable Dotmac
+port from the same source at the same time separates them. This is the same
+target-specific positive control the probe plan demands, applied to the
+vantage itself before the vantage is trusted to say anything.
+
+That is what makes `membership_established` true for this host rather than
+assumed: it was checked against the actual rule sets, in both directions.
 
 **Status: not named, and it cannot be inferred from the target.** This is a
 separate authorization request and, on present evidence, probably a
@@ -113,7 +136,7 @@ apply to Role A.
 | its source address **enumerated against Role A's rule set before any probe** | `ProbeVantage.membership_established` is `False` until this is done, and the verifier refuses to conclude from an unestablished vantage |
 | `nc` available | bash `/dev/tcp` does not exist in this shell and reads every port closed — a silent all-green |
 
-### The vantage probably does not exist yet — raising it now
+### Why one had to be provisioned — kept as the record
 
 Measured on 2026-08-29: **neither the workstation nor `observe`, `s3` nor
 `db-primary` has IPv6 egress.** Only the product hosts do, and using production
@@ -121,17 +144,15 @@ as a probe source for a rehearsal is its own authorization rather than a
 freebie — and a product host inside the fleet's own ranges is not a neutral
 vantage anyway.
 
-So the honest position is: **satisfying Role B likely needs a host that does
-not currently exist.** That is a provisioning request, and it is better raised
-here than discovered mid-rehearsal. What it needs is small — any disposable VM
-with working IPv6 egress, at a provider whose address space is outside every
-Dotmac allowlist, reachable for the duration of one rehearsal.
+So Role B needed a host that did not exist, and one was provisioned:
+`94.72.99.155`, verified above. The requirement it was provisioned against —
+**any disposable VM with IPv6 egress in address space outside every Dotmac
+allowlist** — is kept here because it is the requirement any REPLACEMENT vantage
+must also meet, and because "we already have a host with IPv6" is the shortcut
+that would put a product host in this role.
 
-If Role B cannot be authorized or provisioned, the IPv4 half of Lane 3 can
-still run and the **IPv6 external half is UNMONITORED** — recorded as such
-(ADR-0018), never reported as covered by the on-host evidence. The on-host
-`ss -tlnp` evidence remains valid and remains insufficient on its own: it shows
-what the host bound, not what the internet can reach.
+The on-host `ss -tlnp` evidence remains valid and remains insufficient on its
+own: it shows what the host bound, not what the internet can reach.
 
 ## The five artifacts publication is gated on
 
@@ -211,10 +232,15 @@ strings**, recorded side by side. If they cannot be shown equal, the execution
 proves nothing about the thing that was authorized: it proves something about
 whatever happened to be on the host.
 
-## What closes with Role A alone, and what does not
+## The sixteen gate items, and which host closes each
 
-Two lists rather than a verdict. `0.3.0a1` publication is a separate
-authorization either way.
+Sixteen items, three groups, and **every one of them must close** before
+`0.3.0a1` may be published. The grouping is by which host produces the
+evidence, not by which items are optional — none is.
+
+The workstation group is worth reading rather than skimming: a vantage that may
+NOT claim reachability is still the correct instrument for the two items that
+are not reachability claims.
 
 ### CLOSES with Role A alone — on-host evidence, no external vantage
 
@@ -252,29 +278,34 @@ unit coverage, but a real connection from a real inside vantage being refused
 is the demonstration that the two false P0 escalations of 2026-08-29 would now
 be caught rather than repeated.
 
-### REMAINS OPEN — requires Role B
+### CLOSES with Role B — 4 items, no longer unmonitored
 
-| # | Gate item | State |
+`94.72.99.155` is verified outside every applicable allowlist, so these four
+are now REQUIRED to close rather than recorded as gaps.
+
+| # | Gate item | Expected |
 |---|---|---|
-| 13 | IPv6 external negative: the loopback-bound v6 socket is not reachable from outside | **UNMONITORED** |
-| 14 | IPv6 external positive control: `tcp/22` over v6 to THIS target | **UNMONITORED** |
-| 15 | IPv4 external negative + its positive control | **UNMONITORED** unless a vantage provably outside every applicable allowlist exists |
-| 16 | A `private` exposure IS reachable from inside its declared source set | open; needs a host inside that set |
+| 13 | IPv6 external negative: the loopback-bound v6 socket | not reachable |
+| 14 | IPv6 external positive control: `tcp/22` over v6 to THIS target | reachable |
+| 15 | IPv4 external negative + its `tcp/22` positive control | not reachable / reachable |
+| 16 | a `private` exposure reached from inside its declared source set | reachable |
 
-Items 13-16 are **UNMONITORED**, not "not applicable" and not omitted. An
-unmonitored region is a stated gap with an owner; ADR-0018 requires
-"grandfathered" to stay distinguishable from "reviewed and correct", and the
-same distinction applies to "unproven" against "proven safe". Item 15 is
-conditional rather than impossible: it opens the moment any vantage can be
-shown outside the applicable allowlists.
+**Why these stopped being optional.** The earlier reading — that on-host `ss`
+already covers the underlying defect, so the external half is confirmation —
+was rejected on its premise rather than its logic. For a release whose entire
+subject is ADDRESS-FAMILY ENFORCEMENT, the IPv6 external proof is not
+corroboration of something already established; it is the release's central
+claim. A facility that exists to make IPv6 exposure declarable, and ships
+without once watching an IPv6 socket refuse the internet, has not been tested
+against the thing it was built for.
 
-**What items 13-15 would have caught.** The two ports that were actually open
-to the internet on 2026-08-29 were open over IPv6 only, while their IPv4 rules
-read as containment. On-host `ss` would have shown the wildcard bind — so
-item 4 does cover the underlying defect. What the external half adds is
-independent confirmation from the direction an attacker occupies, which is the
-difference between "we believe the socket is loopback-bound" and "we have
-watched it refuse the internet".
+Item 15 was conditional on a vantage outside the applicable allowlists rather
+than impossible. That vantage now exists, so the condition is met and the item
+opens with the rest.
+
+**Publication of `0.3.0a1` is gated on all sixteen.** An UNMONITORED region is
+an acceptable answer for a peripheral property and is not one for the property
+a release is named after.
 
 ## Fixtures this lane produces
 
