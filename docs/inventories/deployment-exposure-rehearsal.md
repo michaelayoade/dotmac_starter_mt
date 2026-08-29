@@ -35,12 +35,35 @@ The specific claims that unit tests cannot settle:
 - that a probe from outside every applicable allowlist reaches, or does not
   reach, what the plan says.
 
-## The two roles, and why they must be different machines
+## The two roles
 
-Authorization for one does not imply authorization for the other, and the plan
-is invalid if they are the same host.
+**Authorization for one does not imply authorization for the other, and the
+plan is invalid if they are the same host.** Each is requested separately
+below, with its own status.
 
-### Role A — disposable target host
+### Why the vantage cannot be the target
+
+This is not bureaucracy. Both failures happened on this fleet on 2026-08-29.
+
+- **A probe originating on the machine under test proves nothing about
+  external reachability.** It never leaves the host's own stack, so it cannot
+  distinguish a loopback bind from a routable one — which is the single fact
+  the whole lane exists to establish.
+- **A probe from inside an allowlist proves nothing about public
+  reachability.** The workstation sits inside `160.119.124.0/22`, which several
+  of this fleet's `DOCKER-USER` allowlists ACCEPT. Two agents independently
+  connected to "public" ports from it and each escalated a P0 that did not
+  exist. The connections were real; the conclusion was not.
+
+`ProbeVantage.membership_established` encodes the second one: a vantage that
+has not been enumerated against the target's rule set cannot conclude anything,
+and the verifier refuses rather than assuming it is outside.
+
+### Role A — disposable execution target — **PROPOSED: `85.190.246.211`**
+
+**Status: proposed, NOT authorized.** Named by the coordinator; becomes
+authorized only when this plan is reviewed. Nothing in this lane runs against
+it before then.
 
 Where the plan is applied, snapshotted, re-observed and rolled back.
 
@@ -53,10 +76,22 @@ Where the plan is applied, snapshotted, re-observed and rolled back.
 | out-of-band recovery (console or equivalent) | the lane writes INPUT rules; a mistake that locks SSH out must be recoverable without SSH |
 | a recorded pre-state | `iptables-save`, `ip6tables-save`, `ss -tlnp` and `docker ps` captured before anything runs |
 
-### Role B — independent IPv6-capable external vantage
+**What the target must be able to do:** apply the authorized plan under the
+deployment lock, hold a pre-change snapshot, re-observe its own sockets,
+`docker-proxy` processes and firewall chains, and roll back to the snapshot.
 
-Where the outside probes originate. A **different machine**, and genuinely
-outside every source set that could apply to Role A.
+### Role B — independent IPv6-capable external probe vantage — **NOT NAMED**
+
+**Status: not named, and it cannot be inferred from the target.** This is a
+separate authorization request and, on present evidence, probably a
+provisioning request.
+
+**What the vantage must be able to do:** reach Role A's global IPv6 address
+from outside every source set that could apply to it, and prove it did so
+against Role A specifically rather than against the internet in general.
+
+A **different machine**, and genuinely outside every source set that could
+apply to Role A.
 
 | Requirement | Why |
 |---|---|
@@ -66,11 +101,25 @@ outside every source set that could apply to Role A.
 | its source address **enumerated against Role A's rule set before any probe** | `ProbeVantage.membership_established` is `False` until this is done, and the verifier refuses to conclude from an unestablished vantage |
 | `nc` available | bash `/dev/tcp` does not exist in this shell and reads every port closed — a silent all-green |
 
-**In this fleet an IPv6-capable outside vantage is scarce.** Only product hosts
-have IPv6 egress, and a product host is not a neutral vantage. If no
-independent one can be authorized, the IPv6 external half of Lane 3 is
-UNMONITORED and must be recorded as such (ADR-0018) rather than reported as
-covered by the on-host evidence.
+### The vantage probably does not exist yet — raising it now
+
+Measured on 2026-08-29: **neither the workstation nor `observe`, `s3` nor
+`db-primary` has IPv6 egress.** Only the product hosts do, and using production
+as a probe source for a rehearsal is its own authorization rather than a
+freebie — and a product host inside the fleet's own ranges is not a neutral
+vantage anyway.
+
+So the honest position is: **satisfying Role B likely needs a host that does
+not currently exist.** That is a provisioning request, and it is better raised
+here than discovered mid-rehearsal. What it needs is small — any disposable VM
+with working IPv6 egress, at a provider whose address space is outside every
+Dotmac allowlist, reachable for the duration of one rehearsal.
+
+If Role B cannot be authorized or provisioned, the IPv4 half of Lane 3 can
+still run and the **IPv6 external half is UNMONITORED** — recorded as such
+(ADR-0018), never reported as covered by the on-host evidence. The on-host
+`ss -tlnp` evidence remains valid and remains insufficient on its own: it shows
+what the host bound, not what the internet can reach.
 
 ## The five artifacts publication is gated on
 
@@ -174,3 +223,28 @@ Publication of `0.3.0a1` stays HELD regardless of the outcome:
 `docs/inventories/declared-publication-baseline.json` records it as
 `declared-unpublished` while OpenBao containment and credential rotation
 settle. A green Lane 3 removes one blocker; it does not remove that one.
+
+## The publication gates are three separate things
+
+Easy to conflate, and conflating them is how a green preflight comes to read as
+"the release is attested".
+
+| Gate | Establishes | Does NOT establish |
+| --- | --- | --- |
+| **Publisher authentication** | that the identity doing the publishing is the intended one | anything about what was published |
+| **Artifact signing** | that this artifact was signed, by which certificate | that the signature was recorded anywhere durable |
+| **Provenance** | what built the artifact, from which source, on which runner | who published it |
+
+**Publisher authentication does not close signing or provenance.** A green
+preflight establishes who is publishing and nothing about what.
+
+`AGENTS.md` rule 39 binds the signing gate specifically: a signed release
+pipeline verifies **the produced artifact's** application identity and its
+**actual signing certificate**, never secret or file existence — and a step is
+renamed if it does not test the property it is named for. A step called
+"verify signing" that checks a keystore file exists is testing the presence of
+a file and must be called that.
+
+Lane 3 establishes none of the three. It is about exposure semantics against a
+real socket, and it is listed here only so the two are not mistaken for one
+gate when publication is finally considered.
