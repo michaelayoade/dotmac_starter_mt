@@ -437,7 +437,7 @@ def cmd_exposure_verify(args: argparse.Namespace) -> int:
         closed_port_behaviour=args.closed_port_behaviour,
     )
     report = verify_exposure(spec, observation)
-    print(f"policy digest: {report.policy_digest}")
+    print(f"descriptor digest: {report.descriptor_digest}")
     for token in report.verified:
         print(f"  ok       {token}")
     for finding in report.findings:

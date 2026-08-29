@@ -682,13 +682,16 @@ def test_the_recreating_apply_is_accepted() -> None:
     refuse_non_recreating_apply([*APPLY_COMMAND, "app"])
 
 
-def test_the_report_carries_the_policy_digest_it_verified_against(
+def test_the_report_carries_the_descriptor_digest_it_verified_against(
     spec: ProductDeploymentSpec,
 ) -> None:
     """So a recorded verification can be matched to the exact plan it proves,
-    rather than to whatever the descriptor says today."""
-    from dotmac_deployment_foundation.policy import ingress_policy_digest
+    rather than to whatever the descriptor says today.
 
+    It is the CANONICAL DESCRIPTOR digest — the same value deployment control
+    binds its authorization to — and not a second digest of the ingress
+    section, because two digests over overlapping content would be two answers
+    to "what was verified"."""
     report = verify_exposure(spec, _observation())
-    assert report.policy_digest == ingress_policy_digest(spec)
-    assert report.policy_digest.startswith("sha256:")
+    assert report.descriptor_digest == spec.to_canonical_document().sha256_digest()
+    assert report.descriptor_digest.startswith("sha256:")

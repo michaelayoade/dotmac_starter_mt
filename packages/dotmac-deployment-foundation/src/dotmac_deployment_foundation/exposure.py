@@ -52,7 +52,7 @@ from typing import Final, Protocol
 from . import ingress
 from .engine.lock import DEFAULT_LOCK_DIR, deployment_lock
 from .errors import DeploymentError, PreconditionFailed, SpecError
-from .policy import build_firewall_plan, ingress_policy_digest
+from .policy import build_firewall_plan
 from .spec import ProductDeploymentSpec
 
 __all__ = [
@@ -460,7 +460,10 @@ def conclude_binding(
 
 @dataclass(frozen=True, slots=True)
 class VerificationReport:
-    policy_digest: str
+    #: The canonical DESCRIPTOR digest this verification was taken against, so
+    #: a recorded report can be matched to the exact plan it proves rather than
+    #: to whatever the descriptor says today.
+    descriptor_digest: str
     findings: tuple[Finding, ...] = ()
     verified: tuple[str, ...] = ()
 
@@ -739,7 +742,7 @@ def verify_exposure(
                 )
             )
     return VerificationReport(
-        policy_digest=ingress_policy_digest(spec),
+        descriptor_digest=spec.to_canonical_document().sha256_digest(),
         findings=tuple(findings),
         verified=tuple(verified),
     )
