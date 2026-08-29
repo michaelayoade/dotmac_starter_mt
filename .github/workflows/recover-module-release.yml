@@ -47,7 +47,6 @@ on:
           - dotmac-commercial-agreements
           - dotmac-compliance-reporting
           - dotmac-content
-          - dotmac-deployment-control
           - dotmac-document-rendering
           - dotmac-documents
           - dotmac-durable-timers

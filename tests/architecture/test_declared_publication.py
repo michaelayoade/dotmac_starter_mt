@@ -215,12 +215,15 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
     NO LONGER VACUOUS, as of the ADR-0057 cohort (2026-08-20). It was, and the
     docstring said so rather than the test being deleted: the one module in both
     states, `dotmac-imports`, had its ALLOWLIST ROW removed (see the test below),
-    emptying the intersection. Four modules now occupy it deliberately —
-    dotmac-commercial-agreements, dotmac-licensing, dotmac-deployment-control
-    and dotmac-brand-profiles — because `dotmac_vendor_control_plane` cannot pin
-    an unpublished module, so the allowlist row has to precede the release that
-    precedes the adoption. That is the state this rule exists to police rather
-    than forbid: each of the four carries a ledger row saying when its row goes.
+    emptying the intersection. Three modules now occupy it deliberately —
+    dotmac-commercial-agreements, dotmac-licensing and dotmac-brand-profiles —
+    because `dotmac_vendor_control_plane` cannot pin an unpublished module, so
+    the allowlist row has to precede the release that precedes the adoption.
+    (dotmac-deployment-control was a fourth until 2026-08-29, when its allowlist
+    row was removed to freeze this repository as its publisher; the distribution
+    moved to `michaelayoade/dotmac_deployment_control`.) That is the state this
+    rule exists to police rather than forbid: each carries a ledger row saying
+    when its row goes.
 
     Imports used to be the counterexample: it had no ready adopter and its own
     dossier said to stay unreleased, so its old allowlist row asserted something
