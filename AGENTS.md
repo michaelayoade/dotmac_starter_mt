@@ -1008,14 +1008,25 @@ default in production are added to `validate_settings`'s prod-fatal list.
 
 **Test host — hard rule.** Never run test commands or install test/development
 dependencies on the local workstation. Run every focused, unit, architecture,
-integration, migration, browser, and full-suite test on the Dotmac Observer
-server (SSH alias `observe`) in a fresh isolated writable Git worktree pinned
-to the exact branch commit under test; a shared checkout is not test evidence.
-Use only disposable test databases and tear them down after the run. Never use
-`pytest -n auto` on Observer; cap xdist at `-n 2` or `-n 3` to avoid exhausting
-the host. Local work is limited to read-only inspection, editing, formatting,
-and static checks that do not execute tests or install dependencies. Git-hosted
-CI remains the merge acceptance owner.
+integration, migration, browser, and full-suite test on the **dedicated test
+server, 85.190.246.211**, in a fresh isolated writable Git worktree pinned to
+the exact branch commit under test; a shared checkout is not test evidence.
+Use only disposable test databases and tear them down after the run. Local work
+is limited to read-only inspection, editing, formatting, and static checks that
+do not execute tests or install dependencies. Git-hosted CI remains the merge
+acceptance owner.
+
+**Never run a test workload on Dotmac Observer.** Observer owns the
+observability stack, OpenBao and the Knowledge service, and a test run there
+takes those down for everyone. This rule previously named Observer as THE test
+host and offered `-n 2`/`-n 3` instead of `pytest -n auto` as the safeguard.
+That mitigation is disproven: a run already capped at `--memory=10g --cpus=3
+-n 3` triggered a host-global OOM that killed Prometheus for about fifteen
+minutes. A container memory limit bounds one cgroup; it does not reserve memory
+for the other services on the host, and the kernel picks its victim by
+`oom_score`, where a large resident Prometheus outscores the capped test
+process. Reaching Observer for observability, OpenBao or Knowledge work is
+unaffected and remains correct.
 
 - `make check` — ruff lint, import-linter, mypy, bandit, the composed
   migration gate (ADR-0006 D1), format check.
