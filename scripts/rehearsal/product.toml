@@ -94,7 +94,13 @@ start_period_seconds = 5
 container = 8000
 host = @@APP_HOST_PORT@@
 protocol = "tcp"
-bind = "127.0.0.1"
+# The exposure vocabulary IngressPolicy.v1 introduced: declared, never
+# derived from a bind string. `ipv4` rather than `dual_stack` because the
+# rehearsal host is not guaranteed to have IPv6, and a `::1` publish on a
+# host without it fails the `up` step for a reason that has nothing to do
+# with what the rehearsal is proving.
+exposure = "loopback"
+address_family = "ipv4"
 
 [migration]
 command = ["python", "/app/app.py", "--migrate"]

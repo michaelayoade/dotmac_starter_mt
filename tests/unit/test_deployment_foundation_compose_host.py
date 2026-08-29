@@ -117,6 +117,10 @@ retention_days = 14
 
 [ingress]
 host = "example.dotmac.io"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 [[ingress.routes]]
 path = "/"
 role = "app"

@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
+from . import ingress as ingress_contract
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
 from .secrets_guard import require_no_secrets
 
@@ -433,34 +434,228 @@ class PortPublication:
     way to express a UDP listener, so a descriptor with no port section drops it
     silently and the rendered file is missing the one thing that service is for.
 
-    `bind` defaults to loopback. A published port on `0.0.0.0` is reachable
-    regardless of the host firewall, so widening it is a decision that should be
-    visible in a diff.
+    ## Why `bind` was replaced (0.3.0a1)
+
+    `bind` was a free-form string defaulting to loopback, and its docstring
+    asked that widening it "be visible in a diff". That is review discipline,
+    not a refusal, and it could not express the question that actually matters:
+    WHICH ADDRESS FAMILIES. A short-form publish spawns one `docker-proxy` per
+    family, so a descriptor that says nothing about IPv6 gets IPv6 anyway — and
+    the `ip6tables DOCKER-USER` rules written to cover it cannot fire, because
+    that chain is reachable only from FORWARD while `docker-proxy` terminates an
+    IPv6 connection locally on INPUT. Every such rule measured on this fleet
+    showed a zero packet counter while the port it named was open.
+
+    So `exposure` and `address_family` are DECLARED, both mandatory, and the
+    bind address is DERIVED from them. A derived address cannot be misleading;
+    a declared one repeatedly was.
+
+    ## What is declared, and what is resolved elsewhere
+
+    Everything here is a NAME or a posture. `source_set` names a set;
+    `dotmac-deployment-control` resolves it to addresses at authorization and
+    freezes the result into the plan digest. `approval_ref` names a policy;
+    `dotmac-approvals` decides. This facility can refuse a shape and can never
+    grant one, which is exactly the amount of authority a renderer should have.
     """
 
     container: int
     host: int
-    protocol: str = "tcp"
-    bind: str = "127.0.0.1"
+    exposure: str
+    address_family: str
+    protocol: str
+    tls: str
+    authentication: str
+    source_set: str
+    telemetry: bool
+    approval_ref: str
+    rationale_url: str
 
     PROTOCOLS: ClassVar[tuple[str, ...]] = ("tcp", "udp")
+    EXPOSURES: ClassVar[tuple[str, ...]] = ingress_contract.EXPOSURES
+    FAMILIES: ClassVar[tuple[str, ...]] = ingress_contract.ADDRESS_FAMILIES
+    AUTHENTICATIONS: ClassVar[tuple[str, ...]] = ingress_contract.AUTHENTICATIONS
+    TLS_MODES: ClassVar[tuple[str, ...]] = ingress_contract.TLS_MODES
 
     @classmethod
     def parse(cls, table: _Table) -> PortPublication:
         container = table.int_("container", minimum=1, maximum=65535)
         host = table.int_("host", minimum=1, maximum=65535)
         protocol = table.str_("protocol", default="tcp")
-        bind = table.str_("bind", default="127.0.0.1")
-        table.done()
-        if protocol not in cls.PROTOCOLS:
+        # Popped rather than left to `done()`: an unknown-key error would be
+        # correct but unhelpful, and this is the one removal a live consumer is
+        # guaranteed to hit. A descriptor that still declares `bind` must fail
+        # loudly rather than have the value silently ignored — an ignored bind
+        # reads, in a diff, exactly like an honoured one.
+        if table.str_("bind", default=""):
             raise SpecError(
-                f"protocol must be one of {cls.PROTOCOLS}", where=table.path
+                "`bind` was removed in 0.3.0a1: declare `exposure` "
+                f"({'|'.join(cls.EXPOSURES)}) and `address_family` "
+                f"({'|'.join(cls.FAMILIES)}) instead, and the bind address is "
+                "derived from them",
+                where=table.path,
             )
-        return cls(container=container, host=host, protocol=protocol, bind=bind)
+        exposure = table.str_("exposure")
+        address_family = table.str_("address_family")
+        # `default=""` rather than a real default, so "declared as none" and
+        # "not declared" stay distinguishable: a private or public publication
+        # has to SAY what its TLS posture is, and cannot inherit one.
+        tls = table.str_("tls", default="")
+        authentication = table.str_("authentication", default="")
+        source_set = table.str_("source_set", default="")
+        telemetry = table.bool_("telemetry", default=False)
+        approval_ref = table.str_("approval_ref", default="")
+        rationale_url = table.str_("rationale_url", default="")
+        table.done()
 
-    def render(self) -> str:
-        suffix = "" if self.protocol == "tcp" else f"/{self.protocol}"
-        return f"{self.bind}:{self.host}:{self.container}{suffix}"
+        where = table.path
+        if protocol not in cls.PROTOCOLS:
+            raise SpecError(f"protocol must be one of {cls.PROTOCOLS}", where=where)
+        if exposure not in cls.EXPOSURES:
+            raise SpecError(f"exposure must be one of {cls.EXPOSURES}", where=where)
+        if address_family not in cls.FAMILIES:
+            raise SpecError(
+                f"address_family must be one of {cls.FAMILIES}", where=where
+            )
+        if tls and tls not in cls.TLS_MODES:
+            raise SpecError(f"tls must be one of {cls.TLS_MODES}", where=where)
+        if authentication and authentication not in cls.AUTHENTICATIONS:
+            raise SpecError(
+                f"authentication must be one of {cls.AUTHENTICATIONS}", where=where
+            )
+        if source_set:
+            source_set = ingress_contract.parse_source_set(
+                source_set, field="source_set", where=where
+            )
+        if approval_ref:
+            approval_ref = ingress_contract.parse_approval_ref(
+                approval_ref, where=where
+            )
+        if rationale_url:
+            ingress_contract.refuse_address_literal(
+                rationale_url, field="rationale_url", where=where
+            )
+
+        if exposure == "none":
+            declared = sorted(
+                name
+                for name, value in (
+                    ("approval_ref", approval_ref),
+                    ("authentication", authentication),
+                    ("rationale_url", rationale_url),
+                    ("source_set", source_set),
+                    ("telemetry", telemetry),
+                    ("tls", tls not in ("", "none")),
+                )
+                if value
+            )
+            if declared:
+                raise SpecError(
+                    'exposure = "none" emits no publication at all, so it '
+                    f"cannot carry {declared}. A control declared on a socket "
+                    "that does not exist is a control nobody will look for "
+                    "again",
+                    where=where,
+                )
+            tls = "none"
+        elif exposure == "loopback":
+            if source_set:
+                raise SpecError(
+                    'exposure = "loopback" is reachable only from the host '
+                    "itself, so a source set has nothing to filter. Declaring "
+                    "one implies a containment the kernel does not consult",
+                    where=where,
+                )
+            tls = tls or "none"
+        else:
+            # private and public: the TLS posture is a decision, never a
+            # default, because the default would be the wrong one exactly when
+            # it matters.
+            if not tls:
+                raise SpecError(
+                    f"exposure = {exposure!r} must declare `tls` explicitly "
+                    f"(one of {cls.TLS_MODES}). An inherited TLS posture on a "
+                    "routable socket is a posture nobody chose",
+                    where=where,
+                )
+            if not source_set:
+                raise SpecError(
+                    f"exposure = {exposure!r} must declare a named `source_set`. "
+                    "Deployment control resolves the name at authorization; "
+                    "this descriptor never holds the addresses",
+                    where=where,
+                )
+
+        if exposure == "public":
+            # Everything else in this vocabulary is reachable only from a place
+            # someone already controls. `public` is not, so it carries the whole
+            # burden: encrypted, authenticated, source-scoped, observed, and
+            # traceable to a policy a reader can go and read.
+            missing = sorted(
+                name
+                for name, value in (
+                    ("approval_ref", approval_ref),
+                    ("authentication", authentication),
+                    ("rationale_url", rationale_url),
+                    ("telemetry", telemetry),
+                )
+                if not value
+            )
+            if missing:
+                raise SpecError(f'exposure = "public" requires {missing}', where=where)
+            if tls == "none":
+                raise SpecError(
+                    'exposure = "public" cannot declare tls = "none"', where=where
+                )
+        elif approval_ref or rationale_url:
+            raise SpecError(
+                "approval_ref and rationale_url belong to a public exposure. On "
+                f"a {exposure!r} publication they document an approval nothing "
+                "checks, which is how an approval locator becomes decoration",
+                where=where,
+            )
+
+        return cls(
+            container=container,
+            host=host,
+            exposure=exposure,
+            address_family=address_family,
+            protocol=protocol,
+            tls=tls,
+            authentication=authentication,
+            source_set=source_set,
+            telemetry=telemetry,
+            approval_ref=approval_ref,
+            rationale_url=rationale_url,
+        )
+
+    # ── derived ─────────────────────────────────────────────────────────────
+
+    @property
+    def families(self) -> tuple[str, ...]:
+        """The concrete families this publication declares, in a fixed order.
+
+        Empty for `none`: a publication that emits no socket serves no family,
+        and returning `("ipv4",)` there would make every projection count a
+        socket that does not exist.
+        """
+        if self.exposure == "none":
+            return ()
+        if self.address_family == "dual_stack":
+            return ingress_contract.FAMILIES
+        return (self.address_family,)
+
+    def host_ip(self, role_code: str, family: str) -> str:
+        """The rendered `host_ip` for one family.
+
+        Loopback derives a literal. Everything routable derives a REQUIRED
+        variable with no default: a default is precisely what lets a misleading
+        value hide the effective bind, so there is nothing to be misled by — an
+        operator who supplies nothing gets a refusal, not a wildcard.
+        """
+        return ingress_contract.derived_host_ip(
+            self.exposure, family, role_code, self.host
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -963,6 +1158,21 @@ class StaticStrategy:
 
 @dataclass(frozen=True, slots=True)
 class Ingress:
+    """The edge, and the ONE place a `public` exposure legitimately lives.
+
+    A web application is not published publicly; its EDGE is, and the
+    application sits on loopback behind it. That separation is the whole reason
+    an edge exists, so the edge declares its own `exposure` and
+    `address_family` exactly like any other publication and
+    `_validate_cross_field` refuses a directly-published application port that
+    an edge route already covers. An edge that can be bypassed is decoration.
+
+    `upstream_address_family` is the family the edge reaches its own upstreams
+    on — always loopback, never routable, and declared rather than assumed so
+    that "which families does this deployment listen on" has one answer read
+    off the descriptor instead of two answers inferred from Docker's defaults.
+    """
+
     host: str
     routes: tuple[IngressRoute, ...]
     redirect_http: bool
@@ -970,6 +1180,13 @@ class Ingress:
     trusted_proxies: tuple[str, ...]
     security_headers: bool
     static: StaticStrategy
+    exposure: str
+    address_family: str
+    upstream_address_family: str
+    authentication: str
+    source_set: str
+    approval_ref: str
+    rationale_url: str
 
     TLS_POLICIES: ClassVar[tuple[str, ...]] = ("modern", "intermediate")
 
@@ -985,6 +1202,13 @@ class Ingress:
         tls_policy = table.str_("tls_policy", default="modern")
         trusted_proxies = table.str_list("trusted_proxies", default=())
         security_headers = table.bool_("security_headers", default=True)
+        exposure = table.str_("exposure")
+        address_family = table.str_("address_family")
+        upstream_address_family = table.str_("upstream_address_family", default="ipv4")
+        authentication = table.str_("authentication", default="")
+        source_set = table.str_("source_set", default="")
+        approval_ref = table.str_("approval_ref", default="")
+        rationale_url = table.str_("rationale_url", default="")
         static = StaticStrategy.parse(
             table.table("static", optional=True), where=table.path
         )
@@ -992,6 +1216,84 @@ class Ingress:
         if tls_policy not in cls.TLS_POLICIES:
             raise SpecError(
                 f"tls_policy must be one of {cls.TLS_POLICIES}", where=table.path
+            )
+        if exposure not in ingress_contract.EXPOSURES:
+            raise SpecError(
+                f"exposure must be one of {ingress_contract.EXPOSURES}",
+                where=table.path,
+            )
+        if exposure == "none":
+            raise SpecError(
+                'an ingress declaring exposure = "none" publishes no listener, '
+                "so every route it declares is unreachable. Delete the "
+                "[ingress] table instead — an edge nobody can reach is not a "
+                "safer edge, it is an outage that renders cleanly",
+                where=table.path,
+            )
+        if address_family not in ingress_contract.ADDRESS_FAMILIES:
+            raise SpecError(
+                f"address_family must be one of {ingress_contract.ADDRESS_FAMILIES}",
+                where=table.path,
+            )
+        if upstream_address_family not in ingress_contract.FAMILIES:
+            raise SpecError(
+                "upstream_address_family must be one of "
+                f"{ingress_contract.FAMILIES}; an edge reaches its upstream over "
+                "loopback on exactly one family, and dual_stack there would "
+                "double every rendered upstream for no reachability gain",
+                where=table.path,
+            )
+        if authentication and authentication not in ingress_contract.AUTHENTICATIONS:
+            raise SpecError(
+                f"authentication must be one of {ingress_contract.AUTHENTICATIONS}",
+                where=table.path,
+            )
+        if source_set:
+            source_set = ingress_contract.parse_source_set(
+                source_set, field="source_set", where=table.path
+            )
+        # `trusted_proxies` used to hold CIDRs, and a CIDR is exactly what the
+        # named-source-set rule exists to remove: the set of proxies in front
+        # of an edge is environment topology, it differs per environment, and
+        # a stale entry here silently makes a spoofed `X-Forwarded-For`
+        # authoritative. So each entry is now a source-set NAME that deployment
+        # control resolves.
+        trusted_proxies = tuple(
+            ingress_contract.parse_source_set(
+                entry, field="trusted_proxies entry", where=table.path
+            )
+            for entry in trusted_proxies
+        )
+        if exposure == "public":
+            missing = sorted(
+                key
+                for key, value in (
+                    ("approval_ref", approval_ref),
+                    ("rationale_url", rationale_url),
+                )
+                if not value
+            )
+            if missing:
+                raise SpecError(
+                    'an ingress with exposure = "public" requires '
+                    f"{missing}: the locator names the policy the exposure "
+                    "claims to satisfy, and it is inside the digested document "
+                    "so changing it is a plan change",
+                    where=table.path,
+                )
+            approval_ref = ingress_contract.parse_approval_ref(
+                approval_ref, where=table.path
+            )
+        elif approval_ref or rationale_url:
+            raise SpecError(
+                "approval_ref and rationale_url belong to a public ingress",
+                where=table.path,
+            )
+        if exposure == "private" and not source_set:
+            raise SpecError(
+                'an ingress with exposure = "private" must name a source_set; '
+                "deployment control resolves it at authorization",
+                where=table.path,
             )
         _unique(
             [route.path for route in routes],
@@ -1006,7 +1308,20 @@ class Ingress:
             trusted_proxies=trusted_proxies,
             security_headers=security_headers,
             static=static,
+            exposure=exposure,
+            address_family=address_family,
+            upstream_address_family=upstream_address_family,
+            authentication=authentication,
+            source_set=source_set,
+            approval_ref=approval_ref,
+            rationale_url=rationale_url,
         )
+
+    @property
+    def families(self) -> tuple[str, ...]:
+        if self.address_family == "dual_stack":
+            return ingress_contract.FAMILIES
+        return (self.address_family,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1599,6 +1914,31 @@ class ProductDeploymentSpec:
         return tuple(item for item in self.external_dependencies if item.managed)
 
     @property
+    def publications(self) -> tuple[tuple[str, PortPublication], ...]:
+        """Every declared publication, as `(service code, publication)`.
+
+        Roles AND managed dependencies, in one deterministic sequence. Both
+        become Compose services and both can publish a host port, and the
+        exposure rules apply identically — the two ports this facility was
+        built to close (a Redis on 6391 and a Postgres on 9001) are dependency
+        publications, not role publications. Iterating only `spec.roles` would
+        have left the exact case out of the contract that names it.
+        """
+        return tuple(
+            (owner, publication)
+            for owner, ports in sorted(
+                [(role.code, role.ports) for role in self.roles]
+                + [
+                    (dependency.code, dependency.ports)
+                    for dependency in self.external_dependencies
+                ]
+            )
+            for publication in sorted(
+                ports, key=lambda item: (item.host, item.protocol)
+            )
+        )
+
+    @property
     def worker_roles(self) -> tuple[Role, ...]:
         return tuple(role for role in self.roles if role.worker is not None)
 
@@ -1773,3 +2113,81 @@ def _validate_cross_field(spec: ProductDeploymentSpec, source: str) -> None:
 
     if spec.telemetry.metrics and not spec.telemetry.metrics_material:
         raise SpecError("metrics=true needs a metrics_material name", where=source)
+
+    _validate_exposure(spec, source)
+
+
+def _validate_exposure(spec: ProductDeploymentSpec, source: str) -> None:
+    """`IngressPolicy.v1`'s cross-section rules.
+
+    Split out from `_validate_cross_field` because these three refusals are the
+    ones a reader comes looking for, and because they share one derived fact —
+    which role/port pairs the edge already owns — that neither leaf parser can
+    see.
+    """
+    edge_covered: set[tuple[str, int]] = set()
+    if spec.ingress is not None:
+        edge_covered = {(route.role, route.port) for route in spec.ingress.routes}
+
+    for code, publication in spec.publications:
+        where = f"{source} service {code!r} port {publication.host}"
+        if (code, publication.container) in edge_covered:
+            # Two declarations of one port is how they drift, and the drift is
+            # not cosmetic here: the edge publishes its upstream on loopback,
+            # so a second declaration is the one that decides whether the
+            # application is ALSO reachable directly. An edge that can be
+            # bypassed is decoration.
+            raise SpecError(
+                f"{code!r} publishes container port {publication.container}, "
+                "which an ingress route already routes to. The edge owns that "
+                "port: it publishes the upstream on loopback itself, so this "
+                "second declaration can only make the application reachable "
+                "AROUND the edge",
+                where=where,
+            )
+        # Reported TOGETHER rather than one at a time. A publication that
+        # claims three controls nothing enforces has three defects, and fixing
+        # them one CI run at a time hides how far the descriptor is from what
+        # it says it is.
+        problems = ingress_contract.capability_refusals(
+            role_code=code,
+            host_port=publication.host,
+            protocol=publication.protocol,
+            exposure=publication.exposure,
+            families=publication.families,
+            authentication=publication.authentication,
+            source_set=publication.source_set,
+            tls=publication.tls,
+        )
+        if problems:
+            raise SpecError("; ".join(problems), where=where)
+
+    # A host port is a host-wide resource. Two services publishing the same
+    # (port, protocol, family) is a `docker compose up` failure at best and a
+    # silently unreachable service at worst, and it is checkable here.
+    _unique(
+        [
+            ingress_contract.endpoint_token(
+                product=spec.product,
+                environment=spec.environment,
+                role=code,
+                protocol=publication.protocol,
+                family=family,
+                host_port=publication.host,
+                exposure=publication.exposure,
+            )
+            for code, publication in spec.publications
+            for family in publication.families
+        ],
+        what="published endpoint",
+        where=source,
+    )
+    _unique(
+        [
+            f"{publication.host}/{publication.protocol}/{family}"
+            for _code, publication in spec.publications
+            for family in publication.families
+        ],
+        what="host socket",
+        where=source,
+    )
