@@ -1,0 +1,97 @@
+# Lane 3's disposable product. `ProductDeploymentSpec.v1`, the same schema
+# every real descriptor uses — this is not a special-cased fixture format.
+#
+# It exists to make ONE property observable against a real socket: that a
+# declared `exposure` and `address_family` produce exactly the sockets the
+# renderer says they do, on both families, and nothing else.
+#
+# Three publications, chosen so that each proves a different thing:
+#
+#   18443  loopback dual_stack  -> MUST appear as 127.0.0.1 AND [::1], and
+#                                  MUST NOT appear as 0.0.0.0 or [::]
+#   18444  none                 -> MUST NOT appear at all
+#   18445  loopback ipv4        -> MUST appear as 127.0.0.1 and MUST NOT
+#                                  appear on any IPv6 address
+#
+# The third is the control for the first. Without it, a host that simply had
+# no IPv6 would produce the same "no wildcard v6 socket" reading as a host
+# where the contract worked, and the run would pass for the wrong reason.
+
+schema = "ProductDeploymentSpec.v1"
+product = "lane3_exposure"
+environment = "rehearsal"
+
+[assembly]
+manifest_path = "scripts/exposure-rehearsal/product.toml"
+manifest_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+# Pinned by digest and already present on the target, so the rehearsal proves
+# exposure rather than proving a registry pull.
+#
+# Python's stdlib server rather than nginx, and the reason is a finding in
+# itself: the facility renders `read_only: true` by default, and nginx
+# cannot start under it without a tmpfs for /var/cache/nginx. Correct
+# hardening, wrong fixture — a lane about sockets should not also be a lane
+# about someone else`s writable paths. This server writes nothing and binds
+# an unprivileged port, so the only thing under test stays the socket.
+[image]
+reference = "python@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f"
+source_revision = "0000000000000000000000000000000000000000"
+
+[migration]
+command = ["/bin/true"]
+heads_command = ["/bin/echo", "lane3"]
+owner_material = "LANE3_MIGRATION_URL"
+expected_heads = ["lane3"]
+compatibility = "online"
+lock_timeout_seconds = 30
+
+[[roles]]
+code = "app"
+command = ["python", "-m", "http.server", "8080"]
+replicas = 1
+stop_grace_seconds = 5
+
+[roles.resources]
+cpus = "0.25"
+memory = "128m"
+pids = 64
+
+[roles.security]
+user = "10001:10001"
+read_only_root = true
+no_new_privileges = true
+cap_drop = ["ALL"]
+tmpfs = ["/tmp"]
+
+[roles.health.ready]
+path = "/"
+port = 8080
+interval_seconds = 3
+timeout_seconds = 2
+retries = 5
+start_period_seconds = 3
+
+# The subject of the whole lane.
+[[roles.ports]]
+container = 8080
+host = 18443
+protocol = "tcp"
+exposure = "loopback"
+address_family = "dual_stack"
+
+# Declares a port and emits NO socket. The absence is the assertion.
+[[roles.ports]]
+container = 8080
+host = 18444
+protocol = "tcp"
+exposure = "none"
+address_family = "ipv4"
+
+# The single-family control for the dual-stack case above.
+[[roles.ports]]
+container = 8080
+host = 18445
+protocol = "tcp"
+exposure = "loopback"
+address_family = "ipv4"
