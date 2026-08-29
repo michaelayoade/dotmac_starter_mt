@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "profile_id": "dotmac-starter-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_starter_mt",
@@ -8,7 +8,7 @@
   "governance_model": {
     "kind": "pinned",
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
-    "revision": "e0f636c3f5adea77da136f75f49c2349fbf9eeaa",
+    "revision": "4f80bd164137d34ff41f1866d7e748f2e664dee3",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "accepted"
   },
@@ -221,5 +221,33 @@
         "fingerprint": "73d8d950aca5d1de24c6b270bf8bf9bc871d4579e9ce1debdfb6041e8b6e243d"
       }
     ]
-  }
+  },
+  "deployment_artefact_surfaces": [
+    {
+      "surface_id": "starter-product-deployment",
+      "subject": "The Starter's single deployment declaration and the assets dotmac-deployment-foundation renders from it.",
+      "declaration_paths": ["deploy/product.toml"],
+      "rendered_paths": [
+        "deploy/rendered/docker-compose.yml",
+        "deploy/rendered/otel-collector.yaml",
+        "deploy/rendered/alerts.rules.yml"
+      ],
+      "render_check_workflow": ".github/workflows/deployment-conformance.yml",
+      "render_check_command": "render --check",
+      "acknowledged_non_deployments": [
+        {
+          "path": "docker-compose.yml",
+          "reason": "The LEGACY production compose that scripts/deploy.sh drives, and the engine deploy/product.toml exists to replace. It is acknowledged rather than declared because declaring it would assert it conforms, and it does not: it resolves images through ${...} substitution, which ADR 0014 counts as unpinned. Retirement is gated on proven parity per EXTRACTION.toml local_copy_retirement, not on this row, and this row must be removed in the same change that retires it."
+        },
+        {
+          "path": "deploy/forgejo/docker-compose.yml",
+          "reason": "Infrastructure for a DIFFERENT host (the dotmac-s3 artifact registry), not a deployment of this product. It is checked in here for operator convenience and is deployed by nobody in this repository."
+        },
+        {
+          "path": "scripts/rehearsal/product.toml",
+          "reason": "A disposable Lane 2 rehearsal fixture whose values are @@PLACEHOLDER@@ tokens substituted at run time. It is a test input, not a deployable, and it deliberately shares the product.toml name so that the rehearsal exercises the real schema."
+        }
+      ]
+    }
+  ]
 }
