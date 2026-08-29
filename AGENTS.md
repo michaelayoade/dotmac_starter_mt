@@ -481,7 +481,7 @@ specifics) points here and must never fork these rules.
     `BatchTransferService` is dead code — zero callers, not exported, zero
     tests — and is NOT an owner; it is a DELETION (clause *(k)*). A shared
     `dotmac-treasury` distribution or namespace is STILL NOT to be created:
-    rule 22's product-first dossier now exists
+    rule 24's product-first dossier now exists
     (`docs/inventories/treasury-payment-execution-sources.md`, on the sibling
     branch `docs/treasury-product-first-dossier`; its § 12.3 G5 asks for the
     record in terms), and its answer is ADR-0063 — clause *(j)*. The release
@@ -628,7 +628,7 @@ specifics) points here and must never fork these rules.
     intent, no provider outcome attempted), `submitted` (conclusively accepted),
     `ambiguous` (may have landed, reconciliation required), plus terminal
     `settled` / `failed` / `reversed`. **Worker claim/lease state belongs to the
-    execution engine, not to the domain record** (rule 21 / ADR-0014) — a task
+    execution engine, not to the domain record** (rule 23 / ADR-0014) — a task
     that needed somewhere to record a claim and used a business status column is
     most of why that column has three writers. **The migration rule is the
     important part:** existing `PROCESSING` rows are PROBED, the probe is
