@@ -82,8 +82,10 @@ Refusals worth knowing before you write one:
 spec.py          ProductDeploymentSpec.v1 — the one thing a product declares
 ingress.py       IngressPolicy.v1 — exposure vocabulary, address admission,
                  the provider capability matrix, the derived firewall rule
-policy.py        the canonical ingress document and its digest, plus the
-                 provider-neutral edge and firewall plans
+policy.py        the IngressPolicy.v1 section and the provider-neutral edge
+                 and firewall plans
+document.py      DeploymentDescriptorDocument.v1 — the canonical projection
+                 an authorization binds to, and the digest over it
 secrets_guard.py the descriptor holds names, never values (ADR-0009)
 render/          deterministic text emitters: compose, nginx
 alerts.py        64 common infrastructure alerts + the product's own

@@ -3,6 +3,14 @@
 ## What is public
 
 - `ProductDeploymentSpec` and every type it exposes, plus the `SCHEMA` string.
+- `ProductDeploymentSpec.to_canonical_document()` and
+  `DeploymentDescriptorDocumentV1` — its `canonical_bytes()`,
+  `sha256_digest()` and the `DESCRIPTOR_DOCUMENT_SCHEMA` string. The BYTES
+  are public contract exactly as the rendered assets are: a change to the
+  document's shape changes every consumer's digest at once, which is the
+  intended behaviour and makes it a MINOR bump at least.
+- `IngressPolicy.v1`: the exposure vocabulary, the provider capability
+  matrix, the derived endpoint-token format and the firewall rule shape.
 - The `dotmac-deploy` CLI: its subcommands, its flags, and its **exit codes**
   (`0` ok, `1` refused, `2` usage). CI wires the exit codes, so they are part
   of the contract rather than an implementation detail.

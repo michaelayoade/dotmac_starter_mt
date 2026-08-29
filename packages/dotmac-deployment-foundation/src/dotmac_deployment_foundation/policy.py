@@ -1,106 +1,34 @@
-"""The non-mutating projection: one canonical ingress document, and its digest.
+"""The ingress projections: the `IngressPolicy.v1` section, and its two plans.
 
-## Why this module exists at all
+This module answers "what does this descriptor expose, and what must a provider
+do about it". It does NOT own a digest — `document.py` owns the one canonical
+document and the one digest taken over it, because two digests over overlapping
+content is two answers to "what was signed".
 
-`dotmac-deployment-control` owns authorization. Its frozen ``plan_snapshot``
-embeds the desired specification verbatim and hashes it into ``plan_digest``,
-and `approve_plan` requires the approver's evidence to carry that exact digest.
-Everything placed inside the desired specification is therefore digest-covered
-with no field allow-list to drift.
+`ingress_policy_document()` is the section `DeploymentDescriptorDocument.v1`
+embeds. It carries the derived facts a reader cannot recompute from the raw
+descriptor without this facility: which families each publication serves, the
+endpoint token an approval covers, which providers can enforce each declared
+control, the derived firewall rules, and the set of public endpoints deployment
+control needs in order to derive sensitivity rather than trust a caller's flag.
 
-The gap that made ingress unauthorizable was earlier in the chain: this
-facility could parse a descriptor and could render assets, but had no
-**canonical document** in between. Its only digests were of rendered bytes.
-There was nothing to put into ``desired_spec``, so no ingress fact was inside
-any plan digest at all. :func:`ingress_policy_document` is that missing hop,
-and every other function here is a projection of it.
-
-## The five canonicalization rules, and what each one prevents
-
-1. **String keys only, and values restricted to string, integer, boolean and
-   lists of those.** A digest must be re-derivable from stored JSONB months
-   later by a reader who has only the JSON.
-2. **No floats.** ``0.1`` does not round-trip identically through every JSON
-   implementation, and a digest that depends on a float is a digest that
-   sometimes differs from itself.
-3. **No nulls, ever.** An unset axis is MATERIALIZED to its default rather than
-   omitted, because "absent" and "null" and "default" are three states in JSON
-   and one state in the descriptor.
-4. **Defaults are materialized at normalization, not at read.** Ten of this
-   schema's fields are supplied by the parser rather than written by the
-   product. Digesting the raw TOML would let a change to one of those defaults
-   alter running behaviour under an unchanged digest.
-5. **The schema string AND the exact facility version are inside the
-   document.** ``exposure = "public"`` is a word; its MEANING is the socket
-   this version's renderer emits. Without the version in the digest, upgrading
-   the facility changes running exposure while the approved digest stays
-   identical — the approval would then cover a decision nobody made.
+It carries no resolved address. A bind MATERIAL name is in; a bind ADDRESS is
+not — see `document.py` for why that boundary is the whole point of the split.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 from . import ingress
-from .errors import SpecError
-from .spec import SCHEMA, PortPublication, ProductDeploymentSpec
-from .version import VERSION
+from .spec import PortPublication, ProductDeploymentSpec
 
 __all__ = [
     "build_edge_plan",
     "build_firewall_plan",
-    "ingress_policy_digest",
     "ingress_policy_document",
     "public_endpoint_tokens",
 ]
-
-
-# ── canonical JSON ──────────────────────────────────────────────────────────
-
-
-def _canonical(value: Any, *, where: str) -> Any:
-    """Refuse anything the digest cannot re-derive from stored JSON."""
-    if isinstance(value, bool) or isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return [_canonical(item, where=f"{where}[]") for item in value]
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise SpecError(
-                    f"{where}: a non-string key ({key!r}) cannot round-trip "
-                    "through JSON, so the digest could not be re-derived",
-                )
-            out[key] = _canonical(item, where=f"{where}.{key}")
-        return out
-    if value is None:
-        raise SpecError(
-            f"{where}: null is refused. An unset axis is materialized to its "
-            "default; 'absent', 'null' and 'defaulted' are three states in JSON "
-            "and must be one state here",
-        )
-    if isinstance(value, float):
-        raise SpecError(
-            f"{where}: a float is refused. It does not round-trip identically "
-            "through every JSON implementation, and a digest that depends on "
-            "one sometimes differs from itself",
-        )
-    raise SpecError(f"{where}: {type(value).__name__} is not a canonical value")
-
-
-def _digest(document: dict[str, Any]) -> str:
-    payload = json.dumps(
-        _canonical(document, where="document"),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # ── the canonical document ──────────────────────────────────────────────────
@@ -114,10 +42,14 @@ def _publication_document(
         "address_family": publication.address_family,
         "approval_ref": publication.approval_ref,
         "authentication": publication.authentication,
+        # The bind MATERIAL name, never the bind ADDRESS. A loopback literal is
+        # derivable from `exposure` plus `family` plus this facility version,
+        # all three of which the canonical document carries; a routable address
+        # is resolved by deployment control and must not be able to reach a
+        # digest a product repository produces.
         "binds": [
             {
                 "family": family,
-                "host_ip": publication.host_ip(role_code, family),
                 "material": (
                     ""
                     if publication.exposure == "loopback"
@@ -244,11 +176,6 @@ def ingress_policy_document(spec: ProductDeploymentSpec) -> dict[str, Any]:
     ]
     document: dict[str, Any] = {
         "schema": ingress.INGRESS_POLICY_SCHEMA,
-        # Rule 5. The version is not decoration: it is what makes the word
-        # "public" mean one specific rendered socket rather than whatever the
-        # installed renderer currently thinks.
-        "foundation_version": VERSION,
-        "descriptor_schema": SCHEMA,
         "product": spec.product,
         "environment": spec.environment,
         "edge": _edge_document(spec),
@@ -268,17 +195,7 @@ def ingress_policy_document(spec: ProductDeploymentSpec) -> dict[str, Any]:
         ],
         "public_endpoints": list(public_endpoint_tokens(spec)),
     }
-    return _canonical(document, where="document")
-
-
-def ingress_policy_digest(spec: ProductDeploymentSpec) -> str:
-    """``sha256:<hex>`` over the canonical document.
-
-    This is the value that belongs inside `dotmac-deployment-control`'s
-    ``desired_spec`` so that ingress becomes part of ``plan_digest``. It is
-    NOT an authorization and this package cannot make it one.
-    """
-    return _digest(ingress_policy_document(spec))
+    return document
 
 
 def public_endpoint_tokens(spec: ProductDeploymentSpec) -> tuple[str, ...]:

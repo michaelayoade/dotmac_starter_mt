@@ -32,6 +32,11 @@ from __future__ import annotations
 
 from .backup import Assurance, BackupHealth, BackupRecord, assess, restore_rehearsal
 from .conformance import check_all, check_rendered_assets_match
+from .document import (
+    DESCRIPTOR_DOCUMENT_SCHEMA,
+    DeploymentDescriptorDocumentV1,
+    build_canonical_document,
+)
 from .drift import DriftReport, Observation, Verdict, compare
 from .engine import (
     DeploymentOutcome,
@@ -74,7 +79,6 @@ from .ingress import (
 from .policy import (
     build_edge_plan,
     build_firewall_plan,
-    ingress_policy_digest,
     ingress_policy_document,
     public_endpoint_tokens,
 )
@@ -90,6 +94,7 @@ from .version import VERSION as __version__
 __all__ = [
     "ADDRESS_FAMILIES",
     "EXPOSURES",
+    "DESCRIPTOR_DOCUMENT_SCHEMA",
     "INGRESS_POLICY_SCHEMA",
     "PROVIDERS",
     "RESOURCE_ATTRIBUTES",
@@ -102,6 +107,7 @@ __all__ = [
     "DeploymentError",
     "DeploymentFoundationError",
     "DeploymentOutcome",
+    "DeploymentDescriptorDocumentV1",
     "DeploymentPlan",
     "DriftDetected",
     "DriftReport",
@@ -129,6 +135,7 @@ __all__ = [
     "admit_bind_address",
     "assess",
     "audit_image",
+    "build_canonical_document",
     "build_edge_plan",
     "build_firewall_plan",
     "build_plan",
@@ -138,7 +145,6 @@ __all__ = [
     "deployment_lock",
     "endpoint_token",
     "format_plan",
-    "ingress_policy_digest",
     "ingress_policy_document",
     "public_endpoint_tokens",
     "resource_attributes",

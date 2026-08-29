@@ -23,14 +23,30 @@ accepted anywhere, `trusted_proxies` included. A provider capability matrix
 fails a publication closed when it claims a control no available provider
 enforces.
 
-`ingress_policy_document()` / `ingress_policy_digest()` produce the canonical
-normalized document, with every default materialized and BOTH the schema string
-and the exact facility version inside the digest — without the version, a
-facility upgrade would change a running exposure under an unchanged approved
-plan digest. `build_edge_plan()` and `build_firewall_plan()` are
-provider-neutral; the firewall plan is derived defense-in-depth and never a
-substitute for a correct socket binding. `dotmac-deploy ingress-policy` prints
-all of it and mutates nothing.
+`ProductDeploymentSpec.to_canonical_document()` returns
+`DeploymentDescriptorDocument.v1`, and `canonical_bytes()` / `sha256_digest()`
+belong to that DOCUMENT rather than to the spec or a renderer — so there is one
+answer to "what was signed" and a caller cannot reach the digest without
+holding the bytes it was taken over. It is the missing hop between a parsed
+descriptor and `dotmac-deployment-control`'s desired specification: the facility
+previously had no canonical document at all, only digests of rendered bytes, so
+no descriptor fact was inside any plan digest.
+
+The document carries schema identity, the exact facility version, every default
+materialized, the service roster and roles, exact image references, the ingress
+and exposure policy, and the migration, backup, handoff and rollback
+requirements. It EXCLUDES resolved endpoints, IP addresses, credential bindings
+and secret values — Control binds this digest into an independently signed
+authorization and resolves the private material separately, so a resolved
+address reaching the digest would collapse the two owners into one. The
+exclusion is enforced over the finished document, with a planted-address proof.
+
+The descriptor half is derived by walking `dataclasses.fields` rather than by a
+hand-written serializer, because a hand-written one is a field allow-list: the
+next field somebody adds stays out of the digest silently. `build_edge_plan()`
+and `build_firewall_plan()` are provider-neutral; the firewall plan is derived
+defense-in-depth and never a substitute for a correct socket binding.
+`dotmac-deploy ingress-policy` prints all of it and mutates nothing.
 
 Three measured facts are encoded rather than described. An `ip6tables`
 `DOCKER-USER` rule for a published port is INERT — that chain is jumped only

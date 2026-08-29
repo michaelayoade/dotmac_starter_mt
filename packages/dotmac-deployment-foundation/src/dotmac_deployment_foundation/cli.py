@@ -339,14 +339,14 @@ def cmd_ingress_policy(args: argparse.Namespace) -> int:
     from .policy import (
         build_edge_plan,
         build_firewall_plan,
-        ingress_policy_digest,
         ingress_policy_document,
         public_endpoint_tokens,
     )
 
     spec = _load(args.descriptor)
+    canonical = spec.to_canonical_document()
     document = ingress_policy_document(spec)
-    digest = ingress_policy_digest(spec)
+    digest = canonical.sha256_digest()
     if args.format == "digest":
         print(digest)
         return EXIT_OK
@@ -354,15 +354,18 @@ def cmd_ingress_policy(args: argparse.Namespace) -> int:
         print(json.dumps({"digest": digest, "document": document}, indent=2))
         return EXIT_OK
 
-    print(f"{document['schema']} (facility {document['foundation_version']})")
-    print(f"digest: {digest}")
+    print(f"{document['schema']} (facility {canonical.foundation_version})")
+    print(f"{canonical.schema} digest: {digest}")
     print("\npublications:")
     if not document["publications"]:
         print("  (none declared)")
     for publication in document["publications"]:
+        # The MATERIAL name, because the document holds no resolved address.
+        # A loopback publication needs none — its literal is derived from
+        # exposure plus family — so it prints as `derived`.
         binds = (
             ", ".join(
-                f"{entry['family']}={entry['host_ip']}"
+                f"{entry['family']}={entry['material'] or 'derived'}"
                 for entry in publication["binds"]
             )
             or "no socket"

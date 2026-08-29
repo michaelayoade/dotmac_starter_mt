@@ -49,7 +49,6 @@ from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.policy import (
     build_edge_plan,
     build_firewall_plan,
-    ingress_policy_digest,
     ingress_policy_document,
     public_endpoint_tokens,
 )
@@ -722,17 +721,17 @@ def test_the_rendered_rule_carries_a_source_set_TOKEN_never_an_address() -> None
         assert "@SOURCE_SET:openbao-clients@" in rule.render()
 
 
-# ── 7. the canonical document and its digest ────────────────────────────────
+# ── 7. the ingress section of the canonical document ───────────────────────
+#
+# The DIGEST is not tested here. `DeploymentDescriptorDocument.v1` owns the one
+# canonical document and the one digest taken over it — see
+# `test_deployment_foundation_canonical_document.py`. Two digests over
+# overlapping content would be two answers to "what was signed".
 
 
-def test_the_document_carries_the_schema_and_the_exact_facility_version() -> None:
-    """`exposure = "public"` is a word; its meaning is the socket THIS version
-    renders. Without the version in the digest, upgrading the facility changes
-    running exposure under an identical approved digest."""
+def test_the_ingress_section_names_its_own_schema() -> None:
     document = ingress_policy_document(_load(ports=PRIVATE_DUAL))
     assert document["schema"] == "IngressPolicy.v1"
-    assert document["foundation_version"] == VERSION
-    assert document["descriptor_schema"] == "ProductDeploymentSpec.v1"
 
 
 def test_the_declared_version_matches_the_distribution_metadata() -> None:
@@ -742,45 +741,38 @@ def test_the_declared_version_matches_the_distribution_metadata() -> None:
     assert pyproject["tool"]["poetry"]["version"] == VERSION
 
 
-def test_the_digest_changes_when_the_facility_version_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The sensitivity proof for the rule above. Asserting the version is IN the
-    document proves it was written; only changing it proves it is COVERED."""
-    spec = _load(ports=PRIVATE_DUAL)
-    before = ingress_policy_digest(spec)
-    monkeypatch.setattr(
-        "dotmac_deployment_foundation.policy.VERSION", "9.9.9-not-a-real-version"
-    )
-    assert ingress_policy_digest(spec) != before
+def test_the_ingress_section_carries_no_resolved_bind_address() -> None:
+    """A bind MATERIAL name is in; a bind ADDRESS is not.
+
+    Deployment control binds this descriptor's digest into an independently
+    signed authorization and resolves the private material separately. The
+    moment a resolved address can reach that digest, the two owners have
+    collapsed into one — so the section carries the variable NAME and the
+    renderer alone produces the address.
+    """
+    document = ingress_policy_document(_load(ports=PRIVATE_DUAL))
+    binds = document["publications"][0]["binds"]
+    assert [entry["material"] for entry in binds] == [
+        "APP_8200_BIND_IPV4",
+        "APP_8200_BIND_IPV6",
+    ]
+    assert all("host_ip" not in entry for entry in binds)
 
 
-def test_the_digest_changes_when_any_exposure_axis_changes() -> None:
-    baseline = ingress_policy_digest(_load(ports=PRIVATE_DUAL))
-    widened = ingress_policy_digest(
-        _load(
-            ports=PRIVATE_DUAL.replace(
-                'source_set = "openbao-clients"', 'source_set = "everyone"'
-            )
-        )
-    )
-    narrowed = ingress_policy_digest(
-        _load(
-            ports=PRIVATE_DUAL.replace(
-                'address_family = "dual_stack"', 'address_family = "ipv4"'
-            )
-        )
-    )
-    assert len({baseline, widened, narrowed}) == 3
+def test_a_loopback_publication_needs_no_bind_material_at_all() -> None:
+    """Its literal is derivable from exposure plus family plus the facility
+    version, and all three are inside the digest."""
+    document = ingress_policy_document(_load(ports=LOOPBACK_DUAL))
+    binds = document["publications"][0]["binds"]
+    assert [entry["material"] for entry in binds] == ["", ""]
 
 
-def test_the_document_is_stable_across_repeated_projection() -> None:
+def test_the_ingress_section_is_stable_across_repeated_projection() -> None:
     spec = _load(ports=PRIVATE_DUAL + NONE_PUBLICATION)
-    assert ingress_policy_digest(spec) == ingress_policy_digest(spec)
     assert ingress_policy_document(spec) == ingress_policy_document(spec)
 
 
-def test_the_document_materializes_every_default_rather_than_omitting_it() -> None:
+def test_the_section_materializes_every_default_rather_than_omitting_it() -> None:
     """Digesting the raw TOML would let a change to a parser default alter
     running behaviour under an unchanged digest, so defaults are materialized
     and nothing is null."""
@@ -791,11 +783,10 @@ def test_the_document_materializes_every_default_rather_than_omitting_it() -> No
         assert publication[key] is not None
 
 
-def test_the_document_survives_a_json_round_trip_unchanged() -> None:
+def test_the_section_survives_a_json_round_trip_unchanged() -> None:
     """The property the canonicalization rules exist for: a reader months later
     has only the stored JSON, and must be able to re-derive the same digest."""
-    spec = _load(ports=PRIVATE_DUAL)
-    document = ingress_policy_document(spec)
+    document = ingress_policy_document(_load(ports=PRIVATE_DUAL))
     assert json.loads(json.dumps(document)) == document
 
 

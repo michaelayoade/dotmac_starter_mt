@@ -43,11 +43,14 @@ import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from . import ingress as ingress_contract
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
 from .secrets_guard import require_no_secrets
+
+if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside the method
+    from .document import DeploymentDescriptorDocumentV1
 
 SCHEMA: Final = "ProductDeploymentSpec.v1"
 
@@ -1912,6 +1915,28 @@ class ProductDeploymentSpec:
     def managed_dependencies(self) -> tuple[ExternalDependency, ...]:
         """Dependencies this deployment RUNS, in declaration order."""
         return tuple(item for item in self.external_dependencies if item.managed)
+
+    def to_canonical_document(self) -> DeploymentDescriptorDocumentV1:
+        """The canonical, digest-stable projection of this descriptor.
+
+        The hop between a parsed descriptor and
+        `dotmac-deployment-control`'s desired specification. The bytes and the
+        digest belong to the returned DOCUMENT rather than to this class, so
+        there is one answer to "what was signed" and a caller cannot reach the
+        digest without holding the bytes it was taken over::
+
+            document = spec.to_canonical_document()
+            document.canonical_bytes()
+            document.sha256_digest()
+
+        Imported inside the method on purpose: `document.py` reads this module
+        to normalize a descriptor, so a module-level import here would be a
+        cycle. It is a relative import into this same package, not a new
+        dependency — the facility still declares none.
+        """
+        from .document import build_canonical_document
+
+        return build_canonical_document(self)
 
     @property
     def publications(self) -> tuple[tuple[str, PortPublication], ...]:
