@@ -59,11 +59,16 @@ This is not bureaucracy. Both failures happened on this fleet on 2026-08-29.
 has not been enumerated against the target's rule set cannot conclude anything,
 and the verifier refuses rather than assuming it is outside.
 
-### Role A — disposable execution target — **PROPOSED: `85.190.246.211`**
+### Role A — disposable execution target — **AUTHORIZED: `85.190.246.211`**
 
-**Status: proposed, NOT authorized.** Named by the coordinator; becomes
-authorized only when this plan is reviewed. Nothing in this lane runs against
-it before then.
+**Status: authorized by Michael, 2026-08-29.** Everything in the Role A column
+of the gate table below may run against it.
+
+**What is still missing is an ACCESS PATH, not an authorization.** This
+repository carries no SSH configuration entry and no reference to that address,
+so the connection user and the key's location have to be supplied before
+anything runs. Guessing either is the "never infer a target" mistake with an
+extra step. Per the secrets rule the key is named by POINTER, never by value.
 
 Where the plan is applied, snapshotted, re-observed and rolled back.
 
@@ -81,6 +86,13 @@ deployment lock, hold a pre-change snapshot, re-observe its own sockets,
 `docker-proxy` processes and firewall chains, and roll back to the snapshot.
 
 ### Role B — independent IPv6-capable external probe vantage — **NOT NAMED**
+
+**Authorization for Role A did not carry Role B**, and the target may not stand
+in for it. A probe originating on the machine under test never leaves that
+host's own stack, so it cannot distinguish a loopback bind from a routable one
+— which is the single fact the external half exists to establish. Using the
+target as its own vantage converts a two-role rehearsal into a one-role one
+that looks complete, which is worse than not running it.
 
 **Status: not named, and it cannot be inferred from the target.** This is a
 separate authorization request and, on present evidence, probably a
@@ -198,6 +210,71 @@ bound digest, and `VerificationReport.descriptor_digest` must be **byte-identica
 strings**, recorded side by side. If they cannot be shown equal, the execution
 proves nothing about the thing that was authorized: it proves something about
 whatever happened to be on the host.
+
+## What closes with Role A alone, and what does not
+
+Two lists rather than a verdict. `0.3.0a1` publication is a separate
+authorization either way.
+
+### CLOSES with Role A alone — on-host evidence, no external vantage
+
+On-host `ss -tlnp` is the AUTHORITY for what the host bound, not a probe. That
+is not a convenience: hosts differ in closed-port behaviour, so identical probe
+output means different things on different hosts, while `ss` reads the socket
+table directly.
+
+| # | Gate item | Why Role A suffices |
+|---|---|---|
+| 1 | Apply under the product deployment lock | entirely on-host |
+| 2 | Pre-change snapshot (`HostObservation`) | captured before mutation, on-host |
+| 3 | Non-recreating apply is REFUSED | exercised against the real controller path; `restart` reuses the container it has |
+| 4 | Socket re-observation: `127.0.0.1:` and `[::1]:`, never `0.0.0.0:` / `[::]:` | `ss -tlnp` is the authority |
+| 5 | `docker-proxy` re-observation: PID is NEW, `-host-ip` correct per family | a surviving PID means the container was never recreated |
+| 6 | Firewall re-observation: v4 rules in `DOCKER-USER`, v6 in `INPUT`, terminal DROP present, `--ctorigdstport` on the remapped publish | chain dumps are on-host |
+| 7 | The inert-chain fact captured as a fixture: a v6 `DOCKER-USER` rule with a ZERO packet counter | `ip6tables -L -v -n`, on-host |
+| 8 | Rollback, provoked rather than simulated | restores the observed snapshot; re-observation matches |
+| 9 | Digest equality: descriptor == authorized plan == `VerificationReport.descriptor_digest` | computation plus the applied plan |
+| 10 | `exposure = "none"` emits no socket at all | absence in `ss` |
+
+### CLOSES with the WORKSTATION vantage — the two things that are not reachability claims
+
+The workstation sits inside `160.119.124.0/22` and may not be used to claim
+reachability. It is still the right instrument for exactly two items, because
+neither is a claim about reachability:
+
+| # | Gate item | Why a privileged vantage is admissible here |
+|---|---|---|
+| 11 | The target's closed-port behaviour (DROP vs RST), recorded | a property of the TARGET's response style, not of who can reach it — and it is required to interpret any later probe |
+| 12 | The privileged-vantage refusal FIRES on a real probe | the point is that the verdict is refused; a genuinely inside vantage is the only way to demonstrate it |
+
+Item 12 is worth running deliberately. `accept_public_exposure_evidence` has
+unit coverage, but a real connection from a real inside vantage being refused
+is the demonstration that the two false P0 escalations of 2026-08-29 would now
+be caught rather than repeated.
+
+### REMAINS OPEN — requires Role B
+
+| # | Gate item | State |
+|---|---|---|
+| 13 | IPv6 external negative: the loopback-bound v6 socket is not reachable from outside | **UNMONITORED** |
+| 14 | IPv6 external positive control: `tcp/22` over v6 to THIS target | **UNMONITORED** |
+| 15 | IPv4 external negative + its positive control | **UNMONITORED** unless a vantage provably outside every applicable allowlist exists |
+| 16 | A `private` exposure IS reachable from inside its declared source set | open; needs a host inside that set |
+
+Items 13-16 are **UNMONITORED**, not "not applicable" and not omitted. An
+unmonitored region is a stated gap with an owner; ADR-0018 requires
+"grandfathered" to stay distinguishable from "reviewed and correct", and the
+same distinction applies to "unproven" against "proven safe". Item 15 is
+conditional rather than impossible: it opens the moment any vantage can be
+shown outside the applicable allowlists.
+
+**What items 13-15 would have caught.** The two ports that were actually open
+to the internet on 2026-08-29 were open over IPv6 only, while their IPv4 rules
+read as containment. On-host `ss` would have shown the wildcard bind — so
+item 4 does cover the underlying defect. What the external half adds is
+independent confirmation from the direction an attacker occupies, which is the
+difference between "we believe the socket is loopback-bound" and "we have
+watched it refuse the internet".
 
 ## Fixtures this lane produces
 
