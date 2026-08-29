@@ -19,6 +19,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Enforce the accepted Dotmac engineering standards
-        uses: michaelayoade/dotmac_governance/.github/actions/standards-check@0000000000000000000000000000000000000000
+        uses: michaelayoade/dotmac_governance/.github/actions/standards-check@4f80bd164137d34ff41f1866d7e748f2e664dee3
         with:
           default-branch: ${{ github.event.repository.default_branch }}
