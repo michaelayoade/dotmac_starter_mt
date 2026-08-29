@@ -45,13 +45,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_vendor_control_plane"]
 candidate_consumers = []
-adoption_evidence = [
-  "dotmac_vendor_control_plane:main@af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e",
-  "dotmac_vendor_control_plane:production-deploy#32485479666",
-  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:45715e425dc248d85fe374fa5d347087328a445cf7ead1f8abc29f05f0117b0d",
-  "dotmac_vendor_control_plane:migration:v016_licensing_authority",
-  "dotmac_vendor_control_plane:live-schema:mod_licensing",
-]
+adoption_evidence_schema = "v1"
 composition_boundary = "ADR-0024: the vendor control plane installs its own li lineage and owns its own licence rows; no application shares a mod_licensing schema. ADR-0057 s8: the module imports no sibling — agreement and allocation facts arrive as a LicensableGrant value from the assembly. ADR-0006 D2/D4: kernel WS8 is the sole target licence protocol and the dotmac-* schema ids are permanent, so this module issues what dotmac_kernel.licensing already verifies and introduces no second format; the round-trip check makes that structural rather than aspirational. ADR-0009 / hard rule 20: LicenceSigner is a port with no implementation in this package and signing_keys has no private-key column, so custody stays with the product. ADR-0024 / hard rule 28: transport, connection refs, attempt counters, retry outcomes and error codes stayed with the Integrator — this module ends at a signed envelope and resumes at an acknowledgement. ADR-0023 / ADR-0057 s7: platform plane only, and here the plane is a security boundary — issuance must not live inside the deployment it authorises, and the receiving half verifies offline."
 inventory_evidence = [
   "docs/inventories/vendor-cp-gap-sources.md",
@@ -80,3 +74,48 @@ writer_state = "inventory_only"
 retirement_required = false
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
+
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-licensing.version"
+expected = "0.1.0a1"
+
+[[adoption_evidence]]
+kind = "deploy_run"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+run_id = "32485479666"
+observed = "success"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "Re-observed against the API: this run's head_sha IS the commit above. 'Deploy immutable image to production'."
+
+[[adoption_evidence]]
+kind = "image_digest"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+digest = "sha256:45715e425dc248d85fe374fa5d347087328a445cf7ead1f8abc29f05f0117b0d"
+observed = "deployed to production by the run above"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "The registry path used to sit in the `repository` slot, where a machine reading this file would look for a repository name. `repository` now names the PRODUCING product and the content address is the digest."
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+subject = "mod_licensing"
+observed = "v016_licensing_authority applied by the production deploy run above"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "One dated row replaces the two undated strings that used to make this claim twice. Derived from the deploy run rather than from a direct read of the production database, which is why it is an attestation and not an assertion."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_vendor_control_plane"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-licensing.version"
+note = "The rows above are history. The Vendor control plane's BOM is the only authority for what it installs today, and this dossier holds no copy of it — at commit af9fcf6d the plane had already moved past several of the versions recorded above."

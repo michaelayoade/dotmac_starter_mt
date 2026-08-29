@@ -35,11 +35,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_erp"]
 candidate_consumers = ["dotmac_sub"]
-adoption_evidence = [
-  "dotmac_erp:main@63f607d21ba780302786554f9d6242734de898df",
-  "dotmac_erp:pull/363",
-  "dotmac_erp:dependency:dotmac-tax==0.1.0a3",
-]
+adoption_evidence_schema = "v1"
 composition_boundary = "Applications submit typed, deduplicated source facts and consume determinations through local orchestration. Tax imports no billing, payroll, banking or accounting sibling. Official authority APIs and identity validation are Integrator/product adapters; accounting consequences use opaque references outside the module."
 inventory_evidence = ["docs/inventories/tax-sources.md"]
 first_cutover = "ERP is the qualifying policy/reporting source and first decision owner to retire after shared accounting exists. Sub then supplies its billing tax and withholding facts through a versioned product API/outbox contract without losing its operational source-fact ownership. Backoffice is a later exact-pin consumer. No package or table creation is a cutover."
@@ -85,3 +81,25 @@ evidence_paths = [
   "app/services/revenue_service_report.py",
   "app/services/vendor.py",
 ]
+
+# CORRECTION found by typing this list. The previous rows cited ERP #363
+# (63f607d2, 2026-08-25) as the adoption commit. At that commit `dotmac-tax`
+# does not appear in ERP's pyproject.toml or poetry.lock at all: the pin first
+# held a day later, at 7643d5a2. The old citation was the branch tip somebody
+# read, not the commit where anything happened — the same defect that put a
+# twenty-minute-old pin in the deployment-foundation dossier.
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_erp"
+commit = "7643d5a29ec1aaed197d6584a4c8f4267ef57981"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-tax.version"
+expected = "0.1.0a3"
+note = "The commit where the pin FIRST held: 'feat(tax): compose released tax module contracts', 2026-08-26. No `adopted` row accompanies it, and the absence is the honest claim: ERP's own app/services/finance/tax/adoption/composition.py declares NOT COMPOSED — the `tx` lineage is absent from alembic.ini, `mod_tax` exists in no ERP database, and no writer is repointed. A pin is installation, not composition. Whether `status = \"adopted\"` survives that reading is a consumer-ratchet question this contract deliberately does not answer, because no field of AdoptionEvidenceV1 may be an input to a permission."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_erp"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-tax.version"
+note = "ERP's BOM is authoritative for what ERP installs. This dossier holds no copy — the previous `dependency:dotmac-tax==0.1.0a3` string was exactly such a copy."

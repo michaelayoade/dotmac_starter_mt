@@ -42,6 +42,7 @@ consumer forces ``adopted``, two force ``reuse-proven``.
 from __future__ import annotations
 
 import ast
+import copy
 import re
 import tomllib
 from collections.abc import Mapping
@@ -49,6 +50,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests.architecture import adoption_evidence as evidence_schema
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = PROJECT_ROOT / "packages"
@@ -392,40 +395,60 @@ RAN_IN_A_PRODUCT = frozenset({"adopted", "reuse-proven"})
 
 
 def _adoption_evidence_problems(
-    status: str, dossier: Mapping[str, object]
+    status: str,
+    dossier: Mapping[str, object],
+    *,
+    distribution: str = "",
+    schema_marker: object = None,
+    where: str = "",
 ) -> list[str]:
-    """`adopted` must cite what ran, by a reference re-readable afterwards.
+    """`adopted` must cite what ran, as AdoptionEvidenceV1 — typed, and frozen
+    to an immutable commit.
 
     The consumer ratchet above already refuses claiming more or less adoption
-    than the consumer COUNT proves. It says nothing about whether the claim is
-    checkable, and that gap is how two dossiers came to carry `adopted` with no
-    `adoption_evidence` key at all — a true statement about the fleet that a
-    reader has no way to verify, which ADR-0031 treats as the same class of
-    defect as an untrue one.
+    than the consumer COUNT proves.  It says nothing about whether the claim is
+    CHECKABLE, and that gap is how two dossiers came to carry `adopted` with no
+    `adoption_evidence` key at all.
 
-    A reference must name its producing repository and an identity that can be
-    re-read later: a commit, a pull request, a deploy run, an image digest, a
-    revision, a live schema. "It deployed fine" is not one of those, and neither
-    is a bare branch name — see `dotmac_governance` ADR 0013, which this mirrors
-    for the one artefact this repository owns.
+    Until 2026-08-29 this function closed that gap only as far as
+    ADDRESSABILITY: a reference had to split on a colon into a repository and a
+    non-empty identity.  Three defects landed on one field of one dossier inside
+    a single day and every one of them split on a colon — a pin that was stale
+    within twenty minutes, a seven-hex abbreviation of a BRANCH name, and a CI
+    run id carrying no commit, so nothing about the string changed when the tree
+    it exercised did.  `dotmac_governance` ADR 0013 (`AGENTS.md` rule 30) had
+    already ruled a branch name and "latest" out as coordinates; the gap was
+    never in the policy, it was that addressability and immutability are
+    different tests and nobody noticed.
+
+    The shape rules now live in `tests.architecture.adoption_evidence`, whose
+    docstring carries the reasoning and the explicitly UNMONITORED half.  This
+    function keeps only the status coupling, because a permission-adjacent
+    ratchet and a shape check must not be the same test.
     """
     if status not in RAN_IN_A_PRODUCT:
-        return []
+        # An unadopted dossier still may not carry a defective row: shape is not
+        # earned by claiming less. Only the "must cite something" half is
+        # status-conditional.
+        return evidence_schema.evidence_problems(
+            rows=dossier.get("adoption_evidence") or [],
+            pointers=dossier.get("adoption_evidence_pointer"),
+            schema_marker=schema_marker,
+            distribution=distribution,
+            where=where,
+        )
     evidence = dossier.get("adoption_evidence")
     if evidence is None:
         return [f"{status} carries no adoption_evidence key at all"]
     if not isinstance(evidence, list) or not evidence:
         return [f"{status} must cite the adoption evidence it claims"]
-    problems: list[str] = []
-    for ref in evidence:
-        text = str(ref)
-        repository, separator, identity = text.partition(":")
-        if not separator or not repository.strip() or not identity.strip():
-            problems.append(
-                f"adoption evidence {text!r} is not addressable: expected "
-                "<repository>:<re-readable identity>"
-            )
-    return problems
+    return evidence_schema.evidence_problems(
+        rows=evidence,
+        pointers=dossier.get("adoption_evidence_pointer"),
+        schema_marker=schema_marker,
+        distribution=distribution,
+        where=where,
+    )
 
 
 #: What a named product DOES with the capability, as a closed vocabulary.
@@ -716,7 +739,17 @@ def _validate_dossier(
         if isinstance(entry_status, str):
             problems.extend(
                 f"{label}: {problem}"
-                for problem in _adoption_evidence_problems(entry_status, entry)
+                for problem in _adoption_evidence_problems(
+                    entry_status,
+                    entry,
+                    distribution=distribution_name,
+                    # A slice inherits the package's declaration: the version
+                    # marker describes one file, not one contract slice.
+                    schema_marker=entry.get(
+                        evidence_schema.SCHEMA_MARKER,
+                        dossier.get(evidence_schema.SCHEMA_MARKER),
+                    ),
+                )
             )
 
         entry_consumers = entry.get("contract_consumers")
@@ -855,7 +888,14 @@ def _validate_dossier(
                 f"status is {status} with {consumer_count} contract consumer(s); "
                 f"that evidence level is exactly {required}"
             )
-        problems.extend(_adoption_evidence_problems(status, dossier))
+        problems.extend(
+            _adoption_evidence_problems(
+                status,
+                dossier,
+                distribution=distribution_name,
+                schema_marker=dossier.get(evidence_schema.SCHEMA_MARKER),
+            )
+        )
     elif status != expected_debt:
         problems.append(
             "only the exact PRE_RULE_DEBT map may carry an unresolved or "
@@ -1042,28 +1082,413 @@ def test_a_claim_about_an_uninventoried_product_is_refused() -> None:
     ), problems
 
 
+# --------------------------------------------------------------------------
+# AdoptionEvidenceV1 — the shape refusals, each with the defect it prevents
+# --------------------------------------------------------------------------
+
+#: A minimal well-formed dossier fragment.  Used as the NEGATIVE CONTROL for
+#: every mutation below: a scanner over a clean tree passes for the wrong reason
+#: unless a planted defect is shown to fail (ADR-0018 / rule 23).
+_GOOD_COMMIT = "c0de423c2899f9372d70f6b20bd994de5b3e7ab5"
+
+
+def _typed_evidence(distribution: str, **overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "kind": "pinned_at",
+        "repository": "dotmac_vendor_control_plane",
+        "commit": _GOOD_COMMIT,
+        "path": "pyproject.toml",
+        "field": f"tool.poetry.dependencies.{distribution}.version",
+        "expected": "0.1.0a1",
+    }
+    row.update(overrides)
+    return {
+        "adoption_evidence_schema": "v1",
+        "adoption_evidence": [row],
+        "adoption_evidence_pointer": [
+            {
+                "subject": "current_pin",
+                "repository": "dotmac_vendor_control_plane",
+                "paths": ["pyproject.toml", "poetry.lock"],
+                "field": f"tool.poetry.dependencies.{distribution}.version",
+            }
+        ],
+    }
+
+
+def _evidence_problems(fragment: Mapping[str, Any], distribution: str) -> list[str]:
+    return _adoption_evidence_problems(
+        "adopted",
+        fragment,
+        distribution=distribution,
+        schema_marker=fragment.get("adoption_evidence_schema"),
+    )
+
+
 def test_adopted_without_evidence_is_rejected() -> None:
-    """SENSITIVITY for the rule above, both halves."""
+    """SENSITIVITY for the status coupling, both halves."""
     assert _adoption_evidence_problems("adopted", {}) == [
         "adopted carries no adoption_evidence key at all"
     ]
     assert _adoption_evidence_problems("adopted", {"adoption_evidence": []}) == [
         "adopted must cite the adoption evidence it claims"
     ]
-    assert _adoption_evidence_problems(
-        "adopted", {"adoption_evidence": ["it deployed fine"]}
-    ) == [
-        "adoption evidence 'it deployed fine' is not addressable: expected "
-        "<repository>:<re-readable identity>"
-    ]
-    assert (
-        _adoption_evidence_problems(
-            "adopted", {"adoption_evidence": ["dotmac_workspace:main@ef38693"]}
-        )
-        == []
-    )
     # `audit-complete` asserts no run, so it is not asked to prove one.
     assert _adoption_evidence_problems("audit-complete", {}) == []
+
+
+def test_a_well_formed_row_is_accepted() -> None:
+    """The negative control. Without it, every mutation below could be passing
+    because the checker rejects EVERYTHING, and the suite would look green while
+    proving nothing."""
+    assert (
+        _evidence_problems(_typed_evidence("dotmac-ticketing"), "dotmac-ticketing")
+        == []
+    )
+
+
+def test_a_moving_ref_is_refused() -> None:
+    """MUTATION 1 — the coordinate that means something different tomorrow.
+
+    `dotmac_erp:main@e1402902` merged into a live dossier and the old gate saw
+    nothing, because it split on a colon. `dotmac_governance` ADR 0013 had
+    already ruled a branch name out as a coordinate; the gate had simply never
+    implemented it. Both spellings are covered: a bare moving ref, and one
+    dressed up with an `@sha` suffix so it LOOKS pinned.
+    """
+    for moving in ("main", "HEAD", "latest", "default-branch"):
+        bad = _typed_evidence("dotmac-ticketing", commit=moving)
+        problems = _evidence_problems(bad, "dotmac-ticketing")
+        assert any("moving ref" in p or "40-character" in p for p in problems), moving
+
+    dressed = _typed_evidence("dotmac-ticketing", commit=f"main@{_GOOD_COMMIT}")
+    assert any(
+        "moving ref" in problem
+        for problem in _evidence_problems(dressed, "dotmac-ticketing")
+    )
+
+    # And the same refusal on a LOCATOR. #495 kept `main@e1402902` "only as a
+    # locator", which is a weaker role for the same bad coordinate.
+    demoted = _typed_evidence("dotmac-ticketing", locator="dotmac_erp:main@e1402902")
+    assert any(
+        "moving ref" in problem
+        for problem in _evidence_problems(demoted, "dotmac-ticketing")
+    )
+
+
+def test_a_short_sha_is_refused() -> None:
+    """MUTATION 2 — the abbreviation that is unique only where the objects are.
+
+    Two live examples: `dotmac_erp:main@e1402902` (8) and, in the auth-oidc
+    dossier, `dotmac_workspace:main@ef38693` (7). Refused even though git
+    resolves them, because this file is read by tools that have not cloned the
+    repository, and because a truncation and a deliberate abbreviation are
+    indistinguishable once written down.
+    """
+    truncations = [_GOOD_COMMIT[:n] for n in (7, 8, 12, 39)]
+    # Over-length too: slicing past 40 silently returns the WHOLE commit, so a
+    # naive `[:41]` case would pass for the wrong reason and prove nothing.
+    for candidate in [*truncations, _GOOD_COMMIT + "ab"]:
+        assert len(candidate) != 40, candidate
+        problems = _evidence_problems(
+            _typed_evidence("dotmac-ticketing", commit=candidate), "dotmac-ticketing"
+        )
+        assert any("abbreviated revision" in p for p in problems), candidate
+
+    # Uppercase hex of the right length is still not the coordinate: two
+    # spellings of one commit make two strings that never compare equal.
+    shouty = _typed_evidence("dotmac-ticketing", commit=_GOOD_COMMIT.upper())
+    assert _evidence_problems(shouty, "dotmac-ticketing")
+
+
+def test_an_unrelated_run_is_refused() -> None:
+    """MUTATION 3 — an attestation observed against a tree nobody cites.
+
+    `dotmac_erp:workflow-run#33248839031` sat in the deployment-foundation
+    dossier for a day beside a pin claim it never exercised: it was recorded for
+    the a1-era tree, the pin rows were corrected to a2, and the run string did
+    not change because a bare run id carries no commit. Requiring the
+    attestation's `commit` to be one an assertion in the SAME dossier cites
+    makes that drift fail the instant the assertions move.
+    """
+    good = _typed_evidence("dotmac-ticketing")
+    good["adoption_evidence"].append(
+        {
+            "kind": "workflow_run",
+            "repository": "dotmac_vendor_control_plane",
+            "commit": _GOOD_COMMIT,
+            "run_id": "33251009129",
+            "observed": "success",
+            "observed_at": "2026-08-29",
+            "observed_by": "michaelayoade",
+        }
+    )
+    assert _evidence_problems(good, "dotmac-ticketing") == []
+
+    unrelated = copy.deepcopy(good)
+    unrelated["adoption_evidence"][1]["commit"] = (
+        "63c59133f3393c448756bedb04ecfa8a2c12187b"
+    )
+    assert any(
+        "no assertion in this dossier cites" in problem
+        for problem in _evidence_problems(unrelated, "dotmac-ticketing")
+    )
+
+    # A run attesting a repository this dossier makes no claim about at all —
+    # the shape of `dotmac_sub:production-deploy#32009246911`, which sat in the
+    # release-catalogue dossier with no Sub assertion anywhere near it.
+    foreign = copy.deepcopy(good)
+    foreign["adoption_evidence"][1]["repository"] = "dotmac_sub"
+    assert any(
+        "no assertion in this dossier cites that repository" in problem
+        for problem in _evidence_problems(foreign, "dotmac-ticketing")
+    )
+
+
+def test_a_reference_that_does_not_support_its_claim_is_refused() -> None:
+    """MUTATION 4 — claim/reference mismatch.
+
+    A row can be perfectly formed, cite a real commit and a real field, and
+    still be evidence for something else. Four shapes, four ways the mismatch
+    shows:
+
+    * a `pinned_at` addressing a DIFFERENT distribution's dependency entry — a
+      true fact about a different subject;
+    * a `field` of `exists`, which turns "the descriptor is there" into "the
+      contract is spoken" and would let a v2 descriptor count as adoption of v1;
+    * an attestation carrying `path`/`field`/`expected`, dressing an oracle
+      lookup as a re-checkable file read so it is silently never checked;
+    * a `contract_binding` whose `expected` names no pinned revision, so the
+      binding cannot fail — which is the whole of rule 28.
+    """
+    wrong_subject = _typed_evidence(
+        "dotmac-ticketing", field="tool.poetry.dependencies.dotmac-approvals.version"
+    )
+    assert any(
+        "does not support the claim" in problem
+        for problem in _evidence_problems(wrong_subject, "dotmac-ticketing")
+    )
+
+    pseudo = _typed_evidence("dotmac-ticketing", field="exists")
+    assert any(
+        "is not a real key" in problem
+        for problem in _evidence_problems(pseudo, "dotmac-ticketing")
+    )
+
+    unparseable = _typed_evidence("dotmac-ticketing", path="src/assembly.py")
+    assert any(
+        "no structured extension" in problem
+        for problem in _evidence_problems(unparseable, "dotmac-ticketing")
+    )
+
+    dressed_up = _typed_evidence("dotmac-ticketing")
+    dressed_up["adoption_evidence"].append(
+        {
+            "kind": "deploy_run",
+            "repository": "dotmac_vendor_control_plane",
+            "commit": _GOOD_COMMIT,
+            "run_id": "32022599873",
+            "observed": "success",
+            "observed_at": "2026-08-17",
+            "observed_by": "michaelayoade",
+            "path": "pyproject.toml",
+            "field": "tool.poetry.dependencies.dotmac-ticketing.version",
+            "expected": "0.1.0a1",
+        }
+    )
+    assert any(
+        "must not carry" in problem
+        for problem in _evidence_problems(dressed_up, "dotmac-ticketing")
+    )
+
+    unbound = _typed_evidence(
+        "dotmac-ticketing",
+        kind="contract_binding",
+        path=".github/workflows/conformance.yml",
+        field="jobs.deployment.uses",
+        expected="michaelayoade/dotmac_starter_mt/.github/workflows/x.yml@main",
+    )
+    assert any(
+        "names no immutable coordinate" in problem
+        for problem in _evidence_problems(unbound, "dotmac-ticketing")
+    )
+
+
+def test_free_text_evidence_can_never_come_back() -> None:
+    """The ratchet. Migration is done in one change, so there is no shrink-only
+    allowlist to maintain — a free-text entry is refused everywhere, from day
+    one, and the refusal names itself."""
+    regressed = {"adoption_evidence": ["dotmac_erp:main@e1402902"]}
+    assert any(
+        "free-text string" in problem
+        for problem in _evidence_problems(regressed, "dotmac-ticketing")
+    )
+    assert evidence_schema.free_text_problems("", ["dotmac_erp:pull/415"])
+    assert evidence_schema.free_text_problems("", [{"kind": "adopted"}]) == []
+
+
+def test_an_unknown_kind_is_refused() -> None:
+    """The thirteen-prefix accidental vocabulary. A kind nobody wrote a
+    verification procedure for cannot be checked, so it must fail rather than
+    pass through."""
+    for unknown in ("local-copy-retired", "alembic-head", "catalog-artifact", None):
+        bad = _typed_evidence("dotmac-ticketing", kind=unknown)
+        assert any(
+            "unknown kind" in problem
+            for problem in _evidence_problems(bad, "dotmac-ticketing")
+        ), unknown
+
+
+def test_this_repository_cannot_assert_its_own_adoption() -> None:
+    """Reference proof is not adoption (ADR-0006 § 5), and the evidence list was
+    the hole that rule left open — `dotmac_starter_mt:main@93aecc80…` sat in the
+    auth-oidc dossier and `dotmac_starter_mt:…-v0.2.0a2@55750e10…` in the
+    deployment-foundation one."""
+    bad = _typed_evidence("dotmac-ticketing", repository="dotmac_starter_mt")
+    assert any(
+        "cannot assert its own adoption" in problem
+        for problem in _evidence_problems(bad, "dotmac-ticketing")
+    )
+
+
+def test_a_registry_path_cannot_sit_in_the_repository_slot() -> None:
+    """Three vendor dossiers put `ghcr.io/...@sha256:...` where a repository name
+    belongs, which is why no machine could read them."""
+    bad = _typed_evidence(
+        "dotmac-ticketing",
+        repository="ghcr.io/michaelayoade/dotmac_vendor_control_plane",
+    )
+    assert any(
+        "not a repository name" in problem
+        for problem in _evidence_problems(bad, "dotmac-ticketing")
+    )
+
+
+def test_the_live_pin_is_pointed_at_and_never_copied() -> None:
+    """The structural separation of history from the present tense.
+
+    A `pinned_at` history with no `current_pin` pointer leaves a reader unable
+    to tell the newest historical pin from the live one — which is exactly the
+    confusion that put a twenty-minute-old value in a dossier. And a pointer
+    that carries a value has simply become the copy again.
+    """
+    orphaned = _typed_evidence("dotmac-ticketing")
+    del orphaned["adoption_evidence_pointer"]
+    assert any(
+        "must carry a `current_pin`" in problem
+        for problem in _evidence_problems(orphaned, "dotmac-ticketing")
+    )
+
+    valued = _typed_evidence("dotmac-ticketing")
+    valued["adoption_evidence_pointer"][0]["version"] = "0.1.0a1"
+    assert any(
+        "A pointer says WHERE" in problem
+        for problem in _evidence_problems(valued, "dotmac-ticketing")
+    )
+
+
+def test_an_attestation_records_who_saw_it_and_when() -> None:
+    """A run's logs expire. When the coordinate stops resolving the correct
+    report is `unresolvable`, not `failed` — but only if the row degrades into a
+    signed human attestation rather than into a dead link."""
+    fragment = _typed_evidence("dotmac-ticketing")
+    fragment["adoption_evidence"].append(
+        {
+            "kind": "image_digest",
+            "repository": "dotmac_vendor_control_plane",
+            "commit": _GOOD_COMMIT,
+            "digest": "sha256:" + "a" * 64,
+            "observed": "deployed",
+            "observed_at": "2026-08-17",
+            "observed_by": "michaelayoade",
+        }
+    )
+    assert _evidence_problems(fragment, "dotmac-ticketing") == []
+
+    for missing in ("observed", "observed_at", "observed_by"):
+        undated = copy.deepcopy(fragment)
+        del undated["adoption_evidence"][1][missing]
+        assert _evidence_problems(undated, "dotmac-ticketing"), missing
+
+    by_tag = copy.deepcopy(fragment)
+    by_tag["adoption_evidence"][1]["digest"] = "v0.2.0a2"
+    assert any(
+        "image by TAG is not a coordinate" in problem
+        for problem in _evidence_problems(by_tag, "dotmac-ticketing")
+    )
+
+
+def test_the_typed_shape_must_declare_its_version() -> None:
+    """Two evidence shapes reachable under one key with no declared version is
+    how a reader ends up guessing which contract they hold."""
+    undeclared = _typed_evidence("dotmac-ticketing")
+    del undeclared["adoption_evidence_schema"]
+    assert any(
+        "adoption_evidence_schema" in problem
+        for problem in _evidence_problems(undeclared, "dotmac-ticketing")
+    )
+
+
+def test_every_dossier_carries_only_typed_evidence() -> None:
+    """The corpus-wide statement, package level and slices together."""
+    offenders: list[str] = []
+    for package_dir in _shared_package_dirs():
+        dossier = _load_toml(package_dir / "EXTRACTION.toml")
+        offenders.extend(
+            f"{package_dir.name}: {problem}"
+            for problem in evidence_schema.free_text_problems(
+                "", dossier.get("adoption_evidence")
+            )
+        )
+        for entry in dossier.get("slices") or []:
+            offenders.extend(
+                f"{package_dir.name}: {problem}"
+                for problem in evidence_schema.free_text_problems(
+                    "", entry.get("adoption_evidence")
+                )
+            )
+    assert offenders == [], offenders
+
+
+def test_the_unmonitored_half_is_named_rather_than_implied() -> None:
+    """ADR-0018 / rule 23: a region is unmonitored rather than exempt, and that
+    has to be stated.
+
+    This gate is offline shape only. It cannot establish PRESENT-TENSE
+    consumption: a merged commit proves adoption happened and can never prove a
+    consumer is current today. That needs a scheduled external re-derivation
+    against the cited repositories, which is not built. Each entry below names
+    what is not checked and what would have to exist to check it — and the
+    seam is already in the data: every assertion row is a complete fetch
+    instruction, every pointer a complete present-tense query.
+    """
+    required = {
+        "present_tense_consumption",
+        "assertion_resolution",
+        "oracle_resolution",
+        "in_place_edit_ratchet",
+        "consumer_cross_check",
+    }
+    assert set(evidence_schema.UNMONITORED_BY_THIS_GATE) == required
+    for name, reason in evidence_schema.UNMONITORED_BY_THIS_GATE.items():
+        assert "NOT BUILT" in reason or "NOT enforced" in reason, name
+
+    # And the seam is real: every migrated dossier that records a pin history
+    # also records where the live answer is, so the unbuilt checker has
+    # coordinates to run against rather than a note asking someone to look.
+    for package_dir in _shared_package_dirs():
+        dossier = _load_toml(package_dir / "EXTRACTION.toml")
+        for scope in (dossier, *(dossier.get("slices") or [])):
+            rows = scope.get("adoption_evidence") or []
+            if not any(
+                isinstance(row, dict) and row.get("kind") == "pinned_at" for row in rows
+            ):
+                continue
+            pointers = scope.get("adoption_evidence_pointer") or []
+            assert any(
+                pointer.get("subject") == "current_pin" and pointer.get("paths")
+                for pointer in pointers
+            ), package_dir.name
 
 
 def test_missing_product_test_proof_is_rejected() -> None:
@@ -1168,10 +1593,10 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
             "status": "adopted",
             "candidate_consumers": ["dotmac_vendor_control_plane"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
-            # `adopted` now owes addressable evidence. The fixture supplies it
+            # `adopted` now owes RE-CHECKABLE evidence. The fixture supplies it
             # rather than being exempted: a synthetic dossier that could skip
             # the rule would stop exercising the gate it exists to exercise.
-            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
+            **_typed_evidence("dotmac-ticketing"),
         }
     )
 
@@ -1223,7 +1648,7 @@ def test_an_adopted_module_needs_no_invented_future_candidate() -> None:
     dossier.update(
         {
             "status": "adopted",
-            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
+            **_typed_evidence("dotmac-ticketing"),
             "contract_consumers": ["dotmac_vendor_control_plane"],
             "candidate_consumers": [],
         }

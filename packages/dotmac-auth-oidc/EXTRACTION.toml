@@ -72,13 +72,7 @@ preserved_tests = [
 # Adoption is real and was always documented in `first_cutover`; what was
 # missing is the ADDRESSABLE form of it. Prose a reader must trust is not
 # evidence a reader can check, which is the whole distinction ADR-0031 draws.
-adoption_evidence = [
-  "dotmac_workspace:pull/2",
-  "dotmac_workspace:main@ef38693",
-  "dotmac_starter_mt:main@93aecc800be5258bebe7e3cb3ef68097b0a8a113",
-  "dotmac_workspace:local-copy-retired:identity/oidc.py",
-  "dotmac_workspace:test:tests/db/test_state_store_atomicity.py",
-]
+adoption_evidence_schema = "v1"
 
 contract_consumers = ["dotmac_workspace"]
 candidate_consumers = ["dotmac_sub", "dotmac_erp"]
@@ -128,3 +122,24 @@ writer_state = "legacy_writer"
 retirement_required = true
 revision = "aa7dfaf29d64be2de629d2c64a221e6f855a36c1"
 evidence_paths = ["app/services/oidc_mobile_jwks.py", "app/services/oidc_mobile_federation.py", "tests/test_oidc_mobile_federation.py"]
+
+# `main@ef38693` was seven hex digits AND a branch name — two refusals in one
+# string, and it survived the old gate because it split on a colon. Expanded to
+# the full merge commit of Workspace PR #2, which is what the abbreviation
+# meant; the branch half is deleted rather than demoted, because #415's lesson
+# is that a weaker ROLE for a bad coordinate is still a bad coordinate.
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_workspace"
+commit = "ef386933a511f284b4a18abd168baf114acb4e5f"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-auth-oidc.version"
+expected = "0.1.0a1"
+locator = "dotmac_workspace:pull/2"
+note = "The same commit deleted the Workspace's own identity/oidc.py. That retirement is NOT a row here: it is already typed six lines away as [[product_writers]].writer_state, and two places to say one thing is how they drift apart."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_workspace"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-auth-oidc.version"

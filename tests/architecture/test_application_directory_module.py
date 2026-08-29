@@ -67,12 +67,34 @@ def test_the_dossier_records_the_workspace_production_adopter() -> None:
     assert dossier["status"] == "adopted"
     assert dossier["contract_consumers"] == ["dotmac_workspace"]
     assert dossier["candidate_consumers"] == []
-    evidence = set(dossier["adoption_evidence"])
-    assert {
-        "dotmac_workspace:main@bfc121f33013a93c5eceb6d18a8c2417acc11e0d",
-        "dotmac_workspace:production-pilot@workspace.dotmac.io:2026-08-16",
-        "dotmac_workspace:dependency:dotmac-application-directory==0.1.0a3",
-    } <= evidence
+    # AdoptionEvidenceV1. `dependency:...==0.1.0a3` was a copy of the Workspace's
+    # live pin held in another repository's file; it is now a commit-scoped
+    # `pinned_at` plus a VALUELESS pointer at the Workspace's own BOM.
+    rows = dossier["adoption_evidence"]
+    assert all(
+        r["repository"] == "dotmac_workspace"
+        and r["commit"] == "bfc121f33013a93c5eceb6d18a8c2417acc11e0d"
+        for r in rows  # type: ignore[union-attr]
+    )
+    pin = next(r for r in rows if r["kind"] == "pinned_at")  # type: ignore[union-attr]
+    assert pin["field"] == (
+        "tool.poetry.dependencies.dotmac-application-directory.version"
+    )
+    assert pin["expected"] == "0.1.0a3"
+    probes = {
+        r["subject"]: r["observed_at"]
+        for r in rows  # type: ignore[union-attr]
+        if r["kind"] == "live_observation"
+    }
+    assert probes == {
+        "workspace.dotmac.io": "2026-08-16",
+        "https://workspace.dotmac.io/health": "2026-08-17",
+    }
+    pointer = dossier["adoption_evidence_pointer"]
+    assert [p["subject"] for p in pointer] == ["current_pin"]  # type: ignore[union-attr]
+    assert not (
+        set(pointer[0]) & {"expected", "value", "version"}  # type: ignore[index]
+    ), "a pointer that carries a value is the copied live pin again"
 
 
 # ── The property the module exists to protect ────────────────────────────────

@@ -31,11 +31,42 @@ DOSSIERS = {
     )
 }
 
+#: The three witnesses, as AdoptionEvidenceV1 rows rather than as free-text
+#: strings.  Each is `(kind, coordinate)`, and the coordinate is what a later
+#: verifier resolves: the deploy run's id, the image's content address, and — on
+#: the `pinned_at` row — nothing beyond the commit itself, because the pin's
+#: value differs per module and is checked in each module's own suite.
+#:
+#: Every row must ALSO carry `commit == VENDOR_REVISION`.  That is the field the
+#: free-text strings could not express: a bare `production-deploy#<id>` says
+#: which run happened and not which tree it ran, so it stayed silently true
+#: while the tree beneath it moved.
 COMMON_ADOPTION_EVIDENCE = {
-    f"dotmac_vendor_control_plane:main@{VENDOR_REVISION}",
-    f"dotmac_vendor_control_plane:production-deploy#{DEPLOY_RUN}",
-    ("ghcr.io/michaelayoade/dotmac_vendor_control_plane@" f"{IMAGE_DIGEST}"),
+    ("pinned_at", None),
+    ("deploy_run", DEPLOY_RUN),
+    ("image_digest", IMAGE_DIGEST),
 }
+
+
+def _witnesses(dossier: dict[str, Any]) -> set[tuple[str, str | None]]:
+    """The witness set a dossier actually carries, at VENDOR_REVISION only."""
+    found: set[tuple[str, str | None]] = set()
+    for row in dossier.get("adoption_evidence", ()):
+        if not isinstance(row, dict):
+            continue
+        if row.get("commit") != VENDOR_REVISION:
+            continue
+        if row.get("repository") != "dotmac_vendor_control_plane":
+            continue
+        kind = row.get("kind")
+        if kind == "pinned_at":
+            found.add(("pinned_at", None))
+        elif kind == "deploy_run":
+            found.add(("deploy_run", row.get("run_id")))
+        elif kind == "image_digest":
+            found.add(("image_digest", row.get("digest")))
+    return found
+
 
 ADR_CLAIMS = (
     "## Amendment, 2026-08-17: P11 is met by Vendor production",
@@ -85,8 +116,7 @@ def _evidence_errors(
             errors.append(f"{name} is not adopted")
         if dossier.get("contract_consumers") != ["dotmac_vendor_control_plane"]:
             errors.append(f"{name} does not name the Vendor production consumer")
-        evidence = set(dossier.get("adoption_evidence", ()))
-        missing = COMMON_ADOPTION_EVIDENCE - evidence
+        missing = COMMON_ADOPTION_EVIDENCE - _witnesses(dossier)
         if missing:
             errors.append(f"{name} is missing common evidence {sorted(missing)}")
 
@@ -124,7 +154,24 @@ def test_p11_evidence_guard_is_sensitive_to_every_required_claim() -> None:
         assert _evidence_errors(adr, status, no_consumer)
 
         missing_run = copy.deepcopy(dossiers)
-        missing_run[name]["adoption_evidence"].remove(
-            f"dotmac_vendor_control_plane:production-deploy#{DEPLOY_RUN}"
-        )
+        missing_run[name]["adoption_evidence"] = [
+            row
+            for row in missing_run[name]["adoption_evidence"]
+            if row.get("kind") != "deploy_run"
+        ]
         assert _evidence_errors(adr, status, missing_run)
+
+        # The defect the free-text shape could not express at all: the deploy
+        # run kept, but re-pointed at a DIFFERENT tree. Under the old string set
+        # this was invisible, because the run id carried no commit.
+        moved_tree = copy.deepcopy(dossiers)
+        for row in moved_tree[name]["adoption_evidence"]:
+            if row.get("kind") == "deploy_run":
+                row["commit"] = "0" * 40
+        assert _evidence_errors(adr, status, moved_tree)
+
+        wrong_digest = copy.deepcopy(dossiers)
+        for row in wrong_digest[name]["adoption_evidence"]:
+            if row.get("kind") == "image_digest":
+                row["digest"] = "sha256:" + "0" * 64
+        assert _evidence_errors(adr, status, wrong_digest)

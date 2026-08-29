@@ -435,9 +435,24 @@ def test_the_dossier_records_the_production_adopter() -> None:
     assert dossier["status"] == "adopted"
     assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
     assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac_sub"]
-    evidence = set(dossier["adoption_evidence"])
-    assert {
-        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
-        "dotmac_vendor_control_plane:production-deploy#32022599873",
-        "dotmac_vendor_control_plane:migration:v013_approvals_authority",
-    } <= evidence
+    # AdoptionEvidenceV1. The migration citation moved AND was corrected in the
+    # move: the old string said `v013_approvals_authority`, and no revision with
+    # that id exists — the real one carries a `_switch` suffix. Free text could
+    # not tell the difference.
+    rows = dossier["adoption_evidence"]
+    by_kind = {r["kind"]: r for r in rows}  # type: ignore[union-attr]
+    assert set(by_kind) == {
+        "pinned_at",
+        "deploy_run",
+        "image_digest",
+        "live_observation",
+    }
+    assert all(
+        r["repository"] == "dotmac_vendor_control_plane"
+        and r["commit"] == "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+        for r in rows  # type: ignore[union-attr]
+    )
+    assert by_kind["deploy_run"]["run_id"] == "32022599873"
+    assert by_kind["pinned_at"]["expected"] == "0.1.0a4"
+    assert by_kind["live_observation"]["subject"] == "mod_approvals"
+    assert "v013_approvals_authority_switch" in by_kind["live_observation"]["observed"]

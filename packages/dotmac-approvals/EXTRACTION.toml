@@ -39,13 +39,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_vendor_control_plane"]
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
-adoption_evidence = [
-  "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
-  "dotmac_vendor_control_plane:production-deploy#32022599873",
-  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
-  "dotmac_vendor_control_plane:migration:v013_approvals_authority",
-  "dotmac_vendor_control_plane:live-schema:mod_approvals",
-]
+adoption_evidence_schema = "v1"
 composition_boundary = "ADR-0024: each adopter installs its own ap lineage and owns its own approval records. Applications share the package contract, never a mod_approvals schema, a policy row or a decision row. An approval granted in one application is that application's fact; another app learns of it through the owning app's versioned API/webhook, transported by the Integrator. ADR-0026 § 5: tenant and platform are separately named API surfaces and separately audited persistence planes, with no foreign key across them and none into an adopting product's domain schema — subject_id is an opaque reference. ADR-0026 § 6: the module emits an event and the consuming domain's own authoritative service performs the guarded transition; it never executes the consequence. ADR-0026 § 7a: threshold/FX routing stays with the domain, which selects the exact policy revision and passes it in. ADR-0008: subject types are consuming-module manifest declarations; policy codes are operator-owned runtime data, never declarations."
 inventory_evidence = [
   "docs/inventories/approvals-workflow-source-audit.md",
@@ -82,3 +76,52 @@ writer_state = "inventory_only"
 retirement_required = false
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
+
+# CORRECTION found by typing this list: the old string said
+# `migration:v013_approvals_authority`. No revision with that id exists. The
+# real id is `v013_approvals_authority_switch`, and nothing could tell the
+# difference while it was free text.
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-approvals.version"
+expected = "0.1.0a4"
+
+[[adoption_evidence]]
+kind = "deploy_run"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+run_id = "32022599873"
+observed = "success"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "Re-observed against the API: this run's head_sha IS the commit above. 'Deploy immutable image to production'."
+
+[[adoption_evidence]]
+kind = "image_digest"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+digest = "sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc"
+observed = "deployed to production by the run above"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "The registry path used to sit in the `repository` slot, where a machine reading this file would look for a repository name. `repository` now names the PRODUCING product and the content address is the digest."
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+subject = "mod_approvals"
+observed = "v013_approvals_authority_switch applied by the production deploy run above"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "One dated row replaces the two undated strings that used to make this claim twice. Derived from the deploy run rather than from a direct read of the production database, which is why it is an attestation and not an assertion."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_vendor_control_plane"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-approvals.version"
+note = "The rows above are history. The Vendor control plane's BOM is the only authority for what it installs today, and this dossier holds no copy of it — at commit af9fcf6d the plane had already moved past several of the versions recorded above."

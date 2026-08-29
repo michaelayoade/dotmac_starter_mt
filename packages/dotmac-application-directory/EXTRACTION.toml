@@ -59,12 +59,7 @@ inventory_evidence = [
   "docs/inventories/application-portfolio-sources.md",
   "docs/adr/0021-the-tenant-workspace-is-a-third-plane.md",
 ]
-adoption_evidence = [
-  "dotmac_workspace:main@bfc121f33013a93c5eceb6d18a8c2417acc11e0d",
-  "dotmac_workspace:production-pilot@workspace.dotmac.io:2026-08-16",
-  "dotmac_workspace:https://workspace.dotmac.io/health@2026-08-17",
-  "dotmac_workspace:dependency:dotmac-application-directory==0.1.0a3",
-]
+adoption_evidence_schema = "v1"
 first_cutover = "COMPLETED 2026-08-16. The Tenant Workspace (`dotmac_workspace`) exact-pins `dotmac-application-directory==0.1.0a3`, composes the `ad` lineage with the kernel and assembly lineages, and exercised the directory-backed launcher at `workspace.dotmac.io` during the two-worker production OIDC pilot recorded at `bfc121f33013a93c5eceb6d18a8c2417acc11e0d`. This was a greenfield adoption: no prior application-portfolio rows or writer existed to migrate. The cutover adopted only directory inventory. Authentication remains the Workspace's OIDC boundary, and each target application remains the sole authorization and session owner."
 shadow_and_drift = "No shadow verification is possible or needed: there is no prior implementation to run beside, and no existing rows whose behaviour could diverge. The drift this module must detect is a different kind — between its stored descriptor copy and what the target application currently publishes — and that is a first-class feature rather than a migration concern: `reconcile_descriptor` returns UNCHANGED/UPDATED/REGRESSED/CONFLICT, refuses to adopt a descriptor whose version regressed or whose content changed under a fixed version, and records `reconciliation_status` + `descriptor_refreshed_at` so an unreachable application never looks freshly checked."
 local_copy_retirement = "No prior implementation existed to retire. The Workspace launcher is a thin consumer of the module rather than a local directory model or writer. `application-portfolio-sources.md` records the two sweeps that established the greenfield starting point. The module still must NOT absorb the neighbouring authorities in that inventory's concept-to-owner table: commercial entitlement stays with the Vendor CP's allocations/contracts, local capability evaluation stays with `dotmac_kernel.entitlements`, signed licence delivery stays with `dotmac_kernel.licensing`, Workspace authentication stays with its OIDC boundary, and who may enter an application stays with the target application."
@@ -95,3 +90,40 @@ writer_state = "inventory_only"
 retirement_required = false
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["app/models/billing.py"]
+
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_workspace"
+commit = "bfc121f33013a93c5eceb6d18a8c2417acc11e0d"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-application-directory.version"
+expected = "0.1.0a3"
+locator = "dotmac_workspace:pull/5"
+
+# The two live probes, now dated and typed. A live observation is the WEAKEST
+# evidence in this vocabulary and decays: this says something answered on two
+# days in August 2026, and it must never be rendered as a statement about today.
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_workspace"
+commit = "bfc121f33013a93c5eceb6d18a8c2417acc11e0d"
+subject = "workspace.dotmac.io"
+observed = "directory-backed launcher exercised in the two-worker production pilot"
+observed_at = "2026-08-16"
+observed_by = "michaelayoade"
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_workspace"
+commit = "bfc121f33013a93c5eceb6d18a8c2417acc11e0d"
+subject = "https://workspace.dotmac.io/health"
+observed = "healthy"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_workspace"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-application-directory.version"
+note = "`dependency:...==0.1.0a3` used to sit in the list above as a copied live value. It happens to be unchanged today, which is luck, not a control."
