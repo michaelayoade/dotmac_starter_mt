@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -444,57 +445,289 @@ def test_both_poetry_pin_spellings_are_understood() -> None:
 
 
 # ── composition is not production, and that is structural ───────────────────
+#
+# The first version of this section shipped a predicate that contradicted its
+# own rationale: it tested `kinds & ATTESTATION_KINDS`, so a `workflow_run` or
+# an `image_digest` row flipped it to "runtime evidence exists" while the file
+# beside it argued neither proves a system ran. It passed because the only
+# mutation planted was `live_observation`.
+#
+# The mutation set below covers the vocabulary instead of one member of it.
 
 
-def test_composed_at_can_never_be_production_evidence() -> None:
-    """The guardrail, asserted rather than written in a note.
+def _deploy(**over: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "kind": "deploy_run",
+        "repository": VENDOR,
+        "commit": COMMIT,
+        "run_id": "40000000001",
+        "environment": "production",
+        "outcome": "succeeded",
+        "observed": "the dc lineage applied by the production deploy",
+        "observed_at": "2026-08-20",
+        "observed_by": "michaelayoade",
+    }
+    row.update(over)
+    return row
 
-    `composed_at` reads a source tree. No parse of any file can establish that a
-    system is running, so the kind is excluded from
-    `PRODUCTION_PROVING_KINDS` by construction and this test is what keeps it
-    excluded when somebody later widens that set.
-    """
-    assert "composed_at" not in evidence.PRODUCTION_PROVING_KINDS
-    assert "adopted" not in evidence.PRODUCTION_PROVING_KINDS
-    assert evidence.PRODUCTION_PROVING_KINDS <= evidence.ATTESTATION_KINDS, (
-        "a production claim cannot be a fact about a file: no file in any tree "
-        "can state that a system is running"
+
+def _observation(**over: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "kind": "live_observation",
+        "repository": VENDOR,
+        "commit": COMMIT,
+        "subject": "mod_deploy",
+        "deployment_run_id": "40000000001",
+        "observed": "mod_deploy present and serving",
+        "observed_at": "2026-08-25",
+        "observed_by": "michaelayoade",
+    }
+    row.update(over)
+    return row
+
+
+TODAY = date(2026, 8, 29)
+
+
+def test_composed_at_can_never_be_runtime_evidence() -> None:
+    assert "composed_at" not in evidence.RUNTIME_CLAIM_KINDS
+    assert "adopted" not in evidence.RUNTIME_CLAIM_KINDS
+    assert evidence.RUNTIME_CLAIM_KINDS <= evidence.ATTESTATION_KINDS, (
+        "a runtime claim cannot be a fact about a file: no file in any tree can "
+        "state that a system is running"
     )
-    # CI is not production, and a built image is not a deployed one.
-    assert "workflow_run" not in evidence.PRODUCTION_PROVING_KINDS
-    assert "image_digest" not in evidence.PRODUCTION_PROVING_KINDS
+    assert "workflow_run" not in evidence.RUNTIME_CLAIM_KINDS
+    assert "image_digest" not in evidence.RUNTIME_CLAIM_KINDS
 
 
 def test_the_two_axes_are_orthogonal_and_that_is_the_point() -> None:
-    """If they coincided, one set could answer both questions and the second
-    would be redundant. They do not: `composed_at` proves composition from a
-    tree, `live_observation` proves it from a running system."""
     proving = evidence.ADOPTION_PROVING_KINDS
-    production = evidence.PRODUCTION_PROVING_KINDS
-    assert proving & production, "live_observation should be in both"
-    assert proving - production, "composed_at and adopted are source-level"
-    assert production - proving, "deploy_run proves running, not composition"
+    runtime = evidence.RUNTIME_CLAIM_KINDS
+    assert proving & runtime, "live_observation should be in both"
+    assert proving - runtime, "composed_at and adopted are source-level"
+    assert runtime - proving, "deploy_run bears on running, not on composition"
 
 
-def test_this_package_rests_on_source_alone() -> None:
-    """Vendor composed the module on `main`. Nothing observed it running, and
-    the predicate says so rather than leaving a reader to infer it."""
-    assert evidence.rests_on_source_alone([*_rows(), _pinned_row()])
+@pytest.mark.parametrize("kind", sorted(evidence.EVIDENCE_KINDS))
+def test_every_kind_is_on_exactly_one_side_of_the_runtime_axis(kind: str) -> None:
+    """COVERAGE over the vocabulary, which is what the first version lacked.
 
-    # SENSITIVITY: the predicate must stop firing when a runtime row appears,
-    # or "rests on source alone" is a constant wearing a function's name.
-    with_runtime = [
-        *_rows(),
-        _pinned_row(),
-        {
-            "kind": "live_observation",
-            "repository": VENDOR,
-            "commit": COMMIT,
-            "subject": "mod_deploy",
-            "observed": "the dc lineage applied in the production database",
-            "observed_at": "2026-08-29",
-            "observed_by": "nobody — this row is a test fixture, not a claim",
-        },
-    ]
+    A kind added later without a decision would silently count as non-runtime
+    and weaken `has_no_runtime_evidence` by omission rather than by choice.
+    """
+    rows = [{"kind": kind}]
+    assert evidence.has_no_runtime_evidence(rows) is (
+        kind not in evidence.RUNTIME_CLAIM_KINDS
+    )
+
+
+@pytest.mark.parametrize("kind", ["workflow_run", "image_digest"])
+def test_ci_and_build_evidence_leave_a_dossier_runtime_free(kind: str) -> None:
+    """THE REGRESSION. These two are exactly what the previous predicate got
+    wrong: it read them as runtime evidence while arguing they were not."""
+    rows = [*_rows(), _pinned_row(), {"kind": kind}]
+    assert evidence.has_no_runtime_evidence(rows), (
+        f"{kind} was read as evidence that something ran; CI exercising a tree "
+        "is not that tree running anything for anyone, and a built image is not "
+        "a deployed one"
+    )
+    # ...and the literal source predicate correctly says otherwise, which is
+    # why there are two of them.
+    assert not evidence.rests_on_source_alone(rows)
+
+
+def test_this_package_makes_no_runtime_claim() -> None:
+    rows = [*_rows(), _pinned_row()]
+    assert evidence.has_no_runtime_evidence(rows)
+    assert evidence.rests_on_source_alone(rows)
+    assert evidence.proves_source_composition(rows)
+    assert not evidence.proves_production_deployment(rows)
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+
+    # SENSITIVITY: both predicates must stop firing, or they are constants.
+    with_runtime = [*rows, _observation()]
+    assert not evidence.has_no_runtime_evidence(with_runtime)
     assert not evidence.rests_on_source_alone(with_runtime)
+    assert not evidence.has_no_runtime_evidence([_deploy()])
+
+    # The two predicates answer differently on an empty list, and the asymmetry
+    # is deliberate rather than an oversight: an empty dossier genuinely makes
+    # no runtime claim, but it does not rest on source either, because it rests
+    # on nothing. A caller reading "no runtime evidence" as "safe" must also
+    # have checked that some evidence exists.
+    assert evidence.has_no_runtime_evidence([])
     assert not evidence.rests_on_source_alone([])
+
+
+# ── claim 2: a deploy receipt that is not a production deployment ───────────
+
+
+def test_a_production_deploy_receipt_is_accepted() -> None:
+    """Positive control. Without it every refusal below is consistent with a
+    predicate that refuses everything."""
+    assert evidence.proves_production_deployment([_deploy()])
+
+
+@pytest.mark.parametrize(
+    "environment", ["staging", "rehearsal", "disposable", "test", "preview", "ci"]
+)
+def test_a_non_production_deploy_is_not_a_production_deployment(
+    environment: str,
+) -> None:
+    """A rehearsal on a disposable host is a real deploy of the wrong thing."""
+    assert not evidence.proves_production_deployment([_deploy(environment=environment)])
+
+
+def test_a_deploy_with_no_environment_cannot_be_production() -> None:
+    """Fail closed on absence. An unnamed environment is not 'probably
+    production' — and the five deploy_run rows already in this tree carry no
+    environment at all, so this is the live case rather than a hypothetical."""
+    row = _deploy()
+    del row["environment"]
+    assert not evidence.proves_production_deployment([row])
+
+
+@pytest.mark.parametrize("outcome", ["failed", "cancelled", "timed_out", "in_progress"])
+def test_a_deploy_that_did_not_succeed_is_not_a_deployment(outcome: str) -> None:
+    assert not evidence.proves_production_deployment([_deploy(outcome=outcome)])
+
+
+def test_a_deploy_with_no_outcome_cannot_be_production() -> None:
+    row = _deploy()
+    del row["outcome"]
+    assert not evidence.proves_production_deployment([row])
+
+
+def test_a_deploy_with_no_immutable_commit_is_not_bound_to_what_was_deployed() -> None:
+    assert not evidence.proves_production_deployment([_deploy(commit="main")])
+
+
+# ── claim 3: deployed once is not running now ───────────────────────────────
+
+
+def test_a_fresh_bound_observation_proves_currently_running() -> None:
+    assert evidence.proves_currently_running([_deploy(), _observation()], as_of=TODAY)
+
+
+def test_a_historical_production_deploy_alone_is_not_currently_running() -> None:
+    """THE SEPARATION. Claim 2 satisfied, claim 3 not — different claims,
+    different failure modes."""
+    rows = [_deploy()]
+    assert evidence.proves_production_deployment(rows)
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+
+
+def test_a_stale_observation_is_not_currently_running() -> None:
+    """An observation is a statement about a moment. Rendering a year-old one as
+    present tense is the defect."""
+    rows = [_deploy(), _observation(observed_at="2026-01-01")]
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+    # ...and it becomes current again only by widening the window ON PURPOSE.
+    assert evidence.proves_currently_running(rows, as_of=TODAY, max_age_days=400)
+
+
+def test_an_unbound_observation_cannot_say_what_is_running() -> None:
+    """Without the receipt binding, the observation cannot say the running thing
+    is the thing that was authorised."""
+    row = _observation()
+    del row["deployment_run_id"]
+    assert not evidence.proves_currently_running([_deploy(), row], as_of=TODAY)
+
+
+def test_an_observation_bound_to_a_staging_deploy_is_not_production() -> None:
+    """The two refusals compose: a real, fresh, correctly bound observation of a
+    STAGING deploy must not read as production."""
+    rows = [_deploy(environment="staging"), _observation()]
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+
+
+def test_an_observation_dated_in_the_future_is_refused() -> None:
+    rows = [_deploy(), _observation(observed_at="2027-01-01")]
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+
+
+def test_the_claim_predicates_are_independent() -> None:
+    """Each of the three can hold without the others, or the separation is
+    decorative."""
+    source = [*_rows(), _pinned_row()]
+    deployed = [_deploy()]
+    running = [_deploy(), _observation()]
+
+    assert evidence.proves_source_composition(source)
+    assert not evidence.proves_production_deployment(source)
+
+    assert not evidence.proves_source_composition(deployed)
+    assert evidence.proves_production_deployment(deployed)
+    assert not evidence.proves_currently_running(deployed, as_of=TODAY)
+
+    assert evidence.proves_currently_running(running, as_of=TODAY)
+
+
+# ── shape refusals for the new fields ───────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("row", "fragment"),
+    [
+        (
+            {"kind": "workflow_run", "environment": "production"},
+            "must not carry 'environment'",
+        ),
+        ({"kind": "image_digest", "outcome": "succeeded"}, "must not carry 'outcome'"),
+        (
+            {"kind": "deploy_run", "deployment_run_id": "1"},
+            "must not carry 'deployment_run_id'",
+        ),
+        (
+            {"kind": "deploy_run", "outcome": "probably-fine"},
+            "outcome 'probably-fine' is unknown",
+        ),
+        (
+            {"kind": "deploy_run", "environment": ""},
+            "environment must be a non-empty string",
+        ),
+    ],
+)
+def test_a_claim_field_on_the_wrong_kind_is_refused(
+    row: dict[str, object], fragment: str
+) -> None:
+    base = {
+        "repository": VENDOR,
+        "commit": COMMIT,
+        "observed": "x",
+        "observed_at": "2026-08-20",
+        "observed_by": "michaelayoade",
+        "run_id": "1",
+        "digest": "sha256:" + "0" * 64,
+    }
+    identity = evidence.ATTESTATION_IDENTITY[str(row["kind"])]
+    candidate = {
+        **{
+            k: v
+            for k, v in base.items()
+            if k
+            in (
+                identity,
+                "repository",
+                "commit",
+                "observed",
+                "observed_at",
+                "observed_by",
+            )
+        },
+        **row,
+    }
+    problems = evidence.evidence_problems(
+        rows=[candidate, *_rows(), _pinned_row()],
+        pointers=[
+            {
+                "subject": "current_pin",
+                "repository": VENDOR,
+                "paths": ["pyproject.toml"],
+                "field": "tool.poetry.dependencies.dotmac-deployment-control",
+            }
+        ],
+        schema_marker=evidence.SCHEMA_VALUE,
+        distribution=DISTRIBUTION,
+    )
+    assert any(fragment in p for p in problems), (fragment, problems)
