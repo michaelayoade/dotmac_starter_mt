@@ -441,3 +441,60 @@ def test_both_poetry_pin_spellings_are_understood() -> None:
     bare = '[tool.poetry.dependencies]\n"dotmac-deployment-control" = "0.1.0a9"\n'
     assert evidence.declared_dependency_version(bare, DISTRIBUTION) == "0.1.0a9"
     assert evidence.declared_dependency_version(bare, "absent") is None
+
+
+# ── composition is not production, and that is structural ───────────────────
+
+
+def test_composed_at_can_never_be_production_evidence() -> None:
+    """The guardrail, asserted rather than written in a note.
+
+    `composed_at` reads a source tree. No parse of any file can establish that a
+    system is running, so the kind is excluded from
+    `PRODUCTION_PROVING_KINDS` by construction and this test is what keeps it
+    excluded when somebody later widens that set.
+    """
+    assert "composed_at" not in evidence.PRODUCTION_PROVING_KINDS
+    assert "adopted" not in evidence.PRODUCTION_PROVING_KINDS
+    assert evidence.PRODUCTION_PROVING_KINDS <= evidence.ATTESTATION_KINDS, (
+        "a production claim cannot be a fact about a file: no file in any tree "
+        "can state that a system is running"
+    )
+    # CI is not production, and a built image is not a deployed one.
+    assert "workflow_run" not in evidence.PRODUCTION_PROVING_KINDS
+    assert "image_digest" not in evidence.PRODUCTION_PROVING_KINDS
+
+
+def test_the_two_axes_are_orthogonal_and_that_is_the_point() -> None:
+    """If they coincided, one set could answer both questions and the second
+    would be redundant. They do not: `composed_at` proves composition from a
+    tree, `live_observation` proves it from a running system."""
+    proving = evidence.ADOPTION_PROVING_KINDS
+    production = evidence.PRODUCTION_PROVING_KINDS
+    assert proving & production, "live_observation should be in both"
+    assert proving - production, "composed_at and adopted are source-level"
+    assert production - proving, "deploy_run proves running, not composition"
+
+
+def test_this_package_rests_on_source_alone() -> None:
+    """Vendor composed the module on `main`. Nothing observed it running, and
+    the predicate says so rather than leaving a reader to infer it."""
+    assert evidence.rests_on_source_alone([*_rows(), _pinned_row()])
+
+    # SENSITIVITY: the predicate must stop firing when a runtime row appears,
+    # or "rests on source alone" is a constant wearing a function's name.
+    with_runtime = [
+        *_rows(),
+        _pinned_row(),
+        {
+            "kind": "live_observation",
+            "repository": VENDOR,
+            "commit": COMMIT,
+            "subject": "mod_deploy",
+            "observed": "the dc lineage applied in the production database",
+            "observed_at": "2026-08-29",
+            "observed_by": "nobody — this row is a test fixture, not a claim",
+        },
+    ]
+    assert not evidence.rests_on_source_alone(with_runtime)
+    assert not evidence.rests_on_source_alone([])

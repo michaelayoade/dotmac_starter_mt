@@ -429,7 +429,13 @@ PIN_ONLY_ADOPTION_DEBT: dict[tuple[str, str | None], str] = {
         "it is real, but it is a removed Python file, not a field: no "
         "structured path in the Workspace tree states it. Retire by asserting "
         "the Workspace's own composition declaration once one exists, or by an "
-        "audited [[product_writers]] row for dotmac_workspace."
+        "audited [[product_writers]] row for dotmac_workspace. "
+        "NOT retireable by `composed_at`, and the temptation is obvious enough "
+        "to name: that kind now reads Python, so a reader reaches for it here "
+        "and it is the WRONG TOOL. It proves a shape is PRESENT in a syntax "
+        "tree. This cutover is a shape that is ABSENT — a deleted file — and "
+        "no walk over the Workspace tree can distinguish 'removed' from 'never "
+        "existed'. Absence needs an assertion nobody has built."
     ),
     (
         "dotmac-ui",
