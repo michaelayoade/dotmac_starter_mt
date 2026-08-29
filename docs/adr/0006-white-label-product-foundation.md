@@ -1022,6 +1022,88 @@ The ratchet holds in both directions: a package may not sit in a state weaker
 than its evidence supports (one consumer forces `adopted`, two force
 `reuse-proven`), and may not claim a state stronger than its consumers prove.
 
+### Decision amendment — 2026-08-29 (a pin is installation, not adoption)
+
+The 2026-08-12 amendment above made the three states depend on the CONSUMER
+COUNT, and AdoptionEvidenceV1 (#496) made each evidence row a re-checkable fact
+at an immutable commit. Neither made the state depend on what the rows SAY. So
+a dossier could hold `status = "adopted"` while every row beneath it recorded
+only that some consumer's dependency file names the distribution, and nine of
+the ten dossiers #496 migrated came out in exactly that shape. Nothing was red,
+because the two halves were checked by functions that never compared notes.
+
+Owner ruling, 2026-08-29:
+
+> A pin is installation, not adoption. An exact pin means installed. Lineage
+> absent + storage absent + writer unchanged means not composed, and therefore
+> not adopted.
+
+**`dotmac-tax` is the case it was ruled on, and all of its facts are true at
+once.** ERP pins `dotmac-tax 0.1.0a3` at commit `7643d5a2` — the row is correct
+and it stays. ERP also declares the module NOT COMPOSED in its own
+`app/services/finance/tax/adoption/composition.py`: the `tx` lineage is absent
+from ERP's `alembic.ini`, `mod_tax` exists in no ERP database, and no writer is
+repointed — this dossier itself types ERP as a `qualifying_source` whose
+retirement is still required. The pin was simply never the fact being claimed.
+The dossier is corrected to `audit-complete` with zero contract consumers and
+ERP moved back to a candidate, which is what the consumer ratchet requires and
+what the evidence supports. **The pin history is retained**: it was true when
+written and remains true; it was never the thing that was wrong.
+
+**Each evidence kind is classified by what it can prove ON ITS OWN**, and the
+classification is total, so a kind added later must be placed on one side
+rather than counting as neither:
+
+| Class | Kinds | Proves |
+|---|---|---|
+| Installation | `pinned_at`, `contract_binding`, `workflow_run`, `deploy_run`, `image_digest` | a consumer installed, shipped or bound the distribution |
+| Adoption-proving | `adopted`, `live_observation` | the capability is composed, or a writer moved |
+
+`deploy_run` and `image_digest` sit on the installation side for a reason
+visible in this repository's own data rather than by argument: run
+`32022599873` and digest `sha256:56ec5531…` are each cited by three dossiers,
+and run `32485479666` with digest `sha256:45715e42…` by two more. An
+observation equally true of several distributions cannot say which capability
+was composed. `live_observation` is the weaker family but carries a
+per-capability `subject` — `mod_approvals`, `mod_ealloc`, `mod_relcat` — which
+is a statement about composition a shared image digest cannot make.
+
+**The coupling runs both ways.** An adoption state with only installation rows
+fails; an `adopted` ROW under a status that does not claim adoption fails too,
+because the row is the stronger statement and a dossier that under-reports
+makes a false statement about the fleet rather than a missing one. There is no
+historical/superseded state that admits both — `historical-pre-rule` is a
+grandfathering marker and reusing it as one would collapse the distinction
+ADR-0018 requires. The escape hatch is a parameter with an empty set behind it,
+exercised by a test so the branch is live code rather than a comment.
+
+**A branch name is refused in every role, `locator` included.** The canonical
+coordinate is repository + structured path + 40-character commit; a pull-request
+number may be supporting context and never the coordinate. `main@<sha>` remains
+forbidden as a locator, because demoting a bad coordinate to a human handle does
+not make it point at the same tree tomorrow.
+
+**What is NOT corrected here, and why it is debt rather than an exemption.**
+Three scopes still rest on installation alone: `dotmac-auth-oidc`, and
+`dotmac-ui`'s `tokens` and `components` slices. Their cutovers are real and are
+described in their dossiers — the Workspace deleted its own `identity/oidc.py`
+in the pinning commit; Sub, Academy and ERP each serve the packaged assets. What
+is missing is a row a checker can re-derive, because every one of those
+consumers expresses composition in Python (`app/assembly.py`, a stylesheet
+mount) and an AdoptionEvidenceV1 assertion may only address a field in a
+structured file. Writing an `adopted` row for any of them today would mean
+minting a claim about a tree nobody in the change had read, which is the defect
+this train exists to stop. They are recorded in an exact, two-directional
+backlog (`PIN_ONLY_ADOPTION_DEBT`) that fails when a scope enters the shape AND
+when one leaves it without the row being deleted (ADR-0018 / rule 25). Two
+dangling prose references were repaired in the same change: an auth-oidc note
+cited a `[[product_writers]]` row for `dotmac_workspace` that was never written,
+and a `dotmac-ui` slice note referred to a package-level note that did not
+exist.
+
+No field of AdoptionEvidenceV1 becomes an input to a permission. This refuses a
+self-contradictory file; it authorises nothing.
+
 ### Decision amendment — 2026-08-13 (the presentation system is adoption-led, and may need no theme package)
 
 **The presentation system is completed by a sequence of adoption-led releases,

@@ -60,6 +60,26 @@ next_action = "Tokens and the empty-state component remain reuse-proven. The map
 
 adoption_evidence_schema = "v1"
 
+# THE PACKAGE-LEVEL NOTE the tokens slice's Academy row refers to. Added
+# 2026-08-29; before that the reference dangled, which is the same defect as a
+# note pointing at a [[product_writers]] row that was never written.
+#
+# A pin is installation, not adoption. Every row below is `pinned_at`, and a
+# presentation foundation is COMPOSED by two lines of a consumer's
+# `app/assembly.py` — `packaged_static_dirs` and `stylesheets`, or
+# `packaged_template_dirs` for the component library. That is Python, and an
+# AdoptionEvidenceV1 assertion may only address a field in a structured file,
+# so no truthful `adopted` row can be written for these consumers today.
+#
+# The `tokens` and `components` slices are therefore recorded in
+# `PIN_ONLY_ADOPTION_DEBT` (`tests/architecture/test_product_first_extraction.py`)
+# — declared debt under a two-directional ratchet, NOT an exemption and NOT the
+# same claim as "reviewed and correct" (ADR-0018 / rule 25). Their cutovers are
+# real and are described in `first_cutover`; what is missing is a row a checker
+# can re-derive. A slice leaves the map when a consumer gains a structured
+# composition declaration, or when the claim is corrected the way `dotmac-tax`
+# was.
+
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
 # This package publishes THREE contracts whose evidence differs. A single
 # package-level state cannot describe that honestly: report the stronger and the

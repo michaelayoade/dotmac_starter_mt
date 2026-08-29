@@ -470,7 +470,15 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     its parity tests, and record owner/contract/consumers in the
     distribution's `EXTRACTION.toml`. Copying is a one-time extraction, never
     a permanent fork or a second writer (ADR-0006 amendment;
-    `test_product_first_extraction.py`).
+    `test_product_first_extraction.py`). **A pin is installation, not
+    adoption** (2026-08-29): an adoption state needs a row proving COMPOSITION
+    or CUTOVER — an `adopted` assertion at an immutable commit, or a
+    `live_observation` naming the capability in the consumer's running system.
+    `pinned_at`/`contract_binding`/`workflow_run`/`deploy_run`/`image_digest`
+    never suffice; an `adopted` row under a non-adoption status fails the same
+    way backwards; a moving-ref `locator` is refused; the remaining pin-only
+    scopes are the two-directional `PIN_ONLY_ADOPTION_DEBT` backlog
+    (`adoption_evidence.py`, `test_product_first_extraction.py`).
 23. A guard exemption states an ENFORCEABLE premise, or the region is
     unmonitored rather than exempt. Guards enumerate entry-point families
     (tasks, scripts, CLI, workers, cron), not one directory; an existing

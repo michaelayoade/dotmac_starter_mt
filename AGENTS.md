@@ -285,6 +285,31 @@ specifics) points here and must never fork these rules.
     one-time extraction: no permanent fork, parallel writer, or second owner.
     (`tests/architecture/test_product_first_extraction.py`; ADR-0006
     § "Decision amendment — 2026-08-08 (product-first extraction)")
+
+    **A pin is installation, not adoption (amendment 2026-08-29).** A dossier's
+    `status` and its `adoption_evidence` rows are coupled in BOTH directions.
+    An exact pin means a consumer INSTALLED the distribution; it says nothing
+    about composition, and lineage absent + storage absent + writer unchanged
+    is entirely compatible with one. So an adoption state (`adopted`,
+    `reuse-proven`) requires at least one row that can prove COMPOSITION or
+    CUTOVER — an `adopted` assertion naming a structured field at an immutable
+    commit, or a `live_observation` whose subject is this capability inside the
+    consumer's running system. `pinned_at`, `contract_binding`, `workflow_run`,
+    `deploy_run` and `image_digest` are installation facts and never suffice:
+    one deploy run and one image digest in this tree are each cited by three
+    different dossiers, so neither can say WHICH capability was composed.
+    Conversely an `adopted` ROW under a status that does not claim adoption is
+    the same contradiction read backwards, and the schema defines no
+    historical/superseded state that would admit both. A branch name is refused
+    in every role including `locator`: `main@<sha>` is not a coordinate, and
+    demoting a bad coordinate to a human handle does not make it point at the
+    same tree tomorrow. Scopes still resting on installation alone are an
+    exact, two-directional backlog (`PIN_ONLY_ADOPTION_DEBT`), which is
+    declared debt and not an exemption. No field of AdoptionEvidenceV1 is an
+    input to a permission; this refuses a self-contradictory file and
+    authorises nothing.
+    (`tests/architecture/adoption_evidence.py`;
+    `tests/architecture/test_product_first_extraction.py`)
 25. **A guard exemption states an enforceable premise, or it is not an
     exemption.** Excluding a path from a lint, type, architecture or security
     check requires a premise that is machine-checkable in the same change; an

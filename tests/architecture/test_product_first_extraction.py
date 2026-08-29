@@ -394,6 +394,82 @@ def _load_toml(path: Path) -> dict[str, Any]:
 RAN_IN_A_PRODUCT = frozenset({"adopted", "reuse-proven"})
 
 
+#: Adoption states whose evidence rests on INSTALLATION facts alone.
+#:
+#: "A pin is installation, not adoption" (2026-08-29).  Applying it to the ten
+#: dossiers AdoptionEvidenceV1 migrated leaves three scopes claiming a state
+#: their typed rows do not reach.  `dotmac-tax` is not among them: its claim was
+#: refuted rather than merely unproven — ERP's own
+#: `app/services/finance/tax/adoption/composition.py` declares the module NOT
+#: COMPOSED, the `tx` lineage is absent from `alembic.ini`, `mod_tax` exists in
+#: no ERP database and no writer is repointed — so it was CORRECTED to
+#: `audit-complete` in the same change rather than recorded here.
+#:
+#: The three below are different: their cutovers are real and described in
+#: detail in `first_cutover`, and what is missing is a TYPED row, because every
+#: one of these consumers expresses composition in Python (`app/assembly.py`,
+#: a stylesheet link) and AdoptionEvidenceV1 assertions may only address a
+#: structured file.  Prose a reader must trust is not evidence a reader can
+#: check, so they are debt — not exempt, and NOT the same claim as "reviewed and
+#: correct" (ADR-0018 / rule 25).  Writing an `adopted` row for any of them
+#: today would mean minting a claim about another repository's tree that nobody
+#: in this change has read, which is the defect this whole train exists to stop.
+#:
+#: Two-directional: `test_the_pin_only_adoption_backlog_is_exact` fails when a
+#: new scope enters this shape AND when one leaves it without the row being
+#: deleted in the same change.  A row is retired by the consumer gaining a
+#: structured composition declaration, or by the claim being corrected.
+PIN_ONLY_ADOPTION_DEBT: dict[tuple[str, str | None], str] = {
+    (
+        "dotmac-auth-oidc",
+        None,
+    ): (
+        "dotmac_workspace PR #2 exact-pinned 0.1.0a1 and deleted its own "
+        "identity/oidc.py in the same commit. The deletion is the cutover and "
+        "it is real, but it is a removed Python file, not a field: no "
+        "structured path in the Workspace tree states it. Retire by asserting "
+        "the Workspace's own composition declaration once one exists, or by an "
+        "audited [[product_writers]] row for dotmac_workspace."
+    ),
+    (
+        "dotmac-ui",
+        "tokens",
+    ): (
+        "dotmac_sub and dotmac_academy_app both link the published stylesheet, "
+        "but a presentation foundation is composed by two lines of "
+        "app/assembly.py. Nothing in either consumer's structured files "
+        "distinguishes 'installed' from 'rendered'."
+    ),
+    (
+        "dotmac-ui",
+        "components",
+    ): (
+        "Same shape as the tokens slice: dotmac_erp and dotmac_sub add "
+        "dotmac_ui.template_dir() to packaged_template_dirs in Python."
+    ),
+}
+
+
+def _adoption_state_problems(
+    status: object,
+    scope: Mapping[str, Any],
+    *,
+    directory_name: str,
+    slice_name: str | None = None,
+    check_composition: bool = True,
+) -> list[str]:
+    """The status/evidence coupling for one scope, with the backlog applied."""
+    return evidence_schema.adoption_state_problems(
+        status=status,
+        rows=scope.get("adoption_evidence") or [],
+        adoption_states=RAN_IN_A_PRODUCT,
+        installation_only_is_declared_debt=(
+            not check_composition
+            or (directory_name, slice_name) in PIN_ONLY_ADOPTION_DEBT
+        ),
+    )
+
+
 def _adoption_evidence_problems(
     status: str,
     dossier: Mapping[str, object],
@@ -739,6 +815,15 @@ def _validate_dossier(
         if isinstance(entry_status, str):
             problems.extend(
                 f"{label}: {problem}"
+                for problem in _adoption_state_problems(
+                    entry_status,
+                    entry,
+                    directory_name=directory_name,
+                    slice_name=name if isinstance(name, str) else None,
+                )
+            )
+            problems.extend(
+                f"{label}: {problem}"
                 for problem in _adoption_evidence_problems(
                     entry_status,
                     entry,
@@ -901,6 +986,25 @@ def _validate_dossier(
             "only the exact PRE_RULE_DEBT map may carry an unresolved or "
             "historical status"
         )
+
+    # A pin is installation, not adoption — the package headline, for EVERY
+    # status including `audit-complete` and the grandfathered ones. Direction 2
+    # (an `adopted` row under a status that does not claim adoption) must not
+    # live inside the `status in EVIDENCE_STATES` branch above, or the debt
+    # statuses become the one place the stronger row can hide.
+    #
+    # Direction 1 is switched off under schema 2, because there the headline is
+    # DERIVED from the weakest slice and the package level holds no rows of its
+    # own: asserting it here would refuse a dossier for evidence that lives one
+    # level down and is already checked there, slice by slice.
+    problems.extend(
+        _adoption_state_problems(
+            status,
+            dossier,
+            directory_name=directory_name,
+            check_composition=not slices,
+        )
+    )
 
     if problems:
         raise ExtractionDossierError("; ".join(problems))
@@ -1114,6 +1218,30 @@ def _typed_evidence(distribution: str, **overrides: Any) -> dict[str, Any]:
             }
         ],
     }
+
+
+def _composed_evidence(distribution: str, **overrides: Any) -> dict[str, Any]:
+    """`_typed_evidence` plus the row that makes it ADOPTION rather than a pin.
+
+    A fixture asserting an adoption state owes composition evidence like any
+    real dossier — exempting the fixture would stop it exercising the gate it
+    exists to exercise. The observation shares the assertion's repository and
+    commit, because an attestation attached to a tree nobody cites is refused
+    by the cohesion check.
+    """
+    fragment = _typed_evidence(distribution, **overrides)
+    fragment["adoption_evidence"].append(
+        {
+            "kind": "live_observation",
+            "repository": "dotmac_vendor_control_plane",
+            "commit": _GOOD_COMMIT,
+            "subject": f"mod_{distribution.replace('-', '_')}",
+            "observed": "the module's lineage applied by the production deploy",
+            "observed_at": "2026-08-17",
+            "observed_by": "michaelayoade",
+        }
+    )
+    return fragment
 
 
 def _evidence_problems(fragment: Mapping[str, Any], distribution: str) -> list[str]:
@@ -1468,6 +1596,10 @@ def test_the_unmonitored_half_is_named_rather_than_implied() -> None:
         "oracle_resolution",
         "in_place_edit_ratchet",
         "consumer_cross_check",
+        # 2026-08-29: the kind split is checked, the semantics of the chosen
+        # field are not. Naming that is the condition for the guard being
+        # honest about what "a pin is installation, not adoption" buys.
+        "composition_claim_semantics",
     }
     assert set(evidence_schema.UNMONITORED_BY_THIS_GATE) == required
     for name, reason in evidence_schema.UNMONITORED_BY_THIS_GATE.items():
@@ -1489,6 +1621,312 @@ def test_the_unmonitored_half_is_named_rather_than_implied() -> None:
                 pointer.get("subject") == "current_pin" and pointer.get("paths")
                 for pointer in pointers
             ), package_dir.name
+
+
+# --------------------------------------------------------------------------
+# A pin is installation, not adoption — the two-directional status coupling
+# --------------------------------------------------------------------------
+#
+# Four refusals, each with a planted mutation, plus the two properties a
+# mutation alone does not give: that the probe FIRES, and that it covers the
+# whole VOCABULARY rather than the one member somebody happened to test.
+
+
+def _state_problems(
+    status: str,
+    kinds: list[str],
+    *,
+    historical: frozenset[str] = evidence_schema.HISTORICAL_ADOPTION_STATES,
+    debt: bool = False,
+) -> list[str]:
+    return evidence_schema.adoption_state_problems(
+        status=status,
+        rows=[{"kind": kind} for kind in kinds],
+        adoption_states=RAN_IN_A_PRODUCT,
+        historical_states=historical,
+        installation_only_is_declared_debt=debt,
+    )
+
+
+def test_every_evidence_kind_is_classified_by_the_adoption_split() -> None:
+    """COVERAGE, not sensitivity — and the two are different properties.
+
+    A guard that fires on `pinned_at` proves only that it fires on `pinned_at`.
+    The failure this repository keeps repeating is a probe that works on the
+    member it was written against and silently misses the rest of the
+    vocabulary. So the split is asserted TOTAL and DISJOINT over
+    `EVIDENCE_KINDS`: adding a kind without deciding which side it falls on
+    fails here, rather than counting as neither and weakening the guard by
+    omission.
+    """
+    installation = evidence_schema.INSTALLATION_KINDS
+    proving = evidence_schema.ADOPTION_PROVING_KINDS
+    assert installation | proving == evidence_schema.EVIDENCE_KINDS
+    assert not (installation & proving)
+    # And the split is not a re-spelling of the assertion/attestation families:
+    # `adopted` is an assertion and `live_observation` an attestation, while
+    # `pinned_at` (assertion) and `deploy_run` (attestation) both fall on the
+    # installation side. A guard that merely re-checked the family split would
+    # pass this file and prove nothing new.
+    assert proving & evidence_schema.ASSERTION_KINDS
+    assert proving & evidence_schema.ATTESTATION_KINDS
+    assert installation & evidence_schema.ASSERTION_KINDS
+    assert installation & evidence_schema.ATTESTATION_KINDS
+
+
+def test_an_adoption_state_with_no_composition_evidence_is_refused() -> None:
+    """GUARD 1 — `adopted` status without `adopted` evidence.
+
+    MUTATION: a dossier at each adoption state carrying each installation kind
+    alone. Every combination must fail, which is the vocabulary half; the
+    negative control below is the sensitivity half.
+    """
+    for status in sorted(RAN_IN_A_PRODUCT):
+        for kind in sorted(evidence_schema.INSTALLATION_KINDS):
+            problems = _state_problems(status, [kind])
+            assert problems, (status, kind)
+            assert "A pin is installation, not adoption" in problems[0]
+        # And the empty case: a status claiming a run, citing nothing at all.
+        assert _state_problems(status, [])
+
+    # NEGATIVE CONTROL. Without it the assertions above could all be passing
+    # because the function rejects everything it is handed.
+    for status in sorted(RAN_IN_A_PRODUCT):
+        for kind in sorted(evidence_schema.ADOPTION_PROVING_KINDS):
+            assert _state_problems(status, [kind]) == [], (status, kind)
+
+
+def test_an_adopted_row_under_a_non_adoption_status_is_refused() -> None:
+    """GUARD 2 — `adopted` evidence with a non-adopted status.
+
+    The contradiction runs the other way and is the one the 2026-08-12
+    two-directional ratchet was written for: a dossier that under-reports makes
+    a FALSE statement about the fleet, not merely a missing one.
+    """
+    for status in ("audit-complete", "historical-pre-rule", "unresolved"):
+        problems = _state_problems(status, ["adopted"])
+        assert problems, status
+        assert "does not claim adoption" in problems[0]
+
+    # NEGATIVE CONTROL: the same status with rows that make no such claim.
+    for kind in sorted(evidence_schema.EVIDENCE_KINDS - {"adopted"}):
+        assert _state_problems("audit-complete", [kind]) == [], kind
+
+
+def test_a_historical_state_admits_the_row_it_is_defined_for() -> None:
+    """GUARD 2's escape hatch is LIVE CODE, not a comment.
+
+    `HISTORICAL_ADOPTION_STATES` is empty today and the docstring says why. An
+    empty set makes the branch unreachable, and an unreachable branch is
+    indistinguishable from one that does not work — so it is exercised here
+    with a state the caller defines, proving that adding a superseded state
+    later is a schema decision rather than a rewrite of the refusal.
+    """
+    assert evidence_schema.HISTORICAL_ADOPTION_STATES == frozenset()
+    assert _state_problems("superseded", ["adopted"])
+    assert (
+        _state_problems("superseded", ["adopted"], historical=frozenset({"superseded"}))
+        == []
+    )
+
+
+def test_a_pin_can_never_satisfy_an_adoption_requirement() -> None:
+    """GUARD 3 — installation rows do not add up to adoption, at any quantity.
+
+    MUTATION: take the one dossier in the tree that carries a real `adopted`
+    row, demote that row to each installation kind in turn, and require the
+    refusal every time. This is the mutation that matters, because it changes
+    only the CLAIM and leaves the coordinate, the commit and the file
+    untouched — the row still points at `deploy/product.toml`'s `schema` field
+    at `c0de423c`, and it still must not count.
+    """
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-deployment-foundation/EXTRACTION.toml")
+    rows = dossier["adoption_evidence"]
+    assert any(row["kind"] == "adopted" for row in rows), "the fixture lost its row"
+
+    # It passes as it stands. Sensitivity depends on this being true first.
+    assert (
+        evidence_schema.adoption_state_problems(
+            status=dossier["status"], rows=rows, adoption_states=RAN_IN_A_PRODUCT
+        )
+        == []
+    )
+
+    for kind in sorted(evidence_schema.INSTALLATION_KINDS):
+        demoted = copy.deepcopy(rows)
+        for row in demoted:
+            if row["kind"] == "adopted":
+                row["kind"] = kind
+        assert evidence_schema.adoption_state_problems(
+            status=dossier["status"], rows=demoted, adoption_states=RAN_IN_A_PRODUCT
+        ), kind
+
+    # Piling them up changes nothing: ten pins are ten installations.
+    assert _state_problems("adopted", ["pinned_at"] * 10)
+
+
+def test_a_moving_ref_locator_is_refused_across_the_whole_vocabulary() -> None:
+    """GUARD 4 — `main@<sha>` is forbidden EVEN AS A LOCATOR.
+
+    The canonical coordinate is repository + structured path + 40-character
+    commit. A pull-request number is supporting context and may appear in a
+    locator; a branch name may not, in any role, because demoting a bad
+    coordinate to "only a locator" does not make it point at the same tree
+    tomorrow.
+
+    Sensitivity AND coverage: every member of `MOVING_REFS`, in four spellings
+    each, and in mixed case — a case-sensitive comparison here would drop
+    `Main@…` silently, which is exactly how a probe passes while covering
+    nothing.
+    """
+    good = _GOOD_COMMIT
+    for ref in sorted(evidence_schema.MOVING_REFS):
+        spellings = [
+            ref,
+            f"{ref}@{good}",
+            f"dotmac_erp:{ref}@{good}",
+            f"dotmac_erp:{ref.upper()}@{good[:8]}",
+        ]
+        for spelling in spellings:
+            bad = _typed_evidence("dotmac-ticketing", locator=spelling)
+            problems = _evidence_problems(bad, "dotmac-ticketing")
+            assert any("moving ref" in problem for problem in problems), spelling
+
+    # NEGATIVE CONTROL: the locator shapes the dossiers actually use. A guard
+    # that refused these too would be refused by the tree, not by this test.
+    allowed_shapes = (
+        "dotmac_erp:pull/407",
+        "dotmac_workspace:pull/2",
+        f"dotmac_erp:{good}",
+    )
+    for allowed in allowed_shapes:
+        assert (
+            _evidence_problems(
+                _typed_evidence("dotmac-ticketing", locator=allowed), "dotmac-ticketing"
+            )
+            == []
+        ), allowed
+
+    # And no dossier in the tree carries one, in any role.
+    for package_dir in _shared_package_dirs():
+        dossier = _load_toml(package_dir / "EXTRACTION.toml")
+        for row in evidence_schema.iter_rows(dossier):
+            locator = row.get("locator")
+            if not isinstance(locator, str):
+                continue
+            assert not evidence_schema._locator_problem("", locator), (
+                package_dir.name,
+                locator,
+            )
+
+
+def test_the_pin_only_adoption_backlog_is_exact() -> None:
+    """The two-directional ratchet on the declared debt (ADR-0018 / rule 25).
+
+    Fails when a scope ENTERS this shape without being recorded, and when one
+    LEAVES it without the row being deleted in the same change. A one-way
+    ratchet lets "temporary" debt become permanent; a map that is merely a
+    superset lets a retired entry sit there forever looking like work.
+    """
+    observed: dict[tuple[str, str | None], str] = {}
+    for package_dir in _shared_package_dirs():
+        dossier = _load_toml(package_dir / "EXTRACTION.toml")
+        slices = dossier.get("slices") or []
+        scopes: list[tuple[str | None, dict[str, Any]]] = [(None, dossier)]
+        scopes += [(entry.get("name"), entry) for entry in slices]
+        for name, scope in scopes:
+            # Under schema 2 the headline is derived and holds no rows; the
+            # slices carry the evidence and are where the shape is measured.
+            if name is None and slices:
+                continue
+            if evidence_schema.rests_on_installation_alone(
+                status=scope.get("status"),
+                rows=scope.get("adoption_evidence") or [],
+                adoption_states=RAN_IN_A_PRODUCT,
+            ):
+                observed[(package_dir.name, name)] = scope.get("status", "")
+
+    assert set(observed) == set(PIN_ONLY_ADOPTION_DEBT), (
+        "the pin-only adoption backlog drifted; entered="
+        f"{sorted(set(observed) - set(PIN_ONLY_ADOPTION_DEBT))} left="
+        f"{sorted(set(PIN_ONLY_ADOPTION_DEBT) - set(observed))}"
+    )
+    for key, reason in PIN_ONLY_ADOPTION_DEBT.items():
+        assert reason.strip(), key
+
+    # `dotmac-tax` is the correction, not an entry: it must be OUT of the map
+    # and out of the observed shape, in both directions.
+    assert not any(package == "dotmac-tax" for package, _ in PIN_ONLY_ADOPTION_DEBT)
+    assert not any(package == "dotmac-tax" for package, _ in observed)
+
+
+def test_the_corrected_tax_dossier_states_installation_not_adoption() -> None:
+    """The ruling, read back off the file it was ruled on.
+
+    Asserted as PROPERTIES rather than as a status string, so the test still
+    means something if the dossier is reshaped: the pin history survives, the
+    live-pin pointer survives, no row claims adoption, and the consumer list
+    agrees with the state exactly (`_state_for`, in both directions).
+    """
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-tax/EXTRACTION.toml")
+    rows = list(evidence_schema.iter_rows(dossier))
+
+    assert [row["kind"] for row in rows] == ["pinned_at"]
+    assert rows[0]["expected"] == "0.1.0a3"
+    assert evidence_schema.IMMUTABLE_COMMIT.fullmatch(rows[0]["commit"])
+    assert any(
+        pointer.get("subject") == "current_pin"
+        for pointer in dossier.get("adoption_evidence_pointer") or []
+    )
+
+    assert dossier["status"] == "audit-complete"
+    assert dossier["contract_consumers"] == []
+    assert dossier["status"] == _state_for(len(set(dossier["contract_consumers"])))
+    assert dossier["candidate_consumers"]
+
+    # ERP is still typed as the unretired writer, which is the third of the
+    # three facts the ruling turns on.
+    erp = next(
+        entry
+        for entry in dossier["product_writers"]
+        if entry["product"] == "dotmac_erp"
+    )
+    assert erp["writer_state"] == "qualifying_source"
+    assert erp["retirement_required"] is True
+
+
+def test_the_guard_fires_on_the_real_tree_not_only_on_fixtures() -> None:
+    """SENSITIVITY against live dossiers: strip the composition evidence from
+    each package that currently passes on it, and every one must go red.
+
+    A synthetic fixture proves the function works. This proves the function is
+    WIRED to the files, which is the step the previous gate skipped.
+    """
+    proven: list[str] = []
+    for package_dir in _shared_package_dirs():
+        dossier = _load_toml(package_dir / "EXTRACTION.toml")
+        if dossier.get("slices"):
+            continue
+        rows = dossier.get("adoption_evidence") or []
+        if not evidence_schema.ADOPTION_PROVING_KINDS & {
+            row.get("kind") for row in rows
+        }:
+            continue
+        proven.append(package_dir.name)
+        stripped = [
+            row
+            for row in rows
+            if row.get("kind") not in evidence_schema.ADOPTION_PROVING_KINDS
+        ]
+        assert evidence_schema.adoption_state_problems(
+            status=dossier["status"],
+            rows=stripped,
+            adoption_states=RAN_IN_A_PRODUCT,
+        ), package_dir.name
+
+    # The probe must have had something to bite on. An empty sweep is the
+    # "returned nothing, so nothing is wrong" failure this train keeps making.
+    assert len(proven) >= 7, proven
 
 
 def test_missing_product_test_proof_is_rejected() -> None:
@@ -1593,10 +2031,12 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
             "status": "adopted",
             "candidate_consumers": ["dotmac_vendor_control_plane"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
-            # `adopted` now owes RE-CHECKABLE evidence. The fixture supplies it
-            # rather than being exempted: a synthetic dossier that could skip
-            # the rule would stop exercising the gate it exists to exercise.
-            **_typed_evidence("dotmac-ticketing"),
+            # `adopted` now owes RE-CHECKABLE evidence, and since 2026-08-29
+            # evidence that proves COMPOSITION rather than installation. The
+            # fixture supplies both rather than being exempted: a synthetic
+            # dossier that could skip the rule would stop exercising the gate it
+            # exists to exercise.
+            **_composed_evidence("dotmac-ticketing"),
         }
     )
 
@@ -1648,7 +2088,7 @@ def test_an_adopted_module_needs_no_invented_future_candidate() -> None:
     dossier.update(
         {
             "status": "adopted",
-            **_typed_evidence("dotmac-ticketing"),
+            **_composed_evidence("dotmac-ticketing"),
             "contract_consumers": ["dotmac_vendor_control_plane"],
             "candidate_consumers": [],
         }

@@ -136,7 +136,7 @@ path = "pyproject.toml"
 field = "tool.poetry.dependencies.dotmac-auth-oidc.version"
 expected = "0.1.0a1"
 locator = "dotmac_workspace:pull/2"
-note = "The same commit deleted the Workspace's own identity/oidc.py. That retirement is NOT a row here: it is already typed six lines away as [[product_writers]].writer_state, and two places to say one thing is how they drift apart."
+note = "The same commit deleted the Workspace's own identity/oidc.py, and that retirement is the cutover. CORRECTION 2026-08-29: this note used to say the retirement was 'already typed six lines away as [[product_writers]].writer_state'. It is not — dotmac_workspace appears in neither [[product_writers]] nor source_repositories, so the field the note pointed at does not exist. The deletion is a removed Python file, which AdoptionEvidenceV1 cannot address: an assertion may only name a field in a structured file. So this dossier rests on an installation row alone and is recorded in PIN_ONLY_ADOPTION_DEBT until either an audited [[product_writers]] row for the Workspace or a structured composition declaration exists. A pin is installation, not adoption."
 
 [[adoption_evidence_pointer]]
 subject = "current_pin"
