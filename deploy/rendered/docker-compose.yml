@@ -15,7 +15,7 @@ services:
   # The collector deliberately does NOT depend on `migrate`: a collector
   # that waits for a migration cannot report on the migration.
   otel-collector:
-    image: "otel/opentelemetry-collector-contrib:0.109.0"
+    image: "otel/opentelemetry-collector-contrib@sha256:af0f72b2d2493fc17f06cf3bc136548240cd7ebb2c8b1c8a7be6f3eb03068389"
     command:
       - --config=/etc/otelcol/config.yaml
     environment:

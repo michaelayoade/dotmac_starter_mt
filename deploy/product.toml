@@ -102,7 +102,11 @@ deployment_annotations = true
 # "signals leave this host". Without it the rendered otel-collector.yaml sits
 # beside a deployment that runs no collector — a specification of what one would
 # need, in a place a reader reasonably takes for telemetry.
-collector_image = "otel/opentelemetry-collector-contrib:0.109.0"
+# The INDEX digest of the 0.109.0 manifest list, not a per-architecture
+# manifest. `docker inspect` on a laptop hands you the arch-specific one,
+# which silently makes this descriptor architecture-specific and fails on a
+# host of another architecture for a reason invisible in the diff.
+collector_image = "otel/opentelemetry-collector-contrib@sha256:af0f72b2d2493fc17f06cf3bc136548240cd7ebb2c8b1c8a7be6f3eb03068389"
 
 [[external_dependencies]]
 code = "postgres"

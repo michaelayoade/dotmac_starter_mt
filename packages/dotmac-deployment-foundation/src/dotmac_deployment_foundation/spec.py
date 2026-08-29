@@ -67,6 +67,14 @@ _CODE = re.compile(r"^[a-z][a-z0-9_-]{0,61}[a-z0-9]$|^[a-z]$")
 _MATERIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _DIGEST_REF = re.compile(r"^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$")
+#: The same reference, plus an empty arm — "optional, and constrained when
+#: declared". `^$` is the house convention for this shape (see `environment`),
+#: and it is doing real work here: a consumer may declare `[telemetry]` and no
+#: collector at all, which is exactly what `dotmac_erp` does. The rule is that
+#: a DECLARED collector image is digest-pinned, NOT that one must be declared;
+#: requiring declaration is a separate decision with its own migration and is
+#: not something to smuggle in behind a format check.
+_OPTIONAL_DIGEST_REF = re.compile(r"^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$|^$")
 _HOSTNAME = re.compile(
     r"^(?=.{1,253}$)([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
@@ -1476,7 +1484,14 @@ class Telemetry:
         scrape = table.int_(
             "scrape_interval_seconds", default=30, minimum=5, maximum=3600
         )
-        collector_image = table.str_("collector_image", default="")
+        # Digest-pinned, like `image.reference` — this field was the ONE
+        # image reference in the schema with no pattern at all, which is why a
+        # mutable `otel/...:0.109.0` tag reached a rendered Compose file and
+        # only an external conformance check ever noticed. Incomplete collector
+        # evidence cannot support a signed image claim.
+        collector_image = table.str_(
+            "collector_image", default="", pattern=_OPTIONAL_DIGEST_REF
+        )
         collector_insecure = table.bool_("collector_insecure", default=False)
         collector_config_mount = table.str_(
             "collector_config_mount",
