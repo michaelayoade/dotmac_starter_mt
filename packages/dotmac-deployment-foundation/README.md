@@ -39,6 +39,8 @@ dotmac-deploy backup                       # the policy, and what "verified" mea
 dotmac-deploy restore-rehearsal            # what a restore PROOF requires
 dotmac-deploy image-audit REF --inspect i.json --history h.json --layers l.txt
 dotmac-deploy observe --deployment-id 42 --host web1   # the resource stamp
+dotmac-deploy ingress-policy               # declared exposure, plans, digest
+dotmac-deploy ingress-policy --format digest      # what a plan carries
 dotmac-deploy drift --observed observed.json
 dotmac-deploy rollback --previous-image sha256:...     # or why it is refused
 ```
@@ -67,11 +69,23 @@ Refusals worth knowing before you write one:
 | a relaxed security default with no declared `[[roles.security.exceptions]]` | the grant may stay; the silence may not |
 | a postgres backup dataset that does not verify `schema` | a restore producing an empty database passes every other check |
 | both `app_direct_shipping` and `logs` | every line stored twice, every rate threshold silently doubled |
+| a published port with no `exposure` or no `address_family` | a short-form publish spawns one `docker-proxy` PER FAMILY, so a descriptor silent about IPv6 gets IPv6 anyway — and the `ip6tables DOCKER-USER` rules written to cover it are measurably inert |
+| the removed `bind` field | an ignored value reads, in a diff, exactly like an honoured one |
+| a wildcard bind, a hostname, an IPv4-mapped address, or an unresolved `${...}` reaching admission | `"${VM_BIND:-127.0.0.1:}8428:8428"` reads as loopback and becomes a wildcard the moment somebody sets `VM_BIND` without the trailing colon |
+| an IP literal or CIDR anywhere in the descriptor, `trusted_proxies` included | a source set is a NAME the deployment-control plane resolves; topology in Git goes stale with nothing failing |
+| a control no available provider enforces (`authentication = "bearer"` on a raw socket) | a control nothing enforces is worse than an absent one, because it reads as present in every review after this one |
+| a role publishing a port its own edge already routes to | the edge publishes that upstream on loopback itself; a second declaration only makes the application reachable AROUND the edge |
 
 ## Layout
 
 ```
 spec.py          ProductDeploymentSpec.v1 — the one thing a product declares
+ingress.py       IngressPolicy.v1 — exposure vocabulary, address admission,
+                 the provider capability matrix, the derived firewall rule
+policy.py        the IngressPolicy.v1 section and the provider-neutral edge
+                 and firewall plans
+document.py      DeploymentDescriptorDocument.v1 — the canonical projection
+                 an authorization binds to, and the digest over it
 secrets_guard.py the descriptor holds names, never values (ADR-0009)
 render/          deterministic text emitters: compose, nginx
 alerts.py        64 common infrastructure alerts + the product's own

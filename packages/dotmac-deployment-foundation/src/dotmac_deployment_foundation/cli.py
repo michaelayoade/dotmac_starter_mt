@@ -328,6 +328,87 @@ def cmd_observe(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_ingress_policy(args: argparse.Namespace) -> int:
+    """The NON-MUTATING projection: what this descriptor exposes, and its digest.
+
+    Nothing here touches a host, a socket or a firewall. It is the value a
+    product's CI prints for review and the value `dotmac-deployment-control`
+    places inside `desired_spec` so that ingress enters `plan_digest`.
+    """
+    from .ingress import PROVIDERS
+    from .policy import (
+        build_edge_plan,
+        build_firewall_plan,
+        ingress_policy_document,
+        public_endpoint_tokens,
+    )
+
+    spec = _load(args.descriptor)
+    canonical = spec.to_canonical_document()
+    document = ingress_policy_document(spec)
+    digest = canonical.sha256_digest()
+    if args.format == "digest":
+        print(digest)
+        return EXIT_OK
+    if args.format == "json":
+        print(json.dumps({"digest": digest, "document": document}, indent=2))
+        return EXIT_OK
+
+    print(f"{document['schema']} (facility {canonical.foundation_version})")
+    print(f"{canonical.schema} digest: {digest}")
+    print("\npublications:")
+    if not document["publications"]:
+        print("  (none declared)")
+    for publication in document["publications"]:
+        # The MATERIAL name, because the document holds no resolved address.
+        # A loopback publication needs none — its literal is derived from
+        # exposure plus family — so it prints as `derived`.
+        binds = (
+            ", ".join(
+                f"{entry['family']}={entry['material'] or 'derived'}"
+                for entry in publication["binds"]
+            )
+            or "no socket"
+        )
+        print(
+            f"  {publication['role']} {publication['host_port']}"
+            f"/{publication['protocol']} exposure={publication['exposure']} "
+            f"family={publication['address_family']} -> {binds}"
+        )
+    print("\nedge:")
+    edge = document["edge"]
+    if not edge["declared"]:
+        print("  (none declared)")
+    else:
+        print(f"  host={edge['host']} exposure={edge['exposure']}")
+        for endpoint in build_edge_plan(spec):
+            print(f"    {endpoint.path} -> {endpoint.role}:{endpoint.upstream_port}")
+    print("\nderived firewall plan (defense in depth, never the primary control):")
+    rules = build_firewall_plan(spec)
+    if not rules:
+        print("  (nothing routable to filter)")
+    for rule in rules:
+        print(f"  {rule.family} {rule.chain}: {rule.render()}")
+    print("\npublic endpoints:")
+    for token in public_endpoint_tokens(spec):
+        print(f"  {token}")
+    if not public_endpoint_tokens(spec):
+        print("  (none)")
+    if args.providers:
+        print("\nprovider capability matrix:")
+        for code in sorted(PROVIDERS):
+            capability = PROVIDERS[code]
+            print(
+                f"  {code}: families={sorted(capability.families)} "
+                f"protocols={sorted(capability.protocols)} "
+                f"authentication={sorted(capability.authentications)} "
+                f"source_policy={capability.enforces_source_policy} "
+                f"tls={capability.enforces_tls}"
+            )
+            print(f"      {capability.note}")
+    return EXIT_OK
+
+
 def cmd_drift(args: argparse.Namespace) -> int:
     from .drift import Observation, compare
 
@@ -516,6 +597,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROVIDER_COMPOSE_HOST,
         choices=[PROVIDER_COMPOSE_HOST],
         help="the Effects implementation `--execute` runs the plan against",
+    )
+
+    policy = add(
+        "ingress-policy",
+        cmd_ingress_policy,
+        "show the declared exposure contract, its plans and its digest",
+    )
+    policy.add_argument(
+        "--format",
+        default="text",
+        choices=["text", "json", "digest"],
+        help="`json` is the canonical document; `digest` is what a plan carries",
+    )
+    policy.add_argument(
+        "--providers",
+        action="store_true",
+        help="also print the provider capability matrix",
     )
 
     observe = add(
