@@ -1021,6 +1021,51 @@ specifics) points here and must never fork these rules.
     `docs/inventories/deployment-foundation-sources.md` for the eighteen defects
     deliberately NOT extracted)
 
+42. **Build the software ONCE; bind the environment LATE; deploy by EXACT
+    DIGEST.** The immutable artefact carries no environment fact — no
+    production endpoint, no address or CIDR, no host identity, no credential
+    value and no credential FILENAME (a basename is a binding, and a redaction
+    sweep that covers only value-shaped material passes straight over it). It
+    carries exact upstream image digests, never a tag. The environment binds at
+    AUTHORIZATION time as a separately produced, separately signed inventory
+    referenced by digest, and a product declares NAMES — a source set, a
+    material, an endpoint role — which the fleet-intent owner resolves. The
+    authorization is one document naming the release digest, the inventory
+    digest, the rendered-configuration digest and the exact image digests: a
+    deployment is assembled from four independently produced things, and any
+    three of them agreeing proves nothing about the fourth. Release digest and
+    rendered digest stay SEPARATE fields, or nobody can say afterwards whether
+    a difference came from the software or from the environment — which is the
+    question this arrangement exists to answer.
+
+    **The scope boundary is part of the rule, not commentary on it.** It binds
+    deployable software and operational configuration: release artefacts,
+    images, rendered deployment and ingress configuration, infrastructure
+    policy, and the authorization. It does NOT bind tenant data, domain
+    decisions, databases, logs, metrics, or ordinary product settings — the
+    settings-as-data surface is a runtime read of a row and deliberately so
+    (ADR-0011, ADR-0012). A rule stretched over runtime data would forbid the
+    settings resolver, the audit log and every domain state machine in this
+    repository, and a rule that forbids the system it governs gets disabled
+    rather than narrowed. It governs what is DEPLOYED, never what is RECORDED.
+
+    Both failure modes are refused, and they are opposite ends of one axis: an
+    environment compiled into the shared artefact makes the artefact wrong
+    everywhere else, and configuration rendered on the target host makes the
+    running state unattributable. Measured on this fleet: seven observability
+    images floating on `:latest`, CIDRs in a product descriptor's
+    `trusted_proxies` deciding whose `X-Forwarded-For` is believed, and 26
+    unordered `.bak` files serving as a rollback mechanism.
+    (ADR-0071; enforcement: **none yet** as a whole — the property spans
+    repositories and no guard here reads another repository's pipeline. What IS
+    enforced locally and is not the whole rule: `_DIGEST_REF` refuses a tag,
+    `secrets_guard` refuses a secret value at parse time, `IngressPolicy.v1`
+    refuses an address literal in an ingress declaration,
+    `DeploymentDescriptorDocument.v1` excludes resolved material with a
+    planted-address proof, and `render --check` is a byte comparison. Whether a
+    pipeline produces all four digests and whether the authorization names them
+    is review discipline until a product profile can pin and check it.)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
