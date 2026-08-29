@@ -38,13 +38,16 @@ same thing.
   never touches a dependency — see `spec.py`'s `HealthCheck` docstring) into
   `service_healthy` would make that condition trivially true and defeat the
   whole point of a readiness gate.
-- Published ports are derived from `ingress.routes`, never declared
-  separately, and always bind to loopback: a role a product did not put
-  behind ingress has no business being reachable from outside the host at
-  all, and a role that IS behind ingress is reached through the ingress
-  proxy on the host, not directly from outside it — loopback keeps the port
-  usable for host-local diagnostics without exposing it past the host's own
-  network stack.
+- Published ports come from two places and are emitted in ONE syntax. An
+  ingress route derives a loopback publication of its upstream, because a
+  role behind an edge is reached through that edge on the host and not from
+  outside it. Everything else is a `[[roles.ports]]` or
+  `[[external_dependencies.ports]]` publication whose `exposure` and
+  `address_family` are DECLARED (`IngressPolicy.v1`), and whose bind address
+  is derived from them. Both render as Compose LONG SYNTAX, one entry per
+  declared family, so `host_ip` is a field that cannot be omitted rather
+  than a string position that can — see `_published_port_lines` for the
+  IPv6 `docker-proxy` failure that forced it.
 
 ## Assumptions this renderer makes beyond the descriptor
 
@@ -53,9 +56,11 @@ its docstring, "what this type deliberately does NOT hold"); the choices
 below are THIS MODULE's, not the descriptor's, and are named here so a
 reviewer can tell a genuine descriptor gap from a rendering decision:
 
-- **Host port == container port.** The descriptor has no separate "host
-  port" concept, so an ingress route's own `port` is reused for both sides
-  of the loopback binding.
+- **Host port == container port, for an INGRESS-DERIVED publication only.**
+  An ingress route names one port, so it is reused for both sides of the
+  loopback binding. A declared publication carries `host` and `container`
+  separately and is remapped whenever they differ — which is also why a
+  derived firewall rule matches `--ctorigdstport` rather than `--dport`.
 - **Uploads mount path.** `StaticStrategy` names a volume but not a mount
   point; this renderer mounts it at `/srv/uploads` in every role an ingress
   route targets.
@@ -79,10 +84,12 @@ import hashlib
 import re
 from collections.abc import Iterable
 
+from .. import ingress
 from ..errors import SpecError
 from ..spec import (
     SCHEMA,
     ExternalDependency,
+    PortPublication,
     ProductDeploymentSpec,
     Resources,
     Role,
@@ -260,6 +267,93 @@ def _ports_for_role(spec: ProductDeploymentSpec, role: Role) -> tuple[int, ...]:
         return ()
     ports = {route.port for route in spec.ingress.routes if route.role == role.code}
     return tuple(sorted(ports))
+
+
+def _published_port_lines(
+    spec: ProductDeploymentSpec, role: Role, body: int
+) -> list[str]:
+    """The role's `ports:` block, in Compose LONG SYNTAX, always.
+
+    The short form is a colon-delimited string whose host-IP position is
+    OPTIONAL, and that is the whole defect. Omit it and Docker publishes on
+    every family the host has, spawning a second `docker-proxy -host-ip ::`
+    that no `ip6tables DOCKER-USER` rule can filter — that chain is reached
+    only from FORWARD while docker-proxy terminates IPv6 locally on INPUT.
+    Worse, the position can be filled by an expression whose default hides the
+    effective bind: `"${VM_BIND:-127.0.0.1:}8428:8428"` reads as loopback and
+    becomes a wildcard the moment somebody sets `VM_BIND` without the trailing
+    colon.
+
+    Long syntax makes `host_ip` a field of its own. It cannot be omitted by
+    accident, it cannot be smuggled into an adjacent value, and one entry per
+    declared family means the families a service serves are COUNTABLE in the
+    rendered file rather than inferred from Docker's defaults.
+    """
+    entries: set[tuple[str, int, int, str, str]] = set()
+    # Ingress-routed ports: derived, loopback, on the family the edge declares
+    # it reaches its upstreams over. An edge and its upstream share a host, so
+    # this is loopback in every deployment shape this facility renders.
+    upstream_family = (
+        spec.ingress.upstream_address_family if spec.ingress is not None else "ipv4"
+    )
+    for port in _ports_for_role(spec, role):
+        entries.add(
+            (
+                upstream_family,
+                port,
+                port,
+                ingress.LOOPBACK[upstream_family],
+                "tcp",
+            )
+        )
+    entries.update(_publication_entries(role.code, role.ports))
+    return _ports_block(entries, body)
+
+
+def _publication_entries(
+    code: str, publications: Iterable[PortPublication]
+) -> set[tuple[str, int, int, str, str]]:
+    """One rendered entry per declared family, per publication.
+
+    Ports ingress cannot describe. The case that forced the field is Sub's
+    syslog listener on UDP 514: an HTTP reverse proxy has no way to express a
+    UDP listener, so a descriptor without this section drops the one thing that
+    service exists for, silently.
+
+    `exposure = "none"` contributes NOTHING here — `PortPublication.families`
+    is empty for it. Not a publication to an address nobody uses: no entry at
+    all, so the socket does not exist on the host and there is nothing for a
+    firewall rule to be wrong about.
+    """
+    return {
+        (
+            family,
+            publication.host,
+            publication.container,
+            publication.host_ip(code, family),
+            publication.protocol,
+        )
+        for publication in publications
+        for family in publication.families
+    }
+
+
+def _ports_block(entries: set[tuple[str, int, int, str, str]], body: int) -> list[str]:
+    if not entries:
+        return []
+    lines = [_line(body, "ports:")]
+    for _family, host_port, target, host_ip, protocol in sorted(entries):
+        lines.append(_line(body + 1, f"- target: {target}"))
+        lines.append(_line(body + 2, f"published: {host_port}"))
+        lines.append(_line(body + 2, f"host_ip: {_scalar(host_ip)}"))
+        lines.append(_line(body + 2, f"protocol: {protocol}"))
+    return lines
+
+
+def _publication_lines(
+    code: str, publications: Iterable[PortPublication], body: int
+) -> list[str]:
+    return _ports_block(_publication_entries(code, publications), body)
 
 
 def _ingress_role_codes(spec: ProductDeploymentSpec) -> frozenset[str]:
@@ -591,18 +685,8 @@ def _role_service(spec: ProductDeploymentSpec, role: Role) -> list[str]:
 
     lines.extend(_healthcheck_lines(role, body))
 
-    published = [f"127.0.0.1:{port}:{port}" for port in _ports_for_role(spec, role)]
-    # Ports ingress cannot describe. The case that forced the field is Sub's
-    # syslog listener on UDP 514: an HTTP reverse proxy has no way to express a
-    # UDP listener, so a descriptor without this section drops the one thing
-    # that service exists for, silently.
-    published.extend(port.render() for port in role.ports)
-    if published and not host_network:
-        lines.extend(
-            _list_block(
-                body, "ports", [_scalar(entry) for entry in sorted(set(published))]
-            )
-        )
+    if not host_network:
+        lines.extend(_published_port_lines(spec, role, body))
 
     mounts: list[str] = []
     if (
@@ -706,14 +790,12 @@ def _dependency_service(
             _list_block(body, "command", [_scalar(part) for part in dependency.command])
         )
     lines.extend(_environment_lines(body, dependency.materials, dependency.environment))
-    if dependency.ports:
-        lines.extend(
-            _list_block(
-                body,
-                "ports",
-                sorted(_scalar(port.render()) for port in dependency.ports),
-            )
-        )
+    # A managed dependency publishes through the same typed contract a role
+    # does, and for the same reason: the two ports this facility was built to
+    # close (a Redis and a Postgres) are dependency publications. A second
+    # rendering path here would have been a second place for the short form to
+    # survive.
+    lines.extend(_publication_lines(dependency.code, dependency.ports, body))
     if dependency.volumes:
         mounts = [
             f"{volume.name}:{volume.target}" + (":ro" if volume.read_only else "")

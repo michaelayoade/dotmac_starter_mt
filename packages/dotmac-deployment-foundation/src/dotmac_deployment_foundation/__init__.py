@@ -32,6 +32,11 @@ from __future__ import annotations
 
 from .backup import Assurance, BackupHealth, BackupRecord, assess, restore_rehearsal
 from .conformance import check_all, check_rendered_assets_match
+from .document import (
+    DESCRIPTOR_DOCUMENT_SCHEMA,
+    DeploymentDescriptorDocumentV1,
+    build_canonical_document,
+)
 from .drift import DriftReport, Observation, Verdict, compare
 from .engine import (
     DeploymentOutcome,
@@ -59,7 +64,40 @@ from .errors import (
     UnknownFieldError,
     UnknownSchemaError,
 )
+from .exposure import (
+    ExposureEffects,
+    ExposureTransaction,
+    Finding,
+    HostObservation,
+    PrivilegedVantageError,
+    ProbeOutcome,
+    ProbeResult,
+    ProbeVantage,
+    Severity,
+    VerificationReport,
+    accept_public_exposure_evidence,
+    apply_exposure,
+    observation_from_text,
+    verify_exposure,
+)
 from .image import AuditReport, audit_image
+from .ingress import (
+    ADDRESS_FAMILIES,
+    EXPOSURES,
+    INGRESS_POLICY_SCHEMA,
+    PROVIDERS,
+    EdgeEndpoint,
+    FirewallRule,
+    ProviderCapability,
+    admit_bind_address,
+    endpoint_token,
+)
+from .policy import (
+    build_edge_plan,
+    build_firewall_plan,
+    ingress_policy_document,
+    public_endpoint_tokens,
+)
 from .spec import SCHEMA, ProductDeploymentSpec
 from .telemetry import (
     RESOURCE_ATTRIBUTES,
@@ -67,10 +105,14 @@ from .telemetry import (
     ResourceAttributes,
     resource_attributes,
 )
-
-__version__ = "0.2.0a2"
+from .version import VERSION as __version__
 
 __all__ = [
+    "ADDRESS_FAMILIES",
+    "EXPOSURES",
+    "DESCRIPTOR_DOCUMENT_SCHEMA",
+    "INGRESS_POLICY_SCHEMA",
+    "PROVIDERS",
     "RESOURCE_ATTRIBUTES",
     "SCHEMA",
     "Annotation",
@@ -81,15 +123,19 @@ __all__ = [
     "DeploymentError",
     "DeploymentFoundationError",
     "DeploymentOutcome",
+    "DeploymentDescriptorDocumentV1",
     "DeploymentPlan",
     "DriftDetected",
     "DriftReport",
+    "EdgeEndpoint",
     "Effects",
     "Executor",
+    "FirewallRule",
     "LockUnavailableError",
     "Observation",
     "PreconditionFailed",
     "ProductDeploymentSpec",
+    "ProviderCapability",
     "RenderDrift",
     "ResourceAttributes",
     "SecretValueError",
@@ -100,16 +146,37 @@ __all__ = [
     "Strategy",
     "UnknownFieldError",
     "UnknownSchemaError",
+    "ExposureEffects",
+    "ExposureTransaction",
+    "Finding",
+    "HostObservation",
+    "PrivilegedVantageError",
+    "ProbeOutcome",
+    "ProbeResult",
+    "ProbeVantage",
+    "Severity",
+    "VerificationReport",
     "Verdict",
     "__version__",
+    "admit_bind_address",
+    "accept_public_exposure_evidence",
+    "apply_exposure",
+    "observation_from_text",
+    "verify_exposure",
     "assess",
     "audit_image",
+    "build_canonical_document",
+    "build_edge_plan",
+    "build_firewall_plan",
     "build_plan",
     "check_all",
     "check_rendered_assets_match",
     "compare",
     "deployment_lock",
+    "endpoint_token",
     "format_plan",
+    "ingress_policy_document",
+    "public_endpoint_tokens",
     "resource_attributes",
     "restore_rehearsal",
     "steps_for_rollback",

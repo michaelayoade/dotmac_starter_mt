@@ -435,11 +435,15 @@ def _render_https_server(spec: ProductDeploymentSpec) -> list[str]:
 
     if ingress.trusted_proxies:
         lines.append("    # A real proxy sits in front of nginx: resolve the true")
-        lines.append("    # client address from a TRUSTED CIDR's X-Forwarded-For")
-        lines.append("    # instead of originating fresh headers below, which would")
-        lines.append("    # just discard whatever the proxy already resolved.")
-        for cidr in ingress.trusted_proxies:
-            lines.append(f"    set_real_ip_from {cidr};")
+        lines.append("    # client address from a TRUSTED source set's")
+        lines.append("    # X-Forwarded-For instead of originating fresh headers")
+        lines.append("    # below, which would just discard whatever the proxy")
+        lines.append("    # already resolved. The set is a NAME here and stays one")
+        lines.append("    # in the rendered bytes: deployment control substitutes")
+        lines.append("    # @SOURCE_SET:<name>@ at authorization, so no environment")
+        lines.append("    # topology is committed to a product repository.")
+        for source_set in ingress.trusted_proxies:
+            lines.append(f"    set_real_ip_from @SOURCE_SET:{source_set}@;")
         lines.append("    real_ip_header X-Forwarded-For;")
         lines.append("    real_ip_recursive on;")
         lines.append("")

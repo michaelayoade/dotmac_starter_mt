@@ -136,11 +136,15 @@ def _ingress_toml(
 ) -> str:
     trusted_line = ""
     if trusted_proxies:
-        quoted = ", ".join(f'"{cidr}"' for cidr in trusted_proxies)
+        quoted = ", ".join(f'"{name}"' for name in trusted_proxies)
         trusted_line = f"trusted_proxies = [{quoted}]\n"
     return f"""
 [ingress]
 host = "acme.example.com"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 redirect_http = {str(redirect_http).lower()}
 tls_policy = "{tls_policy}"
 security_headers = {str(security_headers).lower()}
@@ -184,6 +188,10 @@ uploads_volume = "acme_uploads"
 _NO_WEBSOCKET_INGRESS = """
 [ingress]
 host = "acme.example.com"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 
 [[ingress.routes]]
 path = "/"
@@ -198,6 +206,10 @@ uploads = "none"
 _AMBIGUOUS_STATIC_INGRESS = """
 [ingress]
 host = "acme.example.com"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 
 [[ingress.routes]]
 path = "/api/"
@@ -213,6 +225,10 @@ port = 8002
 _PORT_CONFLICT_INGRESS = """
 [ingress]
 host = "acme.example.com"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 
 [[ingress.routes]]
 path = "/"
@@ -252,7 +268,7 @@ def rendered_intermediate(spec_intermediate: ProductDeploymentSpec) -> str:
 
 @pytest.fixture(scope="module")
 def spec_trusted_proxies() -> ProductDeploymentSpec:
-    return _spec(_ingress_toml(trusted_proxies=("10.0.0.0/8", "192.168.1.1/32")))
+    return _spec(_ingress_toml(trusted_proxies=("edge-fleet", "corporate-egress")))
 
 
 @pytest.fixture(scope="module")
@@ -494,8 +510,11 @@ def test_with_no_trusted_proxies_nginx_originates_the_forwarding_headers(
 def test_with_trusted_proxies_nginx_trusts_them_via_real_ip_directives(
     rendered_trusted_proxies: str,
 ) -> None:
-    assert "set_real_ip_from 10.0.0.0/8;" in rendered_trusted_proxies
-    assert "set_real_ip_from 192.168.1.1/32;" in rendered_trusted_proxies
+    # NAMES, not CIDRs. The substitution token survives into the rendered
+    # bytes so a product repository never commits environment topology;
+    # deployment control resolves it at authorization.
+    assert "set_real_ip_from @SOURCE_SET:edge-fleet@;" in rendered_trusted_proxies
+    assert "set_real_ip_from @SOURCE_SET:corporate-egress@;" in rendered_trusted_proxies
     assert "real_ip_header X-Forwarded-For;" in rendered_trusted_proxies
     assert "real_ip_recursive on;" in rendered_trusted_proxies
     assert "proxy_set_header X-Real-IP $remote_addr;" not in rendered_trusted_proxies

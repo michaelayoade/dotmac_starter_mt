@@ -1403,17 +1403,33 @@ prepare_effects_fixture() {
   EFFECTS_DESCRIPTOR="${WORK_DIR}/effects-product.toml"
   EFFECTS_COMPOSE_FILE="${WORK_DIR}/effects-rendered/docker-compose.yml"
   cp "${DESCRIPTOR}" "${EFFECTS_DESCRIPTOR}"
-  # The derived ingress fixture publishes the same loopback port its Nginx
-  # upstream names. The ordered HTTP-only fixture keeps its high host port.
+  # Drop the base fixture's own `[[roles.ports]]`. Under IngressPolicy.v1 the
+  # edge OWNS the port it routes to — it publishes that upstream on loopback
+  # itself — so a second declaration of the same container port is refused
+  # rather than merged. This used to rewrite the publication's host port to
+  # match the route instead; that produced two declarations of one port whose
+  # agreement nothing checked, which is the drift the refusal exists to stop.
+  # The ordered HTTP-only fixture keeps its own high host port and its own
+  # publication, because it declares no ingress at all.
   local rewritten="${EFFECTS_DESCRIPTOR}.tmp"
-  sed -E "s/^host = [0-9]+$/host = ${APP_PORT}/" \
-    "${EFFECTS_DESCRIPTOR}" > "${rewritten}"
+  awk '
+    /^\[\[roles\.ports\]\]$/ { skip = 1 }
+    /^\[migration\]$/ { skip = 0 }
+    skip != 1 { print }
+  ' "${EFFECTS_DESCRIPTOR}" > "${rewritten}"
   mv "${rewritten}" "${EFFECTS_DESCRIPTOR}"
   cat >> "${EFFECTS_DESCRIPTOR}" <<'TOML'
 
 [ingress]
 host = "rehearsal.invalid"
 redirect_http = false
+# IngressPolicy.v1: the edge declares its own exposure and address family like
+# any other publication, and `public` carries the approval LOCATOR (never an
+# approval — deployment control owns that binding).
+exposure = "public"
+address_family = "ipv4"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.dotmac.io/deployment/rehearsal-edge"
 
 [[ingress.routes]]
 path = "/"

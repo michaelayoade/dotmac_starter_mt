@@ -3,6 +3,14 @@
 ## What is public
 
 - `ProductDeploymentSpec` and every type it exposes, plus the `SCHEMA` string.
+- `ProductDeploymentSpec.to_canonical_document()` and
+  `DeploymentDescriptorDocumentV1` — its `canonical_bytes()`,
+  `sha256_digest()` and the `DESCRIPTOR_DOCUMENT_SCHEMA` string. The BYTES
+  are public contract exactly as the rendered assets are: a change to the
+  document's shape changes every consumer's digest at once, which is the
+  intended behaviour and makes it a MINOR bump at least.
+- `IngressPolicy.v1`: the exposure vocabulary, the provider capability
+  matrix, the derived endpoint-token format and the firewall rule shape.
 - The `dotmac-deploy` CLI: its subcommands, its flags, and its **exit codes**
   (`0` ok, `1` refused, `2` usage). CI wires the exit codes, so they are part
   of the contract rather than an implementation detail.
@@ -33,6 +41,47 @@ yesterday and does not parse today breaks a consumer's build, and calling that
 a patch is how a facility loses the trust it needs to be adopted. The right
 shape for a new rule is: add it warning-only in a minor release, name the
 version it becomes fatal in, then make it fatal in the next major.
+
+### Deviation, 0.3.0a1: the exposure contract is fatal without a warning release
+
+`IngressPolicy.v1` makes four descriptor changes fatal in this release,
+skipping the warning-only minor the rule above requires:
+
+- `PortPublication.bind` is REMOVED, and declaring it raises rather than being
+  ignored;
+- `exposure` and `address_family` are MANDATORY on every publication;
+- `[ingress]` must declare its own `exposure` and `address_family`, and a
+  public edge must carry `approval_ref` and `rationale_url`;
+- `trusted_proxies` entries are source-set NAMES; a CIDR is refused.
+
+The deviation is recorded here rather than taken silently, and it rests on four
+premises a reader can check rather than on judgement:
+
+1. **The consumer census is exactly one.** `EXTRACTION.toml` records one
+   contract consumer, and the product-first gate derives the dossier's status
+   from that count exactly. The warning phase exists to protect consumers who
+   would otherwise break without notice; here there is one, and it is known.
+2. **That consumer migrates in the same train.** Its descriptor changes
+   alongside this release, so the notice a warning phase would have provided is
+   provided by the change itself.
+3. **A changed consumer set fails the migration gate.** If a second consumer
+   appears, the recorded count no longer supports the dossier's status and the
+   gate fails before this reasoning can be reused on a fleet it no longer
+   describes. The premise is enforced, not asserted.
+4. **Warning-only would still render the unsafe condition.** A release that
+   accepts `bind` keeps emitting a publication whose address family is
+   undeclared — and an undeclared family is not a tidiness problem. A
+   short-form publish spawns one `docker-proxy` per family, so a descriptor
+   silent about IPv6 gets IPv6 anyway, and the `ip6tables DOCKER-USER` rules
+   written to cover it cannot fire. That is not hypothetical: two production
+   DROP rules were measured with zero packet counters while the ports they
+   named were open from the internet. A deprecation window is affordable when
+   the old behaviour is merely untidy; it is not when the old behaviour is the
+   defect.
+
+This deviation authorises exactly these four changes. It is not a precedent for
+skipping the warning phase generally, and a future removal without these four
+premises holding is an ordinary rule violation.
 
 **A new schema version is a new string.** `ProductDeploymentSpec.v2` is a
 different `schema` value, and a v1 reader REFUSES a v2 document rather than

@@ -196,6 +196,10 @@ names = ["DATABASE_URL", "CACHE_TOKEN"]
 
 [ingress]
 host = "acme.example.com"
+exposure = "public"
+address_family = "dual_stack"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 
 [[ingress.routes]]
 path = "/"
@@ -238,11 +242,27 @@ def doc(rendered: str) -> Mapping[str, object]:
 # of what it is given.
 
 
+#: The loopback literals a publication may derive, per family. Written out
+#: rather than pattern-matched on a prefix: the old predicate accepted anything
+#: starting `127.0.0.1:` and would have read `127.0.0.1:x` as loopback, and it
+#: could not see IPv6 at all.
+_LOOPBACK_LITERALS = frozenset({"127.0.0.1", "::1"})
+
+
 def _all_published_ports_are_loopback(compose_doc: Mapping[str, object]) -> bool:
+    """Every `ports:` entry binds a loopback address, on every family.
+
+    Reads LONG SYNTAX, which is the only syntax this renderer emits since
+    0.3.0a1. The short form put the host IP in an optional string position;
+    this reads the `host_ip` FIELD, so an entry that omits it is a missing key
+    rather than a mapping that silently means "every interface".
+    """
     services = compose_doc["services"]
     for service in services.values():
-        for port_mapping in service.get("ports", []):
-            if not port_mapping.startswith("127.0.0.1:"):
+        for entry in service.get("ports", []):
+            if not isinstance(entry, Mapping):
+                return False
+            if entry.get("host_ip") not in _LOOPBACK_LITERALS:
                 return False
     return True
 
@@ -366,8 +386,12 @@ def test_the_owner_material_check_would_catch_a_regression_that_leaked_it(
 def test_a_role_behind_an_ingress_route_publishes_its_route_port_on_loopback(
     doc: Mapping[str, object],
 ) -> None:
-    assert doc["services"]["web"]["ports"] == ["127.0.0.1:8080:8080"]
-    assert doc["services"]["api"]["ports"] == ["127.0.0.1:4000:4000"]
+    assert doc["services"]["web"]["ports"] == [
+        {"target": 8080, "published": 8080, "host_ip": "127.0.0.1", "protocol": "tcp"}
+    ]
+    assert doc["services"]["api"]["ports"] == [
+        {"target": 4000, "published": 4000, "host_ip": "127.0.0.1", "protocol": "tcp"}
+    ]
 
 
 def test_a_role_with_no_ingress_route_publishes_nothing(
@@ -380,18 +404,36 @@ def test_a_role_with_no_ingress_route_publishes_nothing(
 def test_the_loopback_check_would_catch_a_regression_that_bound_a_wide_open_port(
     rendered: str,
 ) -> None:
-    """A check that only asserts the string `'127.0.0.1:'` appears
-    SOMEWHERE in the document passes even if a DIFFERENT port were bound to
-    a routable interface — this proves the predicate inspects every
-    published port, by showing it catches a corrupted document. (A
-    non-loopback address other than the classic "bind all interfaces" one
-    is used here on purpose, to keep this file free of that literal.)"""
+    """A check that only asserts the string `'127.0.0.1'` appears SOMEWHERE in
+    the document passes even if a DIFFERENT port were bound to a routable
+    interface — this proves the predicate inspects every published port, by
+    showing it catches a corrupted document. (A non-loopback address other
+    than the classic "bind all interfaces" one is used here on purpose, to
+    keep this file free of that literal.)"""
     doc_ok = yaml.safe_load(rendered)
     assert _all_published_ports_are_loopback(doc_ok)
-    non_loopback = "10.0.0.5:8080:8080"
-    broken = rendered.replace("127.0.0.1:8080:8080", non_loopback, 1)
-    broken_doc = yaml.safe_load(broken)
-    assert not _all_published_ports_are_loopback(broken_doc)
+    broken = rendered.replace("host_ip: 127.0.0.1", "host_ip: 10.0.0.5", 1)
+    assert not _all_published_ports_are_loopback(yaml.safe_load(broken))
+
+
+def test_the_loopback_check_catches_a_publication_that_omits_host_ip_entirely(
+    rendered: str,
+) -> None:
+    """The mutation the LONG syntax exists to make visible.
+
+    Delete the `host_ip` field and Compose publishes on every family the host
+    has — the exact shape that put two ports on the public internet over IPv6
+    while their IPv4 rules read as containment. The predicate must fail on a
+    MISSING key, not merely on a wrong value, because the defect is an absence.
+    """
+    broken = "\n".join(
+        line
+        for line in rendered.replace("host_ip: 127.0.0.1", "host_ip: DELETE", 1).split(
+            "\n"
+        )
+        if "host_ip: DELETE" not in line
+    )
+    assert not _all_published_ports_are_loopback(yaml.safe_load(broken))
 
 
 # ── 5. readiness drives the healthcheck; liveness becomes a label ──────────

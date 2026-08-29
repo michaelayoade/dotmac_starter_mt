@@ -328,6 +328,137 @@ def cmd_observe(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_ingress_policy(args: argparse.Namespace) -> int:
+    """The NON-MUTATING projection: what this descriptor exposes, and its digest.
+
+    Nothing here touches a host, a socket or a firewall. It is the value a
+    product's CI prints for review and the value `dotmac-deployment-control`
+    places inside `desired_spec` so that ingress enters `plan_digest`.
+    """
+    from .ingress import PROVIDERS
+    from .policy import (
+        build_edge_plan,
+        build_firewall_plan,
+        ingress_policy_document,
+        public_endpoint_tokens,
+    )
+
+    spec = _load(args.descriptor)
+    canonical = spec.to_canonical_document()
+    document = ingress_policy_document(spec)
+    digest = canonical.sha256_digest()
+    if args.format == "digest":
+        print(digest)
+        return EXIT_OK
+    if args.format == "json":
+        print(json.dumps({"digest": digest, "document": document}, indent=2))
+        return EXIT_OK
+
+    print(f"{document['schema']} (facility {canonical.foundation_version})")
+    print(f"{canonical.schema} digest: {digest}")
+    print("\npublications:")
+    if not document["publications"]:
+        print("  (none declared)")
+    for publication in document["publications"]:
+        # The MATERIAL name, because the document holds no resolved address.
+        # A loopback publication needs none — its literal is derived from
+        # exposure plus family — so it prints as `derived`.
+        binds = (
+            ", ".join(
+                f"{entry['family']}={entry['material'] or 'derived'}"
+                for entry in publication["binds"]
+            )
+            or "no socket"
+        )
+        print(
+            f"  {publication['role']} {publication['host_port']}"
+            f"/{publication['protocol']} exposure={publication['exposure']} "
+            f"family={publication['address_family']} -> {binds}"
+        )
+    print("\nedge:")
+    edge = document["edge"]
+    if not edge["declared"]:
+        print("  (none declared)")
+    else:
+        print(f"  host={edge['host']} exposure={edge['exposure']}")
+        for endpoint in build_edge_plan(spec):
+            print(f"    {endpoint.path} -> {endpoint.role}:{endpoint.upstream_port}")
+    print("\nderived firewall plan (defense in depth, never the primary control):")
+    rules = build_firewall_plan(spec)
+    if not rules:
+        print("  (nothing routable to filter)")
+    for rule in rules:
+        print(f"  {rule.family} {rule.chain}: {rule.render()}")
+    print("\npublic endpoints:")
+    for token in public_endpoint_tokens(spec):
+        print(f"  {token}")
+    if not public_endpoint_tokens(spec):
+        print("  (none)")
+    if args.providers:
+        print("\nprovider capability matrix:")
+        for code in sorted(PROVIDERS):
+            capability = PROVIDERS[code]
+            print(
+                f"  {code}: families={sorted(capability.families)} "
+                f"protocols={sorted(capability.protocols)} "
+                f"authentication={sorted(capability.authentications)} "
+                f"source_policy={capability.enforces_source_policy} "
+                f"tls={capability.enforces_tls}"
+            )
+            print(f"      {capability.note}")
+    return EXIT_OK
+
+
+def cmd_exposure_verify(args: argparse.Namespace) -> int:
+    """Verify RECORDED host output against the declared exposure.
+
+    Off-host on purpose. The inputs are the text an operator already has —
+    `ss -tlnp`, a process listing, `iptables-save` and `ip6tables-save` — so
+    the same verifier that runs during an apply can be replayed against an
+    incident's pasted output months later, with no host present and nothing
+    mutated.
+    """
+    from .exposure import Severity, observation_from_text, verify_exposure
+
+    spec = _load(args.descriptor)
+    saves: dict[str, str] = {}
+    if args.iptables_v4:
+        saves["ipv4"] = Path(args.iptables_v4).read_text(encoding="utf-8")
+    if args.iptables_v6:
+        saves["ipv6"] = Path(args.iptables_v6).read_text(encoding="utf-8")
+    observation = observation_from_text(
+        socket_listing=(
+            Path(args.sockets).read_text(encoding="utf-8") if args.sockets else ""
+        ),
+        process_listing=(
+            Path(args.processes).read_text(encoding="utf-8") if args.processes else ""
+        ),
+        iptables_save=saves,
+        closed_port_behaviour=args.closed_port_behaviour,
+    )
+    report = verify_exposure(spec, observation)
+    print(f"descriptor digest: {report.descriptor_digest}")
+    for token in report.verified:
+        print(f"  ok       {token}")
+    for finding in report.findings:
+        marker = "REFUSED" if finding.severity is Severity.REFUSE else "note   "
+        print(f"  {marker}  [{finding.code}] {finding.detail}")
+    if not report.ok:
+        return EXIT_REFUSED
+    if not report.verified:
+        # Not a pass. A verifier with nothing to verify reports green for the
+        # wrong reason, and "no findings" over an empty binding set is exactly
+        # the shape of a check that has silently stopped looking.
+        print(
+            "error: no declared publication was verified — the descriptor "
+            "declares none, or the observation was empty. Green over an empty "
+            "set is not a proof",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    return EXIT_OK
+
+
 def cmd_drift(args: argparse.Namespace) -> int:
     from .drift import Observation, compare
 
@@ -516,6 +647,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROVIDER_COMPOSE_HOST,
         choices=[PROVIDER_COMPOSE_HOST],
         help="the Effects implementation `--execute` runs the plan against",
+    )
+
+    policy = add(
+        "ingress-policy",
+        cmd_ingress_policy,
+        "show the declared exposure contract, its plans and its digest",
+    )
+    policy.add_argument(
+        "--format",
+        default="text",
+        choices=["text", "json", "digest"],
+        help="`json` is the canonical document; `digest` is what a plan carries",
+    )
+    policy.add_argument(
+        "--providers",
+        action="store_true",
+        help="also print the provider capability matrix",
+    )
+
+    verify = add(
+        "exposure-verify",
+        cmd_exposure_verify,
+        "check RECORDED host output against the declared exposure",
+    )
+    verify.add_argument("--sockets", help="`ss -tlnp` output")
+    verify.add_argument("--processes", help="a process listing containing docker-proxy")
+    verify.add_argument("--iptables-v4", help="`iptables-save` output")
+    verify.add_argument("--iptables-v6", help="`ip6tables-save` output")
+    verify.add_argument(
+        "--closed-port-behaviour",
+        default="unknown",
+        choices=["unknown", "drop", "reset"],
+        help=(
+            "how this host answers a closed port. On a DROPPING host an "
+            "external probe cannot tell loopback-bound from "
+            "wildcard-bound-and-dropped, so the conclusion stays inconclusive "
+            "without on-host socket evidence"
+        ),
     )
 
     observe = add(
