@@ -41,6 +41,7 @@ dotmac-deploy image-audit REF --inspect i.json --history h.json --layers l.txt
 dotmac-deploy observe --deployment-id 42 --host web1   # the resource stamp
 dotmac-deploy ingress-policy               # declared exposure, plans, digest
 dotmac-deploy ingress-policy --format digest      # what a plan carries
+dotmac-deploy exposure-verify --sockets ss.txt --iptables-v4 f.txt
 dotmac-deploy drift --observed observed.json
 dotmac-deploy rollback --previous-image sha256:...     # or why it is refused
 ```
@@ -86,6 +87,8 @@ policy.py        the IngressPolicy.v1 section and the provider-neutral edge
                  and firewall plans
 document.py      DeploymentDescriptorDocument.v1 — the canonical projection
                  an authorization binds to, and the digest over it
+exposure.py      apply the plan under the lock, re-observe the host, and
+                 refuse a probe taken from inside the allowlist
 secrets_guard.py the descriptor holds names, never values (ADR-0009)
 render/          deterministic text emitters: compose, nginx
 alerts.py        64 common infrastructure alerts + the product's own

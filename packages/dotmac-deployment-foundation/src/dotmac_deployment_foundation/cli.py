@@ -409,6 +409,56 @@ def cmd_ingress_policy(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_exposure_verify(args: argparse.Namespace) -> int:
+    """Verify RECORDED host output against the declared exposure.
+
+    Off-host on purpose. The inputs are the text an operator already has —
+    `ss -tlnp`, a process listing, `iptables-save` and `ip6tables-save` — so
+    the same verifier that runs during an apply can be replayed against an
+    incident's pasted output months later, with no host present and nothing
+    mutated.
+    """
+    from .exposure import Severity, observation_from_text, verify_exposure
+
+    spec = _load(args.descriptor)
+    saves: dict[str, str] = {}
+    if args.iptables_v4:
+        saves["ipv4"] = Path(args.iptables_v4).read_text(encoding="utf-8")
+    if args.iptables_v6:
+        saves["ipv6"] = Path(args.iptables_v6).read_text(encoding="utf-8")
+    observation = observation_from_text(
+        socket_listing=(
+            Path(args.sockets).read_text(encoding="utf-8") if args.sockets else ""
+        ),
+        process_listing=(
+            Path(args.processes).read_text(encoding="utf-8") if args.processes else ""
+        ),
+        iptables_save=saves,
+        closed_port_behaviour=args.closed_port_behaviour,
+    )
+    report = verify_exposure(spec, observation)
+    print(f"descriptor digest: {report.descriptor_digest}")
+    for token in report.verified:
+        print(f"  ok       {token}")
+    for finding in report.findings:
+        marker = "REFUSED" if finding.severity is Severity.REFUSE else "note   "
+        print(f"  {marker}  [{finding.code}] {finding.detail}")
+    if not report.ok:
+        return EXIT_REFUSED
+    if not report.verified:
+        # Not a pass. A verifier with nothing to verify reports green for the
+        # wrong reason, and "no findings" over an empty binding set is exactly
+        # the shape of a check that has silently stopped looking.
+        print(
+            "error: no declared publication was verified — the descriptor "
+            "declares none, or the observation was empty. Green over an empty "
+            "set is not a proof",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    return EXIT_OK
+
+
 def cmd_drift(args: argparse.Namespace) -> int:
     from .drift import Observation, compare
 
@@ -614,6 +664,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--providers",
         action="store_true",
         help="also print the provider capability matrix",
+    )
+
+    verify = add(
+        "exposure-verify",
+        cmd_exposure_verify,
+        "check RECORDED host output against the declared exposure",
+    )
+    verify.add_argument("--sockets", help="`ss -tlnp` output")
+    verify.add_argument("--processes", help="a process listing containing docker-proxy")
+    verify.add_argument("--iptables-v4", help="`iptables-save` output")
+    verify.add_argument("--iptables-v6", help="`ip6tables-save` output")
+    verify.add_argument(
+        "--closed-port-behaviour",
+        default="unknown",
+        choices=["unknown", "drop", "reset"],
+        help=(
+            "how this host answers a closed port. On a DROPPING host an "
+            "external probe cannot tell loopback-bound from "
+            "wildcard-bound-and-dropped, so the conclusion stays inconclusive "
+            "without on-host socket evidence"
+        ),
     )
 
     observe = add(
