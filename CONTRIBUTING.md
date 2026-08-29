@@ -5,13 +5,15 @@ Human developer rules. Agents follow the same canon via `AGENTS.md`
 
 ## Gates before every commit
 
-Tests run on Dotmac Observer in a fresh isolated worktree; do not install test
-dependencies or run test commands on a workstation. Local static checks are
+Tests run on the dedicated test server (85.190.246.211) in a fresh isolated
+worktree; do not install test dependencies or run test commands on a
+workstation, and never on Dotmac Observer — a capped run there once OOM-killed
+Prometheus (`AGENTS.md`, "Test host"). Local static checks are
 allowed. GitHub CI remains the merge owner.
 
 ```bash
 make check        # exact Poetry/lock, ruff, import-linter, mypy, bandit, format
-# On Observer only:
+# On the dedicated test server only:
 make test-unit
 make test-db-up && make test-integration && make test-db-down
                   # Postgres RLS canaries — required for anything touching
@@ -19,7 +21,7 @@ make test-db-up && make test-integration && make test-db-down
 ```
 
 All relevant gates must be green before push. `TEST_DB_PORT` is
-`?=`-overridable if the disposable Observer port is taken.
+`?=`-overridable if the disposable test-server port is taken.
 
 ## Test-first expectations
 
