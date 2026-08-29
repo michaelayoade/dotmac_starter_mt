@@ -1,0 +1,5 @@
+  15656 /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 5434 -container-ip 172.17.0.2 -container-port 5432 -use-listen-fd
+ 282843 /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 55439 -container-ip 172.17.0.3 -container-port 5432 -use-listen-fd
+1136702 /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 18443 -container-ip 172.19.0.2 -container-port 8080 -use-listen-fd
+1136709 /usr/bin/docker-proxy -proto tcp -host-ip ::1 -host-port 18443 -container-ip 172.19.0.2 -container-port 8080 -use-listen-fd
+1136725 /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 18445 -container-ip 172.19.0.2 -container-port 8080 -use-listen-fd

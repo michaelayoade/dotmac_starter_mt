@@ -1,0 +1,5 @@
+LISTEN 0      4096       127.0.0.1:18445      0.0.0.0:*    users:(("docker-proxy",pid=1136725,fd=7))                
+LISTEN 0      4096       127.0.0.1:18443      0.0.0.0:*    users:(("docker-proxy",pid=1136702,fd=7))                
+LISTEN 0      4096       127.0.0.1:55439      0.0.0.0:*    users:(("docker-proxy",pid=282843,fd=7))                 
+LISTEN 0      4096       127.0.0.1:5434       0.0.0.0:*    users:(("docker-proxy",pid=15656,fd=7))                  
+LISTEN 0      4096           [::1]:18443         [::]:*    users:(("docker-proxy",pid=1136709,fd=7))                

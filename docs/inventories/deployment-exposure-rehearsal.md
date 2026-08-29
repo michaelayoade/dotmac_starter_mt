@@ -1,9 +1,77 @@
 # Exposure rehearsal — Lane 3, and what it must be authorized to touch
 
-**Status 2026-08-29: PLANNED, NOT RUN. Nothing in this document is evidence.**
-It is the execution plan for the gate that blocks publication of
-`dotmac-deployment-foundation` `0.3.0a1`, and the explicit request for the two
-authorizations it needs. Neither has been granted.
+**Status 2026-08-29: RUN. 14 of 16 items CLOSED; 2 remain.** Both roles were
+authorized and both were used. The observed bytes are checked in at
+`scripts/exposure-rehearsal/observed/`, and the fixture that produced them is
+`scripts/exposure-rehearsal/product.toml`.
+
+## Result
+
+| Item | Result |
+|---|---|
+| 1-3 apply under the lock, snapshot, non-recreating apply refused | **partial** — applied with `up -d --force-recreate` and a pre-state snapshot, but not driven through `ExposureTransaction`: no `ExposureEffects` implementation exists for a real host yet |
+| 4 socket re-observation | **CLOSED** — 18443 on `127.0.0.1` AND `[::1]`; 18445 on `127.0.0.1` only; no `0.0.0.0:`, no `[::]:` |
+| 5 `docker-proxy` PIDs new, one per family | **CLOSED** — 1136702 / 1136709 / 1136725 |
+| 6 firewall re-observation | **n/a for this fixture** — every publication is `loopback` or `none`, so the derived plan is empty by construction |
+| 7 inert v6 chain fixture | **NOT captured** — no v6 rule to observe; needs a `private` publication |
+| 8 rollback | **partial** — teardown restored the pre-state exactly (sockets gone, both `DOCKER-USER` chains unchanged), but a PROVOKED transactional rollback was not driven |
+| 9 digest equality | **CLOSED** — `sha256:9b748af9…` identical across the descriptor's canonical document and the verification report |
+| 10 `exposure = "none"` emits no socket | **CLOSED** — 18444 absent from `ss` |
+| 11 target closed-port behaviour | **CLOSED** — Role A **RSTs** (6-7 ms), so probes here can conclude absence |
+| 12 privileged-vantage refusal on a real probe | **CLOSED** — see below |
+| 13-15 external negatives + positive controls, both families | **CLOSED** — see below |
+| 16 `private` reachable from inside its source set | **NOT run** — this fixture declares no `private` publication |
+
+### The external proof, item 13-15
+
+From Role B, all in one run:
+
+```
+IPv4 POSITIVE CONTROL  ssh/22 over IPv4            OPEN
+  18443 / 18445 / 18444 over IPv4                  refused
+IPv6 POSITIVE CONTROL  ssh/22 over IPv6            OPEN
+  18443 / 18445 / 18444 over IPv6                  refused
+```
+
+Both positive controls fired, so the six refusals mean "not reachable" rather
+than "the path is broken". This is the release's central claim, measured: an
+IPv6 socket declared loopback refusing the internet.
+
+### The trap, reproduced live — item 12
+
+Same port, same minute, two vantages:
+
+```
+workstation (inside 160.119.124.0/22) -> ERP 9001 : OPEN
+Role B      (outside every allowlist) -> ERP 9001 : refused
+```
+
+`accept_public_exposure_evidence` then **refused** the workstation result,
+refused an unenumerated vantage, and **accepted** Role B — the negative control
+that stops the refusal being a blanket ban. Unit coverage proves the function
+refuses a constructed vantage; this proves it refuses the actual connection
+that produced two false P0 escalations.
+
+### What the run also found
+
+**The verifier fired `undeclared_socket` on two sockets belonging to other work
+on the shared host** (`127.0.0.1:55439`, `127.0.0.1:5434`). Correct behaviour,
+and the other-direction sweep earning its place: a verifier that only walks the
+descriptor cannot see the port the descriptor does not mention.
+
+**Role A is not a clean host.** It carries four containers from other agents'
+work, which the plan below asks it not to. That cost nothing here only because
+this fixture derives no firewall rules; a `private` publication would write
+port-scoped rules into shared chains, and a snapshot-restoring rollback on a
+shared host can delete a rule another agent added mid-run.
+
+**nginx cannot start under the facility's `read_only: true`** without a tmpfs
+for `/var/cache/nginx`. Correct hardening, and the reason the fixture uses a
+server that writes nothing.
+
+---
+
+The rest of this document is the plan the run followed.
 
 `deployment-foundation-rehearsal.md` describes Lanes 1 and 2 and remains the
 record for them. This is a third lane because it proves a different thing:
