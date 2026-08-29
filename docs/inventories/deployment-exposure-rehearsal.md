@@ -13,14 +13,14 @@ authorized and both were used. The observed bytes are checked in at
 | 4 socket re-observation | **CLOSED** — 18443 on `127.0.0.1` AND `[::1]`; 18445 on `127.0.0.1` only; no `0.0.0.0:`, no `[::]:` |
 | 5 `docker-proxy` PIDs new, one per family | **CLOSED** — 1136702 / 1136709 / 1136725 |
 | 6 firewall re-observation | **n/a for this fixture** — every publication is `loopback` or `none`, so the derived plan is empty by construction |
-| 7 inert v6 chain fixture | **NOT captured** — no v6 rule to observe; needs a `private` publication |
+| 7 inert v6 chain fixture | **BLOCKED** — needs a `private` publication, which needs a clean host (see below) |
 | 8 rollback | **partial** — teardown restored the pre-state exactly (sockets gone, both `DOCKER-USER` chains unchanged), but a PROVOKED transactional rollback was not driven |
 | 9 digest equality | **CLOSED** — `sha256:9b748af9…` identical across the descriptor's canonical document and the verification report |
 | 10 `exposure = "none"` emits no socket | **CLOSED** — 18444 absent from `ss` |
 | 11 target closed-port behaviour | **CLOSED** — Role A **RSTs** (6-7 ms), so probes here can conclude absence |
 | 12 privileged-vantage refusal on a real probe | **CLOSED** — see below |
 | 13-15 external negatives + positive controls, both families | **CLOSED** — see below |
-| 16 `private` reachable from inside its source set | **NOT run** — this fixture declares no `private` publication |
+| 16 `private` reachable from inside its source set | **BLOCKED** — same prerequisite |
 
 ### The external proof, item 13-15
 
@@ -59,11 +59,18 @@ on the shared host** (`127.0.0.1:55439`, `127.0.0.1:5434`). Correct behaviour,
 and the other-direction sweep earning its place: a verifier that only walks the
 descriptor cannot see the port the descriptor does not mention.
 
-**Role A is not a clean host.** It carries four containers from other agents'
-work, which the plan below asks it not to. That cost nothing here only because
-this fixture derives no firewall rules; a `private` publication would write
-port-scoped rules into shared chains, and a snapshot-restoring rollback on a
-shared host can delete a rule another agent added mid-run.
+**Role A is not a clean host, and this is now a PREREQUISITE rather than a
+preference.** It carries four containers from other agents' work, which the
+plan below asks it not to. That cost nothing in this run only because the
+fixture derives no firewall rules at all — every publication is `loopback` or
+`none`.
+
+Items 7 and 16 need a `private` publication, and a `private` publication writes
+port-scoped rules into **shared** chains. Two consequences, and the second is
+the one that bites: a snapshot-restoring rollback replays the chain state
+captured before the run, so a rule another agent added *during* it is deleted
+by the rollback rather than by anything anyone reviewed. **Do not attempt items
+7 or 16 on the current Role A.** They need a host carrying nothing else.
 
 **nginx cannot start under the facility's `read_only: true`** without a tmpfs
 for `/var/cache/nginx`. Correct hardening, and the reason the fixture uses a
@@ -155,8 +162,44 @@ deployment lock, hold a pre-change snapshot, re-observe its own sockets,
 
 ### Role B — independent IPv6-capable external probe vantage — **`94.72.99.155`**
 
-**Status: named and VERIFIED, 2026-08-29.** Sources: v4 `94.72.99.155`,
-v6 `2a02:c204:2353:7605::1`.
+**Status: usable for Role A, and NOT yet a general external vantage.**
+Sources: v4 `94.72.99.155`, v6 `2a02:c204:2353:7605::1`.
+
+The general claim "outside every Dotmac allowlist" is **RETRACTED**. It was
+established by refusals measured only over public transport, and the host holds
+a **second NIC** — `eth1 10.0.0.4/22`, routing into the `idp-ha` private
+network and reaching both nodes there. A vantage that is untrusted publicly and
+inside the perimeter privately is the more dangerous shape, not a lesser one:
+its refusals read as proof of isolation that the private path never had to
+satisfy.
+
+**Standing rule until that NIC is detached: probe from this host only where
+`ip route get <target>` shows the path leaving via `eth0`.**
+
+For Role A that is established, measured rather than assumed:
+
+```
+ip route get 85.190.246.211        -> via 94.72.96.1 dev eth0 src 94.72.99.155
+ip -6 route get 2a02:c204:2353:7655::1 -> dev eth0 src 2a02:c204:2353:7605::1
+ip route get 10.0.0.2              -> dev eth1 src 10.0.0.4
+```
+
+Role A is not in `10.0.0.0/22`, so the private NIC was not in the path and
+contaminated nothing measured against it. The third line is the control: it
+shows the routing query discriminates rather than always answering `eth0`.
+
+#### The verification step this was missing
+
+The original qualification probed *targets* and never enumerated the
+*vantage*. Refusals over one transport were read as refusals over all
+transports — which is the privileged-vantage trap inverted, and it was walked
+into while writing the guard against it.
+
+**Enumerate a vantage's interfaces and routes BEFORE trusting its refusals.**
+`ip -br addr` and `ip route get` for each intended target, recorded alongside
+the probe output. A refusal is scoped to the transport that carried it, and a
+probe whose shape does not match the claim it is testing tells you about the
+probe.
 
 The target may still not stand in for it. A probe originating on the machine
 under test never leaves that host's own stack, so it cannot distinguish a
@@ -348,8 +391,12 @@ be caught rather than repeated.
 
 ### CLOSES with Role B — 4 items, no longer unmonitored
 
-`94.72.99.155` is verified outside every applicable allowlist, so these four
-are now REQUIRED to close rather than recorded as gaps.
+These four are REQUIRED to close rather than recorded as gaps. Each result
+below is scoped to the transport that carried it: `ip route get` confirmed both
+paths to Role A leave via `eth0`, so these are statements about **public-transport
+reachability to Role A**, which is exactly what items 13-15 ask for. They are
+not statements about Role B's isolation in general, and this document does not
+make one.
 
 | # | Gate item | Expected |
 |---|---|---|
