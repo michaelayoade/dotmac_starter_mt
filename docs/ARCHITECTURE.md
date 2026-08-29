@@ -546,7 +546,11 @@ entitlement grants. Billing may update subscription state, and metering may
 feed quota and/or billing, but request handlers consult local entitlement and
 quota decisions—not payment providers or raw license payloads.
 
-### Build and deployment execution: `dotmac-deployment-foundation` (as built, 2026-08-28)
+### Build and deployment execution: `dotmac-deployment-foundation`
+
+As built through 2026-08-28, with the independent-controller extension
+accepted on 2026-08-29. The documentation records the contract; it is not by
+itself implementation, publication or adoption evidence.
 
 ADR-0003 § "Infrastructure provisioning and deployment execution" declared
 profile-specific deployment assets and reusable providers. It was never built,
@@ -568,9 +572,9 @@ properties with a planted-defect proof for each.
 | Owner | Owns | Explicitly does not own |
 |---|---|---|
 | `dotmac-kernel` | in-process contracts and mechanics: sessions and transaction boundaries, tenant priming, conflict savepoints, public error contracts, manifest contracts, migration-graph orchestration, the liveness/readiness and telemetry *interfaces*, the provisioning protocols | anything that renders infrastructure |
-| `dotmac-deployment-foundation` | one release on one host: the descriptor and its refusals, the deterministic renderers, the hardened image contract and its audit, the ordered plan and its gates, backup/restore assurance, ingress providers, resource attributes and deployment annotations, the common alert catalogue, the conformance kit | durable fleet records, health status, signal storage, any in-process runtime contract |
-| `dotmac-deployment-control` | durable fleet intent: desired state, immutable plans, approvals, rollout decisions and attempts, authenticated acknowledgements, drift-as-authority | Docker, Nginx, SSH, cloud providers, migrations, backup, monitoring — its own `EXTRACTION.toml` contract already says so, and ADR-0070 does not widen it |
-| the product assembly | declarative input: identity, manifest reference, process roles and commands, worker/queue topology, image system packages, migration command, readiness dependencies, exposed ports, product hooks, domain alert rules, justified capability exceptions | the deployment engine, the renderers, any infrastructure alert |
+| `dotmac-deployment-foundation` | one release on one host: the unchanged product descriptor and its refusals, the separate execution-envelope contract, controller-provenance verification and transition decision, canonical typed-plan execution and post-effect observation, deterministic renderers, the hardened image contract and its audit, backup/restore assurance, ingress providers, resource attributes and deployment annotations, the common alert catalogue, the conformance kit | durable fleet records, health status, signal storage, any in-process runtime contract |
+| `dotmac-deployment-control` | durable fleet intent: desired state, immutable plans, approvals, rollout decisions and attempts, authenticated acknowledgements, drift-as-authority; it may freeze an execution's plan digest and exact override as durable intent | Docker, Nginx, SSH, cloud providers, migrations, backup, monitoring or importing/executing Foundation — its own `EXTRACTION.toml` contract already says so, and ADR-0070 does not widen it |
+| the product assembly | declarative input in unchanged `ProductDeploymentSpec.v1`: identity, manifest reference, process roles and commands, worker/queue topology, image system packages, migration command, readiness dependencies, exposed ports, product hooks, domain alert rules, justified capability exceptions | the deployment engine, controller or authorizer provenance, transition overrides, the renderers, any infrastructure alert |
 | `dotmac-platform-health` | authenticated normalized health *observations* and their projection | raw logs, metrics, traces, deployment decisions, monitoring infrastructure |
 | the external Observability platform | storage, queries, dashboards, alert delivery, operator access | alert *definitions*, which are the foundation's and the product's |
 
@@ -587,6 +591,66 @@ injected `Effects` protocol. That is what makes the twenty-case
 failure-injection matrix a unit-test file rather than a disposable-VM exercise —
 and a gate that has never been shown to fire is a gate nobody should trust. Two
 of the source engine's gates were in fact found to be wrong only in production.
+
+**The application and its controller have independent identities.** ADR-0070
+Amendment A1 accepts a separate `DeploymentExecutionEnvelope.v1`; it does not
+revise `ProductDeploymentSpec.v1`. The envelope belongs to Foundation's
+execution boundary and carries the exact released Foundation wheel and launcher
+hashes and source coordinate, authorizer provenance, expected current release, candidate
+release, Git-relation evidence, exact plan digest and at most one exact typed
+override. An independent launcher verifies its own envelope-pinned SHA-256 and
+that wheel by SHA-256, then starts the wheel with isolated Python outside the
+staged, current and rollback application checkouts. Application code may supply
+descriptor data and bounded hooks that become typed plan steps, but cannot
+supply the deployment executable, import, shadow or downgrade the judge, or
+bypass Foundation's executor.
+
+The trust root is deliberately outside both identities. A root-owned bootstrap
+loads a root-owned policy with distinct release and authorization Ed25519 public
+keys plus exact API-origin, repository, protected-ref, workflow and reusable-
+workflow authorities. It authenticates completed-success release evidence before executing the
+released launcher, then authenticates completed-success authorization evidence
+that binds the envelope, controller release and exact digest and repository
+metadata of a separately materialized application-history bundle. The
+authorizer checkout is used only to prove the protected workflow remote and
+bytes; ancestry is recomputed only from the separate product-history checkout
+created from that bundle.
+
+The candidate configuration digest is the SHA-256 of the exact descriptor
+bytes, while the plan digest is a separate transition coordinate that may
+include the previous image. This keeps release identity independent of the host
+state from which that release is reached.
+
+Compose services carry a declared runtime kind. Nonzero product roles are
+`release`; managed dependencies and the collector are `auxiliary`; migration
+is `migration`. Only release services join the application quorum, and every
+one carries one canonical role roster. Source and manifest come from the
+inspected image object and image identity from the exact configured repository
+digest. The controller independently renders the exact candidate configuration,
+obtains per-release-role hashes with `docker compose config --hash`, and
+compares them with the running containers' Compose config-hash labels.
+Controller state compares those observations and never supplies a missing
+coordinate. Its atomic replacement synchronizes the file and parent directory.
+
+The independently launched controller acquires the deployment lock before observing the current release,
+and comparison with `expected_current_release`, relation evaluation, plan-digest
+verification, authorization, typed-plan execution and post-effect runtime
+observation stay under the same lock. First deployment,
+same release with identical image/configuration/manifest identity, and a proved
+forward descendant are allowed by default. A rollback, diverged history or
+unprovable relation is refused without an override bound exactly to the current
+release, candidate, controller wheel and launcher, plan and authorizing decision. The same
+source revision with a different image, configuration or product-manifest
+digest is a conflicting rebuild, not an idempotent replay. An override changes
+only the source-transition decision: it never bypasses migration compatibility,
+never permits a `maintenance_required` release online and never authorizes an
+automatic migration downgrade.
+
+The isolated launch environment removes remote-Docker selectors such as
+`DOCKER_HOST` and `DOCKER_CONTEXT`. The authorizer chooses the host by choosing
+the runner; the controller observes the local daemon and the product's Compose
+project there, so an ambient environment cannot redirect a target reference to
+another Docker engine.
 
 **The provider seam is where a host lives, and there is exactly one provider.**
 `engine/run.py` defines `Effects` — nineteen methods, no implementation — and
@@ -620,12 +684,14 @@ filesystem walk is a failed evidence collection: the gate preserves its
 partial listing and diagnostics, then refuses instead of truncating the input
 and auditing an empty file.
 
-**Adoption status.** Version `0.2.0a1` is published, registry-install-verified
-and tagged; `0.2.0a2` is declared for the strict image-collector repair and is
-not published yet. No product has completed adoption or retired its existing
-engine. ERP is the first candidate and may pin a2 only after its protected
-release oracle succeeds; Integrator and Sub remain later candidates. Decision:
-ADR-0070. Sources and the eighteen defects deliberately not extracted:
+**Adoption status.** Version `0.2.0a2` is the latest published Foundation
+release. The accepted independent-controller contract is targeted at
+`0.3.0a1`, which is declared-unpublished: the documentation is not a version,
+wheel, protected release, product pin or host rehearsal. No product has
+completed adoption or retired its existing engine. ERP remains the first
+candidate; Integrator and Sub remain later candidates. Decision: ADR-0070,
+including Amendment A1. Sources, eighteen deliberately uncarried defects and
+the accepted nineteenth controller correction:
 `docs/inventories/deployment-foundation-sources.md`.
 
 ### Target tenant lifecycle and global commercial foundations

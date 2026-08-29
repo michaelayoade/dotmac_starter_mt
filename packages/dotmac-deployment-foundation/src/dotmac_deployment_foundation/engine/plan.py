@@ -579,7 +579,7 @@ def _rollback_decision(
 def format_plan(plan: DeploymentPlan) -> str:
     """A human-readable plan.
 
-    This is what `dotmac-deploy deploy --dry-run` prints and what a reviewer
+    This is what `dotmac-deploy deploy` without `--execute` prints and what a reviewer
     reads on a pull request. The gate/mutate boundary is drawn explicitly
     because it is the one thing a reader needs before authorising a run.
     """

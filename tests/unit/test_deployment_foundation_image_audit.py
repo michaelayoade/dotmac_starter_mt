@@ -36,6 +36,7 @@ GOOD_INSPECT: Mapping[str, Any] = {
         "Entrypoint": ["uvicorn"],
         "Cmd": ["app.main:app", "--host", "127.0.0.1"],
         "Labels": {
+            "org.dotmac.product.manifest.digest": "sha256:" + "d" * 64,
             "org.opencontainers.image.revision": REVISION,
             "org.opencontainers.image.source": "https://example.invalid/product",
             "org.opencontainers.image.version": "1.2.3",

@@ -81,6 +81,7 @@ _MIGRATION_MARKERS: Final[tuple[str, ...]] = (
 )
 
 _REQUIRED_LABELS: Final[tuple[str, ...]] = (
+    "org.dotmac.product.manifest.digest",
     "org.opencontainers.image.revision",
     "org.opencontainers.image.source",
     "org.opencontainers.image.version",

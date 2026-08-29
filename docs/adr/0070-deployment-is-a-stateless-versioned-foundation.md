@@ -224,3 +224,138 @@ Enforcement is:
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a
   separate change per product, gated on proven parity.
+
+## Amendment A1 — 2026-08-29: the deployment controller is independent
+
+- Status: Accepted
+- Release target: `dotmac-deployment-foundation` `0.3.0a1`
+  (declared-unpublished)
+
+The original decision correctly made the deployment engine a released
+Foundation distribution, but did not make the identity of the code making the
+deployment decision independent of the application being deployed. A launcher
+that imports its verifier from the staged, current or rollback application
+checkout lets that application choose, omit or downgrade its own judge. Exact
+application-image verification does not close that loop: application identity
+and controller identity are separate facts and both must be proved before a
+host mutation.
+
+This amendment does **not** create `ProductDeploymentSpec.v2`.
+`ProductDeploymentSpec.v1` remains unchanged and continues to contain only the
+product's declarative topology and build/deployment inputs. Controller and
+authorization facts do not belong to the product being judged.
+
+Foundation defines a separate immutable `DeploymentExecutionEnvelope.v1` for
+one authorized execution. It contains:
+
+- controller provenance: the Foundation distribution name and release, the
+  exact SHA-256 values of the released wheel and independent launcher, and its immutable source/release
+  coordinate;
+- authorizer provenance: the exact HTTPS server origin, repository ID/name,
+  protected ref, workflow ID/path/event, revision and completed-success run
+  coordinate that authorized the execution;
+- the candidate release identity, the **expected current release** identity,
+  and the exact digest of the ordered deployment plan;
+- Git relation evidence for current versus candidate, including the relation
+  kind and digest of the exact signed-authorization-bound
+  `ApplicationHistorySnapshot.v1` used to recompute it; and
+- at most one exact, typed transition override. An override names the refused
+  relation, current release, candidate release, controller wheel and launcher, plan digest,
+  authorizing decision and reason. A free-form force flag is not an
+  override, and an override for one transition cannot authorize another.
+
+The candidate configuration digest hashes the exact product descriptor bytes.
+It is deliberately not the plan digest: the latter includes transition context
+such as the previous image, while release identity must remain the same when
+two hosts reach one candidate from different predecessors.
+
+An independent host launcher verifies its own bytes and the released Foundation
+wheel against the envelope's exact SHA-256 values and starts the wheel with an isolated Python interpreter
+outside every staged, current and rollback application checkout. The launched
+controller measures its own distribution and source provenance and refuses a
+mismatch. The application artifact supplies descriptor data and bounded hooks
+that become typed plan steps; it never supplies a deployment executable,
+shadows or downgrades the controller, or bypasses Foundation's executor.
+
+The independently launched controller acquires the deployment lock **before** observing the current
+release. Observation, comparison with `expected_current_release`, Git-relation
+evaluation, plan-digest verification, transition authorization, typed-plan
+execution and post-effect runtime observation remain under that same lock. A current release changing between authorization and execution
+is stale evidence and is refused, not reconciled by silently rebuilding the
+plan.
+
+The default transition decision is exact:
+
+| Observed relation | Default decision |
+|---|---|
+| no current release | allow the first deployment |
+| same source and the same image/configuration/product-manifest identity | allow an idempotent same-release execution |
+| candidate is a proved descendant of current | allow a forward deployment |
+| candidate is an ancestor of current | refuse rollback without the exact typed override |
+| histories diverge | refuse without the exact typed override |
+| relation cannot be proved | refuse without the exact typed override |
+| same source revision but a different image, configuration or product-manifest digest | refuse as a conflicting rebuild, never treat it as the same release |
+
+An override changes only this source-transition decision. It never bypasses the
+release's migration-compatibility declaration, never makes a
+`maintenance_required` release eligible for the online path, and never permits
+an automatic migration downgrade. A rollback remains an image rollback only
+when the exact release evidence proves the preceding schema is compatible;
+otherwise recovery is forward repair or a separately authorized restore.
+
+Ownership remains split. Foundation owns the envelope schema, controller
+provenance verification and the host-side transition decision. Deployment
+Control may durably freeze the plan digest, approval and override as fleet
+intent, but does not import or execute Foundation and gains no host mechanism.
+The product assembly maps its unchanged descriptor into a plan and owns none of
+the envelope's controller, authorizer or override fields.
+
+This is an accepted contract extension with a source implementation and
+sensitivity canaries, not evidence of CI acceptance, publication or adoption.
+`0.3.0a1` is the declared-unpublished release target; independent-launcher
+rehearsal, protected release and exact-pin adoption each still require their
+own evidence.
+
+### A1 review hardening — 2026-08-29
+
+Agreement among a caller-supplied wheel, launcher and receipt is not
+authentication. Before `0.3.0a1` may publish, A1 therefore also requires:
+
+- a separately provisioned, root-owned bootstrap and root-owned trust policy;
+  neither may come from the application checkout, Foundation wheel or the
+  registry holding the released artifacts;
+- distinct Ed25519 release and deployment-authorization keys, signer purposes
+  and domain-separated payloads. A release signature cannot authorize a
+  deployment, and an authorization signature cannot authenticate a release;
+- a post-completion release finalizer. It proves the protected repository,
+  API origin, protected ref, workflow, exact workflow/reusable-workflow bytes,
+  run attempt, event, head revision and successful conclusion before signing
+  exact wheel, launcher and receipt hashes and sizes. A workflow never attests
+  its own conclusion while running;
+- an equivalent post-completion authorization finalizer. Its signed evidence
+  binds the exact execution envelope, controller release and the digest and
+  repository metadata of one separately materialized application-history
+  bundle;
+- separate authorizer and application-history checkouts. The authorizer proves
+  who approved; the signed application bundle proves ancestry in the product
+  repository. One checkout may never answer both questions;
+- create-only publication for every release artifact. A later privileged
+  deletion/recreation changes signed bytes and is therefore a refusal, never
+  successful code substitution;
+- live observation of all four application release coordinates from only the
+  declared release-bearing roles. Managed databases, Redis, collectors and
+  migration one-shots are typed auxiliary services and do not join the
+  application quorum. Every release role must agree on the exact role roster;
+- image-object proof for source revision and product-manifest digest and exact
+  repository-digest proof for image identity. The controller independently
+  renders the exact candidate configuration, obtains per-release-role hashes
+  with `docker compose config --hash`, and compares them with the running
+  containers' Compose config-hash labels. State is comparison evidence and
+  never fills an absent live coordinate; and
+- durable state replacement that synchronizes both the file and its parent
+  directory.
+
+The dedicated fleet test server is `85.190.246.211`. Observer remains the
+observability, OpenBao and Knowledge control plane and is not a general test
+runner. This names validation authority only; it does not authorize an SSH
+session, release or deployment.

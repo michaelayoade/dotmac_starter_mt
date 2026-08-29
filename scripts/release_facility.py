@@ -39,6 +39,16 @@ So this script does not import the released package at all. It shells out to
 the installed CONSOLE SCRIPT, in a clean venv, exactly as an operator or a
 product's CI would.
 
+## The independently delivered controller
+
+The wheel is published once through the private PyPI registry. The controller
+launcher is not part of that wheel, so `create-controller-receipt` binds the
+exact wheel and `scripts/run_deployment_controller.py` to one strict
+`DeploymentControllerReleaseReceipt.v1`. The workflow preserves all three as
+run provenance, publishes only the launcher and receipt as durable Forgejo
+generic-package files, and verifies their downloaded bytes before tagging. It
+never creates a second generic copy of the wheel.
+
 ## The classification is checked, not trusted
 
 `resolve` reads the package's `EXTRACTION.toml` and refuses anything whose
@@ -59,7 +69,10 @@ Stdlib only, deliberately: this runs before anything is installed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -75,6 +88,26 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = REPO_ROOT / ".github" / "release-facilities.json"
 
 CLASSIFICATION: Final = "universal-facility"
+CONTROLLER_RECEIPT_SCHEMA: Final = "DeploymentControllerReleaseReceipt.v1"
+CONTROLLER_RECEIPT_FILENAME: Final = f"{CONTROLLER_RECEIPT_SCHEMA}.json"
+CONTROLLER_GENERIC_PACKAGE: Final = "dotmac-deployment-controller"
+
+_DIGEST: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
+_REVISION: Final = re.compile(r"^[0-9a-f]{40}$")
+_VERSION: Final = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:a[0-9]+)?$")
+
+_RECEIPT_FIELDS: Final = frozenset(
+    {
+        "schema",
+        "distribution",
+        "exact_version",
+        "artifact_sha256",
+        "launcher_sha256",
+        "source_revision",
+        "release_run_id",
+        "tag",
+    }
+)
 
 # Facts only a STATEFUL module has. An entry declaring one is in the wrong
 # lane, and accepting it here would publish a module while skipping every
@@ -142,6 +175,30 @@ def resolve(distribution: str) -> dict:
             "requires."
         )
 
+    receipt_schema = entry.get("controller_receipt_schema")
+    if receipt_schema != CONTROLLER_RECEIPT_SCHEMA:
+        raise ReleaseRefused(
+            f"{distribution}: controller_receipt_schema must be "
+            f"{CONTROLLER_RECEIPT_SCHEMA!r}, got {receipt_schema!r}"
+        )
+    generic_package = entry.get("controller_generic_package")
+    if generic_package != CONTROLLER_GENERIC_PACKAGE:
+        raise ReleaseRefused(
+            f"{distribution}: controller_generic_package must be "
+            f"{CONTROLLER_GENERIC_PACKAGE!r}, got {generic_package!r}"
+        )
+    launcher_value = entry.get("controller_launcher")
+    if not isinstance(launcher_value, str) or not launcher_value:
+        raise ReleaseRefused(
+            f"{distribution}: controller_launcher must be a repository-relative path"
+        )
+    launcher_path = (REPO_ROOT / launcher_value).resolve()
+    if not launcher_path.is_relative_to(REPO_ROOT) or not launcher_path.is_file():
+        raise ReleaseRefused(
+            f"{distribution}: controller_launcher {launcher_value!r} must resolve "
+            "to a file inside this repository"
+        )
+
     return {**entry, "distribution": distribution, "package_path": package_dir}
 
 
@@ -157,8 +214,7 @@ def cmd_resolve(args: argparse.Namespace) -> None:
 
     if manifest["name"] != args.distribution:
         raise ReleaseRefused(
-            f"pyproject declares {manifest['name']!r}, dispatched "
-            f"{args.distribution!r}"
+            f"pyproject declares {manifest['name']!r}, dispatched {args.distribution!r}"
         )
     if args.version and manifest["version"] != args.version:
         raise ReleaseRefused(
@@ -171,10 +227,20 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     # manifest_attr or kernel_floor — a facility has none, and emitting an
     # empty value would let a later step read it as "unknown" rather than
     # "absent".
-    for key in ("package_dir", "entry_point", "tag_prefix"):
+    for key in (
+        "package_dir",
+        "entry_point",
+        "tag_prefix",
+        "controller_launcher",
+        "controller_receipt_schema",
+        "controller_generic_package",
+    ):
         print(f"{key}={entry[key]}")
     print(f"version={manifest['version']}")
     print(f"tag={entry['tag_prefix']}{manifest['version']}")
+    print(
+        f"controller_artifact_name={args.distribution}-controller-{manifest['version']}"
+    )
 
 
 def cmd_inspect(args: argparse.Namespace) -> None:
@@ -256,6 +322,246 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             + "\n  - ".join(problems)
         )
     print(f"{wheel.name}: content policy OK ({len(names)} entries)")
+
+
+def _strict_object(
+    value: object, *, name: str, fields: frozenset[str]
+) -> dict[str, object]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ReleaseRefused(f"{name} must be an object")
+    document = dict(value)
+    missing = sorted(fields - set(document))
+    unknown = sorted(set(document) - fields)
+    if missing or unknown:
+        raise ReleaseRefused(
+            f"{name} fields differ: missing={missing}, unknown={unknown}"
+        )
+    return document
+
+
+def _strict_text(
+    value: object,
+    *,
+    name: str,
+    pattern: re.Pattern[str] | None = None,
+) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ReleaseRefused(f"{name} must be a non-empty, trimmed string")
+    if pattern is not None and not pattern.fullmatch(value):
+        raise ReleaseRefused(f"{name} has an invalid shape")
+    return value
+
+
+def _positive_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ReleaseRefused(f"{name} must be a positive integer")
+    return value
+
+
+def _sha256(path: Path, *, name: str) -> str:
+    if not path.is_file():
+        raise ReleaseRefused(f"{name} does not exist: {path}")
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise ReleaseRefused(f"cannot hash {name} {path}: {exc}") from exc
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _controller_receipt(
+    *,
+    entry: dict,
+    version: str,
+    source_revision: str,
+    release_run_id: int,
+    tag: str,
+    wheel: Path,
+    launcher: Path,
+) -> dict[str, object]:
+    version = _strict_text(version, name="exact_version", pattern=_VERSION)
+    source_revision = _strict_text(
+        source_revision, name="source_revision", pattern=_REVISION
+    )
+    release_run_id = _positive_int(release_run_id, name="release_run_id")
+    expected_tag = f"{entry['tag_prefix']}{version}"
+    if tag != expected_tag:
+        raise ReleaseRefused(f"controller tag is {tag!r}, expected {expected_tag!r}")
+
+    normalized_distribution = entry["distribution"].replace("-", "_")
+    expected_wheel_prefix = f"{normalized_distribution}-{version}-"
+    if not wheel.name.startswith(expected_wheel_prefix) or wheel.suffix != ".whl":
+        raise ReleaseRefused(
+            f"controller wheel {wheel.name!r} must start with "
+            f"{expected_wheel_prefix!r} and end in '.whl'"
+        )
+
+    launcher_source = entry["controller_launcher"]
+    expected_launcher = (REPO_ROOT / launcher_source).resolve()
+    if launcher.resolve() != expected_launcher:
+        raise ReleaseRefused(
+            f"controller launcher must be the allowlisted {launcher_source!r}, "
+            f"got {launcher}"
+        )
+
+    return {
+        "schema": CONTROLLER_RECEIPT_SCHEMA,
+        "distribution": entry["distribution"],
+        "exact_version": version,
+        "artifact_sha256": _sha256(wheel, name="controller wheel"),
+        "launcher_sha256": _sha256(launcher, name="controller launcher"),
+        "source_revision": source_revision,
+        "release_run_id": release_run_id,
+        "tag": tag,
+    }
+
+
+def _load_controller_receipt(path: Path) -> dict[str, object]:
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        document: dict[str, object] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ReleaseRefused(f"duplicate controller receipt field {key!r}")
+            document[key] = value
+        return document
+
+    try:
+        raw = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseRefused(f"cannot read controller receipt {path}: {exc}") from exc
+
+    receipt = _strict_object(
+        raw, name="controller release receipt", fields=_RECEIPT_FIELDS
+    )
+    if receipt["schema"] != CONTROLLER_RECEIPT_SCHEMA:
+        raise ReleaseRefused(
+            f"controller receipt schema is {receipt['schema']!r}, expected "
+            f"{CONTROLLER_RECEIPT_SCHEMA!r}"
+        )
+    _strict_text(receipt["distribution"], name="distribution")
+    _strict_text(receipt["exact_version"], name="exact_version", pattern=_VERSION)
+    _strict_text(receipt["artifact_sha256"], name="artifact_sha256", pattern=_DIGEST)
+    _strict_text(receipt["launcher_sha256"], name="launcher_sha256", pattern=_DIGEST)
+    _strict_text(receipt["source_revision"], name="source_revision", pattern=_REVISION)
+    _positive_int(receipt["release_run_id"], name="release_run_id")
+    _strict_text(receipt["tag"], name="tag")
+    return receipt
+
+
+def verify_controller_receipt(
+    *,
+    receipt_path: Path,
+    wheel: Path,
+    launcher: Path,
+    distribution: str,
+    version: str,
+    source_revision: str,
+    release_run_id: int,
+    tag: str,
+) -> dict[str, object]:
+    """Strictly rebind a receipt to expected coordinates and observed bytes."""
+    entry = resolve(distribution)
+    manifest = _declared(entry)
+    if manifest["version"] != version:
+        raise ReleaseRefused(
+            f"{distribution}: expected version {version!r} != package version "
+            f"{manifest['version']!r}"
+        )
+
+    receipt = _load_controller_receipt(receipt_path)
+    expected = {
+        "distribution": distribution,
+        "exact_version": version,
+        "source_revision": source_revision,
+        "release_run_id": release_run_id,
+        "tag": tag,
+    }
+    for field, value in expected.items():
+        if receipt[field] != value:
+            raise ReleaseRefused(
+                f"controller receipt {field} is {receipt[field]!r}, expected {value!r}"
+            )
+    if receipt["tag"] != f"{entry['tag_prefix']}{receipt['exact_version']}":
+        raise ReleaseRefused("controller receipt tag does not match its exact version")
+    observed_wheel = _sha256(wheel, name="controller wheel")
+    observed_launcher = _sha256(launcher, name="controller launcher")
+    if observed_wheel != receipt["artifact_sha256"]:
+        raise ReleaseRefused(
+            f"controller wheel hashes to {observed_wheel}, receipt requires "
+            f"{receipt['artifact_sha256']}"
+        )
+    if observed_launcher != receipt["launcher_sha256"]:
+        raise ReleaseRefused(
+            f"controller launcher hashes to {observed_launcher}, receipt requires "
+            f"{receipt['launcher_sha256']}"
+        )
+    return receipt
+
+
+def cmd_create_controller_receipt(args: argparse.Namespace) -> None:
+    entry = resolve(args.distribution)
+    manifest = _declared(entry)
+    if manifest["version"] != args.version:
+        raise ReleaseRefused(
+            f"{args.distribution}: requested version {args.version!r} != package "
+            f"version {manifest['version']!r}"
+        )
+
+    wheel = Path(args.wheel).resolve()
+    launcher = (REPO_ROOT / entry["controller_launcher"]).resolve()
+    receipt = _controller_receipt(
+        entry=entry,
+        version=args.version,
+        source_revision=args.source_revision,
+        release_run_id=args.release_run_id,
+        tag=args.tag,
+        wheel=wheel,
+        launcher=launcher,
+    )
+
+    bundle = Path(args.output_dir).resolve()
+    if bundle.exists() and any(bundle.iterdir()):
+        raise ReleaseRefused(f"controller release bundle is not empty: {bundle}")
+    bundled_wheel = bundle / "wheel" / wheel.name
+    bundled_launcher = bundle / "launcher" / launcher.name
+    bundled_wheel.parent.mkdir(parents=True, exist_ok=True)
+    bundled_launcher.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(wheel, bundled_wheel)
+    shutil.copyfile(launcher, bundled_launcher)
+    bundle.mkdir(parents=True, exist_ok=True)
+    (bundle / CONTROLLER_RECEIPT_FILENAME).write_text(
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    verify_controller_receipt(
+        receipt_path=bundle / CONTROLLER_RECEIPT_FILENAME,
+        wheel=bundled_wheel,
+        launcher=bundled_launcher,
+        distribution=args.distribution,
+        version=args.version,
+        source_revision=args.source_revision,
+        release_run_id=args.release_run_id,
+        tag=args.tag,
+    )
+    print(f"controller release receipt written to {bundle}")
+
+
+def cmd_verify_controller_receipt(args: argparse.Namespace) -> None:
+    verify_controller_receipt(
+        receipt_path=Path(args.receipt).resolve(),
+        wheel=Path(args.wheel).resolve(),
+        launcher=Path(args.launcher).resolve(),
+        distribution=args.distribution,
+        version=args.version,
+        source_revision=args.source_revision,
+        release_run_id=args.release_run_id,
+        tag=args.tag,
+    )
+    print("controller release receipt OK")
 
 
 def _venv(path: Path) -> tuple[Path, Path]:
@@ -388,6 +694,33 @@ def main() -> int:
     p.add_argument("--dist", required=True)
     p.add_argument("--descriptor", required=True)
     p.set_defaults(func=cmd_verify_wheel)
+
+    p = sub.add_parser(
+        "create-controller-receipt",
+        help="copy the exact controller wheel and launcher and bind their receipt",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--source-revision", required=True)
+    p.add_argument("--release-run-id", required=True, type=int)
+    p.add_argument("--tag", required=True)
+    p.add_argument("--wheel", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=cmd_create_controller_receipt)
+
+    p = sub.add_parser(
+        "verify-controller-receipt",
+        help="verify strict release coordinates and exact wheel/launcher bytes",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--source-revision", required=True)
+    p.add_argument("--release-run-id", required=True, type=int)
+    p.add_argument("--tag", required=True)
+    p.add_argument("--receipt", required=True)
+    p.add_argument("--wheel", required=True)
+    p.add_argument("--launcher", required=True)
+    p.set_defaults(func=cmd_verify_controller_receipt)
 
     p = sub.add_parser(
         "verify-registry",

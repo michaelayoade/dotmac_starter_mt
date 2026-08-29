@@ -167,7 +167,10 @@ class FakeEffects:
 
     def __init__(self, **overrides: object) -> None:
         self.present = True
-        self.labels: dict[str, str] = {"org.opencontainers.image.revision": REVISION}
+        self.labels: dict[str, str] = {
+            "org.opencontainers.image.revision": REVISION,
+            "org.dotmac.product.manifest.digest": MANIFEST_DIGEST,
+        }
         self.evidence: dict[str, str] = {"ci": "passed", "run": "1"}
         self.manifest = MANIFEST_DIGEST
         self.dirty = False
@@ -449,6 +452,30 @@ def test_owner_credentials_present_in_a_runtime_role_are_refused_at_parse_time()
             source="<test>",
         )
     assert "MIGRATION_DATABASE_URL" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    (
+        "/srv/dotmac/product-manifest.json",
+        "../product-manifest.json",
+        "deploy/../../product-manifest.json",
+        r"..\product-manifest.json",
+    ),
+)
+def test_manifest_path_must_stay_relative_to_the_staged_deploy_root(
+    manifest_path: str,
+) -> None:
+    toml_manifest_path = manifest_path.replace("\\", "\\\\")
+    with pytest.raises(SpecError, match="relative POSIX path without parent traversal"):
+        ProductDeploymentSpec.loads(
+            DESCRIPTOR.replace(
+                'manifest_path = "deploy/product-manifest.json"',
+                f'manifest_path = "{toml_manifest_path}"',
+                1,
+            ),
+            source="<test>",
+        )
 
 
 def test_a_failing_product_preflight_hook_refuses_before_mutation() -> None:
@@ -1075,3 +1102,16 @@ def test_an_unreadable_manifest_is_a_refusal_and_not_a_match() -> None:
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_manifest"
     assert "could not be read" in outcome.failure
+
+
+def test_a_manifest_not_bound_to_the_image_is_refused_before_mutation() -> None:
+    spec = load()
+    _, outcome = run(
+        spec,
+        FakeEffects(labels={"org.opencontainers.image.revision": REVISION}),
+    )
+
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "verify_manifest"
+    assert "org.dotmac.product.manifest.digest" in outcome.failure
+    assert not outcome.mutated

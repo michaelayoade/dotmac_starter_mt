@@ -87,13 +87,15 @@ that product's host engine versions here and re-run the parse against them.
 None of these needed infrastructure, which was the design goal. What follows is
 what genuinely cannot be established without it.
 
-## Lane 1 — the written suites, on Observer (RUN 2026-08-27 at `484d3ac6`)
+## Lane 1 — historical 0.2 engine suites on Observer (RUN 2026-08-27 at `484d3ac6`)
 
 Prerequisites: Michael authorises the run and the branch commit is transferred.
-The commands below are what was executed; re-run them at any later commit.
+The test selection below preserves the historical lane; the host command is the
+authority for any later exact-commit rerun. Observer remains only in the dated
+results above.
 
 ```
-ssh observe
+ssh root@85.190.246.211
 # fresh isolated writable worktree pinned to the exact commit under test;
 # a shared checkout is not test evidence
 git worktree add /srv/rehearsal/df-<sha> <sha>
@@ -303,15 +305,16 @@ newly find — and only then add the facility's authority row.
 - It names no production or staging host, and authorises no deployment.
 - It does not retire any product's existing engine. Retirement is a separate
   change per product, gated on proven parity, and parity is not this document.
-- It does not make a release claim. **The release lane EXISTS** —
+- It does not make a `0.3.0a1` release claim. `0.2.0a2` is published; the
+  evidence in this document applies to that 0.2 engine. **The release lane
+  EXISTS** —
   `.github/workflows/release-facility.yml`, its closed allowlist
   `.github/release-facilities.json`, `scripts/release_facility.py`, and the
   guard `tests/architecture/test_deployment_release_lane.py` — but a lane that
-  exists is not a publication. Publication needs a `release_run` oracle (rule
-  30), and no run has been dispatched, so no version of this distribution is
-  published or pinnable.
-- **Lane 2 gates the first PUBLICATION, not merely production adoption, and
-  that is now ENCODED rather than written down.** This package executes
+  exists is not publication evidence for a new version. `0.3.0a1` remains
+  declared-unpublished and unpinnable.
+- **Lane 2 gated the first 0.2 PUBLICATION, not merely production adoption, and
+  is ENCODED rather than written down.** This package executes
   migrations, backup, handoff and rollback; shipping a version whose only
   evidence is fakes would put those paths in someone's hands having never met a
   real engine.
@@ -333,3 +336,12 @@ newly find — and only then add the facility's authority row.
   automation with no eyes. `tests/architecture/test_deployment_rehearsal_oracle.py`
   holds the gate in place, and every refusal case there carries a negative
   control so the suite cannot pass by refusing everything.
+
+### Pending 0.3 controller lane
+
+`0.3.0a1` needs new exact-SHA evidence before publication: authenticated signed
+release and authorization evidence, separate authorizer and application-history
+checkouts, a hostile old-application launch, heterogeneous auxiliary/migration
+services beside the declared release-role quorum, and independent canonical
+`docker compose config --hash` comparison against the completed runtime. The
+0.2 rehearsal above establishes none of those controller claims.

@@ -1,9 +1,11 @@
 # dotmac-deployment-foundation
 
 One build-and-deploy facility for every Dotmac product assembly. A product
-declares `deploy/product.toml` and nothing else; the Compose file, the ingress
-site, the collector configuration, the alert rules and the ordered deployment
-plan are all rendered or derived from it.
+declares one product-owned artifact, `deploy/product.toml`; the Compose file,
+the ingress site, the collector configuration, the alert rules and the ordered
+deployment plan are all rendered or derived from it. The independent
+authorizer supplies a separate execution envelope, because the application
+being deployed cannot be allowed to choose or downgrade its own controller.
 
 Decision: [ADR-0070](../../docs/adr/0070-deployment-is-a-stateless-versioned-foundation.md).
 Sources and defect list: [`EXTRACTION.toml`](EXTRACTION.toml) and
@@ -20,8 +22,8 @@ build runner rendering a Compose file has no database and no web framework, and
 must not acquire them in order to validate a descriptor. Two import-linter
 contracts hold the boundary in both directions.
 
-Nothing here runs anything. The deployment plan is DATA and the executor talks
-to an injected `Effects` provider — which is what makes twenty failure cases
+The host controller runs only the canonical typed deployment plan. The
+executor talks to an injected `Effects` provider — which is what makes twenty failure cases
 (wrong digest, failed backup, corrupt backup, candidate never ready, a
 maintenance-required release attempted online) ordinary unit tests instead of
 disposable-VM exercises. A gate that has never been shown to fire is a gate
@@ -77,6 +79,85 @@ Refusals worth knowing before you write one:
 | a control no available provider enforces (`authentication = "bearer"` on a raw socket) | a control nothing enforces is worse than an absent one, because it reads as present in every review after this one |
 | a role publishing a port its own edge already routes to | the edge publishes that upstream on loopback itself; a second declaration only makes the application reachable AROUND the edge |
 
+## The execution envelope
+
+ADR-0070 Amendment A1 keeps `ProductDeploymentSpec.v1` unchanged and accepts a
+separate immutable `DeploymentExecutionEnvelope.v1` for Foundation `0.3.0a1`.
+The product descriptor answers what one product needs; the envelope proves who
+authorized one execution and which independent controller is allowed to judge
+it.
+
+The envelope binds controller provenance (Foundation release, immutable source
+coordinate, exact released-wheel SHA-256 and exact launcher SHA-256), authorizer provenance, the
+candidate and expected current release identities, Git-relation evidence, the
+ordered-plan digest and at most one exact typed override. The override is bound
+to the refused relation, both releases, controller wheel and launcher, plan and authorizing
+decision; a reusable `--force` boolean is not part of the contract.
+
+The candidate's `configuration_digest` hashes the exact descriptor bytes. The
+plan digest is separate because it also contains transition context such as the
+previous image; one candidate must not acquire a different configuration
+identity merely because two hosts upgrade to it from different releases.
+
+An independent launcher verifies its own envelope-pinned hash and the released
+wheel hash, then runs the wheel with an isolated Python interpreter outside the
+staged, current and rollback application checkouts. The controller acquires the
+deployment lock before observing the current release, then keeps observation,
+expected-current comparison, Git-relation evaluation, plan verification,
+authorization, typed-plan execution and post-effect observation under that lock.
+The launch environment drops `DOCKER_HOST`/`DOCKER_CONTEXT`; the controller
+operates on the local host daemon selected by the authorizer's runner, then
+selects only the product's Compose project within that daemon.
+
+The transition rule is fail-closed:
+
+| Relation | Default |
+|---|---|
+| first deployment | allow |
+| same release, including identical image/configuration/manifest digests | allow |
+| proved forward descendant | allow |
+| rollback/ancestor | refuse without the exact override |
+| diverged histories | refuse without the exact override |
+| relation cannot be proved | refuse without the exact override |
+| same source but a different image, configuration or manifest digest | refuse as a conflicting rebuild |
+
+An override never bypasses migration compatibility, never makes a
+`maintenance_required` release eligible for online deployment and never
+authorizes an automatic migration downgrade.
+
+### Authenticated launch and host provisioning
+
+`scripts/run_authenticated_deployment.py` is the trust bootstrap. It is
+deliberately standalone and is **not** imported from, or distributed inside,
+the Foundation wheel it authenticates. Host provisioning installs that file,
+the strict trust policy and at least one Ed25519 public key for each release and
+authorization purpose as root-owned, non-writable files. Key files are pinned
+by byte digest and normalized SPKI digest; one SPKI identity cannot cross
+purposes. The policy exact-allowlists API origins, repository identities,
+protected refs, release/authorization workflows, any reusable-workflow code and
+application repositories, and pins absolute OpenSSL, Git and Docker executables
+by SHA-256. Private signing keys never enter a deployment host or this package.
+
+The protected Foundation release is finalized only after its workflow has
+completed successfully. The post-completion finalizer re-reads the exact
+repository, workflow bytes, run, tag, Actions artifact and registry bytes,
+then signs the wheel, launcher and receipt identities. The authorizing
+Deployment Control repository owes an equivalent post-completion finalizer:
+its signed evidence binds the execution envelope, that exact controller
+release evidence and an application-history bundle. The authorizer checkout
+and application-history checkout have separate purposes and are always
+materialized separately.
+
+The bootstrap verifies both signatures and every binding before it executes
+the released launcher. The launcher re-verifies the sealed inputs, installs
+the exact wheel into an isolated environment, and passes the signed
+authorization through a root-owned mode-0400 inherited file descriptor. A
+receipt that merely agrees with caller-supplied bytes is insufficient.
+
+The bootstrap, trust policy/public-key installation, and the Deployment
+Control authorization finalizer are provisioning/adoption obligations. Their
+source contracts existing here do not claim that a host has installed them.
+
 ## Layout
 
 ```
@@ -95,6 +176,9 @@ alerts.py        64 common infrastructure alerts + the product's own
 telemetry.py     resource attributes, deployment annotations, collector config
 image/           the hardened OCI contract, audited against `docker inspect`
 engine/          the plan as data, the executor, the exclusive lock
+controller.py    independent transition decision, execution and state evidence
+execution.py     strict envelope, provenance, override and Git relation policy
+authenticity.py  signed release/authorization evidence and trust-policy types
 providers/       concrete Effects implementations; compose_host is the only one
 backup.py        four assurance levels, because "backed up" is not "restorable"
 drift.py         image + config + manifest digests vs the approved plan
@@ -104,17 +188,15 @@ cli.py           dotmac-deploy
 
 ## Status
 
-Built and validated in this repository. **Not published, not installed from an
-index, and not pinned by any product** — `AGENTS.md` rule 30: a repository-local
-fact is not a release claim, and a release lane that exists is not a
-publication.
+`0.2.0a2` is the latest published Foundation release. ADR-0070 Amendment A1
+declares the independent-controller extension for `0.3.0a1`. Its source,
+strict release/envelope/state contracts and adversarial canaries are present,
+but `0.3.0a1` is **unpublished**: source and static checks are not a wheel, a
+release tag, CI acceptance, a product pin or a host rehearsal.
 
-Its test suites RUN: Observer, commit `484d3ac6`, `tests/unit tests/architecture`
-exit 0 with zero failures and 12/12 quality targets passing. Tests are not run
-on a workstation.
-
-What has NOT run is the disposable-host rehearsal
-(`scripts/deployment_rehearsal.sh`) — a real engine, a real database, a real
-handoff and a real rollback. Because this package executes migrations, backup,
-handoff and rollback, that rehearsal gates the FIRST PUBLICATION, not merely
-production adoption. See `docs/inventories/deployment-foundation-rehearsal.md`.
+No product has completed adoption or retired its existing deployment engine.
+The `0.3.0a1` release requires the sensitivity proofs and independent-launcher
+rehearsal to pass in CI, followed by protected publication and install/hash
+verification; product adoption and production deployment remain separate later
+evidence.
+See `docs/inventories/deployment-foundation-rehearsal.md`.

@@ -59,6 +59,7 @@ from typing import IO
 
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, StepFailed
+from ..execution import ApplicationReleaseIdentityV1
 from ..render.compose import render_compose
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
@@ -281,6 +282,8 @@ class ComposeHostEffects:
         git_timeout_seconds: int = 15,
         worker_ping_timeout_seconds: int = 30,
         migration_heads_timeout_seconds: int = 60,
+        candidate_identity: ApplicationReleaseIdentityV1 | None = None,
+        previous_identity: ApplicationReleaseIdentityV1 | None = None,
     ) -> None:
         self._spec = spec
         self._deploy_dir = Path(deploy_dir)
@@ -355,6 +358,16 @@ class ComposeHostEffects:
         self._git_timeout_seconds = git_timeout_seconds
         self._worker_ping_timeout_seconds = worker_ping_timeout_seconds
         self._migration_heads_timeout_seconds = migration_heads_timeout_seconds
+        self._candidate_identity = candidate_identity
+        self._previous_identity = previous_identity
+        if candidate_identity is not None and (
+            candidate_identity.image_digest != spec.image_digest
+            or candidate_identity.source_revision != spec.source_revision
+            or candidate_identity.manifest_digest != spec.manifest_digest
+        ):
+            raise PreconditionFailed(
+                "candidate release identity disagrees with the product descriptor"
+            )
 
     # ── the seam ─────────────────────────────────────────────────────────────
 
@@ -675,7 +688,16 @@ class ComposeHostEffects:
         executor treats as a refusal rather than a match — an unreadable
         manifest establishes nothing, and "nothing" is not "agrees".
         """
-        path = (self._deploy_dir / manifest_path).resolve()
+        try:
+            deploy_root = self._deploy_dir.resolve(strict=True)
+            path = (self._deploy_dir / manifest_path).resolve(strict=True)
+            path.relative_to(deploy_root)
+        except ValueError as exc:
+            raise PreconditionFailed(
+                "composed product manifest resolves outside the staged deploy root"
+            ) from exc
+        except OSError:
+            return ""
         try:
             data = path.read_bytes()
         except OSError:
@@ -1018,6 +1040,15 @@ class ComposeHostEffects:
             self._spec, role, candidate_port_base=self._candidate_port_base
         )
         name = self._candidate_container_name(role)
+        if self._manage_compose_file and self._candidate_identity is not None:
+            self._write_atomic(
+                self._compose_file,
+                render_compose(
+                    self._spec,
+                    image=self._spec.image,
+                    release_identity=self._candidate_identity,
+                ),
+            )
         # Best-effort cleanup of a candidate left behind by a prior failed
         # run — its exit code is deliberately not checked, matching
         # `deploy.sh:821` (`docker rm -f ... || true`).
@@ -1078,6 +1109,21 @@ class ComposeHostEffects:
         not overwrite the file that is actually protecting production).
         """
         self._write_env_value(self._image_env_var, image)
+        target_digest = image.rsplit("@", 1)[-1]
+        target_identity = next(
+            (
+                identity
+                for identity in (self._candidate_identity, self._previous_identity)
+                if identity is not None and identity.image_digest == target_digest
+            ),
+            None,
+        )
+        if (
+            self._candidate_identity is not None or self._previous_identity is not None
+        ) and target_identity is None:
+            raise PreconditionFailed(
+                f"no full release identity is bound to switch target {image!r}"
+            )
         if self._manage_compose_file:
             # RE-RENDER, do not just repoint an environment variable. This
             # package's own `render_compose` bakes a literal digest — which is
@@ -1093,7 +1139,12 @@ class ComposeHostEffects:
             # `dotmac-deploy drift` should say so rather than be talked out of
             # it here.
             self._write_atomic(
-                self._compose_file, render_compose(self._spec, image=image)
+                self._compose_file,
+                render_compose(
+                    self._spec,
+                    image=image,
+                    release_identity=target_identity,
+                ),
             )
         services = list(self._spec.role_codes)
         argv = [*self._compose_argv, "up", "-d", "--force-recreate", *services]
@@ -1103,6 +1154,22 @@ class ComposeHostEffects:
                 "switch",
                 f"`{' '.join(argv)}` failed: {_output(result)}",
             )
+        if self._spec.ingress is not None:
+            for role, _ in _nginx_ingress_roles(self._spec):
+                candidate = self._candidate_container_name(role)
+                removed = self._run(
+                    [self._docker_bin, "rm", "-f", candidate],
+                    timeout_seconds=self._inspect_timeout_seconds,
+                )
+                if (
+                    not removed.ok
+                    and "no such container" not in _output(removed).lower()
+                ):
+                    raise StepFailed(
+                        "switch",
+                        f"new primary is running but stale candidate {candidate!r} "
+                        f"could not be removed: {_output(removed)}",
+                    )
 
     def worker_responds(self, role: str) -> bool:
         role_spec = self._spec.role(role)

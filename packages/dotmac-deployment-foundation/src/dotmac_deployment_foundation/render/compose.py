@@ -81,11 +81,13 @@ reviewer can tell a genuine descriptor gap from a rendering decision:
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Iterable
 
 from .. import ingress
 from ..errors import SpecError
+from ..execution import ApplicationReleaseIdentityV1
 from ..spec import (
     SCHEMA,
     ExternalDependency,
@@ -193,6 +195,13 @@ _LOG_MAX_SIZE = "10m"
 _LOG_MAX_FILE = "5"
 _NO_NEW_PRIVILEGES = "no-new-privileges:true"
 _LIVE_LABEL = "io.dotmac.health.live.path"
+_SERVICE_KIND_LABEL = "io.dotmac.deployment.service.kind"
+_PRODUCT_LABEL = "io.dotmac.deployment.product"
+_IDENTITY_SCHEMA_LABEL = "io.dotmac.deployment.identity.schema"
+_ROLE_LABEL = "io.dotmac.deployment.role"
+_CONFIGURATION_DIGEST_LABEL = "io.dotmac.deployment.configuration.digest"
+_MANIFEST_DIGEST_LABEL = "io.dotmac.deployment.manifest.digest"
+_ROSTER_LABEL = "io.dotmac.deployment.release.roster"
 
 # `migrate` runs DDL under the one credential with the widest database grant
 # in the whole deployment; it gets a hardened, bounded envelope of its own
@@ -216,6 +225,13 @@ _MIGRATE_SECURITY = Security(
 
 
 def _header(spec: ProductDeploymentSpec) -> list[str]:
+    identity = _RELEASE_IDENTITY_OVERRIDE[-1]
+    source_revision = (
+        identity.source_revision if identity is not None else spec.source_revision
+    )
+    manifest_digest = (
+        identity.manifest_digest if identity is not None else spec.manifest_digest
+    )
     rule = "# " + "=" * 76
     return [
         rule,
@@ -229,8 +245,8 @@ def _header(spec: ProductDeploymentSpec) -> list[str]:
         # below run something else is a comment that contradicts its own file.
         f"# image:            {_image_reference(spec)}",
         f"# descriptor image: {spec.image}",
-        f"# source revision:  {spec.source_revision}",
-        f"# manifest digest:  {spec.manifest_digest}",
+        f"# source revision:  {source_revision}",
+        f"# manifest digest:  {manifest_digest}",
         rule,
     ]
 
@@ -239,6 +255,7 @@ def _header(spec: ProductDeploymentSpec) -> list[str]:
 
 
 _IMAGE_OVERRIDE: list[str] = []
+_RELEASE_IDENTITY_OVERRIDE: list[ApplicationReleaseIdentityV1 | None] = []
 
 
 def _image_reference(spec: ProductDeploymentSpec) -> str:
@@ -253,6 +270,58 @@ def _image_reference(spec: ProductDeploymentSpec) -> str:
     successful rollback that changed nothing.
     """
     return _IMAGE_OVERRIDE[-1] if _IMAGE_OVERRIDE else spec.image
+
+
+def _release_roster(spec: ProductDeploymentSpec) -> str:
+    return json.dumps(
+        {
+            role.code: role.replicas
+            for role in sorted(spec.roles, key=lambda item: item.code)
+            if role.replicas > 0
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _service_label_lines(
+    spec: ProductDeploymentSpec,
+    *,
+    body: int,
+    kind: str,
+    role: Role | None = None,
+) -> list[str]:
+    labels = {
+        _PRODUCT_LABEL: spec.product,
+        _SERVICE_KIND_LABEL: kind,
+    }
+    identity = _RELEASE_IDENTITY_OVERRIDE[-1]
+    if kind == "release":
+        if role is None:
+            raise SpecError("a release service label requires a declared role")
+        configuration_digest = (
+            identity.configuration_digest
+            if identity is not None
+            else "${DOTMAC_DEPLOYMENT_CONFIGURATION_DIGEST:?required}"
+        )
+        manifest_digest = (
+            identity.manifest_digest if identity is not None else spec.manifest_digest
+        )
+        labels.update(
+            {
+                _CONFIGURATION_DIGEST_LABEL: configuration_digest,
+                _IDENTITY_SCHEMA_LABEL: "ApplicationReleaseIdentityV1",
+                _MANIFEST_DIGEST_LABEL: manifest_digest,
+                _ROLE_LABEL: role.code,
+                _ROSTER_LABEL: _release_roster(spec),
+            }
+        )
+    lines = [_line(body, "labels:")]
+    lines.extend(
+        _line(body + 1, f"{key}: {_scalar(value)}")
+        for key, value in sorted(labels.items())
+    )
+    return lines
 
 
 def _network_name(spec: ProductDeploymentSpec) -> str:
@@ -652,6 +721,7 @@ def _migrate_service(spec: ProductDeploymentSpec) -> list[str]:
     lines.extend(_resource_lines(body, _MIGRATE_RESOURCES))
     lines.extend(_logging_lines(body))
     lines.extend(_security_lines(_MIGRATE_SECURITY, body))
+    lines.extend(_service_label_lines(spec, body=body, kind="migration"))
     lines.append(
         _line(
             body,
@@ -719,8 +789,8 @@ def _role_service(spec: ProductDeploymentSpec, role: Role) -> list[str]:
     )
     lines.append(_line(body, "restart: unless-stopped"))
 
+    lines.extend(_service_label_lines(spec, body=body, kind="release", role=role))
     if role.live is not None:
-        lines.append(_line(body, "labels:"))
         lines.append(_line(body + 1, f"{_LIVE_LABEL}: {_scalar(role.live.path)}"))
 
     return lines
@@ -825,6 +895,7 @@ def _dependency_service(
         )
     lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
     lines.extend(_logging_lines(body))
+    lines.extend(_service_label_lines(spec, body=body, kind="auxiliary"))
     lines.append(_line(body, "restart: unless-stopped"))
     return lines
 
@@ -865,6 +936,7 @@ def _collector_service(spec: ProductDeploymentSpec) -> list[str]:
         )
     )
     lines.extend(_logging_lines(body))
+    lines.extend(_service_label_lines(spec, body=body, kind="auxiliary"))
     lines.append(_line(body, "read_only: true"))
     lines.extend(_list_block(body, "security_opt", [_scalar(_NO_NEW_PRIVILEGES)]))
     lines.extend(_list_block(body, "cap_drop", [_scalar("ALL")]))
@@ -877,7 +949,12 @@ def _collector_service(spec: ProductDeploymentSpec) -> list[str]:
     return lines
 
 
-def render_compose(spec: ProductDeploymentSpec, *, image: str = "") -> str:
+def render_compose(
+    spec: ProductDeploymentSpec,
+    *,
+    image: str = "",
+    release_identity: ApplicationReleaseIdentityV1 | None = None,
+) -> str:
     """The deterministic docker-compose document for `spec`, as text.
 
     Same spec in, same bytes out — always: nothing here reads a clock, a
@@ -889,9 +966,11 @@ def render_compose(spec: ProductDeploymentSpec, *, image: str = "") -> str:
     # scanning the file top-down meets the database before the thing that needs
     # it.
     _IMAGE_OVERRIDE.append(image or spec.image)
+    _RELEASE_IDENTITY_OVERRIDE.append(release_identity)
     try:
         return _render_compose_body(spec)
     finally:
+        _RELEASE_IDENTITY_OVERRIDE.pop()
         _IMAGE_OVERRIDE.pop()
 
 

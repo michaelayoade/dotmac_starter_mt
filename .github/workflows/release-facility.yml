@@ -5,8 +5,9 @@ name: Release facility
 # `release-ui.yml`, `release-module.yml` and `release-adapter.yml` — build once
 # on the exact current protected-main SHA -> require a successful rehearsal on
 # that SHA -> inspect the bytes -> smoke the CLI -> re-assert the run SHA is
-# STILL main's tip -> publish THOSE SAME bytes -> install the published release
-# from the index and re-smoke the CLI -> tag only then.
+# STILL main's tip -> publish THOSE SAME wheel bytes -> durably publish the
+# exact launcher + receipt as Forgejo generic files -> download and compare all
+# registry bytes to the build receipt -> re-smoke the CLI -> tag only then.
 #
 # WHY THIS LANE HAD TO EXIST BEFORE THE PACKAGE COULD SHIP
 #
@@ -75,6 +76,13 @@ on:
 permissions:
   contents: read
 
+# One facility/version publication is one irreversible operation. A second
+# dispatch for the same coordinates queues behind the first and is never
+# allowed to cancel it midway between the launcher and receipt publications.
+concurrency:
+  group: release-facility-${{ inputs.facility }}-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -89,6 +97,8 @@ jobs:
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
+      controller_artifact_name: ${{ steps.resolve.outputs.controller_artifact_name }}
+      controller_generic_package: ${{ steps.resolve.outputs.controller_generic_package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,11 +182,45 @@ jobs:
             --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
             --descriptor deploy/product.toml
 
+      # Build ONCE means the release receipt hashes the wheel already inspected
+      # and smoked above. It also hashes the independent source launcher from
+      # this exact checkout, then copies both byte-for-byte into one immutable
+      # Actions artifact. The receipt has exactly the eight fields accepted by
+      # DeploymentControllerReleaseReceipt.v1; no mutable URL or timestamp can
+      # change its identity.
+      - name: Bind the controller release receipt to the exact built bytes
+        run: |
+          WHEELS=("${{ steps.resolve.outputs.package_dir }}"/dist/*.whl)
+          if [[ ${#WHEELS[@]} -ne 1 || ! -f "${WHEELS[0]}" ]]; then
+            echo "::error::expected exactly one controller wheel"
+            exit 1
+          fi
+          python scripts/release_facility.py create-controller-receipt \
+            "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --source-revision "${GITHUB_SHA}" \
+            --release-run-id "${GITHUB_RUN_ID}" \
+            --tag "${{ steps.resolve.outputs.tag }}" \
+            --wheel "${WHEELS[0]}" \
+            --output-dir controller-release
+
       - name: Upload built artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.facility }}-dist
           path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+      # Run-level provenance and recovery copy. This is deliberately NOT the
+      # consumer distribution: a private Actions artifact needs cross-repo
+      # actions:read authority and expires after 90 days. `publish` places the
+      # launcher and receipt in Forgejo's durable generic registry instead.
+      - name: Upload controller provenance and recovery bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.resolve.outputs.controller_artifact_name }}
+          path: controller-release/
+          if-no-files-found: error
           retention-days: 90
 
   publish:
@@ -219,6 +263,29 @@ jobs:
           name: ${{ inputs.facility }}-dist
           path: dist
 
+      - name: Download the exact controller release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.controller_artifact_name }}
+          path: controller-release
+
+      - name: Re-verify the receipt before publishing
+        run: |
+          WHEELS=(dist/*.whl)
+          if [[ ${#WHEELS[@]} -ne 1 || ! -f "${WHEELS[0]}" ]]; then
+            echo "::error::publish artifact must carry exactly one wheel"
+            exit 1
+          fi
+          python scripts/release_facility.py verify-controller-receipt \
+            "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --source-revision "${GITHUB_SHA}" \
+            --release-run-id "${GITHUB_RUN_ID}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --receipt controller-release/DeploymentControllerReleaseReceipt.v1.json \
+            --wheel "${WHEELS[0]}" \
+            --launcher controller-release/launcher/run_deployment_controller.py
+
       # Publish the SAME bytes `build` inspected and smoked — downloaded,
       # never rebuilt.
       - name: Publish to the Forgejo private index
@@ -229,6 +296,95 @@ jobs:
           python -m pip install --quiet twine
           python -m twine upload \
             --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
+
+      # The wheel has one owner and remains in Forgejo's PyPI registry. Only
+      # the two non-wheel controller assets are published generically. The
+      # receipt is uploaded LAST: consumers treat its existence as the marker
+      # that the matching launcher bytes are already durable. Both PUTs use
+      # the same protected registry-release publisher credential as Twine.
+      # Forgejo's generic endpoint returns 201 when a filename is first created
+      # and 409 when it already exists. A workflow retry may therefore see 409
+      # on its first PUT; it is safe only when an authenticated GET is exactly
+      # byte-identical. Every successful path then repeats the PUT and requires
+      # 409, proving the endpoint did not silently overwrite the durable asset.
+      # Signed evidence separately authenticates the bytes after a privileged
+      # delete/recreate.
+      - name: Publish durable controller launcher and receipt
+        env:
+          GENERIC_USERNAME: ci-publisher
+          GENERIC_TOKEN: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+          GENERIC_BASE: >-
+            https://registry.dotmac.io/api/packages/dotmac/generic/${{ needs.build.outputs.controller_generic_package }}/${{ inputs.version }}
+        run: |
+          put_controller_asset() {
+            local source_path="$1"
+            local target_name="$2"
+            curl --silent --show-error \
+              --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+              --request PUT \
+              --upload-file "${source_path}" \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              "${GENERIC_BASE}/${target_name}"
+          }
+
+          get_controller_asset() {
+            local target_name="$1"
+            local destination="$2"
+            curl --fail --silent --show-error \
+              --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+              --request GET \
+              --output "${destination}" \
+              "${GENERIC_BASE}/${target_name}"
+          }
+
+          publish_controller_asset() {
+            local source_path="$1"
+            local target_name="$2"
+            local label="$3"
+            local remote_copy="${RUNNER_TEMP}/${target_name}.registry-copy"
+            local status
+            local duplicate_status
+
+            if ! status="$(put_controller_asset "${source_path}" "${target_name}")"; then
+              echo "::error::${label} publication request failed before an HTTP response"
+              exit 1
+            fi
+            if [[ "${status}" == "409" ]]; then
+              if ! get_controller_asset "${target_name}" "${remote_copy}"; then
+                echo "::error::${label} exists but could not be read back"
+                exit 1
+              fi
+              if ! cmp --silent "${source_path}" "${remote_copy}"; then
+                echo "::error::${label} exists with different bytes; refusing retry"
+                exit 1
+              fi
+            elif [[ "${status}" != "201" ]]; then
+              echo "::error::${label} creation returned HTTP ${status}; expected 201 or byte-identical 409"
+              exit 1
+            fi
+
+            if ! duplicate_status="$(put_controller_asset "${source_path}" "${target_name}")"; then
+              echo "::error::${label} duplicate probe failed before an HTTP response"
+              exit 1
+            fi
+            if [[ "${duplicate_status}" != "409" ]]; then
+              echo "::error::${label} duplicate returned HTTP ${duplicate_status}; expected 409"
+              exit 1
+            fi
+            rm -f "${remote_copy}"
+          }
+
+          publish_controller_asset \
+            controller-release/launcher/run_deployment_controller.py \
+            run_deployment_controller.py \
+            launcher
+
+          # Receipt creation stays last: its presence is the completion marker.
+          publish_controller_asset \
+            controller-release/DeploymentControllerReleaseReceipt.v1.json \
+            DeploymentControllerReleaseReceipt.v1.json \
+            receipt
 
   verify:
     needs: [build, publish]
@@ -244,6 +400,58 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Download the exact controller release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.controller_artifact_name }}
+          path: controller-release
+
+      - name: Re-verify the downloaded controller release bundle
+        run: |
+          WHEELS=(controller-release/wheel/*.whl)
+          if [[ ${#WHEELS[@]} -ne 1 || ! -f "${WHEELS[0]}" ]]; then
+            echo "::error::controller release bundle must carry exactly one wheel"
+            exit 1
+          fi
+          python scripts/release_facility.py verify-controller-receipt \
+            "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --source-revision "${GITHUB_SHA}" \
+            --release-run-id "${GITHUB_RUN_ID}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --receipt controller-release/DeploymentControllerReleaseReceipt.v1.json \
+            --wheel "${WHEELS[0]}" \
+            --launcher controller-release/launcher/run_deployment_controller.py
+
+      # Consumer distribution comes from Forgejo generic packages, not from
+      # the expiring Actions artifact. Fetch BOTH durable files through the
+      # official endpoint, then compare their bytes to the exact build bundle.
+      # The read happens before registry-wheel verification and before tagging.
+      - name: Download and compare durable controller assets
+        env:
+          GENERIC_USERNAME: ci-publisher
+          GENERIC_TOKEN: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+          GENERIC_BASE: >-
+            https://registry.dotmac.io/api/packages/dotmac/generic/${{ needs.build.outputs.controller_generic_package }}/${{ inputs.version }}
+        run: |
+          mkdir registry-controller
+          curl --fail-with-body --silent --show-error \
+            --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+            --request GET \
+            --output registry-controller/run_deployment_controller.py \
+            "${GENERIC_BASE}/run_deployment_controller.py"
+          curl --fail-with-body --silent --show-error \
+            --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+            --request GET \
+            --output registry-controller/DeploymentControllerReleaseReceipt.v1.json \
+            "${GENERIC_BASE}/DeploymentControllerReleaseReceipt.v1.json"
+          cmp --silent \
+            controller-release/launcher/run_deployment_controller.py \
+            registry-controller/run_deployment_controller.py
+          cmp --silent \
+            controller-release/DeploymentControllerReleaseReceipt.v1.json \
+            registry-controller/DeploymentControllerReleaseReceipt.v1.json
+
       # The index may lag a few seconds after publish.
       - name: Wait for the release on the Forgejo index
         env:
@@ -257,6 +465,35 @@ jobs:
           done
           echo "::error::${{ inputs.facility }} ${{ inputs.version }} did not appear in time"
           exit 1
+
+      # `pip install ==version` proves the package runs, but not that the
+      # registry serves the SAME wheel the build inspected: a second wheel
+      # with the same version could also install cleanly. Download the exact
+      # wheel bytes from Forgejo and compare their SHA-256 to the build receipt
+      # before performing the independent installed-CLI smoke below.
+      - name: Verify registry wheel bytes against the build receipt
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          mkdir registry-dist
+          python -m pip download --quiet --no-cache-dir --no-deps \
+            --only-binary=:all: --index-url "${INDEX}" \
+            --dest registry-dist \
+            "${{ inputs.facility }}==${{ inputs.version }}"
+          WHEELS=(registry-dist/*.whl)
+          if [[ ${#WHEELS[@]} -ne 1 || ! -f "${WHEELS[0]}" ]]; then
+            echo "::error::registry returned other than one exact wheel"
+            exit 1
+          fi
+          python scripts/release_facility.py verify-controller-receipt \
+            "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --source-revision "${GITHUB_SHA}" \
+            --release-run-id "${GITHUB_RUN_ID}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --receipt registry-controller/DeploymentControllerReleaseReceipt.v1.json \
+            --wheel "${WHEELS[0]}" \
+            --launcher registry-controller/run_deployment_controller.py
 
       # Install the PUBLISHED release from the index into a clean venv and
       # re-run the CLI smoke. Unlike the adapter lane this needs no

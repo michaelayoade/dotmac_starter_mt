@@ -1,0 +1,193 @@
+name: Finalize controller release evidence
+
+# This MUST be a second workflow. `Release facility` cannot truthfully sign a
+# document claiming that its own conclusion is success while it is still
+# running. The completed workflow_run is only a candidate: the finalizer reads
+# the run again through the Actions API and binds every identity coordinate.
+#
+# PRE-RELEASE OPERATIONAL BLOCKER. Before the first controller release, the
+# protected `registry-release` environment must provision BOTH
+# `DEPLOYMENT_RELEASE_EVIDENCE_PRIVATE_KEY_PEM` (secret) and
+# `DEPLOYMENT_RELEASE_EVIDENCE_KEY_ID` (variable). Every controller host must
+# separately install the matching public key and key ID in its root-owned
+# DeploymentEvidenceTrustPolicy.v1. This repository deliberately records no
+# private-key value and invents no OpenBao path; absence fails before signing.
+
+on:
+  workflow_run:
+    workflows:
+      - Release facility
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: >-
+    controller-release-evidence-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: registry-release
+    timeout-minutes: 15
+    steps:
+      # `workflow_run` checks out the protected default branch. That checkout
+      # supplies the verifier, never the claimed release identity: the script
+      # separately fetches the release workflow blob at the completed run's
+      # exact head SHA and records its SHA-256 in the signed evidence. It also
+      # re-reads head_branch, requires that branch to remain protected (without
+      # requiring its current tip to equal the historical run SHA), and binds
+      # every reusable workflow's exact ref, resolved SHA and blob digest. The
+      # API base is derived from GITHUB_SERVER_URL before the HTTP reader retains
+      # the token, so a claimed foreign GITHUB_API_URL cannot receive credentials.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Refuse unprovisioned signing authority
+        env:
+          RELEASE_EVIDENCE_KEY_PEM: >-
+            ${{ secrets.DEPLOYMENT_RELEASE_EVIDENCE_PRIVATE_KEY_PEM }}
+          RELEASE_EVIDENCE_KEY_ID: >-
+            ${{ vars.DEPLOYMENT_RELEASE_EVIDENCE_KEY_ID }}
+        run: |
+          if [[ -z "${RELEASE_EVIDENCE_KEY_PEM}" ]]; then
+            echo "::error::protected release-evidence signing secret is absent"
+            exit 1
+          fi
+          if [[ -z "${RELEASE_EVIDENCE_KEY_ID}" ]]; then
+            echo "::error::protected release-evidence key ID is absent"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "${RELEASE_EVIDENCE_KEY_PEM}" > "${RUNNER_TEMP}/release-evidence-ed25519.pem"
+          chmod 600 "${RUNNER_TEMP}/release-evidence-ed25519.pem"
+
+      - name: Re-read, bind, and sign the completed release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FORGEJO_USERNAME: ci-publisher
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+          RELEASE_EVIDENCE_KEY_ID: >-
+            ${{ vars.DEPLOYMENT_RELEASE_EVIDENCE_KEY_ID }}
+        run: |
+          python scripts/finalize_controller_release_evidence.py \
+            --server-origin "${GITHUB_SERVER_URL}" \
+            --api-url "${GITHUB_API_URL}" \
+            --repository-id "${{ github.event.workflow_run.repository.id }}" \
+            --repository "${{ github.event.workflow_run.repository.full_name }}" \
+            --head-repository-id "${{ github.event.workflow_run.head_repository.id }}" \
+            --head-repository "${{ github.event.workflow_run.head_repository.full_name }}" \
+            --workflow-id "${{ github.event.workflow_run.workflow_id }}" \
+            --run-id "${{ github.event.workflow_run.id }}" \
+            --run-attempt "${{ github.event.workflow_run.run_attempt }}" \
+            --event "${{ github.event.workflow_run.event }}" \
+            --head-sha "${{ github.event.workflow_run.head_sha }}" \
+            --status "${{ github.event.workflow_run.status }}" \
+            --conclusion "${{ github.event.workflow_run.conclusion }}" \
+            --registry-origin "https://registry.dotmac.io" \
+            --key-id "${RELEASE_EVIDENCE_KEY_ID}" \
+            --private-key-path "${RUNNER_TEMP}/release-evidence-ed25519.pem" \
+            --openssl-path "/usr/bin/openssl" \
+            --output-dir controller-release-evidence
+
+      # Evidence first, detached signature last. A retry may find the exact
+      # asset already present (409), but succeeds only after an authenticated
+      # GET proves byte identity. The immediate replay must still conflict, so
+      # a pre-existing mismatch or overwrite-capable registry remains a refusal.
+      - name: Publish signed evidence create-only
+        env:
+          GENERIC_USERNAME: ci-publisher
+          GENERIC_TOKEN: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+          GENERIC_BASE: >-
+            https://registry.dotmac.io/api/packages/dotmac/generic/dotmac-deployment-controller
+        run: |
+          VERSION="$(python -c 'import json; print(json.load(open("controller-release-evidence/DeploymentControllerReleaseEvidence.v1.json"))["exact_version"])')"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(a[0-9]+)?$ ]]; then
+            echo "::error::signed release evidence carries an invalid version"
+            exit 1
+          fi
+          DESTINATION="${GENERIC_BASE}/${VERSION}"
+
+          put_evidence_asset() {
+            local source_path="$1"
+            local target_name="$2"
+            curl --silent --show-error \
+              --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+              --request PUT \
+              --upload-file "${source_path}" \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              "${DESTINATION}/${target_name}"
+          }
+
+          get_evidence_asset() {
+            local target_name="$1"
+            local destination="$2"
+            curl --fail --silent --show-error \
+              --user "${GENERIC_USERNAME}:${GENERIC_TOKEN}" \
+              --request GET \
+              --output "${destination}" \
+              "${DESTINATION}/${target_name}"
+          }
+
+          publish_evidence_asset() {
+            local source_path="$1"
+            local target_name="$2"
+            local label="$3"
+            local remote_copy="${RUNNER_TEMP}/${target_name}.registry-copy"
+            local status
+            local duplicate_status
+
+            if ! status="$(put_evidence_asset "${source_path}" "${target_name}")"; then
+              echo "::error::${label} PUT failed before an HTTP response"
+              exit 1
+            fi
+            if [[ "${status}" == "409" ]]; then
+              if ! get_evidence_asset "${target_name}" "${remote_copy}"; then
+                echo "::error::${label} exists but could not be read back"
+                exit 1
+              fi
+              if ! cmp --silent "${source_path}" "${remote_copy}"; then
+                echo "::error::${label} exists with different bytes; refusing retry"
+                exit 1
+              fi
+            elif [[ "${status}" != "201" ]]; then
+              echo "::error::${label} creation returned HTTP ${status}; expected 201 or byte-identical 409"
+              exit 1
+            fi
+
+            if ! duplicate_status="$(put_evidence_asset "${source_path}" "${target_name}")"; then
+              echo "::error::${label} duplicate probe failed before an HTTP response"
+              exit 1
+            fi
+            if [[ "${duplicate_status}" != "409" ]]; then
+              echo "::error::${label} duplicate returned HTTP ${duplicate_status}; expected 409"
+              exit 1
+            fi
+            rm -f "${remote_copy}"
+          }
+
+          publish_evidence_asset \
+            controller-release-evidence/DeploymentControllerReleaseEvidence.v1.json \
+            DeploymentControllerReleaseEvidence.v1.json \
+            "release evidence"
+
+          # Signature creation is the final publication marker.
+          publish_evidence_asset \
+            controller-release-evidence/DetachedEvidenceSignature.v1.json \
+            DetachedEvidenceSignature.v1.json \
+            "release signature"
+
+      - name: Delete projected private key
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/release-evidence-ed25519.pem"

@@ -16,6 +16,14 @@ Audit coordinates:
 Consumed by `packages/dotmac-deployment-foundation/EXTRACTION.toml` and
 ADR-0070.
 
+**Extension review, 2026-08-29.** The original audit coordinates above remain
+the evidence for D1-D18. A later controller-provenance review on protected
+Starter `main` at `c189f04df7e4e36c4dd1e4e997fc458434d0bd2f`, together
+with the Sub production-launch path and workflow-run evidence named in D19,
+found an additional source defect. Its correction is accepted by ADR-0070
+Amendment A1 for the declared-unpublished `0.3.0a1`; it is not represented here
+as extracted production behavior or as product adoption.
+
 ---
 
 ## 1. Why an inventory was needed at all
@@ -214,12 +222,14 @@ counter-example to ERP's `/health`.
 
 ---
 
-## 6. Defects — extracted deliberately as NON-goals
+## 6. Source defects and their disposition
 
-Every row is a behaviour present in a source and deliberately not carried into
-the foundation. Recording them is the point: a reader of the dossier can see
-what was left behind, which is the only way to tell a faithful extraction from
-a partial one.
+D1-D18 are behaviors present in a source and deliberately not carried into the
+foundation. D19 is different and is marked accordingly: it is a later source
+defect whose correction is an accepted contract extension, not current
+Foundation behavior. Recording both dispositions is the point: a reader can
+tell what was left behind, what was accepted for correction and what evidence
+does not yet exist.
 
 | # | Defect | Evidence | What the foundation does instead |
 |---|---|---|---|
@@ -241,6 +251,7 @@ a partial one.
 | D16 | No deployment lock in the ported Starter engine — the exact race that caused Sub's 2026-07-12 incident (concurrent `pg_dump`s, load 52 on 16 cores, ten minutes of 502s) | `dotmac_starter_mt:scripts/deploy.sh` (no `flock` in 198 lines) | `acquire_lock` is step 1 of every plan and is not optional. |
 | D17 | Host-side deploy scripts drifting from the deployed release; twice the cause of a staging incident | `seabone-staging-dotmac-sub-deploy-landmines` (2026-07-28, 2026-08-04) | The engine ships in a versioned distribution that a product exact-pins, and `render --check` fails when the committed asset does not match the descriptor. |
 | D18 | Image retention is the one fail-open step: a retention failure is logged and the deployment still reports healthy | `dotmac_sub:scripts/deploy.sh:831-836` | Kept fail-open deliberately, and stated. Retention is housekeeping; failing a healthy deployment over it would be worse. The difference is that it is now a `notes` entry in the plan rather than an undocumented `|| true`. |
+| D19 | The application checkout can supply or downgrade the code that judges its own deployment. Sub's production launcher authorizes a revision, then invokes deploy machinery from an application checkout; executing Python from that staged/current/rollback tree makes CWD/import precedence part of the trust boundary. Rolling back the application can therefore roll back the verifier even when the application image itself is exact. | `dotmac_sub:.github/workflows/production-deploy.yml`, `scripts/deploy_production.sh`, `scripts/deploy.sh`; production workflow run `31762013926`; Starter controller-provenance review at `c189f04df7e4e36c4dd1e4e997fc458434d0bd2f` | **Accepted extension; this inventory is not implementation or adoption evidence:** ADR-0070 Amendment A1 keeps `ProductDeploymentSpec.v1` unchanged and adds separate `DeploymentExecutionEnvelope.v1`; an independent launcher exact-hashes the released Foundation wheel and runs isolated Python outside every application checkout. `0.3.0a1` remains declared-unpublished. |
 
 ---
 
@@ -257,10 +268,54 @@ described as extracting something that was never there.
 | **No product has a restore rehearsal.** `dotmac_erp:scripts/restore_from_backup.py` (70 lines) restores; nothing verifies a restore on a schedule or records when one last succeeded. | all four |
 | **No product bootstraps its host repeatably.** No Ansible, no cloud-init, in any of the four. Host state is whatever an operator typed. | repository-wide `find` |
 | **No product records deployment evidence as a durable artefact on the host.** Sub's evidence is produced upstream in CI and consumed as a gate input; nothing writes what actually ran. | `dotmac_sub:scripts/deploy.sh` |
+| **No product independently pins and proves a deployment controller outside the application checkout, and no current product proves the current-to-candidate Git relation before mutating a host.** Exact application-image verification therefore does not prove the identity or anti-rollback posture of the judge. | D19 sources; ADR-0070 Amendment A1 is the accepted correction, not present adoption evidence |
 
 ---
 
-## 8. Two patterns that are already fleet-consistent
+## 8. Accepted extension — independent controller and transition evidence
+
+**Dated acceptance, 2026-08-29.** This section records the correction selected
+for D19 and the new gap. It does not amend the 2026-08-26 characterization of
+the audited products. Foundation now carries the source contract, independent
+launcher and sensitivity canaries; that is not CI, publication, exact-pin or
+product-adoption evidence.
+
+`ProductDeploymentSpec.v1` stays unchanged as the product-owned declarative
+input. A separate `DeploymentExecutionEnvelope.v1`, owned by Foundation's
+execution boundary, binds:
+
+- exact released Foundation wheel and source provenance;
+- exact authorizer provenance;
+- the candidate and expected current release identities;
+- immutable Git-relation evidence and the digest of the exact
+  signed-authorization-bound application-history snapshot used to recompute it;
+- the exact ordered-plan digest; and
+- at most one typed override bound to that relation, those releases, that
+  controller wheel, that plan and that authorizing decision.
+
+An independent launcher verifies the released wheel's SHA-256 and starts it
+with an isolated Python interpreter outside staged, current and rollback
+application checkouts. It acquires the deployment lock before observing the
+current release. Observation, expected-current comparison, relation proof,
+plan verification and authorization remain under that lock.
+
+The default allows first deployment, identical same-release execution and a
+proved forward descendant. It refuses rollback, diverged histories and an
+unprovable relation without the exact override. The same source revision with
+a different image, configuration or product-manifest digest is a conflict, not
+a same-release replay. An override affects only this source-transition
+decision: it cannot bypass migration compatibility or the
+`maintenance_required` online refusal and can never authorize an automatic
+migration downgrade.
+
+The release expectation is `0.3.0a1`, declared-unpublished. Its sensitivity
+proofs and independent-launcher rehearsal must pass before protected
+publication and install/hash verification; this inventory records no product
+exact pin or adoption evidence.
+
+---
+
+## 9. Two patterns that are already fleet-consistent
 
 Recorded so the descriptor adopts them rather than re-deciding them:
 

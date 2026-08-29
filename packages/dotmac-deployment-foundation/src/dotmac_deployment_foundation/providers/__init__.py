@@ -1,10 +1,9 @@
 """Concrete `Effects` implementations for `engine.run.Executor`.
 
-`dotmac_deployment_foundation` itself ships none of these — the facility owns
-order, refusal and evidence (`engine/`), never HOW to talk to Docker, Postgres
-or Nginx (ADR-0070). A provider is the piece a deployment host supplies, and
-this package's absence of one is precisely what made `dotmac-deploy deploy
---execute` always refuse (see `cli.py`'s prior `cmd_deploy`).
+Foundation owns these provider implementations as the host mechanism behind its
+typed executor. Direct CLI mutation remains disabled: only the authenticated
+controller invokes a provider after verifying the external execution and trust
+evidence (ADR-0070).
 
 `ComposeHostEffects` is the first, and as of this package version the only,
 provider: the dedicated-VM Docker Compose profile every one of the four

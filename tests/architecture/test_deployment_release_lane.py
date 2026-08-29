@@ -141,12 +141,50 @@ def test_the_facility_tag_prefix_matches_the_distribution_name() -> None:
     assert entry["tag_prefix"] == "dotmac-deployment-foundation-v"
 
 
+def test_the_facility_declares_the_exact_controller_receipt_and_launcher() -> None:
+    entry = _load_json(FACILITY_ALLOWLIST)["facilities"]["dotmac-deployment-foundation"]
+    assert entry["controller_receipt_schema"] == "DeploymentControllerReleaseReceipt.v1"
+    assert entry["controller_launcher"] == "scripts/run_deployment_controller.py"
+    assert entry["controller_generic_package"] == "dotmac-deployment-controller"
+
+
 # ── 2. release-facility.yml publishes with the PUBLISH credential ───────────
 
 
 def test_release_facility_workflow_has_the_three_job_shape() -> None:
     workflow = _load_yaml(RELEASE_WORKFLOW)
     assert set(workflow["jobs"]) == {"build", "publish", "verify"}
+
+
+def _release_concurrency_problems(workflow: dict[str, Any]) -> list[str]:
+    concurrency = workflow.get("concurrency", {})
+    problems: list[str] = []
+    if concurrency.get("group") != (
+        "release-facility-${{ inputs.facility }}-${{ inputs.version }}"
+    ):
+        problems.append("concurrency is not keyed to the facility and version")
+    if concurrency.get("cancel-in-progress") is not False:
+        problems.append("an in-progress release can be cancelled by another dispatch")
+    return problems
+
+
+def test_release_facility_serializes_each_version_without_cancelling_it() -> None:
+    assert _release_concurrency_problems(_load_yaml(RELEASE_WORKFLOW)) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("group", "release-facility"),
+        ("cancel-in-progress", True),
+    ],
+)
+def test_release_facility_concurrency_guard_is_sensitive(
+    field: str, replacement: object
+) -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    mutated["concurrency"][field] = replacement
+    assert _release_concurrency_problems(mutated)
 
 
 def test_release_facility_publish_job_uses_the_publish_token_and_environment() -> None:
@@ -177,6 +215,344 @@ def test_release_facility_reasserts_freshness_before_publish_and_before_verify()
         steps = workflow["jobs"][job_name]["steps"]
         blob = "\n".join(str(step.get("run", "")) for step in steps)
         assert "assert_current_main.sh" in blob, job_name
+
+
+def _named_steps(workflow: dict[str, Any], job: str) -> dict[str, dict[str, Any]]:
+    return {
+        str(step["name"]): step
+        for step in workflow["jobs"][job]["steps"]
+        if "name" in step
+    }
+
+
+def _controller_release_lane_problems(workflow: dict[str, Any]) -> list[str]:
+    """Structural guard for build-once receipt transport and verification."""
+    problems: list[str] = []
+    build = _named_steps(workflow, "build")
+    publish = _named_steps(workflow, "publish")
+    verify = _named_steps(workflow, "verify")
+
+    required_runs = {
+        ("build", "Bind the controller release receipt to the exact built bytes"): (
+            "create-controller-receipt",
+            '--source-revision "${GITHUB_SHA}"',
+            '--release-run-id "${GITHUB_RUN_ID}"',
+        ),
+        ("publish", "Re-verify the receipt before publishing"): (
+            "verify-controller-receipt",
+            "DeploymentControllerReleaseReceipt.v1.json",
+            "dist/*.whl",
+            "controller-release/launcher/run_deployment_controller.py",
+        ),
+        ("publish", "Publish durable controller launcher and receipt"): (
+            "put_controller_asset()",
+            "get_controller_asset()",
+            "publish_controller_asset()",
+            "--request PUT",
+            "--request GET",
+            '--upload-file "${source_path}"',
+            "controller-release/launcher/run_deployment_controller.py",
+            "controller-release/DeploymentControllerReleaseReceipt.v1.json",
+            '[[ "${status}" == "409" ]]',
+            '[[ "${status}" != "201" ]]',
+            '[[ "${duplicate_status}" != "409" ]]',
+            "cmp --silent",
+        ),
+        ("verify", "Re-verify the downloaded controller release bundle"): (
+            "verify-controller-receipt",
+            "controller-release/wheel/*.whl",
+        ),
+        ("verify", "Download and compare durable controller assets"): (
+            "--request GET",
+            "registry-controller/run_deployment_controller.py",
+            "registry-controller/DeploymentControllerReleaseReceipt.v1.json",
+            "cmp --silent",
+        ),
+        ("verify", "Verify registry wheel bytes against the build receipt"): (
+            "pip download",
+            "--only-binary=:all:",
+            "registry-dist/*.whl",
+            "verify-controller-receipt",
+            "--receipt registry-controller/DeploymentControllerReleaseReceipt.v1.json",
+            "--launcher registry-controller/run_deployment_controller.py",
+        ),
+    }
+    jobs = {"build": build, "publish": publish, "verify": verify}
+    for (job, name), needles in required_runs.items():
+        step = jobs[job].get(name)
+        if step is None:
+            problems.append(f"{job}: missing {name!r}")
+            continue
+        run = str(step.get("run", ""))
+        for needle in needles:
+            if needle not in run:
+                problems.append(f"{job}/{name}: missing {needle!r}")
+
+    build_output = (
+        workflow["jobs"]["build"].get("outputs", {}).get("controller_artifact_name")
+    )
+    if build_output != "${{ steps.resolve.outputs.controller_artifact_name }}":
+        problems.append("build: controller artifact name is not exported")
+    generic_output = (
+        workflow["jobs"]["build"].get("outputs", {}).get("controller_generic_package")
+    )
+    if generic_output != "${{ steps.resolve.outputs.controller_generic_package }}":
+        problems.append("build: controller generic package name is not exported")
+
+    upload = build.get("Upload controller provenance and recovery bundle")
+    if upload is None:
+        problems.append("build: controller release bundle is not uploaded")
+    else:
+        settings = upload.get("with", {})
+        if (
+            settings.get("name")
+            != "${{ steps.resolve.outputs.controller_artifact_name }}"
+        ):
+            problems.append("build: controller artifact name is not the resolved name")
+        if settings.get("path") != "controller-release/":
+            problems.append("build: controller release directory is not uploaded")
+        if settings.get("if-no-files-found") != "error":
+            problems.append("build: missing controller files do not fail the upload")
+        if settings.get("retention-days") != 90:
+            problems.append("build: controller release retention changed")
+
+    generic_base = (
+        "https://registry.dotmac.io/api/packages/dotmac/generic/"
+        "${{ needs.build.outputs.controller_generic_package }}/"
+        "${{ inputs.version }}"
+    )
+    generic_publish = publish.get("Publish durable controller launcher and receipt")
+    if generic_publish is None:
+        problems.append("publish: durable controller assets are not published")
+    else:
+        command = str(generic_publish.get("run", ""))
+        generic_env = generic_publish.get("env", {})
+        if generic_env.get("GENERIC_BASE") != generic_base:
+            problems.append("publish: generic package endpoint drifted")
+        if generic_env.get("GENERIC_TOKEN") != ("${{ secrets.FORGEJO_PUBLISH_TOKEN }}"):
+            problems.append("publish: generic assets use a different credential")
+        if command.count("--upload-file") != 1:
+            problems.append("publish: generic PUT is not centralized in one helper")
+        if command.count("--request PUT") != 1:
+            problems.append("publish: generic PUT bypasses the one checked helper")
+        if ".whl" in command or "dist/" in command:
+            problems.append("publish: wheel is being republished generically")
+        if '--write-out "%{http_code}"' not in command:
+            problems.append("publish: generic PUT response status is not observed")
+
+        retry_requirements = (
+            'if [[ "${status}" == "409" ]]; then',
+            'if ! get_controller_asset "${target_name}" "${remote_copy}"; then',
+            'if ! cmp --silent "${source_path}" "${remote_copy}"; then',
+            'elif [[ "${status}" != "201" ]]; then',
+            'if [[ "${duplicate_status}" != "409" ]]; then',
+        )
+        for requirement in retry_requirements:
+            start = command.find(requirement)
+            line_start = command.rfind("\n", 0, start) + 1
+            indentation = command[line_start:start]
+            end = command.find(f"\n{indentation}fi", start)
+            if start < 0 or end < 0 or "exit 1" not in command[start:end]:
+                problems.append(
+                    f"publish: retry/create-only guard lacks {requirement!r}"
+                )
+        if command.count("$(put_controller_asset ") != 2:
+            problems.append("publish: each asset does not receive PUT plus probe")
+        if command.count("publish_controller_asset \\\n") != 2:
+            problems.append("publish: launcher and receipt are not each published once")
+        launcher_position = command.rfind(
+            "controller-release/launcher/run_deployment_controller.py"
+        )
+        receipt_position = command.rfind(
+            "controller-release/DeploymentControllerReleaseReceipt.v1.json"
+        )
+        if launcher_position < 0 or receipt_position <= launcher_position:
+            problems.append("publish: receipt is not the final durable asset")
+
+    durable_download = verify.get("Download and compare durable controller assets")
+    if durable_download is None:
+        problems.append("verify: durable controller assets are not downloaded")
+    else:
+        durable_env = durable_download.get("env", {})
+        durable_command = str(durable_download.get("run", ""))
+        if durable_env.get("GENERIC_BASE") != generic_base:
+            problems.append("verify: generic package endpoint differs from publish")
+        if durable_env.get("GENERIC_TOKEN") != ("${{ secrets.FORGEJO_PUBLISH_TOKEN }}"):
+            problems.append("verify: durable assets use a different credential")
+        if durable_command.count("--request GET") != 2:
+            problems.append("verify: durable download is not exactly two files")
+        if durable_command.count("cmp --silent") != 2:
+            problems.append("verify: both durable files are not byte-compared")
+        if ".whl" in durable_command:
+            problems.append("verify: wheel is being fetched from the generic registry")
+
+    expected_artifact = "${{ needs.build.outputs.controller_artifact_name }}"
+    for job, steps in (("publish", publish), ("verify", verify)):
+        download = steps.get("Download the exact controller release bundle")
+        if (
+            download is None
+            or download.get("with", {}).get("name") != expected_artifact
+        ):
+            problems.append(f"{job}: exact controller artifact is not downloaded")
+
+    publish_order = list(publish)
+    if (
+        "Re-verify the receipt before publishing" in publish_order
+        and "Publish to the Forgejo private index" in publish_order
+        and publish_order.index("Re-verify the receipt before publishing")
+        > publish_order.index("Publish to the Forgejo private index")
+    ):
+        problems.append("publish: receipt verification happens after publication")
+    verify_order = list(verify)
+    if (
+        "Download and compare durable controller assets" in verify_order
+        and "Tag the verified release" in verify_order
+        and verify_order.index("Download and compare durable controller assets")
+        > verify_order.index("Tag the verified release")
+    ):
+        problems.append("verify: durable asset proof happens after tagging")
+    if (
+        "Verify registry wheel bytes against the build receipt" in verify_order
+        and "Tag the verified release" in verify_order
+        and verify_order.index("Verify registry wheel bytes against the build receipt")
+        > verify_order.index("Tag the verified release")
+    ):
+        problems.append("verify: registry byte proof happens after tagging")
+    return problems
+
+
+def test_controller_release_is_carried_and_verified_as_one_build() -> None:
+    assert _controller_release_lane_problems(_load_yaml(RELEASE_WORKFLOW)) == []
+
+
+@pytest.mark.parametrize(
+    ("job", "step", "needle"),
+    [
+        (
+            "build",
+            "Bind the controller release receipt to the exact built bytes",
+            '--release-run-id "${GITHUB_RUN_ID}"',
+        ),
+        (
+            "publish",
+            "Re-verify the receipt before publishing",
+            "verify-controller-receipt",
+        ),
+        (
+            "publish",
+            "Publish durable controller launcher and receipt",
+            "put_controller_asset()",
+        ),
+        (
+            "verify",
+            "Download and compare durable controller assets",
+            "cmp --silent",
+        ),
+        (
+            "verify",
+            "Verify registry wheel bytes against the build receipt",
+            "--only-binary=:all:",
+        ),
+        (
+            "verify",
+            "Verify registry wheel bytes against the build receipt",
+            "verify-controller-receipt",
+        ),
+    ],
+)
+def test_controller_release_lane_guard_is_sensitive(
+    job: str, step: str, needle: str
+) -> None:
+    """Removing each load-bearing leg makes the same structural guard fail."""
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    target = _named_steps(mutated, job)[step]
+    target["run"] = str(target["run"]).replace(needle, "planted-gap")
+
+    assert _controller_release_lane_problems(mutated)
+
+
+def test_controller_release_upload_guard_is_sensitive() -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    upload = _named_steps(mutated, "build")[
+        "Upload controller provenance and recovery bundle"
+    ]
+    upload["with"]["path"] = "wheel-only/"
+
+    assert _controller_release_lane_problems(mutated)
+
+
+def test_controller_generic_publication_refuses_a_second_wheel_copy() -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    publish = _named_steps(mutated, "publish")[
+        "Publish durable controller launcher and receipt"
+    ]
+    publish["run"] += "\ncurl --upload-file dist/controller.whl generic/wheel.whl\n"
+
+    assert _controller_release_lane_problems(mutated)
+
+
+@pytest.mark.parametrize(
+    "needle",
+    [
+        '[[ "${status}" == "409" ]]',
+        'get_controller_asset "${target_name}" "${remote_copy}"',
+        'cmp --silent "${source_path}" "${remote_copy}"',
+        '[[ "${status}" != "201" ]]',
+        '[[ "${duplicate_status}" != "409" ]]',
+    ],
+)
+def test_controller_generic_create_only_guard_is_sensitive(needle: str) -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    publish = _named_steps(mutated, "publish")[
+        "Publish durable controller launcher and receipt"
+    ]
+    publish["run"] = str(publish["run"]).replace(needle, "[[ planted-gap ]]")
+
+    assert _controller_release_lane_problems(mutated)
+
+
+def test_controller_generic_unexpected_status_must_exit_guard_is_sensitive() -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    publish = _named_steps(mutated, "publish")[
+        "Publish durable controller launcher and receipt"
+    ]
+    command = str(publish["run"])
+    condition = 'if [[ "${duplicate_status}" != "409" ]]; then'
+    condition_start = command.index(condition)
+    condition_end = command.index("\nfi", condition_start)
+    refusal = command[condition_start:condition_end]
+    publish["run"] = (
+        command[:condition_start]
+        + refusal.replace("exit 1", "true", 1)
+        + command[condition_end:]
+    )
+
+    assert _controller_release_lane_problems(mutated)
+
+
+def test_controller_generic_receipt_last_guard_is_sensitive() -> None:
+    mutated = copy.deepcopy(_load_yaml(RELEASE_WORKFLOW))
+    publish = _named_steps(mutated, "publish")[
+        "Publish durable controller launcher and receipt"
+    ]
+    command = str(publish["run"])
+    launcher = (
+        "controller-release/launcher/run_deployment_controller.py \\\n"
+        "  run_deployment_controller.py \\\n"
+        "  launcher"
+    )
+    receipt = (
+        "controller-release/DeploymentControllerReleaseReceipt.v1.json \\\n"
+        "  DeploymentControllerReleaseReceipt.v1.json \\\n"
+        "  receipt"
+    )
+    publish["run"] = (
+        command.replace(launcher, "swapped-status")
+        .replace(receipt, launcher)
+        .replace("swapped-status", receipt)
+    )
+
+    assert _controller_release_lane_problems(mutated)
 
 
 # ── 3 & 4. deployment-conformance.yml: no publish token, no public PyPI ─────

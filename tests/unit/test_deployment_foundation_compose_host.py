@@ -747,6 +747,47 @@ def test_release_evidence_reads_the_checked_in_file_keyed_by_revision(
     assert effects.release_evidence("f" * 40) == {}
 
 
+def test_manifest_digest_reads_only_a_file_inside_the_staged_deploy_root(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "deploy" / "product-manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_bytes(b'\n{"product":"example"}\n')
+    effects = make_effects(tmp_path, runner=ScriptedRunner())
+
+    assert effects.manifest_digest("deploy/product-manifest.json") == (
+        f"sha256:{hashlib.sha256(manifest.read_bytes()).hexdigest()}"
+    )
+
+
+def test_manifest_digest_refuses_paths_outside_the_staged_root(
+    tmp_path: Path,
+) -> None:
+    deploy_root = tmp_path / "staged"
+    deploy_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("not the staged manifest")
+    effects = make_effects(deploy_root, runner=ScriptedRunner())
+
+    for candidate in ("../outside.json", str(outside)):
+        with pytest.raises(PreconditionFailed, match="outside the staged deploy root"):
+            effects.manifest_digest(candidate)
+
+
+def test_manifest_digest_refuses_a_symlink_escaping_the_staged_root(
+    tmp_path: Path,
+) -> None:
+    deploy_root = tmp_path / "staged"
+    deploy_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("not the staged manifest")
+    (deploy_root / "product-manifest.json").symlink_to(outside)
+    effects = make_effects(deploy_root, runner=ScriptedRunner())
+
+    with pytest.raises(PreconditionFailed, match="outside the staged deploy root"):
+        effects.manifest_digest("product-manifest.json")
+
+
 # ── migration_heads: tolerant parsing ────────────────────────────────────────
 
 

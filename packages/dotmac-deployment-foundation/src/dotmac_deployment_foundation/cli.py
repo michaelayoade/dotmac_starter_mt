@@ -1,12 +1,12 @@
 """``dotmac-deploy`` — the one command every product's CI and host runs.
 
-The whole facility is behind twelve subcommands. Three design choices are worth
-stating because each is load-bearing:
+Three design choices are load-bearing:
 
-**Every command that can mutate takes ``--dry-run``, and ``deploy`` defaults to
-it.** A deployment tool whose default action deploys is a tool that eventually
-deploys because somebody pressed up-arrow-enter. Printing the plan is free;
-running it must be a thing you asked for.
+**Ordinary commands do not mutate a host.** ``deploy`` and ``rollback`` print
+their plans, and their former ``--execute`` spelling now refuses. The sole
+mutation path is ``execute-authorized``, invoked by the independently verified
+launcher with an exact ``DeploymentExecutionEnvelope.v1`` and sealed launch
+context.
 
 **Rendering and checking are one command with a flag, not two.** `render` and
 `render --check` share every line of logic by construction, so they cannot
@@ -25,10 +25,6 @@ import json
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
-    from .engine.run import DeploymentOutcome, Effects
 
 from .errors import DeploymentFoundationError, RenderDrift, SpecError
 from .spec import SCHEMA, ProductDeploymentSpec
@@ -39,20 +35,14 @@ EXIT_USAGE = 2
 
 DEFAULT_DESCRIPTOR = "deploy/product.toml"
 DEFAULT_OUTPUT_DIR = "deploy/rendered"
-DEFAULT_DEPLOY_DIR = "."
-# The only provider this package ships (`providers/compose_host.py`) — the
-# dedicated-VM Docker Compose profile. `--provider` is still a real flag,
-# not a decoration: `build_parser`'s `choices=[...]` refuses an unknown value
-# as a usage error rather than silently falling back to this one, so a typo
-# fails loudly instead of quietly deploying through the wrong provider.
-PROVIDER_COMPOSE_HOST = "compose-host"
-
-
 # ── rendering registry ──────────────────────────────────────────────────────
 
 
 def _rendered_assets(
-    spec: ProductDeploymentSpec, thresholds: dict[str, str]
+    spec: ProductDeploymentSpec,
+    thresholds: dict[str, str],
+    *,
+    configuration_digest: str,
 ) -> dict[str, str]:
     """Every asset this descriptor produces, by relative path.
 
@@ -61,12 +51,19 @@ def _rendered_assets(
     about is a renderer whose output can be hand-edited undetected.
     """
     from .alerts import render_alert_rules
+    from .execution import ApplicationReleaseIdentityV1
     from .render.compose import render_compose
     from .render.nginx import render_nginx
     from .telemetry import render_collector_config
 
+    identity = ApplicationReleaseIdentityV1(
+        image_digest=spec.image_digest,
+        source_revision=spec.source_revision,
+        configuration_digest=configuration_digest,
+        manifest_digest=spec.manifest_digest,
+    )
     assets: dict[str, str] = {
-        "docker-compose.yml": render_compose(spec),
+        "docker-compose.yml": render_compose(spec, release_identity=identity),
         "alerts.rules.yml": render_alert_rules(spec, thresholds=thresholds),
         "otel-collector.yaml": render_collector_config(
             spec, deployment_id="render", host="render"
@@ -82,25 +79,6 @@ def _rendered_assets(
 
 def _load(path: str) -> ProductDeploymentSpec:
     return ProductDeploymentSpec.load(path)
-
-
-def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Effects:
-    """The `Effects` implementation `--execute` runs the plan against.
-
-    `args.provider` is constrained to `PROVIDER_COMPOSE_HOST` by argparse's
-    own `choices=[...]` (`build_parser`), so an unrecognised value never
-    reaches here — it fails as a usage error before the descriptor is even
-    loaded. This function exists only to keep the one `if` legible as the
-    facility grows a second provider, and to keep the import lazy like every
-    other `cmd_*` handler in this module.
-    """
-    if args.provider == PROVIDER_COMPOSE_HOST:
-        from .providers.compose_host import ComposeHostEffects
-
-        return ComposeHostEffects(spec, Path(args.deploy_dir))
-    raise SpecError(
-        f"unknown provider {args.provider!r}"
-    )  # pragma: no cover - unreachable
 
 
 def _thresholds(path: str | None) -> dict[str, str]:
@@ -147,7 +125,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_render(args: argparse.Namespace) -> int:
     spec = _load(args.descriptor)
-    assets = _rendered_assets(spec, _thresholds(args.thresholds))
+    from .controller import digest_file
+
+    assets = _rendered_assets(
+        spec,
+        _thresholds(args.thresholds),
+        configuration_digest=digest_file(Path(args.descriptor)),
+    )
     out = Path(args.output_dir)
 
     if args.check:
@@ -216,11 +200,22 @@ def cmd_image_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
+    from .controller import (
+        deployment_plan_digest,
+        deployment_plan_document,
+        digest_file,
+    )
     from .engine.plan import build_plan, format_plan
 
     spec = _load(args.descriptor)
     plan = build_plan(spec, previous_image=args.previous_image or "")
-    sys.stdout.write(format_plan(plan))
+    if args.json:
+        document = deployment_plan_document(plan)
+        document["plan_digest"] = deployment_plan_digest(plan)
+        document["configuration_digest"] = digest_file(Path(args.descriptor))
+        print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+    else:
+        sys.stdout.write(format_plan(plan))
     return EXIT_OK
 
 
@@ -236,35 +231,119 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     )
     sys.stdout.write(format_plan(plan))
     if not args.execute:
-        print("\nDRY RUN. Nothing was executed. Re-run with --execute to deploy.")
+        print(
+            "\nDRY RUN. Nothing was executed. Deployment requires an authorized "
+            "DeploymentExecutionEnvelope.v1 through the independently verified "
+            "controller launcher."
+        )
         return EXIT_OK
 
-    from .engine.lock import deployment_lock
-    from .engine.run import Executor
-
-    effects = _build_effects(spec, args)
-    executor = Executor(spec, effects)
-    # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
-    # `_do_release_lock` are no-op steps that say so in their own detail text
-    # (`engine/run.py`) — a lock released when the first step returns is not
-    # a lock, it is a lock-shaped gap between the check and the mutation the
-    # 2026-07-12 incident (`engine/lock.py`) actually needed closed.
-    with deployment_lock(
-        spec.product, label=f"dotmac-deploy deploy {plan.image_digest}"
-    ):
-        outcome = executor.run(plan)
-    print()
-    _print_outcome(outcome)
-    if outcome.succeeded:
-        print(f"\nDEPLOYED {plan.image_digest}")
-        return EXIT_OK
-    failed = outcome.failed_step.value if outcome.failed_step else "(unknown step)"
-    print(
-        f"\nDEPLOY REFUSED at {failed}: {outcome.failure}\n"
-        f"world mutated: {outcome.mutated}",
-        file=sys.stderr,
+    raise SpecError(
+        "direct deploy --execute is disabled; use the independently verified "
+        "controller launcher and DeploymentExecutionEnvelope.v1"
     )
-    return EXIT_REFUSED
+
+
+def cmd_execute_authorized(args: argparse.Namespace) -> int:
+    """Run one Foundation-owned plan through the independent controller."""
+
+    from .controller import (
+        CONTROLLER_LOCK_ROOT,
+        CONTROLLER_STATE_ROOT,
+        ControllerStateStore,
+        DockerCurrentReleaseObserver,
+        execute_authorized,
+    )
+    from .execution import (
+        DeploymentExecutionEnvelopeV1,
+        GitRevisionOracle,
+        provenance_from_launch_context,
+        scrub_controller_provenance_environment,
+    )
+
+    if (
+        not args.execution_envelope
+        or not args.staged_application_root
+        or args.launch_context_fd is None
+    ):
+        raise SpecError(
+            "execute-authorized requires --execution-envelope and "
+            "--staged-application-root plus an inherited launch context from "
+            "the independent launcher"
+        )
+    staged_root = Path(args.staged_application_root).resolve()
+    descriptor = Path(args.descriptor)
+    if not descriptor.is_absolute():
+        descriptor = staged_root / descriptor
+    descriptor = descriptor.resolve()
+    if not descriptor.is_relative_to(staged_root):
+        raise SpecError("the product descriptor must be inside the staged application")
+    envelope = DeploymentExecutionEnvelopeV1.load(args.execution_envelope)
+
+    authorizer_repo = Path(args.authorizer_repo).resolve()
+    application_history_repo = Path(args.application_history_repo).resolve()
+    if authorizer_repo == staged_root or authorizer_repo.is_relative_to(staged_root):
+        raise SpecError("authorizer checkout must be outside the staged application")
+    if (
+        application_history_repo == staged_root
+        or application_history_repo.is_relative_to(staged_root)
+    ):
+        raise SpecError(
+            "application-history checkout must be outside the staged application"
+        )
+    if application_history_repo == authorizer_repo:
+        raise SpecError("authorizer and application-history checkouts must be distinct")
+
+    actual_controller, actual_authorizer, authorization_evidence = (
+        provenance_from_launch_context(
+            args.launch_context_fd,
+            staged_application_root=staged_root,
+        )
+    )
+    if authorization_evidence.execution_envelope_digest != envelope.envelope_digest:
+        raise SpecError(
+            "signed authorization evidence does not bind this execution envelope"
+        )
+    scrub_controller_provenance_environment()
+    state_store = ControllerStateStore(
+        CONTROLLER_STATE_ROOT,
+        product=envelope.product,
+        target_ref=envelope.target_ref,
+    )
+    observer = DockerCurrentReleaseObserver(
+        docker_binary=Path(args.docker_bin),
+        product=envelope.product,
+        state_store=state_store,
+    )
+    result = execute_authorized(
+        envelope=envelope,
+        descriptor_path=descriptor,
+        actual_controller=actual_controller,
+        actual_authorizer=actual_authorizer,
+        authorization_evidence=authorization_evidence,
+        revision_oracle=GitRevisionOracle(
+            repository=application_history_repo,
+            git_binary=Path(args.git_bin),
+            snapshot=authorization_evidence.application_history,
+        ),
+        observer=observer,
+        state_store=state_store,
+        staged_application_root=staged_root,
+        lock_directory=CONTROLLER_LOCK_ROOT,
+    )
+    output = {
+        "allowed": result.decision.allowed,
+        "relation": result.decision.relation.value,
+        "reason_code": result.decision.reason_code,
+        "overridden": result.decision.overridden,
+        "blockers": list(result.decision.blockers),
+        "deployment_succeeded": (
+            None if result.outcome is None else result.outcome.succeeded
+        ),
+        "state_path": None if result.state_path is None else str(result.state_path),
+    }
+    print(json.dumps(output, sort_keys=True, separators=(",", ":")))
+    return EXIT_OK if result.decision.allowed else EXIT_REFUSED
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
@@ -464,7 +543,13 @@ def cmd_drift(args: argparse.Namespace) -> int:
 
     spec = _load(args.descriptor)
     observed = json.loads(Path(args.observed).read_text(encoding="utf-8"))
-    assets = _rendered_assets(spec, _thresholds(args.thresholds))
+    from .controller import digest_file
+
+    assets = _rendered_assets(
+        spec,
+        _thresholds(args.thresholds),
+        configuration_digest=digest_file(Path(args.descriptor)),
+    )
     from hashlib import sha256
 
     approved = {
@@ -506,37 +591,18 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     for index, step in enumerate(steps, start=1):
         print(f"{index}. {step.kind.value} — {step.description}")
     if not args.execute:
-        print("\nDRY RUN. Nothing was executed. Re-run with --execute to roll back.")
+        print(
+            "\nDRY RUN. Nothing was executed. Rollback requires an exact typed "
+            "override in DeploymentExecutionEnvelope.v1 through the independently "
+            "verified controller launcher."
+        )
         return EXIT_OK
 
-    from .engine.lock import deployment_lock
-    from .engine.run import Executor
-
-    effects = _build_effects(spec, args)
-    executor = Executor(spec, effects)
-    # Same rule as `cmd_deploy`: the lock wraps the whole run.
-    with deployment_lock(
-        spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
-    ):
-        outcome = executor.rollback(plan)
-    print()
-    _print_outcome(outcome)
-    if outcome.succeeded:
-        print(f"\nROLLED BACK to {plan.previous_image}")
-        return EXIT_OK
-    failed = outcome.failed_step.value if outcome.failed_step else "(unknown step)"
-    print(f"\nROLLBACK REFUSED at {failed}: {outcome.failure}", file=sys.stderr)
-    return EXIT_REFUSED
-
-
-def _print_outcome(outcome: DeploymentOutcome) -> None:
-    """The step-by-step record every executed run prints, deploy or rollback."""
-    for record in outcome.records:
-        status = "ok" if record.ok else "FAILED"
-        print(f"{record.kind.value:<24} {status:<6} {record.detail}")
-    for note in outcome.notes:
-        print(f"NOTE  {note}")
-    print(f"evidence: {outcome.evidence_path or '(not written; see notes)'}")
+    raise SpecError(
+        "direct rollback --execute is disabled; a source rollback requires an "
+        "exact DeploymentExecutionEnvelope.v1 override through the independent "
+        "controller, and migration downgrade remains forbidden"
+    )
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -589,6 +655,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DESCRIPTOR,
         help=f"default {DEFAULT_DESCRIPTOR}",
     )
+    parser.add_argument(
+        "--execution-envelope",
+        help="DeploymentExecutionEnvelope.v1 supplied by the independent launcher",
+    )
+    parser.add_argument(
+        "--staged-application-root",
+        help="application checkout being judged; never the controller import root",
+    )
+    parser.add_argument("--launch-context-fd", type=int, help=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add(
@@ -628,26 +703,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = add("plan", cmd_plan, "build and print the ordered deployment plan")
     plan.add_argument("--previous-image")
+    plan.add_argument("--json", action="store_true")
 
-    deploy = add("deploy", cmd_deploy, "deploy (DRY RUN unless --execute)")
+    deploy = add(
+        "deploy",
+        cmd_deploy,
+        "show the deployment plan; direct execution is refused",
+    )
     deploy.add_argument("--previous-image")
-    deploy.add_argument("--execute", action="store_true")
+    deploy.add_argument(
+        "--execute",
+        action="store_true",
+        help="compatibility flag that always refuses; use the verified launcher",
+    )
     deploy.add_argument("--skip-backup", action="store_true")
     deploy.add_argument("--skip-backup-reason", default="")
-    deploy.add_argument(
-        "--deploy-dir",
-        default=DEFAULT_DEPLOY_DIR,
-        help=(
-            "the host directory `--execute` runs against, "
-            f"default {DEFAULT_DEPLOY_DIR!r}"
-        ),
+
+    authorized = add(
+        "execute-authorized",
+        cmd_execute_authorized,
+        "internal authenticated-launcher entrypoint; direct invocation is refused",
     )
-    deploy.add_argument(
-        "--provider",
-        default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
-        help="the Effects implementation `--execute` runs the plan against",
-    )
+    authorized.add_argument("--authorizer-repo", required=True)
+    authorized.add_argument("--application-history-repo", required=True)
+    authorized.add_argument("--git-bin", required=True)
+    authorized.add_argument("--docker-bin", required=True)
 
     policy = add(
         "ingress-policy",
@@ -701,22 +781,11 @@ def build_parser() -> argparse.ArgumentParser:
         "rollback", cmd_rollback, "show the rollback plan, or why it is refused"
     )
     rollback.add_argument("--previous-image")
-    rollback.add_argument("--execute", action="store_true")
     rollback.add_argument(
-        "--deploy-dir",
-        default=DEFAULT_DEPLOY_DIR,
-        help=(
-            "the host directory `--execute` runs against, "
-            f"default {DEFAULT_DEPLOY_DIR!r}"
-        ),
+        "--execute",
+        action="store_true",
+        help="compatibility flag that always refuses; use the verified launcher",
     )
-    rollback.add_argument(
-        "--provider",
-        default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
-        help="the Effects implementation `--execute` runs the plan against",
-    )
-
     return parser
 
 

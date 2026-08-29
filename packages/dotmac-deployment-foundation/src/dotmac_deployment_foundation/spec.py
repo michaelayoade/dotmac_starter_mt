@@ -42,7 +42,7 @@ import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from . import ingress as ingress_contract
@@ -1806,6 +1806,18 @@ class ProductDeploymentSpec:
         if assembly is None:  # pragma: no cover - `table()` raises first
             raise SpecError("assembly table is missing", where=source)
         manifest_path = assembly.str_("manifest_path")
+        parsed_manifest_path = PurePosixPath(manifest_path)
+        if (
+            parsed_manifest_path.is_absolute()
+            or manifest_path == ""
+            or "\\" in manifest_path
+            or ".." in parsed_manifest_path.parts
+        ):
+            raise SpecError(
+                "manifest_path must be a relative POSIX path without parent "
+                "traversal",
+                where=assembly.path,
+            )
         manifest_digest = assembly.str_(
             "manifest_digest", pattern=re.compile(r"^sha256:[0-9a-f]{64}$")
         )

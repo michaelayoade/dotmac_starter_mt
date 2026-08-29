@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from .lock import LockUnavailableError, deployment_lock, lock_path
+from .lock import (
+    LockUnavailableError,
+    deployment_lock,
+    lock_path,
+)
 from .plan import (
     DeploymentPlan,
     Phase,

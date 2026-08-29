@@ -419,6 +419,20 @@ class Executor:
     def _do_verify_manifest(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
     ) -> str:
+        image_manifest = self._effects.image_labels(plan.image).get(
+            "org.dotmac.product.manifest.digest", ""
+        )
+        if not image_manifest:
+            raise PreconditionFailed(
+                f"{plan.image} carries no org.dotmac.product.manifest.digest label, "
+                "so the running image cannot independently prove the product "
+                "manifest identity it was built and accepted with"
+            )
+        if image_manifest != plan.manifest_digest:
+            raise PreconditionFailed(
+                f"{plan.image} records product manifest {image_manifest}, but the "
+                f"descriptor declares {plan.manifest_digest}"
+            )
         observed = self._effects.manifest_digest(step.target)
         if not observed:
             raise PreconditionFailed(

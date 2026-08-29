@@ -32,13 +32,19 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from ..errors import LockUnavailableError
 
-__all__ = ["DEFAULT_LOCK_DIR", "LockUnavailableError", "deployment_lock", "lock_path"]
+__all__ = [
+    "DEFAULT_LOCK_DIR",
+    "LockUnavailableError",
+    "deployment_lock",
+    "lock_path",
+]
 
 DEFAULT_LOCK_DIR = "/var/lock"
 
@@ -52,7 +58,7 @@ def lock_path(
     host at once is fine and should not serialise, while two deployments of the
     SAME product at once is the incident.
     """
-    return Path(directory) / f"dotmac_{product}_deploy.lock"
+    return Path(directory).resolve() / f"dotmac_{product}_deploy.lock"
 
 
 def _holder_description(path: Path) -> str:
@@ -103,7 +109,7 @@ def deployment_lock(
     inode, and both then believe they hold the lock — the classic lockfile race.
     An empty file costs nothing.
     """
-    path = Path(directory) / f"dotmac_{product}_deploy.lock"
+    path = lock_path(product, directory=directory)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -111,8 +117,18 @@ def deployment_lock(
             f"cannot create lock directory {path.parent}: {exc}"
         ) from exc
 
-    handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
+        handle = os.open(path, flags, 0o644)
+    except OSError as exc:
+        raise LockUnavailableError(
+            f"cannot open deployment lock {path}: {exc}"
+        ) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise LockUnavailableError(f"deployment lock {path} is not a regular file")
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
