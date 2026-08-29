@@ -731,3 +731,104 @@ def test_a_claim_field_on_the_wrong_kind_is_refused(
         distribution=DISTRIBUTION,
     )
     assert any(fragment in p for p in problems), (fragment, problems)
+
+
+# ── the dossier's own claim, resolved against the captured bytes ────────────
+#
+# Everything above proves the analyser works. This proves it is WIRED to the
+# file that makes the claim — the step the previous evidence gate skipped, and
+# the reason `dotmac-tax` could sit at an adoption state on a pin.
+
+
+DOSSIER = (
+    Path(__file__).resolve().parents[2]
+    / "packages"
+    / "dotmac-deployment-control"
+    / "EXTRACTION.toml"
+)
+
+
+def _dossier() -> dict[str, object]:
+    import tomllib
+
+    return tomllib.loads(DOSSIER.read_text(encoding="utf-8"))
+
+
+def _dossier_rows(kind: str | None = None) -> list[dict[str, object]]:
+    rows = list(_dossier()["adoption_evidence"])  # type: ignore[arg-type]
+    return [r for r in rows if kind is None or r.get("kind") == kind]
+
+
+def test_the_dossier_claims_composition_at_the_captured_commit() -> None:
+    """Non-vacuity first: if the dossier stopped carrying these rows, the
+    resolution below would pass over an empty list and prove nothing."""
+    rows = _dossier_rows("composed_at")
+    assert len(rows) == 2, "the dossier lost its composition rows"
+    assert {row["proves"] for row in rows} == evidence.COMPOSITION_PROOFS
+    for row in rows:
+        assert row["repository"] == VENDOR
+        assert row["commit"] == MANIFEST["commit"], (
+            "the dossier cites a commit the fixtures were not captured at, so "
+            "the resolution below would check a different tree"
+        )
+
+
+def test_the_dossier_composition_claim_resolves_against_the_real_bytes() -> None:
+    pin = _dossier_rows("pinned_at")[0]
+    assert (
+        evidence.composition_claim_problems(
+            sources=_sources(),
+            rows=_dossier_rows("composed_at"),
+            pin_source=_fixture("pyproject.toml"),
+            distribution=DISTRIBUTION,
+            expected_pin=pin["expected"],
+        )
+        == []
+    ), "the dossier asserts a composition the consumer's own bytes do not show"
+
+
+def test_the_dossier_status_is_the_one_its_consumer_count_supports() -> None:
+    dossier = _dossier()
+    assert dossier["status"] == "adopted"
+    assert dossier["contract_consumers"] == [VENDOR]
+    assert (
+        evidence.adoption_state_problems(
+            status=dossier["status"],
+            rows=dossier["adoption_evidence"],
+            adoption_states=frozenset({"adopted", "reuse-proven"}),
+        )
+        == []
+    )
+
+
+def test_the_dossier_claims_vendor_composition_and_never_production() -> None:
+    """The guardrail, tied to the AXIS rather than to a hand-kept list of names.
+
+    Asserting `deploy_run` and `live_observation` are absent BY NAME is a list
+    of things that must not appear, and that is the worst kind of list: it
+    passes silently the day the vocabulary grows a kind nobody adds to it.
+    `has_no_runtime_evidence` is derived from `RUNTIME_CLAIM_KINDS`, so a new
+    runtime kind is covered the moment it is classified — and the parametrised
+    coverage test in this file fails if one is added without being classified.
+
+    BOTH predicates, because they are true of this dossier for different reasons
+    and a future change can break either alone:
+
+      * `has_no_runtime_evidence` — nothing here is even ELIGIBLE to speak about
+        a running system. Adding a `deploy_run` breaks this one.
+      * `rests_on_source_alone` — every row is a source-tree read. Adding a
+        `workflow_run` breaks THIS one while leaving the first true, which is
+        precisely the divergence that exposed the predicate defect.
+    """
+    rows = _dossier()["adoption_evidence"]
+    assert evidence.has_no_runtime_evidence(rows)
+    assert evidence.rests_on_source_alone(rows)
+
+    assert evidence.proves_source_composition(rows)
+    assert not evidence.proves_production_deployment(rows)
+    assert not evidence.proves_currently_running(rows, as_of=TODAY)
+
+    assert "NOT CLAIMED" in str(_dossier()["first_cutover"]), (
+        "the dossier must say out loud that production is unproven, not merely "
+        "omit the claim"
+    )
