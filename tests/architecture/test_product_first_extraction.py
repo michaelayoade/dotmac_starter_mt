@@ -1672,6 +1672,16 @@ def test_every_evidence_kind_is_classified_by_the_adoption_split() -> None:
     assert proving & evidence_schema.ATTESTATION_KINDS
     assert installation & evidence_schema.ASSERTION_KINDS
     assert installation & evidence_schema.ATTESTATION_KINDS
+    # The third family must be represented too, or "total over EVIDENCE_KINDS"
+    # would stay true while a whole family sat unclassified behind a set union
+    # nobody re-read.
+    assert proving & evidence_schema.AST_ASSERTION_KINDS
+    assert (
+        evidence_schema.ASSERTION_KINDS
+        | evidence_schema.ATTESTATION_KINDS
+        | evidence_schema.AST_ASSERTION_KINDS
+        == evidence_schema.EVIDENCE_KINDS
+    )
 
 
 def test_an_adoption_state_with_no_composition_evidence_is_refused() -> None:
