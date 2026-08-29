@@ -145,14 +145,27 @@ build.
 No plane was declared because it might be useful later. ADR-0023 requires a named
 assembly on each declared side, and each of the four rows above names one.
 
-## Adoption state — nothing is adopted
+## Adoption state — one module is adopted
 
-| Module | Dossier status | `adoption_evidence` | First adopter |
-|---|---|---|---|
-| commercial-agreements | `audit-complete` | empty | Vendor CP (authority transfer from `vendor_cp.contracts`) |
-| licensing | `audit-complete` | empty | Vendor CP (authority transfer, issuer half only) |
-| deployment-control | `audit-complete` | empty | Vendor CP (greenfield composition; nothing to transfer) |
-| brand-profiles | `audit-complete` | empty | Sub (tenant plane), then Vendor CP (platform plane) |
+Partially re-measured 2026-08-29. **Only the `deployment-control` row was
+re-measured**; the other three carry their original 2026-08-20 reading and were
+NOT re-checked in that pass. Restating an unmeasured row as still true is the
+failure this correction exists to undo — the section previously said "nothing is
+adopted" for eight days after that stopped being true, because it was prose with
+no guard. Treat the three unmarked rows as of unknown currency.
+
+| Module | Dossier status | `adoption_evidence` | First adopter | Measured |
+|---|---|---|---|---|
+| commercial-agreements | `audit-complete` | empty | Vendor CP (authority transfer from `vendor_cp.contracts`) | 2026-08-20 |
+| licensing | `audit-complete` | empty | Vendor CP (authority transfer, issuer half only) | 2026-08-20 |
+| deployment-control | `adopted` | `pinned_at` + two `composed_at` | **Vendor CP — DONE**, merge `69a877d6` (#71), 2026-08-21 | 2026-08-29 |
+| brand-profiles | `audit-complete` | empty | Sub (tenant plane), then Vendor CP (platform plane) | 2026-08-20 |
+
+The `deployment-control` cutover was a greenfield composition for plans,
+rollouts, credentials and observations, and an authority cutover for the
+deployment-TARGET half alone (`v017` sealed the independent registration path).
+Composition is a fact about Vendor's `main`; **no production deployment is
+claimed** and none is proven.
 
 Each dossier records what its cutover owes. Three obligations are worth naming
 here because they are easy to discover too late:
