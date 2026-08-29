@@ -57,6 +57,35 @@ the packet there is already DNATed and its `--dport` is the container port. And
 every allowlist ends in a terminal DROP, because one whose last rule is an
 ACCEPT enforces nothing.
 
+### Execution and proof
+
+`exposure.py` applies the plan and then goes and looks. `ExposureTransaction`
+takes the product's exclusive deployment lock, SNAPSHOTS the host, applies,
+RE-OBSERVES and verifies — rolling back to the observed snapshot on any
+refusal, because a rollback that restores only what it thinks it changed cannot
+repair what it did not notice changing.
+
+`verify_exposure()` compares declared bindings against real sockets,
+`docker-proxy` processes and firewall chains, in both directions: a declared
+family that is not bound is `socket_missing`, and a bound port the descriptor
+never mentions is `undeclared_socket` — the port that stays open is the one
+nothing declares. `dotmac-deploy exposure-verify` runs the same verifier over
+RECORDED command output, so an incident's pasted `ss` and `iptables-save` can be
+replayed months later with no host present.
+
+Three refusals encode what a naive check misses. `refuse_non_recreating_apply`
+refuses an apply that cannot change a binding, because `docker compose restart`
+reuses the container it already has and a plain `up -d` will not recreate an
+unchanged image — a correct Compose diff plus a restart leaves the OLD binding
+live and the NEW one believed. `conclude_binding` returns INCONCLUSIVE rather
+than "closed" when the only evidence is an external probe against a host that
+silently DROPs, because loopback-bound and wildcard-bound-and-dropped are
+indistinguishable from outside. And `accept_public_exposure_evidence` refuses a
+probe whose vantage is inside — or is not KNOWN to be outside — a source set
+the plan accepts: on 2026-08-29 two agents independently connected to "public"
+ports from a workstation sitting inside this fleet's own allowlisted range, and
+each escalated a P0 that did not exist.
+
 MAJOR-shaped, released as a pre-release, and the warning-phase deviation is
 recorded with its four premises in `COMPATIBILITY.md`. **Publication is HELD**
 while OpenBao containment and credential rotation settle — see
