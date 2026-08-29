@@ -244,6 +244,10 @@
           "reason": "Infrastructure for a DIFFERENT host (the dotmac-s3 artifact registry), not a deployment of this product. It is checked in here for operator convenience and is deployed by nobody in this repository."
         },
         {
+          "path": "scripts/exposure-rehearsal/product.toml",
+          "reason": "The Lane 3 exposure fixture. It declares three publications whose only purpose is to be observed as sockets on a disposable host — a loopback dual-stack pair, a single-family control, and an exposure=none port that must emit nothing. It is a test input, not a deployable, and it deliberately shares the product.toml name so the rehearsal exercises the real schema rather than a fixture dialect."
+        },
+        {
           "path": "scripts/rehearsal/product.toml",
           "reason": "A disposable Lane 2 rehearsal fixture whose values are @@PLACEHOLDER@@ tokens substituted at run time. It is a test input, not a deployable, and it deliberately shares the product.toml name so that the rehearsal exercises the real schema."
         }
