@@ -34,6 +34,7 @@ from collections.abc import Mapping
 
 import pytest
 import yaml
+from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.render.compose import (
     _scalar,
     render_compose,
@@ -434,6 +435,95 @@ def test_the_loopback_check_catches_a_publication_that_omits_host_ip_entirely(
         if "host_ip: DELETE" not in line
     )
     assert not _all_published_ports_are_loopback(yaml.safe_load(broken))
+
+
+# ── 4b. a declared collector image is digest-pinned ────────────────────────
+#
+# `collector_image` was the ONE image reference in the schema with no pattern
+# at all, while `image.reference` has carried `_DIGEST_REF` from the start. A
+# mutable `otel/...:0.109.0` tag therefore reached a rendered Compose file and
+# no local gate could see it — an external conformance check found it.
+#
+# The exemption below is the part that needs guarding. "Optional" and
+# "unchecked" are one edit apart, so the permissive cases and the refusal are
+# asserted together.
+
+
+def _telemetry(collector: str | None) -> str:
+    """The fixture descriptor with its telemetry section rewritten.
+
+    Built from the real loader rather than a hand-made dataclass, so a
+    validation this module misunderstands fails here rather than surfacing as a
+    renderer that only works against objects no descriptor produces.
+    """
+    declared = "" if collector is None else f'\ncollector_image = "{collector}"'
+    return (
+        _TOML
+        + f"""
+[telemetry]
+logs = true
+metrics = true
+metrics_material = "METRICS_TOKEN"{declared}
+"""
+    )
+
+
+def test_a_declared_collector_image_must_be_digest_pinned() -> None:
+    """The defect, planted. A tag makes what ran yesterday and what runs after
+    the next restart two deployments with one description."""
+    with pytest.raises(SpecError) as caught:
+        ProductDeploymentSpec.loads(
+            _telemetry("otel/opentelemetry-collector-contrib:0.109.0"),
+            source="<tagged>",
+        )
+    assert "collector_image" in str(caught.value)
+
+
+def test_a_digest_pinned_collector_image_is_accepted() -> None:
+    """The negative control. A refusal that refused every value would pass the
+    test above and make the field unusable."""
+    spec = ProductDeploymentSpec.loads(
+        _telemetry(
+            "otel/opentelemetry-collector-contrib@sha256:" + "a" * 64,
+        ),
+        source="<pinned>",
+    )
+    assert spec.telemetry.collector_image.endswith("@sha256:" + "a" * 64)
+
+
+def test_declaring_NO_collector_image_stays_legal() -> None:
+    """The exemption, and the reason it exists rather than being tidiness.
+
+    A consumer may declare `[telemetry]` and run no collector — `dotmac_erp`
+    does exactly that, with a `[telemetry]` section and no `collector_` key of
+    any kind. The rule is that a DECLARED collector image is digest-pinned, not
+    that one must be declared; requiring declaration is a separate decision
+    with its own migration.
+    """
+    spec = ProductDeploymentSpec.loads(_telemetry(None), source="<absent>")
+    assert spec.telemetry.collector_image == ""
+
+
+def test_an_explicitly_empty_collector_image_stays_legal() -> None:
+    """`^$` is carried explicitly in the pattern rather than relying on
+    `str_` returning the default before it reaches the pattern branch.
+
+    Both spellings of "no collector" must behave identically, or the contract
+    depends on a helper's internal ordering that nothing else asserts.
+    """
+    spec = ProductDeploymentSpec.loads(_telemetry(""), source="<empty>")
+    assert spec.telemetry.collector_image == ""
+
+
+def test_the_repositorys_own_descriptor_pins_its_collector_by_digest() -> None:
+    """The regression this PR exists for, asserted against the real file rather
+    than a fixture — a fixture cannot go stale in the way the descriptor did."""
+    own = ProductDeploymentSpec.loads(
+        pathlib.Path("deploy/product.toml").read_text(),
+        source="deploy/product.toml",
+    )
+    assert "@sha256:" in own.telemetry.collector_image
+    assert ":0.109.0" not in own.telemetry.collector_image
 
 
 # ── 5. readiness drives the healthcheck; liveness becomes a label ──────────
