@@ -233,7 +233,21 @@
         "deploy/rendered/alerts.rules.yml"
       ],
       "render_check_workflow": ".github/workflows/deployment-conformance.yml",
-      "render_check_command": "render --check"
+      "render_check_command": "render --check",
+      "acknowledged_non_deployments": [
+        {
+          "path": "docker-compose.yml",
+          "reason": "The LEGACY production compose that scripts/deploy.sh drives, and the engine deploy/product.toml exists to replace. It is acknowledged rather than declared because declaring it would assert it conforms, and it does not: it resolves images through ${...} substitution, which ADR 0014 counts as unpinned. Retirement is gated on proven parity per EXTRACTION.toml local_copy_retirement, not on this row, and this row must be removed in the same change that retires it."
+        },
+        {
+          "path": "deploy/forgejo/docker-compose.yml",
+          "reason": "Infrastructure for a DIFFERENT host (the dotmac-s3 artifact registry), not a deployment of this product. It is checked in here for operator convenience and is deployed by nobody in this repository."
+        },
+        {
+          "path": "scripts/rehearsal/product.toml",
+          "reason": "A disposable Lane 2 rehearsal fixture whose values are @@PLACEHOLDER@@ tokens substituted at run time. It is a test input, not a deployable, and it deliberately shares the product.toml name so that the rehearsal exercises the real schema."
+        }
+      ]
     }
   ]
 }
