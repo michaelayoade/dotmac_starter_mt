@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "profile_id": "dotmac-starter-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_starter_mt",
@@ -8,7 +8,7 @@
   "governance_model": {
     "kind": "pinned",
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
-    "revision": "e0f636c3f5adea77da136f75f49c2349fbf9eeaa",
+    "revision": "0000000000000000000000000000000000000000",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "accepted"
   },
@@ -221,5 +221,19 @@
         "fingerprint": "73d8d950aca5d1de24c6b270bf8bf9bc871d4579e9ce1debdfb6041e8b6e243d"
       }
     ]
-  }
+  },
+  "deployment_artefact_surfaces": [
+    {
+      "surface_id": "starter-product-deployment",
+      "subject": "The Starter's single deployment declaration and the assets dotmac-deployment-foundation renders from it.",
+      "declaration_paths": ["deploy/product.toml"],
+      "rendered_paths": [
+        "deploy/rendered/docker-compose.yml",
+        "deploy/rendered/otel-collector.yaml",
+        "deploy/rendered/alerts.rules.yml"
+      ],
+      "render_check_workflow": ".github/workflows/deployment-conformance.yml",
+      "render_check_command": "render --check"
+    }
+  ]
 }
