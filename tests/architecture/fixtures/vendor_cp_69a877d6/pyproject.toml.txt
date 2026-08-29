@@ -1,0 +1,142 @@
+[tool.poetry]
+name = "dotmac-vendor-control-plane"
+version = "0.1.0"
+description = "DotMac Vendor Control Plane — a vendor/product-lifecycle assembly composed from the pinned dotmac-kernel. It is NOT a product data plane; it owns vendor-side accounts, provisioning contracts, and (later) deployment lifecycle."
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "vendor_cp", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+# The kernel is PINNED EXACTLY to the published alpha and resolved ONLY from the
+# private Forgejo index (ADR-0005). The `testing` extra ships the kernel's
+# supported test kit (harness + fakes + provisioning contract + the WS8
+# FakeLicenceSigner) this assembly's tests consume; `licensing` adds the Ed25519
+# dependency `dotmac_kernel.licensing` needs, which the WS8 issuance slice
+# requires to sign and to round-trip its envelopes through `verify_licence`.
+# No copied kernel modules, no import-path shims.
+dotmac-kernel = { version = "0.1.0a77", extras = [
+    "testing",
+    "licensing",
+], source = "forgejo" }
+# Vendor-owned immutable artifact identity and attestations. Exact-pinned from
+# the same private index; its manifest and migration locator are composed by the
+# assembly through the package's public top-level surface.
+#
+# a4 is required, not merely preferred. Through a3 the module declared its two
+# tables in `ModuleManifest.tables` — the TENANT contract — while its migration
+# actually creates platform-shaped tables (no `tenant_id`, REVOKEd from
+# `app_user`). Nothing noticed, because nothing audited the live catalogue here.
+# The composed audit added in `tests/migration/test_composed_live_catalog.py`
+# does, and an a3 module fails it correctly: the declaration and the database
+# disagree. a4 moves both tables to `platform_tables`, which is what makes the
+# declaration true (ADR-0023).
+dotmac-release-catalog = { version = "0.1.0a4", source = "forgejo" }
+# The allocation authority under ADR-0006. Vendor migration `v014` checked the
+# greenfield premise, dropped the empty local tables and retired their writer;
+# Vendor retains only its typed assembly adapter. Exact-pinned from the private
+# index; never a path dependency and never a silent dual-write.
+#
+# a4 moved its `allocations` / `allocation_entries` to declared
+# `platform_tables`, so the composed live-catalogue audit can hold them to the
+# plane they are actually built on.
+#
+# a6 declares the two kernel effects `stage_allocation` writes at REQUEST time
+# and every release through a4 consumed without naming: the idempotency ledger
+# it delegates at-most-once execution to, and the platform audit log it writes
+# inside that same operation. `ea_0002` and `ea_0003` are DDL-free revisions
+# whose entire bodies verify those prerequisites, so the dependency fails at
+# deploy rather than on the first allocation.
+#
+# a5 is skipped deliberately and must never be pinned: it carried only the first
+# half of that repair and was never published to the index.
+dotmac-entitlement-allocation = { version = "0.1.0a6", source = "forgejo" }
+# The dual-plane approval-state authority (ADR-0005/ADR-0028), composed on its
+# PLATFORM plane only. Vendor migration `v013` restored the module's online DML,
+# dropped the empty legacy tables and retired the local writer; Vendor retains
+# only its typed adapter.
+#
+# a5 declares `outbox_relay.v1`. Every release through a4 called
+# `emit_platform_events` -> `enqueue_platform_event`, writing
+# `public.platform_outbox_events` at REQUEST time, while declaring nothing:
+# `ap_0001` creates the approval tables in `mod_approvals` and the relay is the
+# kernel's. An adopter running only its own lineage took `UndefinedTable` on the
+# first approval decision that emitted an event, with the approval transaction
+# rolling back alongside it.
+#
+# This assembly was never exposed to that, because it runs the whole kernel base
+# lineage and therefore already has both relay tables. What it lacked was the
+# PROOF — which is why the repin comes with the `outbox_relay.v1` binding in
+# `vendor_cp.migration_bindings` and the DDL-free `ap_0002_outbox_relay`
+# verification revision. See ADR-0005 s "Adoption plan".
+dotmac-approvals = { version = "0.1.0a5", source = "forgejo" }
+# The platform-only owner of deployment identity, desired state, immutable
+# plans, rollouts and authenticated observations (ADR-0011). Atomic: it declares
+# one supported plane set, so no `ModulePlaneSelection` is possible and none is
+# made. Its two declared prerequisites were already bound here.
+#
+# a2, not the tagged a1. a1 returns the raw unique-constraint error instead of
+# the canonical verdict when two genuinely concurrent FIRST observations race,
+# and this is the assembly that receives arrivals from deployments it does not
+# control over an at-least-once transport — the exact shape that produces the
+# race. a2 runs the receipt insert in a savepoint, keeps the loser's append-only
+# attempt and replays the winner's verdict.
+dotmac-deployment-control = { version = "0.1.0a2", source = "forgejo" }
+# The platform-only Commercial Agreements authority. Vendor migration `v015`
+# checks the greenfield premise under lock, drops the empty legacy tables, and
+# leaves this module as the one lifecycle/history/audit/outbox writer. Vendor
+# retains only typed offer, catalogue and approval-evidence adapters.
+dotmac-commercial-agreements = { version = "0.1.0a1", source = "forgejo" }
+# The platform-only Licensing issuer authority. Vendor v016 checks the
+# greenfield premise under lock, drops the empty local issuer tables and keeps
+# only key custody plus the separately owned delivery projection.
+dotmac-licensing = { version = "0.1.0a1", source = "forgejo" }
+uvicorn = "^0.30"
+# The one control-plane database's driver (Postgres). There is exactly ONE
+# database; no product DSNs, no cross-database access (deny-case D1/D2).
+psycopg = { version = "^3.2", extras = ["binary"] }
+# Migrations: the vendor lineage is composed with the kernel's shipped base
+# lineage (dotmac_kernel.migrations.versions_dir) at deploy time.
+alembic = "^1.13"
+
+# Public Dotmac packages resolve from Forgejo; everything else from PyPI. Marked
+# `explicit` so ONLY named Dotmac packages are pulled from here (no
+# dependency-confusion aggregation of public names).
+[[tool.poetry.source]]
+name = "forgejo"
+url = "https://registry.dotmac.io/api/packages/dotmac/pypi/simple"
+priority = "explicit"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+ruff = "^0.6"
+mypy = "^1.11"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+[tool.ruff.lint.per-file-ignores]
+# asserts are the point in tests; S105/S106 flag dummy fixture "passwords"
+# (e.g. password_hash="x") that are not real secrets.
+"tests/**" = ["S101", "S105", "S106"]
+# The concurrency proof interpolates a per-test scratch TABLE NAME it generated
+# itself (uuid4 hex) — table identifiers cannot be bound as parameters, and no
+# external input reaches these statements.
+"tests/migration/test_replay_concurrency.py" = ["S101", "S105", "S106", "S608"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/vendor_cp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

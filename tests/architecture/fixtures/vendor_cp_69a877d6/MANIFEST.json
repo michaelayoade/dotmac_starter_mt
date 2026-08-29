@@ -1,0 +1,25 @@
+{
+  "repository": "dotmac_vendor_control_plane",
+  "commit": "69a877d6f0c6886e300f5433020f7f25421e111c",
+  "commit_subject": "Compose Deployment Control, and cut target authority over to it (#71)",
+  "files": [
+    {
+      "fixture": "assembly.py.txt",
+      "path": "src/vendor_cp/assembly.py",
+      "blob_sha1": "c1a250edbf18adab547698d74cc938f39eb34c03",
+      "bytes": 6210
+    },
+    {
+      "fixture": "migrations.py.txt",
+      "path": "src/vendor_cp/migrations.py",
+      "blob_sha1": "846d9c01eacc21324dfaa0ecc39ad36b9b835728",
+      "bytes": 6654
+    },
+    {
+      "fixture": "pyproject.toml.txt",
+      "path": "pyproject.toml",
+      "blob_sha1": "84f05766af38ea3b4bfed74628be38dc3e4fed4a",
+      "bytes": 7378
+    }
+  ]
+}

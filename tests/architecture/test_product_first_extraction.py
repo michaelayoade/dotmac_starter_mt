@@ -429,7 +429,13 @@ PIN_ONLY_ADOPTION_DEBT: dict[tuple[str, str | None], str] = {
         "it is real, but it is a removed Python file, not a field: no "
         "structured path in the Workspace tree states it. Retire by asserting "
         "the Workspace's own composition declaration once one exists, or by an "
-        "audited [[product_writers]] row for dotmac_workspace."
+        "audited [[product_writers]] row for dotmac_workspace. "
+        "NOT retireable by `composed_at`, and the temptation is obvious enough "
+        "to name: that kind now reads Python, so a reader reaches for it here "
+        "and it is the WRONG TOOL. It proves a shape is PRESENT in a syntax "
+        "tree. This cutover is a shape that is ABSENT — a deleted file — and "
+        "no walk over the Workspace tree can distinguish 'removed' from 'never "
+        "existed'. Absence needs an assertion nobody has built."
     ),
     (
         "dotmac-ui",
@@ -1672,6 +1678,16 @@ def test_every_evidence_kind_is_classified_by_the_adoption_split() -> None:
     assert proving & evidence_schema.ATTESTATION_KINDS
     assert installation & evidence_schema.ASSERTION_KINDS
     assert installation & evidence_schema.ATTESTATION_KINDS
+    # The third family must be represented too, or "total over EVIDENCE_KINDS"
+    # would stay true while a whole family sat unclassified behind a set union
+    # nobody re-read.
+    assert proving & evidence_schema.AST_ASSERTION_KINDS
+    assert (
+        evidence_schema.ASSERTION_KINDS
+        | evidence_schema.ATTESTATION_KINDS
+        | evidence_schema.AST_ASSERTION_KINDS
+        == evidence_schema.EVIDENCE_KINDS
+    )
 
 
 def test_an_adoption_state_with_no_composition_evidence_is_refused() -> None:
