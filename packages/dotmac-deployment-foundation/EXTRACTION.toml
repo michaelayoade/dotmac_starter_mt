@@ -100,13 +100,7 @@ candidate_consumers = [
 # and it was stale within hours: ERP merged #415 and repinned. A branch tip is
 # a snapshot presented as a standing fact, so the evidence now cites the merged
 # pull request and its merge commit, which do not move.
-adoption_evidence = [
-  "dotmac_erp:pull/415",
-  "dotmac_erp:merge-commit@e1402902b7ce88e222269695155398b1929f8293",
-  "dotmac_erp:dependency:dotmac-deployment-foundation==0.2.0a2",
-  "dotmac_erp:workflow-run#33251009129@e1402902b7ce88e222269695155398b1929f8293",
-  "dotmac_starter_mt:dotmac-deployment-foundation-v0.2.0a2@55750e104df3dd94b6f9f70bf8c8db53986394c7",
-]
+adoption_evidence_schema = "v1"
 
 composition_boundary = "ADR-0070. This package is a UNIVERSAL FACILITY and not a module: no ModuleManifest, no models, no migrations, no short_code, no migration_prefix, no tenant or business state, and therefore no MIGRATION_OWNER_LEDGER row — `check_allocation_serialized.py` exempts this classification for exactly that reason. It declares ZERO runtime dependencies: not dotmac-kernel, not SQLAlchemy, not FastAPI, not Jinja, not a YAML library. That is the same shape as dotmac-ui and it exists for the same reason — a build runner that renders a Compose file has no database and no web framework and must not acquire them in order to validate a descriptor. Rendering is explicit Python emitting text rather than a template engine, so `render --check` compares bytes. Two import-linter contracts hold the boundary in both directions: the facility imports neither the kernel nor the assembly, and no application code imports the facility. Against dotmac-deployment-control the split is WHAT versus HOW: that module owns desired state, immutable plans, approvals, rollout decisions, attempts, acknowledgements and drift-as-authority, and gains no Docker, Nginx, SSH, cloud-provider, migration, backup or monitoring implementation; this facility owns the execution of one release on one host and holds no durable fleet record. Against dotmac-platform-health the split is observation versus infrastructure: that module may own authenticated normalized health observations and their projection; this facility deploys the collectors, injects the resource attributes and emits the deployment annotations, and owns no health status. Against the external Observability platform: it owns storage, queries, dashboards, alert delivery and operator access; this facility owns the alert DEFINITIONS and the pipeline that feeds them. ADR-0062's rule that modules own metric definitions and assemblies own exporters is unchanged and this facility is the exporter-deployment half of it."
 
@@ -155,3 +149,72 @@ evidence_paths = [
   "scripts/sync-static.sh",
   "docker-compose.yml",
 ]
+
+# ADOPTION ITSELF, at the commit where the property FIRST HELD. #407 is where
+# the descriptor, the conformance workflow and the pin all landed; an earlier
+# version of this list cited ERP's branch tip at reading time instead, which is
+# a timestamp presented as a fact.
+[[adoption_evidence]]
+kind = "adopted"
+repository = "dotmac_erp"
+commit = "c0de423c2899f9372d70f6b20bd994de5b3e7ab5"
+path = "deploy/product.toml"
+field = "schema"
+expected = "ProductDeploymentSpec.v1"
+locator = "dotmac_erp:pull/407"
+note = "Adopted as declarative input and a CI gate, NOT as the deployment engine. The absence of a `deploy_run` row below IS that claim, checkably."
+
+# The a1 era. Superseded, never deleted: a1 carried the image-audit collector
+# defect a2 fixed, so 'ERP once ran a1' is a fact with consequences. The
+# free-text list destroyed it by overwriting the value in place.
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_erp"
+commit = "c0de423c2899f9372d70f6b20bd994de5b3e7ab5"
+path = "pyproject.toml"
+field = "tool.poetry.group.dev.dependencies.dotmac-deployment-foundation.version"
+expected = "0.2.0a1"
+locator = "dotmac_erp:pull/407"
+
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_erp"
+commit = "e1402902b7ce88e222269695155398b1929f8293"
+path = "pyproject.toml"
+field = "tool.poetry.group.dev.dependencies.dotmac-deployment-foundation.version"
+expected = "0.2.0a2"
+locator = "dotmac_erp:pull/415"
+note = "The dev group, deliberately: the facility never ships in ERP's runtime image. The free-text `dependency:...==0.2.0a2` string could not say that."
+
+# Rule 28: an independently released caller bound to a pinned published
+# revision, and the binding can fail. 55750e10 is the peeled tag of
+# dotmac-deployment-foundation-v0.2.0a2. Whether that tag exists is the release
+# oracle's question; this row asserts only what ERP's own file says.
+[[adoption_evidence]]
+kind = "contract_binding"
+repository = "dotmac_erp"
+commit = "e1402902b7ce88e222269695155398b1929f8293"
+path = ".github/workflows/deployment-conformance.yml"
+field = "jobs.deployment.uses"
+expected = "michaelayoade/dotmac_starter_mt/.github/workflows/deployment-conformance.yml@55750e104df3dd94b6f9f70bf8c8db53986394c7"
+locator = "dotmac_erp:pull/415"
+
+[[adoption_evidence]]
+kind = "workflow_run"
+repository = "dotmac_erp"
+commit = "e1402902b7ce88e222269695155398b1929f8293"
+run_id = "33251009129"
+observed = "success"
+observed_at = "2026-08-29"
+observed_by = "michaelayoade"
+note = "Re-observed against the API: this run's head_sha IS e1402902. The list previously carried run 33248839031, whose head_sha is d1d0c0e8 — the pull-request preview run, not the merged tree. A bare run id cannot show that difference."
+
+# The live pin lives in ERP's bill of materials and this dossier holds NO copy.
+# A copied value fails silently — it reads fine long after it stopped being
+# true. A pointer fails loudly: if ERP renames the file, it 404s.
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_erp"
+paths = ["pyproject.toml", "poetry.lock", ".github/workflows/deployment-conformance.yml"]
+field = "tool.poetry.group.dev.dependencies.dotmac-deployment-foundation.version"
+note = "ERP owns the consistency of its own two surfaces (the pin and the workflow's `with.foundation-version`). This dossier does not hold a third copy. Re-deriving the present tense from here is the scheduled external check that is NOT built."

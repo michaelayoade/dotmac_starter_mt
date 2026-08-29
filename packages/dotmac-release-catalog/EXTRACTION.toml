@@ -47,14 +47,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_vendor_control_plane"]
 candidate_consumers = []
-adoption_evidence = [
-  "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
-  "dotmac_vendor_control_plane:production-deploy#32022599873",
-  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
-  "dotmac_vendor_control_plane:catalog-artifact@9094efe1-7cab-4fc7-a2f6-c1787e452e14",
-  "dotmac_vendor_control_plane:catalog-attestation@db269812-d99b-4529-9270-9435a8249124",
-  "dotmac_sub:production-deploy#32009246911",
-]
+adoption_evidence_schema = "v1"
 inventory_evidence = [
   "docs/inventories/fleet-decomposition-matrix.md",
   "docs/superpowers/plans/2026-08-12-vendor-cp-composable-parts.md",
@@ -89,3 +82,62 @@ writer_state = "inventory_only"
 retirement_required = false
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["app/models/network.py", "app/services/web_network_firmware_catalog.py", "app/web/admin/network_firmware_catalog.py"]
+
+# CUT: `dotmac_sub:production-deploy#32009246911`. Sub is not a contract
+# consumer of this package and no assertion here cites Sub's tree, so that run
+# was an observation with nothing behind it — an attestation floating free of
+# any claim, which is the shape the cohesion rule now refuses outright.
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-release-catalog.version"
+expected = "0.1.0a4"
+
+[[adoption_evidence]]
+kind = "deploy_run"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+run_id = "32022599873"
+observed = "success"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "Re-observed against the API: this run's head_sha IS the commit above. 'Deploy immutable image to production'."
+
+[[adoption_evidence]]
+kind = "image_digest"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+digest = "sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc"
+observed = "deployed to production by the run above"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "The registry path used to sit in the `repository` slot, where a machine reading this file would look for a repository name. `repository` now names the PRODUCING product and the content address is the digest."
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+subject = "mod_relcat"
+observed = "the composed release-catalogue lineage applied by the production deploy run above"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "One dated row replaces the two undated strings that used to make this claim twice. Derived from the deploy run rather than from a direct read of the production database, which is why it is an attestation and not an assertion."
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_vendor_control_plane"
+commit = "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+subject = "release_artifacts:9094efe1-7cab-4fc7-a2f6-c1787e452e14"
+observed = "artifact row written by the production catalogue, with attestation db269812-d99b-4529-9270-9435a8249124"
+observed_at = "2026-08-17"
+observed_by = "michaelayoade"
+note = "Two `catalog-*@<uuid>` strings collapsed into one dated observation of the row and its attestation. A bare UUID names no system and no moment."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_vendor_control_plane"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-release-catalog.version"
+note = "The rows above are history. The Vendor control plane's BOM is the only authority for what it installs today, and this dossier holds no copy of it — at commit af9fcf6d the plane had already moved past several of the versions recorded above."

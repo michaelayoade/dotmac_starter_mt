@@ -58,6 +58,8 @@ shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand
 local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are a deliberate outcome rather than debt. components: ERP replaced its former empty_state body with a thin legacy-call-shape adapter over the package macro, and Sub replaced its byte-identical renderer with a thin include-context adapter; neither retains a second markup owner. The starter's table macro copy is already retired. CRM adoption is unscheduled, but its local empty-state renderer is a real legacy copy and must retire if CRM adopts the component; optional timing is not a claim of absence. map-frame: no product copy retires in this change; an authorized adoption must replace only the local outer frame and sizing rule while leaving provider and domain behavior local."
 next_action = "Tokens and the empty-state component remain reuse-proven. The map-frame slice is audit-complete and deliberately unadopted: do not publish or call it reuse-proven until a product cutover is authorized. Its first adoption replaces only a local outer frame and sizing rule; provider runtime, viewport, data, domain policy and fallback lists remain product-owned. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet; create a theme package only on proven non-token structural demand."
 
+adoption_evidence_schema = "v1"
+
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
 # This package publishes THREE contracts whose evidence differs. A single
 # package-level state cannot describe that honestly: report the stronger and the
@@ -80,18 +82,46 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_admin_shell_tokens.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
-# Addressable form of the reuse the prose already claims. The slice states
-# these consumers serve the packaged asset from their default branches; a
-# reader could not check that without the refs.
-adoption_evidence = [
-  "dotmac_sub:default-branch:packaged-asset-composition",
-  "dotmac_sub:test:tests/architecture/test_dotmac_ui_adoption.py",
-  "dotmac_academy_app:default-branch:packaged-asset-composition",
-]
 contract_consumers = ["dotmac_sub", "dotmac_academy_app"]
 reference_consumers = ["dotmac_starter_mt"]
 candidate_consumers = ["dotmac_erp", "dotmac_crm"]
 local_copy_retirement = "dotmac_erp still builds its own live src/css tree, the fork dotmac_sub abandoned, so its adoption retires nothing until that tree goes. dotmac_sub re-declares the --dmui-* ramps with its own palette through the sanctioned override path, which is a deliberate outcome rather than outstanding debt."
+
+# `default-branch:` is the moving ref in its purest form — it names no tree at
+# all. Replaced by the commits where each consumer's packaged-asset composition
+# first landed. The two `test:` strings are gone: those paths are already in
+# this slice's `preserved_tests`, six lines up.
+[[slices.adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_sub"
+commit = "aabf50ebaceeac3da5e5734195c7d2e58aae7ca0"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-ui.version"
+expected = "0.1.0a3"
+locator = "dotmac_sub:pull/2296"
+note = "'Adopt the shared UI contract, and report what it measured' — where app/ui.py, the asset mount and the adoption test landed. Sub declares the pin TWICE in one file — `project.dependencies` carries `dotmac-ui==0.1.0a3` alongside the Poetry inline table this row addresses — so a re-derivation that reads only one key path reads half the pin."
+
+[[slices.adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_academy_app"
+commit = "c810e65991ed6d10dcacb29e1f6a070e0fadbdec"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-ui.version"
+expected = "0.1.0a3"
+locator = "dotmac_academy_app:pull/121"
+note = "'Adopt the kernel runtime assembly' — the commit that moved Academy onto packaged_static_dirs/stylesheets. Academy is the only consumer on the kernel asset seam; Sub hand-mounts. Neither composition is expressible as a structured field, so neither carries an `adopted` row — see the package-level note."
+
+[[slices.adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_sub"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-ui.version"
+
+[[slices.adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_academy_app"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-ui.version"
 
 [[slices]]
 name = "components"
@@ -110,25 +140,48 @@ preserved_tests = [
   "dotmac_erp:tests/architecture/test_dotmac_ui_adoption.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
-# Two independent default-branch consumers establish reuse. The starter is
-# recorded separately as reference proof and deliberately does not count:
-# consumption by the assembly that OWNS the package proves the wiring, not that
-# anyone independent chose the contract.
-# Both cutovers are already named by commit in the package-level
-# `first_cutover`; recorded here so the SLICE that claims reuse carries its own
-# evidence rather than borrowing the headline's prose.
-adoption_evidence = [
-  "dotmac_erp:main@462b6fa",
-  "dotmac_sub:main@73c35f4",
-  "dotmac_erp:test:tests/architecture/test_dotmac_ui_adoption.py",
-  "dotmac_sub:test:tests/architecture/test_dotmac_ui_adoption.py",
-]
+# Two independent consumers establish reuse. The starter is recorded separately
+# as reference proof and deliberately does not count: consumption by the
+# assembly that OWNS the package proves the wiring, not that anyone independent
+# chose the contract.
 contract_consumers = ["dotmac_erp", "dotmac_sub"]
 reference_consumers = ["dotmac_starter_mt"]
 # Candidates are future demand, not products already counted above. CRM is
 # technically eligible but unscheduled; Academy has no local renderer to retire.
 candidate_consumers = ["dotmac_crm", "dotmac_academy_app"]
 local_copy_retirement = "ERP's production macro supplied the product-first semantics; its former renderer is now a thin argument adapter over the package macro, protected by direct macro and architecture tests. Sub's byte-identical renderer is now a thin include-context adapter, protected by its architecture test and six live callers. Neither adapter owns markup. The starter's table macro copy is retired. CRM's copy is outside the active programme only because CRM adoption is unscheduled; any future adoption must retire that renderer rather than preserve a second markup owner."
+
+# Two seven-digit abbreviations of a branch name. Expanded to the full
+# commits; the `test:` strings are already this slice's `preserved_tests`.
+[[slices.adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_erp"
+commit = "462b6fa5458ce443cb3b1b1dca499644fd68ed0d"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-ui.version"
+expected = "0.1.0a7"
+locator = "dotmac_erp:pull/282"
+
+[[slices.adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_sub"
+commit = "73c35f49aebb3c15b87dc33e75136bc63cc8248e"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-ui.version"
+expected = "0.1.0a7"
+locator = "dotmac_sub:pull/2380"
+
+[[slices.adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_erp"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-ui.version"
+
+[[slices.adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_sub"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-ui.version"
 
 [[slices]]
 name = "map-frame"

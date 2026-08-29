@@ -32,6 +32,8 @@ from dotmac_kernel.namespaces import (
 )
 from dotmac_licensing import module
 
+from tests.architecture import adoption_evidence as evidence_schema
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-licensing"
 SRC = PACKAGE_ROOT / "src/dotmac_licensing"
@@ -636,20 +638,47 @@ class TestTheExtractionDossierIsHonest:
             assert evidence, "an adopted dossier must cite what it ran"
             assert consumers, "an adopted dossier must name who ran it"
 
-    def test_adoption_evidence_is_addressable_after_the_fact(
+    def test_adoption_evidence_is_re_checkable_not_merely_addressable(
         self, dossier: dict[str, object]
     ) -> None:
-        """Evidence is cited by immutable reference, or it is an assertion.
+        """AdoptionEvidenceV1: every row is frozen to an immutable commit.
 
-        Each ref names its producing repository and an identity that can be
-        re-read later — a commit, a deploy run, an image digest, a revision, a
-        live schema. "It deployed fine" is not one of those.
+        This test used to check that a string split on a colon into two
+        non-empty halves. That is ADDRESSABILITY — it says a reader could find
+        something — and it passed a stale pin, a seven-hex abbreviation of a
+        branch name and a run id with no commit, all on one field on one day.
+        Immutability is the different property, and it is the one
+        `dotmac_governance` ADR 0013 actually requires.
         """
-        for ref in dossier["adoption_evidence"]:  # type: ignore[union-attr]
-            assert ":" in str(ref), ref
-            repository, _, identity = str(ref).partition(":")
-            assert repository, ref
-            assert identity.strip(), ref
+        rows = dossier["adoption_evidence"]
+        assert rows, "an adopted dossier must cite what it ran"
+        for row in rows:  # type: ignore[union-attr]
+            assert isinstance(row, dict), row
+            assert row["kind"] in (
+                evidence_schema.ASSERTION_KINDS | evidence_schema.ATTESTATION_KINDS
+            ), row
+            assert evidence_schema.IMMUTABLE_COMMIT.fullmatch(row["commit"]), row
+            assert row["repository"] == "dotmac_vendor_control_plane"
+        pin = next(r for r in rows if r["kind"] == "pinned_at")  # type: ignore[union-attr]
+        assert pin["commit"] == "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+        assert pin["field"] == "tool.poetry.dependencies.dotmac-licensing.version"
+        assert pin["expected"] == "0.1.0a1"
+
+    def test_the_dossier_holds_no_copy_of_the_live_pin(
+        self, dossier: dict[str, object]
+    ) -> None:
+        """The present tense is POINTED AT, never copied.
+
+        A value copied out of the consumer's bill of materials into this file
+        has no build that fails when it drifts, which is how a pin went stale in
+        twenty minutes. A pointer's failure mode is loud instead.
+        """
+        pointer = dossier["adoption_evidence_pointer"]
+        assert [p["subject"] for p in pointer] == ["current_pin"]  # type: ignore[union-attr]
+        assert set(pointer[0]) <= evidence_schema.POINTER_FIELDS  # type: ignore[index]
+        assert not (
+            set(pointer[0]) & evidence_schema.POINTER_VALUE_FIELDS  # type: ignore[index]
+        )
 
     def test_it_records_the_byte_for_byte_migration_constraint(
         self, dossier: dict[str, object]

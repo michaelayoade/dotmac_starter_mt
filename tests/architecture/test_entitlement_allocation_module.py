@@ -759,12 +759,34 @@ def test_the_extraction_dossier_records_the_single_qualifying_source() -> None:
     assert dossier["status"] == "adopted"
     assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
     assert dossier["candidate_consumers"] == []
-    evidence = set(dossier["adoption_evidence"])
+    # AdoptionEvidenceV1: typed rows, each frozen to an immutable commit. The
+    # free-text strings this used to compare — `main@<sha>`, a bare
+    # `production-deploy#<id>` and an `alembic-head:` prefix nobody designed —
+    # were addressable but not re-checkable.
+    rows = dossier["adoption_evidence"]
     assert {
-        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
-        "dotmac_vendor_control_plane:production-deploy#32022599873",
-        "dotmac_vendor_control_plane:alembic-head:v014_allocations_authority",
-    } <= evidence
+        (r["kind"], r["repository"], r["commit"])
+        for r in rows  # type: ignore[union-attr]
+    } == {
+        (
+            kind,
+            "dotmac_vendor_control_plane",
+            "f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+        )
+        for kind in ("pinned_at", "deploy_run", "image_digest", "live_observation")
+    }
+    pin = next(r for r in rows if r["kind"] == "pinned_at")  # type: ignore[union-attr]
+    assert pin["field"] == (
+        "tool.poetry.dependencies.dotmac-entitlement-allocation.version"
+    )
+    assert pin["expected"] == "0.1.0a4"
+    deploy = next(r for r in rows if r["kind"] == "deploy_run")  # type: ignore[union-attr]
+    assert deploy["run_id"] == "32022599873"
+    schema = next(  # type: ignore[union-attr]
+        r for r in rows if r["kind"] == "live_observation"
+    )
+    assert schema["subject"] == "mod_ealloc"
+    assert "v014_allocations_authority" in schema["observed"]
     assert {"dotmac_erp", "dotmac_sub"} <= set(dossier["source_repositories"])
 
 

@@ -336,12 +336,28 @@ def test_the_extraction_dossier_records_the_production_adopter() -> None:
     assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
     assert dossier["status"] == "adopted"
     assert dossier["candidate_consumers"] == []
-    evidence = set(dossier["adoption_evidence"])
-    assert {
-        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
-        "dotmac_vendor_control_plane:production-deploy#32022599873",
-        "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
-    } <= evidence
+    # AdoptionEvidenceV1. Note what the typing moved: the registry path used to
+    # sit in the REPOSITORY slot, so a machine reading this file found
+    # `ghcr.io/...` where a repository name belongs. It is now an `image_digest`
+    # whose `repository` names the producing product.
+    rows = dossier["adoption_evidence"]
+    by_kind = {r["kind"]: r for r in rows}  # type: ignore[union-attr]
+    assert set(by_kind) == {
+        "pinned_at",
+        "deploy_run",
+        "image_digest",
+        "live_observation",
+    }
+    assert all(
+        r["repository"] == "dotmac_vendor_control_plane"
+        and r["commit"] == "f8f8c3fd636e663e4a17275c19e82fc1667aa52a"
+        for r in rows  # type: ignore[union-attr]
+    )
+    assert by_kind["deploy_run"]["run_id"] == "32022599873"
+    assert by_kind["image_digest"]["digest"] == (
+        "sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc"
+    )
+    assert by_kind["pinned_at"]["expected"] == "0.1.0a4"
 
 
 def test_the_module_declares_the_platform_plane_and_owns_no_tenant_tables() -> None:

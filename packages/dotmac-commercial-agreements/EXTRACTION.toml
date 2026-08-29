@@ -42,13 +42,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_vendor_control_plane"]
 candidate_consumers = []
-adoption_evidence = [
-  "dotmac_vendor_control_plane:main@af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e",
-  "dotmac_vendor_control_plane:production-deploy#32485479666",
-  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:45715e425dc248d85fe374fa5d347087328a445cf7ead1f8abc29f05f0117b0d",
-  "dotmac_vendor_control_plane:migration:v015_agreements_authority",
-  "dotmac_vendor_control_plane:live-schema:mod_agreements",
-]
+adoption_evidence_schema = "v1"
 composition_boundary = "ADR-0024: the vendor control plane installs its own cg lineage and owns its own agreement rows; no application shares a mod_agreements schema, an agreement row or a history row. ADR-0057 § 8: the module imports no sibling. dotmac-approvals supplies ApprovalEvidence as a VALUE through the assembly and dotmac-entitlement-allocation consumes agreement.activated.v1 the same way — neither is imported, and the module never executes another owner's consequence (ADR-0026 § 6). ADR-0006 D1: no foreign key leaves mod_agreements; counterparty_ref, release_ref, offer_ref and approval_decision_ref are opaque and unconstrained, so an executed agreement outlives a superseded release, a retired approval policy and a merged counterparty record. ADR-0019 § 1 and ruling A3: the counterparty reference is opaque and this module defines no counterparty master. ADR-0023 / ADR-0057 § 7: platform plane only, declared from the one consumer that exists today; tables is empty and no tenant plane is declared for later use."
 inventory_evidence = [
   "docs/inventories/vendor-cp-gap-sources.md",
@@ -77,3 +71,48 @@ writer_state = "inventory_only"
 retirement_required = false
 revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
 evidence_paths = ["docs/SOT_RELATIONSHIP_MAP.md", "pyproject.toml"]
+
+[[adoption_evidence]]
+kind = "pinned_at"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+path = "pyproject.toml"
+field = "tool.poetry.dependencies.dotmac-commercial-agreements.version"
+expected = "0.1.0a1"
+
+[[adoption_evidence]]
+kind = "deploy_run"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+run_id = "32485479666"
+observed = "success"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "Re-observed against the API: this run's head_sha IS the commit above. 'Deploy immutable image to production'."
+
+[[adoption_evidence]]
+kind = "image_digest"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+digest = "sha256:45715e425dc248d85fe374fa5d347087328a445cf7ead1f8abc29f05f0117b0d"
+observed = "deployed to production by the run above"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "The registry path used to sit in the `repository` slot, where a machine reading this file would look for a repository name. `repository` now names the PRODUCING product and the content address is the digest."
+
+[[adoption_evidence]]
+kind = "live_observation"
+repository = "dotmac_vendor_control_plane"
+commit = "af9fcf6d3fbd259fbef6b589d37b39d548f7ba8e"
+subject = "mod_agreements"
+observed = "v015_agreements_authority applied by the production deploy run above"
+observed_at = "2026-08-21"
+observed_by = "michaelayoade"
+note = "One dated row replaces the two undated strings that used to make this claim twice. Derived from the deploy run rather than from a direct read of the production database, which is why it is an attestation and not an assertion."
+
+[[adoption_evidence_pointer]]
+subject = "current_pin"
+repository = "dotmac_vendor_control_plane"
+paths = ["pyproject.toml", "poetry.lock"]
+field = "tool.poetry.dependencies.dotmac-commercial-agreements.version"
+note = "The rows above are history. The Vendor control plane's BOM is the only authority for what it installs today, and this dossier holds no copy of it — at commit af9fcf6d the plane had already moved past several of the versions recorded above."
