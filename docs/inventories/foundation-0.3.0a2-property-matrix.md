@@ -95,5 +95,14 @@ it would be certifying.
 
 ## The frozen revision
 
-Recorded at freeze time in `foundation-candidate-0.3.0a2.json`, alongside the
-five identity components and the six artifact coordinates.
+**`e930f878ce400b766b4a50feb0369021a28ab2fa`**, version `0.3.0a2`.
+
+Item-2 evidence: `push: main` run `33339110835` on that exact SHA — 20 executed
+successes, 1 skipped (`allocation-gate`, which is pull-request-only by design
+because it compares against a merge base undefined on a push; it executed and
+passed on each of the six PR heads).
+
+The five frozen identity components and the six artifact coordinates are in
+[`foundation-candidate-0.3.0a2.json`](./foundation-candidate-0.3.0a2.json), with
+the reasoning in
+[`foundation-candidate-0.3.0a2.md`](./foundation-candidate-0.3.0a2.md).
