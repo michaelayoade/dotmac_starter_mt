@@ -36,19 +36,36 @@ import ast
 import importlib.util
 import json
 import pathlib
+import sys
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "credential_lifecycle_sweep.py"
 BASELINE = PROJECT_ROOT / "docs" / "inventories" / "credential-lifecycle-baseline.json"
 INVENTORY = PROJECT_ROOT / "docs" / "inventories" / "credential-lifecycle-sources.md"
 FLEET_ROOT = PROJECT_ROOT.parent
+_MODULE_NAME = "credential_lifecycle_sweep"
 
 
 def _sweep():
-    spec = importlib.util.spec_from_file_location("credential_lifecycle_sweep", SCRIPT)
+    """Load the sweep by path, REGISTERED in `sys.modules` before execution.
+
+    The registration is not optional. `@dataclass` resolves a string annotation
+    through `sys.modules[cls.__module__]` to decide whether it is `KW_ONLY`, so a
+    module executed without being registered raises `AttributeError: 'NoneType'
+    object has no attribute '__dict__'` the moment it defines a dataclass under
+    `from __future__ import annotations`.
+    """
+    if _MODULE_NAME in sys.modules:
+        return sys.modules[_MODULE_NAME]
+    spec = importlib.util.spec_from_file_location(_MODULE_NAME, SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[_MODULE_NAME] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[_MODULE_NAME]
+        raise
     return module
 
 
