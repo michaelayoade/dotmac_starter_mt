@@ -30,6 +30,20 @@
   preservation property against it: a shared filter chain is never restored
   wholesale, and an implementation that replays one is refused by the
   transaction rather than trusted not to.
+- `Digest`, `require_same_digest()`, `ALGORITHMS` and `CANONICAL_ALGORITHM`.
+  The canonical serialization is `sha256:<64 lowercase hex>`; the bare form is
+  accepted on INPUT as a compatibility affordance for
+  `dotmac-deployment-control`'s `String(64)` column and is not a second
+  canonical form.
+- `RehearsalReceipt.v1`: `RehearsalReceiptV1`, `RequirementResult`,
+  `RequirementStatus`, `REQUIRED_ITEMS`, `build_receipt()`,
+  `verify_publication()`, `render_status_document()` and
+  `render_pending_document()`. The sixteen item CODES are contract — a release
+  gate reads them — and only `executed_passed` satisfies publication.
+- `HostLease.v1`: `HostLease`, `load_lease()`, `write_lease()`. A lease is
+  never self-granted; `authorization_run_id` is mandatory.
+- `VantageQualification` and `qualify_vantage()`. Typed observations in, a
+  verdict out; this package performs no network I/O.
 - `Effects`, `Executor`, `DeploymentPlan`, `Step`, `StepKind`, `Strategy`.
 - `conformance.*` — the functions a product calls in its own CI.
 - `RESOURCE_ATTRIBUTES` and the alert `code` of every entry in `COMMON_ALERTS`.

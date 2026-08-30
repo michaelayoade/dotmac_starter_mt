@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from .backup import Assurance, BackupHealth, BackupRecord, assess, restore_rehearsal
 from .conformance import check_all, check_rendered_assets_match
+from .digest import ALGORITHMS, CANONICAL_ALGORITHM, Digest, require_same_digest
 from .document import (
     DESCRIPTOR_DOCUMENT_SCHEMA,
     DeploymentDescriptorDocumentV1,
@@ -95,6 +96,13 @@ from .ingress import (
     admit_bind_address,
     endpoint_token,
 )
+from .lease import (
+    DEFAULT_LEASE_DIR,
+    HOST_LEASE_SCHEMA,
+    HostLease,
+    load_lease,
+    write_lease,
+)
 from .policy import (
     build_edge_plan,
     build_firewall_plan,
@@ -108,6 +116,17 @@ from .provenance import (
     build_provenance,
     normalize_digest,
 )
+from .rehearsal import (
+    REHEARSAL_RECEIPT_SCHEMA,
+    REQUIRED_ITEMS,
+    LaneThreeItem,
+    RehearsalReceiptV1,
+    RequirementResult,
+    RequirementStatus,
+    build_receipt,
+    render_status_document,
+    verify_publication,
+)
 from .spec import SCHEMA, ProductDeploymentSpec
 from .telemetry import (
     RESOURCE_ATTRIBUTES,
@@ -115,9 +134,37 @@ from .telemetry import (
     ResourceAttributes,
     resource_attributes,
 )
+from .vantage import (
+    PRIVATE_RANGES,
+    TUNNEL_KINDS,
+    VantageQualification,
+    qualify_vantage,
+)
 from .version import VERSION as __version__
 
 __all__ = [
+    "write_lease",
+    "verify_publication",
+    "require_same_digest",
+    "render_status_document",
+    "qualify_vantage",
+    "load_lease",
+    "build_receipt",
+    "VantageQualification",
+    "RequirementStatus",
+    "RequirementResult",
+    "RehearsalReceiptV1",
+    "LaneThreeItem",
+    "HostLease",
+    "Digest",
+    "TUNNEL_KINDS",
+    "REQUIRED_ITEMS",
+    "REHEARSAL_RECEIPT_SCHEMA",
+    "PRIVATE_RANGES",
+    "HOST_LEASE_SCHEMA",
+    "DEFAULT_LEASE_DIR",
+    "CANONICAL_ALGORITHM",
+    "ALGORITHMS",
     "ADDRESS_FAMILIES",
     "EXPOSURES",
     "DESCRIPTOR_DOCUMENT_SCHEMA",

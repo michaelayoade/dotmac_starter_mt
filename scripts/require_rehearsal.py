@@ -1,6 +1,29 @@
 #!/usr/bin/env python3
-"""Refuse to publish the deployment facility unless a disposable-host rehearsal
-SUCCEEDED against the exact SHA being published.
+"""Refuse to publish the deployment facility unless the LANE 3 exposure
+rehearsal executed and passed every one of its sixteen items, on the exact SHA.
+
+Lane 3, not Lane 2 — corrected 2026-08-30
+-----------------------------------------
+This gate used to demand `deployment-rehearsal.yml`, which is **Lane 2**: a real
+engine, database, ingress handoff, restore and observability loop. That is a
+genuine and valuable proof, and it is a proof of a different thing. `0.3.0a1`'s
+entire subject is ADDRESS-FAMILY EXPOSURE, and Lane 2 never watches an IPv6
+socket refuse the internet. Gating the release named after that property on a
+lane which cannot observe it is the "green preflight reads as attested" failure
+with two lanes standing in for two gates.
+
+So the oracle is now `exposure-rehearsal.yml`, and passing the run is no longer
+enough on its own: the run publishes a `RehearsalReceipt.v1`, and this gate
+reads it. **No `partial`, `not_applicable`, `hand_measured`, `vacuous`,
+`incomplete` or missing result can satisfy publication** — only sixteen
+`executed_passed`. A Lane 2 receipt offered here is refused by lane number
+rather than counted.
+
+Two oracles, deliberately, because they fail differently. The Actions API says a
+run of the right workflow completed successfully on this SHA (AGENTS.md rule 30:
+an external oracle with immutable coordinates). The receipt says WHAT that run
+established. A green run with a receipt full of `blocked` rows is exactly the
+shape this pair exists to catch, and either oracle alone would miss it.
 
 Why this exists as CODE and not as a sentence in a document
 -----------------------------------------------------------
@@ -12,11 +35,13 @@ telling anyone whether a real Docker daemon honours
 `service_completed_successfully`, whether a real `pg_dump` produced restorable
 bytes, or whether nginx actually drained the old upstream.
 
-`docs/inventories/deployment-foundation-rehearsal.md` said the rehearsal must
-run before publication. A prose requirement is bypassed by anyone who does not
-read it, including a future automation that has no eyes. AGENTS.md rule 30 is
-explicit that a release claim needs an authoritative EXTERNAL oracle carrying
-immutable coordinates; this is that oracle for the rehearsal.
+`docs/inventories/deployment-exposure-rehearsal.md` said the sixteen items must
+close before publication, in a hand-maintained table whose header once claimed
+"14 of 16 CLOSED" while the rows below it recorded four `partial` and one `n/a`.
+A prose requirement is bypassed by anyone who does not read it, including a
+future automation that has no eyes — and a hand-maintained tally can contradict
+its own evidence. The status document is now GENERATED from the receipt, and
+this gate reads the receipt rather than the document.
 
 The oracle is the GitHub Actions API: the MOST RECENT run of the rehearsal
 workflow whose `head_sha` is byte-identical to the SHA under release, which
@@ -39,6 +64,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.request
@@ -194,8 +220,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--workflow",
-        default="deployment-rehearsal.yml",
-        help="the rehearsal workflow file name",
+        default="exposure-rehearsal.yml",
+        help="the LANE 3 rehearsal workflow file name",
+    )
+    parser.add_argument(
+        "--receipt",
+        required=True,
+        help=(
+            "path to the RehearsalReceipt.v1 the rehearsal run published. "
+            "Required: a green run says a job exited 0, and only the receipt "
+            "says what it established"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -210,9 +245,44 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
 
+    # The second oracle. Imported here rather than at module scope so the pure
+    # `decide` half stays importable by a test with nothing installed.
+    sys.path.insert(
+        0,
+        str(
+            pathlib.Path(__file__).resolve().parents[1]
+            / "packages"
+            / "dotmac-deployment-foundation"
+            / "src"
+        ),
+    )
+    from dotmac_deployment_foundation.errors import SpecError
+    from dotmac_deployment_foundation.rehearsal import (
+        RehearsalReceiptV1,
+        verify_publication,
+    )
+
+    receipt_path = pathlib.Path(args.receipt)
+    if not receipt_path.exists():
+        print(
+            f"REFUSED: no rehearsal receipt at {receipt_path}. A run that "
+            "published no receipt has not said what it established",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+    try:
+        receipt = RehearsalReceiptV1.from_json(receipt_path.read_text(encoding="utf-8"))
+        verify_publication(receipt, revision=args.sha)
+    except SpecError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+
     print(f"rehearsal_run_id={proof['run_id']}")
     print(f"rehearsal_run_url={proof['html_url']}")
     print(f"rehearsal_head_sha={proof['head_sha']}")
+    print(f"rehearsal_lane={receipt.lane}")
+    print(f"rehearsal_receipt_digest={receipt.sha256_digest()}")
+    print(f"rehearsal_authorization_run={receipt.authorization_run_id}")
     return EXIT_OK
 
 

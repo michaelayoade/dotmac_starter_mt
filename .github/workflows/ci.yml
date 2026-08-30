@@ -44,6 +44,7 @@ jobs:
             # `fetch-depth: 0`.
             manifest-digest-check,
             product-writer-check,
+            rehearsal-status-check,
             # ADR-0070. Validates `deploy/product.toml` and proves the committed
             # rendered assets still match it. Offline and tag-free like the
             # ledger check above — it reads two checked-in files and compares

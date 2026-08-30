@@ -1,0 +1,114 @@
+# Lane 3 — the EXPOSURE rehearsal, and the oracle publication now depends on.
+#
+# Lane 2 (`deployment-rehearsal.yml`) proves a real engine, database, ingress
+# handoff, restore and observability loop on a disposable runner. It is a real
+# proof of a different thing: it never watches an IPv6 socket refuse the
+# internet, which is the property `0.3.0a1` is named after. `require_rehearsal.py`
+# therefore reads THIS workflow, not that one.
+#
+# Two things make this lane different from Lane 2, and both are deliberate:
+#
+#   * it cannot run on a GitHub-hosted runner. The lane exists to observe real
+#     sockets, real `docker-proxy` processes and real firewall chains on a
+#     leased host, probed from a separately qualified external vantage. A
+#     runner that IS the host cannot tell a loopback bind from a routable one.
+#   * it emits a `RehearsalReceipt.v1` artifact. The run's conclusion says a job
+#     exited zero; the receipt says WHAT it established. Publication needs both,
+#     because a green run whose receipt is full of `blocked` rows is exactly the
+#     shape a single oracle misses.
+#
+# Every input is required and none has a default. A rehearsal missing one is
+# not a partial rehearsal, it is a different activity.
+name: Exposure rehearsal (Lane 3)
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization_run:
+        description: "Platform CP authorization run id (the lease references it)"
+        required: true
+      authorization_doc_digest:
+        description: "digest of the signed authorization document"
+        required: true
+      foundation_artifact:
+        description: "digest of the built Foundation wheel candidate"
+        required: true
+      controller_identity:
+        description: "SHA256 fingerprint of the dedicated controller key"
+        required: true
+      target:
+        description: "the leased rehearsal target"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One exposure rehearsal per commit, and NEVER cancelled in flight. This lane
+  # rewrites shared firewall chains and holds a host lease; a cancelled run
+  # would skip its rollback and leave both in an unreviewed state.
+  group: exposure-rehearsal-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    # Self-hosted, and specifically the registered control runner: the
+    # controller identity is bound to the authorization run and lives there, so
+    # a rehearsal driven from anywhere else is driven by a different actor than
+    # the one the receipt names.
+    runs-on: [self-hosted, dotmac-control-runner]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The external half. Collected BEFORE the controller runs so the vantage
+      # is qualified against its own interfaces and routes rather than trusted,
+      # and so a probe measured after teardown can never be reused as a
+      # negative — a refusal against a stopped service measures absence of a
+      # service, not absence of exposure.
+      - name: Collect and qualify the external probe evidence
+        env:
+          PROBE_HOST: ${{ vars.LANE3_PROBE_HOST }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          test -n "${PROBE_HOST}" || {
+            echo "REFUSED: no external probe vantage configured" >&2; exit 1; }
+          ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
+            "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
+
+      - name: Execute Lane 3 through the controller
+        env:
+          AUTHZ: ${{ inputs.authorization_run }}
+        run: |
+          set -euo pipefail
+          python scripts/exposure_rehearsal_runner.py \
+            --foundation-revision "${GITHUB_SHA}" \
+            --foundation-artifact "${{ inputs.foundation_artifact }}" \
+            --authorization-run "${AUTHZ}" \
+            --authorization-doc-digest "${{ inputs.authorization_doc_digest }}" \
+            --controller-identity "${{ inputs.controller_identity }}" \
+            --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
+            --target "${{ inputs.target }}" \
+            --probe-evidence probe-evidence.json \
+            --descriptor scripts/exposure-rehearsal/product.toml \
+            --receipt-out receipt.json \
+            --status-out docs/inventories/deployment-exposure-rehearsal-status.md
+
+      # `if: always()` so a FAILED rehearsal still publishes its receipt. A
+      # failure that records nothing is indistinguishable from a run that never
+      # happened, and the next person re-runs instead of reading why.
+      - name: Publish the receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lane3-rehearsal-receipt
+          path: |
+            receipt.json
+            probe-evidence.json
+            docs/inventories/deployment-exposure-rehearsal-status.md
+          if-no-files-found: error

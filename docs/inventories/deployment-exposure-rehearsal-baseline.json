@@ -1,0 +1,69 @@
+{
+  "items": {
+    "apply_under_lock": {
+      "detail": "The controller path exists (`exposure-apply --execute`) but has never driven a host. The 2026-08-29 apply was a shell command.",
+      "status": "not_executed"
+    },
+    "closed_port_behaviour": {
+      "detail": "Target RSTs; re-measured 2026-08-30 at 5-8 ms per refusal.",
+      "status": "hand_measured"
+    },
+    "digest_equality": {
+      "detail": "Three terms, and only two were ever measured. There is no authorized plan because nothing can issue one.",
+      "status": "blocked"
+    },
+    "external_negative_v6": {
+      "detail": "The 2026-08-29 negative is not reusable: the fixture containers are gone, so a refusal now measures an absent service. Re-opens with the fixture RUNNING.",
+      "status": "blocked"
+    },
+    "external_positive_v6": {
+      "detail": "Re-measured 2026-08-30: tcp/22 over IPv6 to the target, OPEN.",
+      "status": "hand_measured"
+    },
+    "external_v4": {
+      "detail": "Positive control re-measured 2026-08-30 (tcp/22 over IPv4, OPEN); the negative half re-opens with the fixture running.",
+      "status": "hand_measured"
+    },
+    "firewall_reobservation": {
+      "detail": "The old fixture published only loopback and none, so the derived plan was EMPTY and nothing was observed. The 2026-08-30 fixture derives four rules and makes this testable.",
+      "status": "vacuous"
+    },
+    "inert_v6_chain": {
+      "detail": "Needs the private publication the new fixture adds, executed on a leased host.",
+      "status": "blocked"
+    },
+    "non_recreating_refused": {
+      "detail": "`refuse_non_recreating_apply` has unit coverage; it has never refused a real invocation.",
+      "status": "not_executed"
+    },
+    "none_emits_no_socket": {
+      "detail": "2026-08-29: 18444 absent from `ss`.",
+      "status": "hand_measured"
+    },
+    "pre_change_snapshot": {
+      "detail": "A pre-state was captured by shell, not by `ExposureTransaction.run`.",
+      "status": "not_executed"
+    },
+    "private_from_source": {
+      "detail": "Needs the private publication and a vantage inside its declared source set.",
+      "status": "blocked"
+    },
+    "privileged_vantage_refused": {
+      "detail": "2026-08-29: the workstation result was refused, an unenumerated vantage was refused, and the external vantage was accepted.",
+      "status": "hand_measured"
+    },
+    "provoked_rollback": {
+      "detail": "Teardown restored the pre-state; no PROVOKED transactional rollback was driven.",
+      "status": "not_executed"
+    },
+    "proxy_reobservation": {
+      "detail": "2026-08-29: pids 1136702 / 1136709 / 1136725. The parser discarded pids until 2026-08-30, so this could not have been checked by code.",
+      "status": "hand_measured"
+    },
+    "socket_reobservation": {
+      "detail": "2026-08-29: 18443 on 127.0.0.1 AND [::1]; 18445 on 127.0.0.1 only; no 0.0.0.0 and no [::].",
+      "status": "hand_measured"
+    }
+  },
+  "reason": "The Platform CP authorization issuer is not yet deployed, so no authorization run id exists. Gate item 9 binds three terms and the middle one is the authorized plan, so `build_receipt` correctly refuses to construct a receipt at all. Lane 3 executes once the issuer, the lease and the controller identity exist.\n\n**How this maps to the adopted baseline.** The accepted count was *8 closed, 4 controller-dependent, 3 blocked, 1 vacuous*, stated in the OLD vocabulary where \"closed\" included hand measurements. In this vocabulary nothing is closed until a controller executed it, so the same facts render as **0 executed_passed, 7 hand_measured, 4 not_executed, 4 blocked, 1 vacuous**. Nothing was downgraded on the merits: items 13 and 15 were one \"closed\" each in the old count while only their positive-control halves were measured, and here item 13 is `blocked` because its negative half needs the fixture running. The publication-relevant number was always zero."
+}

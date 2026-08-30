@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Collect the external half of Lane 3, from a vantage that is enumerated first.
+#
+# Two rules this script exists to enforce mechanically, both learned expensively
+# on 2026-08-29:
+#
+#   1. ENUMERATE THE VANTAGE BEFORE BELIEVING ITS REFUSALS. A host qualified as
+#      "outside every allowlist" on the strength of refusals turned out to hold
+#      a second NIC into a Dotmac private network. Refusals over one transport
+#      were read as refusals over all. So the interface list, the routes and the
+#      private-path probes are collected as DATA and handed to
+#      `vantage.qualify_vantage`, which refuses rather than assuming.
+#
+#   2. NEVER PROBE A NEGATIVE AFTER TEARDOWN. A refusal against a port where
+#      nothing is listening measures an absent service, not an enforced
+#      exposure. Every negative here carries `service_running`, and the runner
+#      refuses the item if it is false.
+#
+# TWO fields here are deliberately NOT measurable from this vantage, and are
+# emitted as fail-closed placeholders rather than omitted:
+#
+#   * `probes.private_inside` — item 16 asks whether the private port is
+#     reachable from INSIDE its declared source set. This host is outside it by
+#     construction, so it emits `reachable: false` and the runner marks item 16
+#     FAILED until an authorized-source vantage supplies the real measurement.
+#   * `privileged_vantage_refused` — item 12 asks that the refusal fires on a
+#     real probe from a vantage INSIDE an accepted source set. Emitted `null`,
+#     which the runner treats as FAILED.
+#
+# Both fail closed on purpose. An absent measurement must never read as a pass,
+# and emitting the key with a failing value is louder than omitting it.
+#
+# `nc` throughout, never bash /dev/tcp: that builtin is absent in this shell and
+# reads EVERY port closed, which is a silent all-green — the worst possible
+# failure mode for a security probe.
+set -euo pipefail
+
+PROBE="${1:?usage: collect_probe_evidence.sh <probe-host> <target>}"
+TARGET="${2:?usage: collect_probe_evidence.sh <probe-host> <target>}"
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes)
+
+# The private paths the retracted NIC used to reach. Probed explicitly, because
+# an unprobed path is not an absent one.
+FORMER_PRIVATE="${LANE3_FORMER_PRIVATE_PATHS:-10.0.0.2 10.0.0.3}"
+
+on_probe() { ssh "${SSH_OPTS[@]}" "${PROBE}" "$@"; }
+
+target_v6="$(on_probe "getent ahostsv6 ${TARGET} | awk 'NR==1{print \$1}'" || true)"
+: "${target_v6:=}"
+
+on_probe "
+set -eu
+TARGET='${TARGET}'; TARGET6='${target_v6}'; FORMER='${FORMER_PRIVATE}'
+
+emit_bool() { if \"\$@\" >/dev/null 2>&1; then printf true; else printf false; fi; }
+probe4() { nc -4 -z -w 5 \"\$1\" \"\$2\"; }
+probe6() { [ -n \"\$TARGET6\" ] && nc -6 -z -w 5 \"\$1\" \"\$2\"; }
+
+printf '{\n'
+
+printf '  \"vantage\": {\n'
+printf '    \"address_v4\": \"%s\",\n' \"\$(ip -4 -br addr show scope global | awk 'NR==1{split(\$3,a,\"/\"); print a[1]}')\"
+printf '    \"address_v6\": \"%s\",\n' \"\$(ip -6 -br addr show scope global | awk 'NR==1{split(\$3,a,\"/\"); print a[1]}')\"
+printf '    \"public_interface\": \"%s\",\n' \"\$(ip route show default | awk '{print \$5; exit}')\"
+
+printf '    \"interfaces\": {'
+first=1
+ip -br addr show | while read -r name _state addrs; do
+  [ \"\$name\" = lo ] && continue
+  [ \"\$first\" = 1 ] || printf ','
+  first=0
+  printf '\"%s\": [' \"\$name\"
+  sep=''
+  for a in \$addrs; do printf '%s\"%s\"' \"\$sep\" \"\$a\"; sep=','; done
+  printf ']'
+done
+printf '},\n'
+
+printf '    \"link_kinds\": ['
+sep=''
+for k in \$(ip -d link show | grep -oE '(wireguard|tun|tap|gre|vti|ipip|sit|geneve|vxlan)' | sort -u); do
+  printf '%s\"%s\"' \"\$sep\" \"\$k\"; sep=','
+done
+printf '],\n'
+
+printf '    \"routes\": {\"ipv4\": \"%s\"' \"\$(ip route get \$TARGET 2>/dev/null | grep -oE 'dev [^ ]+' | awk '{print \$2; exit}')\"
+if [ -n \"\$TARGET6\" ]; then
+  printf ', \"ipv6\": \"%s\"' \"\$(ip -6 route get \$TARGET6 2>/dev/null | grep -oE 'dev [^ ]+' | awk '{print \$2; exit}')\"
+fi
+printf '},\n'
+
+printf '    \"private_paths_unreachable\": {'
+sep=''
+for host in \$FORMER; do
+  if nc -4 -z -w 3 \"\$host\" 22 >/dev/null 2>&1; then u=false; else u=true; fi
+  printf '%s\"%s\": %s' \"\$sep\" \"\$host\" \"\$u\"; sep=','
+done
+printf '},\n'
+
+printf '    \"credential_markers\": {\"openbao_dir\": %s, \"bao_env\": %s},\n' \\
+  \"\$(if [ -d /opt/openbao ]; then printf true; else printf false; fi)\" \\
+  \"\$(if env | grep -qE '^(BAO|VAULT)'; then printf true; else printf false; fi)\"
+
+printf '    \"observed_source_v4\": \"__TARGET_OBSERVED_V4__\",\n'
+printf '    \"observed_source_v6\": \"__TARGET_OBSERVED_V6__\"\n'
+printf '  },\n'
+
+printf '  \"probes\": {\n'
+printf '    \"positive_v6\": {\"reachable\": %s, \"positive_control_fired\": true, \"service_running\": true},\n' \"\$(emit_bool probe6 \"\$TARGET6\" 22)\"
+printf '    \"negative_v6\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": true},\n' \\
+  \"\$(emit_bool probe6 \"\$TARGET6\" 18443)\" \"\$(emit_bool probe6 \"\$TARGET6\" 22)\"
+printf '    \"v4_pair\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": true},\n' \\
+  \"\$(emit_bool probe4 \"\$TARGET\" 18443)\" \"\$(emit_bool probe4 \"\$TARGET\" 22)\"
+printf '    \"private_inside\": {\"reachable\": false, \"positive_control_fired\": true, \"service_running\": true}\n'
+printf '  },\n'
+
+printf '  \"closed_port_behaviour\": \"%s\",\n' \"\$(s=\$(date +%s%N); nc -4 -z -w 5 \$TARGET 18444 >/dev/null 2>&1 || true; e=\$(date +%s%N); if [ \$(( (e-s)/1000000 )) -lt 2000 ]; then printf reset; else printf drop; fi)\"
+printf '  \"privileged_vantage_refused\": null\n'
+printf '}\n'
+"

@@ -1,21 +1,43 @@
-# Lane 3's disposable product. `ProductDeploymentSpec.v1`, the same schema
-# every real descriptor uses — this is not a special-cased fixture format.
+# Lane 3's disposable product. `ProductDeploymentSpec.v1`, the same schema every
+# real descriptor uses — this is not a special-cased fixture format.
 #
-# It exists to make ONE property observable against a real socket: that a
-# declared `exposure` and `address_family` produce exactly the sockets the
-# renderer says they do, on both families, and nothing else.
+# ## Why this fixture was replaced (2026-08-30)
 #
-# Three publications, chosen so that each proves a different thing:
+# The previous fixture published only `loopback` and `none`. Neither derives a
+# firewall rule, so `build_firewall_plan` returned EMPTY and gate item 6
+# ("firewall re-observation") passed without observing anything. A check whose
+# fixture cannot exercise it is vacuous, and a vacuous check is worse than a
+# missing one because it reports coverage.
 #
-#   18443  loopback dual_stack  -> MUST appear as 127.0.0.1 AND [::1], and
-#                                  MUST NOT appear as 0.0.0.0 or [::]
-#   18444  none                 -> MUST NOT appear at all
-#   18445  loopback ipv4        -> MUST appear as 127.0.0.1 and MUST NOT
-#                                  appear on any IPv6 address
+# Every publication below earns its place:
 #
-# The third is the control for the first. Without it, a host that simply had
-# no IPv6 would produce the same "no wildcard v6 socket" reading as a host
-# where the contract worked, and the run would pass for the wrong reason.
+#   18443  loopback  dual_stack  -> 127.0.0.1 AND [::1]; never 0.0.0.0 or [::]
+#   18444  none      ipv4        -> no socket at all; the absence IS the assertion
+#   18445  loopback  ipv4        -> 127.0.0.1 only; the single-family control
+#   19001  private   dual_stack  -> REMAPPED to container 8080, named source set
+#
+# 18445 is the control for 18443: without a single-family publication in the
+# same run, a host that simply had no IPv6 would produce the same "no wildcard
+# v6 socket" reading as a host where the contract worked.
+#
+# 19001 is the one that makes items 6, 7 and 16 testable at all:
+#
+#   * it is `private`, so a source set applies and the plan is NON-EMPTY;
+#   * it is REMAPPED (19001 -> 8080), which is the only shape that proves
+#     original-destination matching. Post-DNAT the packet's destination port is
+#     the CONTAINER port, so a `DOCKER-USER` rule written `--dport 19001`
+#     matches nothing while reading in a diff exactly like one that works. The
+#     rule must use `--ctorigdstport`. A non-remapped port cannot tell the two
+#     apart, and a test that cannot tell them apart passes for the wrong reason;
+#   * it is `dual_stack`, so the v4 rules derive into `DOCKER-USER` and the v6
+#     rules into `INPUT` — the split that the inert-chain finding is about;
+#   * `source_set` is a NAME. Deployment control resolves it at authorization;
+#     this descriptor never holds an address, so the rendered file can live in
+#     Git and a resolved one cannot.
+#
+# `tls = "none"` is declared rather than defaulted. A `private` publication must
+# state its posture explicitly, and stating "none" honestly is the point: this
+# fixture is about sockets and source policy, not about transport security.
 
 schema = "ProductDeploymentSpec.v1"
 product = "lane3_exposure"
@@ -29,11 +51,10 @@ manifest_digest = "sha256:000000000000000000000000000000000000000000000000000000
 # exposure rather than proving a registry pull.
 #
 # Python's stdlib server rather than nginx, and the reason is a finding in
-# itself: the facility renders `read_only: true` by default, and nginx
-# cannot start under it without a tmpfs for /var/cache/nginx. Correct
-# hardening, wrong fixture — a lane about sockets should not also be a lane
-# about someone else`s writable paths. This server writes nothing and binds
-# an unprivileged port, so the only thing under test stays the socket.
+# itself: the facility renders `read_only: true` by default, and nginx cannot
+# start under it without a tmpfs for /var/cache/nginx. Correct hardening, wrong
+# fixture — a lane about sockets should not also be a lane about someone else's
+# writable paths. This server writes nothing and binds an unprivileged port.
 [image]
 reference = "python@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f"
 source_revision = "0000000000000000000000000000000000000000"
@@ -72,7 +93,7 @@ timeout_seconds = 2
 retries = 5
 start_period_seconds = 3
 
-# The subject of the whole lane.
+# Dual-stack loopback: the original subject of the lane.
 [[roles.ports]]
 container = 8080
 host = 18443
@@ -95,3 +116,16 @@ host = 18445
 protocol = "tcp"
 exposure = "loopback"
 address_family = "ipv4"
+
+# The publication that makes the firewall half of the lane observable:
+# private, source-scoped, dual-stack, and REMAPPED so that a `--dport` rule
+# would silently match nothing.
+[[roles.ports]]
+container = 8080
+host = 19001
+protocol = "tcp"
+exposure = "private"
+address_family = "dual_stack"
+tls = "none"
+source_set = "lane3-authorized"
+telemetry = true

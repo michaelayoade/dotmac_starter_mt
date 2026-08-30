@@ -57,6 +57,77 @@ the packet there is already DNATed and its `--dport` is the container port. And
 every allowlist ends in a terminal DROP, because one whose last rule is an
 ACCEPT enforces nothing.
 
+### Lane 3 is a runner and a receipt, not a fixture and a table
+
+`scripts/exposure-rehearsal/` held a descriptor and some recorded bytes that no
+test and no workflow consumed, and the sixteen gate items lived in a
+hand-maintained markdown table whose header once read "14 of 16 CLOSED" while
+its own rows recorded four `partial` and one `n/a`.
+
+`scripts/exposure_rehearsal_runner.py` executes the lane through
+`ExposureTransaction` over `ComposeHostExposureEffects` — snapshot, plan, apply,
+re-observation, external probes, rollback, exact restoration comparison — and
+emits `RehearsalReceipt.v1`. Every input is required and none has a default: the
+protected-main revision, the wheel candidate digest, the Platform CP
+authorization run, the signed authorization document, the controller identity,
+the lease, the probe identity and the exact fixture. A rehearsal missing one is
+not a partial rehearsal, it is a different activity.
+
+`require_rehearsal.py` now reads **Lane 3**, not Lane 2. Lane 2 proves a real
+engine, database, handoff and restore loop; it never watches an IPv6 socket
+refuse the internet, which is what this release is named after. Two oracles,
+because they fail differently: the Actions API says a run succeeded on this
+exact SHA, and the receipt says what it established. A green run whose receipt
+is full of `blocked` rows is exactly what the pair catches.
+
+**Only `executed_passed` satisfies publication.** `hand_measured` and `vacuous`
+are their own statuses because the old count folded them into "closed". The
+status document is now GENERATED (`make rehearsal-status-check`), so a heading
+cannot contradict its own table.
+
+### The fixture can now fail the checks it feeds
+
+The old one published only `loopback` and `none`, so `build_firewall_plan`
+returned EMPTY and gate item 6 passed without observing anything. The new one
+adds a `private`, dual-stack, source-scoped publication REMAPPED from 19001 to
+8080 — the only shape that proves original-destination matching, because with
+host == container a wrong `--dport` rule and a correct `--ctorigdstport` rule are
+indistinguishable. It derives four rules: `--ctorigdstport` in `DOCKER-USER` on
+IPv4, `--dport` in `INPUT` on IPv6, each ending in a terminal DROP.
+
+### `ObservedProxy` carries the pid
+
+Gate item 5 is "the `docker-proxy` pid is NEW" — a surviving pid means the
+container was never recreated and the apply proved nothing. The parser discarded
+the pid entirely, so that item could only ever be closed by a human reading `ps`
+output. It is now captured (both `ps -eo pid,args` and `ps aux` shapes), and
+`None` when the listing carried no pid column, so a caller must refuse rather
+than compare sentinels.
+
+### A typed `Digest`, and `HostLease.v1`
+
+`Digest` replaces raw string comparison: bare and prefixed spellings parse to one
+value, uppercase is accepted on input and lowercased on output, and unknown
+algorithms, wrong lengths and malformed values are refused.
+`require_same_digest` takes a NAMED mapping so a refusal says which term
+disagreed, and refuses fewer than two terms so a three-term gate cannot be
+weakened by passing fewer.
+
+`HostLease.v1` records exclusive use of a shared target. Measured 2026-08-30,
+the rehearsal host had no lease mechanism at all while eleven agents' worktrees
+shared it. A lease **cannot be self-granted**: `authorization_run_id` is
+mandatory, and a holder that writes its own lease has proved only that it can
+write a file.
+
+### `VantageQualification` — positive proofs, not an absent NIC
+
+The external vantage's second NIC is gone, which removed the risk AND removed
+the discrimination control that depended on it. A check that stops
+discriminating because the thing it discriminated against was removed has been
+lost, not passed. Qualification is now seven positive proofs, and the last —
+that the TARGET observed the expected source address — is the only one a vantage
+cannot fake about itself.
+
 ### `DeploymentProvenance.v1` — binding what ran to what was authorized
 
 `build_provenance()` binds six facts into one canonical, digest-bearing record:

@@ -87,6 +87,8 @@ deployment-plan: ## Print the ordered deployment plan, gates marked (never deplo
 
 product-writer-check: ## Require one typed, exact-pinned writer claim for every inventoried product
 	poetry run python scripts/product_writer_check.py --check
+rehearsal-status-check: ## Fail if the GENERATED Lane 3 status document drifted
+	poetry run python scripts/generate_rehearsal_status.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
 module-catalog-check: ## Fail if the committed module catalogue is stale
@@ -96,7 +98,7 @@ poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
 	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check manifest-digest-check product-writer-check rehearsal-status-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests

@@ -158,6 +158,18 @@ class ObservedProxy:
     host_port: int
     container_port: int
     protocol: str
+    #: The OS process id, when the listing carried one.
+    #:
+    #: Gate item 5 is "the `docker-proxy` PID is NEW" — a surviving pid means
+    #: the container was never recreated and the apply proved nothing. The
+    #: parser used to discard the pid entirely, so that item could only ever be
+    #: closed by a human reading `ps` output, which is exactly the category of
+    #: hand-measurement Lane 3 exists to eliminate.
+    #:
+    #: `None` rather than `0` when absent: "this listing had no pid column" and
+    #: "the pid is zero" are different facts, and a caller comparing pid sets
+    #: must be able to refuse the first rather than silently compare sentinels.
+    pid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +254,12 @@ _PROXY = re.compile(
     r"-host-port\s+(?P<hport>\d+)\s+.*?-container-port\s+(?P<cport>\d+)"
 )
 
+#: The pid leading a process line, tolerating both shapes this fleet produces:
+#: `ps -eo pid,args` (whitespace, pid, argv) and `ps aux`-style (user, pid,
+#: argv). Separate from `_PROXY` so a listing WITHOUT a pid column still parses
+#: into a proxy — it is missing a field, not malformed.
+_PROXY_PID = re.compile(r"^\s*(?:\S+\s+)?(?P<pid>\d+)\s+\S*docker-proxy")
+
 
 def _split_host_port(local: str) -> tuple[str, int] | None:
     """`127.0.0.1:8003` and `[::1]:8003` and `*:8003`, one answer.
@@ -313,6 +331,7 @@ def parse_docker_proxy_processes(text: str) -> tuple[ObservedProxy, ...]:
         if match is None:
             continue
         host_ip = match.group("ip").strip("[]")
+        pid_match = _PROXY_PID.match(line)
         proxies.append(
             ObservedProxy(
                 family="ipv6" if ":" in host_ip else "ipv4",
@@ -320,6 +339,7 @@ def parse_docker_proxy_processes(text: str) -> tuple[ObservedProxy, ...]:
                 host_port=int(match.group("hport")),
                 container_port=int(match.group("cport")),
                 protocol=match.group("proto"),
+                pid=int(pid_match.group("pid")) if pid_match else None,
             )
         )
     return tuple(proxies)
