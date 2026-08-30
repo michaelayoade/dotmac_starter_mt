@@ -170,16 +170,31 @@ def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Pa
     return Path(directory) / f"{safe}.json"
 
 
-def write_lease(lease: HostLease, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
-    """Persist a lease. Refuses to overwrite a live one held for another run."""
+def write_lease(
+    lease: HostLease,
+    *,
+    directory: str | Path = DEFAULT_LEASE_DIR,
+    now: datetime | None = None,
+) -> Path:
+    """Persist a lease. Refuses to overwrite a live one held for another run.
+
+    ``now`` is injectable because liveness is the whole decision here: with the
+    wall clock, a test asserting the refusal stops asserting anything the moment
+    its fixture expiry passes, and it does so by going green-then-red on a date
+    rather than on a code change. ``HostLease.covers`` already takes its clock;
+    this was the one caller that did not.
+    """
     path = _lease_path(lease.target, directory=directory)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         existing = load_lease(lease.target, directory=directory)
-        now = datetime.now(UTC)
+        resolved_now = datetime.now(UTC) if now is None else now
         still_live = True
         try:
-            existing.covers(now=now, authorization_run_id=existing.authorization_run_id)
+            existing.covers(
+                now=resolved_now,
+                authorization_run_id=existing.authorization_run_id,
+            )
         except PreconditionFailed:
             still_live = False
         if still_live and existing.authorization_run_id != lease.authorization_run_id:

@@ -108,9 +108,39 @@ def test_a_lease_round_trips_and_a_missing_one_refuses(tmp_path) -> None:
 def test_taking_a_host_already_leased_to_another_run_is_refused(tmp_path) -> None:
     """Two holders each believing they have exclusive use is worse than no
     lease, because both then skip the checks a shared host needs."""
-    write_lease(_lease(), directory=tmp_path)
+    write_lease(_lease(), directory=tmp_path, now=NOW)
     with pytest.raises(PreconditionFailed, match="already leased"):
-        write_lease(_lease(authorization_run_id="pcp-run-0002"), directory=tmp_path)
+        write_lease(
+            _lease(authorization_run_id="pcp-run-0002"),
+            directory=tmp_path,
+            now=NOW,
+        )
+
+
+def test_the_refusal_does_not_depend_on_the_wall_clock(tmp_path) -> None:
+    """This assertion used to expire.
+
+    `_lease()` holds until 15:00 UTC on 2026-08-30 and `write_lease` read
+    `datetime.now(UTC)`, so from 15:00 that day the stored lease read expired,
+    the host read free, and the refusal above silently stopped firing --
+    turning green to red on a date rather than on a change. Pinning `now`
+    fixes that case; this proves the dependency is gone rather than merely
+    postponed, which pushing the fixture forward would not.
+    """
+    write_lease(_lease(), directory=tmp_path, now=NOW)
+    long_after = datetime(2099, 1, 1, tzinfo=UTC)
+    contender = _lease(authorization_run_id="pcp-run-0003")
+
+    # Before expiry: refused, because a live lease is held for another run.
+    with pytest.raises(PreconditionFailed, match="already leased"):
+        write_lease(contender, directory=tmp_path, now=NOW)
+
+    # After expiry: permitted, and this is the half that proves `now` is read
+    # at all. If the parameter were ignored, both calls would refuse.
+    write_lease(contender, directory=tmp_path, now=long_after)
+    assert load_lease("203.0.113.10", directory=tmp_path).authorization_run_id == (
+        "pcp-run-0003"
+    )
 
 
 # ── the vantage ─────────────────────────────────────────────────────────────
