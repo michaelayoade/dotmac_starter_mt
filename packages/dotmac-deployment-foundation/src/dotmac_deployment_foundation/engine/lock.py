@@ -32,6 +32,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -51,8 +52,13 @@ def lock_path(
     Per-product rather than global: two different products deploying to one
     host at once is fine and should not serialise, while two deployments of the
     SAME product at once is the incident.
+
+    The directory is RESOLVED. Mutual exclusion is a property of an inode, not
+    of a string, so two callers naming the same directory by different paths —
+    a relative path and an absolute one, or a symlink and its target — must
+    arrive at the same file or they will each take "the lock" and both proceed.
     """
-    return Path(directory) / f"dotmac_{product}_deploy.lock"
+    return Path(directory).resolve() / f"dotmac_{product}_deploy.lock"
 
 
 def _holder_description(path: Path) -> str:
@@ -103,7 +109,7 @@ def deployment_lock(
     inode, and both then believe they hold the lock — the classic lockfile race.
     An empty file costs nothing.
     """
-    path = Path(directory) / f"dotmac_{product}_deploy.lock"
+    path = lock_path(product, directory=directory)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -111,8 +117,36 @@ def deployment_lock(
             f"cannot create lock directory {path.parent}: {exc}"
         ) from exc
 
-    handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    # O_NOFOLLOW, and then a regular-file check on the descriptor we actually
+    # got. The lock lives in a world-writable directory (`/var/lock`), so the
+    # path can be replaced by a symlink between deployments by anyone with a
+    # login on the host. Following it would put the lock — and the pid we write
+    # into it — on some other file, and `flock` on the wrong inode succeeds
+    # cheerfully while excluding nobody.
+    #
+    # The two checks are not redundant. O_NOFOLLOW refuses a symlink AT the
+    # final component; the fstat refuses everything else a path can be — a
+    # FIFO, a device, a directory — which O_NOFOLLOW is perfectly happy to
+    # open. Checking the descriptor rather than the path is what closes the
+    # TOCTOU: `path` may already name something different by the time a
+    # `Path.is_file()` answered.
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_NOFOLLOW", 0)  # absent on some platforms; not fatal
     try:
+        handle = os.open(path, flags, 0o644)
+    except OSError as exc:
+        raise LockUnavailableError(
+            f"cannot open deployment lock {path}: {exc}. A symlink at this "
+            "path is refused rather than followed — the lock would otherwise "
+            "be taken on a file of someone else's choosing"
+        ) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise LockUnavailableError(
+                f"deployment lock {path} is not a regular file. Refusing: "
+                "an advisory lock on a FIFO or a device excludes nothing, so "
+                "proceeding would serialise nothing while appearing to"
+            )
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
