@@ -45,6 +45,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 sys.path.insert(
@@ -64,6 +65,7 @@ from dotmac_deployment_foundation.errors import (
 )
 from dotmac_deployment_foundation.exposure import (
     ExposureTransaction,
+    ObservedProxy,
     foreign_rules,
     ownership_comment,
     refuse_non_recreating_apply,
@@ -206,6 +208,57 @@ def _probe(evidence: dict, key: str) -> dict:
     return probe
 
 
+def judge_proxy_recreation(
+    before: Sequence[ObservedProxy], after: Sequence[ObservedProxy]
+) -> tuple[RequirementStatus, str]:
+    """Gate item 5 — "the `docker-proxy` PID is NEW" — as a pure decision.
+
+    A surviving pid means the container was never recreated, so the apply
+    proved nothing about the binding: the socket that answered afterwards is
+    the same socket that answered before, and a wrong port mapping would look
+    exactly as healthy.
+
+    Extracted from :func:`run` so it can be exercised without a leased host, an
+    SSH identity or a qualified vantage. That is not tidiness. This item was
+    DEAD until recently — `ObservedProxy` discarded the pid entirely, so it
+    could only ever be closed by a human reading `ps` — and the capture was
+    fixed without the decision built on it ever being observed working. Lane 3
+    cannot currently run (no issuer, no registered runner), so a unit test is
+    the only thing that can establish this gate bites at all.
+
+    Four outcomes, and the first is the one that is easy to get wrong:
+
+    - a listing with NO pid column is ``BLOCKED``, never a pass. Comparing
+      `None` against `None` and calling the result "new" is how a check reports
+      success for having measured nothing;
+    - no proxy at all is a failure — there is nothing publishing the port;
+    - any surviving pid is a failure, named;
+    - otherwise every pid is new, and the detail records both sets so the
+      receipt shows what was compared rather than asserting a conclusion.
+    """
+    unknown = [proxy for proxy in after if proxy.pid is None]
+    before_pids = {proxy.pid for proxy in before if proxy.pid is not None}
+    after_pids = {proxy.pid for proxy in after if proxy.pid is not None}
+    survivors = sorted(before_pids & after_pids)
+
+    if unknown:
+        return BLOCKED, (
+            f"{len(unknown)} docker-proxy line(s) carried no pid, so 'the pid is "
+            "new' cannot be established from this listing"
+        )
+    if not after_pids:
+        return FAILED, "no docker-proxy process was observed"
+    if survivors:
+        return FAILED, (
+            f"docker-proxy pid(s) {survivors} SURVIVED the apply — the container "
+            "was not recreated, so the apply proved nothing about the binding"
+        )
+    return PASSED, (
+        f"every docker-proxy pid is new ({sorted(after_pids)}); none survived "
+        f"from the snapshot ({sorted(before_pids)})"
+    )
+
+
 def run(args: argparse.Namespace) -> int:
     started = datetime.now(UTC).isoformat()
     results = Results()
@@ -297,38 +350,9 @@ def run(args: argparse.Namespace) -> int:
         'the exposure = "none" port emits no socket',
         "ss -tlnp",
     )
-    # A listing with no pid column cannot answer item 5 at all, and must refuse
-    # rather than compare `None` against `None` and call the result "new".
-    unknown = [p for p in observed.proxies if p.pid is None]
-    before_pids = {p.pid for p in snapshot.proxies if p.pid is not None}
-    after_pids = {p.pid for p in observed.proxies if p.pid is not None}
-    survivors = sorted(before_pids & after_pids)
-    if unknown:
-        proxy_status, proxy_detail = (
-            BLOCKED,
-            (
-                f"{len(unknown)} docker-proxy line(s) carried no pid, so 'the pid is "
-                "new' cannot be established from this listing"
-            ),
-        )
-    elif not after_pids:
-        proxy_status, proxy_detail = FAILED, "no docker-proxy process was observed"
-    elif survivors:
-        proxy_status, proxy_detail = (
-            FAILED,
-            (
-                f"docker-proxy pid(s) {survivors} SURVIVED the apply — the container "
-                "was not recreated, so the apply proved nothing about the binding"
-            ),
-        )
-    else:
-        proxy_status, proxy_detail = (
-            PASSED,
-            (
-                f"every docker-proxy pid is new ({sorted(after_pids)}); none survived "
-                f"from the snapshot ({sorted(before_pids)})"
-            ),
-        )
+    proxy_status, proxy_detail = judge_proxy_recreation(
+        snapshot.proxies, observed.proxies
+    )
     results.record("proxy_reobservation", proxy_status, proxy_detail, "ps -eo pid,args")
 
     planned = build_firewall_plan(spec)
