@@ -143,6 +143,7 @@ def _receipt(digest: str, **overrides: object) -> AuthorizationReceipt:
         "decision_ref": "approvals:decision:9182",
         "approved_at": "2026-08-30T10:15:00Z",
         "control_version": "0.1.0a4",
+        "operation": "deploy",
     }
     fields.update(overrides)
     return AuthorizationReceipt(**fields)  # type: ignore[arg-type]

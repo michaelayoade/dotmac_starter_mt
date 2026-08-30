@@ -41,6 +41,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from ..authorization import ExecutionGrant
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -206,13 +207,25 @@ class Executor:
         self,
         spec: ProductDeploymentSpec,
         effects: Effects,
+        grant: ExecutionGrant,
         *,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         deployment_id: str = "",
     ) -> None:
+        """`grant` is positional and required — that is the whole point.
+
+        An `Executor` is the only thing in this facility that mutates a host,
+        so it is where authorization has to be unavoidable. Making the grant a
+        required POSITIONAL parameter means a caller cannot forget it, cannot
+        default it, and cannot be given one by a helper that quietly passes
+        `None`. A caller with no grant has nothing to construct this with, and
+        `ExecutionGrant` cannot be built outside `authorize()` — so "execute on
+        a flag" stops being expressible rather than merely being discouraged.
+        """
         self._spec = spec
         self._effects = effects
+        self._grant = grant
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -227,7 +240,23 @@ class Executor:
 
     # ── entry point ─────────────────────────────────────────────────────────
 
+    def _descriptor_digest(self) -> str:
+        """This run's descriptor digest, in the canonical spelling.
+
+        Derived from the spec rather than taken from the caller: a digest the
+        caller supplies alongside the descriptor it is asking us to run proves
+        only that the caller can compute a digest.
+        """
+        return self._spec.to_canonical_document().sha256_digest()
+
     def run(self, plan: DeploymentPlan) -> DeploymentOutcome:
+        # Re-checked here, not merely at construction: the grant names a
+        # descriptor, and this asserts the plan in hand is that descriptor's.
+        # A grant built early and used late is exactly where "nothing changed
+        # in between" stops being safe to assume.
+        self._grant.require(
+            operation="deploy", descriptor_digest=self._descriptor_digest()
+        )
         outcome = DeploymentOutcome(plan=plan, notes=list(plan.notes))
         # The first question about any graph that turned bad at 14:32 is what
         # changed at 14:32. No product in the fleet emits this today, and the
@@ -341,6 +370,9 @@ class Executor:
         otherwise have done, restoring the image that had just failed.
         """
         outcome = DeploymentOutcome(plan=plan, notes=list(plan.notes))
+        self._grant.require(
+            operation="rollback", descriptor_digest=self._descriptor_digest()
+        )
         steps = steps_for_rollback(plan)
         if not steps:
             outcome.failure = plan.rollback_reason

@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 import pytest
+from dotmac_deployment_foundation.authorization import authorize
 from dotmac_deployment_foundation.engine.plan import (
     Strategy,
     build_plan,
@@ -39,6 +40,7 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
     StepFailed,
 )
+from dotmac_deployment_foundation.provenance import AuthorizationReceipt
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 GOOD_DIGEST = "sha256:" + "a" * 64
@@ -141,6 +143,37 @@ port = 8000
 [rollout]
 stability_window_seconds = 60
 """
+
+
+TEST_TARGET = "failure-injection-target"
+
+
+def grant_for(spec: ProductDeploymentSpec, operation: str = "deploy"):  # type: ignore[no-untyped-def]
+    """A real grant for a test executor.
+
+    Built through `authorize()` rather than by constructing `ExecutionGrant`
+    directly, deliberately: these tests are about failure injection, not about
+    the authorization seam, and a test helper that reached past the issuer
+    would be the first example of the bypass that seam exists to prevent.
+    """
+    digest = spec.to_canonical_document().sha256_digest()
+    receipt = AuthorizationReceipt(
+        plan_id="00000000-0000-4000-8000-000000000001",
+        target_ref=TEST_TARGET,
+        descriptor_digest=digest,
+        policy_code="deployment.test",
+        policy_version=1,
+        decision_ref="approvals:decision:test",
+        approved_at="2026-08-30T00:00:00Z",
+        control_version="0.1.0a4",
+        operation=operation,
+    )
+    return authorize(
+        receipt=receipt,
+        operation=operation,
+        descriptor_digest=digest,
+        target=TEST_TARGET,
+    )
 
 
 def load(**overrides: str) -> ProductDeploymentSpec:
@@ -307,7 +340,9 @@ class FakeClock:
 def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object):  # type: ignore[no-untyped-def]
     plan = build_plan(spec, **plan_kwargs)  # type: ignore[arg-type]
     clock = FakeClock()
-    executor = Executor(spec, effects, sleep=clock.sleep, clock=clock.read)
+    executor = Executor(
+        spec, effects, grant_for(spec), sleep=clock.sleep, clock=clock.read
+    )
     return plan, executor.run(plan)
 
 
@@ -954,7 +989,13 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
     spec = load()
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
-    executor = Executor(spec, effects, sleep=FakeClock().sleep, clock=FakeClock().read)
+    executor = Executor(
+        spec,
+        effects,
+        grant_for(spec, "rollback"),
+        sleep=FakeClock().sleep,
+        clock=FakeClock().read,
+    )
     outcome = executor.rollback(plan)
     assert outcome.succeeded, outcome.failure
     assert effects.switched_to == [OLD_DIGEST]
@@ -976,7 +1017,9 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     )
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
-    executor = Executor(spec, effects, sleep=lambda _: None)
+    executor = Executor(
+        spec, effects, grant_for(spec, "rollback"), sleep=lambda _: None
+    )
     with pytest.raises(PreconditionFailed) as caught:
         executor.rollback(plan)
     assert "maintenance_required" in str(caught.value)
@@ -1025,7 +1068,13 @@ def test_a_rollback_annotates_itself() -> None:
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     clock = FakeClock()
-    Executor(spec, effects, sleep=clock.sleep, clock=clock.read).rollback(plan)
+    Executor(
+        spec,
+        effects,
+        grant_for(spec, "rollback"),
+        sleep=clock.sleep,
+        clock=clock.read,
+    ).rollback(plan)
     assert "deployment.rollback" in [item["event"] for item in effects.annotations]
 
 
