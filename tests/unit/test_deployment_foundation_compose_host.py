@@ -961,3 +961,79 @@ def test_the_compose_file_is_left_alone_when_the_host_owns_it(
     assert f"APP_IMAGE=ghcr.io/example/app@{OLD_DIGEST}" in (
         tmp_path / ".env"
     ).read_text(encoding="utf-8")
+
+
+# ── manifest_digest reads only inside the staged release ────────────────────
+#
+# `manifest_digest` answers a gate: the executor compares what it returns
+# against the digest the plan approved. Its path comes from the descriptor,
+# which travels with the release — so the path decides WHICH FILE answers the
+# gate, and a gate that can be pointed at a file of the writer's choosing is
+# not a gate, it is a lookup that always agrees.
+#
+# `spec.py` refuses `..`/absolute/backslash paths at parse. That is the loud
+# half and it cannot see the filesystem: `.resolve()` follows a symlink planted
+# INSIDE the deploy directory, which no syntactic check can catch. Hence the
+# containment re-check here, and hence these tests.
+#
+# Found by the #507 supersession audit; written fresh against current main.
+
+
+def test_manifest_digest_reads_a_manifest_inside_the_deploy_root(
+    tmp_path: Path,
+) -> None:
+    """The positive control. Without it the refusals below prove nothing."""
+    (tmp_path / "manifest.json").write_bytes(b"{}")
+    digest = make_effects(tmp_path).manifest_digest("manifest.json")
+    assert digest == f"sha256:{hashlib.sha256(b'{}').hexdigest()}"
+
+
+def test_manifest_digest_refuses_a_symlink_escaping_the_deploy_root(
+    tmp_path: Path,
+) -> None:
+    """The attack the parse-side check structurally cannot catch.
+
+    Without the containment re-check this returns the digest of `secret.json`,
+    and the gate then agrees about a file that is not part of the release.
+    """
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    outside = tmp_path / "secret.json"
+    outside.write_bytes(b'{"not":"the release"}')
+    (deploy / "manifest.json").symlink_to(outside)
+
+    assert make_effects(deploy).manifest_digest("manifest.json") == "", (
+        "the digest of a file outside the staged release was accepted as "
+        "evidence about the staged release"
+    )
+
+
+def test_manifest_digest_refuses_a_traversing_relative_path(tmp_path: Path) -> None:
+    """Defence in depth — the read side does not rely on the parse side."""
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (tmp_path / "escape.json").write_bytes(b"{}")
+    assert make_effects(deploy).manifest_digest("../escape.json") == ""
+
+
+def test_manifest_digest_still_allows_a_symlink_that_stays_inside(
+    tmp_path: Path,
+) -> None:
+    """Containment, not a blanket symlink ban.
+
+    A link is a legitimate way to stage a file; only LEAVING the root is the
+    problem. Refusing every link would break correct deployments and would
+    make the guard pass for the wrong reason.
+    """
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "m.json").write_bytes(b"{}")
+    (tmp_path / "manifest.json").symlink_to(tmp_path / "real" / "m.json")
+
+    assert make_effects(tmp_path).manifest_digest("manifest.json").startswith("sha256:")
+
+
+def test_manifest_digest_still_returns_empty_for_an_absent_manifest(
+    tmp_path: Path,
+) -> None:
+    """The pre-existing contract is unchanged: absent is a refusal, not a match."""
+    assert make_effects(tmp_path).manifest_digest("manifest.json") == ""
