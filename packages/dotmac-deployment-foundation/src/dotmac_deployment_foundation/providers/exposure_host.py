@@ -53,23 +53,27 @@ from pathlib import Path
 
 from ..engine.run import CommandResult
 from ..errors import StepFailed
-from ..exposure import HostObservation, ObservedChain, observation_from_text
+from ..exposure import (
+    OWNERSHIP_PREFIX,
+    HostObservation,
+    ObservedChain,
+    observation_from_text,
+    ownership_comment,
+)
 from ..ingress import FAMILIES, FirewallRule
 from ..spec import ProductDeploymentSpec
 
 __all__ = ["OWNERSHIP_PREFIX", "ComposeHostExposureEffects", "ownership_comment"]
 
-#: The marker that makes a rule attributable. Prefixed rather than bare, so two
-#: products sharing a host own their rules independently.
-OWNERSHIP_PREFIX = "dotmac-exposure"
-
 #: Same shape as `compose_host.Runner`, restated rather than imported: a
 #: provider depends on the engine's RESULT type, not on a sibling provider.
 Runner = Callable[..., CommandResult]
 
-
-def ownership_comment(product: str) -> str:
-    return f"{OWNERSHIP_PREFIX}:{product}"
+# `OWNERSHIP_PREFIX` and `ownership_comment` MOVED to `..exposure` and are
+# re-exported here so existing importers keep working. They belong to the
+# contract rather than to this provider: `ExposureTransaction` now measures the
+# preservation property itself, and it can only do that if "ours" means the
+# same thing to the transaction and to every implementation of the seam.
 
 
 def _port_match_args(rule: FirewallRule) -> list[str]:

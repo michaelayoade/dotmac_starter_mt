@@ -65,6 +65,7 @@ from .errors import (
     UnknownSchemaError,
 )
 from .exposure import (
+    OWNERSHIP_PREFIX,
     ExposureEffects,
     ExposureTransaction,
     Finding,
@@ -77,7 +78,9 @@ from .exposure import (
     VerificationReport,
     accept_public_exposure_evidence,
     apply_exposure,
+    foreign_rules,
     observation_from_text,
+    ownership_comment,
     verify_exposure,
 )
 from .image import AuditReport, audit_image
@@ -98,6 +101,13 @@ from .policy import (
     ingress_policy_document,
     public_endpoint_tokens,
 )
+from .provenance import (
+    PROVENANCE_SCHEMA,
+    AuthorizationReceipt,
+    DeploymentProvenanceV1,
+    build_provenance,
+    normalize_digest,
+)
 from .spec import SCHEMA, ProductDeploymentSpec
 from .telemetry import (
     RESOURCE_ATTRIBUTES,
@@ -112,11 +122,14 @@ __all__ = [
     "EXPOSURES",
     "DESCRIPTOR_DOCUMENT_SCHEMA",
     "INGRESS_POLICY_SCHEMA",
+    "OWNERSHIP_PREFIX",
+    "PROVENANCE_SCHEMA",
     "PROVIDERS",
     "RESOURCE_ATTRIBUTES",
     "SCHEMA",
     "Annotation",
     "Assurance",
+    "AuthorizationReceipt",
     "AuditReport",
     "BackupHealth",
     "BackupRecord",
@@ -125,6 +138,7 @@ __all__ = [
     "DeploymentOutcome",
     "DeploymentDescriptorDocumentV1",
     "DeploymentPlan",
+    "DeploymentProvenanceV1",
     "DriftDetected",
     "DriftReport",
     "EdgeEndpoint",
@@ -166,6 +180,7 @@ __all__ = [
     "assess",
     "audit_image",
     "build_canonical_document",
+    "build_provenance",
     "build_edge_plan",
     "build_firewall_plan",
     "build_plan",
@@ -174,8 +189,11 @@ __all__ = [
     "compare",
     "deployment_lock",
     "endpoint_token",
+    "foreign_rules",
     "format_plan",
     "ingress_policy_document",
+    "normalize_digest",
+    "ownership_comment",
     "public_endpoint_tokens",
     "resource_attributes",
     "restore_rehearsal",
