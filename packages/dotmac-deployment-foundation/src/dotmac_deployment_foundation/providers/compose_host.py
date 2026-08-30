@@ -64,6 +64,7 @@ from ..render.compose import render_compose
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
 from ..spec import BackupDataset, ProductDeploymentSpec
+from ..toolchain import DEFAULT_TOOLS, require_absolute_tool
 
 __all__ = ["ComposeHostEffects", "NginxInstaller"]
 
@@ -249,8 +250,8 @@ class ComposeHostEffects:
         popen_factory: PopenFactory = _default_popen_factory,
         readiness_probe: ReadinessProbe = _default_readiness_probe,
         clock: Callable[[], float] = time.time,
-        docker_bin: str = "docker",
-        git_bin: str = "git",
+        docker_bin: str = DEFAULT_TOOLS["docker"],
+        git_bin: str = DEFAULT_TOOLS["git"],
         loopback: str = "127.0.0.1",
         app_root: str = "/app",
         image_env_var: str = "APP_IMAGE",
@@ -296,8 +297,14 @@ class ComposeHostEffects:
         self._popen_factory = popen_factory
         self._readiness_probe = readiness_probe
         self._clock = clock
-        self._docker_bin = docker_bin
-        self._git_bin = git_bin
+        # Absolute-path enforcement is unconditional and runs everywhere,
+        # including under a scripted fake runner: it is a pure string check,
+        # and it removes the whole PATH-resolution class. The filesystem
+        # integrity checks live in `toolchain.resolve_tool` and run on the
+        # production path, because a unit test that never execs must not need
+        # a real /usr/bin/docker to exist.
+        self._docker_bin = require_absolute_tool(docker_bin, what="docker_bin")
+        self._git_bin = require_absolute_tool(git_bin, what="git_bin")
         self._loopback = loopback
         self._app_root = PurePosixPath(app_root)
         self._image_env_var = image_env_var
@@ -313,6 +320,13 @@ class ComposeHostEffects:
             else f"{spec.product}_"
         )
         self._db_service = db_service
+        # NOT `require_absolute_tool`. This one runs INSIDE the db container
+        # (`docker compose exec -T <db> pg_dump …`), so the CONTAINER's PATH
+        # resolves it and the host's cannot influence which binary it is — the
+        # premise behind pinning does not hold here. A host path would also be
+        # wrong on its own terms: /usr/bin/pg_dump need not exist in a postgres
+        # image, which commonly ships it under a versioned directory. The image
+        # digest owns this binary's identity.
         self._pg_dump_bin = pg_dump_bin
         self._pg_dump_user = pg_dump_user
         self._pg_dump_database = pg_dump_database or spec.product
