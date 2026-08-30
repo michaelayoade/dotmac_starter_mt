@@ -1,0 +1,49 @@
+{
+  "artifact_id": "9740182233",
+  "artifact_size_bytes": 497826,
+  "expires_at": "2026-11-28T22:41:11Z",
+  "facility": "dotmac-deployment-foundation",
+  "filename": "dotmac_deployment_foundation-0.3.0a2-py3-none-any.whl",
+  "frozen_identity": {
+    "canonical_descriptor_digest": "sha256:f481cfa28501443d8cf152edb87b129b1a08e3a43d57c9d3d2903e6ac706991c",
+    "deployment_identity_label_keys": [
+      "io.dotmac.deployment.configuration.digest",
+      "io.dotmac.deployment.environment",
+      "io.dotmac.deployment.manifest.digest",
+      "io.dotmac.deployment.product",
+      "io.dotmac.deployment.schema",
+      "io.dotmac.deployment.service.kind",
+      "io.dotmac.deployment.service.name",
+      "io.dotmac.deployment.source.revision"
+    ],
+    "rendered_assets": {
+      "alerts.rules.yml": "sha256:b8ccdd5bcf3b593044e6de64fc774a7a441ca9ccb8806828ea3704dc4644b402",
+      "docker-compose.yml": "sha256:bfa43e8ba10f1236b906f2353b2c8214d12216d0d0249e19fbd443576ddd11a2",
+      "otel-collector.yaml": "sha256:1b7e1762ffd79f206f4df53ae5bc7c341325b35246f934057d360b27db1a9fdd"
+    },
+    "schema": "FrozenReleaseIdentity.v1",
+    "source_sha": "e930f878ce400b766b4a50feb0369021a28ab2fa",
+    "version": "0.3.0a2"
+  },
+  "published": false,
+  "repository": "michaelayoade/dotmac_starter_mt",
+  "retention_requested_days": 90,
+  "run_id": "33339810583",
+  "schema": "CandidateArtifact.v1",
+  "sha256": "2a6e0ccd040b05ab602be4b439e48dd61188b3b71ed6e80ecc8a482e70d57443",
+  "simultaneous_property_evidence": {
+    "event": "push",
+    "executed_success": 20,
+    "head_sha": "e930f878ce400b766b4a50feb0369021a28ab2fa",
+    "note": "allocation-gate is pull_request/workflow_dispatch only by design; it compares a branch against its merge base, which is undefined on a push. It executed and passed on each of the six PR heads.",
+    "run_id": "33339110835",
+    "skipped": [
+      "allocation-gate"
+    ],
+    "workflow": "ci.yml"
+  },
+  "size_bytes": 263869,
+  "source_sha": "e930f878ce400b766b4a50feb0369021a28ab2fa",
+  "tagged": false,
+  "version": "0.3.0a2"
+}
