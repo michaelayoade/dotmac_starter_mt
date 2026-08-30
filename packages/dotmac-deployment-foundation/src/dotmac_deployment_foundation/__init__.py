@@ -112,6 +112,11 @@ from .ingress import (
     admit_bind_address,
     endpoint_token,
 )
+from .launcher import (
+    LauncherIdentity,
+    identify_launcher,
+    refuse_untrusted_launcher,
+)
 from .lease import (
     DEFAULT_LEASE_DIR,
     HOST_LEASE_SCHEMA,
@@ -205,6 +210,7 @@ __all__ = [
     "Assurance",
     "AuditReport",
     "AuthorizationReceipt",
+    "LauncherIdentity",
     "RELEASE_EVIDENCE_SCHEMA",
     "ReleaseEvidenceV1",
     "SignatureVerifier",
@@ -309,6 +315,8 @@ __all__ = [
     "authorize",
     "accept_release_evidence",
     "build_provenance",
+    "identify_launcher",
+    "refuse_untrusted_launcher",
     "build_receipt",
     "build_recovery_receipt",
     "check_all",
