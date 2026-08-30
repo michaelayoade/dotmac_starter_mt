@@ -218,6 +218,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_tokens.py",
   "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
+  "dotmac_starter_mt:tests/architecture/test_ui_release_contract.py",
   "dotmac_sub:tests/test_admin_maps_web.py",
   "dotmac_sub:tests/architecture/test_field_live_map_boundary.py",
   "dotmac_crm:tests/test_field_live_map_feed.py",

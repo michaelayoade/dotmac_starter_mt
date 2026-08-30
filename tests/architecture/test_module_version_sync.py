@@ -70,8 +70,12 @@ skipped.
 
 Allowlist-driven discovery is the deliberate scope: a version is a public fact
 exactly when a module may be published, and the two packages this file does not
-cover keep their own dedicated tests (`test_kernel_version_sync.py`,
-`test_ui_release_contract.py`).
+cover keep their own dedicated tests: `test_kernel_version_sync.py` for the
+kernel, and for `dotmac-ui`, `tests/unit/test_dotmac_ui_tokens.py`
+(`test_declared_version_matches_pyproject`, plus the generated stylesheet and
+manifest, which are rendered FROM `__version__`) together with
+`tests/architecture/test_ui_release_contract.py`, which governs the release
+lane rather than the version surfaces.
 """
 
 from __future__ import annotations
