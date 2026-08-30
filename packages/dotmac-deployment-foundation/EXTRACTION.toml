@@ -10,7 +10,6 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_vendor_control_plane",
   "dotmac_workspace",
-  "dotmac_crm",
   "dotmac_integrator",
   "dotmac_erp",
   "dotmac_starter_mt",
@@ -27,7 +26,6 @@ source_revisions = [
   # direct-grant revocation assertions produced EffectivePrivilegeFact.
   "dotmac_vendor_control_plane:ebbf6b2fa2e225c9c3afaa57cd58cd761343e2a5",
   "dotmac_workspace:4c97dda18f6f6a8000ba2ade64f59210508b1d46",
-  "dotmac_crm:a922decf1356f296f1816aba06cf2bcf966fc212",
 ]
 
 source_paths = [
@@ -69,7 +67,6 @@ source_paths = [
   # extracted is the shape of the failure and the closure that repairs it.
   "dotmac_vendor_control_plane:scripts/deploy_production.sh",
   "dotmac_sub:scripts/backup/backup_dotmac_sub_dbs_to_rclone.sh",
-  "dotmac_crm:scripts/db_backup.sh",
   # The product-first reference for "a binding is a claim, not a fact", and the
   # counter-example that produced EffectivePrivilegeFact: these assert
   # revocations through information_schema.table_privileges, which sees only
@@ -177,6 +174,39 @@ evidence_paths = [
 # the descriptor, the conformance workflow and the pin all landed; an earlier
 # version of this list cited ERP's branch tip at reading time instead, which is
 # a timestamp presented as a fact.
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+# Its deploy path takes the backup that PostgresRecoveryBundle.v1 replaces:
+# `pg_dump --dbname ... --format custom`, role-blind. It is the writer the
+# bundle retires, and it is first in the adoption order precisely because its
+# restore proof gates the authorization issuer. Measured 2026-08-30: that dump
+# restored with 114 missing-role errors and still produced 45 tables.
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "ebbf6b2fa2e225c9c3afaa57cd58cd761343e2a5"
+evidence_paths = [
+  "scripts/deploy_production.sh",
+]
+
+[[product_writers]]
+product = "dotmac_workspace"
+# Read as the product-first reference for the role closure and it writes
+# NOTHING of this capability - it has no backup, restore, dump or bundle code
+# at all. `inventory_only` rather than `no_writer` because somebody looked, and
+# what the looking established is itself load-bearing: no product in the fleet
+# derives a role closure, so the closure was written here rather than ported.
+# What it did contribute is the idiom ("a binding is a claim, not a fact"),
+# snapshot-then-pure-decision, and - by counter-example - the direct-grant trap
+# that produced EffectivePrivilegeFact.
+writer_state = "inventory_only"
+retirement_required = false
+revision = "4c97dda18f6f6a8000ba2ade64f59210508b1d46"
+evidence_paths = [
+  "src/dotmac_workspace/migration_bindings.py",
+  "tests/db/test_login_state_isolation.py",
+  "tests/db/test_tenant_isolation.py",
+]
+
 [[adoption_evidence]]
 kind = "adopted"
 repository = "dotmac_erp"
