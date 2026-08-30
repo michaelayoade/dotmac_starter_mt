@@ -1417,6 +1417,90 @@ Recording the split matters more than closing it. A reader who believes all six
 are enforced will skip the five that are not, which is exactly how a shadow
 becomes permanent while every check stays green.
 
+### Decision amendment — 2026-08-30 (a credential lifecycle has one owner, and provisioning cannot be handed material)
+
+Extraction of the human credential lifecycle surfaced a rule the earlier
+amendments imply but never state: **when the capability being extracted is a
+security decision, the extraction must make the dangerous shape
+unrepresentable, not merely absent.**
+
+The measurement that forced it (`docs/inventories/credential-lifecycle-sources.md`,
+exact commits recorded there):
+
+- `dotmac_sub` has **four** `verify_password` owners in four files. Each one
+  re-derives active, locked and reset-required for itself, because the
+  primitive returns a boolean and a boolean cannot carry the answer. Four
+  owners disagreeing is the predictable result of that return type, not
+  carelessness.
+- **Eleven** files call `hash_password`, two of them seed scripts under
+  `scripts/seed/`. A guard scoped to `app/` sees nine and reports the other two
+  as absent — the exact defect hard rule 25 names.
+- `reseller_onboarding._create_credential` accepted a caller-supplied
+  `password` parameter that **no supported caller ever passed**, and that unused
+  parameter is how one value reached 24 external organisations. Sub removed it.
+
+Four rulings follow, and they generalise beyond credentials to any extracted
+security decision.
+
+1. **A security decision returns a typed verdict, never a boolean.** A boolean
+   forces every caller to re-derive the states it cannot carry, which is how one
+   decision becomes four. `CredentialVerificationVerdict` is `accepted`,
+   `reset_required`, `invalid`, `locked`, `disabled`; the owner returns it and
+   issues nothing. Mapping a verdict to an HTTP status or a session stays with
+   the product adapter, where it is one decision in one place.
+
+2. **A parameter that must never be used is deleted, not documented.** An
+   unused, undocumented, caller-supplied secret parameter is not latent risk —
+   it is the incident, waiting for one caller. Removing it from the product
+   (Sub PR #2826) fixes the instance. The extraction must fix the SHAPE: the
+   shared owner's provisioning signature has nowhere to put material and its
+   receipt has nowhere to return it, so a future caller who thinks they are
+   being helpful has no way to be.
+
+3. **Generated credential material leaves through nothing.** Not a return type,
+   log line, exception message, `repr`, receipt field or audit row. The subject
+   reaches a usable credential through a durable recovery intent and the
+   product's own proven channel. A facility that cannot hand you the secret
+   cannot leak it, and that is a stronger property than any handling discipline.
+
+4. **Product security authority is not deployment authority.**
+   `dotmac-deployment-control` owns fleet deployment intent (ADR-0070) and must
+   not authorize an account mutation. A cohort force reset is approved by a
+   PRODUCT approval policy, named on the plan and re-checked against a separate
+   authorization record. That record carries `approval_decision_ref` and
+   deliberately **no** `approved_by`: the approval decision is a product record
+   with its own actor, quorum and audit trail, and a copied actor name would be
+   a second, weaker claim about who approved — the weaker one being the one an
+   automated reader believes.
+
+Two honesty constraints go with it, and both are conditions on the dossier
+rather than on the code.
+
+- **New behaviour is labelled new.** `password_needs_rehash` has zero call sites
+  across `dotmac_sub`, `dotmac_erp` and `dotmac_vendor_control_plane`. The
+  legacy-hash upgrade in the extracted facility is therefore built and tested as
+  NEW behaviour; calling it ported would be a false product-first claim, and the
+  2026-08-08 amendment's whole value is that its claims can be checked.
+- **A measurement that supersedes a census says so.** The AST call-graph sweep
+  and the earlier hand census agree exactly on which FILES are callers and
+  differ on site counts (grep lines include imports). Both numbers are recorded
+  with their definitions, so a later reader does not read a redefinition as
+  progress.
+
+Scope note, because a sweep is how this goes wrong: `AccessCredential` and
+`SnmpCredential` in `dotmac_sub` are DEVICE and SERVICE credentials.
+`UserCredential` alone is the human model. An extraction keyed on the name
+`*Credential` would have given the facility responsibilities it must not have.
+
+This amends nothing above. The two-consumer, named-owner and product-first rules
+still decide whether and how a unit is shared; this says what an extracted
+SECURITY decision additionally owes. Enforcement:
+`tests/unit/test_credential_lifecycle.py`,
+`tests/architecture/test_credential_lifecycle_ratchet.py`,
+`scripts/credential_lifecycle_sweep.py`,
+`docs/inventories/credential-lifecycle-baseline.json`. No kernel version is
+allocated by the change that added the facility, and no product composes it.
+
 ### Decision amendment — 2026-08-25 (the web facet runtime contract)
 
 § 1 named **product facet** as the concept the codebase was missing, and then

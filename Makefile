@@ -56,6 +56,10 @@ connector-baseline: ## Regenerate the external-connector baseline after a verifi
 	poetry run python scripts/external_connector_sweep.py --write-baseline
 connector-ratchet: ## Run the external-connector ratchet with full coverage disclosure (needs the fleet beside this checkout; not in `check`)
 	poetry run python scripts/external_connector_sweep.py --fleet-root $(FLEET_ROOT) --check --strict-coverage
+credential-baseline: ## Regenerate the credential-lifecycle debt baseline after a verified retirement (commit the diff in the same change)
+	poetry run python scripts/credential_lifecycle_sweep.py --fleet-root $(FLEET_ROOT) --write-baseline
+credential-ratchet: ## Run the credential-lifecycle ratchet with full coverage disclosure (siblings need the fleet beside this checkout; the Starter half is enforced by the architecture test)
+	poetry run python scripts/credential_lifecycle_sweep.py --fleet-root $(FLEET_ROOT) --check
 publication-check: ## Report every distribution declaring a version nobody can install
 	poetry run python scripts/declared_publication_sweep.py --check
 publication-baseline: ## Regenerate the declared-but-unpublished ledger (state the reason; commit the diff in the same change)
@@ -173,6 +177,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
+	credential-baseline credential-ratchet \
 	publication-check publication-baseline module-catalog module-catalog-check \
 	manifest-digest-check manifest-digest-verify manifest-digest-record \
 	product-writer-check \

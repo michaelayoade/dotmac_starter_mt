@@ -2275,6 +2275,7 @@ write:
 | Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.tenants.service.provision_tenant` (grants the provisioned owner the `admin` role inside the provisioning transaction). The race-prone `_assign_first_user_admin` first-registrant bootstrap is DELETED (control-plane security Task 2) — registration never grants a role |
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and `app.features.tenants.service.provision_tenant` (creates the new tenant's `admin` role during provisioning) |
 | Auth credentials | `app.features.auth.service.register` (policy-gated self-registration, `auth.registration_policy` default `closed`) **and** `app.features.tenants.service.provision_tenant` (the owner credential, inside the provisioning transaction) — no credential-update/password-reset path yet, phase 2c. `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
+| Human credential lifecycle decisions (kernel CONTRACT; not composed by this assembly) | `dotmac_kernel.credential_lifecycle.CredentialLifecycle` — `provision` (no parameter can carry caller-supplied material), `verify` (one typed verdict, never a boolean, never a session), `complete_reset` (behind a single-use proven recovery authorization) and `plan_force_reset`/`apply_force_reset` (a canonically sorted cohort, a typed `CredentialResetPlanDigestV1`, a separate authorization carrying no `approved_by`, and all targets or none). Stateless: the product supplies five typed ports and OWNS the transaction, so the kernel writes nothing itself. The assembly's own `auth`/`tenants` writers above are unchanged and remain the as-built path; `dotmac_sub` is the named first adopter and its cutover has not started. See "Human credential lifecycle" below and `docs/inventories/credential-lifecycle-sources.md`. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
 | Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`. It enforces two distinct contracts before anything reaches the session: the open ACTION VOCABULARY is declared by installed modules through `AuditActionRegistry`, while the actor is the closed kernel-owned `(actor_type, actor_id)` identity pair (`system` may omit an id; `user`/`service`/`api_key` may not). Both members are explicit at every applicable caller; `actor_party_id` is optional accountability enrichment and never supplies the pair, while `actor_label` is a display snapshot. A production-source AST census covers all 20 writers across the assembly and shipped packages. `dotmac_workspace` PR #10 retired the final known external fallback callers before kernel a69 removed the derivation. `occurred_at` is domain time (database `now()` by default, caller-supplied for reconstruction), distinct from server-assigned persistence `created_at`. Tenant audit actor columns have no FK so attribution survives deletion. |
 | Platform audit events | `dotmac_kernel.audit.write_platform_audit_event` is the sole constructor/writer. Kernel owns the storage contract as `platform_audit_log.v1`; migration `0026_platform_audit_log` makes online history append-only, and the live verifier proves shape, FK/index, no RLS, tenant-role isolation, and `platform_api` `SELECT`+`INSERT` only. Consumer declarations and DDL-free verification revisions follow only after kernel a68 is published, so their declared floor is resolvable. Current limitation: deleting a `PlatformAdmin` nulls actor attribution, so immutable actor snapshotting remains a separate unresolved hardening slice. |
@@ -3188,6 +3189,64 @@ the unit lane would pass against an implementation that never locked) and
 `tests/test_external_identity_login_race.py` (bounded two-session Postgres
 canary; the winner takes the row lock BEFORE the barrier, so each direction is
 forced rather than hoped for).
+
+## Human credential lifecycle (`dotmac_kernel.credential_lifecycle`)
+
+A kernel-owned CONTRACT, published and tested, and composed by nothing in this
+assembly. It is recorded here because a new concept gets its owner row before it
+gets a consumer — not because the reference assembly routes through it today.
+`app.features.auth.service` and `app.features.tenants.service` remain the
+as-built credential writers, and both appear in the frozen debt baseline.
+
+**What it owns.** Every decision about a human password credential: provision,
+verify, complete an individually authorized reset, plan and apply an approved
+cohort force reset. `dotmac_kernel.security` keeps the primitives; the facility
+is the one owner ABOVE them.
+
+**Why it exists.** Measured at exact commits (see the inventory):
+`dotmac_sub` has FOUR verification owners across four files, each re-deriving
+active, locked and reset-required for itself because a boolean cannot carry the
+answer; and eleven files call `hash_password`, two of them seed scripts. The
+narrower reason is sharper still — `reseller_onboarding._create_credential` took
+a caller-supplied `password` no supported caller ever passed, and that unused
+parameter is how one value reached 24 external organisations. Sub removed it;
+this facility makes the shape unrepresentable rather than merely absent.
+
+**The three structural properties.**
+
+1. *Provisioning has nowhere to put a secret and nowhere to return one.* Material
+   is generated from an injectable cryptographic source, hashed, marked
+   reset-required, persisted through the product adapter in the caller's
+   transaction, and forgotten. The subject reaches a usable credential only
+   through a durable RECOVERY INTENT and the product's own channel.
+2. *Verification returns `accepted` / `reset_required` / `invalid` / `locked` /
+   `disabled`,* and never a session. The password is checked first — against
+   throwaway material when no credential exists — so lifecycle state is
+   disclosed only after a correct password and a missing credential costs the
+   same work as a live one.
+3. *A cohort reset is planned, approved and applied as three separable steps.*
+   The plan sorts targets canonically and refuses empty, duplicate, malformed,
+   stale and changed cohorts; `apply_force_reset` recalculates the typed digest
+   rather than trusting the authorization's copy, locks and version-checks every
+   target before mutating any, and produces an append-only secret-free receipt
+   that doubles as the idempotency record.
+
+**Transaction authority is unchanged (hard rule 8).** The facility opens no
+session, never commits and never rolls back. "All targets atomically or none" is
+a property of the caller's boundary, which is the only place it can honestly
+live — so a product applying a cohort reset does it inside one of its own
+transactions.
+
+**Authority boundary.** This is PRODUCT security authority.
+`dotmac-deployment-control` owns fleet deployment intent and must not authorize
+an account mutation; the approval identity on a plan is a product approval
+policy code and version, re-checked against the authorization.
+
+**Not in scope**, and each excluded deliberately: machine credentials
+(`dotmac_kernel.machine_auth`), federated identity (`external_identity`,
+ADR-0069), and DEVICE/SERVICE credentials — `AccessCredential` and
+`SnmpCredential` in `dotmac_sub` are not human credentials, and a sweep keyed on
+`*Credential` would have handed the facility responsibilities it must not have.
 
 ## Testing model
 

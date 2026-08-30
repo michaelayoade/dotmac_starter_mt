@@ -1021,6 +1021,52 @@ specifics) points here and must never fork these rules.
     `docs/inventories/deployment-foundation-sources.md` for the eighteen defects
     deliberately NOT extracted)
 
+42. **A human credential lifecycle has ONE owner, and provisioning cannot be
+    handed material.** `dotmac_kernel.credential_lifecycle` owns provisioning,
+    verification, individually authorized reset completion and approved cohort
+    force reset for HUMAN password credentials. It is stateless: five typed
+    product ports, every database effect in the CALLER's transaction, no
+    session, no ORM, no HTTP status, no provider client and no network import.
+    Machine credentials (`machine_auth`), federated identity (`external_identity`)
+    and DEVICE/SERVICE credentials (`AccessCredential`, `SnmpCredential`) are out
+    of scope — a sweep keyed on `*Credential` hands the owner responsibilities it
+    must not have.
+
+    Four properties, each structural rather than procedural. **Verification
+    returns a typed verdict** (`accepted`, `reset_required`, `invalid`, `locked`,
+    `disabled`), never a boolean and never a session: a boolean forces every
+    caller to re-derive what it cannot carry, which is why `dotmac_sub` has FOUR
+    verification owners. **Provisioning has no parameter a secret can arrive
+    through and no field one can leave through** — Sub's
+    `reseller_onboarding._create_credential` took a caller-supplied `password` no
+    supported caller passed, and that unused parameter is how one value reached
+    24 external organisations; removal is absence, an unrepresentable shape is
+    the fix. **Generated material reaches no return type, log, exception, `repr`,
+    receipt or audit row**; the subject recovers through a durable intent and the
+    product's channel. **A cohort force reset is product security authority** —
+    `dotmac-deployment-control` must not authorize an account mutation; the plan
+    carries a typed `CredentialResetPlanDigestV1` owned by this module (not a
+    universal digest, not Control's), sorts targets canonically, refuses empty,
+    duplicate, malformed, stale and changed cohorts, applies all targets or none,
+    and its separate authorization carries `approval_decision_ref` and no
+    `approved_by`.
+
+    Direct calls to `hash_password`/`verify_password`/`password_needs_rehash`
+    outside the two owner files are FROZEN DEBT, measured by call graph across
+    every Python entry-point family (`app`, `packages`, `src`, `scripts`/`bin`,
+    `alembic`/`migrations`, `tasks`, `workers`/`jobs`, `cli`, `cron`, and
+    repository-root modules — two of Sub's eleven `hash_password` callers are
+    seed scripts) in four repositories at immutable commits, and ratcheted
+    two-directionally. A repository that cannot be measured at its recorded
+    commit ABSTAINS; it is never scored zero. Retiring a caller lowers the
+    baseline in the SAME change. (`AGENTS.md` rule 25's ratchet shape applied to
+    credentials; ADR-0006 amendment 2026-08-30;
+    `tests/architecture/test_credential_lifecycle_ratchet.py`,
+    `tests/unit/test_credential_lifecycle.py`,
+    `scripts/credential_lifecycle_sweep.py`;
+    `docs/inventories/credential-lifecycle-sources.md` for the census, the
+    departures from Sub, and the local-copy retirement gate)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

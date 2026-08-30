@@ -320,6 +320,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.channel_policy",
         "dotmac_kernel.consent",
         "dotmac_kernel.consent_models",
+        "dotmac_kernel.credential_lifecycle",
         "dotmac_kernel.crud",
         "dotmac_kernel.db",
         "dotmac_kernel.delivery",
