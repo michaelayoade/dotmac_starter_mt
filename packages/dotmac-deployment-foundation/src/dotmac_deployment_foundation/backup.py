@@ -68,6 +68,29 @@ from .spec import BackupDataset, ProductDeploymentSpec
 SECONDS_PER_DAY: Final = 86_400
 
 
+class ArtefactClass(str, Enum):
+    """What a stored file actually IS, as distinct from how much is known about it.
+
+    :class:`Assurance` answers "how far has this been checked". This answers a
+    prior question that the fleet has been getting wrong by never asking it: a
+    `pg_dump --dbname` archive is a **data export**. It carries rows and schema;
+    it carries no role, and in three of the fleet's call sites no ownership or
+    ACL either. Restoring one produces a database that looks recovered and is
+    owned by whoever ran the restore, with every policy naming principals that
+    do not exist.
+
+    Calling that file a "backup" is the whole reason nothing in the fleet could
+    be restored while every dashboard was green. So the two are different
+    classes, not two grades of one thing, and :class:`BackupRecord` refuses to
+    let a `data_export` climb past :attr:`Assurance.VERIFIED` — a verified data
+    export is a genuine fact (the bytes are intact) and is still not something
+    anybody can recover from.
+    """
+
+    DATA_EXPORT = "data_export"
+    RECOVERY_BUNDLE = "recovery_bundle"
+
+
 class Assurance(str, Enum):
     """How much is actually known about a backup.
 
@@ -111,9 +134,40 @@ class BackupRecord:
     assurance: Assurance = Assurance.COMPLETED
     restore_proved_at_epoch: int | None = None
     note: str = ""
+    artefact_class: ArtefactClass = ArtefactClass.DATA_EXPORT
+
+    def __post_init__(self) -> None:
+        """A data export cannot be restorable, and saying so is the point.
+
+        The default is DATA_EXPORT rather than RECOVERY_BUNDLE because that is
+        what every existing artefact in the fleet is, and a default that
+        flattered the existing files would have quietly re-created the problem:
+        the entire failure was a set of data exports labelled "backup" on a
+        dashboard that showed them green.
+
+        Climbing to RESTORABLE or PROVED therefore requires saying, explicitly,
+        that this is a recovery bundle - at which point the bundle contract
+        (`recovery.load_manifest`) decides whether it really is one.
+        """
+        if (
+            self.artefact_class is ArtefactClass.DATA_EXPORT
+            and self.assurance.rank >= Assurance.RESTORABLE.rank
+        ):
+            raise SpecError(
+                f"{self.dataset!r} is labelled a data_export and claims "
+                f"{self.assurance.value}. A `pg_dump --dbname` archive carries no "
+                "role definitions, so restoring it produces a database owned by "
+                "the restoring identity whose every policy names principals that "
+                "do not exist - which is exactly the artefact that read as "
+                "recovered. Only a recovery_bundle can be RESTORABLE or PROVED"
+            )
 
     def at_least(self, level: Assurance) -> bool:
         return self.assurance.rank >= level.rank
+
+    @property
+    def is_recovery_bundle(self) -> bool:
+        return self.artefact_class is ArtefactClass.RECOVERY_BUNDLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,13 +366,21 @@ def retention_keep(
 ) -> tuple[tuple[BackupRecord, ...], tuple[BackupRecord, ...]]:
     """Split ``records`` into (keep, prune) for one dataset.
 
-    Two rules, and the second is the one a naive implementation misses:
+    Three rules, and the last two are the ones a naive implementation misses:
 
     - Anything inside the declared retention window is kept.
-    - **The newest PROVED backup is kept regardless of age.** Pruning it
-      because it aged out leaves the deployment with backups nobody has ever
-      restored, which is the state this module exists to prevent. Retention
-      policy must not be able to delete the only evidence that recovery works.
+    - **The newest PROVED bundle is kept regardless of age.** Pruning it because
+      it aged out leaves the deployment with artefacts nobody has ever restored,
+      which is the state this module exists to prevent. Retention policy must not
+      be able to delete the only evidence that recovery has ever worked - and
+      "regardless of age" is the whole clause: a rule that kept it only while it
+      was recent would delete it precisely when it had become the sole survivor.
+    - **A data export is kept until a newer PROVED bundle exists.** The fleet's
+      existing dump files are data exports and not backups, and they are the only
+      copy of the data that exists today. Deleting them on the strength of a
+      retention window, before anything has been proved restorable, would trade a
+      weak artefact for none at all. They age out once - and only once - there is
+      something better and it has been PROVED.
     """
     dataset = _dataset(spec, dataset_code)
     horizon = now_epoch - dataset.retention_days * SECONDS_PER_DAY
@@ -334,6 +396,13 @@ def retention_keep(
     prune: list[BackupRecord] = []
     for record in mine:
         if record.completed_at_epoch >= horizon or record is proved:
+            keep.append(record)
+        elif record.artefact_class is ArtefactClass.DATA_EXPORT and (
+            proved is None or proved.completed_at_epoch <= record.completed_at_epoch
+        ):
+            # Held back deliberately: there is no newer proved bundle, so this
+            # export - weak as it is - is the best thing standing between the
+            # product and total loss.
             keep.append(record)
         else:
             prune.append(record)

@@ -59,6 +59,7 @@ from typing import IO
 
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, StepFailed
+from ..recovery import refuse_identity_stripping
 from ..render.compose import render_compose
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
 from ..render.nginx import handoff_contract_pattern, render_nginx
@@ -801,6 +802,17 @@ class ComposeHostEffects:
         raise StepFailed("backup", f"no backup dataset {code!r} is declared")
 
     def _backup_command(self, dataset: BackupDataset) -> list[str]:
+        # A product that declares a [database] contract is asking for a recovery
+        # bundle, and a recovery bundle carries ownership and ACL evidence. This
+        # provider's historical default was ("--no-owner", "--no-privileges"),
+        # which deletes exactly that at capture time - after which no downstream
+        # check can notice, because the evidence never existed. Refuse here
+        # rather than produce an artefact that will be labelled a backup.
+        if self._spec.database is not None:
+            refuse_identity_stripping(
+                self._pg_dump_extra_args,
+                where=f"backup dataset {dataset.code!r}",
+            )
         return [
             *self._compose_argv,
             "exec",

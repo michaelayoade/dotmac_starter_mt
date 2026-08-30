@@ -65,6 +65,11 @@ SCHEMA: Final = "ProductDeploymentSpec.v1"
 # come from a truncated edit, not from a real name.
 _CODE = re.compile(r"^[a-z][a-z0-9_-]{0,61}[a-z0-9]$|^[a-z]$")
 _MATERIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+# A PostgreSQL role name as this facility will accept it. Deliberately
+# narrower than PostgreSQL allows: an unquoted lowercase identifier needs no
+# quoting anywhere, and a role name requiring quotes is one a shell, a DSN or
+# a comparison eventually gets wrong.
+_ROLE_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _DIGEST_REF = re.compile(r"^[a-z0-9][a-z0-9._\-/:]*@sha256:[0-9a-f]{64}$")
 #: The same reference, plus an empty arm — "optional, and constrained when
@@ -1412,6 +1417,229 @@ class BackupDataset:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseRole:
+    """A role the product's database requires — as an EXPECTATION, never a source.
+
+    This is the descriptor half of `dotmac_workspace`'s "a binding is a claim,
+    not a fact". The product states which roles it believes its database needs;
+    the recovery bundle carries what the source catalog actually required; and
+    `recovery.verify_recovery` compares them. Nothing in this facility turns a
+    declaration here into a `CREATE ROLE`, because a validator that can
+    manufacture the role it is checking for can always make its own check pass.
+
+    ``superuser`` is absent by design rather than defaulted to false. There is no
+    key to write, so a descriptor cannot ask for one and a reviewer never has to
+    catch it.
+
+    ``inherit`` is declared because losing it is invisible. A role that becomes
+    INHERIT silently acquires everything every group it belongs to holds, and
+    nothing about the database looks different afterwards.
+    """
+
+    name: str
+    kind: str
+    inherit: bool
+    login: bool
+    bypassrls: bool
+    member_of: tuple[str, ...]
+
+    KINDS: ClassVar[tuple[str, ...]] = (
+        "migration_owner",
+        "tenant_app",
+        "platform_app",
+        "dispatcher",
+        "read_only",
+    )
+
+    @classmethod
+    def parse(cls, table: _Table) -> DatabaseRole:
+        name = table.str_("name", pattern=_ROLE_NAME)
+        kind = table.str_("kind")
+        if kind not in cls.KINDS:
+            raise SpecError(f"kind must be one of {cls.KINDS}", where=table.path)
+        inherit = table.bool_("inherit", default=True)
+        login = table.bool_("login", default=True)
+        bypassrls = table.bool_("bypassrls", default=False)
+        member_of = table.str_list("member_of", default=(), pattern=_ROLE_NAME)
+        table.done()
+        if kind == "tenant_app" and bypassrls:
+            raise SpecError(
+                f"role {name!r} is the tenant application role and declares "
+                "BYPASSRLS. Every row-level policy in the database is then "
+                "decorative for the one identity they exist to constrain",
+                where=table.path,
+            )
+        _unique(member_of, what="membership", where=table.path)
+        if name in member_of:
+            raise SpecError(
+                f"role {name!r} cannot be a member of itself", where=table.path
+            )
+        return cls(
+            name=name,
+            kind=kind,
+            inherit=inherit,
+            login=login,
+            bypassrls=bypassrls,
+            member_of=member_of,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IsolationInvariant:
+    """A privilege that must — or must not — exist after a recovery.
+
+    Both directions, because only checking the denial half is how a plane ends
+    up isolated from itself: a control-plane role revoked from everything passes
+    every "cannot reach" assertion and cannot run the product.
+
+    Checked against EFFECTIVE privilege (`has_table_privilege` OR
+    `has_any_column_privilege`), never against the direct-grant list. See
+    `recovery.EffectivePrivilegeFact` for why the obvious query is the wrong one.
+    """
+
+    code: str
+    role: str
+    scope: str
+    objects: tuple[str, ...]
+    privileges: tuple[str, ...]
+    denied: bool
+
+    SCOPES: ClassVar[tuple[str, ...]] = ("table", "schema", "sequence", "function")
+
+    #: All seven table privileges. A gate over the four DML ones would pass a
+    #: platform table a supposedly-revoked role could still TRUNCATE, point a
+    #: foreign key at, or attach a trigger to.
+    TABLE_PRIVILEGES: ClassVar[tuple[str, ...]] = (
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+    )
+
+    @classmethod
+    def parse(cls, table: _Table) -> IsolationInvariant:
+        code = table.str_("code", pattern=_CODE)
+        role = table.str_("role", pattern=_ROLE_NAME)
+        scope = table.str_("scope", default="table")
+        if scope not in cls.SCOPES:
+            raise SpecError(f"scope must be one of {cls.SCOPES}", where=table.path)
+        objects = table.str_list("objects")
+        denied = table.bool_("denied", default=True)
+        privileges = table.str_list(
+            "privileges",
+            default=cls.TABLE_PRIVILEGES if scope == "table" else (),
+        )
+        table.done()
+        if not objects:
+            raise SpecError(
+                "an isolation invariant over no object always passes and proves "
+                "nothing",
+                where=table.path,
+            )
+        if not privileges:
+            raise SpecError(
+                "an isolation invariant over no privilege always passes",
+                where=table.path,
+            )
+        if scope == "table":
+            unknown = set(privileges) - set(cls.TABLE_PRIVILEGES)
+            if unknown:
+                raise SpecError(
+                    f"unknown table privilege(s) {sorted(unknown)}", where=table.path
+                )
+        _unique(objects, what="object", where=table.path)
+        return cls(
+            code=code,
+            role=role,
+            scope=scope,
+            objects=objects,
+            privileges=privileges,
+            denied=denied,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseContract:
+    """What the product's database is, so a recovery can be checked against it.
+
+    ``postgres_major`` is required and not defaulted. A restore into a different
+    major version is a migration wearing a recovery's clothes: it may well
+    succeed, and what comes back is not the database that was backed up.
+    """
+
+    postgres_major: int
+    roles: tuple[DatabaseRole, ...]
+    expected_schemas: tuple[str, ...]
+    isolation: tuple[IsolationInvariant, ...]
+    tablespaces: str
+
+    TABLESPACES: ClassVar[tuple[str, ...]] = ("none", "mapped", "declared")
+
+    @classmethod
+    def parse(cls, table: _Table | None) -> DatabaseContract | None:
+        if table is None:
+            return None
+        postgres_major = table.int_("postgres_major", minimum=13, maximum=99)
+        expected_schemas = table.str_list("expected_schemas", default=())
+        tablespaces = table.str_("tablespaces", default="none")
+        roles = tuple(DatabaseRole.parse(item) for item in table.tables("roles"))
+        isolation = tuple(
+            IsolationInvariant.parse(item) for item in table.tables("isolation")
+        )
+        table.done()
+        if tablespaces not in cls.TABLESPACES:
+            raise SpecError(
+                f"tablespaces must be one of {cls.TABLESPACES}. There is no fourth "
+                "value meaning 'nobody looked' — a bundle records the decision, and "
+                "silence restores fine on the host it came from and fails on the "
+                "replacement",
+                where=table.path,
+            )
+        if not roles:
+            raise SpecError(
+                "a database contract declares at least one role. A product whose "
+                "descriptor names no role cannot have a recovery checked against "
+                "anything",
+                where=table.path,
+            )
+        _unique([role.name for role in roles], what="database role", where=table.path)
+        _unique([item.code for item in isolation], what="invariant", where=table.path)
+        declared = {role.name for role in roles}
+        for role in roles:
+            for group in role.member_of:
+                if group not in declared:
+                    raise SpecError(
+                        f"role {role.name!r} is declared a member of {group!r}, "
+                        "which the descriptor does not declare. A membership whose "
+                        "group is undeclared is how a closure comes out short",
+                        where=table.path,
+                    )
+        for invariant in isolation:
+            if invariant.role not in declared:
+                raise SpecError(
+                    f"invariant {invariant.code!r} names role {invariant.role!r}, "
+                    "which the descriptor does not declare",
+                    where=table.path,
+                )
+        return cls(
+            postgres_major=postgres_major,
+            roles=roles,
+            expected_schemas=expected_schemas,
+            isolation=isolation,
+            tablespaces=tablespaces,
+        )
+
+    def role(self, name: str) -> DatabaseRole:
+        for candidate in self.roles:
+            if candidate.name == name:
+                return candidate
+        raise SpecError(f"no database role {name!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class Telemetry:
     """What the deployment ships, and where.
 
@@ -1747,6 +1975,7 @@ class ProductDeploymentSpec:
     runtime_materials: tuple[str, ...]
     ingress: Ingress | None
     backup_datasets: tuple[BackupDataset, ...]
+    database: DatabaseContract | None
     telemetry: Telemetry
     preflight_hooks: tuple[Hook, ...]
     postflight_hooks: tuple[Hook, ...]
@@ -1841,6 +2070,8 @@ class ProductDeploymentSpec:
             )
             backup_table.done()
 
+        database = DatabaseContract.parse(root.table("database", optional=True))
+
         telemetry = Telemetry.parse(
             root.table("telemetry", optional=True), where=source
         )
@@ -1897,6 +2128,7 @@ class ProductDeploymentSpec:
             runtime_materials=runtime_materials,
             ingress=ingress,
             backup_datasets=backup_datasets,
+            database=database,
             telemetry=telemetry,
             preflight_hooks=preflight,
             postflight_hooks=postflight,
@@ -2032,6 +2264,16 @@ def _validate_cross_field(spec: ProductDeploymentSpec, source: str) -> None:
     _unique(
         [alert.code for alert in spec.product_alerts], what="alert code", where=source
     )
+    if spec.database is not None and not any(
+        dataset.kind == "postgres" for dataset in spec.backup_datasets
+    ):
+        raise SpecError(
+            "the descriptor declares a [database] contract - roles, schemas and "
+            "isolation invariants - and no postgres backup dataset. That is a "
+            "description of a database nobody backs up, and the contract would be "
+            "checked against nothing",
+            where=source,
+        )
     _unique(
         [hook.code for hook in spec.preflight_hooks + spec.postflight_hooks],
         what="hook code",

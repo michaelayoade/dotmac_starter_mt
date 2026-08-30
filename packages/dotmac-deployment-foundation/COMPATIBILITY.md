@@ -47,6 +47,31 @@
 - `Effects`, `Executor`, `DeploymentPlan`, `Step`, `StepKind`, `Strategy`.
 - `conformance.*` — the functions a product calls in its own CI.
 - `RESOURCE_ATTRIBUTES` and the alert `code` of every entry in `COMMON_ALERTS`.
+- `PostgresRecoveryBundle.v1`: `BundleComponent` (the thirteen component CODES
+  are contract - a bundle is identified by them), `COMPONENTS` and each
+  `ComponentSpec.covers`, `RecoveryBundleManifestV1`, `build_manifest()`,
+  `load_manifest()`, `derive_role_closure()`, `RoleClosure`, and the typed
+  evidence: `RoleFact`, `MembershipFact`, `OwnershipFact`, `PrivilegeFact`,
+  `EffectivePrivilegeFact`, `DefaultPrivilegeFact`, `FunctionSecurityFact`,
+  `PolicyFact`, `RlsFact`, `ExtensionFact`, `TablespaceDecision`,
+  `CatalogEvidence`. `RoleFact` having NO password field is part of the
+  contract, not an omission: adding one would be a breaking change in the
+  direction that matters.
+- `RESTORE_PROCEDURE` and `RestoreStep` - the ten step CODES and their ORDER
+  are contract. `restore_plan()`, `adjudicate_restore()`, `Disposition`,
+  `RestoreAttempt`, `verify_recovery()`, `verify_plane_isolation()`,
+  `invariant_breaches()`, `classify_invariant_breaches()` and
+  `InvariantBreach`. The `RESTORE DEFECT` / `SOURCE DRIFT` prefixes are
+  contract - an operator and a dashboard both branch on which side is
+  wrong. Manifest `counts` are observations and are gated on by nothing.
+- `RecoveryReceipt.v1`: `RecoveryReceiptV1` and `build_recovery_receipt()`.
+  `restore_duration_seconds` is mandatory and stays mandatory.
+- `refuse_identity_stripping()` and `IDENTITY_STRIPPING_ARGS`.
+- `ArtefactClass` - `data_export` vs `recovery_bundle`, and the rule that a
+  `data_export` may not reach `RESTORABLE` or `PROVED`.
+- `[database]` in `ProductDeploymentSpec.v1`: `DatabaseContract`,
+  `DatabaseRole`, `IsolationInvariant`. There is deliberately no `superuser`
+  key on a declared role; adding one would be breaking.
 
 ## What is not
 

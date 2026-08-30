@@ -1067,6 +1067,72 @@ specifics) points here and must never fork these rules.
     `docs/inventories/credential-lifecycle-sources.md` for the census, the
     departures from Sub, and the local-copy retirement gate)
 
+43. **A database is restorable only from a bundle carrying its ROLE CLOSURE, and
+    a database-only dump is a data export, not a backup.** `pg_dump --dbname`
+    captures GRANTs and RLS policies and never captures the roles they name. The
+    measured consequence: a `pg_restore` of Vendor CP's newest production backup
+    into a disposable PostgreSQL 16 container exited 1 with 114 missing-role
+    errors (`app_admin` 56, `platform_api` 34, `app_user` 20, `outbox_dispatcher`
+    2, `platform_outbox_dispatcher` 2) from a TOC holding 55 ACL entries, 26
+    POLICY entries and ZERO role objects — and LEFT 45 tables, 23 of 26 policies
+    and 16 RLS-enabled tables behind. Under rule 27 / ADR-0023 the revocation IS
+    the plane isolation, so an operator checking `pg_policies` after that restore
+    sees the control and does not have it.
+
+    A `PostgresRecoveryBundleV1` is therefore immutable and CONTAINING: the
+    custom-format dump, the role and membership closure DERIVED FROM THE SOURCE
+    CATALOG (not from any declaration), role attributes and PostgreSQL 16
+    per-membership `INHERIT` state, object ownership, default/schema/object
+    privileges, row- and column-level ACL evidence, RLS ENABLE *and* FORCE,
+    extensions and versions, an explicit tablespace decision (`none` is a
+    decision; silence is not), migration heads, and a canonical manifest whose
+    per-component digest states what it covers. **No passwords, no password
+    hashes, no superusers, no secret values** — `RoleFact` has no field one
+    could be written into, and login material is installed afterwards from the
+    product's approved secret source. `pg_dumpall --globals-only` is refused as
+    written because it emits SCRAM verifiers; role capture uses
+    `--no-role-passwords`.
+
+    Products declare typed database roles, expected schemas, migration heads and
+    isolation invariants in `[database]`. **A declaration is a claim, never a
+    source**: nothing turns it into role DDL, because a validator that can
+    manufacture the role it is checking for can always make its own check pass.
+    Isolation is proven against EFFECTIVE privilege (`has_table_privilege` OR
+    `has_any_column_privilege`, all seven table privileges) — never
+    `information_schema.table_privileges`, which sees only direct grants and
+    reports "fully revoked" for a role holding the privilege through PUBLIC,
+    through an inherited membership, or on a column.
+
+    Restore is ten ordered steps: fresh isolated target at the declared major;
+    roles from the bundle ONLY; objects, ownership, ACLs, policies, data;
+    **refuse any non-zero restore and DESTROY the partial target** (a wrapper
+    checking only the exit status reports a clean failure and leaves the trap);
+    login material afterwards; prove the catalog; prove tenant roles cannot reach
+    platform tables; prove the required revocations; start the EXACT product
+    image and pass readiness as the REAL application roles; emit a value-free
+    receipt carrying the restore WALL CLOCK (a bundle proved at twenty minutes
+    and one proved at six hours are both PROVED and are different facts).
+
+    A rehearsal is also a DRIFT DETECTOR. A restored copy violating a declared
+    invariant was either restored unfaithfully or restored faithfully from a
+    production database that is already wrong; comparing it against the SOURCE
+    catalogue separates them (`RESTORE DEFECT` vs `SOURCE DRIFT`) and is nearly
+    free because the verification holds both. Both still fail the proof - the
+    label changes where the operator looks, never whether the receipt is PROVED.
+    Counts are recorded as OBSERVATIONS and gated on by nothing: a grant matrix
+    changes with every migration, so the gate is the property, not the total.
+
+    Retention always preserves the newest PROVED bundle regardless of age, and
+    keeps an existing `data_export` until that product has a newer PROVED bundle
+    — a policy able to delete the only thing that ever worked is not a retention
+    policy. Every mutation is proven failing: remove a role, a membership, an
+    inheritance flag, an ownership assignment, a default privilege; lose the
+    platform revocation while policies remain; let the validator manufacture a
+    role; and supply a database-only dump — the last catching a plausible WHOLE
+    rather than a missing piece, which is the shape that actually fools an
+    operator (ADR-0071;
+    `tests/unit/test_deployment_foundation_recovery_bundle.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
