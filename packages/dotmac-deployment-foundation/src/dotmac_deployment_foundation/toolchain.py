@@ -62,14 +62,24 @@ __all__ = [
     "resolve_tool",
 ]
 
-#: Documented defaults, overridable per deployment (`AGENTS.md` § "Everything
-#: by config"). Absolute so the default itself is not a `PATH` lookup — a
-#: default of `"docker"` would mean the guard only protects deployments that
-#: had already thought about it.
+#: The HOST binaries this facility executes, with documented defaults that are
+#: overridable per deployment (`AGENTS.md` § "Everything by config"). Absolute,
+#: so the default itself is not a `PATH` lookup — a default of `"docker"` would
+#: mean the guard only protects deployments that had already thought about it.
+#:
+#: `pg_dump` is deliberately ABSENT, and its absence is a scope statement rather
+#: than an oversight. It is invoked as
+#: `docker compose exec -T <db> pg_dump …`, so it is resolved inside the
+#: CONTAINER's filesystem by the container's `PATH`. The host's `PATH` cannot
+#: influence which binary that is, so the premise this module rests on — "an
+#: attacker who controls `PATH` controls the evidence" — simply does not hold
+#: there. Pinning it to a host path would also be wrong on its own terms:
+#: `/usr/bin/pg_dump` need not exist in a postgres image, which commonly ships
+#: it under a versioned directory. What governs that binary is the image digest,
+#: which is pinned elsewhere and is the right owner for it.
 DEFAULT_TOOLS: Final[dict[str, str]] = {
     "docker": "/usr/bin/docker",
     "git": "/usr/bin/git",
-    "pg_dump": "/usr/bin/pg_dump",
 }
 
 

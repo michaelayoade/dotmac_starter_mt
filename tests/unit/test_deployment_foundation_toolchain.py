@@ -54,6 +54,32 @@ def test_an_absolute_path_is_accepted() -> None:
     assert require_absolute_tool("/usr/bin/docker", what="d") == "/usr/bin/docker"
 
 
+def test_pg_dump_is_out_of_scope_and_stays_that_way() -> None:
+    """A container-resolved command is not a host trust anchor.
+
+    `pg_dump` runs as `docker compose exec -T <db> pg_dump …`, so the
+    container's PATH resolves it and the host's cannot influence which binary
+    it is. The premise this module rests on — an attacker who controls PATH
+    controls the evidence — does not hold there.
+
+    Pinning it would also be wrong on its own terms: `/usr/bin/pg_dump` need
+    not exist in a postgres image, which commonly ships it under a versioned
+    directory. The image digest owns that binary's identity.
+
+    Asserted rather than left implicit, because the natural next edit is to
+    "finish the job" by adding it — and that edit breaks real backups on hosts
+    whose image lays pg_dump out differently, which is a worse failure than the
+    one it imagines it is preventing.
+    """
+    from dotmac_deployment_foundation.providers.compose_host import ComposeHostEffects
+    from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+    assert "pg_dump" not in DEFAULT_TOOLS
+    spec = ProductDeploymentSpec.load("scripts/exposure-rehearsal/product.toml")
+    effects = ComposeHostEffects(spec, Path("/tmp"), pg_dump_bin="pg_dump")  # noqa: S108
+    assert effects._pg_dump_bin == "pg_dump"
+
+
 def test_every_shipped_default_is_absolute() -> None:
     """A default of `docker` would protect only deployments that already thought
     about this, which is the opposite of a default."""

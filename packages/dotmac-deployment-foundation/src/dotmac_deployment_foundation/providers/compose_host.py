@@ -259,7 +259,7 @@ class ComposeHostEffects:
         candidate_port_base: int = 18000,
         candidate_container_prefix: str | None = None,
         db_service: str = "db",
-        pg_dump_bin: str = DEFAULT_TOOLS["pg_dump"],
+        pg_dump_bin: str = "pg_dump",
         pg_dump_user: str = "postgres",
         pg_dump_database: str | None = None,
         pg_dump_extra_args: tuple[str, ...] = ("--no-owner", "--no-privileges"),
@@ -320,7 +320,14 @@ class ComposeHostEffects:
             else f"{spec.product}_"
         )
         self._db_service = db_service
-        self._pg_dump_bin = require_absolute_tool(pg_dump_bin, what="pg_dump_bin")
+        # NOT `require_absolute_tool`. This one runs INSIDE the db container
+        # (`docker compose exec -T <db> pg_dump …`), so the CONTAINER's PATH
+        # resolves it and the host's cannot influence which binary it is — the
+        # premise behind pinning does not hold here. A host path would also be
+        # wrong on its own terms: /usr/bin/pg_dump need not exist in a postgres
+        # image, which commonly ships it under a versioned directory. The image
+        # digest owns this binary's identity.
+        self._pg_dump_bin = pg_dump_bin
         self._pg_dump_user = pg_dump_user
         self._pg_dump_database = pg_dump_database or spec.product
         self._pg_dump_extra_args = pg_dump_extra_args

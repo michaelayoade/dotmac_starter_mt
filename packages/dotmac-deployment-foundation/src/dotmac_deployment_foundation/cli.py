@@ -122,7 +122,6 @@ def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Eff
             Path(args.deploy_dir),
             docker_bin=tools["docker"],
             git_bin=tools["git"],
-            pg_dump_bin=tools["pg_dump"],
         )
     raise SpecError(
         f"unknown provider {args.provider!r}"
@@ -956,8 +955,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="the Effects implementation `--execute` runs the plan against",
     )
 
+    # Derived from the host-tool registry rather than listed again, so a tool
+    # entering or leaving that registry cannot leave a flag behind that
+    # configures nothing.
+    from .toolchain import DEFAULT_TOOLS as _HOST_TOOLS
+
     for _sub in (deploy, rollback):
-        for _tool in ("docker", "git", "pg_dump"):
+        for _tool in _HOST_TOOLS:
             _sub.add_argument(
                 f"--{_tool.replace('_', '-')}-bin",
                 dest=f"{_tool}_bin",
