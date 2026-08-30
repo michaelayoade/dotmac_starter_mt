@@ -1113,6 +1113,15 @@ specifics) points here and must never fork these rules.
     receipt carrying the restore WALL CLOCK (a bundle proved at twenty minutes
     and one proved at six hours are both PROVED and are different facts).
 
+    A rehearsal is also a DRIFT DETECTOR. A restored copy violating a declared
+    invariant was either restored unfaithfully or restored faithfully from a
+    production database that is already wrong; comparing it against the SOURCE
+    catalogue separates them (`RESTORE DEFECT` vs `SOURCE DRIFT`) and is nearly
+    free because the verification holds both. Both still fail the proof - the
+    label changes where the operator looks, never whether the receipt is PROVED.
+    Counts are recorded as OBSERVATIONS and gated on by nothing: a grant matrix
+    changes with every migration, so the gate is the property, not the total.
+
     Retention always preserves the newest PROVED bundle regardless of age, and
     keeps an existing `data_export` until that product has a newer PROVED bundle
     — a policy able to delete the only thing that ever worked is not a retention

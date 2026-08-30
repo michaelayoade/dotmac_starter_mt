@@ -80,6 +80,44 @@ tenth emits a value-free receipt carrying the restore **wall clock**.
 **Retention always preserves the newest PROVED bundle regardless of age**, and
 keeps an existing `data_export` until that product has a newer PROVED bundle.
 
+**A rehearsal is also a drift detector.** A restored copy that violates a
+declared invariant has either been restored unfaithfully, or restored perfectly
+from a production database that is already wrong. Those have opposite remedies,
+and the bundle cannot tell them apart by itself. Comparing the restored copy
+against the source catalogue does, and it is nearly free because a verification
+already holds both: a breach in the restored copy only is a **RESTORE DEFECT**;
+a breach in both is **SOURCE DRIFT**. Both still fail the proof — the label
+changes where the operator looks, never whether the receipt is PROVED, because
+otherwise the cheap repair is to relax the bundle until the check passes.
+
+**Counts are observations, never gates.** The manifest records role, privilege,
+policy and RLS counts because a reader wants them. Nothing compares them. A
+grant matrix is a good invariant and a poor assertion: `app_admin 315 /
+app_user 62 / platform_api 164` changes with every migration, so pinning it
+produces a gate that fails on correct work. The gate is the property — the
+tenant role cannot reach platform tables, the platform role holds its required
+revocations — which is what steps 7 and 8 already say. Privilege *fidelity* is
+still checked, as a set difference between source and restored, which is a
+different thing from a total.
+
+## Confirmation, on the dataset that failed
+
+A Platform CP rehearsal on 2026-08-30, run by hand against real production data
+rather than as a fourth script:
+
+- with cluster globals restored first, `pg_restore` exits **0 with zero errors**
+  — against 114 without, on the same dataset;
+- 5/5 roles present; **26** policies (the failed restore left 23); 16 tables with
+  RLS forced; single `app_admin` ownership;
+- `--no-role-passwords`, so no secret material moved; container destroyed;
+  production healthy throughout.
+
+That confirms the role-prelude design this bundle is built around. It also
+produced the drift case above: the restored copy showed `platform_api` holding
+DELETE on `licence_delivery_targets`, and production showed the same — real
+drift against ADR-0011 §4 and hard rule 18, from a revocation whose revision has
+never run in production. Not a restore defect.
+
 ## Alternatives considered
 
 **Fix the nine scripts.** Rejected. It is nine independent repairs with nine
