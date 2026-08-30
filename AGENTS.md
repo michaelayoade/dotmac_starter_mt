@@ -1133,6 +1133,52 @@ specifics) points here and must never fork these rules.
     operator (ADR-0071;
     `tests/unit/test_deployment_foundation_recovery_bundle.py`)
 
+44. **A bootstrap candidate is built once, preserved by digest, and published as
+    the SAME BYTES — never rebuilt.** `release-facility.yml` makes a passing
+    Lane 3 rehearsal its FIRST gate, before build, which is right for a release
+    and closes a loop for a bootstrap: Lane 3 needs a live issuer → the issuer
+    needs a proved restore → the restore proof needs the candidate wheel → the
+    candidate wheel needs Lane 3. `foundation-candidate.yml` breaks it by
+    building the candidate once from merged protected main and preserving it
+    WITHOUT publishing or tagging.
+
+    **The lane is incapable of publishing, not merely not asked to.** Publish
+    authority here rests on exactly two declarations: `environment:` (the
+    credential boundary) and `permissions: contents: write` (the tag
+    capability). The candidate lane declares neither — only `contents: read`
+    and `actions: read`, the latter REQUIRED because recording the artifact id
+    and the real expiry calls the artifacts API. A lane that could publish but
+    currently does not is one edit away from being a second publisher, so the
+    absence is asserted structurally with planted `environment`,
+    `contents: write`, `packages: write`, `id-token: write`, tag-, publish- and
+    `pull_request`-trigger mutations, each observed turning the guard red, plus
+    a conforming synthetic case that must stay green.
+
+    **Six facts, or the bytes are not re-fetchable**: source SHA, run ID,
+    artifact ID, filename, size and SHA-256 (`CandidateArtifact.v1`). A digest
+    alone verifies bytes somebody hands you; it does not let you obtain them.
+    A run ID alone does not say which bytes came out. `expires_at` is READ BACK
+    from the API, never inferred from the requested `retention-days` — a
+    repository or org cap silently lowers it and the difference is invisible
+    until the bytes are gone. 90 days is the MAXIMUM for this public repository
+    (`maximum_allowed_days: 90`), not a preference.
+
+    Consumers address an exact run / artifact / digest, **never "latest"**, and
+    bootstrap refuses to START with under 30 days remaining — a precondition to
+    check, not a fact to assume, because bootstrap spans a restore proof, an
+    issuer stand-up and a full Lane 3 rehearsal.
+
+    **If the artifact expires or becomes unavailable, invalidate every dependent
+    receipt and restart bootstrap with a new candidate digest. Rebuilding and
+    claiming continuity is FORBIDDEN.** This is the easiest constraint in the
+    sequence to violate under pressure: at the point it bites, a rebuild looks
+    identical, costs minutes and is wrong — every downstream receipt names the
+    candidate's digest, so re-deriving matching bytes is a claim, not a proof.
+    Each dependent receipt carries the `artifact_id` and digest as named fields
+    so invalidation is a query rather than a recollection
+    (`scripts/foundation_candidate.py check|verify`;
+    `tests/architecture/test_candidate_lane_cannot_publish.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

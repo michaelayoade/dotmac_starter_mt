@@ -1,0 +1,152 @@
+# Build ONE candidate wheel and preserve it by digest. It cannot publish.
+#
+# ## Why this lane exists
+#
+# `release-facility.yml` makes "Require a passing Lane 3 rehearsal on this exact
+# SHA" its FIRST gate, before build. That is correct for a release and it closes
+# a loop for a bootstrap:
+#
+#   Lane 3 needs a live issuer -> the issuer needs a proved restore -> the
+#   restore proof needs the candidate wheel -> the candidate wheel needs Lane 3.
+#
+# The agreed break is to build the candidate ONCE, preserve those exact bytes,
+# use them for the restore proof and the issuer stand-up, run Lane 3 against the
+# same bytes, and only then have `release-facility.yml` publish THAT artifact
+# without rebuilding it.
+#
+# ## Why it is incapable of publishing rather than merely not asked to
+#
+# A lane that could publish but currently does not is one edit away from being a
+# second publisher. Publish authority in this repository rests on exactly two
+# things, and this workflow declares neither:
+#
+#   * `environment: registry-release` - the credential boundary. `publish` and
+#     `verify` declare it; this does not, so the registry token is unreachable.
+#   * `permissions: contents: write` - declared only by `verify`, which is what
+#     lets it create a tag. This declares `contents: read`.
+#
+# Acquiring either means adding a line that shows up in review as exactly what
+# it is. `tests/architecture/test_candidate_lane_cannot_publish.py` asserts the
+# absence of both, plus the absence of any publish or tag verb, and carries
+# planted mutations so the guard is observed failing rather than assumed to work.
+#
+# `actions: read` is required, not tidiness: recording the artifact ID and the
+# real `expires_at` calls the artifacts API, and the job token's default
+# `contents: read` gets HTTP 403 there.
+#
+# There is no `pull_request` trigger, so no fork can reach this lane and it runs
+# on a GitHub-hosted runner rather than a self-hosted one - the fork-PR exposure
+# the runner-hardening lane is closing does not arise here.
+
+name: Foundation candidate artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      facility:
+        description: >-
+          Which allowlisted universal facility to build a candidate of. The
+          enforced layer is `resolve`, which reads
+          `.github/release-facilities.json` and fails closed.
+        required: true
+        type: choice
+        options:
+          - dotmac-deployment-foundation
+      version:
+        description: "Candidate version (MUST equal the package's pyproject version)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # A candidate is built from merged protected main and from nothing else.
+      # The bytes are about to be depended on by a restore proof, an issuer
+      # bootstrap and a Lane 3 rehearsal; a side-branch build would make every
+      # downstream receipt name an artifact that was never on main.
+      - name: Assert this run is the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      # The same allowlist gate the release lane uses. A candidate for an
+      # unallowlisted distribution is refused here rather than discovered when
+      # the release lane later declines to publish it.
+      - name: Resolve the allowlisted facility
+        id: resolve
+        run: |
+          python scripts/release_facility.py resolve \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Build wheel + sdist
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+
+      # Identical content policy to the release lane. A candidate that would
+      # fail inspection at publish time is worthless as a bootstrap input: the
+      # whole sequence would run against bytes that can never be published.
+      - name: Inspect artifacts
+        run: |
+          python scripts/release_facility.py inspect "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
+      - name: Release wheel CLI smoke
+        run: |
+          python scripts/release_facility.py verify-wheel "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --descriptor deploy/product.toml
+
+      # 90 days is the MAXIMUM this plan allows, not a preference: the repository
+      # is public and `maximum_allowed_days` is 90. The requested value is not
+      # the recorded one - the receipt below records what the API actually
+      # returns for `expires_at`.
+      - name: Upload the candidate
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.facility }}-candidate
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+          if-no-files-found: error
+
+      # All six facts. A digest alone does not let anyone re-fetch the bytes and
+      # a run ID alone does not prove which bytes came out, so the receipt binds
+      # source SHA, run ID, artifact ID, filename, size and SHA-256 together,
+      # with the real expiry.
+      - name: Record the candidate receipt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/foundation_candidate.py record \
+            --facility "${{ inputs.facility }}" \
+            --version "${{ inputs.version }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --source-sha "${GITHUB_SHA}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --artifact-name "${{ inputs.facility }}-candidate" \
+            --out candidate-receipt.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload the candidate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.facility }}-candidate-receipt
+          path: candidate-receipt.json
+          retention-days: 90
+          if-no-files-found: error
