@@ -2020,23 +2020,28 @@ exempt** (ADR-0018) and the implementation branch owes it a gate.
 | `WebSurfaceContribution` shape | module manifest | startup validation | implemented; canary added |
 | Prefix/route-name/nav-ID/namespace collisions | kernel | startup validation | implemented; canaries added |
 | UI contract compatibility | `dotmac-ui` + kernel | startup validation | implemented; canary added |
-| Surface state request-scoped | kernel | runtime context + architecture test | implemented; architecture canary added |
-| Navigation by route name | kernel | route registry canary | implemented for v2; v1 adapter bounded |
+| Surface state request-scoped | kernel | runtime context + architecture test + two-facet request canary | implemented; `test_facet_security_conformance.py` drives two facets in one process and re-checks the first, so cross-facet and cross-request carry-over both fail |
+| Navigation by route name | kernel | route registry canary + composed-assembly resolution canary | implemented for v2; v1 adapter bounded. `test_every_declared_route_reference_resolves_in_this_assembly` re-checks every facet entry/login/landing/logout and every nav item against the routes this assembly actually mounts |
 | Shell/login/landing/logout by route reference | facet + kernel | startup method validation + template canary | implemented for v2; v1 fallbacks bounded |
 | Module template namespace cannot be shadowed | kernel loader | loader precedence canary | implemented for v2; no override slots published yet |
 | Authentication profile | facet | typed provider construction | implemented for tenant and platform profiles |
-| Facet admission by permission | kernel seam | `authorize_party` + boot-time code check | implemented for `staff_admin` |
-| Route authorization | module | route-guard test + composed non-admission sweep | exists; composed staff canary added |
-| CSRF by transport | kernel | explicit route dependency + canary | implemented; runtime canary added |
+| Facet admission by permission | kernel seam | `authorize_party` + boot-time code check + declaration/plane coherence canary | enforced for `staff_admin`. `test_admission_is_only_declared_where_the_runtime_can_enforce_it` refuses an admission permission on a non-TENANT plane, where the runtime never evaluates it; the behavioural non-admitted journey stays `staff_admin`-only and `test_the_behavioural_admission_journey_covers_every_admitting_facet` asserts that premise instead of assuming it |
+| Route authorization | module | route-guard test + facet-derived mutation sweep | implemented. `test_every_facet_mutation_carries_csrf_and_an_auth_tier_guard` enumerates from `assembly.web_facets`, so a new facet is swept by being declared; `test_the_facet_sweep_reaches_more_than_one_facet` stops it collapsing back to `/admin` |
+| CSRF by transport | kernel | explicit route dependency + fail-closed canaries | implemented. Canaries cover a missing `CSRFMiddleware`, incomplete middleware state, a cookie-less unsafe request, and every authentication-exempt browser route still carrying the dependency |
 | Native POST carries hidden CSRF proof | kernel | `test_web_conventions.py` | implemented across declared template roots |
-| CSP from typed capabilities | kernel | composition + test | implemented with a closed requirement vocabulary; raw overrides cannot replace active requirements and may only tighten the full baseline when none are active |
+| CSP from typed capabilities | kernel | composition + tighten-only canary matrix | implemented with a closed requirement vocabulary. The canaries mutate the LIVE composed baseline rather than a restated literal: a raw override beside an active requirement, a dropped directive, a widened source and an untyped directive are each refused, and the unmodified baseline is accepted so the refusals cannot all be passing for the wrong reason |
 | WCAG 2.2 AA per journey | `dotmac-ui` + facet | browser journey tests | target declared, page tests absent |
 | Typed render models in templates | module | extended thin-adapter test | implemented for the v2 Template Studio canary; legacy surfaces remain unmonitored |
 | Brand/locale independence | kernel resolver | contrast + isolation tests | partial |
 | One browser runtime per assembly | assembly | capability resolution at startup | implemented for declared capabilities |
 | Per-facet budgets / CWV | assembly | performance canary | none yet |
 | Mobile as separate assembly | product | dossier + extraction gate | none yet |
-| Manifest-driven governance sweep | kernel tests | sensitivity canary | implemented for composed template roots and v2 surface packages |
+| Manifest-driven governance sweep | kernel tests | sensitivity canary | implemented for composed template roots and v2 surface packages, and re-derived from declarations in `test_facet_template_conventions.py` (which asserts it is a widening of the old `admin/**`, `auth/*`, `platform/**` globs, not a re-scoping) |
+| Non-page template exemption | kernel | never-rendered premise check | implemented; `test_non_page_templates_are_never_rendered_as_a_response` replaces the `components/` directory premise with a machine-checked one (ADR-0018 § 2) |
+| Facet shell reaches the CSRF bridge | facet + kernel | `{% extends %}` chain walk | implemented for every declared facet, with a sensitivity proof |
+| Form method is one a browser honours | module | template canary | implemented; no violation today, so the detector carries its own sensitivity proof |
+| No authored facet prefix in a template | module + kernel | two-directional ratchet + v2 zero-pin | implemented; contract-v2 surface packages are pinned at zero, legacy v1 debt is frozen in `facet_navigation_debt_baseline.json` (45 occurrences, 27 files) and may only fall by regenerating it |
+| Guard exemption states a checkable premise | kernel tests | exemption-integrity canary | implemented; every mutating exemption must be a non-browser route or an assembly-declared facet entry route, exemptions must name routes that exist, `AUTH_GUARD_NAMES` must resolve to real callables, and the counts are a two-directional ratchet |
 
 #### Unresolved, with owners
 

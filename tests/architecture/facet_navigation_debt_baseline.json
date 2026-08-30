@@ -1,0 +1,91 @@
+{
+  "_comment": "Frozen authored-facet-prefix debt for composed templates. A URL-bearing attribute must not author a declared facet's own prefix; use surface.landing_path / surface.logout_path / surface_url(). Two-directional ratchet: the gate fails if this rises or falls without being regenerated in the same change. Run `make facet-nav-baseline`. Do not hand-edit.",
+  "declared_facet_prefixes": [
+    "/platform",
+    "/admin"
+  ],
+  "total": 45,
+  "files": {
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/_table.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/_values_panel.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/form.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/index.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/parties/_table.html": {
+      "/admin": 3
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/parties/create.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/parties/detail.html": {
+      "/admin": 3
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/parties/edit.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/parties/index.html": {
+      "/admin": 3
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/_audit_table.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/_roles_table.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/grants.html": {
+      "/admin": 3
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/role_create.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/roles.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/branding.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/edit.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/index.html": {
+      "/admin": 3
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/auth/login.html": {
+      "/admin": 2
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/components/sidebar.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/components/topbar.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/400.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/401.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/403.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/404.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/409.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/422.html": {
+      "/admin": 1
+    },
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/errors/500.html": {
+      "/admin": 1
+    }
+  }
+}
