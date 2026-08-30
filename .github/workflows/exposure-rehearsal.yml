@@ -51,7 +51,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Refuse before anything targets the self-hosted label.
+  #
+  # An unmatched `runs-on` label does not fail a job — it QUEUES it, for up to
+  # 24 hours. `dotmac-control-runner` is registered nowhere yet, so today this
+  # lane's observable behaviour on dispatch is an indefinite hang that looks
+  # identical to "a rehearsal is already running". This job runs on a
+  # GitHub-HOSTED runner precisely so the check cannot be blocked by the
+  # absence it is checking for, and `rehearse` needs it.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # RUNNER_QUERY_TOKEN needs `administration: read`, which a workflow
+      # `permissions:` block cannot grant — the job token is structurally unable
+      # to list runners. The script REFUSES when the secret is absent rather
+      # than skipping, because "could not determine" is not "available".
+      - name: Refuse if the control runner is absent, offline or busy
+        env:
+          RUNNER_QUERY_TOKEN: ${{ secrets.RUNNER_QUERY_TOKEN }}
+        run: |
+          python scripts/require_runner.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --label self-hosted \
+            --label dotmac-control-runner
+
   rehearse:
+    needs: preflight
     # Self-hosted, and specifically the registered control runner: the
     # controller identity is bound to the authorization run and lives there, so
     # a rehearsal driven from anywhere else is driven by a different actor than
