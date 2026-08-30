@@ -1,24 +1,32 @@
-# Exposure rehearsal — Lane 3, and what it must be authorized to touch
+# Exposure rehearsal — Lane 3, the plan and its prerequisites
 
-**Status 2026-08-30: NOT RUN under the controller. 8 of 16 items closed; 4 are
-closable only by hand as things stand; 3 are blocked; 1 is vacuous under the
-current fixture.** No controller-driven run has happened, so `0.3.0a1` is not
-ready.
+**The status table moved.** It is now GENERATED at
+`docs/inventories/deployment-exposure-rehearsal-status.md`, from
+`RehearsalReceipt.v1` when a run exists and from
+`deployment-exposure-rehearsal-baseline.json` before one does. `make
+rehearsal-status-check` fails if the committed file drifts from its source.
 
-## The header of this document was wrong, and the correction is the point
+This file keeps the PLAN, the role definitions and the prerequisites. It no
+longer keeps a tally, and that is the fix rather than a tidy-up.
 
-The 2026-08-29 revision opened with *"RUN. 14 of 16 items CLOSED; 2 remain."*
-Its own result table, immediately below it, recorded four items as **partial**
-and one as **n/a**. Fourteen was reached by counting `partial` and `n/a` as
-closed.
+## Why the tally had to stop being written by hand
 
-That is the exact failure mode this lane exists to catch, turned inward: a
-summary that reports coverage its own evidence does not support. An item driven
-by an operator's shell is not closed by a controller, and an item a fixture
-cannot exercise is not closed at all. The count below counts only what the
-evidence says.
+The 2026-08-29 revision opened with *"RUN. 14 of 16 items CLOSED."* Its own
+result table, three lines below, recorded four items **partial** and one
+**n/a**. Fourteen was reached by counting those as closed.
 
-## Result — restated against the evidence
+Both halves were written by hand into one file, so nothing could catch the
+contradiction. The generated document computes its heading, its rows and its
+tally from one list, and `verify_publication` reads the receipt rather than the
+document — so a hand-edited table can no longer make a release pass, and a
+summary can no longer disagree with its own evidence.
+
+**Only `executed_passed` satisfies publication.** `hand_measured` and `vacuous`
+exist as their own statuses precisely because the old count folded them in: a
+hand-driven step proves the operator can do it, not that the controller can, and
+a check whose fixture derives nothing observed nothing.
+
+## Historical result — superseded by the generated status document
 
 | Item | Result |
 |---|---|

@@ -108,23 +108,45 @@ jobs:
       # real `pg_dump` produced restorable bytes, or whether nginx drained the
       # old upstream.
       #
-      # `docs/inventories/deployment-foundation-rehearsal.md` required the
-      # disposable-host rehearsal before publication IN PROSE. Prose is
-      # bypassed by anyone who does not read it. This asks the Actions API for
-      # a COMPLETED, SUCCESSFUL run of `deployment-rehearsal.yml` whose
-      # `head_sha` is byte-identical to ${GITHUB_SHA}, and fails closed on
-      # every ambiguity — no runs, a run in flight, any other conclusion, any
-      # SHA mismatch, or an oracle that cannot be read at all. A rehearsal
-      # that passed on a different commit is not evidence about this one, and
-      # that substitution is the likeliest way this gate is defeated while
-      # still looking green.
+      # LANE 3, not Lane 2 (corrected 2026-08-30). This release is named after
+      # ADDRESS-FAMILY EXPOSURE, and Lane 2 — engine, database, handoff,
+      # restore — never watches an IPv6 socket refuse the internet. Gating it
+      # on a lane that cannot observe the property is the "green preflight
+      # reads as attested" failure with two lanes standing in for two gates.
+      #
+      # TWO oracles, because they fail differently:
+      #
+      #   * the Actions API says a run of `exposure-rehearsal.yml` completed
+      #     SUCCESSFULLY on a head_sha byte-identical to ${GITHUB_SHA}
+      #     (AGENTS.md rule 30 — an external oracle, immutable coordinates);
+      #   * the published `RehearsalReceipt.v1` says WHAT that run established.
+      #
+      # A green run whose receipt is full of `blocked` rows is exactly what
+      # this pair catches, and either oracle alone would miss it. Publication
+      # needs sixteen `executed_passed`; no partial, not_applicable,
+      # hand_measured, vacuous, incomplete or missing result can satisfy it.
       #
       # First gate after freshness, so it runs before anything is built and
-      # long before the publish token exists. AGENTS.md rule 30.
-      - name: Require a successful rehearsal on this exact SHA
+      # long before the publish token exists.
+      - name: Require a passing Lane 3 rehearsal on this exact SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/require_rehearsal.py "${GITHUB_SHA}"
+        run: |
+          set -euo pipefail
+          run_id="$(gh run list --workflow exposure-rehearsal.yml \
+            --commit "${GITHUB_SHA}" --limit 1 \
+            --json databaseId -q '.[0].databaseId // empty')"
+          if [ -z "${run_id}" ]; then
+            echo "REFUSED: no Lane 3 exposure rehearsal run exists for ${GITHUB_SHA}." >&2
+            echo "Run exposure-rehearsal.yml against this exact commit first." >&2
+            exit 1
+          fi
+          mkdir -p .rehearsal
+          # Fails the step if the run published no receipt, which is the
+          # correct outcome: a run that recorded nothing established nothing.
+          gh run download "${run_id}" -n lane3-rehearsal-receipt -D .rehearsal
+          python scripts/require_rehearsal.py "${GITHUB_SHA}" \
+            --receipt .rehearsal/receipt.json
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
