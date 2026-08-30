@@ -30,6 +30,13 @@ trust.
 
 from __future__ import annotations
 
+from .ancestry import (
+    PERMITTED_ORDERINGS,
+    DowngradeOverride,
+    Ordering,
+    ReleaseOrdering,
+    refuse_backwards_deploy,
+)
 from .authorization import OPERATIONS, ExecutionGrant, authorize
 from .backup import (
     ArtefactClass,
@@ -129,13 +136,6 @@ from .policy import (
     build_firewall_plan,
     ingress_policy_document,
     public_endpoint_tokens,
-)
-from .ancestry import (
-    PERMITTED_ORDERINGS,
-    DowngradeOverride,
-    Ordering,
-    ReleaseOrdering,
-    refuse_backwards_deploy,
 )
 from .provenance import (
     PROVENANCE_SCHEMA,
