@@ -57,6 +57,58 @@ the packet there is already DNATed and its `--dport` is the container port. And
 every allowlist ends in a terminal DROP, because one whose last rule is an
 ACCEPT enforces nothing.
 
+### `DeploymentProvenance.v1` — binding what ran to what was authorized
+
+`build_provenance()` binds six facts into one canonical, digest-bearing record:
+the descriptor digest, one sha256 per rendered asset (the Compose hashes among
+them), the per-role image digest, the source revision, the service roster, and
+the authorization receipt.
+
+**Digests, never tags.** An image reference with no `@sha256:` is refused: a tag
+is a mutable pointer that can be moved to different bytes after the approval and
+before the deploy, and the record would still read as true. A branch name or an
+abbreviated commit is refused for the same reason — neither identifies the
+source months later.
+
+**The receipt is bound by VALUE, never by import.** `dotmac-deployment-control`
+owns plans, approvals, attempts and receipts; this facility owns rendering and
+execution and declares ZERO runtime dependencies. So `AuthorizationReceipt` is a
+typed input the caller constructs from Control — the same shape as `ProbeResult`
+and `ProbeVantage` — and `provenance.py` imports nothing outside the standard
+library, which is asserted from its own AST.
+
+What the module does with it is a pure equality check: the digest the receipt
+cites must equal the digest of the descriptor in hand. That is deliberately NOT
+an authorization decision. Foundation never judges whether an approval should
+have been granted; it refuses to execute something OTHER than what was
+authorized, which is its own business. A structurally incomplete receipt is
+refused as a malformed input; an unfavourable one is not evaluated at all.
+
+`normalize_digest()` resolves a real trap between the two owners: Control's
+`plan_digest` is BARE hex and this facility emits the `sha256:`-prefixed form,
+compared with a raw `!=`. Unnormalized, a mismatch reads as a security refusal
+while actually being a formatting bug — the kind of alarm that gets suppressed
+rather than investigated. Both sides are normalized before comparison.
+
+### The preservation property moved to the TRANSACTION
+
+`OWNERSHIP_PREFIX` and `ownership_comment()` moved from
+`providers/exposure_host` to `exposure`, and `ExposureTransaction` now MEASURES
+what the provider previously only promised. Before applying it records the rules
+in the shared chains it does not own; after the apply, and again after any
+rollback, it looks and refuses if one of them has vanished.
+
+The asymmetry is deliberate. A foreign rule that VANISHED was deleted by us —
+the data-loss bug wearing the word *restore*, and exactly what replaying a
+captured chain does. A foreign rule that APPEARED was written by somebody else
+while we held the lock, and refusing on it would reject the correct behaviour of
+preserving a rule that arrived mid-transaction. An unlabelled rule on a port we
+publish is treated as ours rather than as unrelated host state, because calling
+it foreign would make a correct rollback of our own leftover look like data loss.
+
+This is a guarantee of the SEAM, not of one implementation: a second provider,
+or a regression in this one, cannot quietly lose it.
+
 ### A real `ExposureEffects`, and the preservation property
 
 `providers/exposure_host.ComposeHostExposureEffects` implements

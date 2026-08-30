@@ -1,26 +1,226 @@
 # Exposure rehearsal — Lane 3, and what it must be authorized to touch
 
-**Status 2026-08-29: RUN. 14 of 16 items CLOSED; 2 remain.** Both roles were
-authorized and both were used. The observed bytes are checked in at
-`scripts/exposure-rehearsal/observed/`, and the fixture that produced them is
-`scripts/exposure-rehearsal/product.toml`.
+**Status 2026-08-30: NOT RUN under the controller. 9 of 16 items closed; 4 are
+closable only by hand as things stand; 2 are blocked; 1 is vacuous under the
+current fixture.** No controller-driven run has happened, so `0.3.0a1` is not
+ready.
 
-## Result
+## The header of this document was wrong, and the correction is the point
+
+The 2026-08-29 revision opened with *"RUN. 14 of 16 items CLOSED; 2 remain."*
+Its own result table, immediately below it, recorded four items as **partial**
+and one as **n/a**. Fourteen was reached by counting `partial` and `n/a` as
+closed.
+
+That is the exact failure mode this lane exists to catch, turned inward: a
+summary that reports coverage its own evidence does not support. An item driven
+by an operator's shell is not closed by a controller, and an item a fixture
+cannot exercise is not closed at all. The count below counts only what the
+evidence says.
+
+## Result — restated against the evidence
 
 | Item | Result |
 |---|---|
-| 1-3 apply under the lock, snapshot, non-recreating apply refused | **partial** — applied with `up -d --force-recreate` and a pre-state snapshot, but not driven through `ExposureTransaction`: no `ExposureEffects` implementation exists for a real host yet |
+| 1 apply under the product deployment lock | **closable only by hand** — the 2026-08-29 run applied with `up -d --force-recreate` from a shell. The controller path now exists (`cmd_exposure_apply --execute` → `ComposeHostExposureEffects` → `ExposureTransaction`) but has never been run against a host |
+| 2 pre-change snapshot (`HostObservation`) | **closable only by hand** — a pre-state was captured by shell, not by `ExposureTransaction.run` |
+| 3 non-recreating apply REFUSED | **closable only by hand** — `refuse_non_recreating_apply` has unit coverage; it has never refused a real invocation |
 | 4 socket re-observation | **CLOSED** — 18443 on `127.0.0.1` AND `[::1]`; 18445 on `127.0.0.1` only; no `0.0.0.0:`, no `[::]:` |
 | 5 `docker-proxy` PIDs new, one per family | **CLOSED** — 1136702 / 1136709 / 1136725 |
-| 6 firewall re-observation | **n/a for this fixture** — every publication is `loopback` or `none`, so the derived plan is empty by construction |
-| 7 inert v6 chain fixture | **BLOCKED** — needs a `private` publication, which needs a clean host (see below) |
-| 8 rollback | **partial** — teardown restored the pre-state exactly (sockets gone, both `DOCKER-USER` chains unchanged), but a PROVOKED transactional rollback was not driven |
+| 6 firewall re-observation | **VACUOUS under this fixture** — every publication is `loopback` or `none`, so the derived plan is empty by construction. Not a pass: nothing was observed because nothing was derived |
+| 7 inert v6 chain fixture | **BLOCKED** — needs a `private` publication (see the prerequisite below) |
+| 8 rollback, provoked | **closable only by hand** — teardown restored the pre-state, but no PROVOKED transactional rollback was driven |
 | 9 digest equality | **CLOSED** — `sha256:9b748af9…` identical across the descriptor's canonical document and the verification report |
 | 10 `exposure = "none"` emits no socket | **CLOSED** — 18444 absent from `ss` |
-| 11 target closed-port behaviour | **CLOSED** — Role A **RSTs** (6-7 ms), so probes here can conclude absence |
+| 11 target closed-port behaviour | **CLOSED** — Role A **RSTs**; re-measured 2026-08-30 at 5-8 ms per refusal |
 | 12 privileged-vantage refusal on a real probe | **CLOSED** — see below |
-| 13-15 external negatives + positive controls, both families | **CLOSED** — see below |
+| 13 IPv6 external negative | **CLOSED for the 2026-08-29 fixture only** — and NOT re-closable today: the containers are gone, so a refusal now measures an absent service rather than a loopback bind. It re-opens with the fixture |
+| 14 IPv6 external positive control | **CLOSED** — re-measured 2026-08-30, `tcp/22` over IPv6 to Role A: OPEN |
+| 15 IPv4 external negative + positive control | **positive control CLOSED** (re-measured 2026-08-30, `tcp/22` over IPv4: OPEN); **negative re-opens with the fixture**, same reason as item 13 |
 | 16 `private` reachable from inside its source set | **BLOCKED** — same prerequisite |
+
+**Closed: 4, 5, 9, 10, 11, 12, 14, and the positive-control halves of 13-15.**
+**Closable only by hand today: 1, 2, 3, 8** — these are the four the controller
+must originate, and naming them as a distinct category is deliberate. **Blocked:
+7, 16.** **Vacuous: 6.**
+
+## 2026-08-30 re-measurement, and the three prerequisites that remain human-only
+
+Everything in this section was measured on 2026-08-30, read-only, and the
+commands are named so the next reader re-runs rather than trusts.
+
+### Role B is now a materially BETTER vantage than the retraction described
+
+The 2026-08-29 retraction rested on a second NIC (`eth1 10.0.0.4/22`) routing
+into the `idp-ha` private network. **That NIC is gone.** Measured with
+`ip -br addr`, `ip rule show` and `ip route show table all`:
+
+```
+lo    UNKNOWN  127.0.0.1/8 ::1/128
+eth0  UP       94.72.99.155/20 2a02:c204:2353:7605::1/64 fe80::250:56ff:fe66:caca/64
+```
+
+No `eth1`. No tunnel, wireguard, tun, tap, gre, vti or ipip device. Policy
+routing is the stock three rules (local/main/default) with no extra table. No
+Docker. No `/opt/openbao` and zero `BAO`/`VAULT` environment variables.
+
+Both paths to Role A leave via `eth0`, checked per family:
+
+```
+ip route get 85.190.246.211          -> via 94.72.96.1 dev eth0 src 94.72.99.155
+ip -6 route get 2a02:c204:2353:7655::1 -> via fe80::1 dev eth0 src 2a02:c204:2353:7605::1
+```
+
+**One caveat, recorded rather than glossed.** The old third line —
+`ip route get 10.0.0.2 -> dev eth1` — was the control proving the routing query
+DISCRIMINATES rather than always answering `eth0`. With the NIC detached that
+query now answers `eth0` like everything else, so that particular control no
+longer discriminates. The interface enumeration above replaces it: with exactly
+one non-loopback interface and no policy routing, there is no other path for a
+query to select. That is a weaker form of the same assurance and is stated as
+such.
+
+### The probe pass, with both positive controls
+
+From Role B to Role A, one run, 2026-08-30:
+
+```
+v4 22     OPEN               12ms      <- IPv4 POSITIVE CONTROL
+v4 18443  refused/filtered    7ms
+v4 18445  refused/filtered    8ms
+v4 18444  refused/filtered    8ms
+v6 22     OPEN                7ms      <- IPv6 POSITIVE CONTROL
+v6 18443  refused/filtered    7ms
+v6 18445  refused/filtered    5ms
+v6 18444  refused/filtered    7ms
+```
+
+Both positive controls fired, so the probe fired. Sub-10 ms refusals confirm
+Role A **RSTs** rather than DROPs, which re-closes item 11 independently of the
+2026-08-29 measurement.
+
+**The six refusals are NOT evidence for items 13 and 15, and counting them would
+be the error this lane exists to prevent.** The 2026-08-29 fixture containers no
+longer exist: all four containers on Role A are `Exited (255)` and no Compose
+project is up. A refusal on a port where nothing is listening measures an absent
+service, not a loopback bind. Items 13 and 15's negative halves re-open with the
+fixture and can only be closed in the same run that applies it.
+
+### Prerequisite 1 — there is no exclusive-lease mechanism to obtain
+
+`"Exclusive lease and no concurrent host mutations"` is the first clause of the
+clean-target definition, and **no mechanism implements it.** `/var/lock` on Role
+A holds only `lvm/` and `subsys/` — no lease file, no convention, nothing to
+take. Meanwhile the host carries eleven other agents' worktrees under `/root`
+(`dotmac-erp-foundation-*`, `dotmac-sub-money-*`, `dotmac-starter-money-*`,
+`codex/`, and others) and four other agents' stopped containers.
+
+A lease cannot be self-granted, and "no concurrent mutations" cannot be verified
+from inside: `who` was empty at the moment of measurement, which says nothing
+about the next minute. **Only a human can quiesce the other lanes and declare
+the window.** This is a human-only prerequisite, not a task.
+
+### Prerequisite 2 — nothing can issue the authorization the rehearsal binds to
+
+This is the substantive finding, and it is a design gap rather than a missing
+feature.
+
+`dotmac-deployment-control` is a LIBRARY module. Its own `EXTRACTION.toml`
+records composition into `dotmac_vendor_control_plane` but states that
+production adoption is explicitly not claimed, and **no Control instance is
+deployed anywhere that can propose or approve a plan.** Three consequences:
+
+1. There is no authorization/run ID, so a controller identity has nothing to be
+   BOUND to. The binding is the whole point of the requirement — an unbound
+   short-lived key is just another shared key with a shorter life.
+2. **Item 9 has no middle term.** The gate is
+   `descriptor == authorized plan == VerificationReport.descriptor_digest`. With
+   no issued plan there are only two terms, and the 2026-08-29 entry closed it
+   on `descriptor == report`. That is a real equality and it is not this one.
+3. `AuthorizationReceipt` (added in this change) is therefore a contract with no
+   producer yet. That is the correct shape — Foundation must never mint its own
+   authorization — but it means the receipt leg of the binding is *declarable*
+   and not yet *satisfiable*.
+
+Foundation must not close this by generating its own receipt. Per ADR-0070 the
+authorization state belongs to Control, and a facility that manufactures the
+approval it then checks has verified nothing.
+
+### Prerequisite 3 — the controller identity is a credential act on a shared host
+
+Attribution today is impossible and measurably so: `/root/.ssh/authorized_keys`
+on Role A holds exactly **two** keys, `seabone@hp-server` and
+`michaelayoade@macboos-MacBook-Pro.local`. Every agent authenticates as one of
+them, so no artifact on that host can be attributed to any actor — which is
+precisely why a rehearsal run under a shared key cannot prove the CONTROLLER did
+it, only that somebody did.
+
+The access path to the registered control runner was verified 2026-08-30 and is
+**indirect**: `160.119.127.188:22` is source-restricted and is NOT reachable from
+the workstation (connect times out). It IS reachable from `seabone`
+(`160.119.127.195`, explicitly in the runner's allow set), which authenticates
+successfully as `dotmac@dotmac-control-runner`. So the runner is usable, via
+seabone, once an identity exists to use.
+
+Creating, installing and later removing a dedicated credential on a shared
+multi-agent host is a provisioning act, and it was placed under review. It stays
+there.
+
+### Proposed deletions: the set is EMPTY
+
+The rule is *"remove only exact, labelled rehearsal-owned objects"*. Measured
+against every Docker object on Role A:
+
+| Object class | Count | Labelled as Foundation-rehearsal-owned |
+|---|---|---|
+| containers (all stopped) | 4 | **0** — and their label maps are EMPTY, lost in the 2026-08-29 reboot, so they cannot be attributed by label at all |
+| volumes | 24 (20 dangling) | **0** — every one carries only `com.docker.volume.anonymous` |
+| networks | 1 non-default (`erp-fin-perms-0778-net`) | **0** |
+| images | 12 | **0** by label |
+
+`docker ps -aq --filter label=dotmac-exposure`, and the equivalent volume and
+network filters for `com.dotmac.rehearsal`, all return zero.
+
+**Nothing qualifies for deletion. No deletion is proposed and none is needed.**
+The four containers and the stray network are ERP/codex work belonging to other
+lanes; `dotmac-df-image-audit-a2-test:6a8fdb03` is identifiable as a Foundation
+artifact by NAME but not by LABEL, and a name is not the stated criterion.
+
+This is the right outcome rather than a shortfall. Under the amended definition
+foreign state is the INSTRUMENT: the requirement *"prove apply and rollback
+without replacing unrelated host state"* is only falsifiable if unrelated state
+is present. **Nominated preservation canaries**, to be captured byte-identical
+before, after apply and after rollback:
+
+- the 4 stopped containers, by ID and status;
+- `erp-fin-perms-0778-net` and its subnet;
+- the 24 volume names;
+- host `postgres` on `127.0.0.1:5432` / `[::1]:5432` and `redis` on
+  `127.0.0.1:6379` / `[::1]:6379` — real foreign sockets, and the two the
+  verifier should also flag as `undeclared_socket`;
+- `iptables-save` and `ip6tables-save` in full.
+
+Both shared chains were measured **empty** on 2026-08-30 (`DOCKER-USER` v4 and
+v6 hold zero rules; `INPUT` v6 policy `ACCEPT`, zero rules; zero rules carry a
+`dotmac-exposure` comment). Firewall canaries therefore have to be *introduced*
+to be meaningful, which is a decision for the run rather than an observation.
+
+### What this changes about items 7 and 16
+
+The 2026-08-29 rationale for BLOCKING them was specific: *"a snapshot-restoring
+rollback replays the chain state captured before the run, so a rule another
+agent added during it is deleted by the rollback"*.
+
+**That mechanism no longer exists.** `ComposeHostExposureEffects` never flushes
+and deletes only rules bearing its own ownership comment, and as of this change
+`ExposureTransaction` independently measures the foreign rules before and after
+and refuses if any vanished. The data-loss path the block was protecting against
+is gone in code.
+
+Items 7 and 16 therefore remain blocked on prerequisites 1-3 — the lease, the
+authorization issuer, and the controller identity — and **no longer on the
+rollback mechanism**. That is a narrowing, and it is a decision for Michael
+whether the narrowed set is satisfiable in one authorized window.
 
 ### The external proof, item 13-15
 

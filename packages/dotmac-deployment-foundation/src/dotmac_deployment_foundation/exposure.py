@@ -57,6 +57,7 @@ from .spec import ProductDeploymentSpec
 
 __all__ = [
     "APPLY_COMMAND",
+    "OWNERSHIP_PREFIX",
     "Binding",
     "ExposureEffects",
     "ExposureTransaction",
@@ -76,7 +77,9 @@ __all__ = [
     "apply_exposure",
     "conclude_binding",
     "expected_bindings",
+    "foreign_rules",
     "observation_from_text",
+    "ownership_comment",
     "parse_docker_proxy_processes",
     "parse_iptables_save",
     "parse_socket_listing",
@@ -776,6 +779,63 @@ def refuse_non_recreating_apply(command: Sequence[str]) -> None:
         )
 
 
+#: The marker that makes a derived rule attributable to one product.
+#:
+#: It lives HERE, in the contract, rather than in the provider that writes it.
+#: Ownership is what makes the preservation property below checkable at all, so
+#: it cannot be a private convention of one implementation — a second provider
+#: that invented its own marker would satisfy every test in the provider's own
+#: file and still let :class:`ExposureTransaction` mistake its rules for
+#: somebody else's.
+OWNERSHIP_PREFIX: Final = "dotmac-exposure"
+
+
+def ownership_comment(product: str) -> str:
+    """The ``-m comment --comment`` value identifying `product`'s own rules.
+
+    Prefixed rather than bare, so two products sharing a host own their rules
+    independently and neither can delete the other's.
+    """
+    return f"{OWNERSHIP_PREFIX}:{product}"
+
+
+def foreign_rules(
+    observation: HostObservation,
+    *,
+    owner: str,
+    managed_ports: Sequence[int] = (),
+) -> tuple[ObservedRule, ...]:
+    """Every rule in the shared filter chains that is NOT this product's.
+
+    This is the measurement behind "changed nothing it did not own". Scoped to
+    :data:`ingress.FILTER_CHAIN` — ``DOCKER-USER`` on IPv4 and ``INPUT`` on
+    IPv6 — because those are the two chains this facility writes into and they
+    are SHARED with everything else on the host.
+
+    Two exclusions, and the second is not redundant:
+
+    1. A rule carrying `owner`'s comment is ours. Ownership is read from the
+       rule TEXT rather than inferred by diffing against a snapshot, because a
+       diff cannot tell "another process added this" from "we added this and
+       failed to record it", and those need opposite handling.
+    2. A rule matching a port in `managed_ports` is treated as ours even
+       WITHOUT the comment. That is deliberately conservative: an unlabelled
+       rule on a port we publish is either a predecessor of ours or a conflict
+       on our own port, and in both cases calling it "unrelated host state"
+       would be wrong. The canaries this function is for are the rules about
+       something else entirely.
+    """
+    shared = {(family, ingress.FILTER_CHAIN[family]) for family in ingress.FAMILIES}
+    managed = set(managed_ports)
+    return tuple(
+        rule
+        for chain in observation.chains
+        if (chain.family, chain.name) in shared
+        for rule in chain.rules
+        if owner not in rule.arguments and rule.matched_port not in managed
+    )
+
+
 class ExposureEffects(Protocol):
     """Everything the transaction can do to a host.
 
@@ -783,6 +843,14 @@ class ExposureEffects(Protocol):
     change is observable and reversible in a way a migration is not, so it gets
     its own seam and its own fake. Every method returns a fact or raises;
     nothing here decides anything.
+
+    ``restore_chains`` receives the snapshot's chains, and an implementation
+    MUST restore only its own rules from them. Restoring a whole chain reverts
+    rules the transaction never created, which on a shared host is data loss
+    wearing the word *restore*. :class:`ExposureTransaction` no longer takes
+    that on trust — it measures the foreign rules before and after and refuses
+    when they move — but the contract states it too, because a property that is
+    only checked is a property the next implementer has to rediscover.
     """
 
     def observe(self) -> HostObservation: ...
@@ -826,6 +894,61 @@ class ExposureTransaction:
     report: VerificationReport | None = field(default=None, init=False)
     rolled_back: bool = field(default=False, init=False)
 
+    @property
+    def owner(self) -> str:
+        """The ownership comment identifying this product's rules."""
+        return ownership_comment(self.spec.product)
+
+    @property
+    def _managed_ports(self) -> tuple[int, ...]:
+        return tuple(rule.host_port for rule in build_firewall_plan(self.spec))
+
+    def _foreign(self, observation: HostObservation) -> list[str]:
+        return sorted(
+            rule.arguments
+            for rule in foreign_rules(
+                observation, owner=self.owner, managed_ports=self._managed_ports
+            )
+        )
+
+    def _check_preserved(
+        self, before: HostObservation, after: HostObservation, *, phase: str
+    ) -> None:
+        """Refuse if a rule this transaction does not own has VANISHED.
+
+        The measurement Michael's constraint asks for, taken rather than
+        promised. `ComposeHostExposureEffects` is careful never to flush a
+        shared chain — but "the provider is careful" is a property of one
+        implementation, and the transaction is where the guarantee has to live
+        so a second provider cannot quietly lose it.
+
+        Only the disappearing direction is a refusal, and the asymmetry is the
+        point. A foreign rule that vanished was deleted by us: that is the
+        data-loss bug wearing the word *restore*, and it is exactly what
+        replaying a whole chain does. A foreign rule that APPEARED was written
+        by somebody else while we held the lock — noise about the host's
+        exclusivity, not evidence that we replaced anything — and refusing on
+        it would reject the correct behaviour of preserving a rule that
+        arrived mid-transaction.
+
+        Comparison is by rule TEXT, unordered. Ordering in these chains is
+        genuinely load-bearing for packet processing, but our own inserts shift
+        foreign rules' indices without changing what they match, so an
+        order-sensitive comparison would fail on every correct run.
+        """
+        was = self._foreign(before)
+        now = set(self._foreign(after))
+        removed = sorted(rule for rule in was if rule not in now)
+        if not removed:
+            return
+        raise PreconditionFailed(
+            f"the exposure {phase} deleted {len(removed)} rule(s) this "
+            f"transaction does not own: {removed[:3]}. Only rules carrying "
+            f"`{self.owner}` may be added or removed — a shared chain is never "
+            "restored wholesale, because replaying a snapshot reverts whatever "
+            "another process legitimately added while we were running"
+        )
+
     @contextmanager
     def _locked(self) -> Iterator[None]:
         with deployment_lock(
@@ -848,6 +971,7 @@ class ExposureTransaction:
                 )
                 self.effects.replace_rules(family, ingress.FILTER_CHAIN[family], rules)
             observed = self.effects.observe()
+            self._check_preserved(self.snapshot, observed, phase="apply")
             report = verify_exposure(self.spec, observed)
             self.report = report
             if not report.ok:
@@ -859,11 +983,18 @@ class ExposureTransaction:
             return report
 
     def _rollback(self, command: Sequence[str]) -> None:
+        """Put back what we changed, and prove we put back nothing else.
+
+        The re-observation at the end is the point. A rollback that is never
+        looked at is a rollback that is believed, and "restore" is exactly the
+        word a chain-flushing implementation would also use.
+        """
         if self.snapshot is None:  # pragma: no cover - run() always snapshots
             raise PreconditionFailed("no snapshot to roll back to")
         self.effects.restore_chains(self.snapshot.chains)
         self.effects.apply_compose(command, timeout_seconds=self.timeout_seconds)
         self.rolled_back = True
+        self._check_preserved(self.snapshot, self.effects.observe(), phase="rollback")
 
 
 def apply_exposure(

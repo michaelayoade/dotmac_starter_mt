@@ -17,6 +17,19 @@
 - The rendered output of every renderer, treated as bytes: `render --check` is
   a byte comparison, so a whitespace change is a breaking change for every
   consumer that has committed the previous output.
+- `DeploymentProvenance.v1`: `AuthorizationReceipt`, `DeploymentProvenanceV1`,
+  `build_provenance()`, `normalize_digest()` and the `PROVENANCE_SCHEMA`
+  string. The canonical BYTES are public contract on the same terms as the
+  descriptor document's. `AuthorizationReceipt` is a typed INPUT this facility
+  never produces: `dotmac-deployment-control` owns authorization, and the
+  receipt is bound by VALUE so a zero-dependency build runner never acquires a
+  stateful module and never reaches into another owner's state.
+- `ExposureEffects` and `ExposureTransaction`, plus `OWNERSHIP_PREFIX`,
+  `ownership_comment()` and `foreign_rules()`. Ownership is part of the
+  CONTRACT rather than of one provider, because the transaction measures the
+  preservation property against it: a shared filter chain is never restored
+  wholesale, and an implementation that replays one is refused by the
+  transaction rather than trusted not to.
 - `Effects`, `Executor`, `DeploymentPlan`, `Step`, `StepKind`, `Strategy`.
 - `conformance.*` — the functions a product calls in its own CI.
 - `RESOURCE_ATTRIBUTES` and the alert `code` of every entry in `COMMON_ALERTS`.
