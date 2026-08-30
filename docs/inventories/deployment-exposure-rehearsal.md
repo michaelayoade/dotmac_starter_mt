@@ -1,7 +1,7 @@
 # Exposure rehearsal — Lane 3, and what it must be authorized to touch
 
-**Status 2026-08-30: NOT RUN under the controller. 9 of 16 items closed; 4 are
-closable only by hand as things stand; 2 are blocked; 1 is vacuous under the
+**Status 2026-08-30: NOT RUN under the controller. 8 of 16 items closed; 4 are
+closable only by hand as things stand; 3 are blocked; 1 is vacuous under the
 current fixture.** No controller-driven run has happened, so `0.3.0a1` is not
 ready.
 
@@ -30,7 +30,7 @@ evidence says.
 | 6 firewall re-observation | **VACUOUS under this fixture** — every publication is `loopback` or `none`, so the derived plan is empty by construction. Not a pass: nothing was observed because nothing was derived |
 | 7 inert v6 chain fixture | **BLOCKED** — needs a `private` publication (see the prerequisite below) |
 | 8 rollback, provoked | **closable only by hand** — teardown restored the pre-state, but no PROVOKED transactional rollback was driven |
-| 9 digest equality | **CLOSED** — `sha256:9b748af9…` identical across the descriptor's canonical document and the verification report |
+| 9 digest equality | **NOT CLOSED — two of three terms.** The gate is `descriptor == authorized plan == VerificationReport.descriptor_digest`. `sha256:9b748af9…` was shown identical across the descriptor's canonical document and the verification report; there was no authorized plan, because nothing can issue one (prerequisite 2). The 2026-08-29 entry recorded this as CLOSED, which is the same over-count as the header |
 | 10 `exposure = "none"` emits no socket | **CLOSED** — 18444 absent from `ss` |
 | 11 target closed-port behaviour | **CLOSED** — Role A **RSTs**; re-measured 2026-08-30 at 5-8 ms per refusal |
 | 12 privileged-vantage refusal on a real probe | **CLOSED** — see below |
@@ -39,10 +39,15 @@ evidence says.
 | 15 IPv4 external negative + positive control | **positive control CLOSED** (re-measured 2026-08-30, `tcp/22` over IPv4: OPEN); **negative re-opens with the fixture**, same reason as item 13 |
 | 16 `private` reachable from inside its source set | **BLOCKED** — same prerequisite |
 
-**Closed: 4, 5, 9, 10, 11, 12, 14, and the positive-control halves of 13-15.**
-**Closable only by hand today: 1, 2, 3, 8** — these are the four the controller
-must originate, and naming them as a distinct category is deliberate. **Blocked:
-7, 16.** **Vacuous: 6.**
+**Closed: 4, 5, 10, 11, 12, 14, and the positive-control halves of 13-15 — 8
+items.** **Closable only by hand today: 1, 2, 3, 8** — the four a controller
+must originate, named as a distinct category deliberately. **Blocked: 7, 9,
+16.** **Vacuous: 6.**
+
+Item 9 moved out of the closed column while this was being written, and the
+reason is worth keeping: the digest-equality gate has three terms and the
+recorded evidence had two. Two thirds of an identity check is not a weaker pass,
+it is a different check.
 
 ## 2026-08-30 re-measurement, and the three prerequisites that remain human-only
 
@@ -204,6 +209,58 @@ Both shared chains were measured **empty** on 2026-08-30 (`DOCKER-USER` v4 and
 v6 hold zero rules; `INPUT` v6 policy `ACCEPT`, zero rules; zero rules carry a
 `dotmac-exposure` comment). Firewall canaries therefore have to be *introduced*
 to be meaningful, which is a decision for the run rather than an observation.
+
+### The controller-identity bootstrap plan — for review, not executed
+
+**Why it is needed, measured.** `/root/.ssh/authorized_keys` on Role A holds
+exactly two keys, `seabone@hp-server` and
+`michaelayoade@macboos-MacBook-Pro.local`. Every agent authenticates as one of
+them, so no artifact on that host can be attributed to any actor. A rehearsal
+run under a shared key cannot prove the CONTROLLER did it — only that somebody
+did — which is the difference between a procedurally and an evidentially
+controller-driven run.
+
+**Access path, verified 2026-08-30.** `160.119.127.188:22` is source-restricted
+and NOT reachable from the workstation (connect times out). It IS reachable from
+`seabone` (`160.119.127.195`, explicitly in the runner's allow set), where
+`ssh dotmac@160.119.127.188` succeeds as `dotmac-control-runner`. So the runner
+is usable indirectly; what is missing is an identity, not a route.
+
+**The bootstrap, in order. Every step is a proposal.**
+
+1. **Obtain the authorization/run ID first.** The credential is bound to it, so
+   it cannot be minted before the thing it binds to exists. This is blocked by
+   prerequisite 2 — no deployed Control issues one. Nothing below should run
+   until that is resolved, because an unbound short-lived key is just another
+   shared key with a shorter life.
+2. **Generate on the runner, never on the workstation.** `ssh-keygen -t ed25519`
+   in a `root`-owned `0700` directory on `dotmac-control-runner`, comment
+   `dotmac-foundation-rehearsal:<run-id>`. The private half never leaves the
+   runner and is never read by an agent. Per the secrets rule the key is named
+   by POINTER only; no path here is a value.
+3. **Record the fingerprint before use.** `ssh-keygen -lf <pub>` — SHA256, into
+   the rehearsal record, alongside the run ID. A fingerprint recorded after the
+   run proves nothing about what ran.
+4. **Install restricted, not bare.** Append to Role A's `authorized_keys` with
+   `restrict,from="<runner address>",command="<the single rehearsal entry
+   point>"`. `restrict` is the deny-all default; `from=` scopes it to the
+   runner; `command=` makes it incapable of an interactive shell. A key that can
+   do anything proves only that a key was used.
+5. **Prefer WireGuard for the transport.** The runner already reaches Observer
+   as `100.64.53.2` over CGNAT space chosen so the tunnel does not inherit a
+   broad `10.0.0.0/8` accept. Extending that shape to Role A keeps the
+   `from=` restriction meaningful against a stable inside address. Note the
+   runner's egress output chain is `policy drop` with `ip protocol icmp accept`,
+   so a successful ping there proves nothing about TCP — the reachability check
+   must be a TCP connect.
+6. **Remove it at the end, and prove removal.** Delete the line, re-read
+   `authorized_keys`, and record the resulting fingerprint set. "Removed" is a
+   claim; the post-removal key list is the evidence.
+
+**What this does not solve.** It makes the rehearsal's own actions attributable.
+It does not make the two pre-existing shared keys attributable, and it does not
+retroactively attribute anything already on the host — including the four
+stopped containers, whose label maps were emptied by the 2026-08-29 reboot.
 
 ### What this changes about items 7 and 16
 
