@@ -59,7 +59,11 @@
   direction that matters.
 - `RESTORE_PROCEDURE` and `RestoreStep` - the ten step CODES and their ORDER
   are contract. `restore_plan()`, `adjudicate_restore()`, `Disposition`,
-  `RestoreAttempt`, `verify_recovery()`, `verify_plane_isolation()`.
+  `RestoreAttempt`, `verify_recovery()`, `verify_plane_isolation()`,
+  `invariant_breaches()`, `classify_invariant_breaches()` and
+  `InvariantBreach`. The `RESTORE DEFECT` / `SOURCE DRIFT` prefixes are
+  contract - an operator and a dashboard both branch on which side is
+  wrong. Manifest `counts` are observations and are gated on by nothing.
 - `RecoveryReceipt.v1`: `RecoveryReceiptV1` and `build_recovery_receipt()`.
   `restore_duration_seconds` is mandatory and stays mandatory.
 - `refuse_identity_stripping()` and `IDENTITY_STRIPPING_ARGS`.

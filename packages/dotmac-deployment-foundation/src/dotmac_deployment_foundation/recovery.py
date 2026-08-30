@@ -124,6 +124,7 @@ __all__ = [
     "RESTORE_PROCEDURE",
     "BundleComponent",
     "CatalogEvidence",
+    "InvariantBreach",
     "ComponentSpec",
     "DefaultPrivilegeFact",
     "Disposition",
@@ -143,8 +144,10 @@ __all__ = [
     "RoleFact",
     "TablespaceDecision",
     "build_manifest",
+    "classify_invariant_breaches",
     "build_recovery_receipt",
     "derive_role_closure",
+    "invariant_breaches",
     "load_manifest",
     "refuse_identity_stripping",
     "restore_plan",
@@ -655,8 +658,6 @@ def _reference_sites(evidence: CatalogEvidence) -> list[tuple[str, str]]:
     principals they presuppose. This does.
     """
     sites: list[tuple[str, str]] = []
-    for role in evidence.roles:
-        sites.append((role.name, "declared in the source catalog"))
     for owned in evidence.ownership:
         sites.append((owned.owner, f"owns {owned.kind} {owned.identity}"))
     for grant in evidence.privileges:
@@ -694,6 +695,15 @@ def _reference_sites(evidence: CatalogEvidence) -> list[tuple[str, str]]:
         sites.append((function.owner, f"owns routine {function.signature}"))
         for executor in function.executors:
             sites.append((executor, f"may EXECUTE {function.signature}"))
+    # LAST, deliberately. `derive_role_closure` keeps the FIRST reason it sees,
+    # and "declared in the source catalog" is true of nearly every role while
+    # explaining nothing. An operator reviewing a bundle needs to see that
+    # `outbox_dispatcher` is present because a routine grants it EXECUTE - the
+    # dependency that would break if it were dropped - not that somebody listed
+    # it. So a declaration is the FALLBACK reason, reached only by a role that
+    # genuinely is referenced nowhere else.
+    for role in evidence.roles:
+        sites.append((role.name, "declared in the source catalog"))
     return sites
 
 
@@ -1472,82 +1482,196 @@ def verify_recovery(
             f"source was at {sorted(source.migration_heads)}"
         )
 
-    findings.extend(verify_plane_isolation(restored, isolation))
+    findings.extend(
+        classify_invariant_breaches(
+            source=source, restored=restored, isolation=isolation
+        )
+    )
+    return tuple(findings)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class InvariantBreach:
+    """One declared invariant that a catalogue does not satisfy.
+
+    Structured rather than a string because the same breach has to be
+    recognised in TWO catalogues - the source and the restored copy - and
+    matching rendered prose to decide whether they are the same breach is how a
+    classifier comes to depend on its own wording.
+    """
+
+    code: str
+    role: str
+    scope: str
+    identity: str
+    privilege: str
+    reason: str
+
+    REASONS: ClassVar[tuple[str, ...]] = ("held", "missing", "unobserved")
+
+    @property
+    def key(self) -> tuple[str, str, str, str, str, str]:
+        return (
+            self.code,
+            self.role,
+            self.scope,
+            self.identity,
+            self.privilege,
+            self.reason,
+        )
+
+
+def invariant_breaches(
+    evidence: CatalogEvidence, isolation: Sequence[Any]
+) -> tuple[InvariantBreach, ...]:
+    """Every declared invariant ``evidence`` fails to satisfy.
+
+    Pure, and applied to the SOURCE as readily as to the restored copy - which
+    is what makes drift distinguishable from an unfaithful restore.
+    """
+    effective = {
+        (fact.scope, fact.identity, fact.role, fact.privilege): fact.holds
+        for fact in evidence.effective_privileges
+    }
+    breaches: list[InvariantBreach] = []
+    for invariant in isolation:
+        role = str(getattr(invariant, "role", ""))
+        scope = str(getattr(invariant, "scope", "table"))
+        code = str(getattr(invariant, "code", "invariant"))
+        denied = bool(getattr(invariant, "denied", True))
+        for identity in tuple(getattr(invariant, "objects", ())):
+            for privilege in tuple(getattr(invariant, "privileges", ())):
+                key = (scope, identity, role, privilege)
+                if key not in effective:
+                    reason = "unobserved"
+                elif denied and effective[key]:
+                    reason = "held"
+                elif not denied and not effective[key]:
+                    reason = "missing"
+                else:
+                    continue
+                breaches.append(
+                    InvariantBreach(
+                        code=code,
+                        role=role,
+                        scope=scope,
+                        identity=identity,
+                        privilege=privilege,
+                        reason=reason,
+                    )
+                )
+    return tuple(breaches)
+
+
+def _breach_message(breach: InvariantBreach, evidence: CatalogEvidence) -> str:
+    if breach.reason == "unobserved":
+        return (
+            f"{breach.code}: nothing observed whether {breach.role!r} effectively "
+            f"holds {breach.privilege} on {breach.scope} {breach.identity!r}. An "
+            "invariant with no effective-privilege observation is UNPROVEN, not "
+            "satisfied - and the direct-grant list is not a substitute, because "
+            "it cannot see a privilege arriving through PUBLIC, through an "
+            "inherited membership, or through a column grant"
+        )
+    if breach.reason == "missing":
+        return (
+            f"{breach.code}: {breach.role!r} does NOT effectively hold "
+            f"{breach.privilege} on {breach.scope} {breach.identity!r}, which the "
+            "descriptor requires. A plane whose own role cannot reach its tables "
+            "is not isolated, it is broken"
+        )
+    note = ""
+    if breach.identity in {fact.table for fact in evidence.policies}:
+        note = (
+            " The table does carry a row-security policy, and that is not the "
+            "isolation: under ADR-0023 the revocation IS the boundary on this "
+            "plane, so an operator reading pg_policies after a recovery sees a "
+            "control that is not there"
+        )
+    return (
+        f"{breach.code}: {breach.role!r} effectively holds {breach.privilege} on "
+        f"{breach.scope} {breach.identity!r} and the descriptor declares it "
+        f"revoked.{note}"
+    )
+
+
+def classify_invariant_breaches(
+    *,
+    source: CatalogEvidence,
+    restored: CatalogEvidence,
+    isolation: Sequence[Any],
+) -> tuple[str, ...]:
+    """Declared invariants the restored copy fails, saying WHICH SIDE is wrong.
+
+    A rehearsal is a drift detector as well as a recovery proof, and the bundle
+    cannot tell the two apart by itself: a restored copy that violates a
+    declared invariant has either been restored unfaithfully, or been restored
+    perfectly from a production database that is already wrong. Those have
+    opposite remedies, and an operator who guesses spends the incident debugging
+    the wrong system.
+
+    Comparing the restored copy against the SOURCE catalogue separates them, and
+    it is nearly free because a verification already holds both:
+
+    - the breach is in the restored copy only -> **RESTORE DEFECT**. The bundle
+      or the restore lost something. Fix the recovery path.
+    - the breach is in BOTH -> **SOURCE DRIFT**. The restore is faithful and
+      production does not match its own declared contract. Fix production; the
+      recovery path is exonerated.
+
+    Measured instance, 2026-08-30: a Platform CP rehearsal found `platform_api`
+    holding DELETE on a delivery-target table in the restored copy. Checking
+    production found the same permission there, so it was real drift - a
+    revocation the declared contract requires whose migration has never run -
+    and not an unfaithful restore.
+
+    **Both classes still fail the proof.** A faithfully restored database that
+    violates its own invariants has not proved isolation; the label changes
+    where the operator looks, never whether the receipt is PROVED. Without that,
+    the tempting repair is to relax the bundle so the check passes.
+    """
+    drifted = {breach.key for breach in invariant_breaches(source, isolation)}
+    findings: list[str] = []
+    for breach in invariant_breaches(restored, isolation):
+        message = _breach_message(breach, restored)
+        if breach.key in drifted:
+            findings.append(
+                f"SOURCE DRIFT - {message} The SOURCE catalogue shows the same "
+                "breach, so the restore is faithful and the production database "
+                "does not match its declared contract. Fix production; do not "
+                "relax the bundle to make this pass"
+            )
+        else:
+            findings.append(
+                f"RESTORE DEFECT - {message} The source catalogue does NOT show "
+                "this breach, so it was introduced by the bundle or the restore"
+            )
     return tuple(findings)
 
 
 def verify_plane_isolation(
     restored: CatalogEvidence, isolation: Sequence[Any]
 ) -> tuple[str, ...]:
-    """Steps 7 and 8: the declared invariants, checked against EFFECTIVE privilege.
+    """Steps 7 and 8 against ONE catalogue, checked on EFFECTIVE privilege.
 
-    Separated from :func:`verify_recovery`'s source/restored comparison because
-    it answers a different question. The comparison asks "is this the same
-    database?"; this asks "is this database *correct*?" — and a bundle captured
-    from an already-broken source would pass the first and must fail the second.
+    Use :func:`classify_invariant_breaches` when both catalogues are in hand -
+    it says whether a breach is a restore defect or production drift, which this
+    cannot. This remains for the single-catalogue case, such as auditing a live
+    database with no bundle.
 
     **It refuses to answer from the direct-grant set.** Every invariant must be
     covered by an :class:`EffectivePrivilegeFact`, and an uncovered invariant is
-    a finding rather than a pass. This is not fastidiousness: a revocation
-    checked against direct grants alone reads as satisfied for a role holding the
-    privilege through ``PUBLIC``, through a group it inherits, or through a
-    column-level grant. That check would go green exactly when the boundary is
-    broken, which is worse than having no check, because it is reported as one.
-
-    Every finding says, in its own message, that a present policy is not evidence
-    of isolation. That sentence is the entire content of the Vendor CP
-    measurement, and it belongs where somebody reads it during an incident rather
-    than only in a docstring.
+    a finding rather than a pass. That is not fastidiousness: a revocation
+    checked against direct grants alone reads as satisfied for a role holding
+    the privilege through ``PUBLIC``, through a group it inherits, or through a
+    column-level grant - so the check would go green exactly when the boundary
+    is broken, which is worse than having no check because it is reported as
+    one.
     """
-    findings: list[str] = []
-    effective = {
-        (fact.scope, fact.identity, fact.role, fact.privilege): fact.holds
-        for fact in restored.effective_privileges
-    }
-    tables_with_policies = {fact.table for fact in restored.policies}
-    for invariant in isolation:
-        role = getattr(invariant, "role", "")
-        scope = getattr(invariant, "scope", "table")
-        objects = tuple(getattr(invariant, "objects", ()))
-        privileges = tuple(getattr(invariant, "privileges", ()))
-        code = getattr(invariant, "code", "invariant")
-        denied = getattr(invariant, "denied", True)
-        for identity in objects:
-            for privilege in privileges:
-                key = (scope, identity, role, privilege)
-                if key not in effective:
-                    findings.append(
-                        f"{code}: nothing observed whether {role!r} effectively "
-                        f"holds {privilege} on {scope} {identity!r}. An invariant "
-                        "with no effective-privilege observation is UNPROVEN, not "
-                        "satisfied — and the direct-grant list is not a substitute, "
-                        "because it cannot see a privilege arriving through PUBLIC, "
-                        "through an inherited membership, or through a column grant"
-                    )
-                    continue
-                holds = effective[key]
-                if denied and holds:
-                    note = ""
-                    if identity in tables_with_policies:
-                        note = (
-                            " The table does carry a row-security policy, and that "
-                            "is not the isolation: under ADR-0023 the revocation IS "
-                            "the boundary on this plane, so an operator reading "
-                            "pg_policies after a recovery sees a control that is "
-                            "not there"
-                        )
-                    findings.append(
-                        f"{code}: {role!r} effectively holds {privilege} on {scope} "
-                        f"{identity!r} and the descriptor declares it revoked.{note}"
-                    )
-                elif not denied and not holds:
-                    findings.append(
-                        f"{code}: {role!r} does NOT effectively hold {privilege} on "
-                        f"{scope} {identity!r}, which the descriptor requires. A "
-                        "plane whose own role cannot reach its tables is not "
-                        "isolated, it is broken"
-                    )
-    return tuple(findings)
+    return tuple(
+        _breach_message(breach, restored)
+        for breach in invariant_breaches(restored, isolation)
+    )
 
 
 # ── step 10: the receipt ─────────────────────────────────────────────────────

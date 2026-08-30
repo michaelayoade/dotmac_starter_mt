@@ -39,6 +39,24 @@ directions. `information_schema.table_privileges` sees only direct grants and
 reports "fully revoked" for a role holding the privilege through PUBLIC, an
 inherited membership, or a column.
 
+`classify_invariant_breaches` — a rehearsal is a DRIFT DETECTOR as well as a
+recovery proof. A restored copy violating a declared invariant has either been
+restored unfaithfully or restored perfectly from a production database that is
+already wrong, and those have opposite remedies. Comparing the restored copy
+against the source catalogue separates them, which is nearly free because a
+verification already holds both: a breach in the restored copy only is a
+RESTORE DEFECT, a breach in both is SOURCE DRIFT. Both still fail the proof —
+the label changes where the operator looks, never whether the receipt is PROVED,
+because otherwise the cheap repair is to relax the bundle until it passes.
+Measured instance: a Platform CP rehearsal found `platform_api` holding DELETE
+on a delivery-target table, and production had the same permission — real drift,
+a required revocation whose migration has never run.
+
+Counts (`roles`, `privileges`, `policies`, `rls_tables`, …) are recorded in the
+manifest as OBSERVATIONS and gated on by nothing. A grant matrix is a good
+invariant and a poor assertion: `app_admin 315 / app_user 62 / platform_api 164`
+changes with every migration, so the gate is the property, not the total.
+
 `RESTORE_PROCEDURE` — ten ordered steps. `adjudicate_restore` DESTROYS a target
 after any non-zero restore, and after a zero exit carrying missing-role errors.
 `RecoveryReceiptV1` is value-free and carries the restore wall clock.

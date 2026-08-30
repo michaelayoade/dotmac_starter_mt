@@ -54,6 +54,7 @@ from dotmac_deployment_foundation.recovery import (
     adjudicate_restore,
     build_manifest,
     build_recovery_receipt,
+    classify_invariant_breaches,
     derive_role_closure,
     load_manifest,
     refuse_identity_stripping,
@@ -1107,7 +1108,15 @@ def test_a_membership_naming_an_undeclared_group_is_refused() -> None:
 
 
 def test_a_database_contract_with_no_postgres_dataset_is_refused() -> None:
-    text = DESCRIPTOR_WITH_EVERY_ROLE.replace('kind = "postgres"', 'kind = "volume"')
+    # Anchored to the dataset's own block. A bare replace also rewrites
+    # `[[external_dependencies]]`, whose `kind = "postgres"` is a DIFFERENT
+    # vocabulary - the descriptor then fails on the dependency instead, and the
+    # test would pass on an unrelated refusal.
+    text = DESCRIPTOR_WITH_EVERY_ROLE.replace(
+        'code = "primary"\nkind = "postgres"',
+        'code = "primary"\nkind = "volume"',
+        1,
+    )
     with pytest.raises(SpecError, match="nobody backs up"):
         ProductDeploymentSpec.loads(text, source="<test>")
 
@@ -1121,3 +1130,145 @@ def test_a_descriptor_cannot_ask_for_a_superuser_database_role() -> None:
     )
     with pytest.raises(SpecError, match="unknown key"):
         ProductDeploymentSpec.loads(text, source="<test>")
+
+
+# ── the rehearsal as a DRIFT detector, not only a recovery proof ─────────────
+
+
+def _with_effective(
+    evidence: CatalogEvidence, *, tenant_holds: bool, platform_holds: bool = True
+) -> CatalogEvidence:
+    return dataclasses.replace(
+        evidence,
+        effective_privileges=(
+            EffectivePrivilegeFact(
+                role=TENANT_APP,
+                identity=PLATFORM_TABLE,
+                privilege="SELECT",
+                holds=tenant_holds,
+            ),
+            EffectivePrivilegeFact(
+                role=PLATFORM_APP,
+                identity=PLATFORM_TABLE,
+                privilege="SELECT",
+                holds=platform_holds,
+            ),
+        ),
+    )
+
+
+def test_a_breach_only_in_the_restored_copy_is_named_a_RESTORE_DEFECT() -> None:
+    """The source is clean, so the bundle or the restore introduced it. The
+    operator should be looking at the recovery path."""
+    findings = verify_recovery(
+        manifest=_manifest(),
+        source=_with_effective(_evidence(), tenant_holds=False),
+        restored=_with_effective(_evidence(), tenant_holds=True),
+        isolation=_isolation(),
+    )
+    assert any(finding.startswith("RESTORE DEFECT") for finding in findings), findings
+    assert not any(finding.startswith("SOURCE DRIFT") for finding in findings)
+
+
+def test_a_breach_in_BOTH_catalogues_is_named_SOURCE_DRIFT() -> None:
+    """The Platform CP rehearsal, 2026-08-30, as a unit test.
+
+    It found `platform_api` holding DELETE on a delivery-target table in the
+    restored copy. The tempting reading is "the restore is unfaithful". Checking
+    production found the SAME permission, so it was real drift: a revocation the
+    declared contract requires whose migration has never run.
+
+    Those two readings have opposite remedies, which is the whole reason the
+    classification is worth producing rather than leaving to a careful operator.
+    """
+    drifted = _with_effective(_evidence(), tenant_holds=True)
+    findings = verify_recovery(
+        manifest=_manifest(),
+        source=drifted,
+        restored=drifted,
+        isolation=_isolation(),
+    )
+    assert any(finding.startswith("SOURCE DRIFT") for finding in findings), findings
+    assert not any(finding.startswith("RESTORE DEFECT") for finding in findings)
+    assert any("Fix production" in finding for finding in findings)
+
+
+def test_source_drift_still_fails_the_proof() -> None:
+    """The label changes where the operator looks, never whether it is PROVED.
+
+    A faithfully restored database that violates its own declared invariants has
+    not proved isolation. If drift were exonerating, the cheap repair would be to
+    relax the bundle until the check passed.
+    """
+    drifted = _with_effective(_evidence(), tenant_holds=True)
+    findings = verify_recovery(
+        manifest=_manifest(),
+        source=drifted,
+        restored=drifted,
+        isolation=_isolation(),
+    )
+    receipt = build_recovery_receipt(
+        manifest=_manifest(),
+        adjudication=_adjudicate(RestoreAttempt(exit_status=0)),
+        findings=findings,
+        restore_duration_seconds=1_187,
+        readiness_role=TENANT_APP,
+        readiness_passed=True,
+        image_digest="sha256:" + "a" * 64,
+        proved_at_epoch=1,
+    )
+    assert not receipt.proved
+
+
+def test_a_clean_pair_produces_neither_label() -> None:
+    assert (
+        classify_invariant_breaches(
+            source=_with_effective(_evidence(), tenant_holds=False),
+            restored=_with_effective(_evidence(), tenant_holds=False),
+            isolation=_isolation(),
+        )
+        == ()
+    )
+
+
+def test_the_manifest_reports_counts_as_OBSERVATIONS_and_gates_on_none_of_them() -> (
+    None
+):
+    """A grant matrix is a good invariant and a poor assertion.
+
+    `app_admin 315 / app_user 62 / platform_api 164` changes with every
+    migration, so pinning it literally produces a gate that fails on correct
+    work. The counts are recorded because they are useful to a reader; the
+    GATE is the property - the tenant role cannot reach platform tables, the
+    platform role holds its required revocations.
+
+    Proven by construction: the counts differ between source and restored here
+    and the verification is still clean, because nothing compares them.
+    """
+    source = _evidence()
+    restored = dataclasses.replace(
+        source,
+        privileges=(
+            *source.privileges,
+            PrivilegeFact(
+                scope="table",
+                identity=TENANT_TABLE,
+                grantee=TENANT_APP,
+                privilege="INSERT",
+                grantor=MIGRATION_OWNER,
+            ),
+        ),
+    )
+    assert len(restored.privileges) != len(source.privileges)
+    manifest = _manifest()
+    assert "counts" in manifest.content
+    # The extra privilege IS reported - as a set difference, which is fidelity,
+    # not a pinned total.
+    findings = verify_recovery(
+        manifest=manifest,
+        source=source,
+        restored=restored,
+        isolation=_isolation(),
+    )
+    assert any("INSERT" in finding for finding in findings)
+    assert not any("count" in finding.lower() for finding in findings)
