@@ -16,6 +16,6 @@ from __future__ import annotations
 
 from typing import Final
 
-VERSION: Final = "0.3.0a1"
+VERSION: Final = "0.3.0a2"
 
 __all__ = ["VERSION"]
