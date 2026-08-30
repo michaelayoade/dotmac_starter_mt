@@ -33,6 +33,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO / ".github" / "workflows" / "release-ui.yml"
+CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 VERIFIER = REPO / "scripts" / "verify_ui_release_artifact.py"
 
 #: The one file both release stages must run against their installed artifact.
@@ -86,6 +87,27 @@ def _assert_both_stages_run_the_shared_proof(workflow: str) -> None:
     )
 
 
+def _assert_pull_requests_execute_the_proof(ci_workflow: str) -> None:
+    """The release lane cannot prove itself; a pull request must.
+
+    `release-ui.yml` is a protected, main-only `workflow_dispatch`, so its
+    artifact proof runs for the first time DURING the irreversible publish.
+    Everything else in this file reads the proof as TEXT, which cannot
+    distinguish a working proof from a syntactically valid broken one. The
+    `ui-artifact` job is the positive control: it builds the wheel, installs
+    it into a clean venv and RUNS the same script on every pull request.
+    """
+    assert VERIFIER_INVOCATION in ci_workflow, (
+        "no pull-request job executes "
+        f"{VERIFIER_INVOCATION}; the release proof would then be checked only "
+        "as text until the irreversible publish runs it for real"
+    )
+    assert _venv_invocations(ci_workflow), (
+        "the pull-request execution of the proof must run under a clean venv "
+        "interpreter, or it measures the checkout instead of the artifact"
+    )
+
+
 def _assert_the_proof_measures_the_installed_artifact(verifier: str) -> None:
     """The script must refuse a source checkout and check the real bytes."""
     for seam, why in (
@@ -131,6 +153,10 @@ def test_release_smokes_every_component_from_both_installed_artifacts() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     _assert_every_published_component_is_in_the_wheel_gate(workflow)
     _assert_both_stages_run_the_shared_proof(workflow)
+
+
+def test_a_pull_request_actually_runs_the_release_proof() -> None:
+    _assert_pull_requests_execute_the_proof(CI_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def test_the_shared_proof_measures_the_installed_bytes() -> None:
@@ -208,3 +234,11 @@ def test_the_component_set_is_not_empty() -> None:
         "unproven; with one component they cannot distinguish derivation from "
         "a hardcoded name"
     )
+
+
+def test_the_pull_request_execution_guard_still_bites() -> None:
+    """Deleting the ui-artifact job must fail, not quietly reduce coverage."""
+    ci_workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    weakened = ci_workflow.replace(VERIFIER_INVOCATION, "true")
+    with pytest.raises(AssertionError, match="no pull-request job executes"):
+        _assert_pull_requests_execute_the_proof(weakened)

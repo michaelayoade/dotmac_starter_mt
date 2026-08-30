@@ -238,6 +238,39 @@ jobs:
       - uses: ./.github/actions/setup-poetry
       - run: bash scripts/consumer_boot_check.sh
 
+  ui-artifact:
+    runs-on: ubuntu-latest
+    # The dotmac-ui counterpart of `consumer-boot`, and it exists because the
+    # release lane cannot prove itself. `release-ui.yml` is a protected,
+    # main-only `workflow_dispatch`, so its artifact proof runs for the first
+    # time DURING the irreversible publish. Until this job existed, the only
+    # pull-request evidence that the proof still worked was an architecture
+    # test reading it as TEXT — which cannot tell a working proof from a
+    # syntactically valid broken one.
+    #
+    # So this builds the wheel, installs it into a CLEAN virtualenv (never the
+    # repo venv, never the checkout), and runs the EXACT script the release
+    # lane runs. Jinja is installed separately, as a host would, so it never
+    # becomes a dotmac-ui runtime dependency. The script itself refuses to
+    # measure a source checkout, so a green run here means the installed
+    # artifact really was the subject.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - name: Build the dotmac-ui wheel
+        working-directory: packages/dotmac-ui
+        run: poetry build
+      - name: Prove the installed artifact with the release lane's own script
+        run: |
+          python -m venv /tmp/uiartifact
+          /tmp/uiartifact/bin/pip install --quiet --no-deps \
+            "$(ls packages/dotmac-ui/dist/*.whl)"
+          /tmp/uiartifact/bin/pip install --quiet "jinja2==3.1.6"
+          /tmp/uiartifact/bin/python scripts/verify_ui_release_artifact.py
+
   kernel-floors:
     runs-on: ubuntu-latest
     # BOTH interpreters, because the products declare >=3.11 and the kernel now
