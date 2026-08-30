@@ -126,9 +126,16 @@ class CredentialAuthorizationError(CredentialLifecycleError):
 
 
 class CredentialCohortDrift(CredentialLifecycleError):
-    """A target changed, vanished, or was never there between planning and
-    applying. The whole plan is refused; a partially applied cohort is not a
-    smaller cohort, it is an unrecorded one."""
+    """The state an authorization was granted against is not the state found.
+
+    A cohort target changed, vanished, or was never there between planning and
+    applying — and the whole plan is then refused, because a partially applied
+    cohort is not a smaller cohort, it is an unrecorded one. The individual
+    reset path raises the same error for the same reason when the subject a
+    proven recovery authorization names has no credential: one subject or a
+    hundred, the world moved under an approved decision and the correct answer
+    is to refuse rather than to improvise.
+    """
 
 
 class CredentialEffectNotRecorded(CredentialLifecycleError):
