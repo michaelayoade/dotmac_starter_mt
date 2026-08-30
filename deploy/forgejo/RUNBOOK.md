@@ -103,8 +103,29 @@ curl -sSI https://registry.dotmac.io/ | head -3         # 200/302 + valid TLS
 
 ## 5. CI publisher identity (scoped token, OpenBao-sourced)
 
-- Create a non-human user `ci-publisher`, add to org `dotmac` with **package
-  read+write** on the target only.
+- Create a non-human user `ci-publisher` and add it to org `dotmac` through a
+  **packages-only team** — NEVER through `owners`. The team carries the
+  packages unit at `write` and every other repository unit at `none`, with
+  `can_create_org_repo=false` and `includes_all_repositories=false`. The
+  starter's team is `starter-publishers`; `deployment-control-publishers` is
+  the equivalent for that lane. Org **team** membership is what grants package
+  access — a correctly scoped token with no team membership gets `401
+  reqPackageAccess` on the package plane.
+
+  > **Why this is called out.** As built, `ci-publisher` was placed in the
+  > `owners` team, which satisfies "package read+write" but also confers full
+  > organization ownership. Token scope hides this: a `write:package` token
+  > refuses the repository/org APIs regardless of membership, so the excess
+  > authority is invisible until someone mints a broader token on the account
+  > or signs in with its password (`prohibit_login` is false). Measured
+  > 2026-08-30 with an `all`-scoped token on `ci-publisher`: as an owner it
+  > created an organization repository and an organization team (201/201);
+  > from the packages-only team both are refused (403/403), as is adding
+  > itself back to `owners`. Grant packages through a packages-only team and
+  > verify with a credential that has only that grant.
+
+  `restricted=true` is NOT a substitute: it was measured to break package index
+  reads while changing no refusal.
 - Generate a **scoped access token** (scope: `write:package`) and store it:
   `bao kv put secret/dotmac/forgejo/ci-publisher-token token=…` (never echoed).
 - Configure OpenBao **JWT auth for GitHub OIDC**: a role bound to
