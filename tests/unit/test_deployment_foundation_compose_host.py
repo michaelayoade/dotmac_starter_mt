@@ -48,6 +48,13 @@ from dotmac_deployment_foundation.providers.compose_host import (
     _candidate_ports,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+from dotmac_deployment_foundation.toolchain import DEFAULT_TOOLS
+
+#: argv[0] for every docker call. Read from `DEFAULT_TOOLS` rather than
+#: written out again, so that changing the shipped default cannot leave these
+#: scripted rules silently matching nothing — which is how a runner fake stops
+#: exercising the code it was written for while still passing.
+DOCKER = DEFAULT_TOOLS["docker"]
 
 GOOD_DIGEST = "sha256:" + "a" * 64
 OLD_DIGEST = "sha256:" + "b" * 64
@@ -242,7 +249,7 @@ def test_compose_project_identity_comes_from_the_product_not_the_directory(
     second = ComposeHostEffects(load(), tmp_path / "second" / "deploy")
 
     assert first._compose_argv[:4] == [
-        "docker",
+        DOCKER,
         "compose",
         "--project-name",
         "example",
@@ -426,7 +433,7 @@ def _observe_roles_with_mount(tmp_path: Path, destination: str):  # type: ignore
     runner = ScriptedRunner()
     runner.when(lambda a: "ps" in a and "json" in a, CommandResult(0, ps_json))
     runner.when(
-        lambda a: a[:2] == ["docker", "inspect"] and "--format" not in a,
+        lambda a: a[:2] == [DOCKER, "inspect"] and "--format" not in a,
         CommandResult(0, inspect_json),
     )
     runner.when(
@@ -682,7 +689,7 @@ def test_write_evidence_is_atomic_a_failed_write_leaves_the_previous_file_intact
 def test_image_present_true_when_present_locally(tmp_path: Path) -> None:
     runner = ScriptedRunner()
     runner.when(
-        lambda a: a[:3] == ["docker", "image", "inspect"] and "--format" not in a,
+        lambda a: a[:3] == [DOCKER, "image", "inspect"] and "--format" not in a,
         CommandResult(0),
     )
     effects = make_effects(tmp_path, runner=runner)
@@ -692,11 +699,11 @@ def test_image_present_true_when_present_locally(tmp_path: Path) -> None:
 def test_image_present_false_when_absent_everywhere(tmp_path: Path) -> None:
     runner = ScriptedRunner()
     runner.when(
-        lambda a: a[:3] == ["docker", "image", "inspect"] and "--format" not in a,
+        lambda a: a[:3] == [DOCKER, "image", "inspect"] and "--format" not in a,
         CommandResult(1, "", "no such image"),
     )
     runner.when(
-        lambda a: a[:3] == ["docker", "manifest", "inspect"],
+        lambda a: a[:3] == [DOCKER, "manifest", "inspect"],
         CommandResult(1, "", "not found"),
     )
     effects = make_effects(tmp_path, runner=runner)
@@ -708,14 +715,14 @@ def test_image_present_pulls_when_present_in_registry_but_not_locally(
 ) -> None:
     runner = ScriptedRunner()
     runner.when(
-        lambda a: a[:3] == ["docker", "image", "inspect"] and "--format" not in a,
+        lambda a: a[:3] == [DOCKER, "image", "inspect"] and "--format" not in a,
         CommandResult(1, "", "no such image"),
     )
-    runner.when(lambda a: a[:3] == ["docker", "manifest", "inspect"], CommandResult(0))
-    runner.when(lambda a: a[:2] == ["docker", "pull"], CommandResult(0))
+    runner.when(lambda a: a[:3] == [DOCKER, "manifest", "inspect"], CommandResult(0))
+    runner.when(lambda a: a[:2] == [DOCKER, "pull"], CommandResult(0))
     effects = make_effects(tmp_path, runner=runner)
     assert effects.image_present(f"ghcr.io/example/app@{GOOD_DIGEST}") is True
-    assert any(call[:2] == ["docker", "pull"] for call in runner.calls)
+    assert any(call[:2] == [DOCKER, "pull"] for call in runner.calls)
 
 
 def test_image_labels_parses_the_revision_label(tmp_path: Path) -> None:
@@ -811,16 +818,16 @@ def test_prune_images_keeps_in_use_and_the_n_most_recent_unused(tmp_path: Path) 
     removed: list[str] = []
     runner = ScriptedRunner()
     runner.when(
-        lambda a: a[:3] == ["docker", "ps", "-a"], CommandResult(0, "running_image\n")
+        lambda a: a[:3] == [DOCKER, "ps", "-a"], CommandResult(0, "running_image\n")
     )
     runner.when(
-        lambda a: a[:3] == ["docker", "image", "inspect"] and a[-1] == "running_image",
+        lambda a: a[:3] == [DOCKER, "image", "inspect"] and a[-1] == "running_image",
         CommandResult(0, "id5"),
     )
-    runner.when(lambda a: a[:3] == ["docker", "image", "ls"], CommandResult(0, rows))
+    runner.when(lambda a: a[:3] == [DOCKER, "image", "ls"], CommandResult(0, rows))
 
     def remove_matcher(argv):  # type: ignore[no-untyped-def]
-        if argv[:3] == ["docker", "image", "rm"]:
+        if argv[:3] == [DOCKER, "image", "rm"]:
             removed.append(argv[3])
             return True
         return False
