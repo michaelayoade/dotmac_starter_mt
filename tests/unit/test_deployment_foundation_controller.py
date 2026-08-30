@@ -142,6 +142,12 @@ compatibility = "online"
 
 [ingress]
 host = "example.dotmac.io"
+# IngressPolicy.v1: the edge declares its own exposure and address family,
+# and a public edge carries the approval LOCATOR (never an approval).
+exposure = "public"
+address_family = "ipv4"
+approval_ref = "deployment.public-exposure"
+rationale_url = "https://docs.example/why"
 [[ingress.routes]]
 path = "/"
 role = "app"

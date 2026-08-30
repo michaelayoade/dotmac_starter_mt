@@ -29,7 +29,7 @@ import json
 import os
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404 -- argv lists, shell=False; see below
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path

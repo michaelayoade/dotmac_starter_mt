@@ -27,7 +27,7 @@ import json
 import os
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404 -- argv lists, shell=False; see below
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass

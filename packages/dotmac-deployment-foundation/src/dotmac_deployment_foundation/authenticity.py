@@ -16,7 +16,7 @@ import json
 import os
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404 -- argv lists, shell=False; see below
 import tempfile
 from dataclasses import dataclass
 from enum import Enum
@@ -1203,7 +1203,7 @@ def _public_key_spki_sha256(*, openssl_path: Path, public_key_path: Path) -> str
     """Hash canonical DER SubjectPublicKeyInfo, not PEM presentation bytes."""
 
     try:
-        completed = subprocess.run(  # noqa: S603 -- absolute, pinned executable
+        completed = subprocess.run(  # noqa: S603  # nosec B603 -- absolute, pinned executable, argv LIST, shell=False
             [
                 str(openssl_path),
                 "pkey",
@@ -1306,7 +1306,7 @@ def verify_detached_evidence(
         ) as handle:
             handle.write(raw_signature)
             handle.flush()
-            completed = subprocess.run(  # noqa: S603 -- absolute, pinned executable
+            completed = subprocess.run(  # noqa: S603  # nosec B603 -- absolute, pinned executable, argv LIST, shell=False
                 [
                     str(policy.openssl_path),
                     "pkeyutl",

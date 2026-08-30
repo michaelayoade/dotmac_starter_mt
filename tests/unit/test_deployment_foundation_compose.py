@@ -562,14 +562,23 @@ def test_the_liveness_probe_is_exposed_as_a_label_never_as_the_healthcheck(
     assert worker["labels"]["io.dotmac.health.live.path"] == "/livez"
 
 
-def test_a_role_with_no_liveness_probe_gets_no_label_at_all(
+def test_a_service_with_no_liveness_probe_carries_no_LIVENESS_label(
     doc: Mapping[str, object],
 ) -> None:
-    # `migrate` is now the only service with no probe of any kind. Every RUNNING
-    # role must declare a health signal — an HTTP probe, a worker ping or a
-    # scheduler tick — so a probe-less role is no longer expressible, and the
-    # one-shot migration service is what is left to assert against.
-    assert "labels" not in doc["services"]["migrate"]
+    """`migrate` is the only service with no probe of any kind. Every RUNNING
+    role must declare a health signal — an HTTP probe, a worker ping or a
+    scheduler tick — so a probe-less role is no longer expressible, and the
+    one-shot migration service is what is left to assert against.
+
+    This used to assert `"labels" not in ...`, and that premise expired when
+    deployment identity labels became universal: every service now carries
+    product and service-kind labels whether or not it has a probe. The property
+    the test was always about is the absence of the LIVENESS label
+    specifically, so it now says that instead of relying on the block being
+    empty for an unrelated reason.
+    """
+    labels = doc["services"]["migrate"].get("labels", {})
+    assert "io.dotmac.health.live.path" not in labels
 
 
 # ── 6. resource limits on every service ─────────────────────────────────────
