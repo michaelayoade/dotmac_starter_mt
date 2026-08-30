@@ -251,6 +251,9 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-people": (
         REPO_ROOT / "packages/dotmac-people" / "src/dotmac_people/migrations/versions"
     ),
+    "dotmac-inbox": (
+        REPO_ROOT / "packages/dotmac-inbox" / "src/dotmac_inbox/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -289,6 +292,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-template-studio": "ts_*.py",
     "dotmac-commercial-agreements": "cg_*.py",
     "dotmac-people": "pe_*.py",
+    "dotmac-inbox": "ib_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -324,6 +328,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-template-studio": "dotmac-template-studio-v",
     "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
     "dotmac-people": "dotmac-people-v",
+    "dotmac-inbox": "dotmac-inbox-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1470,6 +1475,25 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-inbox ──
+    "dotmac-inbox-v0.1.0a2": (
+        "dotmac-inbox",
+        "c3e651cf3e220a64ab3dd51cdf7c98553c0997e8",
+        {
+            "ib_0001_conversations.py": (
+                "cd9b7a6189ecf7fde8b2d55279b5a5feff68947b2639de6cdb566c4422349a53"
+            ),
+        },
+    ),
+    "dotmac-inbox-v0.1.0a1": (
+        "dotmac-inbox",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "ib_0001_conversations.py": (
+                "cd9b7a6189ecf7fde8b2d55279b5a5feff68947b2639de6cdb566c4422349a53"
+            ),
+        },
+    ),
 }
 
 
@@ -1566,6 +1590,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
+    "dotmac-inbox": frozenset(),
 }
 
 
