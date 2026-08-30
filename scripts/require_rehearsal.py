@@ -271,9 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_REFUSED
     try:
-        receipt = RehearsalReceiptV1.from_json(
-            receipt_path.read_text(encoding="utf-8")
-        )
+        receipt = RehearsalReceiptV1.from_json(receipt_path.read_text(encoding="utf-8"))
         verify_publication(receipt, revision=args.sha)
     except SpecError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)

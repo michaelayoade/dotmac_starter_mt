@@ -165,8 +165,9 @@ def test_unprobed_private_paths_are_refused_rather_than_assumed_absent() -> None
     """An unprobed path is not an absent one — this is the check that the
     retracted NIC's reach is genuinely gone rather than merely unlisted."""
     observed = _vantage(private_paths_unreachable={})
-    assert any("unprobed" in p or "no former private path" in p
-               for p in observed.refusals)
+    assert any(
+        "unprobed" in p or "no former private path" in p for p in observed.refusals
+    )
 
 
 def test_assumed_credential_absence_is_refused() -> None:

@@ -28,7 +28,7 @@ sys.path.insert(
     ),
 )
 
-from dotmac_deployment_foundation.rehearsal import (  # noqa: E402
+from dotmac_deployment_foundation.rehearsal import (
     RehearsalReceiptV1,
     RequirementStatus,
     render_pending_document,

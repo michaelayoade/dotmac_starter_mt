@@ -36,4 +36,4 @@ Historical hand measurements are retained below as supporting context. They are 
 - `blocked`: 4
 - `vacuous`: 1
 
-**Publication requires 16 × `executed_passed`.** This does not: 16 item(s) short.
+**Publication requires all 16 to be `executed_passed`.** This does not: 16 item(s) short.

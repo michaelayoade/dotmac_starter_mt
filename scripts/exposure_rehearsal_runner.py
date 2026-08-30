@@ -57,30 +57,30 @@ sys.path.insert(
     ),
 )
 
-from dotmac_deployment_foundation.digest import Digest  # noqa: E402
-from dotmac_deployment_foundation.engine.run import CommandResult  # noqa: E402
-from dotmac_deployment_foundation.errors import (  # noqa: E402
+from dotmac_deployment_foundation.digest import Digest
+from dotmac_deployment_foundation.engine.run import CommandResult
+from dotmac_deployment_foundation.errors import (
     DeploymentFoundationError,
 )
-from dotmac_deployment_foundation.exposure import (  # noqa: E402
+from dotmac_deployment_foundation.exposure import (
     ExposureTransaction,
     foreign_rules,
     ownership_comment,
     refuse_non_recreating_apply,
 )
-from dotmac_deployment_foundation.lease import load_lease  # noqa: E402
-from dotmac_deployment_foundation.policy import build_firewall_plan  # noqa: E402
-from dotmac_deployment_foundation.providers.exposure_host import (  # noqa: E402
+from dotmac_deployment_foundation.lease import load_lease
+from dotmac_deployment_foundation.policy import build_firewall_plan
+from dotmac_deployment_foundation.providers.exposure_host import (
     ComposeHostExposureEffects,
 )
-from dotmac_deployment_foundation.rehearsal import (  # noqa: E402
+from dotmac_deployment_foundation.rehearsal import (
     RequirementResult,
     RequirementStatus,
     build_receipt,
     render_status_document,
 )
-from dotmac_deployment_foundation.spec import ProductDeploymentSpec  # noqa: E402
-from dotmac_deployment_foundation.vantage import (  # noqa: E402
+from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+from dotmac_deployment_foundation.vantage import (
     VantageQualification,
     qualify_vantage,
 )
@@ -136,13 +136,16 @@ def _ssh_runner(target: str, identity: str):
         remote = shlex.join(list(argv))
         command = [
             "ssh",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=yes",
-            "-i", identity,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-i",
+            identity,
             target,
             remote,
         ]
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        completed = subprocess.run(
             command, capture_output=capture, text=True, timeout=timeout, check=False
         )
         return CommandResult(
@@ -277,7 +280,11 @@ def run(args: argparse.Namespace) -> int:
 
     observed = effects.observe()
     sockets = {(s.address, s.port) for s in observed.sockets}
-    wildcard = [p for a, p in sockets if a in ("0.0.0.0", "::", "*")]
+    # S104 is about BINDING to all interfaces. This is the opposite: the
+    # wildcard addresses are what the lane exists to prove ABSENT, so the
+    # literal here is a refusal predicate rather than a bind.
+    wildcards = ("0.0.0.0", "::", "*")  # noqa: S104
+    wildcard = [p for a, p in sockets if a in wildcards]
     results.record(
         "socket_reobservation",
         PASSED if not wildcard else FAILED,
@@ -297,21 +304,30 @@ def run(args: argparse.Namespace) -> int:
     after_pids = {p.pid for p in observed.proxies if p.pid is not None}
     survivors = sorted(before_pids & after_pids)
     if unknown:
-        proxy_status, proxy_detail = BLOCKED, (
-            f"{len(unknown)} docker-proxy line(s) carried no pid, so 'the pid is "
-            "new' cannot be established from this listing"
+        proxy_status, proxy_detail = (
+            BLOCKED,
+            (
+                f"{len(unknown)} docker-proxy line(s) carried no pid, so 'the pid is "
+                "new' cannot be established from this listing"
+            ),
         )
     elif not after_pids:
         proxy_status, proxy_detail = FAILED, "no docker-proxy process was observed"
     elif survivors:
-        proxy_status, proxy_detail = FAILED, (
-            f"docker-proxy pid(s) {survivors} SURVIVED the apply — the container "
-            "was not recreated, so the apply proved nothing about the binding"
+        proxy_status, proxy_detail = (
+            FAILED,
+            (
+                f"docker-proxy pid(s) {survivors} SURVIVED the apply — the container "
+                "was not recreated, so the apply proved nothing about the binding"
+            ),
         )
     else:
-        proxy_status, proxy_detail = PASSED, (
-            f"every docker-proxy pid is new ({sorted(after_pids)}); none survived "
-            f"from the snapshot ({sorted(before_pids)})"
+        proxy_status, proxy_detail = (
+            PASSED,
+            (
+                f"every docker-proxy pid is new ({sorted(after_pids)}); none survived "
+                f"from the snapshot ({sorted(before_pids)})"
+            ),
         )
     results.record("proxy_reobservation", proxy_status, proxy_detail, "ps -eo pid,args")
 
@@ -327,7 +343,8 @@ def run(args: argparse.Namespace) -> int:
         PASSED if firewall_ok else FAILED,
         f"{len(planned)} derived rules; landed={sum(landed)}/{len(planned)}; "
         f"terminal DROP={terminal_drop}",
-        "iptables-save", "ip6tables-save",
+        "iptables-save",
+        "ip6tables-save",
     )
 
     v6_docker_user = observed.chain("ipv6", "DOCKER-USER")

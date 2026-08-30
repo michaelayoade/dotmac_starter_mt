@@ -170,9 +170,7 @@ def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Pa
     return Path(directory) / f"{safe}.json"
 
 
-def write_lease(
-    lease: HostLease, *, directory: str | Path = DEFAULT_LEASE_DIR
-) -> Path:
+def write_lease(lease: HostLease, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
     """Persist a lease. Refuses to overwrite a live one held for another run."""
     path = _lease_path(lease.target, directory=directory)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,9 +179,7 @@ def write_lease(
         now = datetime.now(UTC)
         still_live = True
         try:
-            existing.covers(
-                now=now, authorization_run_id=existing.authorization_run_id
-            )
+            existing.covers(now=now, authorization_run_id=existing.authorization_run_id)
         except PreconditionFailed:
             still_live = False
         if still_live and existing.authorization_run_id != lease.authorization_run_id:

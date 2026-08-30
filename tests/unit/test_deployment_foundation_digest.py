@@ -118,9 +118,7 @@ def test_a_one_bit_mismatch_is_refused_and_names_the_odd_term() -> None:
 
 def test_a_wrong_algorithm_term_is_refused() -> None:
     with pytest.raises(SpecError):
-        require_same_digest(
-            {"a": HEX, "b": f"md5:{'a' * 32}"}, what="gate item 9"
-        )
+        require_same_digest({"a": HEX, "b": f"md5:{'a' * 32}"}, what="gate item 9")
 
 
 def test_a_single_term_cannot_satisfy_an_equality_check() -> None:

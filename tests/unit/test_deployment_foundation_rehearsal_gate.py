@@ -185,7 +185,7 @@ def test_a_receipt_whose_three_terms_disagree_cannot_be_built() -> None:
 
 
 def test_a_receipt_for_another_revision_is_refused() -> None:
-    with pytest.raises(SpecError, match="says\\s+nothing about this one"):
+    with pytest.raises(SpecError, match=r"says\s+nothing about this one"):
         verify_publication(_receipt(), revision="d" * 40)
 
 
