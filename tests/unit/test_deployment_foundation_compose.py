@@ -27,6 +27,7 @@ Five roles carry the fixture's coverage on purpose:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import pathlib
 import re
@@ -34,6 +35,7 @@ from collections.abc import Mapping
 
 import pytest
 import yaml
+from dotmac_deployment_foundation.document import build_canonical_document
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.render.compose import (
     _scalar,
@@ -562,14 +564,21 @@ def test_the_liveness_probe_is_exposed_as_a_label_never_as_the_healthcheck(
     assert worker["labels"]["io.dotmac.health.live.path"] == "/livez"
 
 
-def test_a_role_with_no_liveness_probe_gets_no_label_at_all(
+def test_a_role_with_no_liveness_probe_gets_no_liveness_label(
     doc: Mapping[str, object],
 ) -> None:
     # `migrate` is now the only service with no probe of any kind. Every RUNNING
     # role must declare a health signal — an HTTP probe, a worker ping or a
     # scheduler tick — so a probe-less role is no longer expressible, and the
     # one-shot migration service is what is left to assert against.
-    assert "labels" not in doc["services"]["migrate"]
+    #
+    # It DOES carry a `labels:` block, which it did not before deployment
+    # identity existed: every service is now identifiable whether or not it has
+    # a probe. The assertion is therefore about the liveness key specifically,
+    # not about the presence of labels — the weaker `"labels" not in service`
+    # this replaced would now be testing the identity feature by accident and
+    # would have to be deleted the first time anything else added a label.
+    assert "io.dotmac.health.live.path" not in doc["services"]["migrate"]["labels"]
 
 
 # ── 6. resource limits on every service ─────────────────────────────────────
@@ -960,3 +969,352 @@ def test_the_rendered_collector_carries_no_uid_override(
         f"the collector mounts {writable} writable; a read-only config mount is "
         "what makes the uid question moot in the first place"
     )
+
+
+# ── 14. deployment identity labels ──────────────────────────────────────────
+#
+# A controller reconciling a host has to answer "which release is this, and
+# which configuration produced it" about an object it is looking at. Before
+# these labels the only answers available were an image TAG (mutable — the
+# reason every other reference in this facility is a digest) and a compose
+# PROJECT name (an operator's `-p` flag, or the directory the file sits in).
+# Reconciling against either is reconciling against a guess.
+#
+# The label NAMES below are written out again rather than imported from
+# `render.compose`. Importing them would make these tests agree with the
+# renderer by construction: renaming a constant would rename it in both places
+# and every assertion would keep passing, while every controller matching on
+# the old name broke. The names are a wire contract, so they are pinned as
+# literals here and a rename has to be made deliberately, twice.
+
+_IDENTITY_PREFIX = "io.dotmac.deployment"
+_SCHEMA_LABEL = f"{_IDENTITY_PREFIX}.schema"
+_PRODUCT_LABEL = f"{_IDENTITY_PREFIX}.product"
+_ENVIRONMENT_LABEL = f"{_IDENTITY_PREFIX}.environment"
+_SERVICE_NAME_LABEL = f"{_IDENTITY_PREFIX}.service.name"
+_SERVICE_KIND_LABEL = f"{_IDENTITY_PREFIX}.service.kind"
+_MANIFEST_DIGEST_LABEL = f"{_IDENTITY_PREFIX}.manifest.digest"
+_CONFIGURATION_DIGEST_LABEL = f"{_IDENTITY_PREFIX}.configuration.digest"
+_SOURCE_REVISION_LABEL = f"{_IDENTITY_PREFIX}.source.revision"
+
+_UNIVERSAL_IDENTITY_LABELS = frozenset(
+    {
+        _SCHEMA_LABEL,
+        _PRODUCT_LABEL,
+        _ENVIRONMENT_LABEL,
+        _SERVICE_NAME_LABEL,
+        _SERVICE_KIND_LABEL,
+    }
+)
+_RELEASE_IDENTITY_LABELS = frozenset(
+    {
+        _MANIFEST_DIGEST_LABEL,
+        _CONFIGURATION_DIGEST_LABEL,
+        _SOURCE_REVISION_LABEL,
+    }
+)
+#: The kinds that run the PRODUCT's image and may therefore claim the release.
+_RELEASE_BEARING_KINDS = frozenset({"release", "migration"})
+
+#: The shared fixture declares neither a managed dependency nor a collector, so
+#: it renders only release-bearing services — a document in which the "and
+#: nothing else claims the release" half of the contract is vacuously true.
+#: This adds one of each so both halves have a subject.
+_TOML_WITH_AUXILIARY_SERVICES = (
+    _TOML
+    + f"""
+[telemetry]
+logs = true
+metrics = true
+metrics_material = "METRICS_TOKEN"
+collector_image = "otel/opentelemetry-collector-contrib@sha256:{"e" * 64}"
+
+[[external_dependencies]]
+code = "broker"
+kind = "redis"
+image = "redis@sha256:{"f" * 64}"
+health_probe = ["redis-cli", "ping"]
+"""
+)
+
+
+@pytest.fixture(scope="module")
+def mixed_spec() -> ProductDeploymentSpec:
+    return ProductDeploymentSpec.loads(
+        _TOML_WITH_AUXILIARY_SERVICES, source="<mixed-fixture>"
+    )
+
+
+@pytest.fixture(scope="module")
+def mixed_rendered(mixed_spec: ProductDeploymentSpec) -> str:
+    return render_compose(mixed_spec)
+
+
+@pytest.fixture(scope="module")
+def mixed_doc(mixed_rendered: str) -> Mapping[str, object]:
+    parsed = yaml.safe_load(mixed_rendered)
+    assert isinstance(parsed, dict)
+    return parsed
+
+
+def _every_service_is_identified(compose_doc: Mapping[str, object]) -> bool:
+    """Every service names itself, its product and what kind of thing it is.
+
+    `service.name` is compared against the COMPOSE KEY rather than merely
+    checked for presence: a label that says `web` on the service Compose calls
+    `api` is worse than no label, because it is an authoritative-looking wrong
+    answer to the exact question the labels exist to answer.
+    """
+    services = compose_doc["services"]
+    assert isinstance(services, Mapping)
+    for name, service in services.items():
+        labels = service.get("labels")
+        if not isinstance(labels, Mapping):
+            return False
+        if not _UNIVERSAL_IDENTITY_LABELS <= set(labels):
+            return False
+        if labels[_SERVICE_NAME_LABEL] != name:
+            return False
+    return True
+
+
+def _release_identity_is_stamped_on_exactly_the_release(
+    compose_doc: Mapping[str, object],
+) -> bool:
+    """Release identity appears on every product-image service and nowhere else.
+
+    Both directions matter and only one is obvious. A missing digest leaves a
+    controller unable to identify a release; a digest on the Redis makes a
+    container that takes no part in the release answer "yes" to "are you
+    running release X", which is a wrong answer rather than a missing one.
+    """
+    services = compose_doc["services"]
+    assert isinstance(services, Mapping)
+    for service in services.values():
+        labels = service.get("labels")
+        if not isinstance(labels, Mapping):
+            return False
+        claims_release = labels.get(_SERVICE_KIND_LABEL) in _RELEASE_BEARING_KINDS
+        present = set(labels) & _RELEASE_IDENTITY_LABELS
+        if claims_release and present != _RELEASE_IDENTITY_LABELS:
+            return False
+        if not claims_release and present:
+            return False
+    return True
+
+
+def test_the_mixed_fixture_renders_both_bearing_and_non_bearing_services(
+    mixed_doc: Mapping[str, object],
+) -> None:
+    """The positive control for the whole section.
+
+    Every predicate below quantifies over services, and a `for` loop over a
+    document with no non-release service passes its second clause by never
+    entering it. This pins that the fixture actually contains both populations,
+    so a later fixture edit that drops the Redis fails HERE with a clear
+    message rather than quietly hollowing out four tests.
+    """
+    kinds = {
+        name: service["labels"][_SERVICE_KIND_LABEL]
+        for name, service in mixed_doc["services"].items()
+    }
+    assert kinds == {
+        "broker": "dependency",
+        "otel-collector": "telemetry",
+        "migrate": "migration",
+        "web": "release",
+        "api": "release",
+        "worker": "release",
+        "cache": "release",
+        "netrole": "release",
+    }
+
+
+def test_every_rendered_service_carries_the_deployment_identity_labels(
+    mixed_doc: Mapping[str, object],
+) -> None:
+    assert _every_service_is_identified(mixed_doc)
+
+
+def test_the_identity_check_would_catch_a_service_that_lost_a_label(
+    mixed_rendered: str,
+) -> None:
+    """`_every_service_is_identified` is what the previous test relies on; this
+    proves it is not vacuously true by corrupting a real rendered document —
+    misspelling one service's kind key, which is how a renderer regression
+    would actually present — and showing the predicate then reports False."""
+    marker = f"{_SERVICE_KIND_LABEL}: dependency"
+    assert mixed_rendered.count(marker) == 1
+    broken = mixed_rendered.replace(marker, f"{_SERVICE_KIND_LABEL}x: dependency", 1)
+    assert not _every_service_is_identified(yaml.safe_load(broken))
+
+
+def test_the_identity_check_would_catch_a_service_naming_the_wrong_service(
+    mixed_rendered: str,
+) -> None:
+    """The other half of the same predicate: presence is not correctness.
+
+    A check that only counted keys would pass a document in which every service
+    claimed to be `web`, which is precisely the confident wrong answer these
+    labels exist to prevent.
+    """
+    marker = f"{_SERVICE_NAME_LABEL}: netrole"
+    assert mixed_rendered.count(marker) == 1
+    broken = mixed_rendered.replace(marker, f"{_SERVICE_NAME_LABEL}: web", 1)
+    assert not _every_service_is_identified(yaml.safe_load(broken))
+
+
+def test_a_release_service_names_its_manifest_configuration_and_source(
+    mixed_doc: Mapping[str, object], mixed_spec: ProductDeploymentSpec
+) -> None:
+    labels = mixed_doc["services"]["web"]["labels"]
+    assert labels[_MANIFEST_DIGEST_LABEL] == mixed_spec.manifest_digest
+    assert labels[_SOURCE_REVISION_LABEL] == mixed_spec.source_revision
+    assert labels[_PRODUCT_LABEL] == mixed_spec.product
+    assert labels[_ENVIRONMENT_LABEL] == mixed_spec.environment
+
+
+def test_the_migration_service_carries_the_release_identity_too(
+    mixed_doc: Mapping[str, object], mixed_spec: ProductDeploymentSpec
+) -> None:
+    """`migrate` runs the product's image at this revision and is the release's
+    first effect on the database, so "what applied this schema change" has an
+    answer on the object itself rather than in a deploy log."""
+    labels = mixed_doc["services"]["migrate"]["labels"]
+    assert labels[_MANIFEST_DIGEST_LABEL] == mixed_spec.manifest_digest
+    assert labels[_SOURCE_REVISION_LABEL] == mixed_spec.source_revision
+
+
+def test_release_identity_is_stamped_on_exactly_the_product_image_services(
+    mixed_doc: Mapping[str, object],
+) -> None:
+    assert _release_identity_is_stamped_on_exactly_the_release(mixed_doc)
+
+
+def test_the_release_identity_check_would_catch_a_stripped_digest(
+    mixed_rendered: str,
+) -> None:
+    """Sensitivity, direction one: a release service that lost its
+    configuration digest must fail the predicate."""
+    marker = f"      {_CONFIGURATION_DIGEST_LABEL}: "
+    assert mixed_rendered.count(marker) >= 1
+    broken = mixed_rendered.replace(
+        marker, f"      {_CONFIGURATION_DIGEST_LABEL}x: ", 1
+    )
+    assert not _release_identity_is_stamped_on_exactly_the_release(
+        yaml.safe_load(broken)
+    )
+
+
+def test_the_release_identity_check_would_catch_a_redis_claiming_the_release(
+    mixed_rendered: str, mixed_spec: ProductDeploymentSpec
+) -> None:
+    """Sensitivity, direction two — the one a presence-only check misses.
+
+    A predicate that merely required the digests on release services would pass
+    a document that stamped them on every container, which is the failure this
+    half exists to catch.
+    """
+    marker = f"      {_SERVICE_KIND_LABEL}: dependency\n"
+    assert mixed_rendered.count(marker) == 1
+    leaked = (
+        f'      {_CONFIGURATION_DIGEST_LABEL}: "{"sha256:" + "0" * 64}"\n'
+        f'      {_MANIFEST_DIGEST_LABEL}: "{mixed_spec.manifest_digest}"\n'
+        f"      {_SOURCE_REVISION_LABEL}: {mixed_spec.source_revision}\n"
+    )
+    broken = mixed_rendered.replace(marker, leaked + marker, 1)
+    assert not _release_identity_is_stamped_on_exactly_the_release(
+        yaml.safe_load(broken)
+    )
+
+
+def test_the_configuration_digest_is_the_canonical_descriptor_document_digest(
+    mixed_doc: Mapping[str, object], mixed_spec: ProductDeploymentSpec
+) -> None:
+    """The label is the value deployment control authorizes, not a lookalike.
+
+    Asserted as an EQUALITY against the canonical document rather than as a
+    shape check, because a `sha256:<64 hex>` regex would pass any digest at all
+    and the whole point is that a controller may compare this label to an
+    approved plan digest with `==`. `refuse_resolved_material=False` mirrors
+    the renderer: it changes no byte of the document, only whether a descriptor
+    that trips the Control boundary check can be rendered at all.
+    """
+    expected = build_canonical_document(
+        mixed_spec, refuse_resolved_material=False
+    ).sha256_digest()
+    labels = mixed_doc["services"]["web"]["labels"]
+    assert labels[_CONFIGURATION_DIGEST_LABEL] == expected
+    # A digest that happened to equal the manifest digest would make the
+    # equality above true for the wrong reason — the fixture's manifest digest
+    # is a constant, and a renderer that emitted it twice would pass.
+    assert expected != mixed_spec.manifest_digest
+
+
+def test_every_release_service_in_one_render_shares_one_configuration_digest(
+    mixed_doc: Mapping[str, object],
+) -> None:
+    """Two services in one file disagreeing about which release they belong to
+    is the failure a per-service recomputation would introduce."""
+    digests = {
+        service["labels"][_CONFIGURATION_DIGEST_LABEL]
+        for service in mixed_doc["services"].values()
+        if service["labels"][_SERVICE_KIND_LABEL] in _RELEASE_BEARING_KINDS
+    }
+    assert len(digests) == 1
+
+
+def test_a_rollback_render_restamps_the_configuration_digest(
+    mixed_doc: Mapping[str, object], mixed_spec: ProductDeploymentSpec
+) -> None:
+    """The digest tracks what is ACTUALLY rendered, image override included.
+
+    This is also the positive control for the digest itself: a renderer that
+    emitted a constant, or that digested the descriptor while ignoring the
+    rollback image, would satisfy every other assertion in this section. During
+    a rollback the file runs an image the descriptor does not name, and a label
+    still reporting the descriptor's own digest would claim a configuration
+    whose image field disagrees with the container beside it.
+    """
+    baseline = mixed_doc["services"]["web"]["labels"][_CONFIGURATION_DIGEST_LABEL]
+    rolled_back = f"registry.example.com/acme/app@sha256:{'9' * 64}"
+    assert rolled_back != mixed_spec.image
+
+    rolled = yaml.safe_load(render_compose(mixed_spec, image=rolled_back))
+    observed = rolled["services"]["web"]["labels"][_CONFIGURATION_DIGEST_LABEL]
+    assert observed != baseline
+    # And it is not merely DIFFERENT: it is the digest of this descriptor at
+    # that image, so a rollback to a previously approved image reproduces that
+    # image's approved digest exactly rather than minting a third value.
+    assert (
+        observed
+        == build_canonical_document(
+            dataclasses.replace(mixed_spec, image=rolled_back),
+            refuse_resolved_material=False,
+        ).sha256_digest()
+    )
+
+
+def test_the_liveness_label_shares_one_block_with_the_identity_labels(
+    mixed_doc: Mapping[str, object],
+) -> None:
+    """A compose mapping keeps only the last of two `labels:` keys, so the
+    liveness path and the identity have to be emitted together or one of them
+    silently disappears. It stays OUTSIDE the identity namespace on purpose: a
+    probe address is not part of a release's identity."""
+    labels = mixed_doc["services"]["worker"]["labels"]
+    assert labels["io.dotmac.health.live.path"] == "/livez"
+    assert _UNIVERSAL_IDENTITY_LABELS <= set(labels)
+
+
+def test_the_identity_labels_are_key_sorted_in_the_rendered_text(
+    mixed_rendered: str,
+) -> None:
+    """Sorted rather than insertion-ordered, because insertion order is a
+    property of the code's shape and `render --check` is a byte comparison — a
+    harmless-looking refactor would otherwise fail every consumer's check."""
+    blocks = re.findall(r"\n    labels:\n((?:      \S+:.*\n)+)", mixed_rendered)
+    assert blocks, "no labels block was rendered, so this proved nothing"
+    for entry in blocks:
+        keys = [line.split(":", 1)[0].strip() for line in entry.strip().splitlines()]
+        assert keys == sorted(keys)

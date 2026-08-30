@@ -45,6 +45,12 @@ services:
     tmpfs:
       - /tmp
     restart: unless-stopped
+    labels:
+      io.dotmac.deployment.environment: reference
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.schema: DeploymentIdentity.v1
+      io.dotmac.deployment.service.kind: telemetry
+      io.dotmac.deployment.service.name: otel-collector
 
   migrate:
     image: "ghcr.io/michaelayoade/dotmac_starter_mt@sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -78,6 +84,15 @@ services:
       - /tmp
     stop_grace_period: 300s
     restart: "no"
+    labels:
+      io.dotmac.deployment.configuration.digest: "sha256:81af03d838c6889700c2ea27ce1d2f415fb0492400cbcf0cb0e3b28d75a62142"
+      io.dotmac.deployment.environment: reference
+      io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.schema: DeploymentIdentity.v1
+      io.dotmac.deployment.service.kind: migration
+      io.dotmac.deployment.service.name: migrate
+      io.dotmac.deployment.source.revision: ac5e439e622ec5adba94cf52f4f961f2c39a2d30
 
   app:
     image: "ghcr.io/michaelayoade/dotmac_starter_mt@sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -131,6 +146,14 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
     labels:
+      io.dotmac.deployment.configuration.digest: "sha256:81af03d838c6889700c2ea27ce1d2f415fb0492400cbcf0cb0e3b28d75a62142"
+      io.dotmac.deployment.environment: reference
+      io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.schema: DeploymentIdentity.v1
+      io.dotmac.deployment.service.kind: release
+      io.dotmac.deployment.service.name: app
+      io.dotmac.deployment.source.revision: ac5e439e622ec5adba94cf52f4f961f2c39a2d30
       io.dotmac.health.live.path: /health/live
 
 networks:

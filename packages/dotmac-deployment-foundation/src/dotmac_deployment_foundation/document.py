@@ -242,12 +242,32 @@ class DeploymentDescriptorDocumentV1:
 
 def build_canonical_document(
     spec: ProductDeploymentSpec,
+    *,
+    refuse_resolved_material: bool = True,
 ) -> DeploymentDescriptorDocumentV1:
     """The canonical document for `spec`.
 
     Same descriptor in, same bytes out. Nothing here reads a clock, an
     environment variable or a filesystem, so the digest is a property of the
     descriptor and this facility version, and of nothing else.
+
+    ``refuse_resolved_material=False`` is for ONE caller: the compose renderer,
+    which stamps this document's digest onto every service it emits as that
+    release's configuration identity. The flag does not change a single byte of
+    the document — :func:`_refuse_resolved_material` only ever raises — so the
+    digest a rendered label carries and the digest Control authorizes are the
+    same value, which is the whole reason a controller may compare them with
+    ``==``.
+
+    The flag is needed because the refusal is a BOUNDARY check about what may
+    leave this facility, not a canonicalization rule. `uvicorn --host 0.0.0.0`
+    in a role's command is an in-container bind, not topology in Git, and it
+    trips the address check; a descriptor that cannot pass that check is still
+    a configuration that has to be identifiable on a running container.
+    Refusing to render it would leave the container with NO identity, which is
+    strictly worse than the thing the refusal guards against.
+
+    Anything that SENDS a document to deployment control takes the default.
     """
     from .policy import ingress_policy_document
 
@@ -262,5 +282,6 @@ def build_canonical_document(
         "ingress_policy": ingress_policy_document(spec),
     }
     canonical = _canonical(content, where="document")
-    _refuse_resolved_material(canonical)
+    if refuse_resolved_material:
+        _refuse_resolved_material(canonical)
     return DeploymentDescriptorDocumentV1(content=canonical)
