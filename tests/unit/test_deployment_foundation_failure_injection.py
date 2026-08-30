@@ -40,6 +40,7 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
     StepFailed,
 )
+from dotmac_deployment_foundation.evidence import ReleaseEvidenceV1, TrustPolicy
 from dotmac_deployment_foundation.provenance import AuthorizationReceipt
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
@@ -145,6 +146,52 @@ stability_window_seconds = 60
 """
 
 
+EVIDENCE_KEY = "test-release-signer"
+EVIDENCE_REPO = "michaelayoade/dotmac_starter_mt"
+
+
+def signed_evidence(**overrides: object) -> dict[str, object]:
+    """A signed, non-fork, protected-ref evidence envelope for the fake host.
+
+    Built through the real `ReleaseEvidenceV1` rather than as a hand-written
+    dict so that a change to the required fields shows up here as a failure
+    instead of these tests quietly exercising a shape the verifier no longer
+    accepts.
+    """
+    fields: dict[str, object] = {
+        "revision": REVISION,
+        "repository": EVIDENCE_REPO,
+        "repository_id": "1001",
+        "head_repository_id": "1001",
+        "ref": "refs/heads/main",
+        "run_id": "1",
+        "workflow": "ci.yml",
+        "conclusion": "success",
+    }
+    fields.update(overrides)
+    document = ReleaseEvidenceV1(**fields).as_document()  # type: ignore[arg-type]
+    return {"document": document, "signature": "valid", "key_id": EVIDENCE_KEY}
+
+
+def evidence_policy() -> TrustPolicy:
+    return TrustPolicy(
+        accepted_key_ids=frozenset({EVIDENCE_KEY}), repository=EVIDENCE_REPO
+    )
+
+
+class AcceptingVerifier:
+    """Verifies the fixture's signature and nothing else.
+
+    Deliberately still checks the signature STRING, so a test that tampers with
+    the envelope gets a refusal rather than a pass — a verifier that returned
+    True unconditionally would make every evidence assertion in this file
+    vacuous.
+    """
+
+    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool:
+        return signature == "valid"
+
+
 TEST_TARGET = "failure-injection-target"
 
 
@@ -201,7 +248,7 @@ class FakeEffects:
     def __init__(self, **overrides: object) -> None:
         self.present = True
         self.labels: dict[str, str] = {"org.opencontainers.image.revision": REVISION}
-        self.evidence: dict[str, str] = {"ci": "passed", "run": "1"}
+        self.evidence: object = signed_evidence()
         self.manifest = MANIFEST_DIGEST
         self.dirty = False
         self.overrides_found: list[str] = []
@@ -341,7 +388,13 @@ def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object
     plan = build_plan(spec, **plan_kwargs)  # type: ignore[arg-type]
     clock = FakeClock()
     executor = Executor(
-        spec, effects, grant_for(spec), sleep=clock.sleep, clock=clock.read
+        spec,
+        effects,
+        grant_for(spec),
+        sleep=clock.sleep,
+        clock=clock.read,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
     )
     return plan, executor.run(plan)
 
@@ -995,6 +1048,8 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
         grant_for(spec, "rollback"),
         sleep=FakeClock().sleep,
         clock=FakeClock().read,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
     )
     outcome = executor.rollback(plan)
     assert outcome.succeeded, outcome.failure
@@ -1074,6 +1129,8 @@ def test_a_rollback_annotates_itself() -> None:
         grant_for(spec, "rollback"),
         sleep=clock.sleep,
         clock=clock.read,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
     ).rollback(plan)
     assert "deployment.rollback" in [item["event"] for item in effects.annotations]
 

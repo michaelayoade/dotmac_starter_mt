@@ -74,6 +74,13 @@ from .errors import (
     UnknownFieldError,
     UnknownSchemaError,
 )
+from .evidence import (
+    RELEASE_EVIDENCE_SCHEMA,
+    ReleaseEvidenceV1,
+    SignatureVerifier,
+    TrustPolicy,
+    accept_release_evidence,
+)
 from .exposure import (
     OWNERSHIP_PREFIX,
     ExposureEffects,
@@ -198,6 +205,10 @@ __all__ = [
     "Assurance",
     "AuditReport",
     "AuthorizationReceipt",
+    "RELEASE_EVIDENCE_SCHEMA",
+    "ReleaseEvidenceV1",
+    "SignatureVerifier",
+    "TrustPolicy",
     "ExecutionGrant",
     "OPERATIONS",
     "BackupHealth",
@@ -296,6 +307,7 @@ __all__ = [
     "build_manifest",
     "build_plan",
     "authorize",
+    "accept_release_evidence",
     "build_provenance",
     "build_receipt",
     "build_recovery_receipt",
