@@ -103,8 +103,27 @@ def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Eff
     """
     if args.provider == PROVIDER_COMPOSE_HOST:
         from .providers.compose_host import ComposeHostEffects
+        from .toolchain import DEFAULT_TOOLS, resolve_tool
 
-        return ComposeHostEffects(spec, Path(args.deploy_dir))
+        # The production constructor, and therefore where the filesystem half
+        # of the tool pinning belongs. `ComposeHostEffects` already refuses a
+        # non-absolute path on its own; this additionally proves the binary at
+        # that path exists, is executable, and cannot be replaced by anyone but
+        # its owner — which needs a real filesystem and so cannot live in a
+        # constructor that unit tests drive with a scripted fake runner.
+        tools = {
+            name: resolve_tool(
+                getattr(args, f"{name}_bin", "") or default, what=f"{name}_bin"
+            )
+            for name, default in DEFAULT_TOOLS.items()
+        }
+        return ComposeHostEffects(
+            spec,
+            Path(args.deploy_dir),
+            docker_bin=tools["docker"],
+            git_bin=tools["git"],
+            pg_dump_bin=tools["pg_dump"],
+        )
     raise SpecError(
         f"unknown provider {args.provider!r}"
     )  # pragma: no cover - unreachable
@@ -936,6 +955,20 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[PROVIDER_COMPOSE_HOST],
         help="the Effects implementation `--execute` runs the plan against",
     )
+
+    for _sub in (deploy, rollback):
+        for _tool in ("docker", "git", "pg_dump"):
+            _sub.add_argument(
+                f"--{_tool.replace('_', '-')}-bin",
+                dest=f"{_tool}_bin",
+                default="",
+                help=(
+                    f"absolute path to the {_tool} binary. Overridable per "
+                    "deployment; the default is absolute on purpose, because a "
+                    "bare name would let PATH choose which binary supplies this "
+                    "deployment's evidence"
+                ),
+            )
 
     return parser
 
