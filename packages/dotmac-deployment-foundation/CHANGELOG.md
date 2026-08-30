@@ -1,5 +1,60 @@
 # Changelog — dotmac-deployment-foundation
 
+## 0.3.0a2 — unreleased, and HELD
+
+The eight property clusters an audit of the closed PR #507 found missing, each
+restored fresh against current main rather than revived from that branch.
+
+**a1 must never be published or adopted.** It was built once, before any of
+this landed, as a bootstrap input only, and is authorized for exactly two
+supervised uses: an isolated recovery proof and the Platform CP bootstrap. It
+cannot close Lane 3, because it predates the execution seam it would be
+certifying.
+
+`authorization.py` — Platform CP authorization at the execution seam.
+`Executor` cannot be CONSTRUCTED without an `ExecutionGrant`, and a grant
+cannot be built outside `authorize()`. `--execute` alone refuses; a caller who
+skips authorization has nothing to pass. Deploy and rollback are separately
+authorized, so one approval can no longer both make a change and erase it.
+
+`launcher.py` — refuses a controller loaded from inside the tree it is
+deploying, and a staged directory on `sys.path`. That directory is the INPUT,
+and an input that supplies its own validator is not an input that was
+validated. It does not claim to verify a compromised interpreter; the strong
+form is the launcher digest compared from outside the process.
+
+`evidence.py` — release evidence must be signed, and must be OURS. The previous
+gate accepted any non-empty file. `repository_id != head_repository_id` refuses
+a fork run, which `all_external_contributors` does not cover: that stops fork
+code EXECUTING, not fork evidence being ADMITTED. No verifier, no policy or an
+empty signer set each refuse rather than degrade.
+
+`toolchain.py` — host binaries are named, not searched for. `docker` and `git`
+are absolute and integrity-checked, including the parent directory, because
+`rename(2)` needs write permission on the directory rather than the file.
+`pg_dump` is deliberately excluded: it runs inside the db container, where the
+host's PATH has no say and the image digest owns its identity.
+
+`ancestry.py` — a deploy that is not provably forward refuses. UNKNOWN and
+UNRELATED refuse alongside ANCESTOR, because an unmeasured ancestry is not a
+forward deploy. `DowngradeOverride` is typed, single-use and names the exact
+revision pair, a reason and a decision; it cannot excuse an UNKNOWN ordering.
+
+`render/compose.py` — `DeploymentIdentity.v1` on every rendered service. A
+controller reads a release's identity off the running object instead of
+inferring it from a mutable tag or project name. The configuration digest is
+the same value deployment control binds an approval to, so the comparison is
+`==` rather than a translation.
+
+`release-facility.yml` — publication is create-only and cannot race itself.
+Keyed on facility AND version, never cancelled in flight, and `--skip-existing`
+is absent and asserted absent: it turns a duplicate into a green no-op.
+
+**The version bump itself changes rendered bytes.** `VERSION` is inside the
+canonical descriptor document, so the configuration digest moves and every
+`DeploymentIdentity.v1` label with it. The rendered assets are re-rendered in
+this change, never hand-edited.
+
 ## 0.3.0a1 — unreleased, and HELD
 
 `PostgresRecoveryBundle.v1` — the artefact a database can actually come back
