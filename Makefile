@@ -60,6 +60,12 @@ credential-baseline: ## Regenerate the credential-lifecycle debt baseline after 
 	poetry run python scripts/credential_lifecycle_sweep.py --fleet-root $(FLEET_ROOT) --write-baseline
 credential-ratchet: ## Run the credential-lifecycle ratchet with full coverage disclosure (siblings need the fleet beside this checkout; the Starter half is enforced by the architecture test)
 	poetry run python scripts/credential_lifecycle_sweep.py --fleet-root $(FLEET_ROOT) --check
+executor-retirement-check: ## Report every product's deployment-entrypoint census against its tree (the Starter half is enforced by the architecture test)
+	poetry run python scripts/executor_retirement.py --check
+executor-retirement-baseline: ## Regenerate the executor-retirement baseline after a receipted retirement (commit the diff in the same change)
+	poetry run python scripts/executor_retirement.py --write-baseline
+executor-retirement-receipt: ## Validate one retirement receipt: make executor-retirement-receipt RECEIPT=path/to/receipt.toml
+	poetry run python scripts/executor_retirement.py --validate-receipt $(RECEIPT)
 publication-check: ## Report every distribution declaring a version nobody can install
 	poetry run python scripts/declared_publication_sweep.py --check
 publication-baseline: ## Regenerate the declared-but-unpublished ledger (state the reason; commit the diff in the same change)
@@ -178,6 +184,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
 	credential-baseline credential-ratchet \
+	executor-retirement-check executor-retirement-baseline executor-retirement-receipt \
 	publication-check publication-baseline module-catalog module-catalog-check \
 	manifest-digest-check manifest-digest-verify manifest-digest-record \
 	product-writer-check \

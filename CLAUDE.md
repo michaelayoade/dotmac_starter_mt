@@ -560,6 +560,16 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     debt, ratcheted two-directionally across every Python entry-point family. —
     `AGENTS.md` rule **42**; ADR-0006 amendment 2026-08-30.
 
+32. A displaced deployment executor retires on PROVED evidence, never on
+    adoption. Seven entry-point families (workflow, script, cron, systemd unit,
+    SSH credential, webhook, manual runbook), absence is never a disposition,
+    `active_executor` has no edge to `retired`, two-directional ratchets per
+    family AND per disposition, and a removal receipt naming two distinct
+    successful controller cycles, every removal class including the credential,
+    the zero-surface guard's sensitivity proof and a PROVED recovery verdict.
+    Products own their receipts; there is no registry here. — `AGENTS.md` rule
+    **45**; ADR-0072; `docs/inventories/executor-retirement.md`.
+
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
 

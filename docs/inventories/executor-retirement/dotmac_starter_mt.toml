@@ -1,0 +1,392 @@
+# The Starter's own entrypoint-family census.
+#
+# The Starter runs the gate it publishes. That is not symmetry for its own
+# sake: a contract whose own repository does not satisfy it is a contract whose
+# first real exercise happens in somebody else's pull request, and this one
+# is about to be handed to ERP and Sub.
+#
+# `revision` is the commit the census was TAKEN at, not a pin. It goes stale by
+# design; what keeps the census true is `reconcile()`, which re-walks the live
+# tree on every run and fails on any artifact the tree holds and this file does
+# not. A stale revision beside a passing reconciliation is a dated observation
+# that still holds. A stale revision beside a FAILING one is the census having
+# drifted, and it says exactly which artifact drifted.
+#
+# Nothing here is retired. The Starter's `scripts/deploy.sh` is `active_executor`
+# and stays that way until the Foundation has two successful controller-owned
+# cycles against a real target — which has not happened for any product.
+
+schema = "ExecutorInventory.v1"
+product = "dotmac_starter_mt"
+revision = "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff"
+
+# The fleet DEPLOYMENT targets a Starter entrypoint must never reach. Declared
+# HERE rather than inferred, because this is what makes
+# `non_production_executor` an enforceable premise instead of an assertion: a
+# rehearsal script that grew a line naming one of these would be refused that
+# verdict on the next run.
+#
+# `registry.dotmac.io` is deliberately NOT in this list, and the reason is
+# worth keeping. It was, on the first run of this sweep against the real tree,
+# and the check fired: `deployment-conformance.yml` installs the published
+# facility from that index, so a verdict of `non_production_executor` was
+# refused for a workflow that reaches no host at all. The list means "a place a
+# deployment LANDS", and a package index is an artifact store, not a deployment
+# target. Widening it to every fleet hostname makes the check fire on reads and
+# teaches reviewers to override it, which is how a premise stops being load-
+# bearing.
+production_targets = [
+  "selfcare.dotmac.io",
+  "erp.dotmac.io",
+  "observability.dotmac.io",
+]
+
+# Every family named, present or absent. A family nobody named is unmonitored,
+# not empty — which is why the parser refuses an inventory that omits one.
+families_present = ["workflow", "script"]
+families_absent = [
+  "cron",
+  "systemd_unit",
+  "ssh_credential",
+  "webhook",
+  "manual_runbook",
+]
+
+# An absence is a POSITIVE CLAIM and needs the observation that established it.
+# Every one below is scoped `repository_tree`, which is the honest limit of what
+# this checkout can establish: the tree holds no member. None of them claims
+# anything about a host, and the coverage block prints that bound on every run
+# rather than letting a clean walk read as a clean estate. The Starter has no
+# deployed host to inspect; a product that does — ERP — owes a `host_observed`
+# record naming the host, and that is precisely the record whose absence let
+# `dotmac-books.service` sit installed and disabled for as long as it did.
+
+[[family_absence]]
+family = "cron"
+scope = "repository_tree"
+observed_at = "2026-08-30"
+observed_by = "michaelayoade"
+method = "walked deploy/cron, deploy/cron.d, cron, cron.d, etc/cron.d; no file"
+
+[[family_absence]]
+family = "systemd_unit"
+scope = "repository_tree"
+observed_at = "2026-08-30"
+observed_by = "michaelayoade"
+method = "walked deploy/systemd, systemd, etc/systemd; no unit, timer or socket"
+
+[[family_absence]]
+family = "ssh_credential"
+scope = "repository_tree"
+observed_at = "2026-08-30"
+observed_by = "michaelayoade"
+method = """
+No tree walk is possible: a deploy key lives in a secret store and a host's
+authorized_keys, and one that appeared in a tree would be a leak. This record
+therefore establishes only that no Starter workflow or script in this tree
+holds a deployment SSH credential, which was read from their `secrets.*`
+references. `probe-host-ssh-key` is held by the exposure rehearsal and belongs
+to a disposable probe host, not to a deployment target.
+"""
+
+[[family_absence]]
+family = "webhook"
+scope = "repository_tree"
+observed_at = "2026-08-30"
+observed_by = "michaelayoade"
+method = """
+No tree walk is possible: the registration lives in the sender's configuration.
+This record establishes only that the Starter exposes no deployment-triggering
+receiver route in this tree. Whether a third party has a webhook pointed at a
+Starter deployment is UNOBSERVED, and unobserved is not absent.
+"""
+
+[[family_absence]]
+family = "manual_runbook"
+scope = "repository_tree"
+observed_at = "2026-08-30"
+observed_by = "michaelayoade"
+method = """
+Walked docs/runbooks, docs/operations, docs/ops and runbooks; none exists. The
+Starter's deployment procedure is stated inside scripts/deploy.sh, which is
+declared as a script rather than duplicated as a runbook. A procedure someone
+follows from memory or from a chat message remains unobservable by any walk.
+"""
+
+# ── workflow ────────────────────────────────────────────────────────────────
+
+[[entrypoint]]
+name = "workflow:ci"
+family = "workflow"
+path = ".github/workflows/ci.yml"
+trigger = "push, pull_request, workflow_dispatch"
+credential = "none"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+Runs Compose services and a migration inside the ephemeral GitHub runner that
+is destroyed with the job. Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "workflow:deployment-conformance"
+family = "workflow"
+path = ".github/workflows/deployment-conformance.yml"
+trigger = "workflow_call (products pin it by commit)"
+credential = "FORGEJO_READ_TOKEN"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+The reusable conformance gate. It installs the published facility and renders
+and audits, inside the caller's runner; it reaches no host. Checked: it names
+no declared production target.
+"""
+
+[[entrypoint]]
+name = "workflow:deployment-adopter"
+family = "workflow"
+path = ".github/workflows/deployment-adopter.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_READ_TOKEN"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+Dispatch-only caller of `deployment-conformance`. It commands no verb of its
+own and INHERITS its callee's, which is why the resolver is transitive: judged
+on its own bytes this file reads as inert.
+"""
+
+[[entrypoint]]
+name = "workflow:deployment-rehearsal"
+family = "workflow"
+path = ".github/workflows/deployment-rehearsal.yml"
+trigger = "workflow_dispatch"
+credential = "none"
+disposition = "non_production_executor"
+targets = ["disposable-rehearsal-host"]
+premise = """
+Drives `scripts/deployment_rehearsal.sh`, which creates and destroys the
+infrastructure it uses. Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "workflow:exposure-rehearsal"
+family = "workflow"
+path = ".github/workflows/exposure-rehearsal.yml"
+trigger = "workflow_dispatch"
+credential = "RUNNER_QUERY_TOKEN"
+disposition = "non_production_executor"
+targets = ["disposable-probe-host"]
+premise = """
+Opens an SSH session to a probe vantage point. That is remote execution and is
+counted as one; the premise is the TARGET, not the absence of the verb.
+Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "workflow:engineering-standards"
+family = "workflow"
+path = ".github/workflows/engineering-standards.yml"
+trigger = "push, pull_request"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "workflow:foundation-candidate"
+family = "workflow"
+path = ".github/workflows/foundation-candidate.yml"
+trigger = "workflow_dispatch"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "workflow:recover-module-release"
+family = "workflow"
+path = ".github/workflows/recover-module-release.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = """
+Publishes a distribution to the index and mutates no deployment target;
+commands no deployment verb, directly or through any in-tree callee.
+"""
+
+[[entrypoint]]
+name = "workflow:release-adapter"
+family = "workflow"
+path = ".github/workflows/release-adapter.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-connector"
+family = "workflow"
+path = ".github/workflows/release-connector.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-contract"
+family = "workflow"
+path = ".github/workflows/release-contract.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-facility"
+family = "workflow"
+path = ".github/workflows/release-facility.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-kernel"
+family = "workflow"
+path = ".github/workflows/release-kernel.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-module"
+family = "workflow"
+path = ".github/workflows/release-module.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:release-ui"
+family = "workflow"
+path = ".github/workflows/release-ui.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
+disposition = "not_an_executor"
+premise = "publishes to the index only; commands no deployment verb"
+
+[[entrypoint]]
+name = "workflow:verify-module-composition"
+family = "workflow"
+path = ".github/workflows/verify-module-composition.yml"
+trigger = "workflow_dispatch"
+credential = "FORGEJO_PUBLISH_TOKEN"
+disposition = "not_an_executor"
+premise = "reads the index to verify composition; commands no deployment verb"
+
+# ── script ──────────────────────────────────────────────────────────────────
+
+[[entrypoint]]
+name = "script:deploy.sh"
+family = "script"
+path = "scripts/deploy.sh"
+trigger = "manual — `make deploy TAG=...`, by an operator on the deploy host"
+credential = "MIGRATION_DATABASE_URL (resolved from the host .env at invocation)"
+disposition = "active_executor"
+targets = ["config:DEPLOY_DIR"]
+note = """
+THE Starter executor, and the one whose retirement this machinery exists for.
+Its target is LATE-BOUND: `DEPLOY_DIR` and the sourced `.env` decide at
+invocation which host and which database it acts on. That is recorded as the
+target rather than a hostname because it is the truth, and because a
+late-bound target is the more dangerous shape — nothing pins what this script
+can reach. The Foundation's `local_copy_retirement` clause names this as the
+cheapest of the three retirements. It is still `active_executor`: nothing has
+been displaced, because no product has run two controller-owned cycles.
+"""
+
+[[entrypoint]]
+name = "script:deployment_rehearsal.sh"
+family = "script"
+path = "scripts/deployment_rehearsal.sh"
+trigger = "manual, and `workflow:deployment-rehearsal`"
+credential = "none"
+disposition = "non_production_executor"
+targets = ["disposable-rehearsal-host"]
+premise = """
+Creates the registry, database and containers it uses and tears them down
+again; its own header states it runs only on disposable infrastructure.
+Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "script:dev-db-init.sh"
+family = "script"
+path = "scripts/dev-db-init.sh"
+trigger = "manual, and the local Compose stack"
+credential = "none"
+disposition = "non_production_executor"
+targets = ["local-developer-compose"]
+premise = """
+Initializes the local development database container. Checked: it names no
+declared production target.
+"""
+
+[[entrypoint]]
+name = "script:collect_probe_evidence.sh"
+family = "script"
+path = "scripts/exposure-rehearsal/collect_probe_evidence.sh"
+trigger = "manual, and `workflow:exposure-rehearsal`"
+credential = "probe-host-ssh-key"
+disposition = "non_production_executor"
+targets = ["disposable-probe-host"]
+premise = """
+Executes remotely over SSH against the probe vantage point the exposure
+rehearsal creates. Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
+name = "script:assert_current_main.sh"
+family = "script"
+path = "scripts/assert_current_main.sh"
+trigger = "release workflows, and manual"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "script:consumer_boot_check.sh"
+family = "script"
+path = "scripts/consumer_boot_check.sh"
+trigger = "release workflows, and manual"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "script:kernel_floor_check.sh"
+family = "script"
+path = "scripts/kernel_floor_check.sh"
+trigger = "release workflows, and manual"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "script:module_floor_check.sh"
+family = "script"
+path = "scripts/module_floor_check.sh"
+trigger = "release workflows, and manual"
+credential = "none"
+disposition = "not_an_executor"
+premise = "commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
+name = "script:open_release_record_pr.sh"
+family = "script"
+path = "scripts/open_release_record_pr.sh"
+trigger = "release workflows, and manual"
+credential = "GITHUB_TOKEN"
+disposition = "not_an_executor"
+premise = "opens a pull request; commands no deployment verb"
