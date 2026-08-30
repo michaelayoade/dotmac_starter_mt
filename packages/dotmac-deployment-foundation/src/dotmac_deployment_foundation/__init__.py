@@ -130,6 +130,13 @@ from .policy import (
     ingress_policy_document,
     public_endpoint_tokens,
 )
+from .ancestry import (
+    PERMITTED_ORDERINGS,
+    DowngradeOverride,
+    Ordering,
+    ReleaseOrdering,
+    refuse_backwards_deploy,
+)
 from .provenance import (
     PROVENANCE_SCHEMA,
     AuthorizationReceipt,
@@ -211,12 +218,16 @@ __all__ = [
     "AuditReport",
     "AuthorizationReceipt",
     "LauncherIdentity",
+    "DowngradeOverride",
     "RELEASE_EVIDENCE_SCHEMA",
     "ReleaseEvidenceV1",
     "SignatureVerifier",
     "TrustPolicy",
     "ExecutionGrant",
     "OPERATIONS",
+    "Ordering",
+    "PERMITTED_ORDERINGS",
+    "ReleaseOrdering",
     "BackupHealth",
     "BackupRecord",
     "BundleComponent",
@@ -317,6 +328,7 @@ __all__ = [
     "build_provenance",
     "identify_launcher",
     "refuse_untrusted_launcher",
+    "refuse_backwards_deploy",
     "build_receipt",
     "build_recovery_receipt",
     "check_all",
