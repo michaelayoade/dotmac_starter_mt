@@ -6,6 +6,75 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+**No version is allocated by this change.** The Kernel/UI release train is
+unresolved, and two lanes competing for one version number is how a consumer
+ends up unable to say which `a99` it pinned. The version for this surface is
+derived from immutable tags when Michael authorizes the release.
+
+### Added
+
+- `dotmac_kernel.credential_lifecycle` — the single owner of HUMAN password
+  credential decisions: provisioning, verification, individually authorized
+  reset completion, and approved cohort force reset. Stateless and
+  storage-neutral: no ORM, no web framework, no provider client, no network
+  import, and every database effect through a typed product port inside the
+  CALLER's transaction.
+  - **Provisioning cannot accept password material.** `provision` has no
+    parameter a secret could arrive through and no return value one could leave
+    through. It generates material from an injectable cryptographic source,
+    hashes it with the kernel's canonical primitive, sets reset-required, and
+    emits a durable RECOVERY INTENT — the subject reaches a usable credential
+    through the product's own proven recovery channel, never through a returned
+    or delivered value. Product-first evidence: `dotmac_sub`'s
+    `reseller_onboarding._create_credential` took a caller-supplied `password`
+    that no supported caller ever passed, and that unused parameter is how one
+    value reached 24 external organisations (removed in Sub PR #2826). Removal
+    is absence; this signature makes the shape unrepresentable.
+  - **Verification returns a typed verdict, never a boolean** — `accepted`,
+    `reset_required`, `invalid`, `locked`, `disabled`. `dotmac_sub` has FOUR
+    verification owners across four files, each re-deriving active, locked and
+    reset-required for itself; a boolean cannot carry the answer, which is why
+    they disagree. The engine NEVER issues a session: HTTP mapping and session
+    issuance stay with the product adapter.
+  - `CredentialResetPlanV1` / `CredentialResetAuthorizationV1` /
+    `CredentialResetReceiptV1` with `CredentialResetPlanDigestV1`, a TYPED
+    digest owned by this module — not a universal kernel digest and not
+    `dotmac-deployment-control`'s. Plans sort their targets canonically, refuse
+    empty, duplicate, malformed, stale and changed cohorts, and are applied all
+    targets or none. Authorization is a separate record and deliberately carries
+    no `approved_by`: `approval_decision_ref` points at the product's own
+    approval record, which owns the actor. Idempotency is checked BEFORE
+    expiry, because returning a stored receipt performs no effect: a false
+    "expired" on work that already happened is how an operator comes to
+    reset a cohort a second time.
+  - Ports: `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`,
+    `PasswordPolicyPort`, `CredentialAuditPort`. Principal kinds, applications,
+    credentials, reason codes and approval decisions are OPAQUE strings the
+    engine never parses or branches on.
+
+### Safety and compatibility
+
+- **NEW behaviour, not extracted behaviour:** `password_needs_rehash` returns
+  zero hits across `dotmac_sub`, `dotmac_erp` and
+  `dotmac_vendor_control_plane`. `CredentialVerificationResult.replacement_hash`
+  — the legacy-hash upgrade requested after a successful verification — is built
+  and tested here for the first time. Calling it ported would be a false
+  product-first claim.
+- Lifecycle state is disclosed only AFTER the password matches, and a missing
+  credential costs the same work as a live one, so neither the verdict nor the
+  timing is an account-existence oracle. This is a deliberate departure from the
+  audited products.
+- The kernel ships NO password policy. A default here would quietly become every
+  product's policy.
+- Nothing is deprecated, moved or removed. `dotmac_kernel.security` keeps its
+  primitives unchanged; the facility is an owner above them, and no existing
+  caller is affected.
+- Not adopted by any product. `dotmac_sub` is the named first adopter and its
+  cutover has not started; the retirement gate is in
+  `docs/inventories/credential-lifecycle-sources.md`.
+
 ## 0.1.0a99 — 2026-08-26
 
 ### Added

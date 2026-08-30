@@ -551,6 +551,15 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     release on one host, `dotmac-deployment-control` owns fleet intent, the
     assembly owns declarative input. — `AGENTS.md` rule **41**; ADR-0070.
 
+32. A human credential lifecycle has ONE owner
+    (`dotmac_kernel.credential_lifecycle`): typed verdicts rather than a
+    boolean, provisioning that cannot be handed material and cannot return it,
+    recovery by durable intent, and cohort force reset as product security
+    authority with a locally-owned typed plan digest. Direct
+    `hash_password`/`verify_password`/`password_needs_rehash` calls are frozen
+    debt, ratcheted two-directionally across every Python entry-point family. —
+    `AGENTS.md` rule **42**; ADR-0006 amendment 2026-08-30.
+
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
 

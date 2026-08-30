@@ -152,6 +152,7 @@ Two rules travel with it:
 | `dotmac_kernel.consent` | `ConsentError`, `filter_eligible`, `is_marketing`, `list_suppressions`, `may_send`, `normalize_address`, `normalize_channel`, `register_marketing_categories`, `register_numeric_channels`, `registered_marketing_categories`, `suppress`, `suppression_reason`, `suppression_reasons_for_addresses`, `unsuppress`, `unsuppress_marketing` |
 | `dotmac_kernel.consent_models` | `REASON_BOUNCE`, `REASON_COMPLAINT`, `REASON_ERASURE`, `REASON_MANUAL`, `REASON_UNSUBSCRIBE`, `SCOPE_ALL`, `SCOPE_MARKETING`, `SUPPRESSION_REASONS`, `SUPPRESSION_SCOPES`, `CommunicationSuppression` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
+| `dotmac_kernel.credential_lifecycle` | `CredentialLifecycle`, `CredentialSubjectRef`, `CredentialSnapshot`, `CredentialVerificationResult`, `CredentialVerificationVerdict`, `CredentialResetTargetV1`, `CredentialResetPlanV1`, `CredentialResetPlanDigestV1`, `CredentialResetAuthorizationV1`, `CredentialResetOutcomeV1`, `CredentialResetReceiptV1`, `CredentialResetCompletionReceiptV1`, `CredentialProvisioningReceiptV1`, `CredentialRecoveryAuthorizationV1`, `CredentialRecoveryIntentV1`, `CredentialSessionRevocationIntentV1`, `CredentialAuditEntryV1`, `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`, `PasswordPolicyPort`, `CredentialAuditPort`, `SecretSource`, `default_secret_source`, `REDACTED`, `CREDENTIAL_LIFECYCLE_SCHEMA_VERSION`, `CredentialLifecycleError` + its subclasses (the single owner of human credential decisions; submodule-only — see "Human credential lifecycle" below) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.session_runtime` | `DatabaseRuntime`, `TenantLookup`, `CANONICAL_TENANT_SETTING` |
 | `dotmac_kernel.db` | `runtime`, `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_scope`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
@@ -1181,6 +1182,82 @@ moving a caller from the first to the second is one identifier.
   not yet record which binding produced it. The contract for that column and
   its revocation operation is written in the module docstring and is a separate
   slice. Global logout is out of scope by design.
+
+### Human credential lifecycle (`dotmac_kernel.credential_lifecycle`)
+
+One owner for what a product does to a HUMAN password credential. Not machine
+credentials (`machine_auth`), not federated identity (`external_identity`,
+`dotmac-auth-oidc`), and not device or service credentials.
+
+**Reach for it when** your application stores a password for a person and
+currently calls `hash_password` / `verify_password` directly from more than one
+place — or from one place that is about to become two.
+
+#### The three properties that are the point
+
+1. **Provisioning cannot accept password material.** `provision(subject, *,
+   reason_code, correlation_ref)` has no parameter a secret could arrive
+   through, and `CredentialProvisioningReceiptV1` has no field one could leave
+   through. The engine generates material from an injectable cryptographic
+   source, hashes it, sets reset-required, persists through YOUR adapter in
+   YOUR transaction, and emits a recovery intent. The generated value reaches
+   no return type, log, exception, `repr`, receipt or audit row. Your subject
+   reaches a usable credential through your recovery channel — which is why a
+   leak has nowhere to come from.
+
+2. **Verification returns a verdict, not a boolean.**
+
+   | Verdict | What the adapter must do |
+   |---|---|
+   | `accepted` | issue a session |
+   | `reset_required` | the password was CORRECT; refuse the session and route to reset |
+   | `invalid` | wrong password, or no such credential — indistinguishable on purpose |
+   | `locked` | refuse; the credential is locked |
+   | `disabled` | refuse; the credential is not active |
+
+   The engine never issues a session and never returns an HTTP status. It also
+   always performs a verification — against throwaway material when no
+   credential exists — and reads lifecycle state only after the password
+   matches, so neither the verdict nor the timing tells an attacker whether an
+   account exists.
+
+   `replacement_hash` is a REQUEST to rewrite a legacy hash after a successful
+   verification. The engine holds the raw material only there, so it is the only
+   place the upgrade can be computed; the write is yours.
+
+3. **A cohort force reset is planned, approved and applied as three steps.**
+   `plan_force_reset(...)` returns a canonical `CredentialResetPlanV1` whose
+   `digest` is a typed `CredentialResetPlanDigestV1` — owned by this module,
+   NOT interchangeable with any other Dotmac plan digest.
+   `CredentialResetAuthorizationV1` is separate and carries no `approved_by`;
+   `approval_decision_ref` points at your approval record, which owns the actor.
+   `apply_force_reset` recalculates the digest, checks the policy identity and
+   expiry, locks and version-checks EVERY target before mutating any of them,
+   and returns an append-only secret-free receipt that doubles as the
+   idempotency record.
+
+   **This is product security authority.** `dotmac-deployment-control` owns
+   fleet deployment intent and must not authorize an account mutation.
+
+#### What you supply
+
+Five ports, all typed, all yours. `CredentialStorePort` (rows, locking and
+writes in the caller's transaction), `SessionRevocationPort` and
+`RecoveryIntentPort` (durable outbox intents, each returning the intent or
+reference it recorded — returning nothing is a refusal, not a warning),
+`PasswordPolicyPort` (the kernel ships none), and `CredentialAuditPort`.
+
+Application, principal kind, principal reference, credential reference, reason
+code, approval policy code and approval decision reference are opaque strings.
+The engine stores, sorts and returns them and never parses, splits, case-folds
+or branches on one — `reseller_user`, `subscriber`, `system_user` and every ERP
+principal are your words, not the kernel's.
+
+#### What it does not do
+
+No transaction of its own (hard rule 8 — "all targets atomically or none" is a
+property of YOUR boundary), no session issuance, no HTTP, no email or SMS, no
+secret store, no network of any kind, and no default password policy.
 
 ## Internal modules and names (do not import)
 
