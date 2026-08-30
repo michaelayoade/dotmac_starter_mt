@@ -207,8 +207,9 @@ FAMILY_BY_NAME: Final[dict[str, Family]] = {f.name: f for f in FAMILIES}
 
 # ── Dispositions ────────────────────────────────────────────────────────────
 #
-# ADR-0018 §4: "grandfathered" and "reviewed and correct" stay DISTINCT
-# mechanisms. Here they are two disjoint sets with two different proofs:
+# ADR-0018 §4 keeps two mechanisms DISTINCT: frozen debt, and a per-item verdict
+# that something is genuinely fine as it stands. Here they are two disjoint sets
+# with two different proofs:
 #
 #   BACKLOG_DISPOSITIONS  — frozen debt. Counted by the ratchet. Shrinks only
 #                           by a recorded baseline change.
@@ -217,8 +218,10 @@ FAMILY_BY_NAME: Final[dict[str, Family]] = {f.name: f for f in FAMILIES}
 #                           a premise the sweep CHECKS, so the verdict cannot
 #                           be bought by copying a comment.
 #
-# The word "grandfathered" appears nowhere in this module or its data, and a
-# test asserts that.
+# The word ADR-0018 uses for the first mechanism is deliberately absent from this
+# module and from its data, and the ratchet test asserts that absence — which is
+# why this comment describes the term rather than spelling it. If the two could
+# be written interchangeably, a baseline entry would start reading as approval.
 
 #: Debt. Every member can, or recently could, act on a production deployment.
 BACKLOG_DISPOSITIONS: Final[dict[str, str]] = {

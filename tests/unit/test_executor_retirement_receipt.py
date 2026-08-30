@@ -440,11 +440,15 @@ def test_an_active_executor_cannot_be_receipted_straight_to_retired() -> None:
 
 
 def test_a_displaced_executor_may_be_receipted() -> None:
+    """SIGNED, unlike the refusal cases below. Those all break something the
+    validator reaches BEFORE the digest check, so they need no valid digest; a
+    receipt that is meant to be admissible needs one, and the first version of
+    this test did not have it — the digest refusal caught it in CI."""
     sweep = _sweep()
     inventory = _inventory("displaced")
     document = _with_digest(_receipt(), inventory)
     assert sweep.validate_receipt(
-        _text(document, sign=False), source="probe.toml", inventory=inventory
+        _text(document, sign=True), source="probe.toml", inventory=inventory
     )
 
 
@@ -509,5 +513,5 @@ def test_an_entrypoint_holding_no_credential_needs_no_credential_removal() -> No
         row for row in document["removals"] if row["class"] != "credential"
     ]
     assert sweep.validate_receipt(
-        _text(document, sign=False), source="probe.toml", inventory=inventory
+        _text(document, sign=True), source="probe.toml", inventory=inventory
     )
