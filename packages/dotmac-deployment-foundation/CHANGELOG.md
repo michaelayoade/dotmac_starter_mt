@@ -57,6 +57,39 @@ the packet there is already DNATed and its `--dport` is the container port. And
 every allowlist ends in a terminal DROP, because one whose last rule is an
 ACCEPT enforces nothing.
 
+### A real `ExposureEffects`, and the preservation property
+
+`providers/exposure_host.ComposeHostExposureEffects` implements
+`ExposureEffects` against a host, so apply, snapshot, re-observation and
+rollback run through `ExposureTransaction` rather than through an operator's
+hands. `dotmac-deploy exposure-apply` is the entry point, DRY RUN unless
+`--execute`.
+
+**A rollback restores what that transaction changed and nothing else.** The
+obvious implementation — snapshot the chain, flush it, replay the snapshot —
+destroys any rule another process added while the transaction was running, and
+both chains this facility writes into (`DOCKER-USER` on IPv4, `INPUT` on IPv6)
+are shared with everything else on the host. On a host carrying other work
+that is a data-loss bug wearing the word *restore*.
+
+So nothing is ever flushed. Every inserted rule carries
+`-m comment --comment dotmac-exposure:<product>`, every removal is a targeted
+`-D` of a rule bearing it, and a rule without it is never touched — whenever it
+appeared. Ownership lives in the rule rather than in a diff against a snapshot,
+because a diff cannot tell "someone else added this" from "we failed to record
+adding this", and those need opposite handling. Deletes replay the rule's own
+arguments, never an index, because an index shifts the moment anything else in
+the chain changes.
+
+The port match is re-derived from `FirewallRule.render()` rather than
+re-implemented, so the rule the provider inserts cannot drift from the rule the
+plan describes — the drift that put a `--dport` on a remapped publish.
+
+Proven, not intended: a foreign rule is planted and asserted to survive,
+including one that appears MID-TRANSACTION, and the suite is checked against
+two sabotaged implementations (flush-and-replay, and index-based deletes) to
+confirm it goes red for both.
+
 ### Execution and proof
 
 `exposure.py` applies the plan and then goes and looks. `ExposureTransaction`
