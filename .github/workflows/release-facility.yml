@@ -75,6 +75,23 @@ on:
 permissions:
   contents: read
 
+# One release of one version at a time, and NEVER cancelled in flight.
+#
+# Two dispatches of the same facility+version could previously run
+# concurrently. Both would pass `assert_current_main.sh` (same tip), both would
+# build, and both would reach `twine upload` — so which bytes ended up as that
+# version was decided by a race, and the tag `verify` writes could name the
+# loser's SHA.
+#
+# `cancel-in-progress: false` rather than true, deliberately. This lane
+# publishes to a registry and writes a tag; cancelling it midway can leave a
+# version published with no tag, which is worse than making the second dispatch
+# wait. The queued run then re-asserts freshness on its own and fails cleanly
+# if main moved.
+concurrency:
+  group: release-facility-${{ inputs.facility }}-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -243,6 +260,15 @@ jobs:
 
       # Publish the SAME bytes `build` inspected and smoked — downloaded,
       # never rebuilt.
+      # A version is CREATE-ONLY. Publishing is the moment a name stops being
+      # ours to redefine: every pin, lockfile and receipt that later cites this
+      # version assumes the bytes behind it never changed.
+      #
+      # `--skip-existing` is deliberately absent, and the guard test asserts it
+      # stays absent. It turns a duplicate into a SILENT SUCCESS, so a re-run
+      # that should have screamed "this version already exists, and the bytes
+      # you just built are not the ones behind it" instead reports a green
+      # publish that published nothing.
       - name: Publish to the Forgejo private index
         env:
           TWINE_USERNAME: ci-publisher
