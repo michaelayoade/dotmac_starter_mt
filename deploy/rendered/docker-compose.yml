@@ -37,6 +37,9 @@ services:
       options:
         max-size: 10m
         max-file: "5"
+    labels:
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.service.kind: auxiliary
     read_only: true
     security_opt:
       - "no-new-privileges:true"
@@ -76,6 +79,9 @@ services:
     user: "10001:10001"
     tmpfs:
       - /tmp
+    labels:
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.service.kind: migration
     stop_grace_period: 300s
     restart: "no"
 
@@ -131,6 +137,13 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
     labels:
+      io.dotmac.deployment.configuration.digest: "sha256:c929b900d11b1cede0d5cafbda63c9e9184b0372a0c9c95295261cddc8fc5e83"
+      io.dotmac.deployment.identity.schema: ApplicationReleaseIdentityV1
+      io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      io.dotmac.deployment.product: dotmac_starter_mt
+      io.dotmac.deployment.release.roster: "{\"app\":1}"
+      io.dotmac.deployment.role: app
+      io.dotmac.deployment.service.kind: release
       io.dotmac.health.live.path: /health/live
 
 networks:
