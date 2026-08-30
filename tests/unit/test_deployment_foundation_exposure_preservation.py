@@ -24,6 +24,7 @@ mid-transaction. Only the first is a refusal.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 from dotmac_deployment_foundation.errors import PreconditionFailed
@@ -116,9 +117,7 @@ FOREIGN = ObservedRule(
 OURS = ObservedRule(
     family="ipv4",
     chain="DOCKER-USER",
-    arguments=(
-        f"-p tcp --ctorigdstport 9001 -m comment --comment {OWNER} -j ACCEPT"
-    ),
+    arguments=f"-p tcp --ctorigdstport 9001 -m comment --comment {OWNER} -j ACCEPT",
 )
 
 #: Unlabelled, but on a port WE publish. Conservatively treated as ours rather
@@ -148,7 +147,7 @@ def _observation(*rules: ObservedRule) -> HostObservation:
 # ── what counts as somebody else's ──────────────────────────────────────────
 
 
-def test_a_labelled_rule_is_ours(spec: ProductDeploymentSpec) -> None:
+def test_a_labelled_rule_is_ours() -> None:
     assert foreign_rules(_observation(OURS), owner=OWNER) == ()
 
 
@@ -160,17 +159,11 @@ def test_an_unlabelled_rule_on_a_port_we_publish_is_not_treated_as_foreign() -> 
     """Either a predecessor of ours or a conflict on our own port. Calling it
     "unrelated host state" would be wrong in both readings, and would make a
     correct rollback of our own leftover look like data loss."""
-    assert (
-        foreign_rules(
-            _observation(UNLABELLED_ON_OUR_PORT), owner=OWNER, managed_ports=(9001,)
-        )
-        == ()
-    )
+    observation = _observation(UNLABELLED_ON_OUR_PORT)
+    assert foreign_rules(observation, owner=OWNER, managed_ports=(9001,)) == ()
     # Sensitivity: without the managed-port exclusion it IS reported, so the
     # exclusion is doing work rather than the rule being invisible anyway.
-    assert foreign_rules(_observation(UNLABELLED_ON_OUR_PORT), owner=OWNER) == (
-        UNLABELLED_ON_OUR_PORT,
-    )
+    assert foreign_rules(observation, owner=OWNER) == (UNLABELLED_ON_OUR_PORT,)
 
 
 def test_only_the_shared_filter_chains_are_examined() -> None:
@@ -221,9 +214,7 @@ class _Effects:
             return self._before if not self._destructive else _observation()
         return self._after if self.calls.count("observe") > 1 else self._before
 
-    def apply_compose(
-        self, command: Sequence[str], *, timeout_seconds: int
-    ) -> None:
+    def apply_compose(self, command: Sequence[str], *, timeout_seconds: int) -> None:
         self.calls.append("apply")
 
     def replace_rules(self, family: str, chain: str, rules: Sequence[object]) -> None:
@@ -235,7 +226,7 @@ class _Effects:
 
 
 def test_a_rollback_that_replays_a_whole_chain_is_refused(
-    spec: ProductDeploymentSpec, tmp_path
+    spec: ProductDeploymentSpec, tmp_path: Path
 ) -> None:
     """The central property. Verification fails, so a rollback runs; the
     destructive provider wipes the shared chain on the way back, and the
@@ -257,7 +248,7 @@ def test_a_rollback_that_replays_a_whole_chain_is_refused(
 
 
 def test_a_preserving_rollback_reports_the_verification_failure_instead(
-    spec: ProductDeploymentSpec, tmp_path
+    spec: ProductDeploymentSpec, tmp_path: Path
 ) -> None:
     """The negative control. Same failing verification, same rollback — but the
     provider keeps the foreign rule, so the error the caller sees is the real
@@ -283,7 +274,7 @@ def test_a_preserving_rollback_reports_the_verification_failure_instead(
 
 
 def test_a_foreign_rule_that_appears_mid_transaction_is_not_a_refusal(
-    spec: ProductDeploymentSpec, tmp_path
+    spec: ProductDeploymentSpec, tmp_path: Path
 ) -> None:
     """Somebody else wrote to a shared chain while we held the lock. That is
     noise about the host's exclusivity, not evidence that we replaced

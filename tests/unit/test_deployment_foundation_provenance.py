@@ -37,6 +37,7 @@ from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.provenance import (
     PROVENANCE_SCHEMA,
     AuthorizationReceipt,
+    DeploymentProvenanceV1,
     build_provenance,
     normalize_digest,
 )
@@ -108,8 +109,10 @@ cpus = "0.5"
 memory = "256m"
 
 [roles.worker]
-queue = "default"
-drain_timeout_seconds = 30
+kind = "celery"
+ping_command = ["celery", "-A", "worker", "inspect", "ping"]
+heartbeat_max_age_seconds = 120
+max_backlog = 1000
 """
 
 _RENDERED = {
@@ -145,7 +148,9 @@ def _receipt(digest: str, **overrides: object) -> AuthorizationReceipt:
     return AuthorizationReceipt(**fields)  # type: ignore[arg-type]
 
 
-def _build(spec: ProductDeploymentSpec, digest: str, **overrides: object):
+def _build(
+    spec: ProductDeploymentSpec, digest: str, **overrides: object
+) -> DeploymentProvenanceV1:
     kwargs: dict[str, object] = {
         "rendered_digests": _RENDERED,
         "image_digests": _IMAGES,
@@ -242,9 +247,8 @@ def test_normalize_digest_accepts_both_forms_and_refuses_a_non_digest() -> None:
     hexdigest = "d" * 64
     assert normalize_digest(hexdigest, where="t") == f"sha256:{hexdigest}"
     assert normalize_digest(f"sha256:{hexdigest}", where="t") == f"sha256:{hexdigest}"
-    assert normalize_digest(f"SHA256:{hexdigest.upper()}", where="t") == (
-        f"sha256:{hexdigest}"
-    )
+    upper = f"SHA256:{hexdigest.upper()}"
+    assert normalize_digest(upper, where="t") == f"sha256:{hexdigest}"
     for bad in ("", "sha256:", "deadbeef", "sha512:" + "d" * 64, "z" * 64):
         with pytest.raises(SpecError):
             normalize_digest(bad, where="t")
@@ -386,9 +390,8 @@ def test_a_rendered_digest_is_normalized_and_a_bad_one_is_refused(
         descriptor_digest,
         rendered_digests={"docker-compose.yml": "e" * 64},
     )
-    assert record.content["rendered_digests"]["docker-compose.yml"] == (
-        "sha256:" + "e" * 64
-    )
+    expected = "sha256:" + "e" * 64
+    assert record.content["rendered_digests"]["docker-compose.yml"] == expected
     with pytest.raises(SpecError):
         _build(
             spec,
@@ -417,12 +420,11 @@ def test_provenance_imports_nothing_outside_the_standard_library() -> None:
             imported += [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and node.level == 0:
             imported.append(node.module or "")
-    outside = [
-        name
-        for name in imported
-        if name.split(".")[0] not in sys.stdlib_module_names
-        and name != "__future__"
-    ]
+    outside = []
+    for name in imported:
+        root = name.split(".")[0]
+        if root not in sys.stdlib_module_names and name != "__future__":
+            outside.append(name)
     assert not outside, f"provenance grew a runtime dependency: {outside}"
 
 
