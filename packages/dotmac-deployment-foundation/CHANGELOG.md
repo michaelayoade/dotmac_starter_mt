@@ -71,6 +71,49 @@ exists.
 
 ### Also in 0.3.0a1
 
+`DeploymentIdentity.v1` — every rendered Compose service now carries
+`io.dotmac.deployment.*` labels: the product, the environment, the compose
+service name and its KIND (`release` | `migration` | `dependency` |
+`telemetry`), plus — on the services that run the product's own image — the
+manifest digest, the configuration digest and the source revision.
+
+A controller that cannot read a release's identity off the running object has
+to infer it, and the two things available to infer from are both wrong. An
+image TAG is mutable, which is the reason every other reference in this
+facility is a digest. A compose PROJECT name is an operator's `-p` flag or the
+directory the file happens to sit in. Neither is an authorized identity, and a
+controller that reconciles against an inferred one reconciles the wrong release
+confidently.
+
+The configuration digest is the CANONICAL DESCRIPTOR DOCUMENT's digest — the
+same value `dotmac-deployment-control` binds an approval to — so a controller
+compares the label to an approved plan digest with `==` rather than translating
+between two spellings of one value. It is taken over the descriptor as actually
+rendered, image override included, so a rollback restamps it and a rollback to
+a previously approved image reproduces that image's approved digest exactly. It
+deliberately is NOT a digest of the rendered compose file: the label lives
+inside the file it would describe.
+
+Consequence worth knowing: the canonical document carries the exact facility
+version, so a Foundation upgrade changes the configuration digest and therefore
+the rendered bytes, and `render --check` fails until the assets are
+re-rendered. That is intended — the version is in the digest precisely because
+a renderer upgrade can change what a descriptor word MEANS.
+
+`build_canonical_document` gains `refuse_resolved_material=False` for that one
+caller. The flag changes no byte of the document — the refusal only ever
+raises — but the refusal is a boundary check about what may be SENT to Control
+rather than a canonicalization rule, and a descriptor it trips (an in-container
+`uvicorn --host 0.0.0.0` is enough) must still be renderable. A container with
+no identity is strictly worse than a descriptor Control would want edited.
+
+Auxiliary services are labelled but NOT stamped with the release: a Redis or a
+vendor collector is recreated on its own schedule and takes no part in the
+release, so making one answer "yes" to "are you running release X" would be a
+confident wrong answer rather than a missing one. The migration service IS
+stamped — it runs the product image at this revision and is the release's first
+effect on the database.
+
 `IngressPolicy.v1` — the typed exposure contract, and the non-mutating
 projection that makes an exposure authorizable.
 

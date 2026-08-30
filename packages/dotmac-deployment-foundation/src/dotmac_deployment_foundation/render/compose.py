@@ -49,6 +49,28 @@ same thing.
   than a string position that can — see `_published_port_lines` for the
   IPv6 `docker-proxy` failure that forced it.
 
+## Deployment identity, stamped on every service
+
+Every service carries `io.dotmac.deployment.*` labels naming the product, the
+environment, the compose service and what KIND of thing it is; the services
+that run the product's own image carry the manifest digest, the configuration
+digest and the source revision as well.
+
+The labels exist because a controller that cannot read a release's identity
+off the running object has to infer it, and the two things available to infer
+from are both wrong. An image TAG is mutable — the same tag names different
+bytes on different days, which is exactly why this facility pins a digest
+everywhere else. A compose PROJECT name is an operator's `-p` flag or the
+directory the file happens to sit in; it is renamed by moving a checkout.
+Neither is an authorized identity, and a controller that reconciles against an
+inferred one reconciles the wrong release confidently.
+
+The labels are also written by the RENDERER rather than by whatever performed
+the deployment, so the identity travels with the file. A rendered compose file
+copied to a host and started by hand carries the same identity as one the
+engine deployed — and `render --check` proves the labels on a host match the
+descriptor, which it could not do for a value the deploy step injected.
+
 ## Assumptions this renderer makes beyond the descriptor
 
 `ProductDeploymentSpec` deliberately leaves some things to the renderer (see
@@ -80,11 +102,13 @@ reviewer can tell a genuine descriptor gap from a rendering decision:
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from .. import ingress
+from ..document import build_canonical_document
 from ..errors import SpecError
 from ..spec import (
     SCHEMA,
@@ -194,6 +218,49 @@ _LOG_MAX_FILE = "5"
 _NO_NEW_PRIVILEGES = "no-new-privileges:true"
 _LIVE_LABEL = "io.dotmac.health.live.path"
 
+# ── the deployment identity vocabulary ──────────────────────────────────────
+#
+# One namespace, versioned by a schema label of its own, because a reader that
+# cannot tell WHICH vocabulary it is reading has to guess what a missing key
+# means — "this release predates the key" and "this release does not have that
+# property" are different answers and a controller must not conflate them.
+#
+# Every key is `<prefix>.<group>.<leaf>` and no key is also a prefix of another
+# key. Docker keeps labels flat, so this costs nothing here, but a collector
+# that projects labels into a tree (an OTel resource, a Prometheus relabel set)
+# cannot represent `x.service` holding a string while `x.service.kind` holds
+# another — so `service.name` it is, rather than a bare `service`.
+_IDENTITY_PREFIX = "io.dotmac.deployment"
+_IDENTITY_SCHEMA = "DeploymentIdentity.v1"
+
+_SCHEMA_LABEL = f"{_IDENTITY_PREFIX}.schema"
+_PRODUCT_LABEL = f"{_IDENTITY_PREFIX}.product"
+_ENVIRONMENT_LABEL = f"{_IDENTITY_PREFIX}.environment"
+_SERVICE_NAME_LABEL = f"{_IDENTITY_PREFIX}.service.name"
+_SERVICE_KIND_LABEL = f"{_IDENTITY_PREFIX}.service.kind"
+_MANIFEST_DIGEST_LABEL = f"{_IDENTITY_PREFIX}.manifest.digest"
+_CONFIGURATION_DIGEST_LABEL = f"{_IDENTITY_PREFIX}.configuration.digest"
+_SOURCE_REVISION_LABEL = f"{_IDENTITY_PREFIX}.source.revision"
+
+# What a service IS, which is not derivable from its name: `migrate` is a
+# convention, `otel-collector` is a convention, and a product free to name a
+# role `migrator` would defeat both. Declared here so a controller selects on a
+# label rather than on a string it hopes nobody renamed.
+_KIND_RELEASE = "release"
+_KIND_MIGRATION = "migration"
+_KIND_DEPENDENCY = "dependency"
+_KIND_TELEMETRY = "telemetry"
+
+# The kinds that run the PRODUCT's own image, and therefore the only kinds that
+# may carry a release identity. A Redis or a vendor collector is recreated on
+# its own schedule and takes no part in the release; stamping this release's
+# manifest digest on one would make a container that is not part of the release
+# answer "yes" to "are you running release X", which is the exact confusion
+# these labels exist to remove. The migration service is in, not out: it runs
+# the product image at this revision and is the release's first effect on the
+# database, so a controller asking what applied a schema change gets an answer.
+_RELEASE_BEARING_KINDS = frozenset({_KIND_RELEASE, _KIND_MIGRATION})
+
 # `migrate` runs DDL under the one credential with the widest database grant
 # in the whole deployment; it gets a hardened, bounded envelope of its own
 # rather than inheriting a role's, because it is not a role (see module
@@ -253,6 +320,132 @@ def _image_reference(spec: ProductDeploymentSpec) -> str:
     successful rollback that changed nothing.
     """
     return _IMAGE_OVERRIDE[-1] if _IMAGE_OVERRIDE else spec.image
+
+
+# ── deployment identity ─────────────────────────────────────────────────────
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Identity:
+    """The identity every service in one render shares.
+
+    Built ONCE per render and passed down, rather than recomputed per service:
+    the configuration digest walks the whole descriptor, and a per-service
+    recomputation would be both wasteful and — far worse — a place where two
+    services in one file could disagree about which release they belong to.
+    """
+
+    product: str
+    environment: str
+    manifest_digest: str
+    configuration_digest: str
+    source_revision: str
+
+
+def _configuration_digest(spec: ProductDeploymentSpec) -> str:
+    """`sha256:<hex>` naming the configuration this file was rendered from.
+
+    Deliberately the CANONICAL DESCRIPTOR DOCUMENT's digest and not something
+    this renderer invented: that document is what `dotmac-deployment-control`
+    binds an approval to, so the value stamped on a container is the same value
+    an approval names and the comparison is an `==` rather than a translation.
+    A second, renderer-private digest of "roughly the same thing" would be the
+    two-spellings-of-one-value failure `digest.py` exists to prevent.
+
+    It cannot be a digest of the rendered compose file, which is the shape a
+    reader expects and the one thing that cannot work: the label lives inside
+    the file it would be describing, so the value would have to contain its own
+    hash. `render --check` already digests the rendered bytes; this answers the
+    different question of what the bytes were rendered FROM.
+
+    The digest is taken over the descriptor as ACTUALLY RENDERED, image
+    override included. During a rollback the file runs an image the descriptor
+    does not name, and a label reporting the descriptor's own digest would
+    claim a configuration whose image field disagrees with the container next
+    to it. Substituting the effective image means a rollback to a previously
+    approved image reproduces that image's approved digest exactly, and a
+    rollback to anything else is visibly not an approved configuration — both
+    of which are true statements, which the unsubstituted version is not.
+
+    Consequence worth knowing before it surprises somebody: the canonical
+    document carries the exact facility version (`document.py` rule 5), so
+    upgrading `dotmac-deployment-foundation` changes this value and therefore
+    the rendered bytes. `render --check` fails until the assets are
+    re-rendered. That is the intended behaviour rather than a cost of it — the
+    version is in the digest precisely because a renderer upgrade can change
+    what a descriptor word MEANS, and a running container claiming an identity
+    minted by a different renderer is the claim being avoided.
+    """
+    effective = _image_reference(spec)
+    subject = (
+        spec if effective == spec.image else dataclasses.replace(spec, image=effective)
+    )
+    # `refuse_resolved_material=False`: see `build_canonical_document`. The
+    # refusal is about what may be SENT to deployment control and changes no
+    # byte of the document, so the digest is identical either way — but a
+    # descriptor it trips (an in-container `--host 0.0.0.0` is enough) must
+    # still be renderable, and a container with no identity is worse than a
+    # container whose descriptor Control would want edited.
+    return build_canonical_document(
+        subject, refuse_resolved_material=False
+    ).sha256_digest()
+
+
+def _identity(spec: ProductDeploymentSpec) -> _Identity:
+    return _Identity(
+        product=spec.product,
+        environment=spec.environment,
+        manifest_digest=spec.manifest_digest,
+        configuration_digest=_configuration_digest(spec),
+        source_revision=spec.source_revision,
+    )
+
+
+def _identity_labels(
+    identity: _Identity,
+    *,
+    service: str,
+    kind: str,
+    extra: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Every label one service carries, as a mapping.
+
+    `environment` is omitted rather than emitted empty when the descriptor
+    declares none: a key present with an empty value reads as "deployed to the
+    environment named ''", and an absent key reads as "this descriptor does not
+    say", which is the true statement. Every other key here is always
+    derivable, so an absent one is a renderer bug rather than a descriptor
+    silence.
+    """
+    labels = {
+        _SCHEMA_LABEL: _IDENTITY_SCHEMA,
+        _PRODUCT_LABEL: identity.product,
+        _SERVICE_NAME_LABEL: service,
+        _SERVICE_KIND_LABEL: kind,
+    }
+    if identity.environment:
+        labels[_ENVIRONMENT_LABEL] = identity.environment
+    if kind in _RELEASE_BEARING_KINDS:
+        labels[_MANIFEST_DIGEST_LABEL] = identity.manifest_digest
+        labels[_CONFIGURATION_DIGEST_LABEL] = identity.configuration_digest
+        labels[_SOURCE_REVISION_LABEL] = identity.source_revision
+    labels.update(extra or {})
+    return labels
+
+
+def _labels_block(level: int, labels: Mapping[str, str]) -> list[str]:
+    """The `labels:` mapping, key-sorted so the render stays byte-stable.
+
+    Sorted rather than insertion-ordered because the callers build the mapping
+    from several places (identity here, a liveness path there) and insertion
+    order is then a property of the code's shape rather than of the
+    descriptor — the kind of thing a harmless refactor changes, turning a
+    no-op into a `render --check` failure.
+    """
+    lines = [_line(level, "labels:")]
+    for key in sorted(labels):
+        lines.append(_line(level + 1, f"{key}: {_scalar(labels[key])}"))
+    return lines
 
 
 def _network_name(spec: ProductDeploymentSpec) -> str:
@@ -621,7 +814,7 @@ def _resource_lines(
 # ── the migrate service ──────────────────────────────────────────────────────
 
 
-def _migrate_service(spec: ProductDeploymentSpec) -> list[str]:
+def _migrate_service(spec: ProductDeploymentSpec, identity: _Identity) -> list[str]:
     """The one-shot DDL service. `restart: "no"` on purpose: a migration
     that fails must stay failed and visible, never silently retried into a
     crash loop that keeps holding the schema lock."""
@@ -660,13 +853,21 @@ def _migrate_service(spec: ProductDeploymentSpec) -> list[str]:
         )
     )
     lines.append(_line(body, f"restart: {_scalar('no')}"))
+    lines.extend(
+        _labels_block(
+            body,
+            _identity_labels(identity, service="migrate", kind=_KIND_MIGRATION),
+        )
+    )
     return lines
 
 
 # ── a runtime role's service ─────────────────────────────────────────────────
 
 
-def _role_service(spec: ProductDeploymentSpec, role: Role) -> list[str]:
+def _role_service(
+    spec: ProductDeploymentSpec, role: Role, identity: _Identity
+) -> list[str]:
     host_network = any(exc.kind == "host_network" for exc in role.security.exceptions)
     body = 2
 
@@ -719,9 +920,20 @@ def _role_service(spec: ProductDeploymentSpec, role: Role) -> list[str]:
     )
     lines.append(_line(body, "restart: unless-stopped"))
 
-    if role.live is not None:
-        lines.append(_line(body, "labels:"))
-        lines.append(_line(body + 1, f"{_LIVE_LABEL}: {_scalar(role.live.path)}"))
+    # The liveness path joins the identity labels in ONE block rather than
+    # getting a second `labels:` key of its own — a compose mapping with two
+    # `labels:` keys silently keeps the last one, so the two would not coexist.
+    # It stays outside the `io.dotmac.deployment.*` namespace on purpose: it is
+    # a probe address a collector reads, not part of the release's identity.
+    live = {_LIVE_LABEL: role.live.path} if role.live is not None else {}
+    lines.extend(
+        _labels_block(
+            body,
+            _identity_labels(
+                identity, service=role.code, kind=_KIND_RELEASE, extra=live
+            ),
+        )
+    )
 
     return lines
 
@@ -768,7 +980,9 @@ def _volumes_section(spec: ProductDeploymentSpec) -> list[str]:
 
 
 def _dependency_service(
-    spec: ProductDeploymentSpec, dependency: ExternalDependency
+    spec: ProductDeploymentSpec,
+    dependency: ExternalDependency,
+    identity: _Identity,
 ) -> list[str]:
     """A dependency this deployment RUNS, as a Compose service.
 
@@ -826,10 +1040,16 @@ def _dependency_service(
     lines.extend(_list_block(body, "networks", [_scalar(_network_name(spec))]))
     lines.extend(_logging_lines(body))
     lines.append(_line(body, "restart: unless-stopped"))
+    lines.extend(
+        _labels_block(
+            body,
+            _identity_labels(identity, service=dependency.code, kind=_KIND_DEPENDENCY),
+        )
+    )
     return lines
 
 
-def _collector_service(spec: ProductDeploymentSpec) -> list[str]:
+def _collector_service(spec: ProductDeploymentSpec, identity: _Identity) -> list[str]:
     """The OTel collector, when the deployment declares one.
 
     Rendered as an ordinary service and NOT as a role: it runs somebody else's
@@ -874,6 +1094,12 @@ def _collector_service(spec: ProductDeploymentSpec) -> list[str]:
     tmpfs_mount = "/tmp"  # noqa: S108  # nosec B108 -- a rendered mount path
     lines.extend(_list_block(body, "tmpfs", [_scalar(tmpfs_mount)]))
     lines.append(_line(body, "restart: unless-stopped"))
+    lines.extend(
+        _labels_block(
+            body,
+            _identity_labels(identity, service="otel-collector", kind=_KIND_TELEMETRY),
+        )
+    )
     return lines
 
 
@@ -896,16 +1122,21 @@ def render_compose(spec: ProductDeploymentSpec, *, image: str = "") -> str:
 
 
 def _render_compose_body(spec: ProductDeploymentSpec) -> str:
+    # Built here, once, so every service in this file agrees about which
+    # release it belongs to — and inside the `_IMAGE_OVERRIDE` window, because
+    # the configuration digest is taken over the image actually rendered.
+    identity = _identity(spec)
     blocks = [
-        _dependency_service(spec, dependency)
+        _dependency_service(spec, dependency, identity)
         for dependency in sorted(spec.managed_dependencies, key=lambda d: d.code)
     ]
-    collector = _collector_service(spec)
+    collector = _collector_service(spec, identity)
     if collector:
         blocks.append(collector)
-    blocks.append(_migrate_service(spec))
+    blocks.append(_migrate_service(spec, identity))
     blocks.extend(
-        _role_service(spec, role) for role in sorted(spec.roles, key=lambda r: r.code)
+        _role_service(spec, role, identity)
+        for role in sorted(spec.roles, key=lambda r: r.code)
     )
 
     lines = _header(spec)
