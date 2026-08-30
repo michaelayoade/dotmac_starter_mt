@@ -317,6 +317,55 @@ def cmd_restore_rehearsal(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_recovery_bundle(args: argparse.Namespace) -> int:
+    """Describe the bundle a proved recovery needs, or adjudicate one in hand.
+
+    With no `--manifest` this PRINTS the contract: every component, what its
+    digest covers, and what its absence means. With one, it reads the manifest
+    and either produces the ordered restore procedure or refuses — and the
+    refusal an operator will actually meet is "this is a database-only dump".
+    """
+    from .recovery import COMPONENTS, REQUIRED_COMPONENTS, load_manifest, restore_plan
+
+    spec = _load(args.descriptor)
+    if spec.database is None:
+        print(
+            "the descriptor declares no [database] contract, so there is nothing "
+            "to check a recovery against. A product cannot prove a restore "
+            "without first saying which roles, schemas and isolation invariants "
+            "its database has",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+
+    if not args.manifest:
+        print(f"recovery bundle contract for {spec.product}")
+        print(f"  postgres major   {spec.database.postgres_major}")
+        print(f"  declared roles   {[r.name for r in spec.database.roles]}")
+        print(f"  invariants       {[i.code for i in spec.database.isolation]}")
+        print(f"  tablespaces      {spec.database.tablespaces}")
+        print("  components:")
+        for component in REQUIRED_COMPONENTS:
+            detail = COMPONENTS[component]
+            print(f"    {component.value}")
+            print(f"      digest covers  {detail.covers}")
+            print(f"      absent means   {detail.absent_means}")
+        return EXIT_OK
+
+    manifest = load_manifest(Path(args.manifest).read_bytes())
+    steps = restore_plan(spec, manifest)
+    print(f"bundle {manifest.sha256_digest()}")
+    print(f"  product          {manifest.product}")
+    print(f"  postgres major   {manifest.postgres_major}")
+    print(f"  role closure     {sorted(manifest.role_closure)}")
+    print(f"  migration heads  {list(manifest.migration_heads)}")
+    print("  restore procedure:")
+    for step in steps:
+        print(f"    {step.order:>2}. {step.what}")
+        print(f"        refuses: {step.refuses}")
+    return EXIT_OK
+
+
 def cmd_observe(args: argparse.Namespace) -> int:
     from .telemetry import RESOURCE_ATTRIBUTES, resource_attributes
 
@@ -678,6 +727,19 @@ def build_parser() -> argparse.ArgumentParser:
         "restore-rehearsal", cmd_restore_rehearsal, "show the restore proof required"
     )
     rehearse.add_argument("--dataset")
+
+    bundle = add(
+        "recovery-bundle",
+        cmd_recovery_bundle,
+        "show the recovery-bundle contract, or adjudicate a manifest",
+    )
+    bundle.add_argument(
+        "--manifest",
+        help=(
+            "a PostgresRecoveryBundle.v1 manifest to check. A custom-format dump "
+            "offered here is refused: it is a data export, not a bundle"
+        ),
+    )
 
     plan = add("plan", cmd_plan, "build and print the ordered deployment plan")
     plan.add_argument("--previous-image")

@@ -2,6 +2,57 @@
 
 ## 0.3.0a1 — unreleased, and HELD
 
+`PostgresRecoveryBundle.v1` — the artefact a database can actually come back
+from, and the reason `Assurance.PROVED` is now reachable at all.
+
+`pg_dump --dbname` captures GRANTs and RLS policies and never captures the roles
+they name. A `pg_restore` of Vendor CP's newest production backup into a
+disposable PostgreSQL 16 container exited 1 with 114 missing-role errors from a
+TOC holding 55 ACL entries, 26 POLICY entries and zero role objects — and left
+45 tables, 23 of 26 policies and 16 RLS-enabled tables behind. Under ADR-0023
+the revocation IS the plane isolation, so that database reads as recovered and
+is not.
+
+`recovery.py` adds the bundle: thirteen required components, each with a digest
+and a statement of what it covers — dump, role and membership closure DERIVED
+from the source catalog, role attributes and PostgreSQL 16 per-membership
+INHERIT, ownership, default/schema/object privileges, row- and column-level ACL
+evidence, RLS ENABLE and FORCE, extensions, an explicit tablespace decision,
+migration heads. `load_manifest` refuses a database-only dump on the artefact's
+shape, before a target exists; that refusal catches a plausible WHOLE, which is
+the shape that fools an operator.
+
+No passwords, no hashes, no superusers: `RoleFact` has no field a verifier could
+occupy and refuses `superuser`. `pg_dumpall --globals-only` is named as the
+wrong flag — it emits SCRAM verifiers — and `--no-role-passwords` as the right
+one.
+
+`[database]` in the descriptor declares typed roles, expected schemas and
+isolation invariants. A declaration is a CLAIM: nothing turns it into role DDL,
+`restore_plan` refuses a bundle with no role closure even when the descriptor
+names every role, and an AST guard proves the package contains no role DDL
+anywhere.
+
+`EffectivePrivilegeFact` — isolation is proven with `has_table_privilege` OR
+`has_any_column_privilege` across all seven table privileges, in both
+directions. `information_schema.table_privileges` sees only direct grants and
+reports "fully revoked" for a role holding the privilege through PUBLIC, an
+inherited membership, or a column.
+
+`RESTORE_PROCEDURE` — ten ordered steps. `adjudicate_restore` DESTROYS a target
+after any non-zero restore, and after a zero exit carrying missing-role errors.
+`RecoveryReceiptV1` is value-free and carries the restore wall clock.
+
+**Behaviour change.** `providers/compose_host.py` refuses its own historical
+`("--no-owner", "--no-privileges")` default for any product declaring
+`[database]`; that default gave every adopting product a dump with no ownership
+and no grants in it. `BackupRecord` gains `artefact_class`, defaulting to
+`data_export`, and a `data_export` may not claim RESTORABLE or PROVED.
+`retention_keep` now also keeps an aged data export until a newer PROVED bundle
+exists.
+
+### Also in 0.3.0a1
+
 `IngressPolicy.v1` — the typed exposure contract, and the non-mutating
 projection that makes an exposure authorizable.
 
