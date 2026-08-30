@@ -890,6 +890,9 @@ def test_a_wrong_approval_policy_identity_is_refused() -> None:
 
 
 def test_an_expired_plan_is_refused() -> None:
+    """Paired with the retry-after-expiry test below: expiry still refuses work
+    that has not happened, so moving the idempotency lookup in front of it
+    cannot be mistaken for removing the check."""
     engine, *_ = seeded_cohort("a")
     plan = plan_for("a", expires_at=NOW - timedelta(minutes=1))
     with pytest.raises(CredentialAuthorizationError, match="expired"):
@@ -978,6 +981,23 @@ def test_a_retry_of_the_same_authorized_plan_returns_the_stored_receipt() -> Non
     assert store.writes == writes_after_first
     assert len(sessions.intents) == 2
     assert len(recovery.emitted) == 2
+
+
+def test_a_retry_after_the_window_closed_still_returns_the_receipt() -> None:
+    """Idempotency is checked BEFORE expiry, because returning a stored receipt
+    performs no effect. A false "expired" on work that already happened is how
+    an operator comes to reset a cohort a second time."""
+    clock = {"now": NOW}
+    engine, store, sessions, recovery, audit = build(clock=lambda: clock["now"])
+    for ref in ("a", "b"):
+        seed(store, subject(ref), f"material-{ref}")
+    plan = plan_for("a", "b", expires_at=NOW + timedelta(minutes=5))
+    authorization = authorization_for(plan)
+    first = engine.apply_force_reset(plan, authorization)
+
+    clock["now"] = NOW + timedelta(hours=2)
+    assert engine.apply_force_reset(plan, authorization) is first
+    assert len(store.writes) == 2, "the retry must perform no further work"
 
 
 def test_a_concurrent_credential_change_between_plan_and_apply_is_caught() -> None:

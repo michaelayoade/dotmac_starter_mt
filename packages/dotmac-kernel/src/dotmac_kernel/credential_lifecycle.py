@@ -944,15 +944,20 @@ class CredentialLifecycle:
                 "the authorization names a different approval policy than the "
                 "plan it authorizes"
             )
+        # Idempotency is checked BEFORE expiry, and the order is deliberate.
+        # Returning a stored receipt performs no effect, so a worker retrying
+        # after the approval window closed should get the evidence rather than a
+        # refusal — a false "expired" on work that already happened is how an
+        # operator comes to re-plan and reset a cohort a second time.
+        existing = self.audit.find_receipt(digest)
+        if existing is not None:
+            return existing
+
         if plan.expires_at <= now:
             raise CredentialAuthorizationError(
                 "the authorized plan has expired; re-plan against current "
                 "credential versions rather than extending an approval"
             )
-
-        existing = self.audit.find_receipt(digest)
-        if existing is not None:
-            return existing
 
         # Phase 1 — lock and check EVERY target before mutating any of them.
         locked: list[tuple[CredentialResetTargetV1, CredentialSnapshot]] = []

@@ -45,7 +45,10 @@ derived from immutable tags when Michael authorizes the release.
     empty, duplicate, malformed, stale and changed cohorts, and are applied all
     targets or none. Authorization is a separate record and deliberately carries
     no `approved_by`: `approval_decision_ref` points at the product's own
-    approval record, which owns the actor.
+    approval record, which owns the actor. Idempotency is checked BEFORE
+    expiry, because returning a stored receipt performs no effect: a false
+    "expired" on work that already happened is how an operator comes to
+    reset a cohort a second time.
   - Ports: `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`,
     `PasswordPolicyPort`, `CredentialAuditPort`. Principal kinds, applications,
     credentials, reason codes and approval decisions are OPAQUE strings the
