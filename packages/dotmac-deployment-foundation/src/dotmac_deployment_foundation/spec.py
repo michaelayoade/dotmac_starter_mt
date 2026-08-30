@@ -42,12 +42,55 @@ import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from . import ingress as ingress_contract
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
 from .secrets_guard import require_no_secrets
+
+
+def _contained_relative_path(value: str, *, key: str, where: str) -> str:
+    """A descriptor-supplied path that must stay inside the staged deploy root.
+
+    The descriptor is reviewed input, but it is not *trusted* input: it travels
+    with the release and is the thing an attacker edits if they can edit
+    anything. A path out of it is later joined to the deploy directory and
+    read, so it decides WHICH FILE answers a gate — and a gate that can be
+    pointed at a file of the writer's choosing is not a gate.
+
+    Refused here, at parse, so the descriptor fails loudly on the way in rather
+    than resolving to something surprising later. `providers.compose_host`
+    repeats the containment check after resolving, because only that side can
+    see a symlink planted inside the deploy directory; this side cannot, and a
+    check that can only be made late is still worth making early where it names
+    the offending key.
+    """
+    if not value:
+        raise SpecError(f"{key!r} must not be empty", where=where)
+    if "\\" in value:
+        raise SpecError(
+            f"{key!r} must be a POSIX path with `/` separators, got {value!r}. "
+            "A backslash is a literal filename character on the deploy host, "
+            "not a separator",
+            where=where,
+        )
+    path = PurePosixPath(value)
+    if path.is_absolute():
+        raise SpecError(
+            f"{key!r} must be relative to the deploy directory, got {value!r}. "
+            "An absolute path ignores the staged release entirely",
+            where=where,
+        )
+    if ".." in path.parts:
+        raise SpecError(
+            f"{key!r} must not traverse out of the deploy directory, got "
+            f"{value!r}. A `..` component lets a file outside the staged "
+            "release answer a gate about the staged release",
+            where=where,
+        )
+    return value
+
 
 if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside the method
     from .document import DeploymentDescriptorDocumentV1
@@ -2034,7 +2077,9 @@ class ProductDeploymentSpec:
         assembly = root.table("assembly")
         if assembly is None:  # pragma: no cover - `table()` raises first
             raise SpecError("assembly table is missing", where=source)
-        manifest_path = assembly.str_("manifest_path")
+        manifest_path = _contained_relative_path(
+            assembly.str_("manifest_path"), key="manifest_path", where=source
+        )
         manifest_digest = assembly.str_(
             "manifest_digest", pattern=re.compile(r"^sha256:[0-9a-f]{64}$")
         )

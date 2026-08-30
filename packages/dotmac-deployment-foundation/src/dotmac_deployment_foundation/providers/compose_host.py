@@ -676,7 +676,18 @@ class ComposeHostEffects:
         executor treats as a refusal rather than a match — an unreadable
         manifest establishes nothing, and "nothing" is not "agrees".
         """
-        path = (self._deploy_dir / manifest_path).resolve()
+        root = Path(self._deploy_dir).resolve()
+        path = (root / manifest_path).resolve()
+        # Containment, checked AFTER resolving. `spec.py` already refuses a
+        # `..` or absolute `manifest_path`, but only this side can see a
+        # symlink planted inside the deploy directory — and `.resolve()`
+        # follows those, so a link named `manifest.json` pointing at
+        # `/etc/anything` would otherwise supply the digest that answers this
+        # gate. An escape returns "" for the same reason an absent file does:
+        # the executor treats it as a refusal, and a file outside the staged
+        # release establishes nothing about the staged release.
+        if path != root and root not in path.parents:
+            return ""
         try:
             data = path.read_bytes()
         except OSError:
