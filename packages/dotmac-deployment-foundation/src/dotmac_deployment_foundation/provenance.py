@@ -75,7 +75,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from .document import build_canonical_document
-from .errors import SpecError
+from .errors import SpecError, UnknownFieldError
 from .spec import ProductDeploymentSpec
 from .version import VERSION
 
@@ -151,6 +151,11 @@ class AuthorizationReceipt:
     #: is only as meaningful as the rules that produced it, and those live in a
     #: versioned package that is currently moving repositories.
     control_version: str
+    #: Which operation Control authorized — ``deploy`` or ``rollback``, never
+    #: both. A receipt that did not name one would let a single approval both
+    #: make a change and erase it; see `authorization.py`. Required, because a
+    #: default here would silently re-create exactly that.
+    operation: str
 
     def __post_init__(self) -> None:
         """Refuse a structurally incomplete receipt — NOT an unapproved one.
@@ -182,16 +187,81 @@ class AuthorizationReceipt:
                 "meaning depends on the rules that produced it, and those are "
                 "versioned — an unversioned receipt cannot be re-checked later"
             )
+        if self.operation not in ("deploy", "rollback"):
+            raise SpecError(
+                f"AuthorizationReceipt.operation must be 'deploy' or "
+                f"'rollback', got {self.operation!r}. An unnamed operation "
+                "would make one approval cover both making a change and "
+                "rolling it back"
+            )
         if int(self.policy_version) < 1:
             raise SpecError(
                 f"AuthorizationReceipt.policy_version must be at least 1, got "
                 f"{self.policy_version!r}"
             )
 
+    @property
+    def descriptor_digest_normalized(self) -> str:
+        """The digest in this facility's canonical `sha256:<hex>` spelling.
+
+        Control writes bare hex; this facility writes prefixed. Comparing the
+        two raw is the digest-format trap this module's docstring warns about,
+        so every comparison goes through here rather than through `==` on the
+        stored string.
+        """
+        return normalize_digest(
+            self.descriptor_digest, where="AuthorizationReceipt.descriptor_digest"
+        )
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> AuthorizationReceipt:
+        """Parse a receipt the assembly read out of Control and wrote to disk.
+
+        Strict about unknown keys. A receipt carrying a field this version does
+        not understand may have been issued under rules this version cannot
+        evaluate, and silently ignoring it would mean executing against an
+        approval we only partly read.
+        """
+        known = {
+            "plan_id",
+            "target_ref",
+            "descriptor_digest",
+            "policy_code",
+            "policy_version",
+            "decision_ref",
+            "approved_at",
+            "control_version",
+            "operation",
+        }
+        unknown = sorted(set(document) - known - {"schema"})
+        if unknown:
+            raise UnknownFieldError(
+                f"AuthorizationReceipt has unknown field(s) {unknown}. This "
+                "receipt may have been issued under rules this version cannot "
+                "evaluate; refusing rather than reading it partly"
+            )
+        missing = sorted(known - set(document))
+        if missing:
+            raise SpecError(
+                f"AuthorizationReceipt is missing required field(s) {missing}"
+            )
+        return cls(
+            plan_id=str(document["plan_id"]),
+            target_ref=str(document["target_ref"]),
+            descriptor_digest=str(document["descriptor_digest"]),
+            policy_code=str(document["policy_code"]),
+            policy_version=int(document["policy_version"]),
+            decision_ref=str(document["decision_ref"]),
+            approved_at=str(document["approved_at"]),
+            control_version=str(document["control_version"]),
+            operation=str(document["operation"]),
+        )
+
     def as_document(self) -> dict[str, Any]:
         return {
             "plan_id": self.plan_id,
             "target_ref": self.target_ref,
+            "operation": self.operation,
             "descriptor_digest": normalize_digest(
                 self.descriptor_digest, where="AuthorizationReceipt.descriptor_digest"
             ),

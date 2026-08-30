@@ -30,6 +30,7 @@ trust.
 
 from __future__ import annotations
 
+from .authorization import OPERATIONS, ExecutionGrant, authorize
 from .backup import (
     ArtefactClass,
     Assurance,
@@ -197,6 +198,8 @@ __all__ = [
     "Assurance",
     "AuditReport",
     "AuthorizationReceipt",
+    "ExecutionGrant",
+    "OPERATIONS",
     "BackupHealth",
     "BackupRecord",
     "BundleComponent",
@@ -292,6 +295,7 @@ __all__ = [
     "build_firewall_plan",
     "build_manifest",
     "build_plan",
+    "authorize",
     "build_provenance",
     "build_receipt",
     "build_recovery_receipt",

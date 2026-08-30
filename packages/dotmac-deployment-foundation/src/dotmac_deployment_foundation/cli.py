@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
+    from .authorization import ExecutionGrant
     from .engine.run import DeploymentOutcome, Effects
     from .exposure import VerificationReport
 
@@ -230,6 +231,59 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _require_grant(
+    args: argparse.Namespace, spec: ProductDeploymentSpec, operation: str
+) -> ExecutionGrant:
+    """Turn `--authorization` into an :class:`ExecutionGrant`, or refuse.
+
+    `--execute` on its own reaches here and leaves through the first branch.
+    That is the point of the whole change: the flag says what the operator
+    INTENDS, and intent has never been authorization. What makes this a control
+    rather than a nag is that there is no way past it — `Executor` cannot be
+    constructed without the grant this returns.
+
+    Raises `PreconditionFailed` rather than returning a sentinel so a caller
+    cannot accidentally treat "refused" as "granted" by forgetting to check.
+    """
+    from .authorization import authorize
+    from .provenance import AuthorizationReceipt
+
+    target = getattr(args, "target", "") or ""
+    if not target:
+        raise PreconditionFailed(
+            "--execute requires --target naming the host being deployed to. "
+            "It is stated separately from the receipt on purpose: if this "
+            "came from `receipt.target_ref`, the check below would compare "
+            "the receipt with itself and approve every host"
+        )
+    path = getattr(args, "authorization", "") or ""
+    if not path:
+        raise PreconditionFailed(
+            "--execute requires --authorization: a Platform CP authorization "
+            "receipt naming this descriptor, this target and the "
+            f"{operation!r} operation. --execute alone is the operator saying "
+            "they meant it, which is not the same as being permitted, and this "
+            "facility never authorizes its own deployments"
+        )
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PreconditionFailed(
+            f"cannot read the authorization receipt {path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise PreconditionFailed(
+            f"the authorization receipt {path} is not valid JSON: {exc}"
+        ) from exc
+    receipt = AuthorizationReceipt.from_document(document)
+    return authorize(
+        receipt=receipt,
+        operation=operation,
+        descriptor_digest=spec.to_canonical_document().sha256_digest(),
+        target=target,
+    )
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.plan import build_plan, format_plan
 
@@ -248,8 +302,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
 
+    grant = _require_grant(args, spec, "deploy")
     effects = _build_effects(spec, args)
-    executor = Executor(spec, effects)
+    executor = Executor(spec, effects, grant)
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
     # (`engine/run.py`) — a lock released when the first step returns is not
@@ -614,8 +669,11 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
 
+    # A SEPARATE grant from the deploy's. One approval that covered both would
+    # let a single decision make a change and then erase it.
+    grant = _require_grant(args, spec, "rollback")
     effects = _build_effects(spec, args)
-    executor = Executor(spec, effects)
+    executor = Executor(spec, effects, grant)
     # Same rule as `cmd_deploy`: the lock wraps the whole run.
     with deployment_lock(
         spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
@@ -747,6 +805,23 @@ def build_parser() -> argparse.ArgumentParser:
     deploy = add("deploy", cmd_deploy, "deploy (DRY RUN unless --execute)")
     deploy.add_argument("--previous-image")
     deploy.add_argument("--execute", action="store_true")
+    deploy.add_argument(
+        "--target",
+        default="",
+        help=(
+            "the host this deployment targets, matched against the "
+            "authorization receipt's target_ref. REQUIRED with --execute"
+        ),
+    )
+    deploy.add_argument(
+        "--authorization",
+        default="",
+        help=(
+            "path to the Platform CP authorization receipt permitting this "
+            "operation on this descriptor and target. REQUIRED with "
+            "--execute; the flag alone is intent, not permission"
+        ),
+    )
     deploy.add_argument("--skip-backup", action="store_true")
     deploy.add_argument("--skip-backup-reason", default="")
     deploy.add_argument(
@@ -830,6 +905,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rollback.add_argument("--previous-image")
     rollback.add_argument("--execute", action="store_true")
+    rollback.add_argument(
+        "--target",
+        default="",
+        help=(
+            "the host this deployment targets, matched against the "
+            "authorization receipt's target_ref. REQUIRED with --execute"
+        ),
+    )
+    rollback.add_argument(
+        "--authorization",
+        default="",
+        help=(
+            "path to the Platform CP authorization receipt permitting this "
+            "operation on this descriptor and target. REQUIRED with "
+            "--execute; the flag alone is intent, not permission"
+        ),
+    )
     rollback.add_argument(
         "--deploy-dir",
         default=DEFAULT_DEPLOY_DIR,
