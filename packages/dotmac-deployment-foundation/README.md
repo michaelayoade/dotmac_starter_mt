@@ -37,6 +37,7 @@ dotmac-deploy plan                         # the ordered plan, gates marked
 dotmac-deploy preflight                    # only the steps that mutate nothing
 dotmac-deploy backup                       # the policy, and what "verified" means
 dotmac-deploy restore-rehearsal            # what a restore PROOF requires
+dotmac-deploy recovery-bundle              # the bundle contract, or adjudicate one
 dotmac-deploy image-audit REF --inspect i.json --history h.json --layers l.txt
 dotmac-deploy observe --deployment-id 42 --host web1   # the resource stamp
 dotmac-deploy ingress-policy               # declared exposure, plans, digest
@@ -70,6 +71,8 @@ Refusals worth knowing before you write one:
 | `no_new_privileges = false` | there is no deployment shape that needs it |
 | a relaxed security default with no declared `[[roles.security.exceptions]]` | the grant may stay; the silence may not |
 | a postgres backup dataset that does not verify `schema` | a restore producing an empty database passes every other check |
+| a recovery bundle missing any of its thirteen components | a database-only dump restores 45 tables and 23 policies and has no roles, no grants and no isolation - it reads as recovered |
+| `--no-owner` / `--no-privileges` when the product declares `[database]` | the flags delete the ownership and ACL evidence at CAPTURE, after which no downstream check can notice |
 | both `app_direct_shipping` and `logs` | every line stored twice, every rate threshold silently doubled |
 | a published port with no `exposure` or no `address_family` | a short-form publish spawns one `docker-proxy` PER FAMILY, so a descriptor silent about IPv6 gets IPv6 anyway — and the `ip6tables DOCKER-USER` rules written to cover it are measurably inert |
 | the removed `bind` field | an ignored value reads, in a diff, exactly like an honoured one |
@@ -100,6 +103,7 @@ image/           the hardened OCI contract, audited against `docker inspect`
 engine/          the plan as data, the executor, the exclusive lock
 providers/       concrete Effects implementations; compose_host is the only one
 backup.py        four assurance levels, because "backed up" is not "restorable"
+recovery.py      PostgresRecoveryBundle.v1 - the role closure a dump omits
 drift.py         image + config + manifest digests vs the approved plan
 conformance.py   the checks a product runs in its OWN CI
 cli.py           dotmac-deploy
