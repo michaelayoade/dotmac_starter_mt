@@ -43,6 +43,11 @@ from typing import Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
+from ..evidence import (
+    SignatureVerifier,
+    TrustPolicy,
+    accept_release_evidence,
+)
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
 from .plan import DeploymentPlan, Step, StepKind, steps_for_rollback
@@ -212,6 +217,8 @@ class Executor:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         deployment_id: str = "",
+        evidence_policy: TrustPolicy | None = None,
+        evidence_verifier: SignatureVerifier | None = None,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -226,6 +233,12 @@ class Executor:
         self._spec = spec
         self._effects = effects
         self._grant = grant
+        # Both default to None and BOTH refuse at the point of use rather than
+        # at construction. A missing policy must not be discovered only on the
+        # host that had one — but it also must not stop a `plan` or a dry run,
+        # neither of which verifies anything.
+        self._evidence_policy = evidence_policy
+        self._evidence_verifier = evidence_verifier
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -472,14 +485,37 @@ class Executor:
     def _do_verify_release_evidence(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
     ) -> str:
-        evidence = self._effects.release_evidence(plan.source_revision)
-        if not evidence:
+        """Evidence must be signed, current, and from a protected ref HERE.
+
+        The previous version of this step checked that the evidence mapping was
+        non-empty. That made "CI is the acceptance owner" satisfiable by any
+        writable file: nothing established who wrote it, whether the run it
+        describes happened, or whether it happened in this repository.
+        """
+        raw = self._effects.release_evidence(plan.source_revision)
+        if not raw:
             raise PreconditionFailed(
                 f"no release evidence exists for revision {plan.source_revision}. "
                 "CI is the acceptance owner; a deployment of a revision CI never "
                 "accepted is a deployment of an unreviewed tree"
             )
-        return ", ".join(f"{key}={value}" for key, value in sorted(evidence.items()))
+        if self._evidence_policy is None:
+            raise PreconditionFailed(
+                "release evidence was found but no TrustPolicy is configured, "
+                "so there is nothing to judge it against. Refusing rather than "
+                "falling back to 'a file exists': that fallback is what let an "
+                "unsigned, unattributed file stand for CI acceptance"
+            )
+        evidence = accept_release_evidence(
+            raw,
+            revision=plan.source_revision,
+            policy=self._evidence_policy,
+            verifier=self._evidence_verifier,
+        )
+        return (
+            f"run {evidence.run_id} of {evidence.workflow} on {evidence.ref} "
+            f"({evidence.repository}), signed and not from a fork"
+        )
 
     def _do_refuse_dirty_state(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
