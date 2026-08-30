@@ -255,3 +255,56 @@ queue can still race.
 **Status:** policy replacement implemented on
 `feat/automated-release-authorization`; the current release remains open until
 verification, tag, record auto-merge and green protected main complete.
+
+---
+
+## 2026-08-30 — the legacy production compose is outside the governed surface
+
+**Control:** Governance ADR 0014 (`build once, bind the environment late`),
+enforced by the `deployment-artefact-surface` family over the
+`deployment_artefact_surfaces` declared in `.dotmac/standards-profile.json`.
+Its purpose is that every deployment declaration a repository ships names an
+immutable image digest, so what ran yesterday and what runs after the next
+restart cannot be two deployments with one description.
+
+**What happened.** On its first run against this repository, the check
+reported the root `docker-compose.yml` as an undeclared deployment surface. It
+is a real production declaration — the compose `scripts/deploy.sh` drives, and
+the file `deploy/product.toml` exists to replace — and it resolves its image
+through `${APP_IMAGE:?...}`, which ADR 0014 counts as **unpinned**: a value
+supplied at deploy time is not a value that was approved.
+
+It is therefore recorded here as **acknowledged, not declared**. Declaring it
+as a governed surface would assert it conforms, and it does not.
+
+**Why the obvious repair is refused.** The tempting move is to add a compliant
+second compose beside it and let the legacy one wither. **No compliant twin.**
+Two deployment paths is precisely the condition ADR 0014 exists to remove, and
+a twin makes the estate worse in the interim: two files that must agree, no
+mechanism that makes them agree, and a reviewer who cannot tell from either one
+which is live. The single governed declaration is `deploy/product.toml`; this
+entry covers the one that has not been retired yet.
+
+**The premise, which is enforceable rather than asserted.** The exception holds
+only while the legacy path is FROZEN. Two numbers are baselined in
+`docs/inventories/legacy-compose-baseline.json` and checked by
+`tests/architecture/test_legacy_compose_frozen.py`:
+
+- the number of **mutable image references** in the file, and
+- the number of **callers** that invoke it.
+
+The ratchet is **two-directional** (ADR-0018): it fails if either count RISES,
+and it also fails if either count FALLS without the baseline being lowered in
+the same reviewed change. A silently shrinking baseline is how a ratchet stops
+describing anything — the improvement should be recorded when it happens, by
+the person who made it, not discovered later by someone reading a stale number.
+
+**Retirement is the endpoint, not indefinite tolerance.** This entry is removed
+in the same change that deletes `docker-compose.yml` and retires
+`scripts/deploy.sh`, which `EXTRACTION.toml`'s `local_copy_retirement` gates on
+proven parity — never on the consumer count, and never on this row's
+existence. Until then the region is *monitored and frozen* rather than
+*exempt*, which is the distinction ADR-0018 asks for.
+
+**Status:** acknowledged in the profile, frozen by the ratchet, open until the
+controller is the sole executor.
