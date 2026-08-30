@@ -29,8 +29,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .engine.run import DeploymentOutcome, Effects
+    from .exposure import VerificationReport
 
-from .errors import DeploymentFoundationError, RenderDrift, SpecError
+from .errors import (
+    DeploymentFoundationError,
+    PreconditionFailed,
+    RenderDrift,
+    SpecError,
+)
 from .spec import SCHEMA, ProductDeploymentSpec
 
 EXIT_OK = 0
@@ -409,6 +415,53 @@ def cmd_ingress_policy(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_exposure_apply(args: argparse.Namespace) -> int:
+    """Apply the exposure plan through `ExposureTransaction` — DRY RUN by default.
+
+    Routed through the transaction rather than a script on purpose: apply,
+    snapshot, re-observation and rollback then live in one tested code path
+    instead of in an operator's habit. A dry run still snapshots and still
+    verifies, so it answers "would this host pass?" without touching it.
+    """
+    from .exposure import APPLY_COMMAND, ExposureTransaction, verify_exposure
+    from .providers.compose_host import _default_runner
+    from .providers.exposure_host import ComposeHostExposureEffects
+
+    spec = _load(args.descriptor)
+    effects = ComposeHostExposureEffects(
+        spec, deploy_dir=args.deploy_dir, runner=_default_runner
+    )
+    if not args.execute:
+        report = verify_exposure(spec, effects.observe())
+        print(f"DRY RUN — nothing applied. descriptor {report.descriptor_digest}")
+        _print_exposure_report(report)
+        return EXIT_OK if report.ok else EXIT_REFUSED
+
+    transaction = ExposureTransaction(
+        spec=spec, effects=effects, lock_directory=args.lock_dir
+    )
+    try:
+        report = transaction.run(command=APPLY_COMMAND)
+    except PreconditionFailed as exc:
+        state = "rolled back" if transaction.rolled_back else "NOT rolled back"
+        print(f"error: {exc}", file=sys.stderr)
+        print(f"({state})", file=sys.stderr)
+        return EXIT_REFUSED
+    print(f"applied and verified. descriptor {report.descriptor_digest}")
+    _print_exposure_report(report)
+    return EXIT_OK
+
+
+def _print_exposure_report(report: VerificationReport) -> None:
+    from .exposure import Severity
+
+    for token in report.verified:
+        print(f"  ok       {token}")
+    for finding in report.findings:
+        marker = "REFUSED" if finding.severity is Severity.REFUSE else "note   "
+        print(f"  {marker}  [{finding.code}] {finding.detail}")
+
+
 def cmd_exposure_verify(args: argparse.Namespace) -> int:
     """Verify RECORDED host output against the declared exposure.
 
@@ -664,6 +717,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--providers",
         action="store_true",
         help="also print the provider capability matrix",
+    )
+
+    apply_exposure_cmd = add(
+        "exposure-apply",
+        cmd_exposure_apply,
+        "apply the exposure plan under the lock (DRY RUN unless --execute)",
+    )
+    apply_exposure_cmd.add_argument("--execute", action="store_true")
+    apply_exposure_cmd.add_argument("--deploy-dir", default=DEFAULT_DEPLOY_DIR)
+    apply_exposure_cmd.add_argument(
+        "--lock-dir",
+        default="/var/lock",
+        help="where the product deployment lock lives",
     )
 
     verify = add(

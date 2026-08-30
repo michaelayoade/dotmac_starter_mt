@@ -17,5 +17,11 @@ without `engine/run.py` or `engine/plan.py` changing a line.
 from __future__ import annotations
 
 from .compose_host import ComposeHostEffects, NginxInstaller
+from .exposure_host import ComposeHostExposureEffects, ownership_comment
 
-__all__ = ["ComposeHostEffects", "NginxInstaller"]
+__all__ = [
+    "ComposeHostEffects",
+    "ComposeHostExposureEffects",
+    "NginxInstaller",
+    "ownership_comment",
+]

@@ -42,6 +42,7 @@ dotmac-deploy observe --deployment-id 42 --host web1   # the resource stamp
 dotmac-deploy ingress-policy               # declared exposure, plans, digest
 dotmac-deploy ingress-policy --format digest      # what a plan carries
 dotmac-deploy exposure-verify --sockets ss.txt --iptables-v4 f.txt
+dotmac-deploy exposure-apply                      # DRY RUN unless --execute
 dotmac-deploy drift --observed observed.json
 dotmac-deploy rollback --previous-image sha256:...     # or why it is refused
 ```
@@ -89,6 +90,8 @@ document.py      DeploymentDescriptorDocument.v1 — the canonical projection
                  an authorization binds to, and the digest over it
 exposure.py      apply the plan under the lock, re-observe the host, and
                  refuse a probe taken from inside the allowlist
+providers/       ExposureEffects against a real host; a rollback restores
+                 only what the transaction changed, never a whole chain
 secrets_guard.py the descriptor holds names, never values (ADR-0009)
 render/          deterministic text emitters: compose, nginx
 alerts.py        64 common infrastructure alerts + the product's own
