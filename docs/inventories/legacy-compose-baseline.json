@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "The FROZEN shape of the legacy production compose, acknowledged in",
+    "docs/CONTROL_EXCEPTIONS.md (2026-08-30) as sitting outside the governed",
+    "ADR 0014 deployment surface.",
+    "",
+    "Two-directional ratchet, enforced by",
+    "tests/architecture/test_legacy_compose_frozen.py. A count that RISES",
+    "fails, and a count that FALLS without this file being lowered in the same",
+    "reviewed change also fails: a ratchet that silently absorbs improvement",
+    "stops describing the thing it measures, and would no longer notice a",
+    "caller being added back.",
+    "",
+    "`caller_paths` exists because a count alone cannot show WHICH caller",
+    "changed. Two callers swapping leaves the number identical and the estate",
+    "different.",
+    "",
+    "This file is DELETED in the same change that retires docker-compose.yml",
+    "and scripts/deploy.sh, together with the test and the exception row.",
+    "Retirement is gated on proven parity per EXTRACTION.toml's",
+    "local_copy_retirement, never on this file."
+  ],
+  "path": "docker-compose.yml",
+  "mutable_image_references": 1,
+  "callers": 3,
+  "caller_paths": ["Makefile", "docker-compose.dev.yml", "scripts/deploy.sh"],
+  "measured_on": "2026-08-30",
+  "retires_with": ["docker-compose.yml", "scripts/deploy.sh"]
+}
