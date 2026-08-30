@@ -554,7 +554,10 @@ expected_heads = ["head"]
 compatibility = "online"
 
 [telemetry]
-collector_image = "otel/opentelemetry-collector-contrib:0.109.0"
+# Digest-pinned since the collector image gained `_OPTIONAL_DIGEST_REF`:
+# a DECLARED collector image must be immutable, and a fixture that keeps a
+# tag would be testing a descriptor the parser no longer accepts.
+collector_image = "otel/opentelemetry-collector-contrib@sha256:af0f72b2d2493fc17f06cf3bc136548240cd7ebb2c8b1c8a7be6f3eb03068389"
 endpoint_material = "OTEL_EXPORTER_OTLP_ENDPOINT"
 """
 
