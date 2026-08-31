@@ -37,7 +37,7 @@
     "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
-  "released_total": 79,
+  "released_total": 78,
   "drifted_total": 4,
   "drifted": [
     {
@@ -72,7 +72,7 @@
       "version": "0.1.0a2",
       "tag": "dotmac-numbering-v0.1.0a2",
       "published_tree": "e02b93ea3ce4f04308f8a47a1cb30c247e6dec5d",
-      "head_tree": "a7ea9870ab262448cd718c46b1f90d5381b96eeb",
+      "head_tree": "ad94c961af35571f876f4a7810494bda95b7c7cc",
       "disposition": "code-debt-migration-repaired",
       "reason": "TWO SEPARATE THINGS, and only one was a defect. The DEFECT: nu_0001_numbering.py, a RELEASED migration, was edited in place after a2 shipped; dotmac_erp pins a2 AND composes this lineage, so one revision id named two file contents. Repaired -- the file is restored to its released bytes and the distribution is enrolled in tests/architecture/test_released_migrations.py, which is the gate that owns that question. THE REMAINING ROW: service.py is ahead of the tag (ordinary post-release code drift). A drift row holds that steady; it never spoke to the migration. Clears at the next release."
     }

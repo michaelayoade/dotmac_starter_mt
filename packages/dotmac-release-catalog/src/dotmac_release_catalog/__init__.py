@@ -40,6 +40,19 @@ the validators unconditionally. There is no `update_artifact`: the online
 be rewritten from the request path at all. Correcting one is an offline
 `app_admin` migration under review — a different act, with a different trail.
 
+## Reading
+
+`list_artifacts`, `get_artifact`, `artifact_attestations` and
+`preview_publication` are the whole read surface, and they answer in the typed
+values of `dotmac_release_catalog.facts` — never in ORM rows. Query construction
+over `mod_rel` stays inside this distribution: a consumer that wrote its own
+`select(ReleaseArtifact)` would take a second read authority over a schema it
+does not own, and every column rename would become a cross-repository break.
+
+What those reads DERIVE — an artifact's evidence state, its attested kinds, the
+actions still permitted on it — is stated by this module and appears on no
+input type, so a caller has nowhere to assert it.
+
 ## Where it may be installed
 
 Vendor and OEM control-plane assemblies only. Its tables are platform catalog
@@ -55,6 +68,17 @@ not: import from here.
 
 from __future__ import annotations
 
+from dotmac_release_catalog.facts import (
+    ArtifactAction,
+    ArtifactDetail,
+    ArtifactFilter,
+    ArtifactPage,
+    ArtifactView,
+    AttestationView,
+    EvidenceState,
+    PublicationPreview,
+    PublicationRefusal,
+)
 from dotmac_release_catalog.identity import (
     SHA256,
     ArtifactIdentityError,
@@ -72,7 +96,11 @@ from dotmac_release_catalog.models import (
 )
 from dotmac_release_catalog.service import (
     UnknownArtifactError,
+    artifact_attestations,
     attest_artifact,
+    get_artifact,
+    list_artifacts,
+    preview_publication,
     publish_artifact,
 )
 from dotmac_release_catalog.vocabulary import (
@@ -82,26 +110,39 @@ from dotmac_release_catalog.vocabulary import (
     AttestationKind,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a4+dev"
 
 __all__ = [
     "ARTIFACT_KINDS",
     "ATTESTATION_KINDS",
     "SCHEMA",
     "SHA256",
+    "ArtifactAction",
     "ArtifactAttestation",
+    "ArtifactDetail",
+    "ArtifactFilter",
     "ArtifactIdentityError",
     "ArtifactKind",
+    "ArtifactPage",
+    "ArtifactView",
     "AttestationKind",
+    "AttestationView",
     "Digest",
     "DigestError",
+    "EvidenceState",
+    "PublicationPreview",
+    "PublicationRefusal",
     "ReleaseArtifact",
     "UnknownArtifactError",
     "UnpinnedReferenceError",
     "__version__",
+    "artifact_attestations",
     "attest_artifact",
+    "get_artifact",
+    "list_artifacts",
     "module",
     "pinned_reference",
+    "preview_publication",
     "publish_artifact",
     "versions_dir",
 ]
