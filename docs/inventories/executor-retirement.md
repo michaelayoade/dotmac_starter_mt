@@ -1,6 +1,6 @@
 # Executor retirement: the entrypoint-family contract, the ratchets, the receipt
 
-**Dated:** 2026-08-30, amended 2026-08-31. **Status:** machinery only. **Nothing is retired, frozen,
+**Dated:** 2026-08-30, amended 2026-08-31 (v2 and v3). **Status:** machinery only. **Nothing is retired, frozen,
 disabled or revoked by this document or by the code it describes.**
 
 - Measurement: `scripts/executor_retirement.py`
@@ -325,3 +325,109 @@ negatives and those hide executors.
 
 `retired_total` stays **0**. This amendment defines how a retirement is proven;
 it performs none.
+
+## 6. Amendment — 2026-08-31 (v3): `SshCredentialConstraintV1`
+
+v2 named a gap it could not close: the contract could **count** an SSH key and
+could not **characterise** it. ERP is the live instance — eight root keys on the
+production host, none carrying `from=`, `command=` or `restrict`, and the
+deployment authority is those keys rather than any workflow.
+
+Every `ssh_credential` row now carries a typed constraint; a row without one is
+refused at parse.
+
+| field | records | not this |
+| --- | --- | --- |
+| `fingerprint` | the `SHA256:` form from `ssh-keygen -lf` | a comment, a filename, "the deploy key" |
+| `principal` | the account it authenticates as | — (recorded; does **not** relax the gate) |
+| `source_restriction` | the exact `from=` value, or the literal `unrestricted` | a blank field, which reads as "nobody looked" |
+| `forced_command_digest` | `sha256:` over the forced command, or the literal `none` | the command STRING — a near-match gets waved through |
+| `restrict` | `present` or `absent` | silence |
+| `pty`, `agent_forwarding`, `port_forwarding`, `x11_forwarding` | `denied` or `permitted`, each explicit | an omitted permission |
+| `host`, `observed_at`, `observed_by`, `method` | the host-observed evidence coordinate | a repository-tree inference |
+
+`restrict = present` beside any `permitted` is refused: OpenSSH's `restrict`
+denies all current and future permissions, so that key cannot exist and the row
+was written rather than observed. The constraint is part of the census digest,
+so **loosening a key moves it**.
+
+### The retained rollback key
+
+The substantive rule, and it belongs here rather than in a hardening doc
+because **this model requires the legacy executor's bytes be retained rather
+than deleted** — so a rollback credential survives every retirement. A retained
+key that can open an interactive shell is not a rollback path; it is the
+executor still reachable by hand.
+
+A `retained_rollback` key must be **source-restricted**, **forced-command-only**
+and **incapable of an interactive shell**, each checked independently:
+
+| planted removal | finding |
+| --- | --- |
+| `restrict` removed | must be INCAPABLE OF AN INTERACTIVE SHELL |
+| `from=` removed | must be SOURCE-RESTRICTED |
+| `command=` removed | must be FORCED-COMMAND-ONLY |
+
+Separately, because a detector that fires only when everything is wrong passes
+the realistic failure — one protection quietly dropped. A fully constrained key
+is **admitted** at the same reach, and ERP's measured shape produces exactly
+three independent findings.
+
+The receipt participates: a `retained_rollback` entry whose identity resolves to
+an inventory row is checked against that row's constraint, so the retention a
+receipt creates cannot be looser than the contract allows.
+
+**Deliberately narrow.** The gate bites on `retained_rollback` only. ERP's eight
+unrestricted keys are `active_executor` debt that the ratchet counts and the
+constraint characterises; refusing them at parse would make an honest census
+impossible on day one. The census records reality; the gate guards the retention
+this contract itself creates.
+
+`retired_total` stays **0**.
+
+### The census digest is now ratcheted, not merely recorded
+
+Putting the constraint in the canonical form is worth nothing unless something
+fails when it moves — and until v3 nothing compared digests. The ratchet now
+does, which closes a hole wider than SSH: **counts alone miss every change that
+alters a row's content without altering how many rows there are.** A target
+repointed, a trigger changed, a credential renamed, or a key quietly loosened
+all left the counts identical and passed. A census change must now be
+re-recorded in the same change, like every other number here.
+
+### Compose sanction is entry-point identity (v3)
+
+A compose verb is sanctioned **iff reached through the installed
+`dotmac-deployment-foundation` entry point**, resolved from distribution
+metadata — never from a path, a comment, a filename or a declared premise.
+
+Identity rather than intent, for the reason this module already demonstrated:
+its verb detector read a usage comment as a deployment and drew a call edge
+backwards, because a path mention is symmetric while invocation is not. *"Is
+this the sanctioned call?"* asks about intent, which a tree cannot answer.
+*"Was this reached through that entry point?"* is a fact about topology.
+
+A sanctioned mutation runs inside the installed distribution, which is not in
+the tree, so it never resolves; an unsanctioned one always does. Delegation
+does not launder a direct call beside it.
+
+| property | why |
+| --- | --- |
+| the console-script name is never written down | a literal would turn identity back into a string match; the test strips the distribution name first, because the script name is a PREFIX of it |
+| an unresolvable distribution is UNMONITORED | a check that cannot establish its premise says so |
+| the installed-or-not state is **not** in the baseline | it is a property of where the check runs, not of the product |
+
+The unsanctioned **set** is ratcheted two-directionally — the set, not the
+count, because a swap leaves the count still. Wave 7C drives it to empty. It is
+a measurement rather than a refusal for the same reason the SSH gate is narrow:
+`scripts/deploy.sh` is unsanctioned today, and refusing it would make an honest
+census impossible on day one. Starter records **6**.
+
+### The roster names Vendor CP
+
+`vendor-cp-prod` retains a rollback credential at Wave 7C and sat outside
+`ADOPTION_TARGETS`, so it would have been silently unmonitored rather than
+reported UNADOPTED. The roster entry is the **repository** that owes the
+inventory (`dotmac_vendor_control_plane`); the host belongs in that product's own
+inventory. `unadopted` is now three.
+

@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.metadata
 import itertools
 import json
 import pathlib
@@ -91,6 +92,19 @@ ADOPTION_TARGETS: Final[tuple[str, ...]] = (
     "dotmac_erp",
     "dotmac_starter_mt",
     "dotmac_sub",
+    # Added 2026-08-31. `vendor-cp-prod` is a named production host that
+    # retains a rollback credential at Wave 7C, and it sat outside this roster
+    # — so it would have been SILENTLY UNMONITORED rather than reported
+    # UNADOPTED, which is the roster reproducing the exact failure the code
+    # below was written to prevent.
+    #
+    # The entry is the REPOSITORY that owes the inventory, not the host that
+    # retains the credential. `measure()` resolves `<product>.toml`, so a host
+    # identity here would name a file nobody can ever write and would report
+    # UNADOPTED forever for the wrong reason. `vendor-cp-prod` belongs in this
+    # product's own inventory, as the `host` on the credential's row and as a
+    # `production_targets` entry.
+    "dotmac_vendor_control_plane",
 )
 
 INVENTORY_SCHEMA: Final[str] = "ExecutorInventory.v1"
@@ -414,6 +428,59 @@ REACTIVATION_FAMILIES: Final[frozenset[str]] = frozenset(
 )
 
 
+#: The distribution whose entry point is the ONLY sanctioned way to mutate a
+#: Compose topology. A DISTRIBUTION NAME is an identity: it is resolved against
+#: installed metadata, so the question this answers is "was this reached
+#: through that entry point", never "does this look like the sanctioned call".
+SANCTIONED_DISTRIBUTION: Final[str] = "dotmac-deployment-foundation"
+
+#: The verb reasons that constitute a Compose MUTATION. Derived from
+#: `DEPLOYMENT_VERBS` rather than re-listed, so a new compose pattern is
+#: covered the day it is added.
+COMPOSE_MUTATION_REASONS: Final[frozenset[str]] = frozenset(
+    {"compose topology control"}
+)
+
+
+def sanctioned_entry_points(
+    distribution: str = SANCTIONED_DISTRIBUTION,
+) -> frozenset[str] | None:
+    """Console-script names the INSTALLED sanctioned distribution provides.
+
+    `None` means the distribution is not installed, or installs no console
+    script, and the question therefore cannot be answered — **UNMONITORED,
+    never a pass.** The same rule the displacement window applies to its event
+    source: a check that cannot establish its premise says so rather than
+    returning the comfortable answer.
+
+    WHY IDENTITY RATHER THAN INTENT. A sanctioned Compose mutation is one
+    reached through this distribution's entry point, resolved from installed
+    metadata — not from a path, a filename, a comment or a declared premise.
+    The reason is a defect this module already produced: the verb detector read
+    a USAGE COMMENT as a deployment and the edge resolver drew a call edge
+    backwards, because a path mention is symmetric while invocation is not.
+    "Is this the sanctioned compose call?" has exactly that shape — it asks
+    about intent, which a tree cannot answer. "Was this reached through that
+    entry point?" is a fact about topology.
+
+    The console-script NAME is never written down in this module. It is read
+    from metadata, and a test asserts the literal does not appear here — a
+    hardcoded name would turn an identity check back into a string match.
+    """
+    try:
+        dist = importlib.metadata.distribution(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception:  # pragma: no cover - a broken metadata tree
+        return None
+    names = {
+        entry.name
+        for entry in dist.entry_points
+        if entry.group == "console_scripts" and entry.name
+    }
+    return frozenset(names) or None
+
+
 def executable_text(text: str) -> str:
     """The artifact with its whole-line comments removed.
 
@@ -476,6 +543,8 @@ ENTRY_KEYS: Final[frozenset[str]] = frozenset(
         "premise",
         "targets",
         "reactivates",
+        "delegates_to",
+        "ssh_constraint",
         "rollback_for",
         "receipt",
         "observed_at",
@@ -539,6 +608,8 @@ class Entrypoint:
     premise: str = ""
     targets: tuple[str, ...] = ()
     reactivates: tuple[str, ...] = ()
+    delegates_to: str = ""
+    ssh_constraint: SshConstraint | None = None
     rollback_for: str = ""
     receipt: str = ""
     observed_at: str = ""
@@ -561,7 +632,259 @@ class Entrypoint:
             "path": self.path,
             "targets": sorted(self.targets),
             "reactivates": sorted(self.reactivates),
+            "delegates_to": self.delegates_to,
+            "ssh_constraint": (
+                self.ssh_constraint.canonical() if self.ssh_constraint else None
+            ),
         }
+
+
+# ── SshCredentialConstraintV1 ───────────────────────────────────────────────
+#
+# v2 could COUNT an SSH key and could not CHARACTERISE it. ERP's census is the
+# live instance: eight root keys on the production host, none carrying `from=`,
+# `command=` or `restrict`, and the deployment authority is those keys rather
+# than any workflow. A contract that records "there are eight" and cannot say
+# what any of them may do has measured the wrong thing.
+#
+# WHY THIS BELONGS IN THE RETIREMENT CONTRACT AND NOT IN A HARDENING DOCUMENT.
+# This model requires the legacy executor's BYTES be retained rather than
+# deleted — that is the whole point of `retained_rollback`, and it means a
+# rollback credential survives every retirement. A retained key that can open
+# an interactive root shell is not a rollback path. It is the executor still
+# being reachable by hand, which is the second failure mode this ADR exists to
+# prevent, arriving through the door the retirement itself held open.
+#
+# So the gate is narrow and it is on `retained_rollback`: source-restricted,
+# forced-command-only, and incapable of an interactive shell. All three proven
+# rather than asserted, and each independently, because a detector that fires
+# only when everything is wrong passes the realistic case — one protection
+# quietly dropped.
+
+#: A digest, never the command string. A changed forced command must be
+#: DETECTABLE; a string invites a near-match being waved through in review, and
+#: "close enough" is how `command="/usr/bin/deploy"` becomes
+#: `command="/usr/bin/deploy --shell"`.
+FORCED_COMMAND_NONE: Final[str] = "none"
+
+#: Named rather than omitted. An unrestricted key must SAY it is unrestricted:
+#: absence is never a disposition, and a blank field reads as "not looked at".
+SOURCE_UNRESTRICTED: Final[str] = "unrestricted"
+
+PERMISSION_STATES: Final[tuple[str, ...]] = ("denied", "permitted")
+RESTRICT_STATES: Final[tuple[str, ...]] = ("present", "absent")
+
+#: Every permission `restrict` implies. OpenSSH's `restrict` means "deny all
+#: current and future permissions", so a row claiming `restrict = present`
+#: beside any `permitted` is describing a key that cannot exist — which means
+#: it was hand-written rather than observed, and that is worth refusing on its
+#: own.
+RESTRICT_IMPLIED_DENIALS: Final[tuple[str, ...]] = (
+    "pty",
+    "agent_forwarding",
+    "port_forwarding",
+    "x11_forwarding",
+)
+
+SSH_CONSTRAINT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "fingerprint",
+        "principal",
+        "source_restriction",
+        "forced_command_digest",
+        "restrict",
+        "pty",
+        "agent_forwarding",
+        "port_forwarding",
+        "x11_forwarding",
+        "host",
+        "observed_at",
+        "observed_by",
+        "method",
+        "note",
+    }
+)
+
+SSH_CONSTRAINT_REQUIRED: Final[tuple[str, ...]] = (
+    "fingerprint",
+    "principal",
+    "source_restriction",
+    "forced_command_digest",
+    "restrict",
+    "pty",
+    "agent_forwarding",
+    "port_forwarding",
+    "x11_forwarding",
+    "host",
+    "observed_at",
+    "observed_by",
+    "method",
+)
+
+
+@dataclass(frozen=True)
+class SshConstraint:
+    """What one authorized key may actually do, as observed on a named host."""
+
+    fingerprint: str
+    principal: str
+    source_restriction: str
+    forced_command_digest: str
+    restrict: str
+    pty: str
+    agent_forwarding: str
+    port_forwarding: str
+    x11_forwarding: str
+    host: str
+    observed_at: str
+    observed_by: str
+    method: str
+    note: str = ""
+
+    @property
+    def source_restricted(self) -> bool:
+        return self.source_restriction != SOURCE_UNRESTRICTED
+
+    @property
+    def forced_command_only(self) -> bool:
+        return self.forced_command_digest != FORCED_COMMAND_NONE
+
+    def canonical(self) -> dict[str, str]:
+        """Part of the census digest, so LOOSENING a key moves the digest.
+
+        Without this a key could be quietly unrestricted between two receipts
+        and every recorded digest would still match.
+        """
+        return {
+            "fingerprint": self.fingerprint,
+            "principal": self.principal,
+            "source_restriction": self.source_restriction,
+            "forced_command_digest": self.forced_command_digest,
+            "restrict": self.restrict,
+            "pty": self.pty,
+            "agent_forwarding": self.agent_forwarding,
+            "port_forwarding": self.port_forwarding,
+            "x11_forwarding": self.x11_forwarding,
+        }
+
+
+def parse_ssh_constraint(row: Any, where: str) -> SshConstraint:
+    """Read one `SshCredentialConstraintV1`, refusing anything untyped."""
+    if not isinstance(row, dict):
+        raise InventoryError(f"{where}: `ssh_constraint` must be a table")
+    unknown = sorted(set(row) - SSH_CONSTRAINT_KEYS)
+    if unknown:
+        raise InventoryError(f"{where}: ssh_constraint unknown key(s) {unknown}")
+    for key in SSH_CONSTRAINT_REQUIRED:
+        if not isinstance(row.get(key), str) or not row[key]:
+            raise InventoryError(
+                f"{where}: ssh_constraint `{key}` is required. An unstated "
+                "restriction reads as 'nobody looked', which is exactly the "
+                "state eight unrestricted root keys were in"
+            )
+    for key in ("pty", *RESTRICT_IMPLIED_DENIALS[1:]):
+        if row[key] not in PERMISSION_STATES:
+            raise InventoryError(
+                f"{where}: ssh_constraint `{key}` must be one of "
+                f"{list(PERMISSION_STATES)}; found {row[key]!r}"
+            )
+    if row["restrict"] not in RESTRICT_STATES:
+        raise InventoryError(
+            f"{where}: ssh_constraint `restrict` must be one of "
+            f"{list(RESTRICT_STATES)}"
+        )
+    if not row["fingerprint"].startswith("SHA256:"):
+        raise InventoryError(
+            f"{where}: ssh_constraint `fingerprint` must be the SHA256 form "
+            "(`ssh-keygen -lf`); a comment or a filename does not identify a key"
+        )
+    digest = row["forced_command_digest"]
+    if digest != FORCED_COMMAND_NONE and not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", digest
+    ):
+        raise InventoryError(
+            f"{where}: ssh_constraint `forced_command_digest` must be "
+            f"`sha256:<64 hex>` or the literal {FORCED_COMMAND_NONE!r}. The "
+            "DIGEST and not the command string, so a changed forced command is "
+            "detectable rather than a near-match somebody waved through"
+        )
+    for key in ("source_restriction", "method", "note"):
+        value = row.get(key, "")
+        if value and secret_shaped(value):
+            raise InventoryError(
+                f"{where}: ssh_constraint `{key}` holds a value-shaped string. "
+                "A key is identified by FINGERPRINT here; material never "
+                "appears in an inventory"
+            )
+    if row["restrict"] == "present":
+        contradictions = sorted(
+            key for key in RESTRICT_IMPLIED_DENIALS if row[key] != "denied"
+        )
+        if contradictions:
+            raise InventoryError(
+                f"{where}: ssh_constraint declares `restrict = present` and "
+                f"also {contradictions} permitted. OpenSSH's `restrict` denies "
+                "all current and future permissions, so this key cannot exist "
+                "— the row was written rather than observed"
+            )
+    return SshConstraint(
+        fingerprint=row["fingerprint"],
+        principal=row["principal"],
+        source_restriction=row["source_restriction"],
+        forced_command_digest=row["forced_command_digest"],
+        restrict=row["restrict"],
+        pty=row["pty"],
+        agent_forwarding=row["agent_forwarding"],
+        port_forwarding=row["port_forwarding"],
+        x11_forwarding=row["x11_forwarding"],
+        host=row["host"],
+        observed_at=row["observed_at"],
+        observed_by=row["observed_by"],
+        method=row["method"],
+        note=row.get("note", ""),
+    )
+
+
+def rollback_key_failures(entry: Entrypoint) -> list[str]:
+    """The three properties a RETAINED rollback key must prove, independently.
+
+    Independent on purpose. A single "is this key safe" check fires only when
+    everything is wrong and passes the realistic failure, which is one
+    protection quietly dropped — so `restrict`, `from=` and `command=` are
+    three findings, not one.
+
+    Together they are the property that matters: the key cannot open an
+    interactive shell. `principal` is RECORDED and does not relax the gate; a
+    non-root deploy user holding an unrestricted key is still the executor
+    reachable by hand.
+    """
+    constraint = entry.ssh_constraint
+    if constraint is None:
+        return []
+    failures: list[str] = []
+    if not constraint.source_restricted:
+        failures.append(
+            f"{entry.name} is retained as a rollback path and its key "
+            f"{constraint.fingerprint} is `{SOURCE_UNRESTRICTED}`. A retained "
+            "rollback key must be SOURCE-RESTRICTED (`from=`): a key reachable "
+            "from anywhere is not a rollback path"
+        )
+    if not constraint.forced_command_only:
+        failures.append(
+            f"{entry.name} is retained as a rollback path and its key "
+            f"{constraint.fingerprint} runs no forced command. A retained "
+            "rollback key must be FORCED-COMMAND-ONLY (`command=`): without one "
+            "it executes whatever the client asks for"
+        )
+    if constraint.restrict != "present":
+        failures.append(
+            f"{entry.name} is retained as a rollback path and its key "
+            f"{constraint.fingerprint} carries no `restrict`. A retained "
+            "rollback key must be INCAPABLE OF AN INTERACTIVE SHELL, and "
+            "`restrict` is what denies the pty, the forwarding and the agent "
+            "that make one usable"
+        )
+    return failures
 
 
 #: How an absence was established. The distinction is the entire ERP lesson:
@@ -771,6 +1094,12 @@ def parse_inventory(text: str, *, source: str) -> Inventory:
                 premise=row.get("premise", ""),
                 targets=tuple(row.get("targets") or ()),
                 reactivates=tuple(row.get("reactivates") or ()),
+                delegates_to=row.get("delegates_to", ""),
+                ssh_constraint=(
+                    parse_ssh_constraint(row["ssh_constraint"], where)
+                    if "ssh_constraint" in row
+                    else None
+                ),
                 rollback_for=row.get("rollback_for", ""),
                 receipt=row.get("receipt", ""),
                 observed_at=row.get("observed_at", ""),
@@ -779,6 +1108,21 @@ def parse_inventory(text: str, *, source: str) -> Inventory:
                 note=row.get("note", ""),
             )
         )
+
+    for entry in entrypoints:
+        if entry.family == "ssh_credential" and entry.ssh_constraint is None:
+            raise InventoryError(
+                f"{source}: {entry.name} is in the `ssh_credential` family and "
+                "declares no `ssh_constraint`. Counting a key without saying "
+                "what it may do is the v2 gap this closes: eight root keys were "
+                "COUNTED on a production host and none of them characterised"
+            )
+        if entry.ssh_constraint is not None and entry.family != "ssh_credential":
+            raise InventoryError(
+                f"{source}: {entry.name} declares an `ssh_constraint` but is in "
+                f"the `{entry.family}` family. A key's restriction state "
+                "belongs to the key's own row"
+            )
 
     names = {entry.name for entry in entrypoints}
     for entry in entrypoints:
@@ -945,6 +1289,39 @@ def known_paths(root: pathlib.Path) -> frozenset[str]:
 # ── Reconciliation: the declaration must survive contact with the tree ──────
 
 
+def compose_mutations(inventory: Inventory, root: pathlib.Path) -> dict[str, list[str]]:
+    """Every declared entrypoint that mutates a Compose topology IN-TREE.
+
+    The identity test, and it is almost embarrassingly simple once stated that
+    way: a SANCTIONED mutation happens inside the installed
+    `dotmac-deployment-foundation`, which is not in the tree, so it never
+    appears in a resolved verb set. An UNSANCTIONED one is in the tree, so it
+    always does. Delegating to the entry point does not excuse a direct call
+    beside it — the direct call is still in the tree and still resolves.
+
+    This is a COUNTED measurement, not a refusal. ERP's live executors and the
+    Starter's own `scripts/deploy.sh` are unsanctioned Compose mutations today;
+    refusing them would make an honest census impossible on day one, which is
+    the same mistake the SSH gate deliberately avoids. Wave 7C's "remove direct
+    Compose mutation outside Foundation" is therefore expressed as driving this
+    count to zero, which is what a two-directional ratchet is for.
+    """
+    known = known_paths(root)
+    found: dict[str, list[str]] = {}
+    for entry in inventory.entrypoints:
+        if not entry.path:
+            continue
+        verbs = resolve_verbs(root, entry.path, known)
+        mutations = sorted(
+            verb
+            for verb, reason in verbs.items()
+            if any(marker in reason for marker in COMPOSE_MUTATION_REASONS)
+        )
+        if mutations:
+            found[entry.name] = mutations
+    return dict(sorted(found.items()))
+
+
 def reconcile(inventory: Inventory, root: pathlib.Path) -> list[str]:
     """Findings where the declaration and the tree disagree.
 
@@ -1068,6 +1445,30 @@ def reconcile(inventory: Inventory, root: pathlib.Path) -> list[str]:
                     "in BOTH directions, because a one-way check is satisfied "
                     "by not filling in your own field"
                 )
+        if entry.delegates_to:
+            sanctioned = sanctioned_entry_points()
+            if sanctioned is None:
+                problems.append(
+                    f"{inventory.product}: {entry.name} delegates to "
+                    f"{entry.delegates_to!r}, and `{SANCTIONED_DISTRIBUTION}` "
+                    "is not installed, so the claim cannot be established — "
+                    "UNMONITORED, not a pass. Install the distribution where "
+                    "this check runs"
+                )
+            elif entry.delegates_to not in sanctioned:
+                problems.append(
+                    f"{inventory.product}: {entry.name} delegates to "
+                    f"{entry.delegates_to!r}, which is not a console script of "
+                    f"`{SANCTIONED_DISTRIBUTION}` (it provides "
+                    f"{sorted(sanctioned)}). Sanction is ENTRY-POINT IDENTITY "
+                    "resolved from installed metadata, never a name that looks "
+                    "right"
+                )
+        if entry.disposition == "retained_rollback":
+            problems.extend(
+                f"{inventory.product}: {failure}"
+                for failure in rollback_key_failures(entry)
+            )
         if entry.disposition == "retained_rollback" and not entry.rollback_for:
             problems.append(
                 f"{inventory.product}: {entry.name} is retained as a rollback "
@@ -1180,6 +1581,8 @@ class ProductMeasurement:
     families_tree_complete: tuple[str, ...] = ()
     families_declaration_only: tuple[str, ...] = ()
     tree_only_absences: tuple[str, ...] = ()
+    compose_mutations: dict[str, list[str]] = field(default_factory=dict)
+    sanction_state: str = ""
 
 
 def _git(repo_root: pathlib.Path, *args: str) -> str | None:
@@ -1275,6 +1678,10 @@ def measure_product(
                 if absence.scope == "repository_tree"
             )
         ),
+        compose_mutations=compose_mutations(inventory, root),
+        sanction_state=(
+            "resolved" if sanctioned_entry_points() is not None else "unmonitored"
+        ),
     )
 
 
@@ -1333,8 +1740,45 @@ def ratchet(
         if live is None:
             abstentions.append(f"{product}: UNMEASURED this run")
             continue
+        recorded_digest = row.get("inventory_digest")
+        if recorded_digest and recorded_digest != live.inventory_digest:
+            # Counts alone miss every change that alters a row's CONTENT
+            # without altering how many rows there are — a target repointed, a
+            # trigger changed, or (the case this was added for) an SSH key
+            # quietly loosened. `SshCredentialConstraintV1` is part of the
+            # canonical form precisely so that loosening moves this digest, and
+            # a digest nothing compares is a digest that moves unobserved.
+            failures.append(
+                f"{product}: the census digest moved "
+                f"{recorded_digest} -> {live.inventory_digest} without the "
+                "baseline moving. A row changed content without changing the "
+                "counts; re-record it in the SAME change"
+            )
         failures.extend(live.reconciliation)
         failures.extend(ratchet_family(live.counts, row.get("families", {}), product))
+
+        recorded_paths = row.get("unsanctioned_compose_mutation_paths")
+        if recorded_paths is not None:
+            live_paths = sorted(live.compose_mutations)
+            gained = sorted(set(live_paths) - set(recorded_paths))
+            lost = sorted(set(recorded_paths) - set(live_paths))
+            # The SET, not the count. A swap — one path retired while another
+            # gains the ability — leaves the count still and is exactly the
+            # move that matters.
+            if gained:
+                failures.append(
+                    f"{product}: {gained} gained the ability to mutate a "
+                    f"Compose topology outside `{SANCTIONED_DISTRIBUTION}`. "
+                    "Sanction is reached THROUGH that distribution's entry "
+                    "point; anything else in the tree is unsanctioned"
+                )
+            if lost:
+                failures.append(
+                    f"{product}: {lost} no longer mutates a Compose topology "
+                    "and the baseline still lists it. Wave 7C drives this set "
+                    "to EMPTY, and each step is recorded in the change that "
+                    "takes it"
+                )
 
     for product in sorted(set(measured) - set(recorded)):
         failures.append(
@@ -1410,6 +1854,8 @@ def build_baseline(measured: dict[str, ProductMeasurement], previous: dict) -> d
             "families_tree_complete": list(live.families_tree_complete),
             "families_declaration_only": list(live.families_declaration_only),
             "families": live.counts,
+            "unsanctioned_compose_mutations": len(live.compose_mutations),
+            "unsanctioned_compose_mutation_paths": sorted(live.compose_mutations),
             "retired_total": sum(
                 counts.get("retired", 0) for counts in live.counts.values()
             ),
@@ -1431,6 +1877,7 @@ def build_baseline(measured: dict[str, ProductMeasurement], previous: dict) -> d
             }
             for family in FAMILIES
         },
+        "sanctioned_compose_distribution": SANCTIONED_DISTRIBUTION,
         "dispositions": {
             "backlog": sorted(BACKLOG_DISPOSITIONS),
             "reviewed": sorted(REVIEWED_DISPOSITIONS),
@@ -1478,6 +1925,17 @@ def coverage(
             lines.append(
                 "    absence established by TREE WALK ONLY (says nothing about "
                 f"any host): {', '.join(live.tree_only_absences)}"
+            )
+        lines.append(
+            "    unsanctioned Compose mutations: "
+            f"{len(live.compose_mutations)}"
+            + (f" — {sorted(live.compose_mutations)}" if live.compose_mutations else "")
+        )
+        if live.sanction_state != "resolved":
+            lines.append(
+                f"    SANCTION UNMONITORED: `{SANCTIONED_DISTRIBUTION}` is not "
+                "installed here, so entry-point identity could not be resolved "
+                "— this is not a pass"
             )
         lines.append(f"    inventory digest: {live.inventory_digest}")
     for line in unadopted:
@@ -1907,8 +2365,23 @@ def validate_receipt(
     _require(
         isinstance(retained, list), f"{source}: `retained_rollback` must be a list"
     )
+    by_name = (
+        {entry.name: entry for entry in inventory.entrypoints}
+        if inventory is not None
+        else {}
+    )
     for index, item in enumerate(retained):
         _coordinate(item, f"{source}: retained_rollback[{index}]", ("identity", "why"))
+        # The retention this receipt CREATES is the one that outlives it. A key
+        # retained here is reachable for as long as the rollback path is, so its
+        # constraints are the retirement's business rather than a later audit's.
+        held = by_name.get(item["identity"])
+        if held is not None:
+            failures = rollback_key_failures(held)
+            _require(
+                not failures,
+                f"{source}: retained_rollback[{index}] — " + "; ".join(failures),
+            )
 
     # ── 7. The digest over the receipt's own content ────────────────────────
     computed = receipt_digest(raw)

@@ -248,10 +248,29 @@ def test_this_repositorys_own_census_reconciles_with_its_own_tree() -> None:
 def test_the_scoreboard_is_recorded_and_is_still_zero() -> None:
     """Stated as a fact rather than assumed. When the first retirement lands,
     this number and this assertion move together, in the same change, with a
-    receipt — which is the whole point of recording it here."""
+    receipt — which is the whole point of recording it here.
+
+    The unadopted set is DERIVED from the roster rather than written out. It was
+    a literal pair until Vendor CP joined and this test failed for naming a list
+    instead of asserting the property — which is the wrong-SUBJECT shape of
+    ADR-0018's 2026-08-31 amendment, occurring inside the suite that argues for
+    it. Extending the literal to three entries fixes today and breaks again on
+    the next roster change; deriving it cannot.
+
+    The non-vacuity assertion is the same defect from the other side: a roster
+    where everyone had adopted would leave this comparing two empty lists and
+    passing for the wrong reason.
+    """
+    sweep = _sweep()
     baseline = _baseline()
     assert baseline["retired_total"] == 0
-    assert sorted(baseline["unadopted"]) == ["dotmac_erp", "dotmac_sub"]
+    expected = sorted(
+        product
+        for product in sweep.ADOPTION_TARGETS
+        if not (INVENTORY_DIR / f"{product}.toml").is_file()
+    )
+    assert sorted(baseline["unadopted"]) == expected
+    assert expected, "a roster where everyone has adopted would pass vacuously"
 
 
 # ── Sensitivity proofs (ADR-0018 §5) ────────────────────────────────────────
@@ -924,3 +943,508 @@ def _probe_inventory(sweep, family, entry):
         absences=(),
         entrypoints=(entry,),
     )
+
+
+# ── SshCredentialConstraintV1 (2026-08-31 amendment, v3) ────────────────────
+#
+# v2 could COUNT a key and could not CHARACTERISE it. ERP is the live instance:
+# eight root keys on the production host, none carrying `from=`, `command=` or
+# `restrict`, and the deployment authority is those keys rather than any
+# workflow.
+#
+# The gate is on `retained_rollback` because THIS model creates that retention.
+# The legacy executor's bytes are kept rather than deleted, so a rollback
+# credential survives every retirement — and a retained key that can open an
+# interactive shell is not a rollback path, it is the executor still reachable
+# by hand.
+
+
+def _constraint(**overrides) -> dict:
+    """A fully constrained rollback key. Each test below breaks exactly one."""
+    row = {
+        "fingerprint": "SHA256:0xJ7Yq2mQz8fVn4pL1sT6wXbC3dE5gH9kM2nR4tU7vY0",
+        "principal": "root",
+        "source_restriction": "10.10.0.4/32",
+        "forced_command_digest": "sha256:" + "b" * 64,
+        "restrict": "present",
+        "pty": "denied",
+        "agent_forwarding": "denied",
+        "port_forwarding": "denied",
+        "x11_forwarding": "denied",
+        "host": "erp.dotmac.io",
+        "observed_at": "2026-08-31",
+        "observed_by": "michaelayoade",
+        "method": "read /root/.ssh/authorized_keys on the named host",
+    }
+    row.update(overrides)
+    return {key: value for key, value in row.items() if value is not None}
+
+
+def _key_entry(sweep, **overrides):
+    return sweep.Entrypoint(
+        name="ssh:erp-rollback-key",
+        family="ssh_credential",
+        trigger="an operator opening a session to the deploy host",
+        credential="erp-deploy-host-rollback-key",
+        disposition="retained_rollback",
+        rollback_for="erp-deploy-sh-2026-09-12",
+        host="erp.dotmac.io",
+        ssh_constraint=sweep.parse_ssh_constraint(_constraint(**overrides), "probe"),
+    )
+
+
+def test_the_constraint_records_every_field_michael_enumerated() -> None:
+    sweep = _sweep()
+    assert {
+        "fingerprint",
+        "principal",
+        "source_restriction",
+        "forced_command_digest",
+        "restrict",
+        "pty",
+        "agent_forwarding",
+        "port_forwarding",
+        "x11_forwarding",
+        "host",
+        "observed_at",
+        "observed_by",
+        "method",
+    } == set(sweep.SSH_CONSTRAINT_REQUIRED)
+
+
+def test_a_fully_constrained_retained_key_is_admitted() -> None:
+    """The negative control. Three refusals below prove the gate can say no;
+    only this proves it says no to the right thing, at the same reach."""
+    sweep = _sweep()
+    assert sweep.rollback_key_failures(_key_entry(sweep)) == []
+
+
+def test_removing_restrict_alone_is_refused() -> None:
+    """Planted SEPARATELY. A detector that fires only when everything is wrong
+    passes the realistic failure: one protection quietly dropped."""
+    sweep = _sweep()
+    failures = sweep.rollback_key_failures(
+        _key_entry(sweep, restrict="absent", pty="permitted")
+    )
+    assert len(failures) == 1, failures
+    assert "INCAPABLE OF AN INTERACTIVE SHELL" in failures[0]
+
+
+def test_removing_the_source_restriction_alone_is_refused() -> None:
+    sweep = _sweep()
+    failures = sweep.rollback_key_failures(
+        _key_entry(sweep, source_restriction=sweep.SOURCE_UNRESTRICTED)
+    )
+    assert len(failures) == 1, failures
+    assert "SOURCE-RESTRICTED" in failures[0]
+
+
+def test_removing_the_forced_command_alone_is_refused() -> None:
+    sweep = _sweep()
+    failures = sweep.rollback_key_failures(
+        _key_entry(sweep, forced_command_digest=sweep.FORCED_COMMAND_NONE)
+    )
+    assert len(failures) == 1, failures
+    assert "FORCED-COMMAND-ONLY" in failures[0]
+
+
+def test_erps_measured_shape_fails_all_three_independently() -> None:
+    """Eight unrestricted root keys, none carrying `from=`, `command=` or
+    `restrict`. Asserted as three separate findings, because that is how a
+    partial repair gets reported honestly."""
+    sweep = _sweep()
+    failures = sweep.rollback_key_failures(
+        _key_entry(
+            sweep,
+            source_restriction=sweep.SOURCE_UNRESTRICTED,
+            forced_command_digest=sweep.FORCED_COMMAND_NONE,
+            restrict="absent",
+            pty="permitted",
+            agent_forwarding="permitted",
+        )
+    )
+    assert len(failures) == 3, failures
+
+
+def test_a_forced_command_is_recorded_as_a_digest_not_a_string() -> None:
+    """A digest makes a CHANGED forced command detectable. A string invites a
+    near-match being waved through: `/usr/bin/deploy` becoming
+    `/usr/bin/deploy --shell` reads the same at a glance."""
+    sweep = _sweep()
+    with pytest.raises(sweep.InventoryError, match="DIGEST and not the command"):
+        sweep.parse_ssh_constraint(
+            _constraint(forced_command_digest="/usr/bin/dotmac-deploy"), "probe"
+        )
+
+
+def test_restrict_present_beside_a_permitted_capability_is_refused() -> None:
+    """OpenSSH's `restrict` denies all current and future permissions, so this
+    key cannot exist — the row was written rather than observed."""
+    sweep = _sweep()
+    with pytest.raises(sweep.InventoryError, match="cannot exist"):
+        sweep.parse_ssh_constraint(_constraint(pty="permitted"), "probe")
+
+
+def test_an_unstated_restriction_is_refused_not_assumed_safe() -> None:
+    """Absence is never a disposition, applied to a key. An unrestricted key
+    must SAY it is unrestricted; a blank field reads as 'nobody looked', which
+    is the state the eight keys were already in."""
+    sweep = _sweep()
+    with pytest.raises(sweep.InventoryError, match="nobody looked"):
+        sweep.parse_ssh_constraint(_constraint(source_restriction=None), "probe")
+
+
+def test_a_permission_must_be_denied_or_permitted() -> None:
+    sweep = _sweep()
+    with pytest.raises(sweep.InventoryError, match="must be one of"):
+        sweep.parse_ssh_constraint(_constraint(pty="maybe"), "probe")
+
+
+def test_a_key_is_identified_by_fingerprint_never_by_material() -> None:
+    sweep = _sweep()
+    with pytest.raises(sweep.InventoryError, match="must be the SHA256 form"):
+        sweep.parse_ssh_constraint(_constraint(fingerprint="the deploy key"), "probe")
+    with pytest.raises(sweep.InventoryError, match="material never"):
+        sweep.parse_ssh_constraint(
+            _constraint(method="-----BEGIN OPENSSH PRIVATE KEY-----"), "probe"
+        )
+
+
+def test_an_ssh_credential_row_must_be_characterised() -> None:
+    """The v2 gap, closed. A row that counts a key and says nothing about it is
+    refused at parse."""
+    sweep = _sweep()
+    text = "\n".join(
+        [
+            'schema = "ExecutorInventory.v1"',
+            'product = "probe"',
+            f'revision = "{"0" * 40}"',
+            'families_present = ["ssh_credential"]',
+            "families_absent = "
+            + json.dumps([n for n in sweep.FAMILY_NAMES if n != "ssh_credential"]),
+        ]
+        + [
+            f'[[family_absence]]\nfamily = "{name}"\nscope = "repository_tree"\n'
+            f'observed_at = "2026-08-31"\nobserved_by = "probe"\nmethod = "walked"'
+            for name in sweep.FAMILY_NAMES
+            if name != "ssh_credential" and not sweep.FAMILY_BY_NAME[name].tree_complete
+        ]
+        + [
+            "[[entrypoint]]",
+            'name = "ssh:k"',
+            'family = "ssh_credential"',
+            'trigger = "operator session"',
+            'credential = "deploy-key"',
+            'disposition = "active_executor"',
+            'host = "erp.dotmac.io"',
+        ]
+    )
+    with pytest.raises(sweep.InventoryError, match="declares no `ssh_constraint`"):
+        sweep.parse_inventory(text, source="probe.toml")
+
+
+def test_loosening_a_key_moves_the_census_digest() -> None:
+    """Without the constraint in the canonical form, a key could be quietly
+    unrestricted between two receipts and every recorded digest would match."""
+    sweep = _sweep()
+
+    def census(entry):
+        return sweep.inventory_digest(
+            sweep.Inventory(
+                product="probe",
+                revision="0" * 40,
+                production_targets=(),
+                families_present=("ssh_credential",),
+                families_absent=tuple(
+                    n for n in sweep.FAMILY_NAMES if n != "ssh_credential"
+                ),
+                absences=(),
+                entrypoints=(entry,),
+            )
+        )
+
+    tight = census(_key_entry(sweep))
+    loose = census(_key_entry(sweep, source_restriction=sweep.SOURCE_UNRESTRICTED))
+    assert tight != loose
+
+
+def test_the_gate_only_bites_on_a_retained_rollback_key(tmp_path) -> None:
+    """SPECIFICITY, and it is deliberate. ERP's eight unrestricted keys are
+    `active_executor` debt the ratchet counts; refusing them at parse would
+    make an honest census impossible on day one. The census records reality;
+    the gate guards the retention this contract itself creates."""
+    sweep = _sweep()
+    live = _key_entry(sweep, source_restriction=sweep.SOURCE_UNRESTRICTED)
+    live = sweep.Entrypoint(
+        name=live.name,
+        family=live.family,
+        trigger=live.trigger,
+        credential=live.credential,
+        disposition="active_executor",
+        host=live.host,
+        targets=("erp.dotmac.io",),
+        ssh_constraint=live.ssh_constraint,
+    )
+    assert sweep.rollback_key_failures(live), "the key itself is still unconstrained"
+    inventory = sweep.Inventory(
+        product="probe",
+        revision="0" * 40,
+        production_targets=(),
+        families_present=("ssh_credential",),
+        families_absent=tuple(n for n in sweep.FAMILY_NAMES if n != "ssh_credential"),
+        absences=(),
+        entrypoints=(live,),
+    )
+    problems = sweep.reconcile(inventory, tmp_path)
+    assert not any("rollback" in problem for problem in problems), problems
+
+
+def test_the_census_digest_is_ratcheted_not_merely_recorded() -> None:
+    """A digest nothing compares is a digest that moves unobserved.
+
+    Counts alone miss every change that alters a row's CONTENT without altering
+    how many rows there are — a target repointed, a trigger changed, or an SSH
+    key quietly loosened. `SshCredentialConstraintV1` sits in the canonical form
+    precisely so that loosening moves this digest, which is worth nothing unless
+    something fails when it moves.
+    """
+    sweep = _sweep()
+    baseline = _baseline()
+    measured, _unadopted, _unverified = sweep.measure(baseline, INVENTORY_DIR)
+
+    drifted = json.loads(json.dumps(baseline))
+    drifted["products"][sweep.SELF_REPOSITORY]["inventory_digest"] = (
+        "sha256:" + "0" * 64
+    )
+    failures, _ = sweep.ratchet(measured, drifted)
+    assert any("census digest moved" in failure for failure in failures), failures
+
+    # and the recorded digest is the live one, so the gate is not vacuous
+    failures, _ = sweep.ratchet(measured, baseline)
+    assert not any("census digest" in failure for failure in failures), failures
+
+
+# ── Compose sanction is ENTRY-POINT IDENTITY (2026-08-31, v3) ───────────────
+#
+# "Remove direct Compose mutation outside Foundation" is an identity test, not
+# a disposition test. A compose verb is sanctioned iff it is reached through
+# the installed `dotmac-deployment-foundation` entry point, resolved from
+# distribution metadata — never from a path, a comment, a filename or a
+# declared premise.
+#
+# The reason to prefer identity is a defect this module already produced: the
+# verb detector read a usage comment as a deployment and drew a call edge
+# backwards, because a path mention is symmetric while invocation is not. "Is
+# this the sanctioned compose call?" has the same shape — it asks about intent,
+# which a tree cannot answer.
+
+
+def test_vendor_cp_is_on_the_roster() -> None:
+    """A named production host retaining a rollback credential sat outside the
+    roster, so it would have been SILENTLY UNMONITORED rather than reported
+    UNADOPTED — the roster reproducing the failure the code prevents.
+
+    The entry is the REPOSITORY that owes the inventory, not the host that
+    retains the credential: `measure()` resolves `<product>.toml`, so a host
+    identity here would name a file nobody can ever write.
+    """
+    sweep = _sweep()
+    assert "dotmac_vendor_control_plane" in sweep.ADOPTION_TARGETS
+    assert "dotmac_vendor_control_plane" in _baseline()["unadopted"]
+    assert not any("-prod" in target for target in sweep.ADOPTION_TARGETS)
+
+
+def test_the_sanctioned_entry_point_is_resolved_from_installed_metadata() -> None:
+    """The positive half. In CI the distribution is installed (it is a dev
+    dependency and `poetry install` takes the dev group), so this resolves to a
+    real console script."""
+    sweep = _sweep()
+    resolved = sweep.sanctioned_entry_points()
+    assert resolved, (
+        f"`{sweep.SANCTIONED_DISTRIBUTION}` must be installed where this check "
+        "runs; without it the sanction question is UNMONITORED"
+    )
+    assert all(isinstance(name, str) and name for name in resolved)
+
+
+def test_an_unresolvable_distribution_is_unmonitored_never_a_pass() -> None:
+    """The other half. A check that cannot establish its premise says so."""
+    assert _sweep().sanctioned_entry_points("dotmac-no-such-distribution-xyz") is None
+
+
+def test_the_console_script_name_is_never_written_down_here() -> None:
+    """THE test that keeps this an identity check.
+
+    A hardcoded console-script name would turn metadata resolution back into a
+    string match — the same failure as judging a call by its filename. The
+    module may name the DISTRIBUTION (that is the identity it resolves against)
+    and must not name the script the distribution happens to install.
+    """
+    sweep = _sweep()
+    resolved = sweep.sanctioned_entry_points()
+    assert resolved, "cannot prove absence of a name we could not resolve"
+    source = SCRIPT.read_text("utf-8")
+    assert sweep.SANCTIONED_DISTRIBUTION in source, (
+        "the module must name the DISTRIBUTION — that is the identity it "
+        "resolves against"
+    )
+    # The distribution name is removed FIRST, because the console script is a
+    # PREFIX of it (`dotmac-deploy` inside `dotmac-deployment-foundation`) and a
+    # naive substring check would fail on the very line that makes this an
+    # identity check. Which is the near-match hazard this contract warns about,
+    # arriving inside its own test.
+    residue = source.replace(sweep.SANCTIONED_DISTRIBUTION, "")
+    for name in resolved:
+        assert name not in residue, (
+            f"the console script {name!r} is written into the module; sanction "
+            "must be resolved from metadata, not matched as a literal"
+        )
+
+
+def test_delegation_to_a_name_the_distribution_does_not_provide_is_refused(
+    tmp_path,
+) -> None:
+    sweep = _sweep()
+    if sweep.sanctioned_entry_points() is None:
+        pytest.skip("the sanctioned distribution is not installed here")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text(
+        "dotmac-deploy apply\n", encoding="utf-8"
+    )
+    entry = sweep.Entrypoint(
+        name="d",
+        family="script",
+        trigger="manual",
+        credential="none",
+        disposition="active_executor",
+        path="scripts/d.sh",
+        targets=("host",),
+        delegates_to="deploy-everything",
+    )
+    problems = sweep.reconcile(_probe_inventory(sweep, "script", entry), tmp_path)
+    assert any("ENTRY-POINT IDENTITY" in problem for problem in problems), problems
+
+
+def test_delegation_to_a_real_console_script_is_admitted(tmp_path) -> None:
+    """Both halves at the same reach."""
+    sweep = _sweep()
+    resolved = sweep.sanctioned_entry_points()
+    if resolved is None:
+        pytest.skip("the sanctioned distribution is not installed here")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text("run it\n", encoding="utf-8")
+    entry = sweep.Entrypoint(
+        name="d",
+        family="script",
+        trigger="manual",
+        credential="none",
+        disposition="active_executor",
+        path="scripts/d.sh",
+        targets=("host",),
+        delegates_to=sorted(resolved)[0],
+    )
+    problems = sweep.reconcile(_probe_inventory(sweep, "script", entry), tmp_path)
+    assert not any("ENTRY-POINT IDENTITY" in problem for problem in problems), problems
+    assert not any("UNMONITORED" in problem for problem in problems), problems
+
+
+def test_an_in_tree_compose_verb_is_an_unsanctioned_mutation(tmp_path) -> None:
+    """A sanctioned mutation happens inside the installed distribution, which
+    is not in the tree, so it never appears in a resolved verb set. An
+    unsanctioned one is in the tree, so it always does."""
+    sweep = _sweep()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text(
+        "docker compose up -d\n", encoding="utf-8"
+    )
+    entry = sweep.Entrypoint(
+        name="d",
+        family="script",
+        trigger="manual",
+        credential="none",
+        disposition="active_executor",
+        path="scripts/d.sh",
+        targets=("host",),
+    )
+    found = sweep.compose_mutations(_probe_inventory(sweep, "script", entry), tmp_path)
+    assert found.get("d"), found
+
+
+def test_delegating_does_not_excuse_a_direct_call_beside_it(tmp_path) -> None:
+    """SPECIFICITY in the dangerous direction. A script that shells out to the
+    sanctioned entry point AND runs its own `docker compose` is still mutating
+    a topology outside Foundation."""
+    sweep = _sweep()
+    resolved = sweep.sanctioned_entry_points()
+    if resolved is None:
+        pytest.skip("the sanctioned distribution is not installed here")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text(
+        f"{sorted(resolved)[0]} apply\ndocker compose up -d\n", encoding="utf-8"
+    )
+    entry = sweep.Entrypoint(
+        name="d",
+        family="script",
+        trigger="manual",
+        credential="none",
+        disposition="active_executor",
+        path="scripts/d.sh",
+        targets=("host",),
+        delegates_to=sorted(resolved)[0],
+    )
+    found = sweep.compose_mutations(_probe_inventory(sweep, "script", entry), tmp_path)
+    assert "d" in found, "delegation must not launder the direct call"
+
+
+def test_a_clean_tree_records_no_unsanctioned_mutation(tmp_path) -> None:
+    """The negative control, so the measurement is not "everything is a
+    mutation"."""
+    sweep = _sweep()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text("echo hello\n", encoding="utf-8")
+    entry = sweep.Entrypoint(
+        name="d",
+        family="script",
+        trigger="manual",
+        credential="none",
+        disposition="not_an_executor",
+        path="scripts/d.sh",
+        premise="commands no deployment verb",
+    )
+    assert (
+        sweep.compose_mutations(_probe_inventory(sweep, "script", entry), tmp_path)
+        == {}
+    )
+
+
+def test_the_unsanctioned_set_is_ratcheted_in_both_directions() -> None:
+    """Wave 7C drives this set to EMPTY. The SET rather than the count: a swap
+    — one path retired while another gains the ability — leaves the count still
+    and is exactly the move that matters."""
+    sweep = _sweep()
+    baseline = _baseline()
+    measured, _u, _v = sweep.measure(baseline, INVENTORY_DIR)
+    row = baseline["products"][sweep.SELF_REPOSITORY]
+    assert row["unsanctioned_compose_mutation_paths"], "must not pass over an empty set"
+
+    grown = json.loads(json.dumps(baseline))
+    grown["products"][sweep.SELF_REPOSITORY]["unsanctioned_compose_mutation_paths"] = []
+    failures, _ = sweep.ratchet(measured, grown)
+    assert any("gained the ability" in failure for failure in failures), failures
+
+    shrunk = json.loads(json.dumps(baseline))
+    shrunk["products"][sweep.SELF_REPOSITORY]["unsanctioned_compose_mutation_paths"] = (
+        row["unsanctioned_compose_mutation_paths"] + ["script:_retired.sh"]
+    )
+    failures, _ = sweep.ratchet(measured, shrunk)
+    assert any("drives this set to EMPTY" in failure for failure in failures), failures
+
+
+def test_the_environment_dependent_sanction_state_is_not_frozen_in_the_baseline() -> (
+    None
+):
+    """Whether the distribution is installed is a property of WHERE the check
+    runs, not of the product. Freezing one machine's answer into a committed
+    file is how a local venv becomes a fleet fact."""
+    row = _baseline()["products"][_sweep().SELF_REPOSITORY]
+    assert "compose_sanction_state" not in row
