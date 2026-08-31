@@ -15,7 +15,10 @@ Public surface, by file:
 
 - `contracts` — the frozen vocabulary and every typed refusal;
 - `policy` — the rules, pure and shared by both planes;
-- `service` — the two explicitly named plane surfaces;
+- `service` — the two explicitly named plane surfaces, writes and READS alike
+  (`list_*_requests`, `get_*_request`, `*_decision_history`, `get_*_policy`,
+  `list_*_policy_versions`), all answering in the typed values of `contracts`
+  and never in ORM rows;
 - `outbox` — the optional adapter onto the kernel's transactional outbox;
 - `models`, `manifest` — persistence and registration;
 - `migrations` — `versions_dir()`, where a consuming assembly finds the `ap`
@@ -27,6 +30,7 @@ module declares its own — § 4), and any import of a consuming domain.
 """
 
 from dotmac_approvals.contracts import (
+    ActionRefusal,
     Actor,
     ApprovalError,
     ApprovalEvent,
@@ -35,6 +39,7 @@ from dotmac_approvals.contracts import (
     ApproverKind,
     ContentChanged,
     DecisionAction,
+    DecisionView,
     DuplicateDecision,
     Evaluation,
     InvalidPolicy,
@@ -44,8 +49,14 @@ from dotmac_approvals.contracts import (
     PolicyNotFound,
     PolicyRevision,
     PolicyVersionExists,
+    PolicyView,
     RecordedDecision,
+    RequestAction,
+    RequestDetail,
+    RequestFilter,
     RequestNotPending,
+    RequestPage,
+    RequestView,
     SelfApprovalRefused,
     SoDRule,
     SoDViolation,
@@ -53,9 +64,10 @@ from dotmac_approvals.contracts import (
 from dotmac_approvals.manifest import module
 from dotmac_approvals.migrations import versions_dir
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a5+dev"
 
 __all__ = [
+    "ActionRefusal",
     "Actor",
     "ApprovalError",
     "ApprovalEvent",
@@ -64,6 +76,7 @@ __all__ = [
     "ApproverKind",
     "ContentChanged",
     "DecisionAction",
+    "DecisionView",
     "DuplicateDecision",
     "Evaluation",
     "InvalidPolicy",
@@ -73,8 +86,14 @@ __all__ = [
     "PolicyNotFound",
     "PolicyRevision",
     "PolicyVersionExists",
+    "PolicyView",
     "RecordedDecision",
+    "RequestAction",
+    "RequestDetail",
+    "RequestFilter",
     "RequestNotPending",
+    "RequestPage",
+    "RequestView",
     "SelfApprovalRefused",
     "SoDRule",
     "SoDViolation",

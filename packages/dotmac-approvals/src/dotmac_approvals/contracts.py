@@ -26,8 +26,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 from uuid import UUID
 
 # `sha256:` + 64 hex characters. Written as a length rather than a regex in the
@@ -363,6 +364,190 @@ class ApprovalEvent:
         }
 
 
+# ── Read contracts ──────────────────────────────────────────────────────────
+#
+# The typed values a browser surface renders. Wave 2 step 1: a queue screen and
+# a request detail have to be buildable without a consumer querying `approvals`
+# and without a template deciding who may approve.
+#
+# Everything below is a VALUE. A surface handed a live `ApprovalRequest` holds a
+# session-bound object that lazy-loads on attribute access and expires with the
+# transaction, which turns a template into a query planner and a detached row
+# into a runtime error mid-render.
+
+
+class RequestAction(StrEnum):
+    """What a specific actor may do to a specific pending request.
+
+    Owner-derived, always. Eligibility here is the product of the policy
+    revision, the decisions already recorded, separation of duties, the
+    self-approval rule and MFA — five inputs a row action downstream does not
+    have and must not guess at. A screen that decided for itself whether to show
+    an Approve button would be a second, weaker implementation of
+    `policy.authorise_approval`, and the two would disagree the first time a
+    quorum was reached between the render and the click.
+    """
+
+    APPROVE = "approve"
+    REJECT = "reject"
+    CANCEL = "cancel"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionRefusal:
+    """Why one action is not permitted, in the module's own vocabulary.
+
+    `code` is the refusal type's name — `NotEligible`, `SoDViolation`,
+    `MFARequired`, `DuplicateDecision`, `SelfApprovalRefused` — so a surface can
+    tell an approver why the button is absent instead of leaving them to guess.
+    A stable code, never a sentence to parse.
+    """
+
+    action: RequestAction
+    code: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionView:
+    """One recorded decision, as an immutable reference.
+
+    `decided_at` is the module's clock, not the caller's, and `actor_id` is the
+    actor the module AUTHORISED rather than a name the request supplied. That is
+    what makes this row a reference an auditor can rely on: there is no input
+    anywhere on this module's write surface that can put a different approver or
+    a different time into it.
+    """
+
+    id: UUID
+    request_id: UUID
+    level: int
+    actor_id: UUID
+    action: DecisionAction
+    comment: str | None
+    delegated_from: UUID | None
+    mfa_verified: bool
+    decided_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyView:
+    """One immutable published policy revision.
+
+    `document_digest` is what makes "this request was approved under THIS
+    policy" checkable rather than asserted: the levels are carried as values, so
+    a surface can show the rungs without reading the JSON column itself.
+    """
+
+    id: UUID
+    policy_code: str
+    version: int
+    levels: tuple[ApprovalLevel, ...]
+    allow_self_approval: bool
+    document_digest: str
+    published_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RequestView:
+    """One request as a queue row."""
+
+    id: UUID
+    policy_code: str
+    policy_version: int
+    subject_type: str
+    subject_id: str
+    content_digest: str
+    requested_by: UUID
+    state: ApprovalState
+    current_level: int
+    idempotency_key: str
+    note: str | None
+    opened_at: datetime
+    completed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class RequestDetail:
+    """One request, the policy it is bound to, its history, and the verdict.
+
+    `evaluation` is re-derived from the policy revision and the recorded
+    decisions on every read rather than trusted from the stored `state` column,
+    so a surface shows what the rules say and not what a row last happened to be
+    set to.
+
+    `permitted_actions` and `refusals` are answered FOR a viewer, and are empty
+    when no viewer was named — an anonymous read gets the facts and no
+    invitation to act.
+    """
+
+    request: RequestView
+    policy: PolicyView
+    decisions: tuple[DecisionView, ...]
+    evaluation: Evaluation
+    permitted_actions: tuple[RequestAction, ...] = ()
+    refusals: tuple[ActionRefusal, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RequestFilter:
+    """What an operator may narrow a request queue by.
+
+    A closed set of typed fields. No predicate, no sort column, no raw `where`:
+    a consumer that could pass one would own every future query over this
+    module's tables, and the module could no longer say what its own read
+    surface is.
+
+    There is deliberately nowhere here to state an approver, a decision time, an
+    evaluation or a permitted action. Those are the module's to derive, and an
+    input that could carry one would be an input a client could use to assert
+    it.
+
+    `page_size` is bounded by the TYPE rather than by the caller, because an
+    unbounded queue is how an approvals screen becomes a full-table scan the day
+    a bulk import opens four thousand requests.
+    """
+
+    state: ApprovalState | None = None
+    policy_code: str | None = None
+    subject_type: str | None = None
+    subject_id: str | None = None
+    requested_by: UUID | None = None
+    page: int = 1
+    page_size: int = 50
+
+    MAX_PAGE_SIZE: ClassVar[int] = 200
+
+    def __post_init__(self) -> None:
+        # A plain `ValueError`, not an `ApprovalError`. Every typed error in
+        # this module is a REFUSAL the domain made — not eligible, content
+        # changed, quorum unmet — and a caller catching `ApprovalError` to
+        # render "you may not do that" would then render it for a mistyped page
+        # size. A bad page size is a bug in the layer above, not a decision.
+        if self.page < 1:
+            raise ValueError("page is 1-based")
+        if not 1 <= self.page_size <= self.MAX_PAGE_SIZE:
+            raise ValueError(f"page_size must be 1..{self.MAX_PAGE_SIZE}")
+
+
+@dataclass(frozen=True, slots=True)
+class RequestPage:
+    """One page of requests, and enough to render a pager honestly.
+
+    `total` counts what matches the FILTER, not the page, so a surface can say
+    "showing 50 of 412" without a second query and without guessing.
+    """
+
+    requests: tuple[RequestView, ...]
+    total: int
+    page: int
+    page_size: int
+
+    @property
+    def has_more(self) -> bool:
+        return self.page * self.page_size < self.total
+
+
 EVENT_REQUESTED: Final[str] = "approval.requested"
 EVENT_APPROVED: Final[str] = "approval.approved"
 EVENT_REJECTED: Final[str] = "approval.rejected"
@@ -403,6 +588,7 @@ __all__ = [
     "EVENT_REJECTED",
     "EVENT_REQUESTED",
     "TERMINAL_STATES",
+    "ActionRefusal",
     "Actor",
     "ApprovalError",
     "ApprovalEvent",
@@ -411,6 +597,7 @@ __all__ = [
     "ApproverKind",
     "ContentChanged",
     "DecisionAction",
+    "DecisionView",
     "DuplicateDecision",
     "Evaluation",
     "InvalidPolicy",
@@ -420,8 +607,14 @@ __all__ = [
     "PolicyNotFound",
     "PolicyRevision",
     "PolicyVersionExists",
+    "PolicyView",
     "RecordedDecision",
+    "RequestAction",
+    "RequestDetail",
+    "RequestFilter",
     "RequestNotPending",
+    "RequestPage",
+    "RequestView",
     "SelfApprovalRefused",
     "SoDRule",
     "SoDViolation",

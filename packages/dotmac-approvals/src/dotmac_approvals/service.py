@@ -34,24 +34,34 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from dotmac_approvals import policy as rules
 from dotmac_approvals.contracts import (
     EVENT_FOR_STATE,
+    ActionRefusal,
     Actor,
+    ApprovalError,
     ApprovalEvent,
+    ApprovalLevel,
     ApprovalState,
     ContentChanged,
     DecisionAction,
+    DecisionView,
     Evaluation,
     NotRequester,
     PolicyNotFound,
     PolicyRevision,
     PolicyVersionExists,
+    PolicyView,
     RecordedDecision,
+    RequestAction,
+    RequestDetail,
+    RequestFilter,
     RequestNotPending,
+    RequestPage,
+    RequestView,
     validate_digest,
 )
 from dotmac_approvals.models import (
@@ -697,12 +707,425 @@ def _platform_outcome(
     return ApprovalOutcome(request.id, evaluation, events)
 
 
+# ── Reads ───────────────────────────────────────────────────────────────────
+#
+# The queue and detail contracts a browser surface needs, on the same two
+# explicitly named planes as everything else here. No `platform=` flag: a caller
+# states which security context it is in by naming the function.
+#
+# They live in THIS module for the same reason the writes do. The consuming
+# assembly owns the operator workflow; this module owns `mod_approvals`. The
+# moment a consumer writes its own `select(ApprovalRequest)` it has taken a
+# second read authority over a schema it does not own, and every column rename
+# becomes a cross-repository break — while the eligibility rules, which are the
+# whole point of the module, would quietly acquire a second implementation in a
+# template.
+
+
+def _policy_view(row: ApprovalPolicy | PlatformApprovalPolicy) -> PolicyView:
+    revision = _revision_of(
+        row.levels, row.policy_code, row.version, row.allow_self_approval
+    )
+    return PolicyView(
+        id=row.id,
+        policy_code=row.policy_code,
+        version=row.version,
+        levels=revision.levels,
+        allow_self_approval=row.allow_self_approval,
+        document_digest=row.document_digest,
+        published_at=row.created_at,
+    )
+
+
+def _request_view(row: ApprovalRequest | PlatformApprovalRequest) -> RequestView:
+    return RequestView(
+        id=row.id,
+        policy_code=row.policy_code,
+        policy_version=row.policy_version,
+        subject_type=row.subject_type,
+        subject_id=row.subject_id,
+        content_digest=row.content_digest,
+        requested_by=row.requested_by,
+        state=ApprovalState(row.state),
+        current_level=row.current_level,
+        idempotency_key=row.idempotency_key,
+        note=row.note,
+        opened_at=row.created_at,
+        completed_at=row.completed_at,
+    )
+
+
+def _decision_view(
+    row: ApprovalDecision | PlatformApprovalDecision,
+) -> DecisionView:
+    return DecisionView(
+        id=row.id,
+        request_id=row.request_id,
+        level=row.level,
+        actor_id=row.actor_id,
+        action=DecisionAction(row.action),
+        comment=row.comment,
+        delegated_from=row.delegated_from,
+        mfa_verified=row.mfa_verified,
+        decided_at=row.decided_at,
+    )
+
+
+def _filter_conditions(
+    model: type[ApprovalRequest] | type[PlatformApprovalRequest],
+    criteria: RequestFilter,
+) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = []
+    if criteria.state is not None:
+        conditions.append(model.state == str(criteria.state))
+    if criteria.policy_code is not None:
+        conditions.append(model.policy_code == criteria.policy_code)
+    if criteria.subject_type is not None:
+        conditions.append(model.subject_type == criteria.subject_type)
+    if criteria.subject_id is not None:
+        conditions.append(model.subject_id == criteria.subject_id)
+    if criteria.requested_by is not None:
+        conditions.append(model.requested_by == criteria.requested_by)
+    return conditions
+
+
+def _permitted(
+    revision: PolicyRevision,
+    request: ApprovalRequest | PlatformApprovalRequest,
+    decisions: tuple[RecordedDecision, ...],
+    viewer: Actor,
+) -> tuple[tuple[RequestAction, ...], tuple[ActionRefusal, ...]]:
+    """What this viewer may do, decided by the SAME rules the writes enforce.
+
+    Not a parallel judgement: `authorise_approval` and the three rejection
+    checks below are the exact calls `record_*_decision` makes, so a screen can
+    never offer an action the write path would refuse, and can never hide one it
+    would allow. A second implementation in a template would disagree the first
+    moment a quorum was reached between the render and the click.
+    """
+    if request.state != str(ApprovalState.PENDING):
+        return (), ()
+
+    actions: list[RequestAction] = []
+    refusals: list[ActionRefusal] = []
+    level: ApprovalLevel = revision.level(request.current_level)
+
+    try:
+        rules.authorise_approval(
+            revision,
+            current_level=request.current_level,
+            actor=viewer,
+            requested_by=request.requested_by,
+            decisions=decisions,
+        )
+    except ApprovalError as refusal:
+        refusals.append(
+            ActionRefusal(
+                action=RequestAction.APPROVE,
+                code=type(refusal).__name__,
+                detail=str(refusal),
+            )
+        )
+    else:
+        actions.append(RequestAction.APPROVE)
+
+    try:
+        # A rejection needs eligibility for the level but neither quorum nor a
+        # self-approval check — the same asymmetry `record_*_decision` applies,
+        # because refusing your own request is always permitted.
+        rules.check_not_duplicate(level, actor=viewer, decisions=decisions)
+        rules.check_eligibility(level, viewer)
+        rules.check_mfa(level, viewer)
+    except ApprovalError as refusal:
+        refusals.append(
+            ActionRefusal(
+                action=RequestAction.REJECT,
+                code=type(refusal).__name__,
+                detail=str(refusal),
+            )
+        )
+    else:
+        actions.append(RequestAction.REJECT)
+
+    if request.requested_by == viewer.actor_id:
+        actions.append(RequestAction.CANCEL)
+    else:
+        refusals.append(
+            ActionRefusal(
+                action=RequestAction.CANCEL,
+                code=NotRequester.__name__,
+                detail="only the original requester may cancel this request",
+            )
+        )
+    return tuple(actions), tuple(refusals)
+
+
+def list_tenant_requests(
+    db: Session, *, tenant_id: UUID, filter: RequestFilter | None = None
+) -> RequestPage:
+    """One page of tenant requests matching a typed, closed filter.
+
+    Ordering is by `(created_at, id)`, a total order. Not `created_at` alone:
+    requests opened in one transaction share a timestamp, and a pager over an
+    unstable order shows one row twice and skips another as the queue moves
+    under it — which reads as data loss rather than as a sorting bug.
+    """
+    criteria = filter if filter is not None else RequestFilter()
+    conditions = [
+        ApprovalRequest.tenant_id == tenant_id,
+        *_filter_conditions(ApprovalRequest, criteria),
+    ]
+    total = db.execute(
+        select(func.count()).select_from(ApprovalRequest).where(*conditions)
+    ).scalar_one()
+    rows = (
+        db.execute(
+            select(ApprovalRequest)
+            .where(*conditions)
+            .order_by(ApprovalRequest.created_at, ApprovalRequest.id)
+            .offset((criteria.page - 1) * criteria.page_size)
+            .limit(criteria.page_size)
+        )
+        .scalars()
+        .all()
+    )
+    return RequestPage(
+        requests=tuple(_request_view(row) for row in rows),
+        total=int(total),
+        page=criteria.page,
+        page_size=criteria.page_size,
+    )
+
+
+def list_platform_requests(
+    db: Session, *, filter: RequestFilter | None = None
+) -> RequestPage:
+    """One page of control-plane requests. Same contract, no tenant."""
+    criteria = filter if filter is not None else RequestFilter()
+    conditions = _filter_conditions(PlatformApprovalRequest, criteria)
+    total = db.execute(
+        select(func.count()).select_from(PlatformApprovalRequest).where(*conditions)
+    ).scalar_one()
+    rows = (
+        db.execute(
+            select(PlatformApprovalRequest)
+            .where(*conditions)
+            .order_by(PlatformApprovalRequest.created_at, PlatformApprovalRequest.id)
+            .offset((criteria.page - 1) * criteria.page_size)
+            .limit(criteria.page_size)
+        )
+        .scalars()
+        .all()
+    )
+    return RequestPage(
+        requests=tuple(_request_view(row) for row in rows),
+        total=int(total),
+        page=criteria.page,
+        page_size=criteria.page_size,
+    )
+
+
+def tenant_decision_history(
+    db: Session, *, tenant_id: UUID, request_id: UUID
+) -> tuple[DecisionView, ...]:
+    """Every decision on one tenant request, oldest first."""
+    return tuple(
+        _decision_view(row) for row in _tenant_decisions(db, tenant_id, request_id)
+    )
+
+
+def platform_decision_history(
+    db: Session, *, request_id: UUID
+) -> tuple[DecisionView, ...]:
+    """Every decision on one control-plane request, oldest first."""
+    return tuple(_decision_view(row) for row in _platform_decisions(db, request_id))
+
+
+def get_tenant_request(
+    db: Session, *, tenant_id: UUID, request_id: UUID, viewer: Actor | None = None
+) -> RequestDetail | None:
+    """One tenant request, its policy, its history, and this viewer's actions.
+
+    `evaluation` is re-derived from the policy revision and the recorded
+    decisions rather than read off the stored `state` column, so the detail
+    shows what the rules say and not what a row last happened to be set to.
+    """
+    row = db.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.tenant_id == tenant_id, ApprovalRequest.id == request_id
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    policy_row = db.execute(
+        select(ApprovalPolicy).where(
+            ApprovalPolicy.tenant_id == tenant_id,
+            ApprovalPolicy.policy_code == row.policy_code,
+            ApprovalPolicy.version == row.policy_version,
+        )
+    ).scalar_one_or_none()
+    if policy_row is None:
+        # Fail CLOSED, exactly as `_tenant_policy` does. A detail screen that
+        # rendered a request whose policy revision cannot be found would be
+        # showing an approval nobody can evaluate.
+        raise PolicyNotFound(
+            f"no tenant policy {row.policy_code} v{row.policy_version}"
+        )
+    decision_rows = _tenant_decisions(db, tenant_id, request_id)
+    revision = _revision_of(
+        policy_row.levels,
+        policy_row.policy_code,
+        policy_row.version,
+        policy_row.allow_self_approval,
+    )
+    recorded = _recorded(decision_rows)
+    evaluation = rules.evaluate(
+        revision,
+        state=ApprovalState(row.state),
+        current_level=row.current_level,
+        decisions=recorded,
+    )
+    actions, refusals = (
+        _permitted(revision, row, recorded, viewer) if viewer is not None else ((), ())
+    )
+    return RequestDetail(
+        request=_request_view(row),
+        policy=_policy_view(policy_row),
+        decisions=tuple(_decision_view(item) for item in decision_rows),
+        evaluation=evaluation,
+        permitted_actions=actions,
+        refusals=refusals,
+    )
+
+
+def get_platform_request(
+    db: Session, *, request_id: UUID, viewer: Actor | None = None
+) -> RequestDetail | None:
+    """One control-plane request. Same contract, no tenant."""
+    row = db.execute(
+        select(PlatformApprovalRequest).where(PlatformApprovalRequest.id == request_id)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    policy_row = db.execute(
+        select(PlatformApprovalPolicy).where(
+            PlatformApprovalPolicy.policy_code == row.policy_code,
+            PlatformApprovalPolicy.version == row.policy_version,
+        )
+    ).scalar_one_or_none()
+    if policy_row is None:
+        raise PolicyNotFound(
+            f"no platform policy {row.policy_code} v{row.policy_version}"
+        )
+    decision_rows = _platform_decisions(db, request_id)
+    revision = _revision_of(
+        policy_row.levels,
+        policy_row.policy_code,
+        policy_row.version,
+        policy_row.allow_self_approval,
+    )
+    recorded = _recorded(decision_rows)
+    evaluation = rules.evaluate(
+        revision,
+        state=ApprovalState(row.state),
+        current_level=row.current_level,
+        decisions=recorded,
+    )
+    actions, refusals = (
+        _permitted(revision, row, recorded, viewer) if viewer is not None else ((), ())
+    )
+    return RequestDetail(
+        request=_request_view(row),
+        policy=_policy_view(policy_row),
+        decisions=tuple(_decision_view(item) for item in decision_rows),
+        evaluation=evaluation,
+        permitted_actions=actions,
+        refusals=refusals,
+    )
+
+
+def get_tenant_policy(
+    db: Session, *, tenant_id: UUID, policy_code: str, version: int
+) -> PolicyView | None:
+    """One published tenant policy revision, or nothing."""
+    row = db.execute(
+        select(ApprovalPolicy).where(
+            ApprovalPolicy.tenant_id == tenant_id,
+            ApprovalPolicy.policy_code == policy_code,
+            ApprovalPolicy.version == version,
+        )
+    ).scalar_one_or_none()
+    return _policy_view(row) if row is not None else None
+
+
+def get_platform_policy(
+    db: Session, *, policy_code: str, version: int
+) -> PolicyView | None:
+    """One published control-plane policy revision, or nothing."""
+    row = db.execute(
+        select(PlatformApprovalPolicy).where(
+            PlatformApprovalPolicy.policy_code == policy_code,
+            PlatformApprovalPolicy.version == version,
+        )
+    ).scalar_one_or_none()
+    return _policy_view(row) if row is not None else None
+
+
+def list_tenant_policy_versions(
+    db: Session, *, tenant_id: UUID, policy_code: str
+) -> tuple[PolicyView, ...]:
+    """Every published revision of one tenant policy, oldest version first.
+
+    Ordered by `version`, which a unique constraint already makes total — a
+    policy history that reordered itself between two renders would not be a
+    history.
+    """
+    rows = (
+        db.execute(
+            select(ApprovalPolicy)
+            .where(
+                ApprovalPolicy.tenant_id == tenant_id,
+                ApprovalPolicy.policy_code == policy_code,
+            )
+            .order_by(ApprovalPolicy.version)
+        )
+        .scalars()
+        .all()
+    )
+    return tuple(_policy_view(row) for row in rows)
+
+
+def list_platform_policy_versions(
+    db: Session, *, policy_code: str
+) -> tuple[PolicyView, ...]:
+    """Every published revision of one control-plane policy."""
+    rows = (
+        db.execute(
+            select(PlatformApprovalPolicy)
+            .where(PlatformApprovalPolicy.policy_code == policy_code)
+            .order_by(PlatformApprovalPolicy.version)
+        )
+        .scalars()
+        .all()
+    )
+    return tuple(_policy_view(row) for row in rows)
+
+
 __all__ = [
     "ApprovalOutcome",
     "cancel_platform_request",
     "cancel_tenant_request",
     "evaluate_platform_approval",
     "evaluate_tenant_approval",
+    "get_platform_policy",
+    "get_platform_request",
+    "get_tenant_policy",
+    "get_tenant_request",
+    "list_platform_policy_versions",
+    "list_platform_requests",
+    "list_tenant_policy_versions",
+    "list_tenant_requests",
+    "platform_decision_history",
     "policy_document_digest",
     "publish_platform_policy_version",
     "publish_tenant_policy_version",
@@ -710,4 +1133,5 @@ __all__ = [
     "record_tenant_decision",
     "request_platform_approval",
     "request_tenant_approval",
+    "tenant_decision_history",
 ]

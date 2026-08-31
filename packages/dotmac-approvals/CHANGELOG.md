@@ -5,6 +5,36 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed;
 `0.1.0a1` through `0.1.0a5` have since been published.
 
+## Unreleased — `0.1.0a5+dev`
+
+**Public typed READ contracts.** `list_tenant_requests` / `list_platform_requests`
+over a closed, page-bounded `RequestFilter`; `get_tenant_request` /
+`get_platform_request` returning a `RequestDetail` with the bound policy
+revision, the decision history, a freshly derived `Evaluation` and — for a named
+viewer — the actions that viewer may actually take; `tenant_decision_history` /
+`platform_decision_history`; `get_*_policy` and `list_*_policy_versions`.
+
+Two explicitly named planes here as everywhere else: no `platform=` flag, so a
+caller states its security context by naming the function.
+
+`permitted_actions` is decided by the SAME rules the writes enforce —
+`authorise_approval` and the three rejection checks `record_*_decision` runs —
+so a screen can never offer an action the write path would refuse. A second
+implementation in a template would disagree the first moment a quorum was
+reached between the render and the click.
+
+Every read answers in frozen contract values, never in ORM rows.
+
+**No client-supplied approver, and no client-supplied decision time**, asserted
+over the whole service input surface rather than one type. A decision's
+attribution is the actor this module authorised and its timestamp is this
+module's own clock. `cancelled_by` is not an exception: it is compared against
+the stored `requested_by` and refused when it differs.
+
+**The declared version now carries a PEP 440 local development marker.**
+`0.1.0a5` is published and tagged; `src/` has moved since, and one version may
+not name two sets of importable bytes.
+
 ## 0.1.0a5 — 2026-08-16
 
 Published and verified by release run `32062654126`; the registry-installed
