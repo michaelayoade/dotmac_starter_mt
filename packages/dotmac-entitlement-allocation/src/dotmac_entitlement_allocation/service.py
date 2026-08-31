@@ -61,14 +61,25 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from dotmac_kernel.audit import write_platform_audit_event
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_entitlement_allocation.facts import (
+    AllocatedCapability,
+    AllocationAction,
+    AllocationFilter,
+    AllocationIntegrity,
+    AllocationPage,
+    AllocationReconciliation,
+    AllocationRecord,
+    AllocationRefusal,
+    AllocationStatus,
+    ReconciliationState,
+)
 from dotmac_entitlement_allocation.models import (
     Allocation,
     AllocationEntry,
-    AllocationStatus,
 )
 from dotmac_entitlement_allocation.ports import (
     AllocationConflictError,
@@ -88,20 +99,6 @@ IDEMPOTENCY_SCOPE = "entitlement_allocation.stage"
 #: Declared on the module manifest. One event per staging, written inside the
 #: idempotent operation so an at-least-once transport cannot produce two.
 AUDIT_ACTION_STAGED = "entitlement_allocation.staged"
-
-
-@dataclass(frozen=True, slots=True)
-class AllocatedCapability:
-    """One entitled capability as it was staged.
-
-    A named value object rather than a `tuple[str, int]`: a bare pair forces
-    every consumer to remember which position is which, and the compiler cannot
-    tell `(code, quantity)` from `(quantity, code)` when both are read
-    positionally.
-    """
-
-    capability_code: str
-    quantity: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,12 +429,200 @@ def allocation_product(db: Session, allocation_id: UUID) -> str:
     return str(product)
 
 
+# ── Reads ───────────────────────────────────────────────────────────────────
+#
+# The contract-scoped view a control-plane surface needs, and the reason it
+# lives here: query construction over `mod_ealloc` is this module's alone. A
+# consumer that wrote its own `select(Allocation)` would take a second read
+# authority over a schema it does not own, and — worse for this module than for
+# most — it would be one `select` away from reading an UNSEALED row as history.
+
+
+def _capabilities(allocation: Allocation) -> tuple[AllocatedCapability, ...]:
+    return tuple(
+        AllocatedCapability(
+            capability_code=entry.capability_code, quantity=entry.quantity
+        )
+        for entry in sorted(allocation.entries, key=lambda e: e.capability_code)
+    )
+
+
+def _record(allocation: Allocation) -> AllocationRecord:
+    """One row as a value, with the integrity verdict this module derives.
+
+    `sealed` is the only column the online role may write, and only this
+    module's staging path writes it. Turning it into a typed verdict here is
+    what stops every consumer from re-deciding what an unsealed row means — and
+    the answer that matters is that it means nothing yet.
+    """
+    integrity = (
+        AllocationIntegrity.SEALED
+        if allocation.sealed
+        else AllocationIntegrity.UNSEALED
+    )
+    return AllocationRecord(
+        id=allocation.id,
+        contract_ref=allocation.contract_ref,
+        product_code=allocation.product_code,
+        customer_ref=allocation.customer_ref,
+        content_hash=allocation.content_hash,
+        status=AllocationStatus(allocation.status),
+        entries=_capabilities(allocation),
+        integrity=integrity,
+        # Issuing against an unsealed row is issuing against an entitlement set
+        # nobody finished validating, which is exactly what `allocation_product`
+        # refuses. Deriving the action from the same fact means a screen cannot
+        # offer what that call would then reject.
+        permitted_actions=((AllocationAction.ISSUE,) if allocation.sealed else ()),
+        source_event_id=allocation.source_event_id,
+        snapshot_fingerprint=allocation.snapshot_fingerprint,
+        staged_at=allocation.created_at,
+    )
+
+
+def get_allocation(db: Session, allocation_id: UUID) -> AllocationRecord | None:
+    """One allocation as it stands on file, or nothing.
+
+    Returns an UNSEALED row rather than raising, unlike `allocation_product`:
+    the difference is what the caller is about to do. Issuing against an
+    incomplete write must fail closed; LOOKING at one is how an operator finds
+    out it needs repairing, and refusing the read would hide the very row
+    somebody has to act on.
+    """
+    row = db.get(Allocation, allocation_id)
+    return _record(row) if row is not None else None
+
+
+def allocations_for_contract(
+    db: Session, contract_ref: UUID
+) -> tuple[AllocationRecord, ...]:
+    """Every allocation staged for one contract, oldest first.
+
+    One row per `(contract_ref, content_hash)` — a contract whose terms changed
+    and re-activated has several, and they are all history. Ordered by
+    `(created_at, id)`, a total order: two rows written in one transaction share
+    a timestamp, and a history that reorders itself between two renders is not a
+    history.
+    """
+    rows = (
+        db.execute(
+            select(Allocation)
+            .where(Allocation.contract_ref == contract_ref)
+            .order_by(Allocation.created_at, Allocation.id)
+        )
+        .scalars()
+        .all()
+    )
+    return tuple(_record(row) for row in rows)
+
+
+def list_allocations(
+    db: Session, filter: AllocationFilter | None = None
+) -> AllocationPage:
+    """One page of allocations matching a typed, closed filter.
+
+    Ordering is by `(created_at, id)`, a total order — not `created_at` alone,
+    and not `contract_ref`, which is not unique. A pager over an unstable order
+    shows one row twice and skips another as the estate grows under it, which
+    reads as data loss rather than as a sorting bug.
+    """
+    criteria = filter if filter is not None else AllocationFilter()
+    conditions: list[ColumnElement[bool]] = []
+    if criteria.contract_ref is not None:
+        conditions.append(Allocation.contract_ref == criteria.contract_ref)
+    if criteria.product_code is not None:
+        conditions.append(Allocation.product_code == criteria.product_code)
+    if criteria.customer_ref is not None:
+        conditions.append(Allocation.customer_ref == criteria.customer_ref)
+    if criteria.sealed is not None:
+        conditions.append(Allocation.sealed.is_(criteria.sealed))
+
+    total = db.execute(
+        select(func.count()).select_from(Allocation).where(*conditions)
+    ).scalar_one()
+    rows = (
+        db.execute(
+            select(Allocation)
+            .where(*conditions)
+            .order_by(Allocation.created_at, Allocation.id)
+            .offset((criteria.page - 1) * criteria.page_size)
+            .limit(criteria.page_size)
+        )
+        .scalars()
+        .all()
+    )
+    return AllocationPage(
+        allocations=tuple(_record(row) for row in rows),
+        total=int(total),
+        page=criteria.page,
+        page_size=criteria.page_size,
+    )
+
+
+def reconciliation(
+    db: Session, *, contract_ref: UUID, content_hash: str
+) -> AllocationReconciliation:
+    """Whether this exact activation has a usable allocation, and if not, why.
+
+    The caller states `(contract_ref, content_hash)` from ITS OWN authority —
+    this module never reads a contract, so contract invariants stay proven where
+    they live rather than re-derived here from a foreign table. Everything else
+    in the answer is derived from rows this module owns, and there is nowhere to
+    pass a verdict in.
+
+    The refusal is the typed form of what `allocation_product` raises, so an
+    operator screen can say "never staged" or "never sealed" instead of catching
+    an exception to find out which.
+    """
+    row = db.execute(
+        select(Allocation).where(
+            Allocation.contract_ref == contract_ref,
+            Allocation.content_hash == content_hash,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return AllocationReconciliation(
+            contract_ref=contract_ref,
+            content_hash=content_hash,
+            state=ReconciliationState.MISSING,
+            refusal=AllocationRefusal.NOT_STAGED,
+            detail=(
+                f"no allocation for activation ({contract_ref}, {content_hash}); "
+                "stage it from the contract owner's snapshot"
+            ),
+        )
+    record = _record(row)
+    if not row.sealed:
+        return AllocationReconciliation(
+            contract_ref=contract_ref,
+            content_hash=content_hash,
+            state=ReconciliationState.INCOMPLETE,
+            allocation=record,
+            refusal=AllocationRefusal.NOT_SEALED,
+            detail=(
+                f"allocation {row.id} was never sealed; it is an incomplete "
+                "write, not history. Repair or remove it before issuing "
+                "against it."
+            ),
+        )
+    return AllocationReconciliation(
+        contract_ref=contract_ref,
+        content_hash=content_hash,
+        state=ReconciliationState.ALLOCATED,
+        allocation=record,
+    )
+
+
 __all__ = [
     "AUDIT_ACTION_STAGED",
     "IDEMPOTENCY_SCOPE",
     "AllocatedCapability",
     "AllocationView",
     "allocation_product",
+    "allocations_for_contract",
+    "get_allocation",
+    "list_allocations",
+    "reconciliation",
     "snapshot_fingerprint",
     "stage_allocation",
 ]

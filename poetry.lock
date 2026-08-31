@@ -1040,7 +1040,7 @@ url = "packages/dotmac-durable-timers"
 
 [[package]]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a6"
+version = "0.1.0a6+dev"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1320,7 +1320,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-licensing"
-version = "0.1.0a1"
+version = "0.1.0a1+dev"
 description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0057 § 2)"
 optional = false
 python-versions = ">=3.11,<3.14"

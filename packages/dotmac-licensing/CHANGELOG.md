@@ -5,6 +5,32 @@ All notable changes to the `dotmac-licensing` distribution. This package follows
 surface is still settling — a `0.MINOR` bump may carry breaking changes, each
 called out here.
 
+## Unreleased — `0.1.0a1+dev`
+
+**Public typed READ contracts.** `list_licences` over a closed page-bounded
+`LicenceFilter` answering `LicenceSummary` rows (not `LicenceView`, which
+carries every issuance in the lineage and would be a nested page per row);
+`signing_keys`; `revocations`; `revocation_lists` and `latest_revocation_list`;
+and `issuance_handoff`.
+
+`signing_keys` returns key IDs and statuses and **no material of any kind** —
+public included. The public half is real and must be distributed, but through
+`build_keyring`, which is a protocol artefact a deployment verifies with. Putting
+it on a screen's contract would make every future surface a place key material
+can appear by accident. The private half still has no column anywhere here.
+
+`issuance_handoff` is the Integrator boundary as a type: the envelope, digest and
+signing key ID on the way out; acknowledgements and the digests they named on the
+way back. `AcknowledgementState` is deliberately not a delivery state —
+`awaiting` means nothing was reported, which is not "undelivered", because a
+deployment can apply a licence and never report. There is no attempt count, retry
+outcome or connection reference, and a test refuses one.
+
+**The declared version now carries a PEP 440 local development marker.**
+`0.1.0a1` is published and tagged; `src/` has moved since (this change and the
+docstring drift already recorded in the released-source drift baseline), and one
+version may not name two sets of importable bytes.
+
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of the vendor control plane's issuer-side

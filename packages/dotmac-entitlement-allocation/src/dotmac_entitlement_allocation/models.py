@@ -48,13 +48,14 @@ the service cannot police a path that never calls it.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from uuid import UUID
 
 from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from dotmac_entitlement_allocation.facts import STAGED, AllocationStatus
 
 #: Derived from the allocated short code — never a literal here. The migration
 #: uses a literal on purpose (a frozen historical artifact); runtime models
@@ -65,27 +66,13 @@ _ALLOCATIONS = "allocations"
 _ENTRIES = "allocation_entries"
 
 
-class AllocationStatus(StrEnum):
-    """The allocation lifecycle, as a value object rather than a bare string.
-
-    ONE definition, shared by persistence and by every owner that reads the
-    contract — the typed-contracts standard's requirement, and the reason this
-    is not two constants that drift.
-
-    Only `STAGED` exists in this release. Delivery and acknowledgement states
-    belong to licence issuance, a different owner; an allocation that tracked
-    its own delivery would become a second delivery authority.
-
-    Stored as text with no CHECK, for the reason ADR-0008 records against native
-    enums: adding a member should cost a module release, not an `ALTER TYPE` on
-    every deployment.
-    """
-
-    STAGED = "staged"
-
-
-#: Back-compat alias for the value, so call sites read naturally.
-STAGED = AllocationStatus.STAGED
+#: ONE definition, shared by persistence and by every owner that reads the
+#: contract — the typed-contracts standard's requirement, and the reason this is
+#: not two constants that drift. It is DECLARED in `facts`, because a status is a
+#: value this module publishes and only incidentally a column: a read contract
+#: that had to import the ORM to name a status would drag persistence into every
+#: consumer's type-checker. Re-exported here, so `models.AllocationStatus` keeps
+#: resolving for every existing caller.
 
 
 class Allocation(Base, TimestampMixin):

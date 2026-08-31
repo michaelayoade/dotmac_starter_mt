@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-licensing"
-version = "0.1.0a1"
+version = "0.1.0a1+dev"
 description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0057 § 2)"
 authors = ["DotMac"]
 readme = "README.md"

@@ -44,6 +44,20 @@ than being reported as an undeclared capability.
   Otherwise an allocation validated against product A can be issued as a licence
   for product B: every code still resolves, just in a different catalogue.
 
+## Reading
+
+`get_allocation`, `allocations_for_contract`, `list_allocations` and
+`reconciliation` are the whole read surface, and they answer in the typed values
+of `dotmac_entitlement_allocation.facts` — never in ORM rows. Query construction
+over `mod_ealloc` stays inside this distribution: a consumer writing its own
+`select(Allocation)` would be one query away from reading an UNSEALED row as
+history.
+
+`reconciliation(contract_ref=..., content_hash=...)` is the contract-scoped
+answer, and the caller supplies both from its own authority because this module
+never reads a contract. What it derives — the integrity verdict, the permitted
+actions, the typed refusal — appears on no input type.
+
 ## Public surface
 
 Everything importable from this top-level namespace is stable. Submodules are
@@ -52,14 +66,25 @@ not: import from here.
 
 from __future__ import annotations
 
+from dotmac_entitlement_allocation.facts import (
+    STAGED,
+    AllocatedCapability,
+    AllocationAction,
+    AllocationFilter,
+    AllocationIntegrity,
+    AllocationPage,
+    AllocationReconciliation,
+    AllocationRecord,
+    AllocationRefusal,
+    AllocationStatus,
+    ReconciliationState,
+)
 from dotmac_entitlement_allocation.manifest import module
 from dotmac_entitlement_allocation.migrations import versions_dir
 from dotmac_entitlement_allocation.models import (
     SCHEMA,
-    STAGED,
     Allocation,
     AllocationEntry,
-    AllocationStatus,
 )
 from dotmac_entitlement_allocation.ports import (
     AllocationConflictError,
@@ -76,14 +101,17 @@ from dotmac_entitlement_allocation.ports import (
 from dotmac_entitlement_allocation.service import (
     AUDIT_ACTION_STAGED,
     IDEMPOTENCY_SCOPE,
-    AllocatedCapability,
     AllocationView,
     allocation_product,
+    allocations_for_contract,
+    get_allocation,
+    list_allocations,
+    reconciliation,
     snapshot_fingerprint,
     stage_allocation,
 )
 
-__version__ = "0.1.0a6"
+__version__ = "0.1.0a6+dev"
 
 __all__ = [
     "AUDIT_ACTION_STAGED",
@@ -92,9 +120,16 @@ __all__ = [
     "STAGED",
     "AllocatedCapability",
     "Allocation",
+    "AllocationAction",
     "AllocationConflictError",
     "AllocationEntry",
     "AllocationError",
+    "AllocationFilter",
+    "AllocationIntegrity",
+    "AllocationPage",
+    "AllocationReconciliation",
+    "AllocationRecord",
+    "AllocationRefusal",
     "AllocationStatus",
     "AllocationView",
     "CapabilityCatalogueReader",
@@ -103,11 +138,16 @@ __all__ = [
     "DuplicateCapabilityError",
     "EmptyAllocationError",
     "IncompleteAllocationError",
+    "ReconciliationState",
     "UndeclaredCapabilityError",
     "UnknownProductError",
     "__version__",
     "allocation_product",
+    "allocations_for_contract",
+    "get_allocation",
+    "list_allocations",
     "module",
+    "reconciliation",
     "snapshot_fingerprint",
     "stage_allocation",
     "versions_dir",
