@@ -54,11 +54,23 @@ def test_runtime_version_matches_the_distribution_version() -> None:
     )
 
 
-def test_the_version_is_a_pep440_release_or_prerelease() -> None:
+def test_the_version_is_a_pep440_release_prerelease_or_development_marker() -> None:
     """A malformed version fails the publish late, after the build job has
-    already run; catching the shape here keeps that failure local."""
+    already run; catching the shape here keeps that failure local.
+
+    An optional PEP 440 LOCAL segment (`+dev`) is accepted, and is not a
+    loosening. After a release, main declares the released version plus a local
+    segment, because main has diverged from the bytes that version names and a
+    bare number would be a claim the tree cannot support -- the shape that let
+    `dotmac-ui` 0.1.0a7 reach the registry without `map_frame`. No index accepts
+    a local version, so the marker allocates nothing and cannot be published;
+    `release-kernel.yml` compares its dispatched version against
+    `poetry version --short`, so a release still requires the marker to be
+    replaced by a real allocated number.
+    """
     assert re.fullmatch(
-        r"\d+\.\d+\.\d+(?:a|b|rc)?\d*", dotmac_kernel.__version__
+        r"\d+\.\d+\.\d+(?:a|b|rc)?\d*(?:\+[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*)?",
+        dotmac_kernel.__version__,
     ), f"not a PEP 440 version: {dotmac_kernel.__version__!r}"
 
 
@@ -424,7 +436,12 @@ def _alpha(release: str) -> int:
     Compared as an int, not as a string: `"0.1.0a9" > "0.1.0a53"` is lexically
     true and numerically false, and this whole train is `0.1.0a*`.
     """
-    match = re.fullmatch(r"0\.1\.0a(\d+)", release)
+    # A PEP 440 local segment is stripped before comparison. `0.1.0a99+dev` is
+    # a99 plus local changes, and PEP 440 sorts a local version ABOVE the same
+    # public version -- so it satisfies exactly the floors a99 satisfies. Failing
+    # here instead would make a development marker look like a floor violation.
+    public = release.split("+", 1)[0]
+    match = re.fullmatch(r"0\.1\.0a(\d+)", public)
     assert match, f"unexpected release form {release!r}"
     return int(match.group(1))
 
