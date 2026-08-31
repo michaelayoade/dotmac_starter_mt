@@ -1298,7 +1298,68 @@ specifics) points here and must never fork these rules.
     Sensitivity requires BOTH halves observed: the planted third-executor change
     refused, and the properly attributed window admitted, against the same
     reach. Whole-line comments are stripped before verb detection and edge
-    resolution — calls, not mentions
+    resolution — calls, not mentions.
+
+    **Amended 2026-08-31 (v3) — a key is CHARACTERISED, not counted.** Every
+    `ssh_credential` row carries an `SshCredentialConstraintV1`: fingerprint,
+    principal, the exact source restriction, the forced-command DIGEST (never
+    the string — a near-match gets waved through), `restrict`, and each of PTY,
+    agent, port and X11 explicitly `denied` or `permitted`, plus the
+    host-observed evidence coordinate. A row without one is refused; an
+    unrestricted key must SAY `unrestricted` rather than leave a blank that
+    reads as "nobody looked"; `restrict = present` beside any `permitted` is
+    refused because such a key cannot exist. The constraint is part of the
+    census digest, so LOOSENING a key moves it.
+
+    The substantive rule, and it lives here rather than in a hardening document
+    because THIS MODEL RETAINS THE LEGACY EXECUTOR'S BYTES — so a rollback
+    credential survives every retirement, and a retained key that can open an
+    interactive shell is not a rollback path but the executor still reachable by
+    hand. A `retained_rollback` key must be SOURCE-RESTRICTED,
+    FORCED-COMMAND-ONLY and INCAPABLE OF AN INTERACTIVE SHELL, each checked
+    INDEPENDENTLY: `restrict`, `from=` and `command=` are planted and refused
+    separately, because a detector that fires only when everything is wrong
+    passes the realistic failure of one protection quietly dropped. A fully
+    constrained key is admitted at the same reach. `principal` is recorded and
+    does not relax the gate. Deliberately narrow: the gate bites on
+    `retained_rollback` only — live unrestricted keys are `active_executor` debt
+    the ratchet counts, because the census records reality while the gate guards
+    the retention this contract itself creates.
+
+    Building that exposed a wider hole: the census digest was RECORDED and never
+    COMPARED, so any change to a row's content that left the row count identical
+    passed silently — a target repointed, a trigger changed, a credential
+    renamed, a key unrestricted. The ratchet now compares the recorded census
+    digest against the live one, so a content change is re-recorded in the same
+    change like every other number here.
+
+    **Compose sanction is ENTRY-POINT IDENTITY.** A compose verb is sanctioned
+    IFF reached through the installed `dotmac-deployment-foundation` entry
+    point, resolved from installed DISTRIBUTION METADATA — never from a path, a
+    comment, a filename or a declared premise. Identity rather than intent for
+    the reason this guard already demonstrated on itself: its verb detector read
+    a usage comment as a deployment and drew a call edge backwards, because a
+    path mention is symmetric while invocation is not. A sanctioned mutation
+    runs inside the installed distribution, which is not in the tree, so it
+    never resolves; an unsanctioned one always does, and delegation does not
+    launder a direct call beside it. The console-script NAME is never written
+    down — a literal would turn identity back into a string match — an
+    unresolvable distribution is UNMONITORED rather than a pass, and whether it
+    is installed is NOT recorded in the baseline, because that is a property of
+    where the check runs rather than of the product. The unsanctioned SET is
+    ratcheted two-directionally (the set, not the count: a swap leaves the count
+    still), and it is a measurement rather than a refusal, because live
+    executors are unsanctioned today and refusing them would make an honest
+    census impossible on day one. Pairs with the installed `dotmac-platform`
+    CLI ratchet; coordinate the vocabulary before either hardens.
+
+    **A production host outside the roster is silently unmonitored.**
+    `ADOPTION_TARGETS` names the REPOSITORY that owes an inventory, and a named
+    production host retaining a rollback credential must have one — otherwise
+    the roster reproduces the failure the code prevents. The roster holds
+    repository identities, never host identities: `measure()` resolves
+    `<product>.toml`, so a host in the roster names a file nobody can write and
+    reports UNADOPTED forever for the wrong reason
     (ADR-0072; `scripts/executor_retirement.py`;
     `tests/architecture/test_executor_retirement_ratchet.py`;
     `tests/unit/test_executor_retirement_receipt.py`)
