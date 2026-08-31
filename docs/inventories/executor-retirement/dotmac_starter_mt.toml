@@ -121,6 +121,23 @@ follows from memory or from a chat message remains unobservable by any walk.
 # ── workflow ────────────────────────────────────────────────────────────────
 
 [[entrypoint]]
+name = "workflow:control-runner-diagnostic"
+family = "workflow"
+path = ".github/workflows/control-runner-diagnostic.yml"
+trigger = "workflow_dispatch"
+credential = "hosted: GITHUB_TOKEN(contents:read) + RUNNER_QUERY_TOKEN; self-hosted: GITHUB_TOKEN(explicit permissions empty), no user-provisioned repository secret"
+disposition = "not_an_executor"
+premise = """
+The hosted half lists one repository's runners and proves the query identity is
+refused on the foreign repository. The self-hosted half receives no
+user-provisioned repository secret, declares an empty permissions map for its
+GITHUB_TOKEN, and refuses if RUNNER_QUERY_TOKEN crosses the job boundary. It
+asserts its exact unprivileged identity, labels and lack of usable Docker or
+passwordless sudo.
+Neither half commands a deployment verb, directly or through an in-tree callee.
+"""
+
+[[entrypoint]]
 name = "workflow:ci"
 family = "workflow"
 path = ".github/workflows/ci.yml"
