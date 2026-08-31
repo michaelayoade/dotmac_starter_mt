@@ -110,6 +110,9 @@ CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 #: unmonitored and named as such by
 #: `test_the_unmonitored_distributions_are_named`.
 DISTRIBUTIONS: dict[str, Path] = {
+    "dotmac-numbering": (
+        REPO_ROOT / "packages/dotmac-numbering/src/dotmac_numbering/migrations/versions"
+    ),
     "dotmac-approvals": (
         REPO_ROOT / "packages/dotmac-approvals/src/dotmac_approvals/migrations/versions"
     ),
@@ -260,6 +263,7 @@ DISTRIBUTIONS: dict[str, Path] = {
 #: the module's migration prefix, so the ratchet cannot be defeated by a file
 #: the pattern happens not to match.
 LINEAGE_GLOBS: dict[str, str] = {
+    "dotmac-numbering": "nu_*.py",
     "dotmac-approvals": "ap_*.py",
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
@@ -296,6 +300,7 @@ LINEAGE_GLOBS: dict[str, str] = {
 }
 
 TAG_PREFIXES: dict[str, str] = {
+    "dotmac-numbering": "dotmac-numbering-v",
     "dotmac-approvals": "dotmac-approvals-v",
     "dotmac-integration": "dotmac-integration-v",
     "dotmac-entitlement-allocation": "dotmac-entitlement-allocation-v",
@@ -340,6 +345,23 @@ VERSIONS = DISTRIBUTIONS["dotmac-integration"]
 #: `origin`; the full peeled commit is recorded and cross-checked so the tag
 #: object and unchanged migration bytes cannot hide a moved coordinate.
 RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
+    # ── dotmac-numbering ─────────────────────────────────────────────────────
+    # Enrolled after nu_0001 was edited in place AFTER this tag shipped: a
+    # `_ALLOWED_FREEZE_ARGUMENTS` allowlist was added to appease bandit B608,
+    # which scanned this lineage because it was not in the exclusion list. The
+    # emitted DDL was byte-identical and both call sites passed, but the file
+    # was not -- and `dotmac_erp` pins a2 AND composes this lineage, so one
+    # revision id named two file contents in a database this repository cannot
+    # inspect. The file is restored to these bytes in the same change.
+    "dotmac-numbering-v0.1.0a2": (
+        "dotmac-numbering",
+        "4c282228b53405442effc4159f5db9d50446d335",
+        {
+            "nu_0001_numbering.py": (
+                "9c3079774b0db615ea5d4c6ca121a9ed43688236bbc5f0a0166a2906513da561"
+            ),
+        },
+    ),
     # ── dotmac-approvals ────────────────────────────────────────────────────
     # ap_0001 was edited in place twice before this guard enrolled the module.
     # The exact three historical byte sets are recorded here; the explicit
@@ -1556,6 +1578,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: example. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
+    "dotmac-numbering": frozenset(),
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
