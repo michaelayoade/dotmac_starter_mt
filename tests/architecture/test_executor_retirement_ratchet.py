@@ -248,14 +248,29 @@ def test_this_repositorys_own_census_reconciles_with_its_own_tree() -> None:
 def test_the_scoreboard_is_recorded_and_is_still_zero() -> None:
     """Stated as a fact rather than assumed. When the first retirement lands,
     this number and this assertion move together, in the same change, with a
-    receipt — which is the whole point of recording it here."""
+    receipt — which is the whole point of recording it here.
+
+    The unadopted set is DERIVED from the roster rather than written out. It was
+    a literal pair until Vendor CP joined and this test failed for naming a list
+    instead of asserting the property — which is the wrong-SUBJECT shape of
+    ADR-0018's 2026-08-31 amendment, occurring inside the suite that argues for
+    it. Extending the literal to three entries fixes today and breaks again on
+    the next roster change; deriving it cannot.
+
+    The non-vacuity assertion is the same defect from the other side: a roster
+    where everyone had adopted would leave this comparing two empty lists and
+    passing for the wrong reason.
+    """
+    sweep = _sweep()
     baseline = _baseline()
     assert baseline["retired_total"] == 0
-    assert sorted(baseline["unadopted"]) == [
-        "dotmac_erp",
-        "dotmac_sub",
-        "dotmac_vendor_control_plane",
-    ]
+    expected = sorted(
+        product
+        for product in sweep.ADOPTION_TARGETS
+        if not (INVENTORY_DIR / f"{product}.toml").is_file()
+    )
+    assert sorted(baseline["unadopted"]) == expected
+    assert expected, "a roster where everyone has adopted would pass vacuously"
 
 
 # ── Sensitivity proofs (ADR-0018 §5) ────────────────────────────────────────
