@@ -49,6 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).parent / "published_source_drift_baseline.json"
 
 _SCRIPT = REPO_ROOT / "scripts/published_source_drift.py"
+_KERNEL_AUTHORIZATION_SCRIPT = REPO_ROOT / "scripts/kernel_release_authorization.py"
 
 
 def _load_script():
@@ -62,6 +63,20 @@ def _load_script():
 
 
 _drift = _load_script()
+
+
+def _load_kernel_authorization():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "_kernel_release_authorization", _KERNEL_AUTHORIZATION_SCRIPT
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _baseline() -> dict:
@@ -126,6 +141,13 @@ def test_the_recorded_totals_still_describe_this_tree():
     )
 
 
+def test_the_renderer_reproduces_the_checked_in_baseline_byte_for_byte():
+    """The post-tag recorder and the manual Make target share one renderer."""
+
+    _require_tags()
+    assert _drift.render_baseline() == BASELINE_PATH.read_text()
+
+
 def test_the_comparison_actually_reaches_released_distributions():
     """Non-vacuity: the invariant must be exercised by something real.
 
@@ -179,26 +201,9 @@ def test_the_kernel_no_longer_claims_a_version_it_is_not():
     why at the point the change is made.
     """
 
-    import tomllib
-
-    data = tomllib.loads(
-        (REPO_ROOT / "packages/dotmac-kernel/pyproject.toml").read_text()
-    )
-    project = data.get("project") or data.get("tool", {}).get("poetry", {})
-    version = project["version"]
-    if f"dotmac-kernel-v{version}" in _drift.tags():
-        published = _drift.git(
-            "rev-parse", f"dotmac-kernel-v{version}:packages/dotmac-kernel/src"
-        )
-        current = _drift.git("rev-parse", "HEAD:packages/dotmac-kernel/src")
-        assert published == current, (
-            f"dotmac-kernel declares {version}, a released version, but its src/ "
-            "has diverged from that release"
-        )
-    else:
-        assert "+" in version, (
-            f"dotmac-kernel declares {version}, which has no release tag and no "
-            "local development segment. A declared version with neither is a "
-            "claim nobody can check: allocate and release it, or mark it as "
-            "development with a PEP 440 local segment"
-        )
+    authorization = _load_kernel_authorization()
+    try:
+        state = authorization.validate_current_state()
+    except authorization.KernelReleaseAuthorizationError as failure:
+        pytest.fail(str(failure))
+    assert state in {"development", "authorized", "allocated", "released"}

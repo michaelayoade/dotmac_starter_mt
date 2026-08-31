@@ -49,6 +49,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Bind build to the active kernel release authorization
+        run: python scripts/kernel_release_authorization.py verify-release --phase build --version "${{ inputs.version }}"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
@@ -118,6 +120,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Re-bind publish to the active kernel release authorization
+        run: python scripts/kernel_release_authorization.py verify-release --phase publish --version "${{ inputs.version }}"
       # Publish the SAME bytes `build` inspected + smoked (downloaded, not
       # rebuilt) to the PRIVATE Forgejo index. `FORGEJO_PUBLISH_TOKEN` is a
       # protected `registry-release` environment secret whose CANONICAL source is
@@ -150,6 +154,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Re-assert the run SHA is still protected main before read-back
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - name: Bind registry verification to the active kernel release authorization
+        run: python scripts/kernel_release_authorization.py verify-release --phase verify --version "${{ inputs.version }}"
+
       # The Forgejo index may lag a few seconds after publish — poll the simple
       # index for the version before smoking it.
       - name: Wait for the release on the Forgejo index
@@ -174,8 +184,13 @@ jobs:
         run: bash scripts/consumer_boot_check.sh --from-registry "${{ inputs.version }}"
 
       # Only AFTER registry verification: tag the published SHA.
+      - name: Re-assert the run SHA is still protected main before tagging
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
       - name: Tag the verified release
         run: |
+          python scripts/kernel_release_authorization.py verify-release \
+            --phase tag --version "${{ inputs.version }}"
           TAG="dotmac-kernel-v${{ inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
