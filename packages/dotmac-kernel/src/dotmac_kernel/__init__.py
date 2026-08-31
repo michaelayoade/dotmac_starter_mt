@@ -34,6 +34,17 @@ if TYPE_CHECKING:
 # Only names whose defining module has no import-time engine/I/O side effect,
 # so `import dotmac_kernel` never requires DATABASE_URL. Engine-touching APIs
 # (db sessions, guards, middleware, platform auth) are submodule imports.
+from dotmac_kernel.api_documentation import (
+    ApiDocumentationPolicy,
+    ApiDocumentationPolicyError,
+    ApiDocumentationPolicyViolation,
+    DocumentationExposure,
+    DocumentationPlane,
+    api_documentation_policy,
+    audit_api_documentation,
+    classify_environment,
+    environment_api_documentation_policy,
+)
 from dotmac_kernel.assembly import ProductAssemblySpec, ProductSecurityPolicy
 from dotmac_kernel.audit import (
     ACTOR_TYPES,
@@ -318,6 +329,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
     {
         "dotmac_kernel.app_factory",
         "dotmac_kernel.assembly",
+        "dotmac_kernel.api_documentation",
         "dotmac_kernel.audit",
         "dotmac_kernel.audit_actions",
         "dotmac_kernel.branding",
@@ -443,6 +455,16 @@ __all__ = [
     "INTERNAL_MODULES",
     # assembly composition
     "ProductAssemblySpec",
+    # API-documentation exposure: declared per assembly, never inherited
+    "ApiDocumentationPolicy",
+    "ApiDocumentationPolicyError",
+    "ApiDocumentationPolicyViolation",
+    "DocumentationExposure",
+    "DocumentationPlane",
+    "api_documentation_policy",
+    "audit_api_documentation",
+    "classify_environment",
+    "environment_api_documentation_policy",
     "ProductSecurityPolicy",
     "ModulePlane",
     "ModulePlaneSelection",

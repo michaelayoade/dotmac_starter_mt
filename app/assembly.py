@@ -40,6 +40,7 @@ from __future__ import annotations
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
+from dotmac_kernel.api_documentation import environment_api_documentation_policy
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
@@ -169,6 +170,11 @@ assembly = ProductAssemblySpec(
         ),
     ),
     web_enabled=settings.web_enabled,
+    # Resolved from ENVIRONMENT at composition time, failing CLOSED: only the
+    # enumerated development and test spellings publish. Unset, blank, a typo
+    # and `staging` all resolve to production, which mounts no browser pages and
+    # serves the OpenAPI document only behind the platform bearer guard.
+    api_documentation=environment_api_documentation_policy(),
     ui_contract_version=dotmac_ui.UI_CONTRACT_VERSION,
     web_facets=(
         WebFacetMount(

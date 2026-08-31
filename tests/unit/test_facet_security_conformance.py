@@ -38,6 +38,7 @@ from collections.abc import Iterator
 from typing import Final
 
 import pytest
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.app_factory import create_app
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.middleware.csrf import (
@@ -68,6 +69,11 @@ from fastapi.testclient import TestClient
 from app.assembly import assembly
 from app.main import app as production_app
 from tests.architecture.test_route_guards import AUTH_GUARD_NAMES, MUTATING_ALLOWLIST
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 _MUTATING: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -344,10 +350,9 @@ def test_a_cookie_less_pre_auth_post_is_still_protected() -> None:
     """
     client = TestClient(_probe_app(csrf=True), raise_server_exceptions=False)
     response = client.post("/mutate")
-    assert response.status_code == 403, (
-        "a cookie-less unsafe request was not refused "
-        f"(status {response.status_code})"
-    )
+    assert (
+        response.status_code == 403
+    ), f"a cookie-less unsafe request was not refused (status {response.status_code})"
     assert "reached" not in response.text
 
 
@@ -487,6 +492,7 @@ def test_a_facet_with_no_surfaces_still_boots() -> None:
     into an outage.
     """
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="empty-facet",
         modules=(ModuleManifest(code="nothing", version="1.0.0"),),
         platform_surface_enabled=False,

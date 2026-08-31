@@ -43,6 +43,7 @@ from dotmac_kernel import (
     load_manifests,
     write_audit_event,
 )
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.deps import require_permission, require_tenant
 from dotmac_kernel.models import Base, Party
 from dotmac_kernel.outbox_event_types import (
@@ -62,6 +63,11 @@ from dotmac_kernel.testing import create_test_engine, isolated_session
 from fastapi import APIRouter, Depends
 
 from app.features import FEATURE_MODULES
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 # The declaration sites themselves are not "consumers" — excluding them is what
 # makes the orphan scan meaningful at all, since every code trivially appears in
@@ -205,7 +211,13 @@ def test_a_route_requiring_an_undeclared_permission_fails_the_boot() -> None:
     module = FeatureManifest(name="ghost", routers=[router])
     try:
         with pytest.raises(UndeclaredPermissionError) as exc:
-            create_app(ProductAssemblySpec(name="ghost-assembly", modules=[module]))
+            create_app(
+                ProductAssemblySpec(
+                    api_documentation=_DOCS_POLICY,
+                    name="ghost-assembly",
+                    modules=[module],
+                )
+            )
         assert "ghost.read" in str(exc.value)
     finally:
         _restore_process_declarations()
@@ -226,7 +238,11 @@ def test_the_same_route_boots_once_its_module_declares_the_code() -> None:
         permissions=[PermissionSpec(code="ghost.read")],
     )
     try:
-        create_app(ProductAssemblySpec(name="ghost-assembly", modules=[module]))
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY, name="ghost-assembly", modules=[module]
+            )
+        )
     finally:
         _restore_process_declarations()
 

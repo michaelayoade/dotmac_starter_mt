@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.models import Party
@@ -39,6 +40,11 @@ from dotmac_kernel.web_surfaces import (
 )
 from fastapi import APIRouter, Request
 from fastapi.testclient import TestClient
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 class _DenyingProvider:
@@ -542,6 +548,7 @@ def test_entry_route_is_assembly_approved_while_sibling_route_uses_profile(
     entry = WebRouteRef("identity", "console", "login")
     landing = WebRouteRef("identity", "console", "home")
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="facet-test",
         modules=(manifest,),
         web_facets=(_facet(entry_routes=(entry,), landing_route=landing),),
@@ -731,6 +738,7 @@ def test_a_tenant_profile_with_admission_is_accepted_and_enforced(
         permissions=(PermissionSpec(code="ops.access", description="Ops access"),),
     )
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="admission-test",
         modules=(manifest,),
         web_facets=(_facet_on("tenant_session", admission_permission="ops.access"),),

@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.modules import ModuleManifest, ModuleRegistryError
 from dotmac_kernel.namespaces import APPROVALS_MIGRATION_OWNER, NamespaceRegistry
@@ -27,6 +28,11 @@ from dotmac_kernel.prerequisites import (
     install_prerequisite_bindings,
     resolve_depends_on,
 )
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 ROLES = "module_database_roles.v1"
 TENANT = "tenant_scope_catalog.v1"
@@ -121,13 +127,18 @@ def test_a_composed_selectable_module_cannot_omit_its_selection() -> None:
     with pytest.raises(
         ModulePlaneSelectionError, match="approvals.*no plane selection"
     ):
-        ProductAssemblySpec(name="vendor", modules=[_manifest()])
+        ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY, name="vendor", modules=[_manifest()]
+        )
 
 
 def test_an_explicit_supported_selection_is_accepted() -> None:
     selection = _selection(ModulePlane.PLATFORM)
     spec = ProductAssemblySpec(
-        name="vendor", modules=[_manifest()], module_planes=[selection]
+        api_documentation=_DOCS_POLICY,
+        name="vendor",
+        modules=[_manifest()],
+        module_planes=[selection],
     )
     assert spec.module_planes == (selection,)
 
@@ -135,6 +146,7 @@ def test_an_explicit_supported_selection_is_accepted() -> None:
 def test_an_unknown_module_selection_is_refused() -> None:
     with pytest.raises(ModulePlaneSelectionError, match="unknown module"):
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="vendor",
             modules=[_manifest()],
             module_planes=[_selection(ModulePlane.PLATFORM, module="ghost")],
@@ -150,6 +162,7 @@ def test_an_unsupported_selection_is_refused() -> None:
     )
     with pytest.raises(ModulePlaneSelectionError, match="does not support"):
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="vendor",
             modules=[manifest],
             module_planes=[_selection(ModulePlane.TENANT)],
@@ -158,7 +171,9 @@ def test_an_unsupported_selection_is_refused() -> None:
 
 def test_an_atomic_dual_plane_module_needs_no_selector() -> None:
     manifest = _manifest(supported_plane_sets=())
-    spec = ProductAssemblySpec(name="starter", modules=[manifest])
+    spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY, name="starter", modules=[manifest]
+    )
     assert spec.module_planes == ()
 
 

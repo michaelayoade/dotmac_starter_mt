@@ -172,9 +172,22 @@ Imports ONLY the public kernel surface — no `app.*`, nothing from the workspac
 An empty assembly (no feature modules) boots to just the kernel surface.
 """
 
-from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel import (
+    ProductAssemblySpec,
+    create_app,
+    environment_api_documentation_policy,
+)
 
-app = create_app(ProductAssemblySpec(name="ext-consumer", modules=()))
+# An external consumer must declare its documentation exposure: the kernel
+# refuses to build without one. Resolved from ENVIRONMENT, failing closed to
+# production -- so this also proves the helper is on the public surface.
+app = create_app(
+    ProductAssemblySpec(
+        name="ext-consumer",
+        modules=(),
+        api_documentation=environment_api_documentation_policy(),
+    )
+)
 PY
 
 echo "==> [5/6] Write the boot + package-data proof runner"
@@ -198,7 +211,12 @@ from fastapi.testclient import TestClient
 import dotmac_kernel
 import dotmac_kernel.migrations as kmig
 import dotmac_kernel.templating as ktpl
-from dotmac_kernel import FeatureManifest, ProductAssemblySpec, create_app
+from dotmac_kernel import (
+    FeatureManifest,
+    ProductAssemblySpec,
+    create_app,
+    environment_api_documentation_policy,
+)
 from dotmac_kernel.capabilities import UndeclaredCapabilityError
 from dotmac_kernel.deps import require_capability, require_permission
 from dotmac_kernel.permissions import UndeclaredPermissionError
@@ -248,6 +266,9 @@ for kind, guard, expected_error in (
             ProductAssemblySpec(
                 name=f"lazy-{kind}-probe",
                 modules=(FeatureManifest(name=kind, routers=(router,)),),
+                # Declared so this probe still fails on the DECLARATION
+                # validation it is testing, not on the documentation policy.
+                api_documentation=environment_api_documentation_policy(),
             )
         )
     except expected_error:

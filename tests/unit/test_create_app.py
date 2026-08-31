@@ -39,6 +39,7 @@ from dotmac_kernel import (
     WebSurfaceContribution,
     create_app,
 )
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.app_factory import (
     LayeredStaticFiles,
     _referenced_capabilities,
@@ -54,6 +55,11 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 _TIGHTER_CSP = _STRICT_CSP.replace(
     "img-src 'self' data: https:", "img-src 'self' data:"
@@ -97,6 +103,7 @@ def _secured_legacy_web_kwargs(
 
 def test_spec_is_frozen_and_collections_immutable():
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="s",
         modules=[],
         role_definitions=[],
@@ -120,7 +127,9 @@ def test_spec_is_frozen_and_collections_immutable():
 
 
 def test_empty_assembly_boots_to_kernel_surface_only():
-    app = create_app(ProductAssemblySpec(name="empty", modules=()))
+    app = create_app(
+        ProductAssemblySpec(api_documentation=_DOCS_POLICY, name="empty", modules=())
+    )
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "ok"}
     paths = _paths(app)
@@ -150,6 +159,7 @@ def test_platform_surface_can_be_disabled_without_disabling_product_routes():
 
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="dedicated-product",
             modules=(FeatureManifest(name="product", routers=(router,)),),
             platform_surface_enabled=False,
@@ -164,7 +174,12 @@ def test_platform_surface_can_be_disabled_without_disabling_product_routes():
 def test_web_enabled_false_drops_web_but_keeps_json_api():
     manifest_modules = _reference_modules()
     api_app = create_app(
-        ProductAssemblySpec(name="api", modules=manifest_modules, web_enabled=False)
+        ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
+            name="api",
+            modules=manifest_modules,
+            web_enabled=False,
+        )
     )
     assert not _has_static_mount(api_app)
     paths = _paths(api_app)
@@ -174,6 +189,7 @@ def test_web_enabled_false_drops_web_but_keeps_json_api():
 
     web_app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="web",
             modules=manifest_modules,
             web_enabled=True,
@@ -197,13 +213,20 @@ def test_legacy_web_module_without_a_secured_staff_facet_fails_the_boot():
     )
 
     with pytest.raises(ValueError, match="explicit staff_admin facet"):
-        create_app(ProductAssemblySpec(name="unsafe-legacy", modules=(manifest,)))
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
+                name="unsafe-legacy",
+                modules=(manifest,),
+            )
+        )
 
 
 def test_disabled_module_routes_are_absent():
     modules = _reference_modules()
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="d",
             modules=modules,
             disabled_modules=frozenset({"parties"}),
@@ -217,7 +240,9 @@ def test_disabled_module_routes_are_absent():
 
 
 def test_security_headers_middleware_is_wired():
-    app = create_app(ProductAssemblySpec(name="mw", modules=()))
+    app = create_app(
+        ProductAssemblySpec(api_documentation=_DOCS_POLICY, name="mw", modules=())
+    )
     with TestClient(app) as client:
         resp = client.get("/health")
     assert resp.headers["x-content-type-options"] == "nosniff"
@@ -248,6 +273,7 @@ def test_active_browser_capability_composes_typed_csp() -> None:
     )
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="typed-csp",
             modules=(module,),
             platform_surface_enabled=False,
@@ -281,6 +307,7 @@ def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch)
     monkeypatch.setattr(settings, "content_security_policy", "")
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="secured-product",
             security_policy=ProductSecurityPolicy(
                 content_security_policy=_TIGHTER_CSP,
@@ -304,6 +331,7 @@ def test_environment_csp_overrides_the_product_default(monkeypatch):
     monkeypatch.setattr(settings, "content_security_policy", _TIGHTER_CSP)
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="secured-product",
             security_policy=ProductSecurityPolicy(content_security_policy=_STRICT_CSP),
         )
@@ -323,7 +351,9 @@ def test_create_app_rejects_an_unsafe_partial_raw_csp(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="raw CSP override"):
-        create_app(ProductAssemblySpec(name="unsafe-csp"))
+        create_app(
+            ProductAssemblySpec(api_documentation=_DOCS_POLICY, name="unsafe-csp")
+        )
 
 
 def test_product_security_policy_rejects_header_injection():
@@ -350,6 +380,7 @@ def test_product_startup_checks_and_hooks_run_in_declaration_order(monkeypatch):
     monkeypatch.setattr(app_factory, "_tenancy_errors", lambda: [])
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="lifecycle-product",
             startup_checks=(check,),
             startup_hooks=(sync_hook, async_hook),
@@ -369,6 +400,7 @@ def test_product_startup_check_fails_closed_in_production(monkeypatch):
     monkeypatch.setattr(app_factory.settings, "environment", "production")
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="invalid-product",
             startup_checks=(lambda: ("product contract is invalid",),),
         )
@@ -480,6 +512,7 @@ def test_create_app_publishes_the_module_inventory_on_app_state():
     from dotmac_kernel.modules import ModuleManifest, ModuleRegistry
 
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="inv",
         modules=[
             ModuleManifest(code="base", version="1.0.0"),
@@ -500,7 +533,12 @@ def test_health_does_not_disclose_the_module_inventory():
     would hand an unauthenticated caller a deployment fingerprint; the
     inventory is reached through app state / an authenticated surface."""
     app = create_app(
-        ProductAssemblySpec(name="h", modules=_reference_modules(), web_enabled=False)
+        ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
+            name="h",
+            modules=_reference_modules(),
+            web_enabled=False,
+        )
     )
     with TestClient(app) as client:
         body = client.get("/health").json()
@@ -511,6 +549,7 @@ def test_disabled_module_is_installed_but_not_enabled_in_the_inventory():
     modules = _reference_modules()
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="d",
             modules=modules,
             disabled_modules=frozenset({"parties"}),
@@ -534,6 +573,7 @@ def test_create_app_fails_closed_on_an_incoherent_module_set():
     with pytest.raises(MissingModuleDependencyError):
         create_app(
             ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
                 name="missing",
                 modules=[ModuleManifest(code="a", version="1", dependencies=("gone",))],
             )
@@ -542,6 +582,7 @@ def test_create_app_fails_closed_on_an_incoherent_module_set():
     with pytest.raises(ModuleDependencyCycleError):
         create_app(
             ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
                 name="cycle",
                 modules=[
                     ModuleManifest(code="a", version="1", dependencies=("b",)),
@@ -557,6 +598,7 @@ def test_create_app_rejects_disabling_a_dependency_something_else_needs():
     with pytest.raises(MissingModuleDependencyError):
         create_app(
             ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
                 name="dis",
                 modules=[
                     ModuleManifest(code="base", version="1"),
@@ -590,6 +632,7 @@ def test_mixed_feature_and_module_assembly_boots():
 
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="mixed",
             modules=[
                 FeatureManifest(name="legacy", routers=[legacy_api]),
@@ -629,6 +672,7 @@ def test_create_app_attaches_the_read_only_assembly_permission_plan() -> None:
 
     app = create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="permission-plan",
             modules=(FeatureManifest(name="expense", permissions=(permission,)),),
             role_definitions=(RoleDefinition("finance_manager"),),
@@ -649,6 +693,7 @@ def test_create_app_rejects_profile_reference_to_undeclared_permission() -> None
     with pytest.raises(PermissionPlanError, match="undeclared permission"):
         create_app(
             ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
                 name="bad-permission-plan",
                 role_definitions=(RoleDefinition("admin"),),
                 role_grant_profiles=(
@@ -689,6 +734,7 @@ def test_module_manifest_routers_mount_like_feature_routers():
     paths = _paths(
         create_app(
             ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
                 name="m",
                 modules=[manifest],
                 **_secured_legacy_web_kwargs("modtest.portal.access"),
@@ -699,7 +745,12 @@ def test_module_manifest_routers_mount_like_feature_routers():
 
     api_only = _paths(
         create_app(
-            ProductAssemblySpec(name="m2", modules=[manifest], web_enabled=False)
+            ProductAssemblySpec(
+                api_documentation=_DOCS_POLICY,
+                name="m2",
+                modules=[manifest],
+                web_enabled=False,
+            )
         )
     )
     assert "/mod-api" in api_only and "/admin/mod-web" not in api_only
