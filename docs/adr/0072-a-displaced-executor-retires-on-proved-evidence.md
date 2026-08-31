@@ -1,8 +1,9 @@
 # ADR 0072 — A displaced deployment executor retires on proved evidence, never on adoption
 
 **Status:** Accepted — **fleet-wide**. Amended 2026-08-31 (an eighth
-entry-point family, `runtime_reactivation`, and `DisplacementWindow.v1`). The
-amendment is a dated addition; no earlier text is rewritten.
+entry-point family, `runtime_reactivation`, and `DisplacementWindow.v1`), and
+again 2026-08-31 (`SshCredentialConstraintV1`). Each amendment is a dated
+addition; no earlier text is rewritten.
 **Date:** 2026-08-30
 **Decision owner:** Michael
 **Extends:** ADR-0018 (a guard exemption states an enforceable premise — this
@@ -303,3 +304,150 @@ It performs no retirement. `retired_total` stays **0**. It defines how a
 retirement is proven; it does not prove one. It does not block issuer
 activation or the first receipt, and it must land before any executor is
 declared retired.
+
+## Decision amendment — 2026-08-31 (SshCredentialConstraintV1)
+
+The v2 amendment closed two gaps and named a third it could not close: the
+contract could **count** an SSH key and could not **characterise** it.
+`Entrypoint` had no field for a key's restriction state, so "eight root keys on
+the production host, none carrying `from=`, `command=` or `restrict`" was a
+sentence in a census rather than a fact a guard could hold.
+
+### The typed constraint
+
+Every `ssh_credential`-family row now carries an `SshCredentialConstraintV1`,
+and a row without one is refused at parse. It records the fingerprint and
+principal, the exact source restriction, the forced-command **digest**,
+`restrict`, and the PTY, agent, port and X11 permissions — each explicitly
+`denied` or `permitted` — together with the host-observed evidence coordinate
+that makes it re-checkable.
+
+Three properties of the encoding are load-bearing:
+
+- **A digest, never the command string.** A digest makes a *changed* forced
+  command detectable. A string invites a near-match being waved through:
+  `/usr/bin/dotmac-deploy` becoming `/usr/bin/dotmac-deploy --shell` reads the
+  same at a glance and is a different key.
+- **An unrestricted key must SAY it is unrestricted.** `source_restriction =
+  "unrestricted"` and `forced_command_digest = "none"` are literal values, not
+  omissions. Absence is never a disposition, and a blank field reads as "nobody
+  looked" — which is precisely the state the eight keys were already in.
+- **`restrict = present` beside any `permitted` is refused.** OpenSSH's
+  `restrict` denies all current and future permissions, so such a key cannot
+  exist. A row asserting both was written rather than observed, and that is
+  worth refusing on its own.
+
+The constraint is part of the census digest, so **loosening a key moves it**.
+Without that, a key could be quietly unrestricted between two receipts and
+every recorded digest would still match.
+
+### The retained rollback key, and why this belongs here
+
+This is the substantive rule, and it belongs in the retirement contract rather
+than in a hardening document for a reason internal to the model:
+
+> **This model requires the legacy executor's bytes be retained rather than
+> deleted.** That is what `retained_rollback` is for — and it means a rollback
+> credential survives every retirement.
+
+A retained key that can open an interactive shell is not a rollback path. It is
+the executor still being reachable by hand: the second failure mode this ADR
+exists to prevent, arriving through the door the retirement itself held open.
+
+A key held under `retained_rollback` must therefore be **source-restricted**,
+**forced-command-only**, and **incapable of an interactive shell** — all three
+proven rather than asserted, and each checked **independently**. A single
+"is this key safe" verdict fires only when everything is wrong and passes the
+realistic failure, which is one protection quietly dropped. So the removal of
+`restrict`, of `from=` and of `command=` are three findings, planted and
+observed separately, alongside a properly constrained key that is **admitted**
+at the same reach.
+
+`principal` is recorded and does **not** relax the gate. A non-root deploy user
+holding an unrestricted key is still the executor reachable by hand.
+
+The receipt participates: a `retained_rollback` entry whose identity resolves to
+an inventory row is checked against that row's constraint, so the retention a
+receipt creates cannot be looser than the contract allows.
+
+### Deliberately narrow
+
+The gate bites on `retained_rollback` only. ERP's eight unrestricted keys are
+`active_executor` debt that the ratchet counts and the constraint characterises;
+refusing them at parse would make an honest census impossible on day one. **The
+census records reality; the gate guards the retention this contract itself
+creates.**
+
+`retired_total` stays **0**. This amendment defines how a retained credential is
+proven safe; it retires, disables and revokes nothing.
+
+### A hole the constraint exposed: the census digest was never compared
+
+`SshCredentialConstraintV1` is part of the canonical census form so that
+loosening a key moves the digest. Building that revealed that **nothing
+compared digests** — the ratchet was over counts only, so any change to a row's
+CONTENT that left the row count identical passed silently: a target repointed,
+a trigger changed, a credential renamed, a key unrestricted. The ratchet now
+compares the recorded census digest against the live one and fails in either
+direction, so a content change must be re-recorded in the same change. This is
+wider than SSH and was found by asking what the new field's digest membership
+actually bought.
+
+### Two directions folded into v3 — 2026-08-31
+
+**The roster names Vendor CP.** `vendor-cp-prod` is a named production host
+retaining a rollback credential at Wave 7C, and it sat outside
+`ADOPTION_TARGETS` — so it would have been **silently unmonitored rather than
+reported UNADOPTED**, which is the roster reproducing the exact failure the code
+was written to prevent. The entry is the REPOSITORY that owes the inventory
+(`dotmac_vendor_control_plane`), not the host that retains the credential:
+`measure()` resolves `<product>.toml`, so a host identity in the roster would
+name a file nobody could ever write and would report UNADOPTED forever for the
+wrong reason. `vendor-cp-prod` belongs in that product's own inventory, as the
+`host` on the credential's row and as a `production_targets` entry.
+
+**Compose sanction is ENTRY-POINT IDENTITY, not a disposition.** A compose verb
+is sanctioned **iff it is reached through the installed
+`dotmac-deployment-foundation` entry point**, resolved from installed
+distribution metadata — never from a path, a comment, a filename or a declared
+premise. Anything else that reaches a compose verb is unsanctioned, whatever its
+intent.
+
+The reason to prefer identity is a defect this module already produced: the verb
+detector read a *usage comment* as a deployment and the edge resolver drew a
+call edge backwards, because a path mention is symmetric while invocation is
+not. *"Is this the Foundation-sanctioned compose call?"* has the same shape — it
+asks about intent, which a tree cannot answer. *"Was this reached through that
+entry point?"* is a fact about topology.
+
+The implementation is almost embarrassingly simple once stated that way: a
+sanctioned mutation happens inside the installed distribution, which is **not in
+the tree**, so it never appears in a resolved verb set; an unsanctioned one is in
+the tree, so it always does. Delegation does not launder a direct call beside
+it. Three properties keep it honest:
+
+- **The console-script name is never written down.** It is read from metadata,
+  and a test asserts the literal does not appear in the module — a hardcoded
+  name would turn an identity check back into a string match. That test had to
+  strip the distribution name first, because the script name is a PREFIX of it;
+  the near-match hazard this ADR warns about arrived inside its own test.
+- **An unresolvable distribution is UNMONITORED, never a pass.** If the
+  distribution is not installed where the check runs, the sanction question
+  cannot be answered and the coverage block says so.
+- **Whether it is installed is not recorded in the baseline.** That is a
+  property of where the check runs, not of the product; freezing one machine's
+  answer into a committed file is how a local environment becomes a fleet fact.
+
+Wave 7C's *"remove direct Compose mutation outside Foundation"* is therefore
+expressed as driving the unsanctioned SET to empty, ratcheted two-directionally
+— the set rather than the count, because a swap (one path retired while another
+gains the ability) leaves the count still and is exactly the move that matters.
+It is a counted measurement rather than a refusal for the same reason the SSH
+gate is narrow: the Starter's own `scripts/deploy.sh` is unsanctioned today, and
+refusing it would make an honest census impossible on day one.
+
+This pairs with Wave 4's installed `dotmac-platform` CLI ratchet. Once Platform
+CP is installed as a wheel with real entry points, the same
+`sanctioned_entry_points()` shape applies there, and the vocabulary should be
+coordinated before either ratchet hardens.
+
