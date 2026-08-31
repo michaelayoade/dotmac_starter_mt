@@ -251,7 +251,11 @@ def test_the_scoreboard_is_recorded_and_is_still_zero() -> None:
     receipt — which is the whole point of recording it here."""
     baseline = _baseline()
     assert baseline["retired_total"] == 0
-    assert sorted(baseline["unadopted"]) == ["dotmac_erp", "dotmac_sub"]
+    assert sorted(baseline["unadopted"]) == [
+        "dotmac_erp",
+        "dotmac_sub",
+        "dotmac_vendor_control_plane",
+    ]
 
 
 # ── Sensitivity proofs (ADR-0018 §5) ────────────────────────────────────────
