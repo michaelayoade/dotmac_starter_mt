@@ -360,6 +360,7 @@ def test_public_host_binding_enforces_identity_and_route_invariants(
         HostRunnerTransportSpecV1(
             "HostRunnerTransportSpec.v1",
             _policy().digest,
+            _policy().adapter,
             identities,
             workloads,
             grants,
@@ -372,6 +373,7 @@ def test_public_host_binding_enforces_identity_and_route_invariants(
             HostRunnerTransportSpecV1(
                 "HostRunnerTransportSpec.v1",
                 _policy().digest,
+                _policy().adapter,
                 (HostRunnerIdentityV1("starter", PROXY.uid, 3128),),
                 (),
                 (),

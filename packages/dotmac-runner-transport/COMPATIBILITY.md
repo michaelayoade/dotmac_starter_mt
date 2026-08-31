@@ -32,4 +32,11 @@ base chain's terminal drop.
 A `RunnerTransportReceipt.v1` is valid only against the expected bundle and
 runner name, including exact transport and workload environment digests; a
 changed direct-grant bypass therefore invalidates the receipt even when all
-lifecycle rows still say `executed_passed`.
+lifecycle rows still say `executed_passed`. The expected bundle also supplies
+the adapter identity; the expected source revision and provider runner identity
+are separate inputs derived from the protected workflow. Every lifecycle row
+must have one retained canonical `RunnerTransportLifecycleEvidence.v1`
+document whose bytes reproduce its digest and name that same source revision,
+adapter identity, runner identity, typed verdict and mutation flag. Acceptance
+takes and parses those exact bytes; an in-memory document object is not an
+evidence input. A typed digest without the corresponding bytes is not evidence.

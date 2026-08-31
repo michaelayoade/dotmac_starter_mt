@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from .canonical import typed_sha256
 from .contracts import (
+    AdapterIdentityV1,
     HostDirectEgressGrantV1,
     HostNftablesBindingV1,
     HostProxyIdentityV1,
@@ -78,6 +79,7 @@ class RunnerProxyEnvironmentV1:
 class RunnerEgressBundleV1:
     schema: str
     policy_digest: str
+    adapter: AdapterIdentityV1
     binding: HostRunnerTransportSpecV1
     squid_conf: str
     nftables_conf: str
@@ -97,6 +99,8 @@ class RunnerEgressBundleV1:
         self.binding.assert_valid()
         if self.policy_digest != self.binding.policy_digest:
             raise ValueError("bundle policy differs from its host binding")
+        if self.adapter != self.binding.adapter:
+            raise ValueError("bundle adapter differs from its host binding")
         if self.squid_sha256 != typed_sha256(self.squid_conf.encode("utf-8")):
             raise ValueError("bundle Squid digest differs from its content")
         if self.nftables_sha256 != _nftables_digest(
@@ -236,6 +240,7 @@ def render_host_bundle(
     binding = HostRunnerTransportSpecV1(
         schema="HostRunnerTransportSpec.v1",
         policy_digest=policy.digest,
+        adapter=policy.adapter,
         identities=tuple(sorted(identities, key=lambda item: item.runner_name)),
         workload_policies=tuple(
             sorted(workload_policies, key=lambda item: item.policy_key)
@@ -401,6 +406,7 @@ def render_host_bundle(
     return RunnerEgressBundleV1(
         schema="RunnerEgressBundle.v1",
         policy_digest=policy.digest,
+        adapter=policy.adapter,
         binding=binding,
         squid_conf=squid_text,
         nftables_conf=nft_text,

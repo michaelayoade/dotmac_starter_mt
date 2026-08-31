@@ -1824,7 +1824,7 @@ url = "packages/dotmac-response-obligations"
 
 [[package]]
 name = "dotmac-runner-transport"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Provider-neutral transport policy and host enforcement rendering for self-hosted runners"
 optional = false
 python-versions = ">=3.11,<3.14"

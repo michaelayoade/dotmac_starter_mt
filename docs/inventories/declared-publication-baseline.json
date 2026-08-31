@@ -113,8 +113,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE VMID 124 PILOT RETIRES THE LEGACY WRITER. The provider-neutral core, deterministic renderer and receipt refusals are source-complete, but publication before the live pilot would make an unexercised host-control surface available fleet-wide. It is deliberately absent from release-facilities.json. Remove this row only after one protected-main bundle drives both repository diagnostics to terminal provider-recorded success, repeats after a cold reboot, and the observed-broker inventory plus its autonomous timer are retired with no_autonomous_return. Foundation 0.3.0a2 remains byte-frozen and is not changed or republished by this facility.",
+      "declared": "0.1.0a2",
+      "reason": "INTENDED UNTIL THE VMID 124 PILOT RETIRES THE LEGACY WRITER. The one-time local a1 wheel and bundle from 5d6381d were never published or tagged and are INVALIDATED: receipt acceptance did not bind adapter or provider-runner coordinates and accepted arbitrary well-formed evidence digests without the retained bytes. Reusing a1 for repaired bytes would make one version identify two contracts. a2 adds the typed provider-runner identity and canonical lifecycle-evidence documents, binds the adapter through the host specification, and re-hashes every retained document at acceptance. It remains absent from release-facilities.json. Remove this row only after one protected-main a2 bundle drives both repository diagnostics to terminal provider-recorded success, repeats after a cold reboot, and the observed-broker inventory plus its autonomous timer are retired with no_autonomous_return. The unchanged GitHub Actions adapter remains a1 and its >=0.1.0a1 dependency admits core a2. Foundation paths are outside this change.",
       "state": "never-published"
     },
     "dotmac-runner-transport-github-actions": {

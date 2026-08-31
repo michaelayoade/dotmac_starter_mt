@@ -252,6 +252,7 @@ class HostRunnerTransportSpecV1:
 
     schema: str
     policy_digest: str
+    adapter: AdapterIdentityV1
     identities: tuple[HostRunnerIdentityV1, ...]
     workload_policies: tuple[WorkloadEgressPolicyV1, ...]
     direct_grants: tuple[HostDirectEgressGrantV1, ...]
