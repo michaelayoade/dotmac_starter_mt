@@ -16,6 +16,37 @@ Vendor remains authoritative on its exact a1 pin until a2 has passed the
 protected release workflow and Vendor deliberately adopts that immutable
 artifact.
 
+## Unreleased — `0.1.0a2+dev`
+
+**Public typed READ contracts.** `detail()` returns an `AgreementDetail` — the
+agreement and its lines, the lifecycle timeline, the owner-derived
+`permitted_actions`, and the `expected_version` / `expected_status` a surface
+hands straight back on the next command. Carrying the expected version with the
+thing being looked at is what turns a concurrent edit into an
+`ExpectedStateError` refusal rather than a lost update.
+
+**`AgreementFilter` gives the EXISTING keyset reader a closed shape**, and bounds
+`limit` in the type rather than in one function body. It is not a second list
+implementation: `list_agreements(db, filter)` and the a1
+`list_agreements(db, after=..., limit=...)` name the same page through the same
+reader, and passing both is refused. A parallel reader would be a second read
+authority over `mod_agreements` with its own drift.
+
+**One lifecycle table.** `service._PERMITTED_FROM` states which statuses each
+command may be issued from, and every write guard now reads it instead of an
+inline `frozenset`. The permitted-actions read comes from that same table, so a
+screen cannot offer an action the write path would refuse — a second copy in a
+template would disagree the moment a status moved between the render and the
+click.
+
+`DEFAULT_AGREEMENT_PAGE_SIZE` and `MAX_AGREEMENT_PAGE_SIZE` moved to `ports` so
+`facts` can bound the filter without importing `service`. Both modules still
+re-export them; no caller's import changes.
+
+**The declared version now carries a PEP 440 local development marker.**
+`0.1.0a2` is published and tagged; `src/` has moved since, and one version may
+not name two sets of importable bytes.
+
 ## 0.1.0a2 — 2026-08-25 (unreleased)
 
 ### Added

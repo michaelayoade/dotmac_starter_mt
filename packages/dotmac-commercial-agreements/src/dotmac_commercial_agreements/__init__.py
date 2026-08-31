@@ -62,6 +62,12 @@ never constructs a session (hard rule 8). The boundary owns the transaction.
 
 Everything importable from this top-level namespace is stable. Submodules are
 not: import from here.
+
+`get`, `detail`, `history`, `family` and `list_agreements` are the whole read
+surface, and they answer in the typed values of `facts` — never in ORM rows.
+`list_agreements` is ONE keyset reader: the closed `AgreementFilter` and the a1
+``after=``/``limit=`` keywords name the same page in two ways, and there is
+deliberately no second list implementation to drift from it.
 """
 
 from __future__ import annotations
@@ -78,6 +84,9 @@ from dotmac_commercial_agreements.facts import (
     AGREEMENT_SUSPENDED_V1,
     AGREEMENT_TERMINATED_V1,
     PUBLISHED_EVENT_TYPES,
+    AgreementAction,
+    AgreementDetail,
+    AgreementFilter,
     AgreementPage,
     AgreementView,
     PromisedLine,
@@ -126,6 +135,7 @@ from dotmac_commercial_agreements.service import (
     amend,
     approve,
     cancel,
+    detail,
     expire,
     family,
     get,
@@ -140,7 +150,7 @@ from dotmac_commercial_agreements.service import (
     terminate,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a2+dev"
 
 __all__ = [
     "AGREEMENT_ACTIVATED_V1",
@@ -161,13 +171,16 @@ __all__ = [
     "TERMINAL_STATUSES",
     "ActivateCommand",
     "ActivationEvidence",
-    "AgreementBoundaryError",
     "Agreement",
+    "AgreementAction",
+    "AgreementBoundaryError",
+    "AgreementDetail",
     "AgreementError",
     "AgreementEvent",
+    "AgreementFilter",
     "AgreementLine",
-    "AgreementPeriod",
     "AgreementPage",
+    "AgreementPeriod",
     "AgreementStatus",
     "AgreementView",
     "AmendCommand",
@@ -195,6 +208,7 @@ __all__ = [
     "approve",
     "cancel",
     "derive_end_exclusive",
+    "detail",
     "expire",
     "family",
     "get",
