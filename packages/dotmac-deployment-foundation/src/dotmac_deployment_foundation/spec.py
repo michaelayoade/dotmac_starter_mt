@@ -1,4 +1,4 @@
-"""``ProductDeploymentSpec.v1`` — the one thing a product declares.
+"""Strict ``ProductDeploymentSpec.v1`` and ``.v2`` readers.
 
 A product assembly owns exactly one deployment artifact: `deploy/product.toml`.
 Everything else a deployment needs — the Compose file, the Nginx site, the
@@ -15,7 +15,7 @@ facility exists to remove, and a permissive parser converts it from a CI
 failure into a production one.
 
 **The schema string is checked first and fails closed.** A descriptor written
-against a future ``.v2`` may declare fields whose ABSENCE changes behaviour
+against a future schema may declare fields whose ABSENCE changes behaviour
 rather than merely losing detail — a security exception, say — so an older
 renderer refuses rather than rendering a subset it believes is complete.
 
@@ -34,6 +34,10 @@ is a units bug waiting for the one host where it matters.
 - Anything the facility can derive. Resource attributes, container names and
   the plan's step order are DERIVED, so two products cannot disagree about
   them.
+
+V1 is immutable. V2 adds only typed database-catalogue coordinates: a v1
+document carrying that key is refused, while v1 canonical bytes omit the
+version-gated dataclass field entirely.
 """
 
 from __future__ import annotations
@@ -46,6 +50,11 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from . import ingress as ingress_contract
+from .database_catalog import (
+    DatabaseCatalogCoordinateV1,
+    DatabaseCatalogProductIdentityV1,
+    DatabaseCatalogScope,
+)
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
 from .secrets_guard import require_no_secrets
 
@@ -95,7 +104,12 @@ def _contained_relative_path(value: str, *, key: str, where: str) -> str:
 if TYPE_CHECKING:  # pragma: no cover - the runtime import is inside the method
     from .document import DeploymentDescriptorDocumentV1
 
-SCHEMA: Final = "ProductDeploymentSpec.v1"
+SCHEMA_V1: Final = "ProductDeploymentSpec.v1"
+SCHEMA_V2: Final = "ProductDeploymentSpec.v2"
+SCHEMAS: Final = (SCHEMA_V1, SCHEMA_V2)
+# Backwards-compatible public name: existing callers importing SCHEMA mean the
+# schema their current descriptors use, not "whichever schema is newest".
+SCHEMA: Final = SCHEMA_V1
 
 # A hyphen is allowed, and that is not cosmetic. A role code is emitted VERBATIM
 # as the Compose service key, so a schema that forbade hyphens would force
@@ -1618,11 +1632,49 @@ class DatabaseContract:
     expected_schemas: tuple[str, ...]
     isolation: tuple[IsolationInvariant, ...]
     tablespaces: str
+    catalogs: tuple[DatabaseCatalogCoordinateV1, ...] = field(
+        default=(), repr=False, metadata={"descriptor_since": SCHEMA_V2}
+    )
 
     TABLESPACES: ClassVar[tuple[str, ...]] = ("none", "mapped", "declared")
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.catalogs, tuple) or not all(
+            isinstance(catalog, DatabaseCatalogCoordinateV1)
+            for catalog in self.catalogs
+        ):
+            raise SpecError(
+                "database catalogs must be a tuple of DatabaseCatalogCoordinateV1"
+            )
+        keys = tuple(
+            (item.scope.value, item.schema, item.path, item.digest)
+            for item in self.catalogs
+        )
+        if keys != tuple(sorted(set(keys))):
+            raise SpecError("database catalogs must be unique and sorted")
+        product_catalogs = tuple(
+            item for item in self.catalogs if item.scope is DatabaseCatalogScope.PRODUCT
+        )
+        if product_catalogs and len(self.catalogs) != 1:
+            raise SpecError("a product catalog cannot be combined with another catalog")
+        expected = set(self.expected_schemas)
+        covered: set[str] = set()
+        for catalog in self.catalogs:
+            schemas = set(catalog.complete_schemas)
+            if not schemas <= expected:
+                raise SpecError(
+                    "a database catalog covers a schema outside expected_schemas"
+                )
+            if schemas & covered:
+                raise SpecError("database catalogs overlap on a complete schema")
+            covered.update(schemas)
+            if catalog.scope is DatabaseCatalogScope.PRODUCT and schemas != expected:
+                raise SpecError("a product catalog must cover every expected schema")
+
     @classmethod
-    def parse(cls, table: _Table | None) -> DatabaseContract | None:
+    def parse(
+        cls, table: _Table | None, *, descriptor_schema: str
+    ) -> DatabaseContract | None:
         if table is None:
             return None
         postgres_major = table.int_("postgres_major", minimum=13, maximum=99)
@@ -1632,6 +1684,51 @@ class DatabaseContract:
         isolation = tuple(
             IsolationInvariant.parse(item) for item in table.tables("isolation")
         )
+        catalogs: tuple[DatabaseCatalogCoordinateV1, ...] = ()
+        if descriptor_schema == SCHEMA_V2:
+            parsed_catalogs: list[DatabaseCatalogCoordinateV1] = []
+            for catalog_table in table.tables("catalogs"):
+                try:
+                    scope = DatabaseCatalogScope(catalog_table.str_("scope"))
+                except ValueError as exc:
+                    raise SpecError(
+                        "catalog scope must be 'module' or 'product'",
+                        where=catalog_table.path,
+                    ) from exc
+                product_identity_table = catalog_table.table(
+                    "product_identity", optional=True
+                )
+                product_identity = None
+                if product_identity_table is not None:
+                    product_identity = DatabaseCatalogProductIdentityV1(
+                        descriptor_product=product_identity_table.str_(
+                            "descriptor_product"
+                        ),
+                        catalog_product=product_identity_table.str_("catalog_product"),
+                        catalog_version=product_identity_table.str_("catalog_version"),
+                        mapping_ref=product_identity_table.str_(
+                            "mapping_ref", default=""
+                        ),
+                    )
+                    product_identity_table.done()
+                parsed_catalogs.append(
+                    DatabaseCatalogCoordinateV1(
+                        schema=catalog_table.str_("schema"),
+                        path=catalog_table.str_("path"),
+                        digest=catalog_table.str_("digest"),
+                        scope=scope,
+                        complete_schemas=catalog_table.str_list("complete_schemas"),
+                        product_identity=product_identity,
+                    )
+                )
+                catalog_table.done()
+            catalogs = tuple(parsed_catalogs)
+            if not catalogs:
+                raise SpecError(
+                    "ProductDeploymentSpec.v2 [database] requires at least one "
+                    "database catalog coordinate",
+                    where=table.path,
+                )
         table.done()
         if tablespaces not in cls.TABLESPACES:
             raise SpecError(
@@ -1673,6 +1770,7 @@ class DatabaseContract:
             expected_schemas=expected_schemas,
             isolation=isolation,
             tablespaces=tablespaces,
+            catalogs=catalogs,
         )
 
     def role(self, name: str) -> DatabaseRole:
@@ -2005,7 +2103,7 @@ class ProductAlert:
 
 @dataclass(frozen=True, slots=True)
 class ProductDeploymentSpec:
-    """``ProductDeploymentSpec.v1``."""
+    """A strictly parsed ``ProductDeploymentSpec.v1`` or ``.v2`` document."""
 
     product: str
     environment: str
@@ -2028,6 +2126,37 @@ class ProductDeploymentSpec:
     stability_window_seconds: int
     rollback_images_retained: int
     source: str = field(default="", compare=False)
+    descriptor_schema: str = field(
+        default=SCHEMA_V1, repr=False, metadata={"canonical_root_only": True}
+    )
+
+    def __post_init__(self) -> None:
+        if self.descriptor_schema not in SCHEMAS:
+            raise UnknownSchemaError(
+                f"schema is {self.descriptor_schema!r}, this facility reads "
+                f"{list(SCHEMAS)!r}"
+            )
+        catalogs = self.database.catalogs if self.database is not None else ()
+        if self.descriptor_schema == SCHEMA_V1 and catalogs:
+            raise SpecError(
+                "ProductDeploymentSpec.v1 cannot carry database catalogs; use v2"
+            )
+        if (
+            self.descriptor_schema == SCHEMA_V2
+            and self.database is not None
+            and not catalogs
+        ):
+            raise SpecError(
+                "ProductDeploymentSpec.v2 [database] requires at least one "
+                "database catalog coordinate"
+            )
+        for catalog in catalogs:
+            identity = catalog.product_identity
+            if identity is not None and identity.descriptor_product != self.product:
+                raise SpecError(
+                    "database catalog product_identity.descriptor_product must "
+                    "equal the descriptor product exactly"
+                )
 
     # ── loading ─────────────────────────────────────────────────────────────
 
@@ -2053,9 +2182,9 @@ class ProductDeploymentSpec:
         # scanning for secrets second means a secret in a field this version
         # does not define is still caught.
         declared = document.get("schema")
-        if declared != SCHEMA:
+        if declared not in SCHEMAS:
             raise UnknownSchemaError(
-                f"schema is {declared!r}, this facility reads {SCHEMA!r}. A "
+                f"schema is {declared!r}, this facility reads {list(SCHEMAS)!r}. A "
                 "descriptor from a newer schema is REFUSED rather than "
                 "partially read: a field this version cannot see may be the "
                 "one that disables a control",
@@ -2115,7 +2244,9 @@ class ProductDeploymentSpec:
             )
             backup_table.done()
 
-        database = DatabaseContract.parse(root.table("database", optional=True))
+        database = DatabaseContract.parse(
+            root.table("database", optional=True), descriptor_schema=str(declared)
+        )
 
         telemetry = Telemetry.parse(
             root.table("telemetry", optional=True), where=source
@@ -2183,6 +2314,7 @@ class ProductDeploymentSpec:
             stability_window_seconds=stability,
             rollback_images_retained=retained,
             source=source,
+            descriptor_schema=str(declared),
         )
         _validate_cross_field(spec, source)
         return spec

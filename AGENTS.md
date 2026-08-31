@@ -1390,10 +1390,24 @@ specifics) points here and must never fork these rules.
     inherited, PUBLIC and column-level reach, and must answer every selected
     question. A comparison reports `UNMEASURABLE`, never agreement, for a fact
     the descriptor schema cannot declare. In particular,
-    `ProductDeploymentSpec.v1` currently has no exact table or column contract,
-    so the seven-table/95-column `mod_deploy` plane remains a typed enforcement
-    gap until a versioned declaration surface owns it. Schema presence or an
-    Alembic head is not substituted for that missing structural proof
+    `ProductDeploymentSpec.v1` remains immutable and has no exact table or
+    column contract. A typed sidecar can bind MODULE- or PRODUCT-scoped
+    catalogue coordinates to its digest without pretending they are v1 facts;
+    `ProductDeploymentSpec.v2` embeds them explicitly while the v1 reader keeps
+    refusing the new key and preserving v1 canonical bytes. Kernel catalogue
+    schemas pair exactly with MODULE or PRODUCT scope, and product catalogues
+    bind their product code/version through an explicit descriptor-product
+    mapping. Structural evidence requires an integrated verifier over the held
+    catalogue and observation bytes, the same observation and PostgreSQL major
+    as `ObservedDatabaseState`, complete schema/table/column extent, and drift
+    findings in both directions. Contract-id allowlists alone authorize nothing;
+    Foundation invokes the injected kernel verifier over both held payloads and
+    rechecks its factory-only result, including declaration scope, complete
+    schemas and product code/version, before minting a witness.
+    Partial `mod_deploy` evidence and every v1 sidecar withhold
+    `matched_descriptor_digest`; v2 exposes it only with complete recognized
+    coverage. Schema presence or an Alembic head is never
+    substituted for structural proof
     (ADR-0070 amendment 2026-08-31;
     `tests/unit/test_deployment_foundation_database_transition.py`;
     `tests/unit/test_deployment_foundation_database_drift.py`).

@@ -38,7 +38,7 @@ from .errors import (
     RenderDrift,
     SpecError,
 )
-from .spec import SCHEMA, ProductDeploymentSpec
+from .spec import ProductDeploymentSpec
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -149,7 +149,7 @@ def _thresholds(path: str | None) -> dict[str, str]:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     spec = _load(args.descriptor)
-    print(f"{args.descriptor}: valid {SCHEMA}")
+    print(f"{args.descriptor}: valid {spec.descriptor_schema}")
     print(f"  product        {spec.product}")
     print(f"  image          {spec.image}")
     print(f"  revision       {spec.source_revision}")
@@ -758,7 +758,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="dotmac-deploy",
         description=(
             "Build- and deploy-time facility for Dotmac product assemblies. "
-            "Reads deploy/product.toml (ProductDeploymentSpec.v1)."
+            "Reads deploy/product.toml (ProductDeploymentSpec.v1 or .v2)."
         ),
     )
     parser.add_argument(
