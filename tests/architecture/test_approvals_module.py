@@ -329,6 +329,12 @@ def test_policy_codes_are_data_and_subject_types_are_opaque_strings() -> None:
         "DecisionAction",
         "ApproverKind",
         "SoDRule",
+        # Wave 2. What a specific ACTOR may do to a specific request, derived by
+        # this module from the policy revision and the decisions already
+        # recorded. Not a policy code and not a subject type: it names no
+        # configuration an operator invents and no document class a consuming
+        # module declares, which are the two things the premise above forbids.
+        "RequestAction",
     }, enum_names
     assert models.ApprovalPolicy.__table__.c["policy_code"].type.python_type is str
     assert models.ApprovalRequest.__table__.c["subject_type"].type.python_type is str

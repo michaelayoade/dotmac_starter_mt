@@ -595,7 +595,7 @@ url = "packages/dotmac-application-directory"
 
 [[package]]
 name = "dotmac-approvals"
-version = "0.1.0a5"
+version = "0.1.0a5+dev"
 description = "DotMac dual-plane approval policy revisions, content-bound requests and decisions"
 optional = false
 python-versions = ">=3.11,<3.14"
