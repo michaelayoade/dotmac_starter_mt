@@ -97,6 +97,25 @@ def main() -> int:
 
     rows = drifted()
     total = len(released_distributions())
+
+    # Carry forward the DISPOSITION a human wrote for a row that is still
+    # drifting. Regeneration must not silently discard the characterisation --
+    # a debt list whose reasons evaporate the first time somebody runs the make
+    # target is a list that decays into four bare names nobody can act on. A
+    # row that stopped drifting simply disappears, reason and all.
+    if BASELINE_PATH.exists():
+        previous = json.loads(BASELINE_PATH.read_text())
+        carried = {
+            entry["distribution"]: entry
+            for entry in previous.get("drifted", [])
+            if "disposition" in entry
+        }
+        for row in rows:
+            prior = carried.get(row["distribution"])
+            if prior is None:
+                continue
+            row["disposition"] = prior["disposition"]
+            row["reason"] = prior.get("reason", "")
     if args.write_baseline:
         BASELINE_PATH.write_text(
             json.dumps(
@@ -118,6 +137,25 @@ def main() -> int:
                         "never by editing a published version's contents, which",
                         "would make one version name two contracts.",
                         "",
+                        "",
+                        "Every row carries a DISPOSITION and a retirement",
+                        "condition, because a debt list without one is a list",
+                        "nobody can ever close. A row is not evidence a",
+                        "re-release is owed: `accepted-debt` rows are",
+                        "docstring-only and clear at that distribution's next",
+                        "release, and `not-actionable-here` is repaired by",
+                        "removing a retired copy, never by publishing.",
+                        "",
+                        "A row also says NOTHING about a released MIGRATION.",
+                        "That is a different gate",
+                        "(tests/architecture/test_released_migrations.py) and a",
+                        "different failure: a migration edited after release",
+                        "changes what future installations build, while",
+                        "alembic_version records only that the revision ran.",
+                        "Do not read a row here as covering it.",
+                        "",
+                        "Dispositions are carried forward on regeneration; a row",
+                        "that stops drifting disappears, reason and all.",
                         "Regenerate: make published-source-drift-baseline",
                     ],
                     "released_total": total,
