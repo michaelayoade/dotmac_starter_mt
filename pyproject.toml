@@ -390,6 +390,22 @@ exclude_dirs = [
     "tests",
     "alembic",
     "packages/dotmac-kernel/src/dotmac_kernel/migrations",
+    # A module's own lineage, for the SAME reason as `alembic/` and the
+    # kernel's above: a migration builds DDL from in-code constants, never from
+    # user input.
+    #
+    # Listed per path because bandit's `exclude_dirs` does not glob here -- a
+    # `packages/*/src/*/migrations` pattern is accepted silently and still
+    # scans, which was verified rather than assumed. Each new stateful module
+    # that hits B608 adds its line.
+    #
+    # This is not cosmetic. Without it B608 fires on a RELEASED migration, and
+    # the cheapest way to silence it is to EDIT that file -- which is exactly
+    # what happened to `nu_0001_numbering.py` after
+    # `dotmac-numbering-v0.1.0a2` shipped, giving one revision id two file
+    # contents while `alembic_version` recorded only that the revision ran.
+    # Removing the incentive is the durable half of that repair.
+    "packages/dotmac-numbering/src/dotmac_numbering/migrations",
     # The shipped test kit (kernel-boundary Task 5) is test-support code — its
     # provider CONTRACT is expressed as asserts (the pytest idiom), same
     # category as the excluded `tests/`, so B101 is expected, not a finding.

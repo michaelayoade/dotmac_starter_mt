@@ -54,6 +54,8 @@ palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the 
 	poetry run python scripts/palette_debt_baseline.py
 published-source-drift-baseline: ## Regenerate the released-source drift debt baseline (commit the diff in the same change)
 	poetry run python scripts/published_source_drift.py --write-baseline
+released-lineage-coverage-baseline: ## Regenerate the released-lineage coverage debt baseline (commit the diff in the same change)
+	poetry run python scripts/released_lineage_coverage.py --write-baseline
 facet-nav-baseline: ## Regenerate the authored-facet-prefix navigation debt baseline (commit the diff in the same change)
 	poetry run python scripts/facet_navigation_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
@@ -186,7 +188,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check palette-baseline published-source-drift-baseline facet-nav-baseline connector-baseline connector-ratchet \
+	css-build css-watch ui-build ui-check palette-baseline published-source-drift-baseline released-lineage-coverage-baseline facet-nav-baseline connector-baseline connector-ratchet \
 	credential-baseline credential-ratchet \
 	executor-retirement-check executor-retirement-baseline executor-retirement-receipt \
 	publication-check publication-baseline module-catalog module-catalog-check \
