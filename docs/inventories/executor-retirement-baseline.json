@@ -1,0 +1,155 @@
+{
+  "dispositions": {
+    "backlog": [
+      "active_executor",
+      "displaced",
+      "frozen"
+    ],
+    "reviewed": [
+      "non_production_executor",
+      "not_an_executor",
+      "retained_rollback"
+    ],
+    "terminal": [
+      "retired"
+    ]
+  },
+  "families": {
+    "cron": {
+      "incompleteness_premise": "a crontab installed on a host has no in-tree artifact; /etc/cron.d/dotmac_erp_db_backup is real and is invisible to any repository walk",
+      "patterns": [
+        "*"
+      ],
+      "roots": [
+        "deploy/cron",
+        "deploy/cron.d",
+        "cron",
+        "cron.d",
+        "etc/cron.d"
+      ],
+      "tree_complete": false
+    },
+    "manual_runbook": {
+      "incompleteness_premise": "a procedure a person follows from memory, a wiki or a chat message is an executor with no artifact anywhere; only the written ones can be walked",
+      "patterns": [
+        "*.md",
+        "*.rst",
+        "*.txt"
+      ],
+      "roots": [
+        "docs/runbooks",
+        "docs/operations",
+        "docs/ops",
+        "runbooks"
+      ],
+      "tree_complete": false
+    },
+    "script": {
+      "incompleteness_premise": "",
+      "patterns": [
+        "*.sh",
+        "*.bash",
+        "*.zsh",
+        "*.ps1"
+      ],
+      "roots": [
+        "scripts",
+        "bin",
+        "deploy",
+        "ops",
+        "tools"
+      ],
+      "tree_complete": true
+    },
+    "ssh_credential": {
+      "incompleteness_premise": "a deploy key or authorized_keys entry lives in a secret store and on a host, never in a tree; a credential that appeared in a tree would be a leak, not an inventory",
+      "patterns": [],
+      "roots": [],
+      "tree_complete": false
+    },
+    "systemd_unit": {
+      "incompleteness_premise": "a unit installed under /etc/systemd/system has no in-tree artifact, and `dotmac-books.service` was found installed and disabled \u2014 disabled is not absent, and absent from the tree is not absent from the host",
+      "patterns": [
+        "*.service",
+        "*.timer",
+        "*.socket",
+        "*.path"
+      ],
+      "roots": [
+        "deploy/systemd",
+        "systemd",
+        "etc/systemd"
+      ],
+      "tree_complete": false
+    },
+    "webhook": {
+      "incompleteness_premise": "the registration lives in the SENDER's configuration \u2014 a GitHub repository setting, a provider console \u2014 so a receiver route in this tree is at most half the entrypoint",
+      "patterns": [],
+      "roots": [],
+      "tree_complete": false
+    },
+    "workflow": {
+      "incompleteness_premise": "",
+      "patterns": [
+        "*.yml",
+        "*.yaml"
+      ],
+      "roots": [
+        ".github/workflows",
+        ".forgejo/workflows",
+        ".gitlab-ci"
+      ],
+      "tree_complete": true
+    }
+  },
+  "inventory_schema": "ExecutorInventory.v1",
+  "products": {
+    "dotmac_starter_mt": {
+      "absences_established_by_tree_walk_only": [
+        "cron",
+        "manual_runbook",
+        "ssh_credential",
+        "systemd_unit",
+        "webhook"
+      ],
+      "families": {
+        "script": {
+          "active_executor": 1,
+          "non_production_executor": 3,
+          "not_an_executor": 5
+        },
+        "workflow": {
+          "non_production_executor": 5,
+          "not_an_executor": 11
+        }
+      },
+      "families_absent": [
+        "cron",
+        "manual_runbook",
+        "ssh_credential",
+        "systemd_unit",
+        "webhook"
+      ],
+      "families_declaration_only": [],
+      "families_present": [
+        "script",
+        "workflow"
+      ],
+      "families_tree_complete": [
+        "workflow",
+        "script"
+      ],
+      "inventory_digest": "sha256:3d83b4ce024156f9d32188f8f2955fc096168fb1119d03846b7b5aaa11bf55e0",
+      "measured_from": "working tree",
+      "retired_total": 0,
+      "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff"
+    }
+  },
+  "receipt_schema": "ExecutorRetirementReceipt.v1",
+  "retired_total": 0,
+  "schema_version": 1,
+  "unadopted": [
+    "dotmac_erp",
+    "dotmac_sub"
+  ]
+}

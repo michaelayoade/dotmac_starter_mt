@@ -1179,6 +1179,58 @@ specifics) points here and must never fork these rules.
     (`scripts/foundation_candidate.py check|verify`;
     `tests/architecture/test_candidate_lane_cannot_publish.py`)
 
+45. **A displaced deployment executor retires on PROVED evidence, never on
+    adoption — and it is never one script.** ERP is a `contract_consumer` of
+    `dotmac-deployment-foundation` and its 486-line `scripts/deploy.sh` is
+    retired no sooner for it: a facility adopted as declarative input and a CI
+    gate has proven nothing about its ability to replace an executor. The
+    programme scoreboard is `retired_total`, it is committed, and only a receipt
+    moves it.
+
+    Two opposite failures bracket the removal — deleting the script early takes
+    the rollback path with it; leaving it active creates a second deployment
+    authority nobody watches. The rule between them is that **a replacement is
+    not adopted while the displaced executor can still act normally**, expressed
+    as one absent edge in a state machine: `active_executor` may become
+    `frozen` and nothing else. It has no path to `displaced` or `retired`.
+
+    A product declares one `ExecutorInventory.v1` over SEVEN entry-point
+    families — `workflow`, `script`, `cron`, `systemd_unit`, `ssh_credential`,
+    `webhook`, `manual_runbook` — each entrypoint carrying a family, trigger,
+    credential IDENTITY and disposition. **Absence is never a disposition**: an
+    artifact discovered in the tree and not declared fails, and a family omitted
+    from the inventory is refused. Four families cannot be walked at all, and an
+    absence in one of them needs an observer, a time, a method and a SCOPE —
+    `repository_tree` says nothing about any host, `host_observed` names the
+    host. Conflating those is how `dotmac-books.service` sat installed and
+    disabled on a production host. A product with no inventory is UNADOPTED,
+    never zero.
+
+    Reviewed verdicts carry premises the checker REFUSES: `not_an_executor` over
+    an artifact commanding a deployment verb — resolved TRANSITIVELY, because a
+    dispatch-only caller reads as inert on its own bytes — and
+    `non_production_executor` over one naming a declared production target.
+    Ratchets are two-directional per product, family and DISPOSITION (a total
+    hides `active_executor` becoming `frozen`), plus `unadopted` and
+    `retired_total`, which rises only with a receipt and may not fall at all.
+    Every family carries its own planted violation, with at least one proof in
+    situ over the real tree.
+
+    The removal writes an `ExecutorRetirementReceipt.v1` that can FAIL: the
+    subject and the census digest it was `displaced` in; TWO successful
+    controller cycles as distinct runs (one proves the replacement can deploy;
+    only the second proves it can deploy again over its own previous state);
+    every removal by class INCLUDING the credential, because a live credential
+    is a second executor waiting for whoever holds it; the zero-surface guard
+    with its sensitivity proof; a PROVED recovery verdict with an exercise
+    coordinate, never "rollback is documented"; what was deliberately retained;
+    and a digest. Value-free, absence is not a status, corrections by
+    supersession. Products own their receipts; Governance owns the
+    cross-repository envelope and there is no registry here
+    (ADR-0072; `scripts/executor_retirement.py`;
+    `tests/architecture/test_executor_retirement_ratchet.py`;
+    `tests/unit/test_executor_retirement_receipt.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
