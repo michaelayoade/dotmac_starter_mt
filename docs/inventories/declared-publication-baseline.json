@@ -112,6 +112,16 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-runner-transport": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE VMID 124 PILOT RETIRES THE LEGACY WRITER. The provider-neutral core, deterministic renderer and receipt refusals are source-complete, but publication before the live pilot would make an unexercised host-control surface available fleet-wide. It is deliberately absent from release-facilities.json. Remove this row only after one protected-main bundle drives both repository diagnostics to terminal provider-recorded success, repeats after a cold reboot, and the observed-broker inventory plus its autonomous timer are retired with no_autonomous_return. Foundation 0.3.0a2 remains byte-frozen and is not changed or republished by this facility.",
+      "state": "never-published"
+    },
+    "dotmac-runner-transport-github-actions": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
+      "state": "never-published"
+    },
     "dotmac-tax": {
       "declared": "0.1.0a4",
       "reason": "C3 POLICY-ADOPTION SUPPLY RELEASE. Version a4 adds immutable ORM-free authority, jurisdiction, code, rule/band and classification reads plus exact-replay ensure commands required for ERP to bind reviewed policy identities without importing module models. It does not run ERP's backfill or shadow, move tax authority, or make inclusive, foreign-currency or historical PAYE cohorts admissible. Remove this row only in the oracle-backed a4 release-record change after the protected workflow installs the artifact back and tags the exact revision; ERP must not pin a4 before that release exists.",

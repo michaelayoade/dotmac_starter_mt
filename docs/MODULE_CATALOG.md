@@ -117,6 +117,8 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-remote-access`](../packages/dotmac-remote-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-remote-access/EXTRACTION.toml) | [tenant · `mod_remoteaccess`](../packages/dotmac-remote-access/src/dotmac_remote_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub` |
 | [`dotmac-reseller-management`](../packages/dotmac-reseller-management/README.md) | optional module | [`audit-complete`](../packages/dotmac-reseller-management/EXTRACTION.toml) | [tenant · `mod_reseller`](../packages/dotmac-reseller-management/src/dotmac_reseller_management/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
 | [`dotmac-response-obligations`](../packages/dotmac-response-obligations/README.md) | optional module | [`audit-complete`](../packages/dotmac-response-obligations/EXTRACTION.toml) | [tenant · `mod_sla`](../packages/dotmac-response-obligations/src/dotmac_response_obligations/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a95` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-runner-transport`](../packages/dotmac-runner-transport/README.md) | universal facility | [`audit-complete`](../packages/dotmac-runner-transport/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_observability`, `dotmac_starter_mt` |
+| [`dotmac-runner-transport-github-actions`](../packages/dotmac-runner-transport-github-actions/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-runner-transport-github-actions/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_observability`, `dotmac_starter_mt` |
 | [`dotmac-sales`](../packages/dotmac-sales/README.md) | optional module | [`audit-complete`](../packages/dotmac-sales/EXTRACTION.toml) | [tenant · `mod_sales`](../packages/dotmac-sales/src/dotmac_sales/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-service-access-policy`](../packages/dotmac-service-access-policy/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-access-policy/EXTRACTION.toml) | [tenant · `mod_serviceaccess`](../packages/dotmac-service-access-policy/src/dotmac_service_access_policy/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a91` | — | `dotmac_sub` |
 | [`dotmac-service-catalog`](../packages/dotmac-service-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-catalog/EXTRACTION.toml) | [tenant · `mod_svc_cat`](../packages/dotmac-service-catalog/src/dotmac_service_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a91` | — | `dotmac_sub` |
@@ -727,6 +729,22 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-response-obligations/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-runner-transport`](../packages/dotmac-runner-transport/README.md)
+
+- **Owner:** Provider-neutral self-hosted runner transport intent, exact endpoint validation, adapter discovery, canonical policy and digest, host enforcement rendering, execution receipts, and refusal semantics.
+- **Contract:** Resolve a discovered provider adapter against explicitly requested runner capabilities; produce one deterministic exact-host HTTPS policy; keep transport separate from workload grants; render loopback CONNECT-proxy and UID-bound direct-egress refusal artifacts; and accept a receipt only when provider selection, projection, application, acquisition, workload execution, result upload, provider-recorded success and positive/negative controls all executed. NOT provider domain knowledge, provider metadata retrieval, runner registration, credentials, workflow business policy, or a product deployment executor.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-runner-transport/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_observability`, `dotmac_starter_mt`.
+
+### [`dotmac-runner-transport-github-actions`](../packages/dotmac-runner-transport-github-actions/README.md)
+
+- **Owner:** The GitHub Actions runner transport adapter: parse GitHub's versioned metadata observation, intersect its exact domains with GitHub's official domains-by-function contract, and publish one immutable adapter manifest through package metadata.
+- **Contract:** Translate only complete official GitHub self-hosted runner functional groups into provider-neutral RunnerTransport capabilities and claim the raw snapshot, explicit exclusions and declaration digests. Azure-named result-storage endpoints are current GitHub adapter data only. PACKAGES is withheld while pkg-containers.githubusercontent.com is absent; SOURCE_FETCH is withheld because no complete provider contract is declared. NOT runner policy ownership, host firewall or proxy mutation, GitHub credentials, runner registration, workflow decisions, live request-path metadata fetches, cloud CIDRs, inferred hostname semantics, partial functional groups, or a provider branch in the core facility.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-runner-transport-github-actions/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_observability`, `dotmac_starter_mt`.
 
 ### [`dotmac-sales`](../packages/dotmac-sales/README.md)
 

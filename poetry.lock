@@ -1823,6 +1823,37 @@ type = "directory"
 url = "packages/dotmac-response-obligations"
 
 [[package]]
+name = "dotmac-runner-transport"
+version = "0.1.0a1"
+description = "Provider-neutral transport policy and host enforcement rendering for self-hosted runners"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-runner-transport"
+
+[[package]]
+name = "dotmac-runner-transport-github-actions"
+version = "0.1.0a1"
+description = "GitHub Actions provider adapter for Dotmac runner transport"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-runner-transport = ">=0.1.0a1"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-runner-transport-github-actions"
+
+[[package]]
 name = "dotmac-sales"
 version = "0.1.0a1"
 description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
@@ -4344,4 +4375,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "c8edafddeb73c6ab0804f856ec56d6468625dde991e3c5b88dcfca8c3e70af4a"
+content-hash = "7bd6a2d5e5a8820d95e15d4471f495fc1774bfef0529f2789f9364a47768e8d9"

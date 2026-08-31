@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "dotmac-runner-transport"
+version = "0.1.0a1"
+description = "Provider-neutral transport policy and host enforcement rendering for self-hosted runners"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_runner_transport", from = "src" }]
+include = [
+  { path = "src/dotmac_runner_transport/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+
+[tool.poetry.scripts]
+dotmac-runner-transport = "dotmac_runner_transport.cli:main"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0,<9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
