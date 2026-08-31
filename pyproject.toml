@@ -231,6 +231,11 @@ argon2-cffi = "^25.1.0"
 # distribution by exact version; this path entry is what makes the source
 # testable in the repository that owns it (ADR-0070).
 dotmac-deployment-foundation = { path = "packages/dotmac-deployment-foundation", develop = true }
+# Self-hosted runner policy is a build/host-control facility, not application
+# runtime. The provider adapter is discovered only by its offline renderer;
+# neither distribution ships in the Starter image or handles a request.
+dotmac-runner-transport = { path = "packages/dotmac-runner-transport", develop = true }
+dotmac-runner-transport-github-actions = { path = "packages/dotmac-runner-transport-github-actions", develop = true }
 pytest = "^8.3"
 pytest-asyncio = "^0.24"
 httpx = "^0.27"

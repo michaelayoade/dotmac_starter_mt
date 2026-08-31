@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "dotmac-runner-transport-github-actions"
+version = "0.1.0a1"
+description = "GitHub Actions provider adapter for Dotmac runner transport"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_runner_transport_github_actions", from = "src" }]
+include = [
+  { path = "src/dotmac_runner_transport_github_actions/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-runner-transport = ">=0.1.0a1"
+
+[tool.poetry.plugins."dotmac.runner_transport.adapters"]
+github-actions = "dotmac_runner_transport_github_actions:ADAPTER"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0,<9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
