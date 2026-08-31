@@ -111,7 +111,6 @@ from .. import ingress
 from ..document import build_canonical_document
 from ..errors import SpecError
 from ..spec import (
-    SCHEMA,
     ExternalDependency,
     PortPublication,
     ProductDeploymentSpec,
@@ -290,7 +289,7 @@ def _header(spec: ProductDeploymentSpec) -> list[str]:
         "# deploy/product.toml and re-run `dotmac-deploy render`.",
         "#",
         f"# product:          {spec.product}",
-        f"# schema:           {SCHEMA}",
+        f"# schema:           {spec.descriptor_schema}",
         # The image this file actually runs, which after a rollback is NOT the
         # descriptor's. A header describing the descriptor while the services
         # below run something else is a comment that contradicts its own file.
