@@ -388,6 +388,170 @@ def test_the_state_comparison_fires_on_a_hand_written_label() -> None:
     )
 
 
+def _unpublished_survey(sweep) -> dict:
+    """One unpublished distribution, so the reason rules are the only variable."""
+    return _survey_of(
+        {
+            "dotmac-thing": {
+                "declared": "0.1.0a1",
+                "state": sweep.NEVER_PUBLISHED,
+                "tag_prefix": "dotmac-thing-v",
+                "published_versions": [],
+                "release_lane": "module",
+            }
+        }
+    )
+
+
+def test_the_guard_fires_on_the_generators_unwritten_placeholder() -> None:
+    """The defect this check was added for, and it is not hypothetical.
+
+    `--write-baseline` writes `UNWRITTEN_REASON` for any distribution it has no
+    existing reason to carry forward. That happens on a routine event: a rebase
+    conflicting on the ledger — which every PR in a train touching released
+    distributions hits — is correctly resolved by taking main's side wholesale
+    rather than hand-merging JSON, which momentarily removes your own row. The
+    next regeneration then emits the marker.
+
+    Nothing rejected it. `reconcile` compared declared versions against
+    published state and never read `reason` content, so a placeholder passed
+    `--check` and every CI gate. It fired on #554's rebase on 2026-08-29 and was
+    caught only because the lane had captured the reasons beforehand.
+
+    Why that is worse than it sounds: `reason` is the only field distinguishing
+    accepted debt from unnoticed drift. Both produce a row with the same
+    `declared` and the same `state`. A placeholder silently converts "we know
+    about this and accepted it" into "this drifted and nobody noticed".
+
+    AXIS REACHABILITY (ADR-0018 amendment, 2026-08-26): a guard whose axis
+    cannot be reached satisfies the letter of a sensitivity proof while being
+    blind. This one is reachable by a source edit available today — delete any
+    row from `docs/inventories/declared-publication-baseline.json` and run
+    `make publication-baseline`; the row comes back carrying the marker and
+    `make publication-check` goes red. That is the same two commands the rebase
+    resolution performs by accident.
+    """
+    sweep = _sweep()
+    problems = sweep.reconcile(
+        _unpublished_survey(sweep),
+        {
+            "dotmac-thing": {
+                "declared": "0.1.0a1",
+                "state": sweep.NEVER_PUBLISHED,
+                "reason": sweep.UNWRITTEN_REASON,
+            }
+        },
+    )
+    # NAMED, not merely detected: a failure that says only "something is wrong"
+    # tells a reader nothing about which row to repair.
+    assert any("dotmac-thing" in problem for problem in problems)
+    assert any("placeholder" in problem for problem in problems)
+
+
+def test_the_guard_fires_on_a_placeholder_that_was_half_edited() -> None:
+    """Containment, not equality, is why this case is caught.
+
+    Appending a few words to the marker is the row that looks reviewed and is
+    not — the reader sees prose and moves on. Equality against the constant
+    would pass it.
+    """
+    sweep = _sweep()
+    problems = sweep.reconcile(
+        _unpublished_survey(sweep),
+        {
+            "dotmac-thing": {
+                "declared": "0.1.0a1",
+                "state": sweep.NEVER_PUBLISHED,
+                "reason": sweep.UNWRITTEN_REASON + " \u2014 will fix after the release",
+            }
+        },
+    )
+    assert any("placeholder" in problem for problem in problems)
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "\n\t ", None])
+def test_the_guard_fires_on_a_reason_that_says_nothing(reason) -> None:
+    """The half a `"TODO" in reason` substring check would miss entirely.
+
+    An empty string, a row of spaces and an absent key are the same defect as
+    the placeholder — nobody has said why — with no name to match on. They are
+    checked as a PROPERTY (is there text here) rather than as a word, which is
+    the whole reason this rejection is not written as a `TODO` scan.
+    """
+    sweep = _sweep()
+    entry = {"declared": "0.1.0a1", "state": sweep.NEVER_PUBLISHED}
+    if reason is not None:
+        entry["reason"] = reason
+    problems = sweep.reconcile(_unpublished_survey(sweep), {"dotmac-thing": entry})
+    assert any("states no reason" in problem for problem in problems)
+    assert any("dotmac-thing" in problem for problem in problems)
+
+
+def test_a_real_reason_mentioning_a_todo_elsewhere_is_left_alone() -> None:
+    """SPECIFICITY, and the reason the tempting form was rejected.
+
+    A substring match on `TODO` is what this check obviously wants to be, and it
+    is precisely the "guard checks a NAME instead of the property it is named
+    for" shape ADR-0018's 2026-08-26 amendment ratified. The ledger's reasons
+    are paragraphs and several already name follow-up work; a word scan would
+    fail one of them for saying so out loud, which is how a guard gets switched
+    off. Matching the generator's whole marker sentence cannot make that
+    mistake.
+    """
+    sweep = _sweep()
+    assert not sweep.reconcile(
+        _unpublished_survey(sweep),
+        {
+            "dotmac-thing": {
+                "declared": "0.1.0a1",
+                "state": sweep.NEVER_PUBLISHED,
+                "reason": (
+                    "INTENDED UNTIL THE PILOT LANDS. The distribution is built "
+                    "and withheld on purpose; the remaining TODO is the "
+                    "adopter's lock pin, tracked on the release lane, and the "
+                    "row deletes itself at tag time."
+                ),
+            }
+        },
+    )
+
+
+def test_the_live_ledger_carries_a_written_reason_on_every_row() -> None:
+    """The case that matters as much as the firing ones: a check that rejects
+    the REAL ledger is worse than no check at all.
+
+    Eighteen unpublished rows as of 2026-08-31, zero placeholders. Asserted
+    through the same function `--check` calls, so this cannot pass while the
+    gate would fail.
+    """
+    sweep = _sweep()
+    ledger = _ledger()
+    assert ledger, "an empty ledger would make this pass for the wrong reason"
+    for distribution, entry in sorted(ledger.items()):
+        assert not sweep.unwritten_reason(distribution, entry), distribution
+
+
+def test_the_placeholder_literal_has_exactly_one_home() -> None:
+    """Two copies of the marker is the second-authority defect in miniature.
+
+    The generator emits it and the guard refuses it. If those were two literals,
+    editing the emitted one would leave the guard recognising a string nothing
+    writes any more — a check that still runs, still passes, and no longer
+    checks anything. Both go through `UNWRITTEN_REASON`, and this test is what
+    keeps that true; note that it refers to the constant rather than repeating
+    the text, for the same reason.
+    """
+    source = (PROJECT_ROOT / "scripts" / "declared_publication_sweep.py").read_text(
+        encoding="utf-8"
+    )
+    sweep = _sweep()
+    assert source.count(sweep.UNWRITTEN_REASON) == 1, (
+        "the placeholder text appears more than once in the sweep — it must "
+        "exist only at `UNWRITTEN_REASON`, with every other use referring to "
+        "that name"
+    )
+
+
 def test_a_consistent_state_produces_no_findings() -> None:
     """SPECIFICITY for all three proofs above: the reconciler must object
     because something is wrong, not because it objects to everything."""
