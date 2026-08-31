@@ -13,13 +13,16 @@ sys.path.insert(0, str(ROOT / "packages/dotmac-kernel/src"))
 sys.path.insert(0, str(ROOT / "packages/dotmac-runner-transport/src"))
 
 from dotmac_runner_transport import (  # noqa: E402
+    EvidenceFieldV1,
     EvidenceStatus,
     ExactHost,
     HostNftablesBindingV1,
     HostProxyIdentityV1,
     HostRunnerIdentityV1,
+    LifecycleEvidenceDocumentV1,
     LifecycleEvidenceV1,
     ProviderDomainSnapshotV1,
+    ProviderRunnerIdentityV1,
     RunnerTransportAdapterManifest,
     RunnerTransportCapability,
     RunnerTransportReceiptV1,
@@ -33,6 +36,14 @@ from dotmac_runner_transport import (  # noqa: E402
     typed_sha256,
 )
 from dotmac_runner_transport.receipt import REQUIRED_ITEMS  # noqa: E402
+
+SOURCE_REVISION = "a" * 40
+
+
+def _retained(
+    documents: tuple[LifecycleEvidenceDocumentV1, ...],
+) -> tuple[bytes, ...]:
+    return tuple(document.canonical_bytes for document in documents)
 
 
 @dataclass(frozen=True)
@@ -242,18 +253,35 @@ def _receipt(status: EvidenceStatus = EvidenceStatus.EXECUTED_PASSED):
         ),
     )
     environment = bundle.runner_environments[0]
-    return RunnerTransportReceiptV1(
-        schema="RunnerTransportReceipt.v1",
-        source_revision="a" * 40,
+    identity = ProviderRunnerIdentityV1(
+        logical_runner_name="runner-one",
+        provider_runner_name="provider-runner-one",
         repository="owner/repository",
-        runner_name="runner-one",
         required_labels=("runner-one", "self-hosted"),
+    )
+    documents = tuple(
+        LifecycleEvidenceDocumentV1(
+            schema="RunnerTransportLifecycleEvidence.v1",
+            item=name,
+            status=EvidenceStatus.EXECUTED_PASSED,
+            mutated=False,
+            source="provider-control-plane",
+            observed_at="2026-08-31T15:00:00Z",
+            source_revision=SOURCE_REVISION,
+            adapter=bundle.adapter,
+            runner_identity=identity,
+            fields=(EvidenceFieldV1("outcome", "success"),),
+        )
+        for name in REQUIRED_ITEMS
+    )
+    receipt = RunnerTransportReceiptV1(
+        schema="RunnerTransportReceipt.v1",
+        source_revision=SOURCE_REVISION,
+        runner_identity=identity,
         specification_digest=bundle.policy_digest,
         authorized_plan_digest=bundle.policy_digest,
         execution_policy_digest=bundle.policy_digest,
-        adapter_key="fake-provider",
-        adapter_version="1",
-        adapter_declaration_digest="sha256:" + "c" * 64,
+        adapter=bundle.adapter,
         binding_digest=bundle.binding_digest,
         rendered_squid_digest=bundle.squid_sha256,
         rendered_nftables_digest=bundle.nftables_sha256,
@@ -263,16 +291,129 @@ def _receipt(status: EvidenceStatus = EvidenceStatus.EXECUTED_PASSED):
             LifecycleEvidenceV1(
                 name,
                 status if name == "result_uploaded" else EvidenceStatus.EXECUTED_PASSED,
-                "sha256:" + "f" * 64,
+                document.digest,
             )
-            for name in REQUIRED_ITEMS
+            for name, document in zip(REQUIRED_ITEMS, documents, strict=True)
         ),
-    ), bundle
+    )
+    return receipt, bundle, identity, documents
 
 
 def test_receipt_requires_result_upload_not_only_local_exit_zero() -> None:
-    accepted, bundle = _receipt()
-    accepted.assert_accepted(bundle)
-    refused, refused_bundle = _receipt(EvidenceStatus.NOT_EXECUTED)
+    accepted, bundle, identity, documents = _receipt()
+    accepted.assert_accepted(bundle, SOURCE_REVISION, identity, _retained(documents))
+    refused, refused_bundle, refused_identity, refused_documents = _receipt(
+        EvidenceStatus.NOT_EXECUTED
+    )
     with pytest.raises(ValueError, match="result_uploaded"):
-        refused.assert_accepted(refused_bundle)
+        refused.assert_accepted(
+            refused_bundle,
+            SOURCE_REVISION,
+            refused_identity,
+            _retained(refused_documents),
+        )
+
+
+def test_receipt_binds_source_revision_to_the_expected_commit() -> None:
+    receipt, bundle, identity, documents = _receipt()
+    replayed = replace(receipt, source_revision="b" * 40)
+    with pytest.raises(ValueError, match="wrong source revision"):
+        replayed.assert_accepted(bundle, "b" * 40, identity, _retained(documents))
+
+
+def test_receipt_binds_adapter_to_the_expected_bundle() -> None:
+    receipt, bundle, identity, documents = _receipt()
+    object.__setattr__(
+        receipt, "adapter", replace(receipt.adapter, key="other-provider")
+    )
+    with pytest.raises(ValueError, match="adapter identity differs"):
+        receipt.assert_accepted(bundle, SOURCE_REVISION, identity, _retained(documents))
+
+
+def test_receipt_evidence_cannot_replay_under_another_adapter() -> None:
+    receipt, bundle, identity, documents = _receipt()
+    adapter = replace(bundle.adapter, key="other-provider")
+    changed_binding = replace(bundle.binding, adapter=adapter)
+    changed_bundle = replace(bundle, adapter=adapter, binding=changed_binding)
+    replayed = replace(
+        receipt,
+        adapter=adapter,
+        binding_digest=changed_bundle.binding_digest,
+    )
+    with pytest.raises(ValueError, match="wrong adapter identity"):
+        replayed.assert_accepted(
+            changed_bundle,
+            SOURCE_REVISION,
+            identity,
+            _retained(documents),
+        )
+
+
+@pytest.mark.parametrize(
+    "expected_identity",
+    [
+        ProviderRunnerIdentityV1(
+            "runner-one",
+            "provider-runner-two",
+            "owner/repository",
+            ("runner-one", "self-hosted"),
+        ),
+        ProviderRunnerIdentityV1(
+            "runner-one",
+            "provider-runner-one",
+            "other/repository",
+            ("runner-one", "self-hosted"),
+        ),
+        ProviderRunnerIdentityV1(
+            "runner-one",
+            "provider-runner-one",
+            "owner/repository",
+            ("extra-label", "runner-one", "self-hosted"),
+        ),
+    ],
+)
+def test_receipt_binds_provider_runner_repository_and_labels(
+    expected_identity: ProviderRunnerIdentityV1,
+) -> None:
+    receipt, bundle, _, documents = _receipt()
+    with pytest.raises(ValueError, match="provider runner identity differs"):
+        receipt.assert_accepted(
+            bundle, SOURCE_REVISION, expected_identity, _retained(documents)
+        )
+
+
+def test_receipt_requires_the_retained_canonical_evidence_bytes() -> None:
+    receipt, bundle, identity, documents = _receipt()
+    with pytest.raises(ValueError, match="documents are missing"):
+        receipt.assert_accepted(
+            bundle, SOURCE_REVISION, identity, _retained(documents[:-1])
+        )
+
+    tampered = replace(documents[0], fields=(EvidenceFieldV1("outcome", "failure"),))
+    with pytest.raises(ValueError, match="retained evidence bytes differ"):
+        receipt.assert_accepted(
+            bundle,
+            SOURCE_REVISION,
+            identity,
+            _retained((tampered, *documents[1:])),
+        )
+
+    with pytest.raises(ValueError, match="must be canonical bytes"):
+        receipt.assert_accepted(
+            bundle,
+            SOURCE_REVISION,
+            identity,
+            documents,  # type: ignore[arg-type]
+        )
+
+    replayed = replace(
+        receipt,
+        items=(replace(receipt.items[0], mutated=True), *receipt.items[1:]),
+    )
+    with pytest.raises(ValueError, match="wrong mutation flag"):
+        replayed.assert_accepted(
+            bundle,
+            SOURCE_REVISION,
+            identity,
+            _retained(documents),
+        )

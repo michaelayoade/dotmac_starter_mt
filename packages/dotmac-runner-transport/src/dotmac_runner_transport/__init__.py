@@ -22,7 +22,14 @@ from .policy import (
     TransportPolicyRefused,
     derive_transport_policy,
 )
-from .receipt import EvidenceStatus, LifecycleEvidenceV1, RunnerTransportReceiptV1
+from .receipt import (
+    EvidenceFieldV1,
+    EvidenceStatus,
+    LifecycleEvidenceDocumentV1,
+    LifecycleEvidenceV1,
+    ProviderRunnerIdentityV1,
+    RunnerTransportReceiptV1,
+)
 from .render import (
     RunnerEgressBundleV1,
     RunnerProxyEnvironmentV1,
@@ -34,6 +41,7 @@ __all__ = [
     "ADAPTER_GROUP",
     "AdapterDiscoveryError",
     "AdapterIdentityV1",
+    "EvidenceFieldV1",
     "EvidenceStatus",
     "ExactHost",
     "HostDirectEgressGrantV1",
@@ -42,7 +50,9 @@ __all__ = [
     "HostRunnerIdentityV1",
     "HostRunnerTransportSpecV1",
     "LifecycleEvidenceV1",
+    "LifecycleEvidenceDocumentV1",
     "ProviderDomainSnapshotV1",
+    "ProviderRunnerIdentityV1",
     "ResolvedRunnerTransportPolicyV1",
     "RunnerEgressBundleV1",
     "RunnerProxyEnvironmentV1",

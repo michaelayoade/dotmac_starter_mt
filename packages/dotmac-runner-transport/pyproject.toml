@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-runner-transport"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Provider-neutral transport policy and host enforcement rendering for self-hosted runners"
 authors = ["DotMac"]
 readme = "README.md"
