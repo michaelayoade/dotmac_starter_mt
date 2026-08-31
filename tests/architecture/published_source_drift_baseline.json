@@ -16,6 +16,25 @@
     "never by editing a published version's contents, which",
     "would make one version name two contracts.",
     "",
+    "",
+    "Every row carries a DISPOSITION and a retirement",
+    "condition, because a debt list without one is a list",
+    "nobody can ever close. A row is not evidence a",
+    "re-release is owed: `accepted-debt` rows are",
+    "docstring-only and clear at that distribution's next",
+    "release, and `not-actionable-here` is repaired by",
+    "removing a retired copy, never by publishing.",
+    "",
+    "A row also says NOTHING about a released MIGRATION.",
+    "That is a different gate",
+    "(tests/architecture/test_released_migrations.py) and a",
+    "different failure: a migration edited after release",
+    "changes what future installations build, while",
+    "alembic_version records only that the revision ran.",
+    "Do not read a row here as covering it.",
+    "",
+    "Dispositions are carried forward on regeneration; a row",
+    "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
   "released_total": 79,
@@ -26,28 +45,36 @@
       "version": "0.1.0a1",
       "tag": "dotmac-brand-profiles-v0.1.0a1",
       "published_tree": "5e0ff0db06a4999519aecb830d5616cea0dc6aea",
-      "head_tree": "e7eb5e21248cae18d4862781d31cb566d079e208"
+      "head_tree": "e7eb5e21248cae18d4862781d31cb566d079e208",
+      "disposition": "accepted-debt",
+      "reason": "Docstring-only, ahead of the tag; the published wheel matches what a consumer installs. No re-release is warranted for prose. CLEARS AT THE NEXT RELEASE of this distribution, which will tag the current bytes."
     },
     {
       "distribution": "dotmac-deployment-control",
       "version": "0.1.0a2",
       "tag": "dotmac-deployment-control-v0.1.0a2",
       "published_tree": "4d6542af402d4cfc59214afd19a6eeb3341f1608",
-      "head_tree": "b87541286f8a85219ea52dac2c60e879655b05cf"
+      "head_tree": "b87541286f8a85219ea52dac2c60e879655b05cf",
+      "disposition": "not-actionable-here",
+      "reason": "This directory is a RETIRED COPY awaiting extraction step 10, and the consuming assembly pins a6 rather than the a2 declared here. Nothing to repair in this repository: the row disappears when the copy is removed by that extraction step. Do NOT re-release to make it match."
     },
     {
       "distribution": "dotmac-licensing",
       "version": "0.1.0a1",
       "tag": "dotmac-licensing-v0.1.0a1",
       "published_tree": "b45bf1b536ee2374a575e0feed65a67ef17606dc",
-      "head_tree": "2c175210e070f15ab9d75caaba25e9a742e86bd7"
+      "head_tree": "2c175210e070f15ab9d75caaba25e9a742e86bd7",
+      "disposition": "accepted-debt",
+      "reason": "Docstring-only, ahead of the tag; the published wheel matches what a consumer installs. No re-release is warranted for prose. CLEARS AT THE NEXT RELEASE of this distribution, which will tag the current bytes."
     },
     {
       "distribution": "dotmac-numbering",
       "version": "0.1.0a2",
       "tag": "dotmac-numbering-v0.1.0a2",
       "published_tree": "e02b93ea3ce4f04308f8a47a1cb30c247e6dec5d",
-      "head_tree": "a7ea9870ab262448cd718c46b1f90d5381b96eeb"
+      "head_tree": "a7ea9870ab262448cd718c46b1f90d5381b96eeb",
+      "disposition": "code-debt-migration-repaired",
+      "reason": "TWO SEPARATE THINGS, and only one was a defect. The DEFECT: nu_0001_numbering.py, a RELEASED migration, was edited in place after a2 shipped; dotmac_erp pins a2 AND composes this lineage, so one revision id named two file contents. Repaired -- the file is restored to its released bytes and the distribution is enrolled in tests/architecture/test_released_migrations.py, which is the gate that owns that question. THE REMAINING ROW: service.py is ahead of the tag (ordinary post-release code drift). A drift row holds that steady; it never spoke to the migration. Clears at the next release."
     }
   ]
 }
