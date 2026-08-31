@@ -141,6 +141,7 @@ def test_every_entry_point_family_michael_enumerated_is_present() -> None:
         "ssh_credential",
         "webhook",
         "manual_runbook",
+        "runtime_reactivation",
     }
     assert set(_baseline()["families"]) == set(sweep.FAMILY_NAMES)
 
@@ -378,6 +379,10 @@ WALKABLE_PLANTS: dict[str, tuple[str, str]] = {
     "cron": ("deploy/cron.d/_planted_deployer", "0 * * * * root /opt/deploy.sh\n"),
     "systemd_unit": ("deploy/systemd/_planted.service", "ExecStart=/opt/deploy.sh\n"),
     "manual_runbook": ("docs/runbooks/_planted.md", "Then run `docker compose up`.\n"),
+    "runtime_reactivation": (
+        "deploy/docker-compose._planted.yml",
+        "services:\n  app:\n    restart: unless-stopped\n",
+    ),
 }
 
 
@@ -708,3 +713,214 @@ def test_the_walk_is_not_vacuous() -> None:
     assert len(discovered["workflow"]) >= 10, discovered["workflow"]
     assert len(discovered["script"]) >= 5, discovered["script"]
     assert len(sweep.known_paths(PROJECT_ROOT)) >= 20
+
+
+# ── The eighth family: runtime reactivation (2026-08-31 amendment) ──────────
+
+
+def test_the_family_is_named_for_the_capability_not_the_policy() -> None:
+    """`runtime_reactivation`, deliberately NOT `restart_policy`. Docker's
+    `restart: unless-stopped` normally brings back THE SAME CONTAINER, which is
+    not a deployment — a family named after the policy would describe the wrong
+    thing and sweep in every benign case. The property that makes one of these
+    an executor is that it can return a DISPLACED executor after a reboot."""
+    sweep = _sweep()
+    assert "runtime_reactivation" in sweep.FAMILY_NAMES
+    assert "restart_policy" not in sweep.FAMILY_NAMES
+    assert not sweep.FAMILY_BY_NAME["runtime_reactivation"].tree_complete
+
+
+def test_the_directive_detector_fires_on_a_reactivating_policy() -> None:
+    sweep = _sweep()
+    assert sweep.reactivation_directives("    restart: unless-stopped\n")
+    assert sweep.reactivation_directives("Restart=always\n")
+    assert sweep.reactivation_directives("@reboot /opt/deploy.sh\n")
+    assert sweep.reactivation_directives("WantedBy=multi-user.target\n")
+
+
+def test_the_directive_detector_does_not_fire_on_a_non_reactivating_policy() -> None:
+    """SPECIFICITY, and it is the whole distinction: `restart: "no"` is the
+    correct shape for a one-shot migration service, and a detector that fired
+    on it would refuse the verdict of the most carefully written file in the
+    tree."""
+    sweep = _sweep()
+    assert sweep.reactivation_directives('    restart: "no"\n') == {}
+    assert sweep.reactivation_directives("    restart: no\n") == {}
+    assert sweep.reactivation_directives("# restart: always was removed\n") == {}
+
+
+def test_calls_not_mentions_a_usage_comment_is_not_a_deployment() -> None:
+    """The defect the eighth family exposed on its first run.
+    `docker-compose.dev.yml` carries a usage comment reading `docker compose -f
+    ... up`, and the verb detector read it as a deployment. A guard that fires
+    on documentation gets overridden, and then it gets ignored."""
+    sweep = _sweep()
+    assert sweep.deployment_verbs("#   docker compose -f a.yml up\n") == {}
+    assert sweep.deployment_verbs("   # rsync the static files\n") == {}
+    assert sweep.deployment_verbs("docker compose up -d  # start it\n"), (
+        "an INLINE trailing comment must keep its command; over-stripping "
+        "produces false negatives, which is the direction that hides an executor"
+    )
+
+
+def test_a_path_named_in_prose_does_not_draw_a_call_edge() -> None:
+    """A path mention is symmetric; invocation is not. `docker-compose.yml`
+    names `scripts/deploy.sh` in a comment — the script that operates ON it —
+    and matching raw text drew the edge backwards, so the topology inherited
+    the verbs of the executor that deploys it."""
+    sweep = _sweep()
+    root = PROJECT_ROOT
+    known = sweep.known_paths(root)
+    compose = sweep.read_artifact(root, "docker-compose.yml") or ""
+    assert "scripts/deploy.sh" in compose, "the fixture premise must still hold"
+    assert sweep.resolve_verbs(root, "docker-compose.yml", known) == {}
+    # and the real `uses:`/`run:` edge must survive the same change
+    adopter = sweep.resolve_verbs(
+        root, ".github/workflows/deployment-adopter.yml", known
+    )
+    assert "docker-compose" in adopter
+
+
+def test_not_an_executor_is_refused_over_a_live_reactivation_directive(
+    tmp_path,
+) -> None:
+    sweep = _sweep()
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "c.yml").write_text(
+        "services:\n  a:\n    restart: always\n", encoding="utf-8"
+    )
+    problems = sweep.reconcile(
+        _probe_inventory(
+            sweep,
+            "runtime_reactivation",
+            sweep.Entrypoint(
+                name="r",
+                family="runtime_reactivation",
+                trigger="daemon",
+                credential="none",
+                disposition="not_an_executor",
+                path="deploy/c.yml",
+                premise="looks inert",
+            ),
+        ),
+        tmp_path,
+    )
+    assert any("is not nothing" in problem for problem in problems), problems
+
+
+def test_the_weaker_verdict_is_refused_when_there_is_no_directive(tmp_path) -> None:
+    """The other direction, so `reactivates_no_declared_executor` does not
+    become the place everything lands."""
+    sweep = _sweep()
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "c.yml").write_text("services:\n  a: {}\n", encoding="utf-8")
+    problems = sweep.reconcile(
+        _probe_inventory(
+            sweep,
+            "runtime_reactivation",
+            sweep.Entrypoint(
+                name="r",
+                family="runtime_reactivation",
+                trigger="daemon",
+                credential="none",
+                disposition="reactivates_no_declared_executor",
+                path="deploy/c.yml",
+                premise="capability with no subject",
+            ),
+        ),
+        tmp_path,
+    )
+    assert any("is `not_an_executor`" in problem for problem in problems), problems
+
+
+def test_the_no_subject_claim_is_checked_in_both_directions(tmp_path) -> None:
+    """A one-way check is satisfied by declining to fill in your own field."""
+    sweep = _sweep()
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "c.yml").write_text(
+        "services:\n  a:\n    restart: always\n", encoding="utf-8"
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "d.sh").write_text("docker compose up\n", encoding="utf-8")
+    inventory = sweep.Inventory(
+        product="probe",
+        revision="0" * 40,
+        production_targets=(),
+        families_present=("runtime_reactivation", "script"),
+        families_absent=tuple(
+            n for n in sweep.FAMILY_NAMES if n not in ("runtime_reactivation", "script")
+        ),
+        absences=(),
+        entrypoints=(
+            sweep.Entrypoint(
+                name="r",
+                family="runtime_reactivation",
+                trigger="daemon",
+                credential="none",
+                disposition="reactivates_no_declared_executor",
+                path="deploy/c.yml",
+                premise="claims no subject",
+            ),
+            sweep.Entrypoint(
+                name="d",
+                family="script",
+                trigger="manual",
+                credential="none",
+                disposition="active_executor",
+                path="scripts/d.sh",
+                targets=("host",),
+                reactivates=("r",),
+            ),
+        ),
+    )
+    problems = sweep.reconcile(inventory, tmp_path)
+    assert any("BOTH directions" in problem for problem in problems), problems
+
+
+def test_a_reactivation_pointing_at_nothing_is_refused() -> None:
+    """Unfalsifiable. A mechanism naming a subject nobody declared can never be
+    proven gone."""
+    sweep = _sweep()
+    text = "\n".join(
+        [
+            'schema = "ExecutorInventory.v1"',
+            'product = "probe"',
+            f'revision = "{"0" * 40}"',
+            'families_present = ["runtime_reactivation"]',
+            "families_absent = "
+            + json.dumps(
+                [n for n in sweep.FAMILY_NAMES if n != "runtime_reactivation"]
+            ),
+        ]
+        + [
+            f'[[family_absence]]\nfamily = "{name}"\nscope = "repository_tree"\n'
+            f'observed_at = "2026-08-31"\nobserved_by = "probe"\nmethod = "walked"'
+            for name in sweep.FAMILY_NAMES
+            if name != "runtime_reactivation"
+            and not sweep.FAMILY_BY_NAME[name].tree_complete
+        ]
+        + [
+            "[[entrypoint]]",
+            'name = "r"',
+            'family = "runtime_reactivation"',
+            'trigger = "daemon"',
+            'credential = "none"',
+            'disposition = "reactivation_capable"',
+            'reactivates = ["a-ghost"]',
+        ]
+    )
+    with pytest.raises(sweep.InventoryError) as caught:
+        sweep.parse_inventory(text, source="probe.toml")
+    assert "cannot be proven gone" in str(caught.value)
+
+
+def _probe_inventory(sweep, family, entry):
+    return sweep.Inventory(
+        product="probe",
+        revision="0" * 40,
+        production_targets=(),
+        families_present=(family,),
+        families_absent=tuple(n for n in sweep.FAMILY_NAMES if n != family),
+        absences=(),
+        entrypoints=(entry,),
+    )

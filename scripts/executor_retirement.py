@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import itertools
 import json
 import pathlib
 import re
@@ -189,6 +190,24 @@ FAMILIES: Final[tuple[Family, ...]] = (
         ),
     ),
     Family(
+        name="runtime_reactivation",
+        roots=("deploy", "compose", "docker"),
+        patterns=(
+            "docker-compose*.yml",
+            "docker-compose*.yaml",
+            "compose*.yml",
+            "compose*.yaml",
+        ),
+        tree_complete=False,
+        include_repository_root=True,
+        incompleteness_premise=(
+            "a supervisor's ENABLEMENT lives on the host, not in the file that "
+            "configures it: a unit can be installed and disabled, a Compose "
+            "policy can name a service that is not running, and a @reboot "
+            "crontab has no in-tree artifact at all"
+        ),
+    ),
+    Family(
         name="manual_runbook",
         roots=("docs/runbooks", "docs/operations", "docs/ops", "runbooks"),
         patterns=("*.md", "*.rst", "*.txt"),
@@ -238,6 +257,12 @@ BACKLOG_DISPOSITIONS: Final[dict[str, str]] = {
         "both controller receipts exist and removal is authorized; the "
         "artifact is still present because removal is a separate change"
     ),
+    "reactivation_capable": (
+        "can return a declared executor to acting state with NO invocation — "
+        "after a reboot, a daemon restart or a supervisor decision. Debt "
+        "because a displaced executor that can resurrect itself was never "
+        "displaced; requires `reactivates`, and every name in it must resolve"
+    ),
 }
 
 #: Not debt, and not silence either. Each requires a machine-checked premise.
@@ -255,6 +280,11 @@ REVIEWED_DISPOSITIONS: Final[dict[str, str]] = {
         "deliberately kept as the recovery path for a retirement; requires the "
         "identity of the retirement it protects, so the retention has an owner "
         "and an end"
+    ),
+    "reactivates_no_declared_executor": (
+        "carries a live reactivation directive but can return no DECLARED "
+        "executor; checked in both directions, so it is refused the moment "
+        "either its own `reactivates` fills in or another row names it"
     ),
 }
 
@@ -281,8 +311,15 @@ PERMITTED_TRANSITIONS: Final[dict[str, tuple[str, ...]]] = {
     "displaced": ("frozen", "retired", "retained_rollback"),
     "retained_rollback": ("retired",),
     "retired": (),
-    "not_an_executor": ("active_executor",),
+    "not_an_executor": ("active_executor", "reactivation_capable"),
     "non_production_executor": ("active_executor",),
+    # A reactivation mechanism is not on the deploy/redeploy path, so it never
+    # passes through `displaced`. It leaves debt one of two ways: the executor
+    # it could resurrect is gone, or the mechanism itself is. What ORDERS the
+    # two is not this table — it is the retirement receipt, which refuses to
+    # commit while any row naming the subject is unaccounted for.
+    "reactivation_capable": ("reactivates_no_declared_executor", "retired"),
+    "reactivates_no_declared_executor": ("reactivation_capable", "retired"),
 }
 
 
@@ -336,11 +373,86 @@ SKIPPED_DIRECTORY_NAMES: Final[frozenset[str]] = frozenset(
 )
 
 
+#: A directive that lets a supervisor act with NOBODY invoking anything.
+#
+# The family is `runtime_reactivation` and NOT `restart_policy`, and the
+# difference is the whole point rather than a naming preference. Docker's
+# `restart: unless-stopped` normally restarts THE SAME CONTAINER, which is not
+# a deployment at all — a family named after the policy would describe the
+# wrong thing and sweep in every benign case. The property that makes one of
+# these an executor is narrower: **it can reactivate a DISPLACED executor after
+# a reboot.** So the directive below is only half the finding; the other half
+# is `reactivates`, which says whether anything it could bring back is a
+# declared executor. A directive with an empty `reactivates` is capability
+# without a subject, and is recorded as exactly that.
+#
+# What this reframes is the RECEIPT. A retirement no longer owes only "the
+# artifact is gone"; it owes "the executor cannot autonomously return". Those
+# are different claims, and only the second survives a reboot.
+REACTIVATION_DIRECTIVES: Final[tuple[tuple[str, str], ...]] = (
+    (
+        r"""restart:\s*['"]?(always|unless-stopped|on-failure)""",
+        "compose restart policy",
+    ),
+    (r"Restart\s*=\s*(always|on-failure|on-abnormal|on-watchdog)", "systemd restart"),
+    (r"\[Install\]", "systemd enablement stanza"),
+    (r"WantedBy\s*=", "systemd boot target"),
+    (r"@reboot\b", "cron boot entry"),
+)
+
+_REACTIVATION_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(pattern), reason) for pattern, reason in REACTIVATION_DIRECTIVES
+)
+
+#: The families whose artifacts can carry a reactivation directive, and where a
+#: `not_an_executor` verdict is therefore checked against one. Scoped rather
+#: than universal: a shell script containing the string `@reboot` in a comment
+#: is not a supervisor, and a guard that fired there would be overridden until
+#: it stopped being read.
+REACTIVATION_FAMILIES: Final[frozenset[str]] = frozenset(
+    {"runtime_reactivation", "systemd_unit", "cron"}
+)
+
+
+def executable_text(text: str) -> str:
+    """The artifact with its whole-line comments removed.
+
+    CALLS, NOT MENTIONS — the same rule `credential_lifecycle_sweep.py` states
+    for AST call sites, applied where no AST exists. This was not a theoretical
+    tidy-up: `docker-compose.dev.yml` carries a usage comment reading
+    `docker compose -f docker-compose.yml -f docker-compose.dev.yml up`, and on
+    the first run of the eighth family the verb detector read it as a
+    deployment and refused the file's verdict. A guard that fires on
+    documentation gets overridden, and then it gets ignored.
+
+    Deliberately conservative: only lines whose first non-blank character is
+    `#`. An inline trailing comment keeps its line, so a real command followed
+    by a note still counts, and a `#` inside a quoted value cannot silently
+    delete the command beside it. Over-stripping would produce false
+    NEGATIVES, which is the direction that hides an executor.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def reactivation_directives(text: str) -> dict[str, str]:
+    """Every directive in this text that lets a supervisor act unbidden."""
+    found: dict[str, str] = {}
+    body = executable_text(text)
+    for pattern, reason in _REACTIVATION_PATTERNS:
+        match = pattern.search(body)
+        if match is not None:
+            found[match.group(0).strip()] = reason
+    return dict(sorted(found.items()))
+
+
 def deployment_verbs(text: str) -> dict[str, str]:
     """Every deployment verb this text commands, mapped to why it counts."""
     found: dict[str, str] = {}
+    body = executable_text(text)
     for pattern, reason in _VERB_PATTERNS:
-        match = pattern.search(text)
+        match = pattern.search(body)
         if match is not None:
             found[match.group(0).strip()] = reason
     return dict(sorted(found.items()))
@@ -363,6 +475,7 @@ ENTRY_KEYS: Final[frozenset[str]] = frozenset(
         "disposition",
         "premise",
         "targets",
+        "reactivates",
         "rollback_for",
         "receipt",
         "observed_at",
@@ -425,6 +538,7 @@ class Entrypoint:
     path: str = ""
     premise: str = ""
     targets: tuple[str, ...] = ()
+    reactivates: tuple[str, ...] = ()
     rollback_for: str = ""
     receipt: str = ""
     observed_at: str = ""
@@ -446,6 +560,7 @@ class Entrypoint:
             "disposition": self.disposition,
             "path": self.path,
             "targets": sorted(self.targets),
+            "reactivates": sorted(self.reactivates),
         }
 
 
@@ -655,6 +770,7 @@ def parse_inventory(text: str, *, source: str) -> Inventory:
                 path=row.get("path", ""),
                 premise=row.get("premise", ""),
                 targets=tuple(row.get("targets") or ()),
+                reactivates=tuple(row.get("reactivates") or ()),
                 rollback_for=row.get("rollback_for", ""),
                 receipt=row.get("receipt", ""),
                 observed_at=row.get("observed_at", ""),
@@ -663,6 +779,37 @@ def parse_inventory(text: str, *, source: str) -> Inventory:
                 note=row.get("note", ""),
             )
         )
+
+    names = {entry.name for entry in entrypoints}
+    for entry in entrypoints:
+        dangling = sorted(set(entry.reactivates) - names)
+        if dangling:
+            raise InventoryError(
+                f"{source}: {entry.name} declares it can reactivate "
+                f"{dangling}, which is/are not declared in this inventory. A "
+                "reactivation pointing at nothing cannot be proven gone"
+            )
+        if entry.name in entry.reactivates:
+            raise InventoryError(
+                f"{source}: {entry.name} reactivates itself; that is a cycle, "
+                "not a mechanism"
+            )
+        if entry.disposition == "reactivation_capable" and not entry.reactivates:
+            raise InventoryError(
+                f"{source}: {entry.name} is `reactivation_capable` and names "
+                "nothing it can return. Capability with no subject is "
+                "`reactivates_no_declared_executor`, which is a different and "
+                "checkable claim"
+            )
+        if entry.reactivates and entry.disposition not in (
+            "reactivation_capable",
+            "retired",
+        ):
+            raise InventoryError(
+                f"{source}: {entry.name} can reactivate {list(entry.reactivates)} "
+                f"but is `{entry.disposition}`. A live mechanism that can "
+                "return a declared executor is debt, not a reviewed verdict"
+            )
 
     return Inventory(
         product=product,
@@ -738,6 +885,13 @@ def _referenced_paths(text: str, known: frozenset[str]) -> set[str]:
     parsing `uses:` alone finds one.
     """
     found: set[str] = set()
+    # Comments stripped here TOO, and for a sharper reason than in the verb
+    # detector. A path mention is SYMMETRIC; invocation is not. `docker-
+    # compose.yml` carries a comment naming `scripts/deploy.sh` — the script
+    # that operates ON it — and matching raw text drew the edge backwards, so
+    # the topology inherited the verbs of the executor that deploys it. A
+    # `uses:` or a `run:` line is not a comment, so every real edge survives.
+    text = executable_text(text)
     for candidate in known:
         if candidate in text:
             found.add(candidate)
@@ -851,6 +1005,26 @@ def reconcile(inventory: Inventory, root: pathlib.Path) -> list[str]:
             )
             continue
 
+        directives = reactivation_directives(text)
+        if entry.family in REACTIVATION_FAMILIES:
+            if entry.disposition == "not_an_executor" and directives:
+                problems.append(
+                    f"{inventory.product}: {entry.name} is declared "
+                    f"`not_an_executor` but carries {sorted(directives)}. A "
+                    "supervisor that can act with nobody invoking it is not "
+                    "nothing; the verdict is refused"
+                )
+            if entry.disposition == "reactivates_no_declared_executor" and (
+                not directives
+            ):
+                problems.append(
+                    f"{inventory.product}: {entry.name} claims "
+                    "`reactivates_no_declared_executor` and carries no "
+                    "reactivation directive at all. That is `not_an_executor`; "
+                    "the weaker-sounding verdict must not become the place "
+                    "everything lands"
+                )
+
         verbs = resolve_verbs(root, entry.path, known)
         if entry.disposition == "not_an_executor":
             if verbs:
@@ -881,6 +1055,19 @@ def reconcile(inventory: Inventory, root: pathlib.Path) -> list[str]:
                 "exclusion whose premise is unstated is an unmonitored region "
                 "(ADR-0018 §2)"
             )
+        if entry.disposition == "reactivates_no_declared_executor":
+            claimed_by = sorted(
+                other.name
+                for other in inventory.entrypoints
+                if entry.name in other.reactivates
+            )
+            if claimed_by:
+                problems.append(
+                    f"{inventory.product}: {entry.name} claims to reactivate no "
+                    f"declared executor, but {claimed_by} name(s) it. Checked "
+                    "in BOTH directions, because a one-way check is satisfied "
+                    "by not filling in your own field"
+                )
         if entry.disposition == "retained_rollback" and not entry.rollback_for:
             problems.append(
                 f"{inventory.product}: {entry.name} is retained as a rollback "
@@ -1331,6 +1518,8 @@ RECEIPT_KEYS: Final[frozenset[str]] = frozenset(
         "controller_receipts",
         "removals",
         "zero_surface_guard",
+        "displacement_window",
+        "no_autonomous_return",
         "recovery_verdict",
         "retained_rollback",
         "superseded_by",
@@ -1354,6 +1543,110 @@ REMOVAL_CLASSES: Final[tuple[str, ...]] = (
 )
 
 CONTROLLER_CYCLES: Final[tuple[str, ...]] = ("deploy", "redeploy")
+
+# ── DisplacementWindow.v1 ───────────────────────────────────────────────────
+#
+# `controller_receipts` prove two POSITIVE cycles. Nothing in v1 proved the
+# negative, and the negative is the harder half: a window in which the legacy
+# executor was not invoked reads as displacement, but two readings collapse
+# into it —
+#
+#   (a) the executor is idle and the controller owns the runtime; or
+#   (b) the runtime changed and NEITHER executor did it.
+#
+# (b) is not a legacy invocation, so a zero-invocation guard passes while the
+# controller's claim to own the runtime is false. There is a third executor and
+# the measurement cannot see it.
+#
+# The repair is the inversion `family_absence` already makes for hosts:
+# ATTRIBUTION, NOT ABSENCE. The window does not assert that nothing happened;
+# it enumerates everything that happened and attributes each one. A change with
+# no attribution IS the finding.
+
+#: How the window's events were obtained. Only sources that observe every
+#: transition qualify.
+EVENT_SOURCE_METHODS: Final[dict[str, str]] = {
+    "event_stream": "a subscription delivering every transition as it occurs",
+    "audit_log": "an append-only record the runtime writes on every change",
+    "daemon_event_api": "the container daemon's own event feed",
+}
+
+#: Named so the refusal can say WHY, rather than failing an unknown value. Each
+#: of these samples state and infers the gaps, so a change that begins and ends
+#: between two samples leaves no trace — which is precisely the third-executor
+#: shape the window exists to catch.
+EVENT_SOURCE_METHODS_REFUSED: Final[dict[str, str]] = {
+    "poll": "samples state; a change between two samples leaves no trace",
+    "periodic_snapshot": "same defect on a longer interval",
+    "quiet_window": (
+        "observes the ABSENCE of invocations, which is the claim under test "
+        "rather than evidence for it"
+    ),
+}
+
+#: `complete` is a claim about the SOURCE, and the chain check below is what
+#: tests it. `cannot_establish` is not a caveat on a pass — it forces the
+#: verdict to `unmonitored`, because ADR-0018's rule applies to this contract
+#: too: an unmonitored region is honestly unmonitored, never quietly exempt.
+EVENT_SOURCE_COMPLETENESS: Final[tuple[str, ...]] = ("complete", "cannot_establish")
+
+WINDOW_VERDICTS: Final[dict[str, str]] = {
+    "displaced": "every runtime change in the window is attributed",
+    "unmonitored": "the source cannot prove it saw every change",
+    "not_displaced": "a change was attributed to the legacy executor",
+}
+
+#: A runtime change that is NOT a deployment. Every one of them is
+#: same-image BY DEFINITION, and that is checked rather than trusted: a change
+#: whose image identity moved is a deployment, whatever it is labelled. This is
+#: where Docker's benign case lives — `restart: unless-stopped` bringing back
+#: the same container is `same_container_restart`, and the schema proves the
+#: sameness instead of accepting the word.
+NON_DEPLOYMENT_CAUSES: Final[dict[str, str]] = {
+    "same_container_restart": "the supervisor restarted the same container",
+    "host_reboot_same_image": "the host rebooted and the same image came back",
+    "daemon_restart_same_image": "the container daemon restarted",
+    "operator_stop_start_same_image": "a person cycled the service, deploying nothing",
+}
+
+WINDOW_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "from",
+        "to",
+        "start_runtime",
+        "end_runtime",
+        "event_source",
+        "verdict",
+        "runtime_changes",
+    }
+)
+
+# ── The no-autonomous-return proof ──────────────────────────────────────────
+#
+# What the `runtime_reactivation` family reframes. A retirement used to owe
+# "the artifact is gone". It now owes "the executor CANNOT COME BACK", and
+# those are different claims — a script deleted from a tree whose unit is still
+# enabled, or whose image is still named by a `restart: always` service, comes
+# back at the next reboot with nobody having invoked anything.
+
+RETURN_PROOF_METHODS: Final[dict[str, str]] = {
+    "observed_reboot": (
+        "the host was rebooted and the subject did not return — the only "
+        "method that tests the property directly"
+    ),
+    "supervisor_catalog": (
+        "every reactivation mechanism was inspected and shown incapable; "
+        "requires the mechanisms to be enumerated, because an inspection of an "
+        "unstated set proves nothing"
+    ),
+    "mechanism_absent": "no reactivation mechanism existed to begin with",
+}
+
+MECHANISM_DISPOSITIONS: Final[tuple[str, ...]] = (
+    "removed",
+    "disabled_and_verified",
+    "never_applied",
+)
 
 
 class ReceiptError(ValueError):
@@ -1575,6 +1868,21 @@ def validate_receipt(
         "coverage",
     )
 
+    # ── 4b. The displacement window, and the two cycles inside it ───────────
+    attributed_runs = _validate_window(raw, source, status)
+    if attributed_runs or raw.get("displacement_window") is not None:
+        outside = sorted(run_ids - attributed_runs)
+        _require(
+            not outside or status != "committed",
+            f"{source}: controller run(s) {outside} are cited as proof but do "
+            "not appear as attributed changes inside the displacement window. "
+            "A cycle the window did not see is a cycle the window cannot "
+            "vouch for",
+        )
+
+    # ── 4c. The subject cannot come back on its own ─────────────────────────
+    _validate_no_return(raw, source, status, inventory)
+
     # ── 5. The PROVED recovery verdict ──────────────────────────────────────
     recovery = raw.get("recovery_verdict")
     _coordinate(
@@ -1612,6 +1920,247 @@ def validate_receipt(
             "a mutable record with a stern comment",
         )
     return raw
+
+
+def _validate_window(raw: dict, source: str, status: str) -> set[str]:
+    """`DisplacementWindow.v1`. Returns the controller run ids it attributes.
+
+    Bounded, chained, and complete or honestly unmonitored. The chain is the
+    part that does the real work: consecutive changes must meet
+    (`runtime_after` == the next `runtime_before`) and the declared endpoints
+    must match the ends. A source that missed a change leaves a BREAK in the
+    chain, so completeness is tested rather than declared — which is what
+    "complete, named event source" has to mean if it is to mean anything.
+    """
+    window = raw.get("displacement_window")
+    if window is None:
+        _require(
+            status != "committed",
+            f"{source}: a committed retirement requires a "
+            "`displacement_window`. Two successful controller cycles prove the "
+            "replacement WORKS; only the window proves the legacy executor "
+            "stopped acting, and a quiet interval is not that proof",
+        )
+        return set()
+
+    _require(
+        isinstance(window, dict), f"{source}: `displacement_window` must be a table"
+    )
+    unknown = sorted(set(window) - WINDOW_KEYS)
+    _require(not unknown, f"{source}: displacement_window unknown key(s) {unknown}")
+    _coordinate(
+        window,
+        f"{source}: displacement_window",
+        ("from", "to", "start_runtime", "end_runtime", "verdict"),
+    )
+    _require(
+        window["verdict"] in WINDOW_VERDICTS,
+        f"{source}: displacement_window verdict must be one of "
+        f"{sorted(WINDOW_VERDICTS)}",
+    )
+    _require(
+        window["from"] < window["to"],
+        f"{source}: displacement_window is not bounded forwards "
+        f"({window['from']} -> {window['to']}). An open or inverted window is "
+        "not an observation",
+    )
+
+    source_row = window.get("event_source")
+    _coordinate(
+        source_row,
+        f"{source}: displacement_window.event_source",
+        ("name", "method", "completeness"),
+    )
+    method = source_row["method"]
+    _require(
+        method not in EVENT_SOURCE_METHODS_REFUSED,
+        f"{source}: event source method {method!r} is refused — "
+        f"{EVENT_SOURCE_METHODS_REFUSED.get(method, '')}",
+    )
+    _require(
+        method in EVENT_SOURCE_METHODS,
+        f"{source}: unknown event source method {method!r}; the methods that "
+        f"observe every transition are {sorted(EVENT_SOURCE_METHODS)}",
+    )
+    completeness = source_row["completeness"]
+    _require(
+        completeness in EVENT_SOURCE_COMPLETENESS,
+        f"{source}: event source completeness must be one of "
+        f"{list(EVENT_SOURCE_COMPLETENESS)}",
+    )
+    if completeness == "cannot_establish":
+        _require(
+            window["verdict"] == "unmonitored",
+            f"{source}: event source {source_row['name']!r} cannot establish "
+            "completeness, so the verdict is UNMONITORED. A pass with a caveat "
+            "is the shape ADR-0018 exists to refuse, and this contract does not "
+            "get an exemption from its own rule",
+        )
+    _require(
+        window["verdict"] == "displaced" or status != "committed",
+        f"{source}: a committed retirement requires a `displaced` window "
+        f"verdict; found {window['verdict']!r}",
+    )
+
+    changes = window.get("runtime_changes")
+    _require(
+        isinstance(changes, list),
+        f"{source}: displacement_window.runtime_changes must be a list",
+    )
+
+    attributed_runs: set[str] = set()
+    ordered: list[dict] = []
+    for index, change in enumerate(changes):
+        where = f"{source}: displacement_window.runtime_changes[{index}]"
+        _coordinate(change, where, ("observed_at", "runtime_before", "runtime_after"))
+        unknown_change = sorted(
+            set(change)
+            - {
+                "observed_at",
+                "runtime_before",
+                "runtime_after",
+                "controller_receipt",
+                "non_deployment_cause",
+                "note",
+            }
+        )
+        _require(not unknown_change, f"{where}: unknown key(s) {unknown_change}")
+
+        run = change.get("controller_receipt")
+        cause = change.get("non_deployment_cause")
+        _require(
+            bool(run) or bool(cause),
+            f"{where}: UNATTRIBUTED. Every runtime change is linked to a "
+            "controller receipt or to a typed non-deployment cause. A change "
+            "nobody can account for is a third executor, and this is the field "
+            "that finds it",
+        )
+        _require(
+            not (run and cause),
+            f"{where}: attributed to a controller receipt AND a "
+            "non-deployment cause. One change has one cause; an ambiguous "
+            "attribution is an unattributed one with two labels",
+        )
+        if cause:
+            _require(
+                cause in NON_DEPLOYMENT_CAUSES,
+                f"{where}: unknown non-deployment cause {cause!r}; the causes "
+                f"are {sorted(NON_DEPLOYMENT_CAUSES)}",
+            )
+            _require(
+                change["runtime_before"] == change["runtime_after"],
+                f"{where}: attributed to {cause!r}, but the runtime identity "
+                f"moved ({change['runtime_before']} -> "
+                f"{change['runtime_after']}). A change that altered what is "
+                "running IS a deployment, whatever it is called — this is "
+                "exactly the distinction a restart policy blurs",
+            )
+        else:
+            attributed_runs.add(run)
+        ordered.append(change)
+
+    ordered.sort(key=lambda row: row["observed_at"])
+    if ordered:
+        _require(
+            window["start_runtime"] == ordered[0]["runtime_before"],
+            f"{source}: the window opens at {window['start_runtime']} but its "
+            f"first change starts from {ordered[0]['runtime_before']}. The gap "
+            "is a change nobody recorded",
+        )
+        _require(
+            window["end_runtime"] == ordered[-1]["runtime_after"],
+            f"{source}: the window closes at {window['end_runtime']} but its "
+            f"last change ends at {ordered[-1]['runtime_after']}. The gap is a "
+            "change nobody recorded",
+        )
+        for first, second in itertools.pairwise(ordered):
+            _require(
+                first["runtime_after"] == second["runtime_before"],
+                f"{source}: the change chain BREAKS between "
+                f"{first['observed_at']} and {second['observed_at']} "
+                f"({first['runtime_after']} != {second['runtime_before']}). A "
+                "break is a transition the source did not see, which is the "
+                "completeness claim failing rather than the window being quiet",
+            )
+    else:
+        _require(
+            window["start_runtime"] == window["end_runtime"],
+            f"{source}: the window records no change, yet the runtime moved "
+            f"({window['start_runtime']} -> {window['end_runtime']}). That "
+            "movement is the third executor",
+        )
+    return attributed_runs
+
+
+def _validate_no_return(raw: dict, source: str, status: str, inventory) -> None:
+    """The subject cannot come back on its own.
+
+    A retirement used to owe "the artifact is gone". Since the
+    `runtime_reactivation` family exists it owes more: a script deleted from a
+    tree whose unit is still enabled, or whose image is still named by a
+    `restart: always` service, returns at the next reboot with nobody having
+    invoked anything. That is not a retirement; it is a pause.
+    """
+    proof = raw.get("no_autonomous_return")
+    if proof is None:
+        _require(
+            status != "committed",
+            f"{source}: a committed retirement requires a "
+            "`no_autonomous_return` proof. Removing the artifact and proving "
+            "it cannot return are different claims, and only the second "
+            "survives a reboot",
+        )
+        return
+
+    _coordinate(
+        proof,
+        f"{source}: no_autonomous_return",
+        ("method", "observed_at", "observed_by", "host"),
+    )
+    method = proof["method"]
+    _require(
+        method in RETURN_PROOF_METHODS,
+        f"{source}: unknown no_autonomous_return method {method!r}; the "
+        f"methods are {sorted(RETURN_PROOF_METHODS)}",
+    )
+
+    mechanisms = proof.get("mechanisms", [])
+    _require(
+        isinstance(mechanisms, list),
+        f"{source}: no_autonomous_return.mechanisms must be a list",
+    )
+    accounted: set[str] = set()
+    for index, row in enumerate(mechanisms):
+        where = f"{source}: no_autonomous_return.mechanisms[{index}]"
+        _coordinate(row, where, ("identity", "disposition_after"))
+        _require(
+            row["disposition_after"] in MECHANISM_DISPOSITIONS,
+            f"{where}: disposition_after must be one of "
+            f"{list(MECHANISM_DISPOSITIONS)}",
+        )
+        accounted.add(row["identity"])
+
+    _require(
+        method != "supervisor_catalog" or bool(mechanisms),
+        f"{source}: `supervisor_catalog` inspected an unstated set. An "
+        "inspection that does not say WHAT it inspected proves nothing",
+    )
+
+    if inventory is not None:
+        subject = raw["subject"]["entrypoint"]
+        naming = sorted(
+            entry.name
+            for entry in inventory.entrypoints
+            if subject in entry.reactivates
+        )
+        missing = sorted(set(naming) - accounted)
+        _require(
+            not missing,
+            f"{source}: {missing} can reactivate {subject!r} and the receipt "
+            "does not account for them. This is the ordering the transition "
+            "table deliberately does not enforce: a displaced executor with a "
+            "live resurrection path was never displaced",
+        )
 
 
 def receipt_digest(receipt: dict) -> str:

@@ -63,6 +63,32 @@ def _scalar(value) -> str:
     return str(value)
 
 
+def _window_changes() -> list[dict]:
+    """An unbroken chain: each change starts where the previous one ended, the
+    two controller runs appear inside the window, and the one non-deployment
+    cause is same-image."""
+    return [
+        {
+            "observed_at": "2026-09-10T10:00:00Z",
+            "runtime_before": "sha256:" + "c" * 64,
+            "runtime_after": "sha256:" + "d" * 64,
+            "controller_receipt": "40000000001",
+        },
+        {
+            "observed_at": "2026-09-10T18:00:00Z",
+            "runtime_before": "sha256:" + "d" * 64,
+            "runtime_after": "sha256:" + "d" * 64,
+            "non_deployment_cause": "same_container_restart",
+        },
+        {
+            "observed_at": "2026-09-11T09:00:00Z",
+            "runtime_before": "sha256:" + "d" * 64,
+            "runtime_after": "sha256:" + "e" * 64,
+            "controller_receipt": "40000000002",
+        },
+    ]
+
+
 def _toml(document: dict) -> str:
     lines: list[str] = []
     for key, value in document.items():
@@ -74,8 +100,26 @@ def _toml(document: dict) -> str:
     for key, value in document.items():
         if isinstance(value, dict):
             lines.append(f"\n[{key}]")
+            sub_tables: list[tuple[str, dict]] = []
+            sub_arrays: list[tuple[str, list]] = []
             for inner, item in value.items():
-                lines.append(f"{inner} = {_scalar(item)}")
+                if isinstance(item, dict):
+                    sub_tables.append((inner, item))
+                elif isinstance(item, list) and item and isinstance(item[0], dict):
+                    sub_arrays.append((inner, item))
+                else:
+                    lines.append(f"{inner} = {_scalar(item)}")
+            # TOML: every scalar of a table must precede that table's first
+            # sub-table header, or the scalar lands in the sub-table instead.
+            for inner, table in sub_tables:
+                lines.append(f"\n[{key}.{inner}]")
+                for field, item in table.items():
+                    lines.append(f"{field} = {_scalar(item)}")
+            for inner, rows in sub_arrays:
+                for row in rows:
+                    lines.append(f"\n[[{key}.{inner}]]")
+                    for field, item in row.items():
+                        lines.append(f"{field} = {_scalar(item)}")
         elif isinstance(value, list) and value and isinstance(value[0], dict):
             for row in value:
                 lines.append(f"\n[[{key}]]")
@@ -147,6 +191,25 @@ def _receipt(**overrides) -> dict:
                 "why": "the prior release's topology, kept as the recovery path",
             }
         ],
+        "displacement_window": {
+            "from": "2026-09-01T00:00:00Z",
+            "to": "2026-09-11T23:59:59Z",
+            "start_runtime": "sha256:" + "c" * 64,
+            "end_runtime": "sha256:" + "e" * 64,
+            "event_source": {
+                "name": "erp-host-docker-events",
+                "method": "daemon_event_api",
+                "completeness": "complete",
+            },
+            "verdict": "displaced",
+            "runtime_changes": _window_changes(),
+        },
+        "no_autonomous_return": {
+            "method": "observed_reboot",
+            "observed_at": "2026-09-12",
+            "observed_by": "michaelayoade",
+            "host": "erp.dotmac.io",
+        },
     }
     document.update(overrides)
     for key in [k for k, v in document.items() if v is None]:
@@ -511,6 +574,241 @@ def test_an_entrypoint_holding_no_credential_needs_no_credential_removal() -> No
     document = _with_digest(_receipt(), inventory)
     document["removals"] = [
         row for row in document["removals"] if row["class"] != "credential"
+    ]
+    assert sweep.validate_receipt(
+        _text(document, sign=True), source="probe.toml", inventory=inventory
+    )
+
+
+# ── DisplacementWindow.v1 (2026-08-31 amendment) ────────────────────────────
+#
+# `controller_receipts` prove two POSITIVE cycles. The window proves the
+# negative, and it does it by ATTRIBUTION rather than absence: it does not
+# assert that nothing happened, it enumerates everything that happened and
+# accounts for each one. A change with no attribution IS the finding.
+
+
+def _window(document: dict) -> dict:
+    return document["displacement_window"]
+
+
+def test_a_committed_receipt_requires_a_displacement_window() -> None:
+    sweep = _sweep()
+    document = _receipt()
+    del document["displacement_window"]
+    with pytest.raises(
+        sweep.ReceiptError, match="requires a\n?.?`?displacement_window"
+    ):
+        _validate(document, sign=False)
+
+
+def test_a_quiet_window_is_not_an_event_source() -> None:
+    """Michael's constraint, now normative: polling or a quiet interval is
+    insufficient. `quiet_window` observes the ABSENCE of invocations, which is
+    the claim under test rather than evidence for it."""
+    sweep = _sweep()
+    for refused in ("poll", "periodic_snapshot", "quiet_window"):
+        document = _receipt()
+        _window(document)["event_source"]["method"] = refused
+        with pytest.raises(sweep.ReceiptError, match="is refused"):
+            _validate(document, sign=False)
+
+
+def test_an_incomplete_source_yields_unmonitored_not_a_caveated_pass() -> None:
+    """ADR-0018's principle applied to this contract's own guard. An
+    unmonitored region is honestly unmonitored, never quietly exempt."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["event_source"]["completeness"] = "cannot_establish"
+    with pytest.raises(sweep.ReceiptError, match="UNMONITORED"):
+        _validate(document, sign=False)
+
+    document["status"] = "proposed"
+    _window(document)["verdict"] = "unmonitored"
+    assert _validate(document, sign=False)["status"] == "proposed"
+
+
+def test_an_unmonitored_verdict_cannot_be_committed() -> None:
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["event_source"]["completeness"] = "cannot_establish"
+    _window(document)["verdict"] = "unmonitored"
+    with pytest.raises(sweep.ReceiptError, match="requires a `displaced` window"):
+        _validate(document, sign=False)
+
+
+def test_an_unbounded_window_is_refused() -> None:
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["to"] = _window(document)["from"]
+    with pytest.raises(sweep.ReceiptError, match="not bounded forwards"):
+        _validate(document, sign=False)
+
+
+def test_the_planted_third_executor_change_is_refused() -> None:
+    """THE case this field exists for. A runtime change nobody can account for
+    is a third executor — and a zero-invocation guard passes straight over it,
+    because it was not an invocation of the legacy executor."""
+    sweep = _sweep()
+    document = _receipt()
+    changes = _window(document)["runtime_changes"]
+    changes[1] = {
+        "observed_at": changes[1]["observed_at"],
+        "runtime_before": changes[1]["runtime_before"],
+        "runtime_after": changes[1]["runtime_after"],
+    }
+    with pytest.raises(sweep.ReceiptError, match="UNATTRIBUTED"):
+        _validate(document, sign=False)
+
+
+def test_a_properly_attributed_window_is_not_refused() -> None:
+    """The OTHER half, asserted against the same reach. A refusal test alone
+    proves the validator can say no; only the pair proves it says no to the
+    right thing. Same fixture, same code path, one field changed."""
+    document = _receipt()
+    changes = _window(document)["runtime_changes"]
+    assert "non_deployment_cause" in changes[1], "the fixture premise must hold"
+    parsed = _validate(document, sign=True)
+    assert parsed["displacement_window"]["verdict"] == "displaced"
+    assert len(parsed["displacement_window"]["runtime_changes"]) == 3
+
+
+def test_a_non_deployment_cause_that_moved_the_image_is_refused() -> None:
+    """Docker's benign case, proven rather than accepted. `restart:
+    unless-stopped` bringing back the SAME container is not a deployment; the
+    same policy bringing back a DIFFERENT image is one, whatever it is
+    labelled."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["runtime_changes"][1]["runtime_after"] = "sha256:" + "f" * 64
+    with pytest.raises(sweep.ReceiptError, match="the runtime identity\n?.?moved"):
+        _validate(document, sign=False)
+
+
+def test_a_change_with_two_attributions_is_refused() -> None:
+    """An ambiguous attribution is an unattributed one with two labels."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["runtime_changes"][1]["controller_receipt"] = "40000000009"
+    with pytest.raises(sweep.ReceiptError, match="One change has one cause"):
+        _validate(document, sign=False)
+
+
+def test_a_break_in_the_chain_is_a_change_nobody_recorded() -> None:
+    """Completeness TESTED, not declared. A source that missed a transition
+    leaves a gap between one change's end and the next one's start."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["runtime_changes"][2]["runtime_before"] = "sha256:" + "9" * 64
+    with pytest.raises(sweep.ReceiptError, match="chain BREAKS"):
+        _validate(document, sign=False)
+
+
+def test_the_window_endpoints_must_match_the_chain() -> None:
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["end_runtime"] = "sha256:" + "9" * 64
+    with pytest.raises(sweep.ReceiptError, match="closes at"):
+        _validate(document, sign=False)
+
+
+def test_an_empty_window_whose_runtime_moved_is_the_third_executor() -> None:
+    """No change recorded, and yet the runtime is not what it was. That
+    movement is the whole finding, and an absence-based guard cannot see it."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["runtime_changes"] = []
+    with pytest.raises(sweep.ReceiptError, match="That movement is the third"):
+        _validate(document, sign=False)
+
+
+def test_a_controller_cycle_the_window_did_not_see_is_refused() -> None:
+    """A cycle cited as proof but absent from the window is a cycle the window
+    cannot vouch for."""
+    sweep = _sweep()
+    document = _receipt()
+    _window(document)["runtime_changes"][2]["controller_receipt"] = "40000000007"
+    _window(document)["runtime_changes"][2]["runtime_after"] = _window(document)[
+        "end_runtime"
+    ]
+    with pytest.raises(sweep.ReceiptError, match="do not appear as attributed"):
+        _validate(document, sign=False)
+
+
+# ── The no-autonomous-return proof ──────────────────────────────────────────
+
+
+def test_a_committed_receipt_requires_a_no_autonomous_return_proof() -> None:
+    """A retirement used to owe "the artifact is gone". Since the
+    `runtime_reactivation` family exists it owes "the executor cannot come
+    back", and only the second claim survives a reboot."""
+    sweep = _sweep()
+    document = _receipt()
+    del document["no_autonomous_return"]
+    with pytest.raises(sweep.ReceiptError, match="survives a reboot"):
+        _validate(document, sign=False)
+
+
+def test_a_supervisor_catalog_that_names_nothing_is_refused() -> None:
+    """An inspection that does not say WHAT it inspected proves nothing."""
+    sweep = _sweep()
+    document = _receipt()
+    document["no_autonomous_return"]["method"] = "supervisor_catalog"
+    with pytest.raises(sweep.ReceiptError, match="unstated set"):
+        _validate(document, sign=False)
+
+
+def test_a_live_resurrection_path_blocks_the_retirement() -> None:
+    """The ordering the transition table deliberately does not enforce. A
+    displaced executor with a mechanism that can bring it back was never
+    displaced — the script is gone from the tree and returns at the next
+    reboot with nobody having invoked anything."""
+    sweep = _sweep()
+    inventory = sweep.Inventory(
+        product="dotmac_erp",
+        revision="0" * 40,
+        production_targets=("erp.dotmac.io",),
+        families_present=("script", "runtime_reactivation"),
+        families_absent=tuple(
+            n for n in sweep.FAMILY_NAMES if n not in ("script", "runtime_reactivation")
+        ),
+        absences=(),
+        entrypoints=(
+            sweep.Entrypoint(
+                name="script:deploy.sh",
+                family="script",
+                trigger="manual",
+                credential="none",
+                disposition="displaced",
+                path="scripts/deploy.sh",
+                targets=("erp.dotmac.io",),
+            ),
+            sweep.Entrypoint(
+                name="unit:dotmac-books.service",
+                family="runtime_reactivation",
+                trigger="systemd, on boot",
+                credential="none",
+                disposition="reactivation_capable",
+                host="erp.dotmac.io",
+                reactivates=("script:deploy.sh",),
+            ),
+        ),
+    )
+    document = _with_digest(_receipt(), inventory)
+    document["removals"] = [
+        row for row in document["removals"] if row["class"] != "credential"
+    ]
+    with pytest.raises(sweep.ReceiptError, match="never displaced"):
+        sweep.validate_receipt(
+            _text(document, sign=False), source="probe.toml", inventory=inventory
+        )
+
+    # And the same receipt, once the mechanism is accounted for, is admissible.
+    document["no_autonomous_return"]["mechanisms"] = [
+        {
+            "identity": "unit:dotmac-books.service",
+            "disposition_after": "disabled_and_verified",
+        }
     ]
     assert sweep.validate_receipt(
         _text(document, sign=True), source="probe.toml", inventory=inventory

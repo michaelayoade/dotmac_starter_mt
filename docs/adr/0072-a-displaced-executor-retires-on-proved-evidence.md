@@ -1,6 +1,8 @@
 # ADR 0072 — A displaced deployment executor retires on proved evidence, never on adoption
 
-**Status:** Accepted — **fleet-wide**
+**Status:** Accepted — **fleet-wide**. Amended 2026-08-31 (an eighth
+entry-point family, `runtime_reactivation`, and `DisplacementWindow.v1`). The
+amendment is a dated addition; no earlier text is rewritten.
 **Date:** 2026-08-30
 **Decision owner:** Michael
 **Extends:** ADR-0018 (a guard exemption states an enforceable premise — this
@@ -191,3 +193,113 @@ cutover receipt has no field for.
 **Score an unmeasured product zero.** Rejected: it reports debt as retired,
 which is the exact failure this ADR exists to prevent, arriving through the
 measurement instead of through the code.
+
+
+## Decision amendment — 2026-08-31 (an executor with no invoker, and the negative half)
+
+ERP's census, taken against the merged v1 contract, produced two findings the
+contract could not express. Both are ADDITIONS. No clause above is withdrawn.
+
+### A. The eighth family is `runtime_reactivation`, not `restart_policy`
+
+The naming is the ruling, not a preference. Docker's `restart: unless-stopped`
+normally restarts **the same container**, which is not a deployment at all — so
+a family named after the policy would describe the wrong thing and sweep in
+every benign case, and a guard that fires on benign cases is a guard people
+learn to override.
+
+The property that makes one of these an executor is narrower and sharper:
+
+> **It can reactivate a displaced executor after reboot.**
+
+That reframes what a retirement owes. A retirement used to owe *the artifact is
+gone*. It now owes *the executor cannot autonomously return* — and those are
+different claims. A script deleted from a tree whose unit is still enabled, or
+whose image is still named by a `restart: always` service, comes back at the
+next reboot with nobody having invoked anything. That is not a retirement; it
+is a pause with a receipt.
+
+Concretely: the family's artifacts are the supervisor configurations a tree can
+hold (Compose files, unit files, `@reboot` entries); its enablement lives on a
+host, so `tree_complete` is false and its absence needs an observer. A row
+carries `reactivates`, naming the declared executors it can return, and that
+list is checked in **both** directions — a row claiming to reactivate nothing
+is refused the moment another row names it, because a one-way check is
+satisfied by declining to fill in your own field. A `not_an_executor` verdict is
+refused over an artifact carrying a live reactivation directive; the weaker
+`reactivates_no_declared_executor` verdict is refused over one carrying none,
+so it cannot become the place everything lands.
+
+The receipt gains `no_autonomous_return`: a typed method (`observed_reboot`,
+`supervisor_catalog`, `mechanism_absent`), an observer, a host, and the
+mechanisms considered with their disposition after the retirement. Every
+inventory row naming the subject in its `reactivates` must be accounted for, or
+the receipt is refused. That cross-check — not the transition table — is what
+orders a mechanism's retirement against its subject's.
+
+### B. `DisplacementWindow.v1` — attribution, not absence
+
+`controller_receipts` prove two POSITIVE cycles. Nothing proved the negative,
+and the negative is the harder half. A window in which the legacy executor was
+not invoked reads as displacement, but two readings collapse into it:
+
+1. the executor is idle and the controller owns the runtime; or
+2. **the runtime changed and neither executor did it.**
+
+(2) is not a legacy invocation, so a zero-invocation guard passes while the
+controller's claim to own the runtime is false. There is a third executor and
+the measurement cannot see it.
+
+**A quiet window is not evidence; it is the claim under test.** `poll`,
+`periodic_snapshot` and `quiet_window` are therefore named and REFUSED as event
+sources rather than merely absent from the accepted list, because someone will
+try each of them and deserves to be told why. The accepted sources —
+`event_stream`, `audit_log`, `daemon_event_api` — are the ones that observe
+every transition.
+
+The window does not assert that nothing happened. It **enumerates everything
+that happened and attributes each one**: to a controller receipt, or to a typed
+non-deployment cause. Zero unattributed changes. A change nobody can account for
+IS the finding.
+
+Four properties make that more than a form to fill in:
+
+- **Bounded**, with exact start and end runtime identities.
+- **Chained.** Consecutive changes must meet, and the declared endpoints must
+  match the ends. A source that missed a transition leaves a BREAK, so
+  completeness is *tested* rather than declared — which is what "a complete,
+  named event source" has to mean if it is to mean anything.
+- **Same-image is proven, not accepted.** A `non_deployment_cause` whose
+  runtime identity moved is refused. This is where Docker's benign case lives:
+  `restart: unless-stopped` returning the same container is
+  `same_container_restart`, and the schema checks the sameness instead of
+  believing the label.
+- **`cannot_establish` forces `unmonitored`.** Not a pass with a caveat. This
+  ADR's own guard gets no exemption from ADR-0018's rule: an unmonitored region
+  is honestly unmonitored, never quietly exempt. An `unmonitored` verdict cannot
+  be committed.
+
+The two cited controller cycles must appear as attributed changes inside the
+window. A cycle the window did not see is a cycle the window cannot vouch for.
+
+### C. Calls, not mentions — a specificity repair the eighth family exposed
+
+On its first run the verb detector read a **usage comment** in
+`docker-compose.dev.yml` (`docker compose -f … up`) as a deployment, and the
+edge resolver drew a call edge backwards from `docker-compose.yml` to
+`scripts/deploy.sh` because that path appears in a comment there — so the
+topology inherited the verbs of the executor that deploys it.
+
+Whole-line comments are now stripped before both verb detection and edge
+resolution. Conservative by construction: only lines whose first non-blank
+character is `#`, so an inline trailing comment keeps its command.
+Over-stripping would produce false negatives, which is the direction that hides
+an executor. This is the rule `credential_lifecycle_sweep.py` states as "calls,
+not mentions", applied where no AST exists.
+
+### D. What this amendment does not do
+
+It performs no retirement. `retired_total` stays **0**. It defines how a
+retirement is proven; it does not prove one. It does not block issuer
+activation or the first receipt, and it must land before any executor is
+declared retired.

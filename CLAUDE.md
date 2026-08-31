@@ -561,14 +561,21 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `AGENTS.md` rule **42**; ADR-0006 amendment 2026-08-30.
 
 32. A displaced deployment executor retires on PROVED evidence, never on
-    adoption. Seven entry-point families (workflow, script, cron, systemd unit,
-    SSH credential, webhook, manual runbook), absence is never a disposition,
+    adoption. EIGHT entry-point families (workflow, script, cron, systemd unit,
+    SSH credential, webhook, manual runbook, and `runtime_reactivation` — the
+    supervisor that can return a displaced executor after reboot with nobody
+    invoking anything, so a retirement owes "it cannot come back" and not just
+    "the artifact is gone"), absence is never a disposition,
     `active_executor` has no edge to `retired`, two-directional ratchets per
     family AND per disposition, and a removal receipt naming two distinct
     successful controller cycles, every removal class including the credential,
     the zero-surface guard's sensitivity proof and a PROVED recovery verdict.
-    Products own their receipts; there is no registry here. — `AGENTS.md` rule
-    **45**; ADR-0072; `docs/inventories/executor-retirement.md`.
+    `DisplacementWindow.v1` proves the negative half by ATTRIBUTION rather than
+    absence: every runtime change linked to a controller receipt or a typed
+    same-image cause, zero unattributed, a quiet window refused as an event
+    source, and `cannot_establish` forcing UNMONITORED. Products own their
+    receipts; there is no registry here. — `AGENTS.md` rule **45** (amended
+    2026-08-31); ADR-0072; `docs/inventories/executor-retirement.md`.
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

@@ -1226,7 +1226,37 @@ specifics) points here and must never fork these rules.
     coordinate, never "rollback is documented"; what was deliberately retained;
     and a digest. Value-free, absence is not a status, corrections by
     supersession. Products own their receipts; Governance owns the
-    cross-repository envelope and there is no registry here
+    cross-repository envelope and there is no registry here.
+
+    **Amended 2026-08-31 — an executor with no invoker, and the negative half.**
+    An EIGHTH family, `runtime_reactivation` and deliberately NOT
+    `restart_policy`: `restart: unless-stopped` normally restarts THE SAME
+    CONTAINER, which is no deployment, so naming the family after the policy
+    would describe the wrong thing and fire on every benign case. The executor
+    property is narrower — **it can reactivate a displaced executor after
+    reboot** — which reframes what a retirement owes: not "the artifact is
+    gone" but **"the executor cannot autonomously return"**. A row carries
+    `reactivates`, checked in BOTH directions, and the receipt gains
+    `no_autonomous_return` (typed method, observer, host, mechanisms with their
+    disposition after) that must account for every row naming the subject.
+
+    And `DisplacementWindow.v1`, because two positive controller cycles never
+    proved the negative: a quiet window is **the claim under test, not evidence
+    for it**, so `poll`, `periodic_snapshot` and `quiet_window` are NAMED and
+    REFUSED as event sources. The window enumerates every runtime change and
+    attributes each to a controller receipt or a typed non-deployment cause —
+    **zero unattributed**, because a change nobody can account for is a third
+    executor that a zero-invocation guard passes straight over. Bounded with
+    exact start/end runtime identities; CHAINED, so a missed transition leaves a
+    break and completeness is tested rather than declared; a non-deployment
+    cause whose image identity MOVED is refused, which is how the benign restart
+    is proven rather than believed; and `cannot_establish` forces the verdict
+    `UNMONITORED`, never a pass with a caveat — this rule's own guard gets no
+    exemption from rule 25. Both cited cycles must appear inside the window.
+    Sensitivity requires BOTH halves observed: the planted third-executor change
+    refused, and the properly attributed window admitted, against the same
+    reach. Whole-line comments are stripped before verb detection and edge
+    resolution — calls, not mentions
     (ADR-0072; `scripts/executor_retirement.py`;
     `tests/architecture/test_executor_retirement_ratchet.py`;
     `tests/unit/test_executor_retirement_receipt.py`)
