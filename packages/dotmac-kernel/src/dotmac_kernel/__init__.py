@@ -110,6 +110,14 @@ from dotmac_kernel.exceptions import (
     UnauthorizedError,
 )
 from dotmac_kernel.external_identity import ResolvedExternalIdentity
+from dotmac_kernel.facet_principal import (
+    FacetPrincipal,
+    FacetPrincipalError,
+    FacetPrincipalPlaneMismatchError,
+    FacetPrincipalUnavailableError,
+    facet_principal,
+    require_facet_principal,
+)
 from dotmac_kernel.features import (
     FeatureManifest,
     NavItem,
@@ -369,6 +377,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.outbox_event_types",
         "dotmac_kernel.permissions",
         "dotmac_kernel.permission_provisioning",
+        "dotmac_kernel.facet_principal",
         "dotmac_kernel.planes",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.prerequisites",
@@ -450,6 +459,13 @@ __all__ = [
     "NavigationRegion",
     "StaticPackage",
     "SurfaceContext",
+    # the principal a facet already authenticated, projected for module reuse
+    "FacetPrincipal",
+    "FacetPrincipalError",
+    "FacetPrincipalPlaneMismatchError",
+    "FacetPrincipalUnavailableError",
+    "facet_principal",
+    "require_facet_principal",
     "TemplatePackage",
     "TemplateRef",
     "WebFacetMount",

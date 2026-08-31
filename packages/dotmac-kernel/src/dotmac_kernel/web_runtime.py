@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.deps import authorize_party, get_db, require_tenant
 from dotmac_kernel.entitlements import is_entitled
+from dotmac_kernel.facet_principal import FacetPrincipal, record_facet_principal
 from dotmac_kernel.middleware.csrf import require_csrf
 from dotmac_kernel.models import Party
 from dotmac_kernel.web_surfaces import (
@@ -156,6 +157,19 @@ def _tenant_context_dependency(
                 f"tenant authentication profile {profile.code!r} did not return Party"
             )
         tenant = require_tenant(request)
+        # The facet has authenticated this actor. Publish it request-scoped
+        # BEFORE admission, so an admission refusal and a successful request
+        # agree on who was acting -- an audit of a 403 needs the actor too.
+        record_facet_principal(
+            request,
+            FacetPrincipal(
+                facet=facet.code,
+                security_plane=profile.security_plane,
+                subject_id=principal.id,
+                subject=principal,
+                tenant_id=getattr(tenant, "id", None),
+            ),
+        )
         if facet.admission_permission and not authorize_party(
             db,
             tenant=tenant,
@@ -204,8 +218,22 @@ def _non_tenant_context_dependency(
         )
 
     def dependency(
-        request: Request, _principal: Any = Depends(authentication)
+        request: Request, principal: Any = Depends(authentication)
     ) -> SurfaceContext:
+        # Previously bound to `_principal` purely to force the dependency to
+        # run, which is why a platform-plane surface had no way to name its
+        # actor without authenticating a second time.
+        subject_id = getattr(principal, "id", None)
+        if profile is not None and subject_id is not None:
+            record_facet_principal(
+                request,
+                FacetPrincipal(
+                    facet=facet.code,
+                    security_plane=profile.security_plane,
+                    subject_id=subject_id,
+                    subject=principal,
+                ),
+            )
         return _context(
             request,
             registry=registry,
