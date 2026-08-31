@@ -282,3 +282,11 @@ Python repository cannot run a check over any of them.
 - `release-record-kernel-a99-ui-a8.md` — publication coordinates for `dotmac-kernel`
   0.1.0a99 and `dotmac-ui` 0.1.0a8 (tags, runs, byte chain, registry read-back,
   installed-artifact canary). Publication only; it asserts no product adoption.
+
+## Presentation-layer census
+
+- `presentation-layer-sources.md` — read-only census of the ten presentation
+  categories across `dotmac_sub`, `dotmac_erp`, `dotmac_platform_control_plane`,
+  `dotmac_starter_mt` and `dotmac_workspace`, at named commits. Evidence and
+  boundary rulings only; explicitly NOT a decision to extract anything
+  (ADR-0006 § 5).
