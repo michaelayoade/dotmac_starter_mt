@@ -3,12 +3,12 @@
     {
       "bytes": 32627,
       "path": "dotmac-ui/dotmac-ui-1.css",
-      "sha256": "987e8922603ab5a9fdd7834da8cbcd88c6265909052edc342d5a2ac4ee9ccc16"
+      "sha256": "a44fde0da5fd740e4468da18fda792032f1d997abaa4a0bde8410ddf53f1ba75"
     }
   ],
   "name": "dotmac-ui",
   "token_count": 192,
   "token_prefix": "--dmui-",
   "ui_contract_version": 1,
-  "version": "0.1.0a7"
+  "version": "0.1.0a8"
 }

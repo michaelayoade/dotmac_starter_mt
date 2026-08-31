@@ -102,6 +102,7 @@ jobs:
             "dotmac_ui/static/dotmac-ui/tailwind-preset.js" \
             "dotmac_ui/static/dotmac-ui/manifest.json" \
             "dotmac_ui/templates/dotmac_ui/components/empty_state.html" \
+            "dotmac_ui/templates/dotmac_ui/components/map_frame.html" \
             "dotmac_ui/py.typed" ; do
             echo "${CONTENTS}" | grep -q "${required}" \
               || { echo "::error::wheel is missing ${required}"; exit 1; }
@@ -114,40 +115,21 @@ jobs:
           echo "wheel contents OK"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
-      # venv, confirm the version it reports, render the packaged component
-      # through a host-supplied Jinja environment, and confirm the preset it
-      # ships is loadable CommonJS. These exercise the actual installed bytes.
+      # venv and run the SHARED artifact proof against it — the same file the
+      # registry-installed verification runs, so the two stages cannot drift.
+      # The proof refuses to measure a source checkout, reads the component set
+      # from the installed package rather than a hand-written list, resolves
+      # every published template through a host Jinja loader, checks the
+      # rendered classes against each declared contract, and recomputes the
+      # manifest digests from the installed bytes. Jinja is installed
+      # separately so it never becomes a dotmac-ui runtime dependency.
       - name: Release wheel smoke
-        working-directory: packages/dotmac-ui
         run: |
           python -m venv /tmp/uismoke
-          /tmp/uismoke/bin/pip install --quiet --no-deps "$(ls dist/*.whl)"
+          /tmp/uismoke/bin/pip install --quiet --no-deps \
+            "$(ls packages/dotmac-ui/dist/*.whl)"
           /tmp/uismoke/bin/pip install --quiet "jinja2==3.1.6"
-          /tmp/uismoke/bin/python - <<'PY'
-          import dotmac_ui
-          from dotmac_ui.assets import stylesheet_path, tailwind_preset_path
-          from dotmac_ui.theme import bootstrap_script
-          from jinja2 import Environment, FileSystemLoader, StrictUndefined
-          assert stylesheet_path().is_file(), "stylesheet missing from the installed wheel"
-          assert tailwind_preset_path().is_file(), "preset missing from the installed wheel"
-          assert bootstrap_script(), "theme bootstrap is empty"
-          env = Environment(
-              loader=FileSystemLoader(dotmac_ui.template_dir()),
-              autoescape=True,
-              undefined=StrictUndefined,
-          )
-          macro = getattr(
-              env.get_template(dotmac_ui.EMPTY_STATE.template).module,
-              dotmac_ui.EMPTY_STATE.macro,
-          )
-          rendered = str(
-              macro("No invoices", "Create one to begin.", "New invoice", "/invoices/new")
-          )
-          assert 'class="dmui-empty-state__title"' in rendered
-          assert 'href="/invoices/new"' in rendered
-          print("installed dotmac-ui", dotmac_ui.__version__)
-          print("preset:", tailwind_preset_path())
-          PY
+          /tmp/uismoke/bin/python scripts/verify_ui_release_artifact.py
           PRESET="$(/tmp/uismoke/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
           node -e "const p=require('${PRESET}'); if(!p.theme||!p.theme.extend||!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('preset loads as CommonJS')"
 
@@ -226,9 +208,11 @@ jobs:
           echo "::error::dotmac-ui ${{ inputs.version }} did not appear on the Forgejo index in time"
           exit 1
 
-      # Install the PUBLISHED release FROM THE INDEX into a clean venv and smoke
-      # it — the same checks as the build-time smoke, against the artifact a
-      # consumer would actually resolve.
+      # Install the PUBLISHED release FROM THE INDEX into a clean venv and run
+      # the SAME shared artifact proof the build stage ran — one file, two
+      # subjects. The build stage proved the bytes it produced; this proves the
+      # bytes a consumer actually resolves, and the version it installs must be
+      # the one the proof reports.
       - name: Install from the Forgejo registry and verify
         env:
           UI_INDEX_URL: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
@@ -240,30 +224,12 @@ jobs:
             --extra-index-url "https://pypi.org/simple" \
             "dotmac-ui==${{ inputs.version }}"
           /tmp/uiverify/bin/pip install --quiet "jinja2==3.1.6"
-          /tmp/uiverify/bin/python - <<'PY'
-          import dotmac_ui
-          from dotmac_ui.assets import asset_manifest, stylesheet_path, tailwind_preset_path
-          from dotmac_ui.theme import bootstrap_script
-          from jinja2 import Environment, FileSystemLoader, StrictUndefined
-          assert stylesheet_path().is_file()
-          assert tailwind_preset_path().is_file()
-          assert bootstrap_script()
-          env = Environment(
-              loader=FileSystemLoader(dotmac_ui.template_dir()),
-              autoescape=True,
-              undefined=StrictUndefined,
-          )
-          macro = getattr(
-              env.get_template(dotmac_ui.EMPTY_STATE.template).module,
-              dotmac_ui.EMPTY_STATE.macro,
-          )
-          rendered = str(
-              macro("No invoices", "Create one to begin.", "New invoice", "/invoices/new")
-          )
-          assert 'class="dmui-empty-state__title"' in rendered
-          assert 'href="/invoices/new"' in rendered
-          print("verified dotmac-ui", dotmac_ui.__version__, asset_manifest()["ui_contract_version"])
-          PY
+          /tmp/uiverify/bin/python scripts/verify_ui_release_artifact.py
+          INSTALLED="$(/tmp/uiverify/bin/python -c 'import dotmac_ui; print(dotmac_ui.__version__)')"
+          if [ "${INSTALLED}" != "${{ inputs.version }}" ]; then
+            echo "::error::index resolved ${INSTALLED}, not ${{ inputs.version }}"
+            exit 1
+          fi
           PRESET="$(/tmp/uiverify/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
           node -e "const p=require('${PRESET}'); if(!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('published preset loads as CommonJS')"
 

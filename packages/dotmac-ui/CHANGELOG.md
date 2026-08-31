@@ -7,7 +7,14 @@ separate axis from the package version. Pre-1.0 (`0.x`, incl. this alpha) the
 surface is still settling — a `0.MINOR` bump may carry breaking changes, each
 called out here.
 
-## Unreleased
+## 0.1.0a8 — 2026-08-30
+
+`UI_CONTRACT_VERSION` stays **1**; the component library grows by one
+member. This is a NEW version rather than a re-publication of `0.1.0a7`:
+`map_frame` landed on `main` after `0.1.0a7` was published and tagged, so
+the tree and the published `0.1.0a7` artifact already disagree. Editing a
+published version's contents would make one version name two contracts
+(`AGENTS.md` rule 34) — the repair is always a new version.
 
 ### Added
 
