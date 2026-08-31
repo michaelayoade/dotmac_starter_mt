@@ -8,10 +8,17 @@ here.
 
 ## Unreleased
 
-**No version is allocated by this change.** The Kernel/UI release train is
-unresolved, and two lanes competing for one version number is how a consumer
-ends up unable to say which `a99` it pinned. The version for this surface is
-derived from immutable tags when Michael authorizes the release.
+_Nothing yet._
+
+## 0.1.0a100 — 2026-08-31
+
+**Allocated from immutable tags.** The newest published kernel tag is
+`dotmac-kernel-v0.1.0a99` (peeled `8c92943062dbfe7f17bfa35264243709ec3d92c3`);
+`0.1.0a96` was skipped and is recorded below; nothing above `a99` is tagged, so
+`0.1.0a100` is the next unclaimed number. This heading replaces the
+`0.1.0a99+dev` development marker that kept `main` from claiming a published
+version whose bytes it no longer shipped — the marker is removed by ALLOCATING,
+never by editing it off.
 
 ### Added
 
