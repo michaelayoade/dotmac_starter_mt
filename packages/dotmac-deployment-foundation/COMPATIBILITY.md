@@ -72,6 +72,23 @@
 - `[database]` in `ProductDeploymentSpec.v1`: `DatabaseContract`,
   `DatabaseRole`, `IsolationInvariant`. There is deliberately no `superuser`
   key on a declared role; adding one would be breaking.
+- Database contract drift: `ObservedDatabaseState`,
+  `EffectivePrivilegeAuditUniverse`, `PrivilegeUniverseDerivation`,
+  `DatabaseDriftExclusions`, `DatabaseDriftPhase`,
+  `DatabaseContractDriftReport`, `DatabaseDriftFinding`,
+  `DatabaseContractGap`, `DatabaseContractGapCode`, and
+  `compare_database_contract()`. A report binds the full canonical descriptor
+  digest, exposes it as `matched_descriptor_digest` only after a complete
+  match, and exits/refuses on an absent privilege audit universe. The current
+  v1 contract cannot declare exact tables or columns, so those dimensions are
+  typed contract gaps rather than facts inferred from a running database.
+- `DatabaseDescriptorTransition.v1`,
+  `DatabaseDescriptorPromotionPending.v1` and
+  `DatabaseDescriptorTransitionReceipt.v1`: the `from`/`to`, plan and target
+  bindings; the one-transaction versus declared-checkpoint durability shape;
+  `promotion_pending`; the idempotent compare-and-swap promotion port; and the
+  terminal postcondition and promotion evidence. Authorization binds the
+  result descriptor; the starting descriptor is the live/CAS precondition.
 
 ## What is not
 

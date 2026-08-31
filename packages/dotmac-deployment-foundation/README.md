@@ -104,7 +104,12 @@ engine/          the plan as data, the executor, the exclusive lock
 providers/       concrete Effects implementations; compose_host is the only one
 backup.py        four assurance levels, because "backed up" is not "restorable"
 recovery.py      PostgresRecoveryBundle.v1 - the role closure a dump omits
+database_drift.py pure two-way descriptor/catalogue comparison; an independent
+                 privilege audit universe is mandatory and table/column gaps
+                 remain explicit until ProductDeploymentSpec can declare them
 drift.py         image + config + manifest digests vs the approved plan
+transition.py    DB from/to contract, promotion_pending recovery and terminal
+                 compare-and-swap receipt
 conformance.py   the checks a product runs in its OWN CI
 cli.py           dotmac-deploy
 ```

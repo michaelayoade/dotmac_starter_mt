@@ -568,7 +568,7 @@ properties with a planted-defect proof for each.
 | Owner | Owns | Explicitly does not own |
 |---|---|---|
 | `dotmac-kernel` | in-process contracts and mechanics: sessions and transaction boundaries, tenant priming, conflict savepoints, public error contracts, manifest contracts, migration-graph orchestration, the liveness/readiness and telemetry *interfaces*, the provisioning protocols | anything that renders infrastructure |
-| `dotmac-deployment-foundation` | one release on one host: the descriptor and its refusals, the deterministic renderers, the hardened image contract and its audit, the ordered plan and its gates, backup/restore assurance, ingress providers, resource attributes and deployment annotations, the common alert catalogue, the conformance kit | durable fleet records, health status, signal storage, any in-process runtime contract |
+| `dotmac-deployment-foundation` | one release on one host: the descriptor and its refusals, the deterministic renderers, the hardened image contract and its audit, the ordered plan and its gates, the typed database descriptor-transition/CAS protocol and terminal receipt construction, backup/restore assurance, ingress providers, resource attributes and deployment annotations, the common alert catalogue, the conformance kit | the accepted descriptor pointer, a `DescriptorPromoter` implementation or its durable promotion events, durable fleet records, health status, signal storage, any in-process runtime contract |
 | `dotmac-deployment-control` | durable fleet intent: desired state, immutable plans, approvals, rollout decisions and attempts, authenticated acknowledgements, drift-as-authority | Docker, Nginx, SSH, cloud providers, migrations, backup, monitoring — its own `EXTRACTION.toml` contract already says so, and ADR-0070 does not widen it |
 | the product assembly | declarative input: identity, manifest reference, process roles and commands, worker/queue topology, image system packages, migration command, readiness dependencies, exposed ports, product hooks, domain alert rules, justified capability exceptions | the deployment engine, the renderers, any infrastructure alert |
 | `dotmac-platform-health` | authenticated normalized health *observations* and their projection | raw logs, metrics, traces, deployment decisions, monitoring infrastructure |
@@ -587,6 +587,31 @@ injected `Effects` protocol. That is what makes the twenty-case
 failure-injection matrix a unit-test file rather than a disposable-VM exercise —
 and a gate that has never been shown to fire is a gate nobody should trust. Two
 of the source engine's gates were in fact found to be wrong only in production.
+
+**A database result is declared before execution and promoted honestly.** The
+transition binds target, plan, starting descriptor and result descriptor.
+Authorization binds the result; the live starting state is its independent
+precondition. One transaction has no intermediate durable state, while a
+partially committing operation declares every ordered checkpoint. PostgreSQL
+and Control's accepted pointer are separate transaction domains, so the gap
+after the database commit is named `promotion_pending`, recovered by an
+idempotent compare-and-swap, and closed only by a receipt carrying the observed
+postcondition and Control's durable promotion event. Foundation owns this typed
+mechanic. No accepted-pointer registry or `DescriptorPromoter` implementation
+is composed in this tree yet. Platform CP's Git descriptor and promotion ledger
+own its current accepted pointer and event; moving that authority into
+Deployment Control requires an explicit migration rather than an as-built claim
+written ahead of the code.
+
+**Database drift is a pure two-way comparison, not a catalogue-to-descriptor
+generator.** `database_drift.py` compares the accepted descriptor with a frozen
+`CatalogEvidence` snapshot and reports declared-but-absent and
+present-but-undeclared facts separately for the dimensions
+`ProductDeploymentSpec.v1` can express. Effective privilege comparison is
+unmeasurable without a typed audit universe derived independently from the
+descriptor. Exact tables and columns are also reported as contract gaps: the v1
+database contract declares neither, and live production may verify a future
+candidate but may never author it.
 
 **The provider seam is where a host lives, and there is exactly one provider.**
 `engine/run.py` defines `Effects` — nineteen methods, no implementation — and

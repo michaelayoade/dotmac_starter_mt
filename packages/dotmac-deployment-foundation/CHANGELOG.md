@@ -1,5 +1,31 @@
 # Changelog — dotmac-deployment-foundation
 
+## 0.3.0a2+dev — unreleased development marker
+
+The source tree has diverged from the frozen 0.3.0a2 candidate and therefore
+must not continue claiming the candidate's version. This local-version marker
+allocates no release; the next alpha is allocated only by the release owner
+from immutable publication evidence.
+
+`DatabaseDescriptorTransition.v1` pre-authorizes the descriptor state a
+database operation produces, binds the result to its plan and target, and
+requires the live starting descriptor as a compare-and-swap precondition. An
+operation either commits in one transaction or declares every ordered durable
+checkpoint; a lone final candidate cannot describe partial progress.
+
+`DatabaseDescriptorPromotionPending.v1` names the honest gap between the
+database commit and descriptor promotion. Recovery re-drives one idempotent
+compare-and-swap keyed by transition id, and the terminal
+`DatabaseDescriptorTransitionReceipt.v1` binds both descriptors, the observed
+database postcondition and the durable promotion event.
+
+`compare_database_contract()` adds a descriptor-digest-bound, read-only,
+two-way catalogue comparison with phase-specific refusal classifications,
+exact schema/head/role/isolation comparisons, an independently derived
+effective-privilege audit-universe requirement, typed exclusions, and explicit
+v1 table/column contract gaps. It never derives a descriptor from the running
+database.
+
 ## 0.3.0a2 — unreleased, and HELD
 
 The eight property clusters an audit of the closed PR #507 found missing, each
