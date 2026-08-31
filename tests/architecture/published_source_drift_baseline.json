@@ -1,0 +1,53 @@
+{
+  "$comment": [
+    "Released distributions whose src/ tree no longer matches",
+    "the tag of the version they declare. Each row is one",
+    "version naming two different sets of importable bytes.",
+    "",
+    "This is FROZEN DEBT, ratcheted in BOTH directions by",
+    "tests/architecture/",
+    "test_declared_version_matches_published_tree.py: a new",
+    "drifted distribution fails, and a repaired one fails too",
+    "until this file is regenerated, so the count cannot drift",
+    "silently in either direction.",
+    "",
+    "Repair a row by allocating a NEW version, or by moving the",
+    "declared version to a PEP 440 local development marker --",
+    "never by editing a published version's contents, which",
+    "would make one version name two contracts.",
+    "",
+    "Regenerate: make published-source-drift-baseline"
+  ],
+  "released_total": 79,
+  "drifted_total": 4,
+  "drifted": [
+    {
+      "distribution": "dotmac-brand-profiles",
+      "version": "0.1.0a1",
+      "tag": "dotmac-brand-profiles-v0.1.0a1",
+      "published_tree": "5e0ff0db06a4999519aecb830d5616cea0dc6aea",
+      "head_tree": "e7eb5e21248cae18d4862781d31cb566d079e208"
+    },
+    {
+      "distribution": "dotmac-deployment-control",
+      "version": "0.1.0a2",
+      "tag": "dotmac-deployment-control-v0.1.0a2",
+      "published_tree": "4d6542af402d4cfc59214afd19a6eeb3341f1608",
+      "head_tree": "b87541286f8a85219ea52dac2c60e879655b05cf"
+    },
+    {
+      "distribution": "dotmac-licensing",
+      "version": "0.1.0a1",
+      "tag": "dotmac-licensing-v0.1.0a1",
+      "published_tree": "b45bf1b536ee2374a575e0feed65a67ef17606dc",
+      "head_tree": "2c175210e070f15ab9d75caaba25e9a742e86bd7"
+    },
+    {
+      "distribution": "dotmac-numbering",
+      "version": "0.1.0a2",
+      "tag": "dotmac-numbering-v0.1.0a2",
+      "published_tree": "e02b93ea3ce4f04308f8a47a1cb30c247e6dec5d",
+      "head_tree": "a7ea9870ab262448cd718c46b1f90d5381b96eeb"
+    }
+  ]
+}
