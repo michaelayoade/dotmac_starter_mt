@@ -13,16 +13,44 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.models import Base
+from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.product_database_catalog import (
+    ComposedDatabaseLineageHeadV1,
+    DatabaseCatalogOwnerKind,
+    DatabaseCatalogOwnerV1,
+    DatabaseColumnContractV1,
+    DatabaseColumnGeneration,
+    DatabasePersistencePlane,
+    DatabaseRelationKind,
+    DatabaseTableContractV1,
+    HostDatabaseCatalogFragmentV1,
+    ModuleDatabaseCatalogContributionV1,
+    ModuleDatabaseCatalogSnapshot,
+    ModuleDatabaseTableContractV1,
+    PostgresTypeContractV1,
+    PostgresTypeKind,
+    ProductDatabaseCatalogSnapshot,
+)
+from dotmac_kernel.product_manifest import ProductManifestSnapshot
 from dotmac_release_catalog import (
     ArtifactKind,
     AttestationKind,
     Digest,
     DigestError,
+    DuplicateSingularAttestationError,
+    ModuleDatabaseCatalogMismatchError,
+    ProductDatabaseCatalogMismatchError,
+    ProductManifestMismatchError,
     ReleaseArtifact,
+    TypedAttestationRequiredError,
     UnknownArtifactError,
     UnpinnedReferenceError,
     attest_artifact,
+    attest_module_database_catalog,
+    attest_product_database_catalog,
+    attest_product_manifest,
     publish_artifact,
 )
 from sqlalchemy import create_engine, event
@@ -74,6 +102,122 @@ def _publish(db: Session, **overrides: object) -> ReleaseArtifact:
     }
     kwargs.update(overrides)
     return publish_artifact(db, **kwargs)  # type: ignore[arg-type]
+
+
+def _database_snapshot(
+    *,
+    product_code: str = "dotmac-sub",
+    product_version: str = "7.100.7",
+) -> ProductDatabaseCatalogSnapshot:
+    owner = DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.KERNEL, "kernel")
+    table = DatabaseTableContractV1(
+        schema="public",
+        name="tenants",
+        owner=owner,
+        plane=DatabasePersistencePlane.HOST,
+        relation_kind=DatabaseRelationKind.TABLE,
+        columns=(
+            DatabaseColumnContractV1(
+                name="id",
+                ordinal=1,
+                postgres_type=PostgresTypeContractV1(
+                    kind=PostgresTypeKind.BASE,
+                    schema="pg_catalog",
+                    name="uuid",
+                    formatted="uuid",
+                ),
+                nullable=False,
+                generation=DatabaseColumnGeneration.NONE,
+            ),
+        ),
+    )
+    return ProductDatabaseCatalogSnapshot.from_assembly(
+        ProductAssemblySpec(name=product_code),
+        product_version=product_version,
+        postgres_major=16,
+        host_fragments=(
+            HostDatabaseCatalogFragmentV1(
+                owner=owner,
+                lineage_head="0034_example_kernel_head",
+                tables=(table,),
+            ),
+            HostDatabaseCatalogFragmentV1(
+                owner=DatabaseCatalogOwnerV1(
+                    DatabaseCatalogOwnerKind.ASSEMBLY, product_code
+                ),
+                lineage_head="a999_catalog_fixture",
+                tables=(
+                    DatabaseTableContractV1(
+                        schema="public",
+                        name="assembly_contract_marker",
+                        owner=DatabaseCatalogOwnerV1(
+                            DatabaseCatalogOwnerKind.ASSEMBLY, product_code
+                        ),
+                        plane=DatabasePersistencePlane.HOST,
+                        relation_kind=DatabaseRelationKind.TABLE,
+                        columns=table.columns,
+                    ),
+                ),
+            ),
+        ),
+        composed_lineage_heads=(
+            ComposedDatabaseLineageHeadV1(
+                DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.ASSEMBLY, product_code),
+                "a999_catalog_fixture",
+            ),
+            ComposedDatabaseLineageHeadV1(
+                DatabaseCatalogOwnerV1(DatabaseCatalogOwnerKind.KERNEL, "kernel"),
+                "0034_example_kernel_head",
+            ),
+        ),
+    )
+
+
+def _product_manifest(
+    *,
+    product_code: str = "dotmac-sub",
+    product_version: str = "7.100.7",
+) -> ProductManifestSnapshot:
+    return ProductManifestSnapshot(
+        product_code=product_code,
+        product_version=product_version,
+        capability_codes=("network.radius",),
+    )
+
+
+def _module_database_snapshot(
+    *, distribution_name: str = "dotmac-sub", distribution_version: str = "7.100.7"
+) -> ModuleDatabaseCatalogSnapshot:
+    manifest = ModuleManifest(
+        code="release_catalog_fixture",
+        version="0.4.0",
+        core=False,
+        short_code="rel",
+        migration_prefix="rl",
+        migration_branch="release_catalog",
+        platform_tables=("release_artifacts",),
+        database_catalog=ModuleDatabaseCatalogContributionV1(
+            lineage_head="rl_0002_singular_attestations",
+            tables=(
+                ModuleDatabaseTableContractV1(
+                    name="release_artifacts",
+                    relation_kind=DatabaseRelationKind.TABLE,
+                    columns=_database_snapshot().fragments[1].tables[0].columns,
+                ),
+            ),
+        ),
+    )
+    return ModuleDatabaseCatalogSnapshot.from_manifest(
+        manifest,
+        distribution_name=distribution_name,
+        distribution_version=distribution_version,
+        composed_lineage_head=ComposedDatabaseLineageHeadV1(
+            DatabaseCatalogOwnerV1(
+                DatabaseCatalogOwnerKind.MODULE, "release_catalog_fixture"
+            ),
+            "rl_0002_singular_attestations",
+        ),
+    )
 
 
 class TestPublishValidatesEveryTime:
@@ -130,17 +274,35 @@ class TestAttest:
         assert attestation.attestation_kind == "sbom"
         assert attestation.digest == f"sha256:{_OTHER}"
 
-    def test_records_a_product_manifest_as_its_own_claim(self, db: Session) -> None:
+    def test_generic_seam_refuses_a_product_manifest_digest(self, db: Session) -> None:
         artifact = _publish(db)
-        attestation = attest_artifact(
+        with pytest.raises(TypedAttestationRequiredError, match="typed declaration"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.PRODUCT_MANIFEST,
+                uri="https://example.com/product-manifest.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+    def test_allows_multiple_signatures_for_one_artifact(self, db: Session) -> None:
+        artifact = _publish(db)
+        first = attest_artifact(
             db,
             artifact_id=artifact.id,
-            attestation_kind=AttestationKind.PRODUCT_MANIFEST,
-            uri="https://example.com/product-manifest.json",
+            attestation_kind=AttestationKind.SIGNATURE,
+            uri="https://example.com/signature-a.json",
             digest=f"sha256:{_OTHER}",
         )
+        second = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.SIGNATURE,
+            uri="https://example.com/signature-b.json",
+            digest=_DIGEST,
+        )
 
-        assert attestation.attestation_kind == "product_manifest"
+        assert first.id != second.id
 
     def test_refuses_to_attest_an_artifact_that_does_not_exist(
         self, db: Session
@@ -167,6 +329,170 @@ class TestAttest:
                 attestation_kind=AttestationKind.SBOM,
                 uri="https://example.com/sbom.json",
                 digest="not-a-digest",
+            )
+
+    def test_generic_seam_refuses_a_database_catalog_digest(self, db: Session) -> None:
+        """A label plus opaque digest cannot stand in for inspected content."""
+        artifact = _publish(db)
+
+        with pytest.raises(TypedAttestationRequiredError, match="typed declaration"):
+            attest_artifact(
+                db,
+                artifact_id=artifact.id,
+                attestation_kind=AttestationKind.PRODUCT_DATABASE_CATALOG,
+                uri="https://example.com/product-database-catalog.json",
+                digest=f"sha256:{_OTHER}",
+            )
+
+
+class TestAttestProductManifest:
+    def test_records_typed_content_and_derives_the_digest(self, db: Session) -> None:
+        artifact = _publish(db)
+        snapshot = _product_manifest()
+
+        attestation = attest_product_manifest(
+            db,
+            artifact_id=artifact.id,
+            uri="https://example.com/product-manifest.json",
+            snapshot=snapshot,
+        )
+
+        assert attestation.attestation_kind == "product_manifest"
+        assert attestation.digest == snapshot.digest
+
+    def test_refuses_a_different_product_identity(self, db: Session) -> None:
+        artifact = _publish(db)
+
+        with pytest.raises(ProductManifestMismatchError, match="product_code"):
+            attest_product_manifest(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/product-manifest.json",
+                snapshot=_product_manifest(product_code="dotmac-erp"),
+            )
+
+    def test_refuses_a_second_manifest_for_one_artifact(self, db: Session) -> None:
+        artifact = _publish(db)
+        snapshot = _product_manifest()
+        attest_product_manifest(
+            db,
+            artifact_id=artifact.id,
+            uri="https://example.com/product-manifest.json",
+            snapshot=snapshot,
+        )
+
+        with pytest.raises(
+            DuplicateSingularAttestationError, match="already has its singular"
+        ):
+            attest_product_manifest(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/replacement-product-manifest.json",
+                snapshot=snapshot,
+            )
+
+
+class TestAttestProductDatabaseCatalog:
+    def test_records_the_typed_snapshot_and_derives_its_digest(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(db)
+        snapshot = _database_snapshot()
+
+        attestation = attest_product_database_catalog(
+            db,
+            artifact_id=artifact.id,
+            uri="https://example.com/product-database-catalog.json",
+            snapshot=snapshot,
+        )
+
+        assert attestation.attestation_kind == "product_database_catalog"
+        assert attestation.digest == snapshot.digest
+
+    @pytest.mark.parametrize(
+        ("snapshot", "message"),
+        [
+            (_database_snapshot(product_code="dotmac-erp"), "product_code"),
+            (_database_snapshot(product_version="7.100.8"), "product_version"),
+        ],
+    )
+    def test_refuses_a_snapshot_for_a_different_artifact_identity(
+        self,
+        db: Session,
+        snapshot: ProductDatabaseCatalogSnapshot,
+        message: str,
+    ) -> None:
+        artifact = _publish(db)
+
+        with pytest.raises(ProductDatabaseCatalogMismatchError, match=message):
+            attest_product_database_catalog(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/product-database-catalog.json",
+                snapshot=snapshot,
+            )
+
+
+class TestAttestModuleDatabaseCatalog:
+    def test_binds_distribution_identity_not_manifest_release(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(db)
+        snapshot = _module_database_snapshot()
+
+        attestation = attest_module_database_catalog(
+            db,
+            artifact_id=artifact.id,
+            uri="https://example.com/module-database-catalog.json",
+            snapshot=snapshot,
+        )
+
+        assert attestation.attestation_kind == "module_database_catalog"
+        assert attestation.digest == snapshot.digest
+        assert snapshot.module_release_version == "0.4.0"
+        assert snapshot.distribution_version == artifact.version
+
+    def test_refuses_a_different_distribution_version(self, db: Session) -> None:
+        artifact = _publish(db)
+        with pytest.raises(ModuleDatabaseCatalogMismatchError, match="version"):
+            attest_module_database_catalog(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/module-database-catalog.json",
+                snapshot=_module_database_snapshot(distribution_version="7.100.8"),
+            )
+
+    def test_refuses_a_free_form_map(self, db: Session) -> None:
+        artifact = _publish(db)
+
+        with pytest.raises(TypeError, match="opaque maps"):
+            attest_product_database_catalog(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/product-database-catalog.json",
+                snapshot={"product_code": "dotmac-sub"},  # type: ignore[arg-type]
+            )
+
+    def test_refuses_a_second_database_catalog_for_one_artifact(
+        self, db: Session
+    ) -> None:
+        artifact = _publish(db)
+        snapshot = _database_snapshot()
+        attest_product_database_catalog(
+            db,
+            artifact_id=artifact.id,
+            uri="https://example.com/product-database-catalog.json",
+            snapshot=snapshot,
+        )
+
+        with pytest.raises(
+            DuplicateSingularAttestationError, match="already has its singular"
+        ):
+            attest_product_database_catalog(
+                db,
+                artifact_id=artifact.id,
+                uri="https://example.com/replacement-database-catalog.json",
+                snapshot=snapshot,
             )
 
 

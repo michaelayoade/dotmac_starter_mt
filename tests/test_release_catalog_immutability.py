@@ -24,8 +24,9 @@ vendor-assembly-only, and the composed migration gate correctly refuses a
 lineage whose owner is not in the assembly's composition. So `mod_rel` is not in
 this repository's `alembic.ini` and `make test-db-up` does not create it.
 
-The fixture therefore runs `rl_0001`'s own `upgrade()` against the admin
-connection, which is exactly how a vendor assembly will run it. That makes this
+The fixture therefore runs the Release Catalog lineage's own `upgrade()`
+functions against the admin connection, which is exactly how a vendor assembly
+will run it. That makes this
 a stronger test than riding on the assembly's migration chain would have been:
 it proves the lineage stands alone, which is the property a separate consuming
 repository actually depends on.
@@ -53,6 +54,14 @@ _INSERT = text(
     INSERT INTO mod_rel.release_artifacts
         (id, product_code, version, artifact_kind, digest, artifact_ref)
     VALUES (:id, :product, :version, 'container_image', :digest, :ref)
+    """
+)
+
+_INSERT_ATTESTATION = text(
+    """
+    INSERT INTO mod_rel.artifact_attestations
+        (id, artifact_id, attestation_kind, uri, digest)
+    VALUES (:id, :artifact_id, :kind, :uri, :digest)
     """
 )
 
@@ -90,6 +99,9 @@ def catalogue_schema(admin_engine) -> Generator[None, None, None]:
     from dotmac_release_catalog.migrations.versions import (  # type: ignore[import-not-found]
         rl_0001_release_artifacts as lineage,
     )
+    from dotmac_release_catalog.migrations.versions import (  # type: ignore[import-not-found]
+        rl_0002_singular_attestations as singular_attestations,
+    )
 
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -98,10 +110,12 @@ def catalogue_schema(admin_engine) -> Generator[None, None, None]:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
             lineage.upgrade()
+            singular_attestations.upgrade()
     yield
     with admin_engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
+            singular_attestations.downgrade()
             lineage.downgrade()
 
 
@@ -264,6 +278,52 @@ class TestTheReferenceCannotDriftFromTheDigest:
                 "ref": f"registry.example.com/x@{future}",
             },
         )
+        admin_session.rollback()
+
+
+class TestDeclarationAttestationCardinality:
+    def test_raw_sql_cannot_record_two_product_catalogues(
+        self, admin_session: Session, published: uuid.UUID
+    ) -> None:
+        values = {
+            "artifact_id": published,
+            "kind": "product_database_catalog",
+            "uri": "https://example.com/catalog-a.json",
+            "digest": f"sha256:{'d' * 64}",
+        }
+        admin_session.execute(
+            _INSERT_ATTESTATION,
+            {"id": uuid.uuid4(), **values},
+        )
+
+        with pytest.raises(
+            IntegrityError, match="uq_artifact_attestations_singular_kind"
+        ):
+            admin_session.execute(
+                _INSERT_ATTESTATION,
+                {
+                    "id": uuid.uuid4(),
+                    **values,
+                    "uri": "https://example.com/catalog-b.json",
+                    "digest": f"sha256:{'e' * 64}",
+                },
+            )
+        admin_session.rollback()
+
+    def test_raw_sql_may_record_multiple_signatures(
+        self, admin_session: Session, published: uuid.UUID
+    ) -> None:
+        for suffix, character in (("a", "d"), ("b", "e")):
+            admin_session.execute(
+                _INSERT_ATTESTATION,
+                {
+                    "id": uuid.uuid4(),
+                    "artifact_id": published,
+                    "kind": "signature",
+                    "uri": f"https://example.com/signature-{suffix}.json",
+                    "digest": f"sha256:{character * 64}",
+                },
+            )
         admin_session.rollback()
 
 

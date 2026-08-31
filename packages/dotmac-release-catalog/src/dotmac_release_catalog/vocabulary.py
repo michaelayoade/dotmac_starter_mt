@@ -57,7 +57,7 @@ class ArtifactKind(StrEnum):
 class AttestationKind(StrEnum):
     """What a recorded claim about an artifact actually proves.
 
-    Four distinct questions, deliberately not merged into "provenance":
+    Six distinct questions, deliberately not merged into "provenance":
 
     * `SBOM` — what is *inside* the artifact.
     * `PROVENANCE` — how and from what the artifact was *built*.
@@ -65,6 +65,14 @@ class AttestationKind(StrEnum):
     * `PRODUCT_MANIFEST` — which product and capabilities the exact product
       assembly declares. Its document schema is owned by
       `dotmac_kernel.product_manifest`; this enum classifies the attestation.
+    * `MODULE_DATABASE_CATALOG` — which schema, tables and columns one exact
+      reusable module distribution declares. Its document schema is owned by
+      `dotmac_kernel.product_database_catalog`; the claim is complete for that
+      module only and says nothing about a whole product database.
+    * `PRODUCT_DATABASE_CATALOG` — which namespaces, tables and columns that
+      exact product assembly declares. Its document schema is owned by
+      `dotmac_kernel.product_database_catalog`; Release Catalog may classify
+      only a typed canonical snapshot, never an opaque caller-supplied digest.
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -76,6 +84,8 @@ class AttestationKind(StrEnum):
     PROVENANCE = "provenance"
     SIGNATURE = "signature"
     PRODUCT_MANIFEST = "product_manifest"
+    MODULE_DATABASE_CATALOG = "module_database_catalog"
+    PRODUCT_DATABASE_CATALOG = "product_database_catalog"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.

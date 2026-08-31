@@ -89,10 +89,50 @@ consumer never hard-codes a source checkout or reaches into package internals.
 
 `AttestationKind.PRODUCT_MANIFEST` associates a canonical
 `dotmac_kernel.ProductManifestSnapshot` with exact artifact bytes. The
-attestation row stores the document URI and the digest of its exact bytes; this
-module neither fetches nor interprets it. A consumer fetches through its own
-transport, verifies the digest, and parses through the kernel contract.
+publisher calls `attest_product_manifest`; the typed seam checks product code
+and version against the artifact and derives the digest from the canonical
+snapshot bytes. The generic digest-only seam refuses this declaration kind.
+The module never fetches the URI. A consumer fetches through its own transport,
+verifies the digest, and parses through the kernel contract.
 
 Do not record this as `PROVENANCE`. Provenance says how an artifact was built;
 the product manifest says which product and capability vocabulary that build
 declares. Conflating them makes presence of one appear to prove the other.
+
+## Product database-catalog attestations
+
+`AttestationKind.PRODUCT_DATABASE_CATALOG` associates a canonical, typed
+`dotmac_kernel.ProductDatabaseCatalogSnapshot` with exact artifact bytes. It is
+not accepted by the generic `attest_artifact` digest seam. A publisher must call
+`attest_product_database_catalog`, which verifies that the snapshot's product
+code and version match the artifact and computes the attestation digest from
+the snapshot's canonical bytes:
+
+```python
+from dotmac_release_catalog import attest_product_database_catalog
+
+attest_product_database_catalog(
+    db,
+    artifact_id=artifact.id,
+    uri="https://example.com/product-database-catalog.json",
+    snapshot=database_catalog_snapshot,
+)
+```
+
+Release Catalog stores the URI and derived digest; it does not fetch the URI or
+infer structure from a running database. The digest is not a replacement for
+typed content: a consumer fetches the exact bytes, verifies the digest, and
+parses them through the kernel contract before it reasons about namespaces,
+tables or columns.
+
+`MODULE_DATABASE_CATALOG` is a distinct singular claim for one reusable module
+distribution. `attest_module_database_catalog` binds `distribution_name` and
+`distribution_version` to the artifact. The module release and manifest
+contract versions remain separate coordinates; a module claim never implies
+that a whole product database is complete.
+
+A product manifest, module database catalogue and product database catalogue
+are each singular per artifact. Migration `rl_0002_singular_attestations`
+enforces that cardinality with a partial unique index while continuing to allow
+multiple signatures. If existing rows contradict the rule, the migration
+refuses to build the index; it never chooses one declaration as authoritative.

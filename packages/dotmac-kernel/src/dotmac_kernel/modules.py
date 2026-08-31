@@ -73,6 +73,9 @@ from dotmac_kernel.planes import (
     supported_plane_sets as _supported_plane_sets,
 )
 from dotmac_kernel.prerequisites import validate_prerequisites
+from dotmac_kernel.product_database_catalog import (
+    ModuleDatabaseCatalogContributionV1,
+)
 from dotmac_kernel.web_surfaces import WebSurfaceContribution
 
 if TYPE_CHECKING:
@@ -253,6 +256,11 @@ class ModuleManifest:
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
+    # Optional, fully structural release-catalogue contribution. `tables` and
+    # `platform_tables` above remain the one owner of table identity and plane;
+    # this contribution is accepted only when it describes that declaration
+    # exactly. It is last to preserve every historical positional constructor.
+    database_catalog: ModuleDatabaseCatalogContributionV1 | None = None
 
     def __post_init__(self) -> None:
         if not self.code:
@@ -373,6 +381,7 @@ class ModuleManifest:
                 )
             object.__setattr__(self, "supported_plane_sets", supported)
         self._validate_namespace()
+        self._validate_database_catalog()
 
     def _validate_namespace(self) -> None:
         """Stateful and stateless are the only two coherent shapes (D1).
@@ -432,6 +441,47 @@ class ModuleManifest:
                     "(ADR-0023)"
                 )
             seen.add(table)
+
+    def _validate_database_catalog(self) -> None:
+        """Keep structural facts subordinate to the existing table owner.
+
+        Older manifests omit the contribution and continue to load. A product
+        may publish a *complete* database snapshot only after every installed
+        stateful manifest supplies one; that completeness refusal belongs to
+        ``ProductDatabaseCatalogSnapshot.from_assembly``.
+        """
+
+        contribution = self.database_catalog
+        if contribution is None:
+            return
+        if not isinstance(contribution, ModuleDatabaseCatalogContributionV1):
+            raise ModuleRegistryError(
+                f"module {self.code!r} database_catalog must be a "
+                "ModuleDatabaseCatalogContributionV1"
+            )
+        if not self.is_stateful or self.db_schema is None:
+            raise ModuleRegistryError(
+                f"stateless module {self.code!r} cannot contribute database structure"
+            )
+        migration_owner = self.migration_owner()
+        if (
+            migration_owner is None
+            or migration_owner.revision_pattern().fullmatch(contribution.lineage_head)
+            is None
+        ):
+            raise ModuleRegistryError(
+                f"module {self.code!r} database_catalog lineage head "
+                f"{contribution.lineage_head!r} does not belong to its "
+                f"{self.migration_prefix!r} migration lineage"
+            )
+        expected = frozenset((*self.tables, *self.platform_tables))
+        actual = frozenset(table.name for table in contribution.tables)
+        if actual != expected:
+            raise ModuleRegistryError(
+                f"module {self.code!r} database_catalog must reference exactly its "
+                f"existing table declarations; missing={sorted(expected - actual)}, "
+                f"unknown={sorted(actual - expected)}"
+            )
 
     # ── D1 derived views ────────────────────────────────────────────────────
 

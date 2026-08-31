@@ -133,6 +133,7 @@ preserved_tests = [
   "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
   "dotmac_sub:tests/architecture/test_composition.py",
   "dotmac_starter_mt:tests/unit/test_product_manifest.py",
+  "dotmac_starter_mt:tests/unit/test_product_database_catalog.py",
   "dotmac_starter_mt:tests/unit/test_modules.py",
   "dotmac_starter_mt:tests/unit/test_subscriptions_contracts.py",
   "dotmac_starter_mt:tests/unit/test_machine_credentials.py",

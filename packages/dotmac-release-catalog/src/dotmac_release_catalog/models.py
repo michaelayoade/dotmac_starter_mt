@@ -68,6 +68,7 @@ from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -179,6 +180,28 @@ class ArtifactAttestation(Base, TimestampMixin):
             "attestation_kind",
             "digest",
             name="uq_artifact_attestations_artifact_kind_digest",
+        ),
+        # A product manifest, module database catalogue and product database
+        # catalogue each claim the ONE exact declaration document of its kind
+        # for an artifact. Unlike signatures, two rows of any one of these
+        # kinds are contradictory rather than cumulative. Keep the predicate
+        # in both dialects so SQLite service tests exercise the same cardinality
+        # as the PostgreSQL migration.
+        Index(
+            "uq_artifact_attestations_singular_kind",
+            "artifact_id",
+            "attestation_kind",
+            unique=True,
+            postgresql_where=sa.text(
+                "attestation_kind IN "
+                "('product_manifest', 'module_database_catalog', "
+                "'product_database_catalog')"
+            ),
+            sqlite_where=sa.text(
+                "attestation_kind IN "
+                "('product_manifest', 'module_database_catalog', "
+                "'product_database_catalog')"
+            ),
         ),
         schema_table_args(SCHEMA),
     )

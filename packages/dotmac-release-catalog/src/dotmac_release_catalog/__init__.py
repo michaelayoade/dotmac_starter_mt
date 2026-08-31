@@ -34,8 +34,9 @@ is a mutable tag with a different spelling.
 
 ## Writing
 
-`publish_artifact` and `attest_artifact` are the seam, and both route through
-the validators unconditionally. There is no `update_artifact`: the online
+`publish_artifact`, `attest_artifact` and the typed attestation functions are
+the seam, and all route through their validators unconditionally. There is no
+`update_artifact`: the online
 `platform_api` role holds SELECT and INSERT only, so a published artifact cannot
 be rewritten from the request path at all. Correcting one is an offline
 `app_admin` migration under review — a different act, with a different trail.
@@ -71,8 +72,16 @@ from dotmac_release_catalog.models import (
     ReleaseArtifact,
 )
 from dotmac_release_catalog.service import (
+    DuplicateSingularAttestationError,
+    ModuleDatabaseCatalogMismatchError,
+    ProductDatabaseCatalogMismatchError,
+    ProductManifestMismatchError,
+    TypedAttestationRequiredError,
     UnknownArtifactError,
     attest_artifact,
+    attest_module_database_catalog,
+    attest_product_database_catalog,
+    attest_product_manifest,
     publish_artifact,
 )
 from dotmac_release_catalog.vocabulary import (
@@ -95,11 +104,19 @@ __all__ = [
     "AttestationKind",
     "Digest",
     "DigestError",
+    "DuplicateSingularAttestationError",
+    "ModuleDatabaseCatalogMismatchError",
+    "ProductDatabaseCatalogMismatchError",
+    "ProductManifestMismatchError",
     "ReleaseArtifact",
+    "TypedAttestationRequiredError",
     "UnknownArtifactError",
     "UnpinnedReferenceError",
     "__version__",
     "attest_artifact",
+    "attest_module_database_catalog",
+    "attest_product_database_catalog",
+    "attest_product_manifest",
     "module",
     "pinned_reference",
     "publish_artifact",

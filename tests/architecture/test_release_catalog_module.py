@@ -38,10 +38,15 @@ MODULE_ROOT = Path(inspect.getfile(identity)).parent
 PACKAGE_ROOT = MODULE_ROOT.parents[1]
 MIGRATIONS = MODULE_ROOT / "migrations" / "versions"
 LINEAGE = MIGRATIONS / "rl_0001_release_artifacts.py"
+SINGULAR_ATTESTATIONS = MIGRATIONS / "rl_0002_singular_attestations.py"
 
 
 def _migration_source() -> str:
     return LINEAGE.read_text(encoding="utf-8")
+
+
+def _singular_attestations_source() -> str:
+    return SINGULAR_ATTESTATIONS.read_text(encoding="utf-8")
 
 
 # ── D1: the ledger allocation ────────────────────────────────────────────────
@@ -116,12 +121,28 @@ def test_installed_consumer_locates_lineage_through_public_surface() -> None:
     assert "versions_dir" in package.__all__
     assert package.versions_dir() == MIGRATIONS
     assert (package.versions_dir() / "rl_0001_release_artifacts.py").is_file()
+    assert (package.versions_dir() / "rl_0002_singular_attestations.py").is_file()
 
 
 def test_the_revision_id_fits_the_alembic_version_column() -> None:
     """Over-long revision ids do not fail at authoring time — they fail at
     `alembic upgrade`, against a real database."""
     assert len("rl_0001_release_artifacts") <= 32
+    assert len("rl_0002_singular_attestations") <= 32
+
+
+def test_singular_attestations_extend_the_release_catalog_lineage() -> None:
+    tree = ast.parse(_singular_attestations_source())
+    assigned = {
+        target.id: node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert assigned["revision"].value == "rl_0002_singular_attestations"
+    assert assigned["down_revision"].value == "rl_0001_release_artifacts"
+    assert assigned["depends_on"].value is None
 
 
 # ── Identity is content ──────────────────────────────────────────────────────
@@ -156,6 +177,31 @@ def test_an_attestation_records_its_own_digest_not_only_a_uri() -> None:
     """ "The SBOM at this URI" is a mutable tag by another route."""
     columns = {c.name for c in models.ArtifactAttestation.__table__.columns}
     assert {"uri", "digest", "attestation_kind"} <= columns
+
+
+def test_declaration_attestations_are_singular_but_signatures_are_not() -> None:
+    indexes = {
+        index.name: index for index in models.ArtifactAttestation.__table__.indexes
+    }
+    singular = indexes["uq_artifact_attestations_singular_kind"]
+    assert singular.unique is True
+    assert tuple(column.name for column in singular.columns) == (
+        "artifact_id",
+        "attestation_kind",
+    )
+    predicate = str(singular.dialect_options["postgresql"]["where"])
+    assert "product_manifest" in predicate
+    assert "module_database_catalog" in predicate
+    assert "product_database_catalog" in predicate
+    assert "signature" not in predicate
+
+
+def test_singular_migration_refuses_duplicates_without_cleanup() -> None:
+    source = _singular_attestations_source()
+    assert "unique=True" in source
+    assert "product_manifest" in source
+    assert "product_database_catalog" in source
+    assert "DELETE" not in source.upper()
 
 
 # ── Platform catalog, not tenant-scoped ──────────────────────────────────────
@@ -315,7 +361,16 @@ def test_the_write_path_is_the_only_documented_entry_point() -> None:
     no privilege to perform."""
     import dotmac_release_catalog as package
 
-    assert {"publish_artifact", "attest_artifact"} <= set(package.__all__)
+    assert {
+        "publish_artifact",
+        "attest_artifact",
+        "attest_product_database_catalog",
+        "attest_product_manifest",
+        "DuplicateSingularAttestationError",
+        "ProductDatabaseCatalogMismatchError",
+        "ProductManifestMismatchError",
+        "TypedAttestationRequiredError",
+    } <= set(package.__all__)
     assert not {"update_artifact", "delete_artifact"} & set(package.__all__)
 
 

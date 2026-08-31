@@ -4,6 +4,28 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
+## Unreleased
+
+Adds the closed `AttestationKind.MODULE_DATABASE_CATALOG` and
+`AttestationKind.PRODUCT_DATABASE_CATALOG` claims alongside the existing
+`PRODUCT_MANIFEST` claim, with typed `attest_product_manifest`,
+`attest_module_database_catalog` and `attest_product_database_catalog` seams.
+The service accepts kernel-owned canonical snapshots, binds a product
+snapshot's product identity or a module snapshot's distribution identity to
+the artifact, and derives the stored digest from the canonical bytes. The
+generic attestation seam refuses all three singular declaration kinds, so a
+caller cannot launder an opaque digest into a typed product or
+database-structure claim.
+
+No CHECK-constraint migration is needed for the new vocabulary members because
+attestation kinds are stored as text. Migration
+`rl_0002_singular_attestations` adds the partial unique index that makes product
+manifests, module database catalogues and product database catalogues singular
+per artifact. It deliberately refuses pre-existing duplicates instead of
+choosing which immutable claim is authoritative. No package version is
+allocated while the kernel release containing the snapshot contract remains
+unpublished.
+
 ## 0.1.0a4 — 2026-08-15
 
 **The persistence plane is now declared correctly.** This module always built

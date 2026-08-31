@@ -1394,6 +1394,37 @@ specifics) points here and must never fork these rules.
     (ADR-0070 amendment 2026-08-31;
     `tests/unit/test_deployment_foundation_database_transition.py`;
     `tests/unit/test_deployment_foundation_database_drift.py`).
+47. **A product database catalogue is built once from declarations, never
+    derived from a running database.** `ModuleManifest.tables` and
+    `platform_tables` remain the only module table/plane owner. A module's
+    `ModuleDatabaseCatalogContributionV1` may add exact ordered column/type
+    structure only for those names at one lineage head; schema, owner and plane
+    are derived during composition, never repeated in the contribution.
+    `ProductDatabaseCatalogSnapshot` composes every selected stateful module
+    with explicit kernel/assembly/extension host fragments, carries exact
+    schema extent and PostgreSQL major, and refuses omissions, extras,
+    collisions, noncanonical bytes and a host fragment pretending to be a
+    module. PostgreSQL identifiers stay structured fields and preserve quoted
+    catalogue spelling — no joining or splitting on `.`, `:` or `->`.
+
+    Schema v1 is explicitly `tables_and_columns`; it claims no constraints,
+    indexes, triggers, privileges or policies. A module snapshot is separately
+    publishable without claiming unrelated product schemas. The product
+    snapshot remains all-or-nothing. Kernel's observer and digest-bound
+    verifier own the stable observation/comparator IDs; an ID string alone is
+    not structural evidence.
+
+    Release Catalog binds canonical snapshots to exact artifact bytes as the
+    distinct, singular `module_database_catalog` and
+    `product_database_catalog` attestations. It does not author or interpret a
+    live catalogue, and its generic digest-only writer cannot create either
+    typed claim. `ProductManifestSnapshot` remains the independent
+    capability-only contract. The live migration catalogue is a
+    comparator/observer only: disagreement is drift or a failed/unauthorised
+    promotion, never input to regenerating the accepted declaration.
+    (ADR-0017 amendment 2026-08-31;
+    `tests/unit/test_product_database_catalog.py`,
+    `tests/unit/test_release_catalog_service.py`)
 
 ## Everything by config — no hardcoding
 
