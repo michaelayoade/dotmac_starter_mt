@@ -4,6 +4,30 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
+## Unreleased — `0.1.0a4+dev`
+
+**Public typed READ contracts** (`dotmac_release_catalog.facts`): `list_artifacts`
+over a closed, page-bounded `ArtifactFilter`; `get_artifact` returning an
+`ArtifactDetail` with its attestation history and owner-derived permitted
+actions; `artifact_attestations`; and `preview_publication`, which runs the same
+identity validators `publish_artifact` runs and answers as a READ.
+
+Every read answers in frozen dataclasses, never in ORM rows: a surface handed a
+session-bound `ReleaseArtifact` holds an object that lazy-loads on attribute
+access and expires with the transaction, which turns a template into a query
+planner.
+
+What the module DERIVES — `evidence_state`, `attested_kinds`,
+`permitted_actions`, a publication verdict — appears on no input type, so a
+caller has nowhere to assert it. `EvidenceState` deliberately reports
+`signature_recorded` and never "verified": this module does not fetch an
+attestation URI (ADR-0009), so it cannot know that one validated.
+
+**The declared version now carries a PEP 440 local development marker.**
+`0.1.0a4` is published and tagged; `src/` has moved since, and one version may
+not name two sets of importable bytes. The marker allocates nothing and cannot
+be published — the next release allocates a real version.
+
 ## 0.1.0a4 — 2026-08-15
 
 **The persistence plane is now declared correctly.** This module always built

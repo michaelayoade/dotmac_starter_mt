@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-release-catalog"
-version = "0.1.0a4"
+version = "0.1.0a4+dev"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 authors = ["DotMac"]
 readme = "README.md"
