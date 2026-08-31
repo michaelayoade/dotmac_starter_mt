@@ -15,41 +15,6 @@ derived from immutable tags when Michael authorizes the release.
 
 ### Added
 
-<<<<<<< HEAD
-- `dotmac_kernel.facet_principal` — the principal a browser facet ALREADY
-  authenticated, projected so a module-owned surface can attribute an action
-  without authenticating a second time. `FacetPrincipal` carries the facet, the
-  `BrowserSecurityPlane` it was established on, the subject id, the subject as
-  the assembly's provider returned it, and the tenant on the tenant plane;
-  `require_facet_principal(request, plane=...)` refuses, and
-  `facet_principal(request)` is the optional read for a surface that renders
-  differently for an anonymous visitor.
-  - **It is a projection, not an authenticator.** The composed surface
-    dependency already resolves the principal — the tenant path spent it on
-    admission and let it fall out of scope, and the non-tenant path bound it to
-    `_principal` purely to force the dependency to run. So the actor was
-    reachable only by re-reading the cookie, and a second credential read is a
-    second authentication owner wearing a helper's name: it can disagree with
-    the facet about who is acting, and it multiplies where a token fix must
-    land. Six Wave 2 module surfaces each inventing their own is the
-    parallel-authority shape ADR-0024 exists to remove.
-  - **Absent refuses; it never authenticates a fallback.** There is no
-    credential-reading code path in the module at all, asserted structurally by
-    a source scan (with its own positive-sample sensitivity proof) rather than
-    behaviourally, because no behavioural test can show the absence of a path it
-    did not happen to trigger. It imports no authenticator and no database
-    session.
-  - **The wrong security plane refuses, in both directions.** The caller
-    DECLARES the plane it is written for; the guard never infers it from the
-    principal, which would make it agree with whatever it was handed. A
-    tenant-plane identity reaching a platform surface fails loudly rather than
-    being attributed, and the matching-plane positive control is asserted beside
-    each refusal so the guard cannot pass by failing everything.
-  - The public (`none`) plane can neither be recorded nor required, and a
-    tenant-plane principal with no tenant is refused at construction.
-
-- `dotmac_kernel.credential_lifecycle` — the single owner of HUMAN password
-=======
 - `dotmac_kernel.api_documentation` — who may read an assembly's API
   documentation, DECLARED per assembly rather than inherited from FastAPI.
   `create_app` built `FastAPI(title=..., lifespan=...)` and passed none of the
@@ -84,8 +49,39 @@ derived from immutable tags when Michael authorizes the release.
     `ENVIRONMENT=development` has lost a minute, a host that forgot the line has
     published its whole API.
 
-- `dotmac_kernel.facet_principal` — the single owner of HUMAN password
->>>>>>> ab807891 (feat(kernel): API documentation exposure is declared, never inherited)
+- `dotmac_kernel.facet_principal` — the principal a browser facet ALREADY
+  authenticated, projected so a module-owned surface can attribute an action
+  without authenticating a second time. `FacetPrincipal` carries the facet, the
+  `BrowserSecurityPlane` it was established on, the subject id, the subject as
+  the assembly's provider returned it, and the tenant on the tenant plane;
+  `require_facet_principal(request, plane=...)` refuses, and
+  `facet_principal(request)` is the optional read for a surface that renders
+  differently for an anonymous visitor.
+  - **It is a projection, not an authenticator.** The composed surface
+    dependency already resolves the principal — the tenant path spent it on
+    admission and let it fall out of scope, and the non-tenant path bound it to
+    `_principal` purely to force the dependency to run. So the actor was
+    reachable only by re-reading the cookie, and a second credential read is a
+    second authentication owner wearing a helper's name: it can disagree with
+    the facet about who is acting, and it multiplies where a token fix must
+    land. Six Wave 2 module surfaces each inventing their own is the
+    parallel-authority shape ADR-0024 exists to remove.
+  - **Absent refuses; it never authenticates a fallback.** There is no
+    credential-reading code path in the module at all, asserted structurally by
+    a source scan (with its own positive-sample sensitivity proof) rather than
+    behaviourally, because no behavioural test can show the absence of a path it
+    did not happen to trigger. It imports no authenticator and no database
+    session.
+  - **The wrong security plane refuses, in both directions.** The caller
+    DECLARES the plane it is written for; the guard never infers it from the
+    principal, which would make it agree with whatever it was handed. A
+    tenant-plane identity reaching a platform surface fails loudly rather than
+    being attributed, and the matching-plane positive control is asserted beside
+    each refusal so the guard cannot pass by failing everything.
+  - The public (`none`) plane can neither be recorded nor required, and a
+    tenant-plane principal with no tenant is refused at construction.
+
+- `dotmac_kernel.credential_lifecycle` — the single owner of HUMAN password
   credential decisions: provisioning, verification, individually authorized
   reset completion, and approved cohort force reset. Stateless and
   storage-neutral: no ORM, no web framework, no provider client, no network
