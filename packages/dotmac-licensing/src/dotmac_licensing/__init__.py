@@ -58,6 +58,24 @@ each other`).
 
 Receives a `Session`; only `add` and `flush` (hard rule 8).
 
+## Reading
+
+`list_licences` (over a closed, page-bounded `LicenceFilter`), `licence_view`,
+`get_issuance`, `current_issuance`, `acknowledgements`, `issuance_handoff`,
+`signing_keys`, `revocations`, `revocation_lists`, `latest_revocation_list` and
+`inspect_issued_envelope` are the whole read surface, and they answer in the
+typed values of `facts` — never in ORM rows.
+
+`signing_keys` returns key IDs and statuses and NO material of any kind. The
+public half is distributed by `build_keyring`, a protocol artefact a deployment
+verifies with; the private half has no column here at all.
+
+`issuance_handoff` is the Integrator boundary as a type: the envelope and digest
+on the way out, acknowledgements on the way back, and no attempt count, retry
+outcome or connection reference anywhere — those are the transport's, and a
+field for one here would make this module a second delivery authority with no
+honest way to fill it.
+
 ## Public surface
 
 Everything importable from this top-level namespace is stable. Submodules are
@@ -76,11 +94,18 @@ from dotmac_licensing.facts import (
     LICENCE_SUSPENDED_V1,
     PUBLISHED_EVENT_TYPES,
     REVOCATION_LIST_PUBLISHED_V1,
+    AcknowledgementState,
     AcknowledgementView,
     InspectionResult,
+    IssuanceHandoff,
     IssuanceView,
+    LicenceFilter,
+    LicencePage,
+    LicenceSummary,
     LicenceView,
     RevocationListView,
+    RevocationView,
+    SigningKeyView,
 )
 from dotmac_licensing.manifest import module
 from dotmac_licensing.migrations import versions_dir
@@ -129,18 +154,24 @@ from dotmac_licensing.service import (
     expire,
     get_issuance,
     inspect_issued_envelope,
+    issuance_handoff,
     issuances_by_key,
     issue_licence,
+    latest_revocation_list,
     licence_view,
+    list_licences,
     publish_revocation_list,
     register_signing_key,
     reinstate,
+    revocation_lists,
+    revocations,
     revoke_licence,
     set_key_status,
+    signing_keys,
     suspend,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a1+dev"
 
 __all__ = [
     "AUDIT_ACTION_ACKNOWLEDGED",
@@ -161,19 +192,24 @@ __all__ = [
     "AcknowledgeCommand",
     "AcknowledgementOutcome",
     "AcknowledgementRefusedError",
+    "AcknowledgementState",
     "AcknowledgementView",
     "EmptyGrantError",
     "ExpectedStateError",
     "InspectionResult",
     "InstallationReport",
+    "IssuanceHandoff",
     "IssuanceStatus",
     "IssuanceTransitionCommand",
     "IssuanceView",
     "IssueCommand",
     "Licence",
     "LicenceAcknowledgement",
+    "LicenceFilter",
     "LicenceIssuance",
+    "LicencePage",
     "LicenceSigner",
+    "LicenceSummary",
     "LicenceView",
     "LicensableGrant",
     "LicensedCapability",
@@ -182,10 +218,12 @@ __all__ = [
     "RevocationList",
     "RevocationListView",
     "RevocationSupersessionError",
+    "RevocationView",
     "RevokeCommand",
     "SignerRefusedError",
     "SigningKey",
     "SigningKeyStatus",
+    "SigningKeyView",
     "TransitionRefusedError",
     "UnverifiableIssuanceError",
     "__version__",
@@ -197,16 +235,22 @@ __all__ = [
     "expire",
     "get_issuance",
     "inspect_issued_envelope",
+    "issuance_handoff",
     "issuances_by_key",
     "issue_licence",
+    "latest_revocation_list",
     "licence_view",
+    "list_licences",
     "module",
     "publish_revocation_list",
     "register_signing_key",
     "reinstate",
     "require_usable_signers",
+    "revocation_lists",
+    "revocations",
     "revoke_licence",
     "set_key_status",
+    "signing_keys",
     "suspend",
     "versions_dir",
 ]
