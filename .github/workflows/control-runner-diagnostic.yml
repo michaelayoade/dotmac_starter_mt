@@ -1,0 +1,79 @@
+name: Control runner diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: control-runner-diagnostic-starter
+  cancel-in-progress: false
+
+jobs:
+  token-boundary:
+    name: Prove the repository-scoped query identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require own 200, foreign 403 and the exact online runner
+        env:
+          RUNNER_QUERY_TOKEN: ${{ secrets.RUNNER_QUERY_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_runner_token_boundary.py \
+            --own-repository michaelayoade/dotmac_starter_mt \
+            --foreign-repository michaelayoade/dotmac_observability \
+            --runner-name control-runner-starter-mt \
+            --label self-hosted \
+            --label Linux \
+            --label X64 \
+            --label dotmac-control-runner \
+            --label dotmac-foundation-control
+
+  diagnostic:
+    name: Acquire the dedicated Starter runner without a repository secret
+    needs: token-boundary
+    runs-on: [self-hosted, Linux, X64, dotmac-control-runner, dotmac-foundation-control]
+    timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Prove the acquired runner is the intended unprivileged host
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_REPOSITORY}" = "michaelayoade/dotmac_starter_mt"
+          test "${RUNNER_ENVIRONMENT}" = "self-hosted"
+          test "${RUNNER_NAME}" = "control-runner-starter-mt"
+          test "${RUNNER_OS}" = "Linux"
+          test "${RUNNER_ARCH}" = "X64"
+          test "$(id -u)" = "1002"
+          test "$(id -un)" = "ghrun-starter"
+          actual_groups="$(id -Gn | tr ' ' '\n' | LC_ALL=C sort | paste -sd, -)"
+          if test "${actual_groups}" != "ghrun-starter,ghrunners"; then
+            echo "REFUSED: runner group membership is not the declared unprivileged set" >&2
+            exit 1
+          fi
+          if test -n "${RUNNER_QUERY_TOKEN+x}"; then
+            echo "REFUSED: the repository query token crossed into the self-hosted job" >&2
+            exit 1
+          fi
+          if command -v docker >/dev/null 2>&1; then
+            echo "REFUSED: docker is available to the runner identity" >&2
+            exit 1
+          fi
+          if test -S /var/run/docker.sock && { test -r /var/run/docker.sock || test -w /var/run/docker.sock; }; then
+            echo "REFUSED: the Docker socket is usable by the runner identity" >&2
+            exit 1
+          fi
+          if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            echo "REFUSED: passwordless sudo is available to the runner identity" >&2
+            exit 1
+          fi
+          echo "dedicated Starter control runner acquired without a user-provisioned repository secret"
