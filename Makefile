@@ -52,6 +52,8 @@ fleet-facts: ## Re-measure fact-level ownership coverage across ERP/CRM/Sub (sam
 	poetry run python scripts/fleet_fact_registry.py --fleet-root $(FLEET_ROOT) --check
 palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the diff in the same change)
 	poetry run python scripts/palette_debt_baseline.py
+facet-nav-baseline: ## Regenerate the authored-facet-prefix navigation debt baseline (commit the diff in the same change)
+	poetry run python scripts/facet_navigation_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
 	poetry run python scripts/external_connector_sweep.py --write-baseline
 connector-ratchet: ## Run the external-connector ratchet with full coverage disclosure (needs the fleet beside this checkout; not in `check`)
@@ -182,7 +184,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
+	css-build css-watch ui-build ui-check palette-baseline facet-nav-baseline connector-baseline connector-ratchet \
 	credential-baseline credential-ratchet \
 	executor-retirement-check executor-retirement-baseline executor-retirement-receipt \
 	publication-check publication-baseline module-catalog module-catalog-check \
