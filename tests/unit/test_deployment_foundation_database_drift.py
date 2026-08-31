@@ -37,6 +37,7 @@ from dotmac_deployment_foundation.recovery import (
     RoleFact,
     TablespaceDecision,
 )
+from dotmac_deployment_foundation.render.compose import configuration_digest
 from dotmac_deployment_foundation.spec import (
     DatabaseContract,
     DatabaseRole,
@@ -527,5 +528,10 @@ def test_report_binds_the_descriptor_but_does_not_claim_it_matched_across_gaps()
         exclusions=POSTGRES_SYSTEM_EXCLUSIONS,
     )
 
-    assert report.descriptor_digest == spec.to_canonical_document().sha256_digest()
+    # The digest the DEPLOYMENT carries, not one re-derived here. The strict
+    # `to_canonical_document()` refuses a descriptor holding resolved material,
+    # and this repository's own product.toml holds an in-container
+    # `--host 0.0.0.0`, so asserting against it would compare the report to a
+    # document that cannot be built for the descriptor under test.
+    assert report.descriptor_digest == configuration_digest(spec)
     assert report.matched_descriptor_digest == ""

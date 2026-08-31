@@ -22,8 +22,8 @@ from collections.abc import Iterable, Sequence
 from enum import Enum
 from typing import Final
 
-from .document import build_canonical_document
 from .recovery import CatalogEvidence, EffectivePrivilegeFact
+from .render.compose import configuration_digest
 from .spec import DatabaseContract, ProductDeploymentSpec
 
 __all__ = [
@@ -658,21 +658,18 @@ def compare_database_contract(
 
     return DatabaseContractDriftReport(
         phase=phase,
-        # `refuse_resolved_material=False`, exactly as `render/compose.py` does,
-        # and for the same reason it gives: that refusal is about what may be
-        # SENT to deployment control, and it changes no byte of the document --
-        # the digest is identical either way. The strict form trips on an
-        # in-container `--host 0.0.0.0`, which this repository's own
-        # `deploy/product.toml` contains, so using it here would make a drift
-        # report impossible for the very descriptor the deployment identity is
-        # built from.
+        # The renderer owns this digest, and this reuses it rather than
+        # re-deriving it. Deriving it here would mean a SECOND caller of
+        # `refuse_resolved_material=False` -- the exact thing
+        # `test_canonical_document_boundary_flag.py` pins to one site, because
+        # the danger is not the flag but its second caller: the moment
+        # something that really does send a document to Control passes False,
+        # the boundary is gone and the call site looks ordinary.
         #
-        # Binding the SAME digest the rendered identity carries is the point: a
-        # report bound to a digest nothing else references could not be checked
-        # against the deployment it claims to describe.
-        descriptor_digest=build_canonical_document(
-            spec, refuse_resolved_material=False
-        ).sha256_digest(),
+        # Binding the SAME digest the rendered identity carries is also the
+        # point: a report bound to a digest nothing else references cannot be
+        # checked against the deployment it claims to describe.
+        descriptor_digest=configuration_digest(spec),
         declared_fact_count=len(declared),
         observed_fact_count=len(observed),
         findings=tuple(sorted(findings, key=_finding_sort_key)),
