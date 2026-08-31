@@ -323,6 +323,48 @@ specifics) points here and must never fork these rules.
     detector still fires. (ADR-0018; `dotmac_erp` reference implementation:
     `scripts/check_session_context.py` + `session_context_legacy.txt`)
 
+    **Amended 2026-08-31 — SUBJECT, EXTENT, LIFETIME.** A guard makes a claim
+    about a subject, over an extent, for a duration, and each can be wrong
+    INDEPENDENTLY while the other two look fine — all three producing an
+    unmonitored region that reports as covered. One rule, three shapes.
+
+    *Subject:* a guard that checks a NAME rather than the property. `"PYTHONPATH"
+    not in dockerfile` failing on the comment explaining its absence; a ledger
+    test catching its own docstring; a verb detector reading a usage comment as
+    a deployment and drawing a call edge BACKWARDS, because a path mention is
+    symmetric while invocation is not; a ratchet failing on a type-annotation
+    import. Move from a name to a property: parse rather than grep, strip prose
+    before scanning, resolve an identity from metadata. Corollary: a rejection
+    vocabulary other owners import VERBATIM is a published contract, and
+    changing it is a contract change wherever the file lives.
+
+    *Extent:* a hand-maintained list, or authored files while derived artifacts
+    go unchecked. A profile guard enumerated FIVE stateful modules while the
+    assembly composed SIX. And `dotmac_erp` PR #426 (merged `4ab8761d`) asserted
+    a deleted entrypoint's absence scoped to the ROOT compose only, while the
+    rendered sibling still named `/app/entrypoint-monitoring.sh` in every role —
+    a file absent from the image's COPY allowlist. **The rendered project could
+    not have started, and the guard for exactly that defect was looking one file
+    away.** A repository that RENDERS deployment artifacts has TWO populations,
+    and a guard written against the authored one is silent over the deployed
+    one. DERIVE the extent, never declare it.
+
+    *Lifetime:* a relaxation that never names its expiry. ERP carried
+    `require-real-digests: false` while its descriptor already held a real
+    digest; nothing recorded when it should be armed, so it never was. This is
+    the premise rule read carefully — **a premise with no expiry is not
+    enforceable; it is permanent by default while reading as temporary.** The
+    conforming shape names the condition (Vendor CP ADR 0017's stated retirement
+    conditions; this repo's `deployment-adopter.yml` numbered re-enabling
+    conditions).
+
+    Each shape carries a sensitivity proof — fires on the planted defect, silent
+    on the conforming form — and the lifetime guard was introduced over existing
+    debt the way this rule requires, as an exact two-directional ratchet rather
+    than a blanket allow
+    (`tests/architecture/test_guard_subject_extent_lifetime.py`;
+    `docs/inventories/guard-lifetime-baseline.json`)
+
 26. **Starter-owned templates author colour against `var(--dmui-*)`, never a
     literal palette.** A hardcoded Tailwind palette utility (`bg-slate-700`,
     `text-primary-600`, `text-white`) or a raw hex/`rgb()` literal in any
