@@ -22,6 +22,7 @@ from collections.abc import Iterable, Sequence
 from enum import Enum
 from typing import Final
 
+from .document import build_canonical_document
 from .recovery import CatalogEvidence, EffectivePrivilegeFact
 from .spec import DatabaseContract, ProductDeploymentSpec
 
@@ -657,7 +658,21 @@ def compare_database_contract(
 
     return DatabaseContractDriftReport(
         phase=phase,
-        descriptor_digest=spec.to_canonical_document().sha256_digest(),
+        # `refuse_resolved_material=False`, exactly as `render/compose.py` does,
+        # and for the same reason it gives: that refusal is about what may be
+        # SENT to deployment control, and it changes no byte of the document --
+        # the digest is identical either way. The strict form trips on an
+        # in-container `--host 0.0.0.0`, which this repository's own
+        # `deploy/product.toml` contains, so using it here would make a drift
+        # report impossible for the very descriptor the deployment identity is
+        # built from.
+        #
+        # Binding the SAME digest the rendered identity carries is the point: a
+        # report bound to a digest nothing else references could not be checked
+        # against the deployment it claims to describe.
+        descriptor_digest=build_canonical_document(
+            spec, refuse_resolved_material=False
+        ).sha256_digest(),
         declared_fact_count=len(declared),
         observed_fact_count=len(observed),
         findings=tuple(sorted(findings, key=_finding_sort_key)),
