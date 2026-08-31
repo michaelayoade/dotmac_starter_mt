@@ -86,14 +86,13 @@ def drifted() -> list[dict[str, str]]:
     return sorted(out, key=lambda row: row["distribution"])
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--write-baseline", action="store_true")
-    args = parser.parse_args()
+def baseline_document() -> dict:
+    """Render the complete current census while preserving dispositions.
 
-    if not tags():
-        print("REFUSED: this checkout has no tags; every result would be vacuous")
-        return 2
+    This is deliberately a pure return value.  The post-release recorder needs
+    to validate every output before writing any of them, so a helper that writes
+    as a side effect would make an atomic record impossible.
+    """
 
     rows = drifted()
     total = len(released_distributions())
@@ -101,8 +100,8 @@ def main() -> int:
     # Carry forward the DISPOSITION a human wrote for a row that is still
     # drifting. Regeneration must not silently discard the characterisation --
     # a debt list whose reasons evaporate the first time somebody runs the make
-    # target is a list that decays into four bare names nobody can act on. A
-    # row that stopped drifting simply disappears, reason and all.
+    # target is a list that decays into bare names nobody can act on. A row that
+    # stopped drifting simply disappears, reason and all.
     if BASELINE_PATH.exists():
         previous = json.loads(BASELINE_PATH.read_text())
         carried = {
@@ -116,56 +115,72 @@ def main() -> int:
                 continue
             row["disposition"] = prior["disposition"]
             row["reason"] = prior.get("reason", "")
+
+    return {
+        "$comment": [
+            "Released distributions whose src/ tree no longer matches",
+            "the tag of the version they declare. Each row is one",
+            "version naming two different sets of importable bytes.",
+            "",
+            "This is FROZEN DEBT, ratcheted in BOTH directions by",
+            "tests/architecture/",
+            "test_declared_version_matches_published_tree.py: a new",
+            "drifted distribution fails, and a repaired one fails too",
+            "until this file is regenerated, so the count cannot drift",
+            "silently in either direction.",
+            "",
+            "Repair a row by allocating a NEW version, or by moving the",
+            "declared version to a PEP 440 local development marker --",
+            "never by editing a published version's contents, which",
+            "would make one version name two contracts.",
+            "",
+            "",
+            "Every row carries a DISPOSITION and a retirement",
+            "condition, because a debt list without one is a list",
+            "nobody can ever close. A row is not evidence a",
+            "re-release is owed: `accepted-debt` rows are",
+            "docstring-only and clear at that distribution's next",
+            "release, and `not-actionable-here` is repaired by",
+            "removing a retired copy, never by publishing.",
+            "",
+            "A row also says NOTHING about a released MIGRATION.",
+            "That is a different gate",
+            "(tests/architecture/test_released_migrations.py) and a",
+            "different failure: a migration edited after release",
+            "changes what future installations build, while",
+            "alembic_version records only that the revision ran.",
+            "Do not read a row here as covering it.",
+            "",
+            "Dispositions are carried forward on regeneration; a row",
+            "that stops drifting disappears, reason and all.",
+            "Regenerate: make published-source-drift-baseline",
+        ],
+        "released_total": total,
+        "drifted_total": len(rows),
+        "drifted": rows,
+    }
+
+
+def render_baseline() -> str:
+    """Canonical bytes used by both the manual and post-tag writers."""
+
+    return json.dumps(baseline_document(), indent=2) + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--write-baseline", action="store_true")
+    args = parser.parse_args()
+
+    if not tags():
+        print("REFUSED: this checkout has no tags; every result would be vacuous")
+        return 2
+
+    document = baseline_document()
+    rows = document["drifted"]
+    total = document["released_total"]
     if args.write_baseline:
-        BASELINE_PATH.write_text(
-            json.dumps(
-                {
-                    "$comment": [
-                        "Released distributions whose src/ tree no longer matches",
-                        "the tag of the version they declare. Each row is one",
-                        "version naming two different sets of importable bytes.",
-                        "",
-                        "This is FROZEN DEBT, ratcheted in BOTH directions by",
-                        "tests/architecture/",
-                        "test_declared_version_matches_published_tree.py: a new",
-                        "drifted distribution fails, and a repaired one fails too",
-                        "until this file is regenerated, so the count cannot drift",
-                        "silently in either direction.",
-                        "",
-                        "Repair a row by allocating a NEW version, or by moving the",
-                        "declared version to a PEP 440 local development marker --",
-                        "never by editing a published version's contents, which",
-                        "would make one version name two contracts.",
-                        "",
-                        "",
-                        "Every row carries a DISPOSITION and a retirement",
-                        "condition, because a debt list without one is a list",
-                        "nobody can ever close. A row is not evidence a",
-                        "re-release is owed: `accepted-debt` rows are",
-                        "docstring-only and clear at that distribution's next",
-                        "release, and `not-actionable-here` is repaired by",
-                        "removing a retired copy, never by publishing.",
-                        "",
-                        "A row also says NOTHING about a released MIGRATION.",
-                        "That is a different gate",
-                        "(tests/architecture/test_released_migrations.py) and a",
-                        "different failure: a migration edited after release",
-                        "changes what future installations build, while",
-                        "alembic_version records only that the revision ran.",
-                        "Do not read a row here as covering it.",
-                        "",
-                        "Dispositions are carried forward on regeneration; a row",
-                        "that stops drifting disappears, reason and all.",
-                        "Regenerate: make published-source-drift-baseline",
-                    ],
-                    "released_total": total,
-                    "drifted_total": len(rows),
-                    "drifted": rows,
-                },
-                indent=2,
-            )
-            + "\n"
-        )
+        BASELINE_PATH.write_text(render_baseline())
         print(f"wrote {BASELINE_PATH.relative_to(REPO_ROOT)} ({len(rows)} drifted)")
         return 0
 

@@ -665,3 +665,100 @@ def test_a_refused_first_enrolment_does_not_partially_remove_the_ledger(
     assert "one migration prefix" in str(refusal.value)
     assert ledger.read_text(encoding="utf-8") == ledger_before
     assert released.read_text(encoding="utf-8") == released_before
+
+
+def test_kernel_record_consumes_authorization_and_refreshes_source_census(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The a100 post-tag deadlock: the tag adds one released distribution.
+
+    Removing only the publication row leaves main red because the checked-in
+    released-source total still describes the pre-tag tree. The same writer
+    must consume the one-shot authorization and regenerate that census before
+    writing any output.
+    """
+
+    writer = _writer()
+    ledger = tmp_path / "declared-publication-baseline.json"
+    released = tmp_path / "test_released_migrations.py"
+    baseline = tmp_path / "published_source_drift_baseline.json"
+    authorization_path = tmp_path / "kernel-release-authorization.json"
+    ledger.write_text(
+        writer.LEDGER.read_text().replace(
+            '"declared": "0.1.0a99+dev"',
+            '"declared": "0.1.0a100"',
+            1,
+        )
+    )
+    released.write_text(writer.RELEASED_TAGS_MODULE.read_text())
+    baseline.write_text(
+        json.dumps({"released_total": 77, "drifted_total": 4, "drifted": []}) + "\n"
+    )
+    authorization_path.write_text(
+        json.dumps({"$schema": "KernelReleaseAuthorization.v1", "active": {}}) + "\n"
+    )
+
+    class FakeAuthorizationError(RuntimeError):
+        pass
+
+    class FakeAuthorization:
+        KernelReleaseAuthorizationError = FakeAuthorizationError
+
+        @staticmethod
+        def consume_for_release(**coordinates):
+            assert coordinates == {
+                "version": "0.1.0a100",
+                "tag": "dotmac-kernel-v0.1.0a100",
+                "commit": "a" * 40,
+            }
+            return (
+                json.dumps(
+                    {"$schema": "KernelReleaseAuthorization.v1", "active": None},
+                    indent=2,
+                )
+                + "\n"
+            )
+
+    class FakeSourceDrift:
+        @staticmethod
+        def render_baseline():
+            return (
+                json.dumps(
+                    {"released_total": 78, "drifted_total": 4, "drifted": []},
+                    indent=2,
+                )
+                + "\n"
+            )
+
+    monkeypatch.setattr(writer, "LEDGER", ledger)
+    monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released)
+    monkeypatch.setattr(writer, "SOURCE_DRIFT_BASELINE", baseline)
+    monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
+    monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
+    monkeypatch.setattr(
+        writer,
+        "_local_script",
+        lambda name: (
+            FakeAuthorization
+            if name == "kernel_release_authorization"
+            else FakeSourceDrift
+        ),
+    )
+
+    changed = writer.write_record(
+        distribution="dotmac-kernel",
+        version="0.1.0a100",
+        tag="dotmac-kernel-v0.1.0a100",
+        package_dir=None,
+        import_name=None,
+    )
+
+    assert "dotmac-kernel" not in json.loads(ledger.read_text())["unpublished"]
+    assert json.loads(authorization_path.read_text())["active"] is None
+    assert json.loads(baseline.read_text())["released_total"] == 78
+    assert changed == [
+        "removed the dotmac-kernel publication-ledger row",
+        "consumed the kernel release authorization",
+        "recomputed the published-source census from the tagged tree "
+        "(78 released, 4 drifted)",
+    ]

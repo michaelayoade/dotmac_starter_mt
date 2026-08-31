@@ -68,10 +68,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Protocol
+from typing import Final, Protocol
 from uuid import UUID
 
 # ── Errors ──────────────────────────────────────────────────────────────────
+
+
+#: Agreement rows carry promised lines, so the owner bounds one read rather
+#: than relying on every adapter to remember a safe limit.
+#:
+#: They live HERE rather than beside the reader because `facts.AgreementFilter`
+#: bounds `limit` in the TYPE, and `facts` cannot import `service` — `service`
+#: imports `facts`. Both still re-export them, so no caller's import moves.
+DEFAULT_AGREEMENT_PAGE_SIZE: Final[int] = 100
+MAX_AGREEMENT_PAGE_SIZE: Final[int] = 200
 
 
 class AgreementError(ValueError):
@@ -321,6 +331,8 @@ def derive_end_exclusive(expiry_date: date) -> date:
 
 
 __all__ = [
+    "DEFAULT_AGREEMENT_PAGE_SIZE",
+    "MAX_AGREEMENT_PAGE_SIZE",
     "ActivationEvidence",
     "AgreementBoundaryError",
     "AgreementError",

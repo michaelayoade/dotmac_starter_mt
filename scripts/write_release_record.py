@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -68,6 +69,10 @@ LEDGER = REPO_ROOT / "docs" / "inventories" / "declared-publication-baseline.jso
 RELEASED_TAGS_MODULE = (
     REPO_ROOT / "tests" / "architecture" / "test_released_migrations.py"
 )
+SOURCE_DRIFT_BASELINE = (
+    REPO_ROOT / "tests" / "architecture" / "published_source_drift_baseline.json"
+)
+KERNEL_AUTHORIZATION = REPO_ROOT / ".github" / "kernel-release-authorization.json"
 
 #: Where a distribution's migrations live inside its package, if it has any.
 _MIGRATIONS = "src/{import_name}/migrations/versions"
@@ -75,6 +80,18 @@ _MIGRATIONS = "src/{import_name}/migrations/versions"
 
 class ReleaseRecordError(RuntimeError):
     """The record cannot be written, and guessing is not an option."""
+
+
+def _local_script(name: str):
+    path = REPO_ROOT / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"_release_record_{name}", path)
+    if spec is None or spec.loader is None:
+        raise ReleaseRecordError(f"cannot load the local {name} script")
+    module = importlib.util.module_from_spec(spec)
+    # dataclasses resolves a class's annotations through its registered module.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _git(*args: str) -> str:
@@ -516,13 +533,13 @@ def add_released_tag(
                 f"lost the RELEASED_TAGS anchor for {distribution}"
             )
         at = anchor.start() + 1
-        entries = "".join(
+        rendered_entries = "".join(
             _rendered_entry(
                 historical_tag, distribution, historical_commit, historical_digests
             )
             for historical_tag, historical_commit, historical_digests in missing
         )
-        return text[:at] + entries + text[at:], True
+        return text[:at] + rendered_entries + text[at:], True
 
     previously_released = {
         filename
@@ -576,6 +593,10 @@ def write_record(
     new_ledger = ledger_text
     module_text = RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
     new_module = module_text
+    baseline_text = SOURCE_DRIFT_BASELINE.read_text(encoding="utf-8")
+    new_baseline = baseline_text
+    authorization_text = KERNEL_AUTHORIZATION.read_text(encoding="utf-8")
+    new_authorization = authorization_text
     changed: list[str] = []
 
     row = json.loads(ledger_text)["unpublished"].get(distribution)
@@ -621,12 +642,42 @@ def write_record(
                     "the tag oracle"
                 )
 
-    # Validate every premise before either file changes. A refused first
+    if distribution == "dotmac-kernel":
+        authorization = _local_script("kernel_release_authorization")
+        try:
+            new_authorization = authorization.consume_for_release(
+                version=version, tag=tag, commit=commit
+            )
+        except authorization.KernelReleaseAuthorizationError as failure:
+            raise ReleaseRecordError(
+                f"kernel release authorization cannot be consumed: {failure}"
+            ) from failure
+        json.loads(new_authorization)
+
+        source_drift = _local_script("published_source_drift")
+        new_baseline = source_drift.render_baseline()
+        rendered = json.loads(new_baseline)
+        if rendered["released_total"] <= json.loads(baseline_text)["released_total"]:
+            raise ReleaseRecordError(
+                "kernel tag did not increase the released-source census"
+            )
+        changed.append("consumed the kernel release authorization")
+        changed.append(
+            "recomputed the published-source census from the tagged tree "
+            f"({rendered['released_total']} released, "
+            f"{rendered['drifted_total']} drifted)"
+        )
+
+    # Validate every premise before any file changes. A refused first
     # enrolment must not leave a half-repair that hides the stale ledger row.
     if new_ledger != ledger_text:
         LEDGER.write_text(new_ledger, encoding="utf-8")
     if new_module != module_text:
         RELEASED_TAGS_MODULE.write_text(new_module, encoding="utf-8")
+    if new_baseline != baseline_text:
+        SOURCE_DRIFT_BASELINE.write_text(new_baseline, encoding="utf-8")
+    if new_authorization != authorization_text:
+        KERNEL_AUTHORIZATION.write_text(new_authorization, encoding="utf-8")
 
     return changed
 
