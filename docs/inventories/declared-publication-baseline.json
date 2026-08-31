@@ -117,11 +117,6 @@
       "reason": "C3 POLICY-ADOPTION SUPPLY RELEASE. Version a4 adds immutable ORM-free authority, jurisdiction, code, rule/band and classification reads plus exact-replay ensure commands required for ERP to bind reviewed policy identities without importing module models. It does not run ERP's backfill or shadow, move tax authority, or make inclusive, foreign-currency or historical PAYE cohorts admissible. Remove this row only in the oracle-backed a4 release-record change after the protected workflow installs the artifact back and tags the exact revision; ERP must not pin a4 before that release exists.",
       "state": "declared-unpublished"
     },
-    "dotmac-ui": {
-      "declared": "0.1.0a8",
-      "reason": "MAP_FRAME SUPPLY RELEASE. a8 adds the provider-neutral `map_frame` component contract, its inert packaged template and the `map-frame-min-block-size` override token. It is a NEW version rather than a re-publication of a7 because `map_frame` landed on main AFTER dotmac-ui-v0.1.0a7 was published and tagged (peeled 042532d2c80ee7a56b14b71269d15459288312c2), so the tree and the published a7 artifact already disagree; an ERP install-back inspection on 2026-08-29 proved the a7 wheel exposes only EMPTY_STATE. Editing a published version would make one version name two contracts (AGENTS.md rule 34). The slice stays `audit-complete`, not adopted: no product is modified or counted as a consumer here, and no consumer may pin a8 until the protected release-ui workflow publishes it, installs it back from the Forgejo index and tags the exact revision. Remove this row only in the oracle-backed a8 release record.",
-      "state": "declared-unpublished"
-    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
