@@ -120,7 +120,7 @@ from ..spec import (
     Security,
 )
 
-__all__ = ["render_compose", "render_compose_digest"]
+__all__ = ["configuration_digest", "render_compose", "render_compose_digest"]
 
 # ── the scalar quoter ────────────────────────────────────────────────────────
 
@@ -340,6 +340,19 @@ class _Identity:
     manifest_digest: str
     configuration_digest: str
     source_revision: str
+
+
+def configuration_digest(spec: ProductDeploymentSpec) -> str:
+    """The digest a rendered service carries as its configuration identity.
+
+    Public because other facility code legitimately needs to BIND this identity
+    -- a database drift report is checkable only if it names the same digest the
+    deployment carries. It is a thin alias on purpose: the derivation, and the
+    single `refuse_resolved_material=False` call it depends on, stay here, so
+    reuse never becomes a second bypass of that boundary.
+    """
+
+    return _configuration_digest(spec)
 
 
 def _configuration_digest(spec: ProductDeploymentSpec) -> str:

@@ -218,6 +218,47 @@ Enforcement is:
   is built and validated, and must not be described as in production
   (`AGENTS.md` rule 30).
 
+### Amendment — 2026-08-31: database changes promote a declared result
+
+A database-advancing operation carries a pre-authored descriptor transition:
+target, plan digest, starting descriptor digest and result descriptor digest.
+Authorization binds the result, plan and target; the starting digest is the
+independently observed live-state and compare-and-swap precondition. A running
+database is never used to author its descriptor.
+
+The operation either commits in one database transaction or declares an
+ordered descriptor for every durable checkpoint, including the final state. A
+partially committing operation with only a final candidate is refused because
+it leaves recovery with an undeclared intermediate state.
+
+PostgreSQL and the accepted descriptor registry are separate transaction
+domains, so their movement is not described as literally atomic. After the
+database result is observed and before the accepted descriptor is promoted,
+the transition is explicitly `promotion_pending`. Promotion is an idempotent,
+durably recorded compare-and-swap from the starting digest to the result digest
+keyed by transition id. Recovery re-drives that same operation and must recover
+the original promotion event; observing that the pointer already equals the
+result is not itself promotion evidence. A terminal receipt binds both
+descriptors, the plan and target, the database postcondition, and the promotion
+event.
+
+The corresponding drift comparison runs in both directions at preflight,
+postflight and recovery. A live fact missing from the descriptor is as much a
+failure as a declared fact missing from the catalogue. Effective-privilege
+coverage comes from an independently selected audit universe rather than from
+the descriptor's invariants, because the omitted invariant is the Platform CP
+incident shape. A report cannot expose a matched descriptor digest until the
+whole selected universe was answered.
+
+This amendment also records a boundary rather than hiding it:
+`ProductDeploymentSpec.v1` declares schemas, roles, isolation, tablespace
+posture and migration heads, but no exact table or column inventory. Therefore
+the current comparator detects Platform CP's undeclared `mod_deploy` schema,
+six heads and DELETE revocation, while refusing to claim that the schema's
+seven tables and 95 columns match. Those are typed contract gaps until a
+versioned declaration surface owns them; neither a schema name nor an Alembic
+head is accepted as structural proof.
+
 ## What this ADR does not decide
 
 - It does not authorize a production deployment, a host, or an SSH session.

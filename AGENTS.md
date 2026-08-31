@@ -1364,6 +1364,37 @@ specifics) points here and must never fork these rules.
     `tests/architecture/test_executor_retirement_ratchet.py`;
     `tests/unit/test_executor_retirement_receipt.py`)
 
+46. **A database-advancing operation promotes the descriptor it was authorized
+    to produce.** Its candidate is authored before execution and the running
+    database is never used to derive it. Authorization binds the target, plan
+    and result descriptor; the independently observed starting descriptor is a
+    precondition and the compare-and-swap source. The operation either has one
+    database transaction or declares a descriptor for every durable checkpoint,
+    including the final state; otherwise it refuses to start.
+
+    PostgreSQL and the accepted-descriptor registry are separate transaction
+    domains. The state after the database commit and before registry promotion
+    is therefore named `promotion_pending`, not called atomic. Promotion is an
+    idempotent, durably recorded compare-and-swap keyed by transition id, and a
+    terminal receipt binds the starting and result descriptors, target, plan,
+    database postcondition and promotion event. Recovery re-drives the same
+    promotion and cannot infer success merely because the pointer now equals
+    the result.
+
+    Drift comparison is two-way at preflight, postflight and recovery:
+    declared-but-absent and present-but-undeclared both refuse. Its effective-
+    privilege audit extent is selected independently of the descriptor, covers
+    inherited, PUBLIC and column-level reach, and must answer every selected
+    question. A comparison reports `UNMEASURABLE`, never agreement, for a fact
+    the descriptor schema cannot declare. In particular,
+    `ProductDeploymentSpec.v1` currently has no exact table or column contract,
+    so the seven-table/95-column `mod_deploy` plane remains a typed enforcement
+    gap until a versioned declaration surface owns it. Schema presence or an
+    Alembic head is not substituted for that missing structural proof
+    (ADR-0070 amendment 2026-08-31;
+    `tests/unit/test_deployment_foundation_database_transition.py`;
+    `tests/unit/test_deployment_foundation_database_drift.py`).
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
