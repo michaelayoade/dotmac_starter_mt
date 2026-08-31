@@ -35,7 +35,7 @@ from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, PLATFORM_AUDIT_LO
 
 module = ModuleManifest(
     code="entitlement_allocation",
-    version="0.1.0a6",
+    version="0.1.0a6+dev",
     core=False,
     short_code="ealloc",
     migration_prefix="ea",

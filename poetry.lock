@@ -1040,7 +1040,7 @@ url = "packages/dotmac-durable-timers"
 
 [[package]]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a6"
+version = "0.1.0a6+dev"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 optional = false
 python-versions = ">=3.11,<3.14"
