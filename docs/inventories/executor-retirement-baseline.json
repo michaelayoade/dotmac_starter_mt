@@ -3,11 +3,13 @@
     "backlog": [
       "active_executor",
       "displaced",
-      "frozen"
+      "frozen",
+      "reactivation_capable"
     ],
     "reviewed": [
       "non_production_executor",
       "not_an_executor",
+      "reactivates_no_declared_executor",
       "retained_rollback"
     ],
     "terminal": [
@@ -41,6 +43,21 @@
         "docs/operations",
         "docs/ops",
         "runbooks"
+      ],
+      "tree_complete": false
+    },
+    "runtime_reactivation": {
+      "incompleteness_premise": "a supervisor's ENABLEMENT lives on the host, not in the file that configures it: a unit can be installed and disabled, a Compose policy can name a service that is not running, and a @reboot crontab has no in-tree artifact at all",
+      "patterns": [
+        "docker-compose*.yml",
+        "docker-compose*.yaml",
+        "compose*.yml",
+        "compose*.yaml"
+      ],
+      "roots": [
+        "deploy",
+        "compose",
+        "docker"
       ],
       "tree_complete": false
     },
@@ -113,6 +130,10 @@
         "webhook"
       ],
       "families": {
+        "runtime_reactivation": {
+          "not_an_executor": 2,
+          "reactivates_no_declared_executor": 3
+        },
         "script": {
           "active_executor": 1,
           "non_production_executor": 3,
@@ -130,8 +151,11 @@
         "systemd_unit",
         "webhook"
       ],
-      "families_declaration_only": [],
+      "families_declaration_only": [
+        "runtime_reactivation"
+      ],
       "families_present": [
+        "runtime_reactivation",
         "script",
         "workflow"
       ],
@@ -139,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:3d83b4ce024156f9d32188f8f2955fc096168fb1119d03846b7b5aaa11bf55e0",
+      "inventory_digest": "sha256:7967f630b26ba58cb2c646b6ed028f8e66d14df6dc36ff4575b3e4d4968db0d5",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff"

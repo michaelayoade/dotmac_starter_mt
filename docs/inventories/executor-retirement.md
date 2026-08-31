@@ -1,6 +1,6 @@
 # Executor retirement: the entrypoint-family contract, the ratchets, the receipt
 
-**Dated:** 2026-08-30. **Status:** machinery only. **Nothing is retired, frozen,
+**Dated:** 2026-08-30, amended 2026-08-31. **Status:** machinery only. **Nothing is retired, frozen,
 disabled or revoked by this document or by the code it describes.**
 
 - Measurement: `scripts/executor_retirement.py`
@@ -31,7 +31,7 @@ normally.** That rule is why `frozen` is a state with its own evidence and why
 
 ## 1. The entrypoint-family contract
 
-A legacy executor is not one script. Seven families are enumerated by name —
+A legacy executor is not one script. Eight families are enumerated by name —
 never by directory, because a guard scoped to one directory is a guard with a
 known hole (ADR-0018 §1):
 
@@ -44,8 +44,9 @@ known hole (ADR-0018 §1):
 | `ssh_credential` | — | **no** |
 | `webhook` | — | **no** |
 | `manual_runbook` | `docs/runbooks`, `docs/operations`, `runbooks` | **no** |
+| `runtime_reactivation` | repository root, `deploy`, `compose`, `docker` | **no** |
 
-Four of the seven cannot be walked, and each records **why** in its
+Five of the eight cannot be walked, and each records **why** in its
 `incompleteness_premise`. That is not a formality. This programme has already
 found, on a production host, `dotmac-books.service` installed and disabled, an
 `app-dev` Compose service carrying production credentials, and `sync-static.sh`
@@ -252,3 +253,75 @@ of the four whose engine is currently protecting a production deployment.
 Nothing in this repository executes any of that. The products execute their own
 retirements when their two controller cycles are proven, and this is the
 machinery that says whether they were.
+
+
+## 5. Amendment — 2026-08-31
+
+Two additions from ERP's census, ratified by Michael. Full reasoning in
+ADR-0072's dated amendment; the operational summary is here.
+
+### The eighth family: `runtime_reactivation`
+
+**Not** `restart_policy`, and the name is the ruling. `restart: unless-stopped`
+normally restarts *the same container*, which is not a deployment — a family
+named after the policy would describe the wrong thing and sweep in every benign
+case. The executor property is narrower: **it can reactivate a displaced
+executor after reboot.**
+
+So the retirement receipt now owes `no_autonomous_return` — proof the executor
+**cannot come back** — rather than only proof the artifact is gone. A script
+deleted from a tree whose unit is still enabled returns at the next reboot with
+nobody having invoked anything.
+
+Two new dispositions, each checked:
+
+| disposition | premise, and how it is checked |
+| --- | --- |
+| `reactivation_capable` (backlog) | can return a declared executor; `reactivates` must be non-empty and every name must resolve |
+| `reactivates_no_declared_executor` (reviewed) | carries a live directive but returns nothing declared; refused if its own `reactivates` fills in **or** another row names it |
+
+`not_an_executor` in a reactivation-bearing family is refused over an artifact
+carrying a directive. `restart: "no"` correctly does not fire — that is the
+right shape for a one-shot migration service, and a detector firing on it would
+refuse the most carefully written file in the tree.
+
+The Starter declares five rows here, all `reactivates` nothing: its one
+executor is operator-invoked and runs in no container.
+
+### `DisplacementWindow.v1` — attribution, not absence
+
+A quiet window is **not evidence; it is the claim under test**. `poll`,
+`periodic_snapshot` and `quiet_window` are named and REFUSED as event sources,
+so the refusal can say why. The window enumerates every runtime change and
+attributes each to a controller receipt or a typed non-deployment cause. **Zero
+unattributed changes.**
+
+| property | what it catches |
+| --- | --- |
+| bounded, with exact start/end runtime identities | an open or inverted interval |
+| chained — changes must meet, ends must match | a transition the source never saw; completeness is TESTED, not declared |
+| a non-deployment cause must be same-image | a restart that actually changed what is running |
+| `cannot_establish` forces verdict `unmonitored` | a pass with a caveat; an `unmonitored` verdict cannot be committed |
+| both cited cycles must appear inside the window | a cycle the window cannot vouch for |
+
+### Sensitivity: both halves, same reach
+
+The fleet rule now requires both. `test_the_planted_third_executor_change_is_refused`
+strips one attribution from the conforming fixture and the validator refuses;
+`test_a_properly_attributed_window_is_not_refused` runs the same fixture
+unmodified through the same code path and it is admissible. A refusal test alone
+proves the validator can say no; only the pair proves it says no to the right
+thing.
+
+### Calls, not mentions
+
+The eighth family exposed a specificity defect on its first run: a usage
+comment reading `docker compose -f … up` was read as a deployment, and a path
+named in a comment drew a call edge backwards, so a Compose file inherited the
+verbs of the script that deploys it. Whole-line comments are now stripped
+before both verb detection and edge resolution — conservatively, so an inline
+trailing comment keeps its command, because over-stripping produces false
+negatives and those hide executors.
+
+`retired_total` stays **0**. This amendment defines how a retirement is proven;
+it performs none.

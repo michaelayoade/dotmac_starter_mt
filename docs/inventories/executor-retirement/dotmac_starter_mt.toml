@@ -43,7 +43,7 @@ production_targets = [
 
 # Every family named, present or absent. A family nobody named is unmonitored,
 # not empty — which is why the parser refuses an inventory that omits one.
-families_present = ["workflow", "script"]
+families_present = ["workflow", "script", "runtime_reactivation"]
 families_absent = [
   "cron",
   "systemd_unit",
@@ -51,6 +51,11 @@ families_absent = [
   "webhook",
   "manual_runbook",
 ]
+
+# `runtime_reactivation` moved from absent to PRESENT in the 2026-08-31
+# amendment. It was never absent; it was unmodelled, which is a different and
+# worse thing — five Compose files were carrying supervisor directives that no
+# family named, so nothing walked them and nothing could have said so.
 
 # An absence is a POSITIVE CLAIM and needs the observation that established it.
 # Every one below is scoped `repository_tree`, which is the honest limit of what
@@ -390,3 +395,77 @@ trigger = "release workflows, and manual"
 credential = "GITHUB_TOKEN"
 disposition = "not_an_executor"
 premise = "opens a pull request; commands no deployment verb"
+
+# ── runtime_reactivation ────────────────────────────────────────────────────
+#
+# NOT a "restart policy" census. Docker's `restart: unless-stopped` normally
+# brings back THE SAME CONTAINER, which is not a deployment at all — the
+# property that would make one of these an executor is narrower: it can return
+# a DECLARED executor to acting state with nobody invoking anything.
+#
+# Every Starter row below `reactivates` nothing. That is a real finding rather
+# than a formality: the Starter's one executor, `script:deploy.sh`, is invoked
+# by an operator and is not run by any container, so no supervisor here can
+# resurrect it. `reactivates_no_declared_executor` records capability without a
+# subject, and it is checked in BOTH directions — the row's own `reactivates`
+# must be empty AND no other row may name it — because a one-way check is
+# satisfied by declining to fill in your own field.
+
+[[entrypoint]]
+name = "reactivation:docker-compose.yml"
+family = "runtime_reactivation"
+path = "docker-compose.yml"
+trigger = "the container daemon, on host boot or daemon restart"
+credential = "none"
+disposition = "reactivates_no_declared_executor"
+premise = """
+Carries `restart: unless-stopped` on the app service. Reactivates the
+application, which is the deployment's SUBJECT and not a declared executor:
+returning it after a reboot restores service, it does not re-arm anything that
+can deploy.
+"""
+
+[[entrypoint]]
+name = "reactivation:deploy/rendered/docker-compose.yml"
+family = "runtime_reactivation"
+path = "deploy/rendered/docker-compose.yml"
+trigger = "the container daemon, on host boot or daemon restart"
+credential = "none"
+disposition = "reactivates_no_declared_executor"
+premise = """
+The Foundation's rendered topology. Carries `restart: unless-stopped` on the
+long-lived services and `restart: "no"` on the one-shot migration service —
+which is the correct shape and is why the directive detector must not fire on
+`no`. Reactivates no declared executor. This row observes a file this lane does
+not own; the Foundation owns its content and `render --check` guards it.
+"""
+
+[[entrypoint]]
+name = "reactivation:deploy/forgejo/docker-compose.yml"
+family = "runtime_reactivation"
+path = "deploy/forgejo/docker-compose.yml"
+trigger = "the container daemon, on host boot or daemon restart"
+credential = "none"
+disposition = "reactivates_no_declared_executor"
+premise = """
+The private index's own topology. Its services persist across reboots by
+design; none of them is a declared executor.
+"""
+
+[[entrypoint]]
+name = "reactivation:docker-compose.dev.yml"
+family = "runtime_reactivation"
+path = "docker-compose.dev.yml"
+trigger = "a developer running the local stack"
+credential = "none"
+disposition = "not_an_executor"
+premise = "carries no reactivation directive at all; nothing survives a reboot"
+
+[[entrypoint]]
+name = "reactivation:docker-compose.test.yml"
+family = "runtime_reactivation"
+path = "docker-compose.test.yml"
+trigger = "the CI test job"
+credential = "none"
+disposition = "not_an_executor"
+premise = "carries no reactivation directive at all; nothing survives a reboot"
