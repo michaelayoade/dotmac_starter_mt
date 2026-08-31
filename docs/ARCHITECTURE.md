@@ -2757,6 +2757,55 @@ deployment diagnostics; `ProductManifestSnapshot` is deliberately narrower and
 release-portable. The product-first evidence and first retirement gate are in
 `docs/inventories/product-manifest-sources.md`.
 
+### Release-bound product database catalogues
+
+Database table/column structure is a separate build-once release fact. The capability
+manifest above deliberately says nothing about persistence, so it remains
+byte-for-byte unchanged. `ProductDatabaseCatalogSnapshot` instead freezes the
+complete selected database composition for one product release as canonical
+JSON: PostgreSQL major, exact schema extent, typed lineage fragments, relation
+kind, persistence plane, ordered columns, PostgreSQL type identity and
+modifier, nullability, default/identity/generated state, and collation. Its
+digest is the digest of those exact bytes.
+
+Schema v1 says `scope=tables_and_columns`. It makes no claim about constraints,
+indexes, triggers, privileges or policies; those require an explicit later
+contract rather than interpreting absence as agreement.
+
+The ownership chain has no live-database authoring path:
+
+- `ModuleManifest.tables` and `platform_tables` remain the only module table
+  and plane declaration; a module database-catalogue contribution may describe
+  columns only for that exact set, at one named lineage head;
+- `ModuleDatabaseCatalogSnapshot` binds one contribution to distinct
+  distribution, module-release and manifest-contract coordinates. It is
+  independently publishable and never claims unrelated product schemas;
+- `ProductDatabaseCatalogSnapshot.from_assembly` validates the installed module
+  registry and explicit plane selections, derives module schema/owner/plane,
+  composes explicit kernel/assembly/extension host fragments, and refuses any
+  missing, extra or duplicate relation;
+- `dotmac-release-catalog` will associate a typed module snapshot or complete
+  product snapshot with exact artifact bytes as a distinct, singular
+  attestation — NOT YET, and deliberately not in the change that adds this
+  contract. That module is a released distribution whose declared
+  `dotmac-kernel` floor is proved both sufficient and necessary by
+  `scripts/module_floor_check.sh`, and a floor may only name a PUBLISHED
+  kernel. Its adoption follows the kernel release that carries
+  `product_database_catalog`, together with the floor bump; and
+- `dotmac_kernel.database_catalog_comparator` owns the read-only PostgreSQL
+  observation and pure, digest-bound verifier. Its stable IDs are
+  `dotmac.postgresql-tables-columns-observation/v1` and
+  `dotmac.database-catalog-tables-columns-comparator/v1`.
+  `dotmac_kernel.migrations.catalog` retains its RLS/grant authority; neither
+  path derives a declaration from the target.
+
+The human `docs/MODULE_CATALOG.md` remains a generated discovery projection and
+owns none of these facts. `ProductManifestSnapshot` remains the independent
+product/capability attestation. Keeping both documents separate lets a
+stateless contract catalogue publish its capability manifest without acquiring
+an empty or fictitious persistence identity, and lets Release Catalog join
+both claims to the same immutable artifact once it adopts this contract.
+
 ## Module database namespaces and migration lineage (ADR-0006 D1)
 
 As-built in kernel `0.1.0a12`. The authority is `dotmac_kernel.namespaces`; the

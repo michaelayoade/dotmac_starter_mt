@@ -500,6 +500,49 @@ product name and builds the capability catalogue from four manifests, with
 determinism and ownership tests. ERP has only a compatibility probe and CRM has
 no kernel assembly, so neither is allowed to supply guessed product data.
 
+## Amendment, 2026-08-31: database structure is a sibling build attestation
+
+Platform CP supplied the concrete blocked consumer. Its create-only bootstrap
+installed a module schema, advanced six lineages and changed an effective
+privilege while its accepted deployment descriptor continued describing the
+pre-bootstrap database. The repair proved that a release needs an authored
+answer to a second question: not only “which capabilities do these bytes
+declare?”, but “which database structure do these bytes produce?”
+
+That answer is `ProductDatabaseCatalogSnapshot`, a sibling of — never an
+extension to — `ProductManifestSnapshot`. The existing product manifest is a
+capability-only contract consumed by stateless catalogues and stays on schema
+v1 unchanged. A database catalogue is independently optional, typed and
+canonical.
+
+Release Catalog is the intended binder — a complete product snapshot against
+the exact product artifact, a reusable module snapshot against its exact
+distribution artifact, each a distinct singular attestation separate from the
+`product_manifest` claim — and that adoption is deliberately NOT part of this
+change. `dotmac-release-catalog` is a released distribution, and this
+repository proves a released module's declared kernel floor is the earliest
+kernel that can load it. A floor naming a version no tag carries is
+unresolvable, so a module cannot adopt kernel code in the same change that
+introduces it; `dotmac-entitlement-allocation` took the same two steps for
+`PLATFORM_AUDIT_LOG_V1` (kernel first, floor bump after publication). Until
+that second step lands, no artifact carries a database-catalogue attestation
+and the attestation vocabulary is unchanged.
+
+Module table identity and persistence plane stay owned by `ModuleManifest`.
+The module's structural contribution references that exact declaration and
+adds the ordered column/type contract at a named migration head; it cannot
+invent another table, schema, owner or plane. A product build composes those
+fragments with explicit host fragments and fails unless every selected stateful
+module and every exact schema extent is complete. A running database is only
+comparison evidence. It is never an input to snapshot construction.
+
+This is the demand-pulled build-once seam for deployment state. The next
+deployment-descriptor generation binds the contained canonical snapshot and
+digest, and database-advancing operations promote that binding with the
+descriptor they produce. Until that descriptor generation and its comparator
+witness land, this amendment creates no claim that database transition
+atomicity is already enforced.
+
 This amendment does not lift the broader moratorium. The Vendor allocation
 writer remains authoritative until Sub publishes the snapshot, Vendor consumes
 and verifies it, the historical preflight passes, and the legacy allocation

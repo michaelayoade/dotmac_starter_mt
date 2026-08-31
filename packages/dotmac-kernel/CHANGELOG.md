@@ -15,6 +15,17 @@ derived from immutable tags when Michael authorizes the release.
 
 ### Added
 
+- `dotmac_kernel.product_database_catalog` — a separate, canonical build-once
+  database-structure attestation for an exact product release. Module
+  contributions reference the table identities already owned by
+  `ModuleManifest`; schema, declaration owner and persistence plane are derived
+  during composition rather than authored twice. The immutable snapshot binds
+  PostgreSQL major, exact schema extent, lineage heads, relation kinds, ordered
+  columns, structured PostgreSQL type identity and modifiers, nullability,
+  default/identity/generated state, and collation. Parsing refuses unknown or
+  non-canonical bytes, duplicate JSON keys, incomplete stateful modules,
+  duplicate relations, ambiguous plane selection, and host fragments
+  impersonating module owners. `ProductManifestSnapshot` v1 is unchanged.
 - `dotmac_kernel.api_documentation` — who may read an assembly's API
   documentation, DECLARED per assembly rather than inherited from FastAPI.
   `create_app` built `FastAPI(title=..., lifespan=...)` and passed none of the
