@@ -41,9 +41,12 @@ Every field of every descriptor dataclass is normalized by walking
 `dataclasses.fields`, not by a hand-written serializer. A hand-written one is a
 field allow-list wearing a different hat: the next field somebody adds stays
 out of the digest, silently, and the failure is invisible until an unapproved
-change ships under an approved digest. The only exclusion is `compare=False`
-fields — today just `ProductDeploymentSpec.source`, which is the path of the
-machine that happened to read the file.
+change ships under an approved digest. The only machine-local exclusion is
+`compare=False` — today just `ProductDeploymentSpec.source`, the path of the
+reading machine. The descriptor schema is emitted once as the root
+discriminator, not duplicated inside the descriptor object. Fields introduced
+by a later published schema carry version metadata and remain absent from older
+canonical bytes.
 
 ## The five canonicalization rules
 
@@ -74,7 +77,7 @@ from typing import Any, Final
 
 from . import ingress
 from .errors import SpecError
-from .spec import SCHEMA, ProductDeploymentSpec
+from .spec import SCHEMA_V1, SCHEMA_V2, ProductDeploymentSpec
 from .version import VERSION
 
 __all__ = [
@@ -125,7 +128,7 @@ def _canonical(value: Any, *, where: str) -> Any:
     raise SpecError(f"{where}: {type(value).__name__} is not a canonical value")
 
 
-def _normalize(value: Any) -> Any:
+def _normalize(value: Any, *, descriptor_schema: str = SCHEMA_V1) -> Any:
     """Any descriptor value, as canonical JSON data.
 
     Walks `dataclasses.fields` rather than naming fields, so a field added to
@@ -137,7 +140,9 @@ def _normalize(value: Any) -> Any:
         return dict(UNSET)
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
-            field.name: _normalize(getattr(value, field.name))
+            field.name: _normalize(
+                getattr(value, field.name), descriptor_schema=descriptor_schema
+            )
             for field in dataclasses.fields(value)
             # `compare=False` marks a field the descriptor itself does not
             # consider part of its identity. Today that is exactly
@@ -145,11 +150,24 @@ def _normalize(value: Any) -> Any:
             # read the file — digesting it would make the same descriptor
             # produce two digests from two checkouts.
             if field.compare
+            # The descriptor schema is already the canonical document's root
+            # discriminator. Repeating it inside `descriptor` would create two
+            # coordinates that a malformed document could make disagree.
+            and not field.metadata.get("canonical_root_only", False)
+            # A published schema is immutable. Version-gated fields exist on
+            # the shared typed model but are absent from older canonical bytes.
+            and not (
+                field.metadata.get("descriptor_since") == SCHEMA_V2
+                and descriptor_schema == SCHEMA_V1
+            )
         }
     if isinstance(value, list | tuple):
-        return [_normalize(item) for item in value]
+        return [_normalize(item, descriptor_schema=descriptor_schema) for item in value]
     if isinstance(value, dict):
-        return {str(key): _normalize(item) for key, item in value.items()}
+        return {
+            str(key): _normalize(item, descriptor_schema=descriptor_schema)
+            for key, item in value.items()
+        }
     return value
 
 
@@ -273,12 +291,12 @@ def build_canonical_document(
 
     content: dict[str, Any] = {
         "schema": DESCRIPTOR_DOCUMENT_SCHEMA,
-        "descriptor_schema": SCHEMA,
+        "descriptor_schema": spec.descriptor_schema,
         # Rule 5. Not decoration: it is what makes the word "public" mean one
         # specific rendered socket rather than whatever the installed renderer
         # currently thinks.
         "foundation_version": VERSION,
-        "descriptor": _normalize(spec),
+        "descriptor": _normalize(spec, descriptor_schema=spec.descriptor_schema),
         "ingress_policy": ingress_policy_document(spec),
     }
     canonical = _canonical(content, where="document")

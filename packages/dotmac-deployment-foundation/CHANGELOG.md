@@ -1,11 +1,14 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.3.0a2+dev — unreleased development marker
+## Unreleased changes after the 0.3.0a2 candidate — version unallocated
 
-The source tree has diverged from the frozen 0.3.0a2 candidate and therefore
-must not continue claiming the candidate's version. This local-version marker
-allocates no release; the next alpha is allocated only by the release owner
-from immutable publication evidence.
+These changes are not part of the frozen 0.3.0a2 candidate and do not allocate
+or name its successor. The package and runtime metadata deliberately remain
+`0.3.0a2`: that version is an unpublished candidate identity embedded in the
+canonical descriptor and rendered deployment assets, and adding a local
+`+dev` segment would change the evidence it is meant to preserve. The release
+owner allocates the next version from immutable publication evidence. Until
+then, this section records source work only and makes no release claim.
 
 `DatabaseDescriptorTransition.v1` pre-authorizes the descriptor state a
 database operation produces, binds the result to its plan and target, and
@@ -22,9 +25,24 @@ database postcondition and the durable promotion event.
 `compare_database_contract()` adds a descriptor-digest-bound, read-only,
 two-way catalogue comparison with phase-specific refusal classifications,
 exact schema/head/role/isolation comparisons, an independently derived
-effective-privilege audit-universe requirement, typed exclusions, and explicit
-v1 table/column contract gaps. It never derives a descriptor from the running
-database.
+effective-privilege audit-universe requirement and typed exclusions. The
+independent sidecar can bind canonical database catalogues by schema, contained
+path, digest and explicit MODULE or PRODUCT scope to a v1 descriptor digest.
+It deliberately cannot make those coordinates v1 descriptor facts.
+`ProductDeploymentSpec.v2` is the explicit successor: its `[database]` requires
+and digest-covers the coordinates while the v1 reader keeps refusing the key.
+Foundation does not copy their grammar. A separate
+typed comparator result becomes a witness only after an integrated verifier
+runs over held catalogue and observation bytes with complete
+schema/table/column observation. Contract identifiers alone are not provenance:
+Foundation invokes the injected verifier over both held payloads and rechecks
+the returned comparator id, scope, digests and PostgreSQL major. Coordinates
+are then checked against the verified declaration schema, MODULE/PRODUCT scope,
+complete schemas and product code/version; product coordinates
+also bind catalogue product code/version through an explicit descriptor-product
+mapping. Changed structural attributes remain reportable in both set-difference
+directions, while partial scope and the v1 sidecar both withhold a
+whole-descriptor match.
 
 ## 0.3.0a2 — unreleased, and HELD
 

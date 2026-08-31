@@ -53,7 +53,7 @@ drift), `2` usage.
 
 ## The descriptor
 
-`ProductDeploymentSpec.v1` holds **material names and approved pointers, never
+`ProductDeploymentSpec.v1` and `.v2` hold **material names and approved pointers, never
 secret values** — refused at parse time, not at review time. Unknown keys are
 refused rather than ignored, because a typo in `read_only` that silently
 disables a read-only filesystem is exactly the defect this facility removes.
@@ -84,7 +84,8 @@ Refusals worth knowing before you write one:
 ## Layout
 
 ```
-spec.py          ProductDeploymentSpec.v1 — the one thing a product declares
+spec.py          strict ProductDeploymentSpec.v1/v2 readers; v2 adds typed,
+                 digest-bound database catalogue coordinates without changing v1
 ingress.py       IngressPolicy.v1 — exposure vocabulary, address admission,
                  the provider capability matrix, the derived firewall rule
 policy.py        the IngressPolicy.v1 section and the provider-neutral edge
@@ -107,6 +108,8 @@ recovery.py      PostgresRecoveryBundle.v1 - the role closure a dump omits
 database_drift.py pure two-way descriptor/catalogue comparison; an independent
                  privilege audit universe is mandatory and table/column gaps
                  remain explicit until ProductDeploymentSpec can declare them
+database_structure.py typed MODULE/PRODUCT catalogue sidecar and fail-closed
+                 held-bytes verifier seam; v1 never treats the sidecar as a fact
 drift.py         image + config + manifest digests vs the approved plan
 transition.py    DB from/to contract, promotion_pending recovery and terminal
                  compare-and-swap receipt

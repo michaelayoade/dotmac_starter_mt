@@ -71,17 +71,41 @@
   `data_export` may not reach `RESTORABLE` or `PROVED`.
 - `[database]` in `ProductDeploymentSpec.v1`: `DatabaseContract`,
   `DatabaseRole`, `IsolationInvariant`. There is deliberately no `superuser`
-  key on a declared role; adding one would be breaking.
+  key on a declared role; adding one would be breaking. V1 remains immutable
+  and has no catalogue coordinate.
+- `[database]` in `ProductDeploymentSpec.v2`: the v1 fields plus mandatory
+  `[[database.catalogs]]` whenever `[database]` exists. Coordinates are typed,
+  contained and digest-covered. The kernel module schema is valid only at
+  MODULE scope (one complete schema), and the kernel product schema only at
+  PRODUCT scope (all expected schemas); future schemas need an explicit typed
+  registration. Product coordinates also bind catalogue product code/version
+  to the descriptor product, with a decision reference required for aliases.
+  V1 refuses this key rather than partially reading it.
 - Database contract drift: `ObservedDatabaseState`,
   `EffectivePrivilegeAuditUniverse`, `PrivilegeUniverseDerivation`,
   `DatabaseDriftExclusions`, `DatabaseDriftPhase`,
   `DatabaseContractDriftReport`, `DatabaseDriftFinding`,
-  `DatabaseContractGap`, `DatabaseContractGapCode`, and
-  `compare_database_contract()`. A report binds the full canonical descriptor
-  digest, exposes it as `matched_descriptor_digest` only after a complete
-  match, and exits/refuses on an absent privilege audit universe. The current
-  v1 contract cannot declare exact tables or columns, so those dimensions are
-  typed contract gaps rather than facts inferred from a running database.
+  `DatabaseContractGap`, `DatabaseContractGapCode`,
+  `DatabaseCatalogScope`, `DatabaseCatalogCoordinateV1`,
+  `DatabaseCatalogProductIdentityV1`,
+  `DatabaseDescriptorCatalogBindingV1`,
+  `DatabaseStructureComparisonResultV1`, `DatabaseStructureCoverageV1`,
+  `DatabaseStructureFactAttribute`, `DatabaseStructureFactKeyV1`,
+  `DatabaseStructureFindingV1`, `DatabaseStructureObservationEvidenceV1`,
+  `DatabaseStructureWitnessV1`,
+  `accept_database_structure_comparison()` and `compare_database_contract()`.
+  The sidecar binds catalogue coordinates to a v1 descriptor digest without
+  pretending they are inside v1; `ProductDeploymentSpec.v2` embeds the same
+  coordinates. Contract-id allowlists are not an evidence path: acceptance
+  requires an injected typed verifier and invokes it over the held catalogue
+  and observation bytes. The verifier result's exact contract id, fact scope,
+  digests, PostgreSQL major, declaration schema/scope/complete schemas and
+  product code/version are rechecked before normalization. The
+  structural result and `ObservedDatabaseState` must bind the same observation
+  digest and PostgreSQL major. A report exposes `matched_descriptor_digest`
+  only for v2 after complete accepted structural evidence covers every schema;
+  a module-scoped witness is useful evidence but can never masquerade as a
+  whole-product match.
 - `DatabaseDescriptorTransition.v1`,
   `DatabaseDescriptorPromotionPending.v1` and
   `DatabaseDescriptorTransitionReceipt.v1`: the `from`/`to`, plan and target

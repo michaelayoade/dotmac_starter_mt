@@ -22,9 +22,17 @@ from collections.abc import Iterable, Sequence
 from enum import Enum
 from typing import Final
 
+from .database_structure import (
+    DatabaseDescriptorCatalogBindingV1,
+    DatabaseStructureObservationEvidenceV1,
+    DatabaseStructureWitnessV1,
+    StructureFactDimension,
+    StructureFactDirection,
+)
+from .errors import PreconditionFailed
 from .recovery import CatalogEvidence, EffectivePrivilegeFact
 from .render.compose import configuration_digest
-from .spec import DatabaseContract, ProductDeploymentSpec
+from .spec import SCHEMA_V2, DatabaseContract, ProductDeploymentSpec
 
 __all__ = [
     "POSTGRES_SYSTEM_EXCLUSIONS",
@@ -87,6 +95,8 @@ class DatabaseFactDimension(str, Enum):
 class DatabaseContractGapCode(str, Enum):
     TABLE_DECLARATION = "table_declaration_unavailable"
     COLUMN_DECLARATION = "column_declaration_unavailable"
+    PRODUCT_STRUCTURE_COVERAGE = "product_structure_coverage_incomplete"
+    DESCRIPTOR_CATALOG_BINDING = "descriptor_catalog_binding_unavailable"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -261,10 +271,19 @@ class ObservedDatabaseState:
     postgres_major: int
     catalog: CatalogEvidence
     effective_privilege_universe: EffectivePrivilegeAuditUniverse | None = None
+    structure_observation: DatabaseStructureObservationEvidenceV1 | None = None
 
     def __post_init__(self) -> None:
         if self.postgres_major < 1:
             raise ValueError("an observed PostgreSQL major must be positive")
+        if (
+            self.structure_observation is not None
+            and self.structure_observation.postgres_major != self.postgres_major
+        ):
+            raise ValueError(
+                "the structural observation and observed database state bind "
+                "different PostgreSQL majors"
+            )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -611,6 +630,8 @@ def compare_database_contract(
     *,
     phase: DatabaseDriftPhase,
     exclusions: DatabaseDriftExclusions = POSTGRES_SYSTEM_EXCLUSIONS,
+    catalog_binding: DatabaseDescriptorCatalogBindingV1 | None = None,
+    structure_witnesses: tuple[DatabaseStructureWitnessV1, ...] = (),
 ) -> DatabaseContractDriftReport:
     """Compare every currently expressible database fact, in both directions.
 
@@ -622,19 +643,183 @@ def compare_database_contract(
     if contract is None:
         raise ValueError("the accepted descriptor declares no [database] contract")
 
+    descriptor_digest = configuration_digest(spec)
+    structural_findings: list[DatabaseDriftFinding] = []
+    structural_measurement_issues: list[str] = []
+    contract_gaps: tuple[DatabaseContractGap, ...]
+    if catalog_binding is None:
+        if structure_witnesses:
+            raise PreconditionFailed(
+                "a structural witness requires its exact descriptor-catalog binding"
+            )
+        contract_gaps = STRUCTURE_CONTRACT_GAPS
+    else:
+        if not isinstance(catalog_binding, DatabaseDescriptorCatalogBindingV1):
+            raise PreconditionFailed(
+                "catalog_binding must be DatabaseDescriptorCatalogBindingV1"
+            )
+        if catalog_binding.descriptor_digest != descriptor_digest:
+            raise PreconditionFailed(
+                "the catalog sidecar binds a different descriptor digest"
+            )
+        if catalog_binding.product != spec.product:
+            raise PreconditionFailed("the catalog sidecar binds a different product")
+        if catalog_binding.postgres_major != contract.postgres_major:
+            raise PreconditionFailed(
+                "the catalog sidecar binds a different PostgreSQL major"
+            )
+        if set(catalog_binding.expected_schemas) != set(contract.expected_schemas):
+            raise PreconditionFailed(
+                "the catalog sidecar binds a different expected schema extent"
+            )
+        descriptor_binds_catalogs = spec.descriptor_schema == SCHEMA_V2
+        if descriptor_binds_catalogs and catalog_binding.catalogs != contract.catalogs:
+            raise PreconditionFailed(
+                "the catalog evidence binding differs from the coordinates "
+                "embedded in ProductDeploymentSpec.v2"
+            )
+        if not isinstance(structure_witnesses, tuple) or not all(
+            isinstance(witness, DatabaseStructureWitnessV1)
+            for witness in structure_witnesses
+        ):
+            raise PreconditionFailed(
+                "structure_witnesses must be a tuple of "
+                "DatabaseStructureWitnessV1 values"
+            )
+        witnessed_catalogs = tuple(
+            witness.result.catalog for witness in structure_witnesses
+        )
+        if len(set(witnessed_catalogs)) != len(witnessed_catalogs):
+            raise PreconditionFailed(
+                "database structure witnesses repeat a catalog coordinate"
+            )
+        gaps: list[DatabaseContractGap] = []
+        if not descriptor_binds_catalogs:
+            gaps.append(
+                DatabaseContractGap(
+                    code=DatabaseContractGapCode.DESCRIPTOR_CATALOG_BINDING,
+                    dimension=DatabaseFactDimension.SCHEMA,
+                    detail=(
+                        "ProductDeploymentSpec.v1 cannot contain database catalog "
+                        "coordinates. This sidecar is evidence design input, not a "
+                        "descriptor fact; only ProductDeploymentSpec.v2 may make it "
+                        "part of the authorized descriptor and enable a full match"
+                    ),
+                )
+            )
+        covered_schemas: set[str] = set()
+        for catalog in catalog_binding.catalogs:
+            matching = tuple(
+                witness
+                for witness in structure_witnesses
+                if witness.result.catalog == catalog
+            )
+            if not matching:
+                scope = ", ".join(catalog.complete_schemas)
+                gaps.extend(
+                    (
+                        DatabaseContractGap(
+                            code=DatabaseContractGapCode.TABLE_DECLARATION,
+                            dimension=DatabaseFactDimension.TABLE,
+                            detail=(
+                                f"catalog {catalog.path!r} binds complete schemas "
+                                f"[{scope}], but no accepted structural witness "
+                                "proves their independently observed table extent"
+                            ),
+                        ),
+                        DatabaseContractGap(
+                            code=DatabaseContractGapCode.COLUMN_DECLARATION,
+                            dimension=DatabaseFactDimension.COLUMN,
+                            detail=(
+                                f"catalog {catalog.path!r} binds complete schemas "
+                                f"[{scope}], but no accepted structural witness "
+                                "proves their independently observed column extent"
+                            ),
+                        ),
+                    )
+                )
+                continue
+            structural = matching[0].result
+            if structural.descriptor_digest != descriptor_digest:
+                raise PreconditionFailed(
+                    "the structural witness binds a different descriptor digest"
+                )
+            if structural.postgres_major != observation.postgres_major:
+                raise PreconditionFailed(
+                    "the structural witness and observed database state bind "
+                    "different PostgreSQL majors"
+                )
+            if observation.structure_observation is None:
+                raise PreconditionFailed(
+                    "a structural witness requires its exact observation evidence "
+                    "on ObservedDatabaseState"
+                )
+            if structural.observation != observation.structure_observation:
+                raise PreconditionFailed(
+                    "the structural witness was produced from different observation "
+                    "evidence than ObservedDatabaseState"
+                )
+            structural_measurement_issues.extend(structural.measurement_issues)
+            covered_schemas.update(catalog.complete_schemas)
+            for finding in structural.findings:
+                structural_findings.append(
+                    DatabaseDriftFinding(
+                        dimension={
+                            StructureFactDimension.TABLE: DatabaseFactDimension.TABLE,
+                            StructureFactDimension.COLUMN: DatabaseFactDimension.COLUMN,
+                        }[finding.dimension],
+                        direction={
+                            StructureFactDirection.DECLARED_BUT_ABSENT: (
+                                DatabaseFactDirection.DECLARED_BUT_ABSENT
+                            ),
+                            StructureFactDirection.PRESENT_BUT_UNDECLARED: (
+                                DatabaseFactDirection.PRESENT_BUT_UNDECLARED
+                            ),
+                        }[finding.direction],
+                        subject=finding.subject,
+                        declared=finding.declared,
+                        observed=finding.observed,
+                    )
+                )
+        undeclared_witnesses = set(witnessed_catalogs) - set(catalog_binding.catalogs)
+        if undeclared_witnesses:
+            raise PreconditionFailed(
+                "a structural witness binds a database catalog the sidecar "
+                "does not declare"
+            )
+        uncovered = sorted(set(contract.expected_schemas) - covered_schemas)
+        if uncovered:
+            gaps.append(
+                DatabaseContractGap(
+                    code=DatabaseContractGapCode.PRODUCT_STRUCTURE_COVERAGE,
+                    dimension=DatabaseFactDimension.SCHEMA,
+                    detail=(
+                        "structural witnesses do not cover declared schema(s) "
+                        f"{uncovered}; partial module evidence cannot produce a "
+                        "whole-descriptor match"
+                    ),
+                )
+            )
+        contract_gaps = tuple(gaps)
+
     declared = _declared_facts(
         contract,
         expected_heads=spec.migration.expected_heads,
         exclusions=exclusions,
     )
     observed = _observed_facts(observation, exclusions=exclusions)
-    measurement_issues = _audit_issues(
-        observation, declared=declared, exclusions=exclusions
+    measurement_issues = tuple(
+        sorted(
+            set(structural_measurement_issues).union(
+                _audit_issues(observation, declared=declared, exclusions=exclusions)
+            )
+        )
     )
     declared_by_identity = {fact.identity: fact.value for fact in declared}
     observed_by_identity = {fact.identity: fact.value for fact in observed}
 
     findings: list[DatabaseDriftFinding] = []
+    findings.extend(structural_findings)
     for fact in declared - observed:
         findings.append(
             DatabaseDriftFinding(
@@ -669,10 +854,10 @@ def compare_database_contract(
         # Binding the SAME digest the rendered identity carries is also the
         # point: a report bound to a digest nothing else references cannot be
         # checked against the deployment it claims to describe.
-        descriptor_digest=configuration_digest(spec),
+        descriptor_digest=descriptor_digest,
         declared_fact_count=len(declared),
         observed_fact_count=len(observed),
         findings=tuple(sorted(findings, key=_finding_sort_key)),
         measurement_issues=measurement_issues,
-        contract_gaps=STRUCTURE_CONTRACT_GAPS,
+        contract_gaps=contract_gaps,
     )

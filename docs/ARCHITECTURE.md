@@ -606,12 +606,38 @@ written ahead of the code.
 **Database drift is a pure two-way comparison, not a catalogue-to-descriptor
 generator.** `database_drift.py` compares the accepted descriptor with a frozen
 `CatalogEvidence` snapshot and reports declared-but-absent and
-present-but-undeclared facts separately for the dimensions
-`ProductDeploymentSpec.v1` can express. Effective privilege comparison is
+present-but-undeclared facts separately. Effective privilege comparison is
 unmeasurable without a typed audit universe derived independently from the
-descriptor. Exact tables and columns are also reported as contract gaps: the v1
-database contract declares neither, and live production may verify a future
-candidate but may never author it.
+descriptor. An independent `DatabaseDescriptorCatalogBindingV1` sidecar can
+bind one or more release-contained catalogues by schema/path/digest to the
+existing descriptor digest. A catalogue is explicitly module-scoped over one
+complete schema or product-scoped over every expected schema. The two kernel v1
+schema identifiers have exact, non-interchangeable scopes; an unknown future
+schema is refused until its reader and scope are explicitly registered. A
+product coordinate binds the catalogue product code and version to the exact
+descriptor product, and any code alias requires a declared decision reference.
+The sidecar is a
+typed migration seam, not a v1 descriptor fact. `ProductDeploymentSpec.v2` is
+the explicit successor: when it declares `[database]`, it requires and
+digest-covers those coordinates while the v1 reader continues to refuse them.
+
+Foundation does not parse those bytes or redefine their grammar. A separately
+owned typed comparator and live observer must be invoked by an integrated
+verifier over the held catalogue and observation bytes. A caller-supplied
+result plus recognizable contract strings is not provenance and cannot mint a
+witness. The result binds the exact observation identity also held by
+`ObservedDatabaseState`, including PostgreSQL major, and carries typed
+schema/table/column facts plus explicit completeness. Foundation invokes the
+injected kernel verifier over both held payloads, then rechecks its factory-only
+result's comparator id, fact scope, digests, PostgreSQL major, declaration
+schema/scope/complete schemas and product code/version. Verified witnesses compose
+by covered schema and carry drift findings in both directions. A
+`mod_deploy` witness can prove its
+seven-table/95-column slice, but it cannot expose `matched_descriptor_digest`
+while `public` or another expected schema remains uncovered—and no sidecar can
+expose it for v1 at all. V2 may expose it only after recognized witnesses cover
+every expected schema. The current `CatalogEvidence` has no table/column
+inventory and cannot produce such a witness.
 
 **The provider seam is where a host lives, and there is exactly one provider.**
 `engine/run.py` defines `Effects` — nineteen methods, no implementation — and
