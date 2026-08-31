@@ -24,12 +24,18 @@ from __future__ import annotations
 import dotmac_ui
 import pytest
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.templating import install_stylesheets, templates
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
 from app.assembly import _presentation_stylesheets, assembly
 from app.main import app
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +158,7 @@ def test_runtime_brand_css_loads_after_design_system_defaults() -> None:
 def test_api_only_deployments_advertise_no_stylesheet() -> None:
     create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="api-only-probe",
             modules=(),
             web_enabled=False,
@@ -174,6 +181,7 @@ def test_the_stylesheet_url_is_same_origin_and_cache_busted() -> None:
 @pytest.mark.parametrize("spec_field", ["packaged_static_dirs", "stylesheets"])
 def test_the_new_spec_slots_are_normalised_to_tuples(spec_field: str) -> None:
     spec = ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name="probe",
         modules=(),
         packaged_static_dirs=[dotmac_ui.static_dir()],

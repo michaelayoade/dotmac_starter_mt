@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.outbox_event_types import (
     DuplicateOutboxEventTypeError,
@@ -12,6 +13,11 @@ from dotmac_kernel.outbox_event_types import (
     UndeclaredOutboxEventTypeError,
     active_outbox_event_types,
 )
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 def _manifest(code: str, *event_types: str) -> ModuleManifest:
@@ -56,6 +62,7 @@ def test_legacy_feature_manifest_without_the_new_field_contributes_nothing() -> 
 def test_create_app_installs_the_registry_from_the_installed_module_set() -> None:
     create_app(
         ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
             name="event-types",
             modules=[_manifest("billing", "billing.invoice_due")],
         )

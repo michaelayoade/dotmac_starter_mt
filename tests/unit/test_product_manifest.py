@@ -12,6 +12,12 @@ from dotmac_kernel import (
     ProductManifestError,
     ProductManifestSnapshot,
 )
+from dotmac_kernel.api_documentation import api_documentation_policy
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 def _assembly(
@@ -20,6 +26,7 @@ def _assembly(
     manifests: tuple[FeatureManifest, ...] | None = None,
 ) -> ProductAssemblySpec:
     return ProductAssemblySpec(
+        api_documentation=_DOCS_POLICY,
         name=name,
         modules=manifests
         or (

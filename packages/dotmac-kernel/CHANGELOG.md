@@ -15,6 +15,7 @@ derived from immutable tags when Michael authorizes the release.
 
 ### Added
 
+<<<<<<< HEAD
 - `dotmac_kernel.facet_principal` — the principal a browser facet ALREADY
   authenticated, projected so a module-owned surface can attribute an action
   without authenticating a second time. `FacetPrincipal` carries the facet, the
@@ -48,6 +49,43 @@ derived from immutable tags when Michael authorizes the release.
     tenant-plane principal with no tenant is refused at construction.
 
 - `dotmac_kernel.credential_lifecycle` — the single owner of HUMAN password
+=======
+- `dotmac_kernel.api_documentation` — who may read an assembly's API
+  documentation, DECLARED per assembly rather than inherited from FastAPI.
+  `create_app` built `FastAPI(title=..., lifespan=...)` and passed none of the
+  four suppression arguments, so every assembly over this kernel served a
+  complete, unauthenticated description of its own API — including deployments
+  whose ingress proxies `/` wholesale.
+  - **`ProductAssemblySpec.api_documentation` is REQUIRED**; `create_app`
+    refuses to build without it. A kernel default would be an exposure nobody
+    declared, chosen by the party with the least information about where the
+    deployment sits — which is the inherited behaviour being repaired.
+  - **Suppressed at construction, not repaired afterwards.** Extracted
+    product-first from `vendor_cp.api_documentation`
+    (`dotmac_platform_control_plane` PR #94, head `cbc433cf`), which had to
+    delete routes and clear attributes after the factory returned because it did
+    not own the constructor. The kernel does, so the route surgery is dropped: a
+    route that is never mounted cannot be missed by a later filter, re-added by
+    a subsequent `include_router`, or depend on the order two post-hoc steps run
+    in. The audit half is kept verbatim, because it asks a different question —
+    the arguments are what the assembly meant, `audit_api_documentation` reads
+    what it serves.
+  - **Two planes, never mixed.** `PLATFORM_BEARER` is expressible only for the
+    DOCUMENT plane: a browser navigating to `/docs` sends no `Authorization`
+    header, so the only way to make a bearer-gated page "work" is a session
+    cookie — the cookie/bearer confusion this prevents. No documentation route
+    may carry a cookie-transport guard under any exposure.
+  - **Resolution fails closed.** Only the enumerated development and test
+    spellings publish; UNSET, blank, a typo and `staging` all resolve to
+    `production`, which mounts no browser pages and serves the OpenAPI document
+    only behind `require_platform_admin`. Deliberately stricter than
+    `Settings.environment` (defaults to development) and `Settings.is_production`
+    (treats `staging` as non-production): a developer who must type
+    `ENVIRONMENT=development` has lost a minute, a host that forgot the line has
+    published its whole API.
+
+- `dotmac_kernel.facet_principal` — the single owner of HUMAN password
+>>>>>>> ab807891 (feat(kernel): API documentation exposure is declared, never inherited)
   credential decisions: provisioning, verification, individually authorized
   reset completion, and approved cohort force reset. Stateless and
   storage-neutral: no ORM, no web framework, no provider client, no network
