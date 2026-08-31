@@ -6,12 +6,12 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased
+## 0.1.0a100 — 2026-08-31
 
-**No version is allocated by this change.** The Kernel/UI release train is
-unresolved, and two lanes competing for one version number is how a consumer
-ends up unable to say which `a99` it pinned. The version for this surface is
-derived from immutable tags when Michael authorizes the release.
+The version is the numeric successor of the immutable a99 tag. It becomes an
+allocated release only through `KernelReleaseAuthorization.v1`; this heading
+records the already-landed contents before the authorization binds their exact
+bytes.
 
 ### Added
 
@@ -130,6 +130,16 @@ derived from immutable tags when Michael authorizes the release.
     `PasswordPolicyPort`, `CredentialAuditPort`. Principal kinds, applications,
     credentials, reason codes and approval decisions are OPAQUE strings the
     engine never parses or branches on.
+
+### Release integrity
+
+- `KernelReleaseAuthorization.v1` binds the protected-main base, previous
+  annotated tag, next numeric alpha and normalized release-input digest before
+  a version can lose its `+dev` marker. The authorization-only commit and its
+  immediate allocation child are verified again at build, publish, registry
+  read-back and tag creation, then consumed by the automatic release record.
+- The post-tag recorder deterministically refreshes the released-source census,
+  so a new kernel tag cannot leave protected main red on a stale count.
 
 ### Safety and compatibility
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "KernelReleaseAuthorization.v1",
+  "$comment": [
+    "A kernel release is authorized by a protected, authorization-only commit.",
+    "The next commit may allocate exactly the bound version and mechanical",
+    "version surfaces; the protected release workflow then builds those exact",
+    "bytes once. The post-tag recorder consumes the authorization.",
+    "",
+    "An empty active value means no unreleased kernel version is authorized."
+  ],
+  "active": null
+}
