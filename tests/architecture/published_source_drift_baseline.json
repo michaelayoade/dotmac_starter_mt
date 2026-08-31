@@ -37,8 +37,8 @@
     "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
-  "released_total": 75,
-  "drifted_total": 4,
+  "released_total": 74,
+  "drifted_total": 3,
   "drifted": [
     {
       "distribution": "dotmac-brand-profiles",
@@ -57,15 +57,6 @@
       "head_tree": "b87541286f8a85219ea52dac2c60e879655b05cf",
       "disposition": "not-actionable-here",
       "reason": "This directory is a RETIRED COPY awaiting extraction step 10, and the consuming assembly pins a6 rather than the a2 declared here. Nothing to repair in this repository: the row disappears when the copy is removed by that extraction step. Do NOT re-release to make it match."
-    },
-    {
-      "distribution": "dotmac-licensing",
-      "version": "0.1.0a1",
-      "tag": "dotmac-licensing-v0.1.0a1",
-      "published_tree": "b45bf1b536ee2374a575e0feed65a67ef17606dc",
-      "head_tree": "2c175210e070f15ab9d75caaba25e9a742e86bd7",
-      "disposition": "accepted-debt",
-      "reason": "Docstring-only, ahead of the tag; the published wheel matches what a consumer installs. No re-release is warranted for prose. CLEARS AT THE NEXT RELEASE of this distribution, which will tag the current bytes."
     },
     {
       "distribution": "dotmac-numbering",

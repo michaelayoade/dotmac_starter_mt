@@ -64,7 +64,7 @@ from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, PLATFORM_AUDIT_LO
 
 module = ModuleManifest(
     code="licensing",
-    version="0.1.0a1",
+    version="0.1.0a1+dev",
     core=False,
     short_code="licensing",
     migration_prefix="li",

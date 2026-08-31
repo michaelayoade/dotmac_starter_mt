@@ -75,7 +75,7 @@ from dotmac_kernel.licensing import (
     verify_revocation_list,
 )
 from dotmac_kernel.messaging import enqueue_platform_event, process_once_platform
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from dotmac_licensing import facts
@@ -1272,6 +1272,210 @@ def inspect_issued_envelope(
     )
 
 
+def signing_keys(db: Session) -> tuple[facts.SigningKeyView, ...]:
+    """Every registered key, as an IDENTIFIER and a status. No material.
+
+    Distinct from `build_keyring`, and the difference is who is asking.
+    `build_keyring` produces the protocol artefact a deployment verifies with
+    and necessarily carries public material; this answers an operator screen,
+    which needs to know which key signed a licence and whether it is still
+    active. Keeping them separate means no future surface can render key
+    material by accident.
+    """
+    rows = db.execute(select(SigningKey).order_by(SigningKey.key_id)).scalars().all()
+    return tuple(
+        facts.SigningKeyView(
+            key_id=row.key_id, status=row.status, registered_at=row.created_at
+        )
+        for row in rows
+    )
+
+
+def revocations(db: Session) -> tuple[facts.RevocationView, ...]:
+    """Every revoked lineage, newest last.
+
+    Ordered by `(created_at, id)`, a total order: two revocations recorded in
+    one transaction share a timestamp, and a list that reorders itself between
+    two renders is not a record.
+    """
+    rows = (
+        db.execute(select(Revocation).order_by(Revocation.created_at, Revocation.id))
+        .scalars()
+        .all()
+    )
+    return tuple(
+        facts.RevocationView(
+            id=row.id,
+            licence_id=row.licence_id,
+            reason=row.reason,
+            actor_ref=row.actor_ref,
+            revoked_at=row.created_at,
+        )
+        for row in rows
+    )
+
+
+def _revocation_list_view(row: RevocationList) -> facts.RevocationListView:
+    return facts.RevocationListView(
+        id=row.id,
+        list_version=row.list_version,
+        digest=row.digest,
+        key_id=row.key_id,
+        entry_count=row.entry_count,
+        envelope=row.envelope,
+    )
+
+
+def revocation_lists(db: Session) -> tuple[facts.RevocationListView, ...]:
+    """Every published revocation snapshot, oldest version first.
+
+    Ordered by `list_version`, which a unique constraint already makes total. A
+    receiver only ever accepts a list at or above the version it holds, so the
+    version sequence IS the history — showing it out of order would misreport
+    which snapshot a deployment is allowed to be on.
+    """
+    rows = (
+        db.execute(select(RevocationList).order_by(RevocationList.list_version))
+        .scalars()
+        .all()
+    )
+    return tuple(_revocation_list_view(row) for row in rows)
+
+
+def latest_revocation_list(db: Session) -> facts.RevocationListView | None:
+    """The highest published list version, or nothing published yet."""
+    row = db.execute(
+        select(RevocationList).order_by(RevocationList.list_version.desc()).limit(1)
+    ).scalar_one_or_none()
+    return _revocation_list_view(row) if row is not None else None
+
+
+def issuance_handoff(db: Session, issuance_id: UUID) -> facts.IssuanceHandoff | None:
+    """What the issuer hands a transport, and what it has heard back.
+
+    The boundary as a read. Everything on the way out is this module's — the
+    signed envelope, its digest, the key that signed it, the deployment it is
+    bound to. Everything on the way back is an acknowledgement a receiver
+    reported.
+
+    `acknowledgement_state` is not a delivery state, and the type says why: this
+    module ends at a signed envelope and resumes at an acknowledgement, so
+    "nothing reported" is exactly that and never "undelivered".
+    """
+    row = db.get(LicenceIssuance, issuance_id)
+    if row is None:
+        return None
+    receipts = acknowledgements(db, issuance_id)
+    if not receipts:
+        state = facts.AcknowledgementState.AWAITING
+    elif any(
+        receipt.outcome == AcknowledgementOutcome.REJECTED.value for receipt in receipts
+    ):
+        # A rejection anywhere in the history is the answer an operator needs
+        # first, even if a later report applied: something refused this version
+        # once, and that is what a support question is about.
+        state = facts.AcknowledgementState.REJECTED
+    else:
+        state = facts.AcknowledgementState.ACKNOWLEDGED
+    return facts.IssuanceHandoff(
+        issuance_id=row.id,
+        licence_id=row.licence_id,
+        licence_version=row.version,
+        subject_ref=row.licence.subject_ref,
+        product_code=row.licence.product_code,
+        digest=row.digest,
+        key_id=row.key_id,
+        deployment_ref=row.deployment_ref,
+        envelope=row.envelope,
+        acknowledgement_state=state,
+        receipts=receipts,
+        receipt_references=tuple(receipt.digest for receipt in receipts),
+    )
+
+
+def list_licences(
+    db: Session, filter: facts.LicenceFilter | None = None
+) -> facts.LicencePage:
+    """One page of licence lineages matching a typed, closed filter.
+
+    Answers `LicenceSummary`, not `LicenceView`: the latter carries every
+    issuance in the lineage, which is right for a detail screen and is a nested
+    page per row on a list.
+
+    Ordering is by `(subject_ref, product_code, id)`. Not `created_at`, which is
+    not unique: a pager over an unstable order shows one row twice and skips
+    another as the estate grows under it, which reads as data loss rather than
+    as a sorting bug.
+    """
+    criteria = filter if filter is not None else facts.LicenceFilter()
+    conditions: list[ColumnElement[bool]] = []
+    if criteria.subject_ref is not None:
+        conditions.append(Licence.subject_ref == criteria.subject_ref)
+    if criteria.product_code is not None:
+        conditions.append(Licence.product_code == criteria.product_code)
+    if criteria.revoked is True:
+        conditions.append(
+            select(Revocation.id).where(Revocation.licence_id == Licence.id).exists()
+        )
+    elif criteria.revoked is False:
+        conditions.append(
+            ~select(Revocation.id).where(Revocation.licence_id == Licence.id).exists()
+        )
+    if criteria.issuance_status is not None:
+        conditions.append(
+            select(LicenceIssuance.id)
+            .where(
+                LicenceIssuance.licence_id == Licence.id,
+                LicenceIssuance.status == criteria.issuance_status,
+            )
+            .exists()
+        )
+    if criteria.key_id is not None:
+        conditions.append(
+            select(LicenceIssuance.id)
+            .where(
+                LicenceIssuance.licence_id == Licence.id,
+                LicenceIssuance.key_id == criteria.key_id,
+            )
+            .exists()
+        )
+
+    total = db.execute(
+        select(func.count()).select_from(Licence).where(*conditions)
+    ).scalar_one()
+    rows = (
+        db.execute(
+            select(Licence)
+            .where(*conditions)
+            .order_by(Licence.subject_ref, Licence.product_code, Licence.id)
+            .offset((criteria.page - 1) * criteria.page_size)
+            .limit(criteria.page_size)
+        )
+        .scalars()
+        .all()
+    )
+    return facts.LicencePage(
+        licences=tuple(_licence_summary(db, row) for row in rows),
+        total=int(total),
+        page=criteria.page,
+        page_size=criteria.page_size,
+    )
+
+
+def _licence_summary(db: Session, row: Licence) -> facts.LicenceSummary:
+    current = max(row.issuances, key=lambda item: item.version, default=None)
+    return facts.LicenceSummary(
+        id=row.id,
+        subject_ref=row.subject_ref,
+        product_code=row.product_code,
+        generation=row.generation,
+        revoked=_is_revoked(db, row.id),
+        issuance_count=len(row.issuances),
+        current_version=current.version if current is not None else None,
+        current_status=current.status if current is not None else None,
+    )
+
+
 __all__ = [
     "AUDIT_ACTION_ACKNOWLEDGED",
     "AUDIT_ACTION_ISSUED",
@@ -1297,13 +1501,19 @@ __all__ = [
     "expire",
     "get_issuance",
     "inspect_issued_envelope",
+    "issuance_handoff",
     "issuances_by_key",
     "issue_licence",
+    "latest_revocation_list",
     "licence_view",
+    "list_licences",
     "publish_revocation_list",
     "register_signing_key",
     "reinstate",
+    "revocation_lists",
+    "revocations",
     "revoke_licence",
     "set_key_status",
+    "signing_keys",
     "suspend",
 ]
