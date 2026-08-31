@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from dotmac_kernel.api_documentation import ApiDocumentationPolicy
 from dotmac_kernel.modules import AnyManifest
 from dotmac_kernel.permission_provisioning import RoleDefinition, RoleGrantProfile
 from dotmac_kernel.planes import (
@@ -156,6 +157,14 @@ class ProductAssemblySpec:
     # administration offline; that is a product surface decision and must not
     # require deleting FastAPI routes after the factory has validated them.
     platform_surface_enabled: bool = True
+    # Who may read this assembly's API documentation. REQUIRED: `create_app`
+    # refuses to build when this is None, because FastAPI mounts /docs, /redoc
+    # and /openapi.json by default and a kernel-chosen fallback would be an
+    # exposure nobody declared -- the inherited default that
+    # `dotmac_kernel.api_documentation` exists to end. An assembly that takes
+    # its exposure from the deployment environment declares
+    # `environment_api_documentation_policy()`.
+    api_documentation: ApiDocumentationPolicy | None = None
     # Whole-portal surface switch — mount the admin/HTML surface or run API-only.
     web_enabled: bool = True
     # Interactive-browser composition (ADR-0006, 2026-08-25 amendment).  The

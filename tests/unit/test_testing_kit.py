@@ -13,6 +13,7 @@ from uuid import UUID
 import pytest
 import sqlalchemy as sa
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.models import Base
 from dotmac_kernel.providers.provisioning import (
@@ -31,6 +32,11 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 def _public_tables():
@@ -80,7 +86,11 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
     engine = create_test_engine(tables=_public_tables())
     try:
         with isolated_session(engine) as session:
-            app = create_app(ProductAssemblySpec(name="kit-test", modules=()))
+            app = create_app(
+                ProductAssemblySpec(
+                    api_documentation=_DOCS_POLICY, name="kit-test", modules=()
+                )
+            )
             with assembly_test_client(app, session=session) as client:
                 resp = client.get("/health")
                 assert resp.status_code == 200

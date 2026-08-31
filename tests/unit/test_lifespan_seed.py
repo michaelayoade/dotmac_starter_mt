@@ -22,11 +22,17 @@ import sys
 
 import pytest
 from dotmac_kernel import create_app
+from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.app_factory import _run_enabled_seeds
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import FeatureManifest
 from fastapi.testclient import TestClient
+
+#: Test assemblies declare the development policy explicitly: the kernel
+#: refuses to build without one, and a fallback would be the inherited
+#: exposure `api_documentation` exists to end.
+_DOCS_POLICY = api_documentation_policy("development")
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +85,12 @@ def _drive_lifespan(app) -> None:
 
 def _app_with(manifest: FeatureManifest):
     return create_app(
-        ProductAssemblySpec(name="seed_test", modules=[manifest], web_enabled=True)
+        ProductAssemblySpec(
+            api_documentation=_DOCS_POLICY,
+            name="seed_test",
+            modules=[manifest],
+            web_enabled=True,
+        )
     )
 
 

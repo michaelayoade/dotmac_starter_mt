@@ -31,6 +31,13 @@ from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from dotmac_kernel.api_documentation import (
+    ApiDocumentationPolicyViolation,
+    DocumentationExposure,
+    audit_api_documentation,
+    documentation_arguments,
+    mount_bearer_protected_document,
+)
 from dotmac_kernel.assembly import ProductAssemblySpec, StartupHook
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.capabilities import (
@@ -651,7 +658,37 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             logger.warning("Tenancy: %s", err)
         yield
 
-    app = FastAPI(title=spec.name, lifespan=lifespan)
+    # Who may read this assembly's API documentation is DECLARED, never
+    # inherited. FastAPI mounts /docs, /docs/oauth2-redirect, /redoc and
+    # /openapi.json by default; this factory used to pass none of the four
+    # suppression arguments, so every assembly over this kernel served a
+    # complete unauthenticated description of its own API.
+    #
+    # Refusing an absent policy is the load-bearing half. A default here would
+    # be a kernel-chosen exposure nobody declared -- exactly the inheritance
+    # being repaired -- and it would be chosen by the party with the least
+    # information about where the deployment sits.
+    if spec.api_documentation is None:
+        raise RuntimeError(
+            f"product assembly {spec.name!r} declares no api_documentation "
+            "policy. FastAPI publishes /docs, /redoc and /openapi.json by "
+            "default, so there is no safe fallback for the kernel to choose: "
+            "set ProductAssemblySpec.api_documentation, e.g. "
+            "environment_api_documentation_policy() to resolve it from "
+            "ENVIRONMENT (which fails closed to production)"
+        )
+    documentation_policy = spec.api_documentation
+
+    app = FastAPI(
+        title=spec.name,
+        lifespan=lifespan,
+        **documentation_arguments(documentation_policy),
+    )
+    # FastAPI can only mount the document unguarded, so a bearer-protected
+    # document is suppressed above and mounted here behind the platform guard.
+    # Nothing is deleted: the guarded route is the only one that ever exists.
+    if documentation_policy.document is DocumentationExposure.PLATFORM_BEARER:
+        mount_bearer_protected_document(app)
 
     # Installed-module inventory for health/diagnostics consumers. The kernel
     # exposes the CONTRACT on app state, not an endpoint: public `/health` below
@@ -767,6 +804,17 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # permission codes. Fails the boot, before the app is ever returned.
     _validate_referenced_permissions(app, permission_plan)
     _validate_referenced_capabilities(app, capability_catalogue)
+    # The arguments above are what the assembly MEANT; this reads what it
+    # actually serves, after every router is mounted. A policy nobody applied
+    # fails here just as loudly as a policy applied wrongly, and a later
+    # `include_router` that re-introduces a documentation path is caught.
+    documentation_violations = audit_api_documentation(app, documentation_policy)
+    if documentation_violations:
+        raise ApiDocumentationPolicyViolation(
+            f"product assembly {spec.name!r} serves API documentation its "
+            "declared policy forbids: " + "; ".join(documentation_violations)
+        )
+
     return app
 
 
