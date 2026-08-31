@@ -581,9 +581,19 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `DisplacementWindow.v1` proves the negative half by ATTRIBUTION rather than
     absence: every runtime change linked to a controller receipt or a typed
     same-image cause, zero unattributed, a quiet window refused as an event
-    source, and `cannot_establish` forcing UNMONITORED. Products own their
-    receipts; there is no registry here. — `AGENTS.md` rule **45** (amended
-    2026-08-31); ADR-0072; `docs/inventories/executor-retirement.md`.
+    source, and `cannot_establish` forcing UNMONITORED.
+    `SshCredentialConstraintV1` characterises every SSH key rather than counting
+    it, and a RETAINED rollback key must be source-restricted,
+    forced-command-only and incapable of an interactive shell — because this
+    model retains the legacy executor's bytes, so a rollback credential outlives
+    every retirement. Compose sanction is ENTRY-POINT IDENTITY resolved from
+    installed distribution metadata — never a path, filename or declared
+    premise — with the unsanctioned set ratcheted to empty and an unresolvable
+    distribution reported UNMONITORED. `ADOPTION_TARGETS` names repositories,
+    never hosts, and a production host retaining a rollback credential must have
+    one. Products own their receipts; there is no registry here. —
+    `AGENTS.md` rule **45** (amended twice, 2026-08-31); ADR-0072;
+    `docs/inventories/executor-retirement.md`.
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

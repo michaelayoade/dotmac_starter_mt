@@ -163,17 +163,28 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:7967f630b26ba58cb2c646b6ed028f8e66d14df6dc36ff4575b3e4d4968db0d5",
+      "inventory_digest": "sha256:e64ea036556617d0a69515a36ce23242970096475341161d190eccf4428f943f",
       "measured_from": "working tree",
       "retired_total": 0,
-      "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff"
+      "revision": "fccb10244dd13e4dd46ef7df73fb7da94f4d59ff",
+      "unsanctioned_compose_mutation_paths": [
+        "script:deploy.sh",
+        "script:deployment_rehearsal.sh",
+        "workflow:ci",
+        "workflow:deployment-adopter",
+        "workflow:deployment-conformance",
+        "workflow:deployment-rehearsal"
+      ],
+      "unsanctioned_compose_mutations": 6
     }
   },
   "receipt_schema": "ExecutorRetirementReceipt.v1",
   "retired_total": 0,
+  "sanctioned_compose_distribution": "dotmac-deployment-foundation",
   "schema_version": 1,
   "unadopted": [
     "dotmac_erp",
-    "dotmac_sub"
+    "dotmac_sub",
+    "dotmac_vendor_control_plane"
   ]
 }
