@@ -18,7 +18,6 @@ import tomllib
 from pathlib import Path
 from types import ModuleType
 
-import pytest
 from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
 from dotmac_numbering import models, service
 from dotmac_numbering.manifest import module
@@ -286,15 +285,18 @@ def test_the_freeze_is_also_a_database_trigger() -> None:
     assert "start_value" not in migration.split("_IDENTITY_COLUMNS")[1].split(")")[0]
 
 
-def test_freeze_sql_rejects_identifiers_outside_the_declared_planes() -> None:
-    migration = _migration_module()
-    with pytest.raises(ValueError, match="declared plane"):
-        migration._freeze_function_sql(
-            "mod_numbering.hostile",
-            "series_counters; DROP TABLE tenants",
-            "allocation_receipts",
-            "tenant",
-        )
+# `test_freeze_sql_rejects_identifiers_outside_the_declared_planes` lived here.
+# It asserted a `_ALLOWED_FREEZE_ARGUMENTS` allowlist inside
+# `nu_0001_numbering.py` -- but that allowlist was added to a migration ALREADY
+# RELEASED as `dotmac-numbering-v0.1.0a2`, and `dotmac_erp` pins a2 and composes
+# this lineage. One revision id naming two file contents is a worse defect than
+# the inert defensive validation was a benefit, so the file was restored to its
+# released bytes and this test went with it.
+#
+# The validation is not forbidden -- it is welcome in a NEW revision, where it
+# describes bytes no installation has run yet. It may not be re-applied to
+# nu_0001. The identifiers it guarded are module-level literals naming one of
+# two declared planes; nothing reaches them from outside this file.
 
 
 def test_the_migration_mirrors_the_critical_validation_in_check_constraints() -> None:
