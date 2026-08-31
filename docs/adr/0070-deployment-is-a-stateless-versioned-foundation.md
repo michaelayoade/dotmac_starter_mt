@@ -250,14 +250,47 @@ the descriptor's invariants, because the omitted invariant is the Platform CP
 incident shape. A report cannot expose a matched descriptor digest until the
 whole selected universe was answered.
 
-This amendment also records a boundary rather than hiding it:
-`ProductDeploymentSpec.v1` declares schemas, roles, isolation, tablespace
-posture and migration heads, but no exact table or column inventory. Therefore
-the current comparator detects Platform CP's undeclared `mod_deploy` schema,
-six heads and DELETE revocation, while refusing to claim that the schema's
-seven tables and 95 columns match. Those are typed contract gaps until a
-versioned declaration surface owns them; neither a schema name nor an Alembic
-head is accepted as structural proof.
+This amendment also records a boundary rather than hiding it.
+`ProductDeploymentSpec.v1` is already published and is not redefined to accept
+a new key. An independent `DatabaseDescriptorCatalogBindingV1` sidecar can bind
+canonical database-catalogue schema/path/digest coordinates to its descriptor
+digest. Each coordinate names either one complete MODULE schema or every
+expected schema as a PRODUCT catalogue. A sidecar is not a descriptor fact and
+can never enable v1's whole-descriptor matched digest.
+
+The kernel module and product v1 schema identifiers are paired exactly with
+MODULE and PRODUCT scope respectively; a future schema needs a new explicit
+registration. A product coordinate binds catalogue product code and version to
+the exact descriptor product and requires a decision reference when those codes
+are intentionally aliases.
+
+`ProductDeploymentSpec.v2` is the explicit successor rather than a silent v1
+expansion. The v1 parser still refuses `database.catalogs` and its canonical
+bytes omit the version-gated field. V2 requires at least one coordinate whenever
+`[database]` exists, embeds it in the canonical descriptor, and may reach a
+whole-descriptor match only after recognized witnesses cover every expected
+schema.
+
+Foundation owns neither catalogue grammar nor live collection. Structural
+acceptance must invoke an integrated verifier over the held catalogue and
+observation bytes, not trust a freely constructed result because its comparator
+and observer strings look known. The result and `ObservedDatabaseState` bind
+the same immutable observation identity and PostgreSQL major, report changed
+attributes as both set-difference directions, and require explicit complete
+schema, table and column extent. Foundation invokes that dependency-inverted
+verifier with the held payloads and rechecks its factory-only result's contract
+id, fact scope, digests, PostgreSQL major, declaration schema/scope/complete
+schemas and product code/version before normalizing its typed facts.
+
+Scoped evidence stays scoped. The Deployment Control catalogue can prove the
+seven tables and 95 columns in `mod_deploy` without waiting for every module,
+but that witness cannot expose the whole descriptor's matched digest while
+`public` or another declared schema lacks structural coverage. Current
+`CatalogEvidence` cannot create the witness because it carries no table or
+column inventory. A product must compose the kernel-owned observer and pass the
+matching module or product verifier into Foundation; a schema name or contract
+id alone is not an adapter and proves nothing. Neither a schema name nor an
+Alembic head is substituted for structural proof.
 
 ## What this ADR does not decide
 
