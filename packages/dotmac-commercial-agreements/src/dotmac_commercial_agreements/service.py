@@ -75,6 +75,8 @@ from dotmac_commercial_agreements.models import (
     AgreementStatus,
 )
 from dotmac_commercial_agreements.ports import (
+    DEFAULT_AGREEMENT_PAGE_SIZE,
+    MAX_AGREEMENT_PAGE_SIZE,
     ActivationEvidence,
     AgreementError,
     AgreementPeriod,
@@ -110,10 +112,55 @@ SCOPE_AMEND = "commercial_agreement.amend"
 
 _ENTITY = "commercial_agreement"
 
-#: Agreement rows carry promised lines, so the owner bounds one read rather
-#: than relying on every adapter to remember a safe limit.
-DEFAULT_AGREEMENT_PAGE_SIZE: Final[int] = 100
-MAX_AGREEMENT_PAGE_SIZE: Final[int] = 200
+
+# ── The lifecycle table ─────────────────────────────────────────────────────
+
+#: Which statuses each lifecycle command may be issued FROM.
+#:
+#: One table, read by BOTH the write guards below and by the permitted-actions
+#: read. That is the point: a surface asks this module what may be done, and the
+#: answer comes from the same data that refuses the command — so a screen cannot
+#: offer an action the write path would reject, and cannot hide one it would
+#: allow. A second copy in a template would disagree the moment a status moved
+#: between the render and the click.
+#:
+#: `AMEND` is every non-terminal status: the predecessor may be draft, proposed,
+#: approved, active or suspended, and a terminal agreement is superseded by a
+#: NEW agreement rather than amended.
+_PERMITTED_FROM: Final[Mapping[facts.AgreementAction, frozenset[str]]] = {
+    facts.AgreementAction.PROPOSE: frozenset({AgreementStatus.DRAFT.value}),
+    facts.AgreementAction.APPROVE: frozenset({AgreementStatus.PROPOSED.value}),
+    facts.AgreementAction.REJECT: frozenset({AgreementStatus.PROPOSED.value}),
+    facts.AgreementAction.ACTIVATE: frozenset({AgreementStatus.APPROVED.value}),
+    facts.AgreementAction.SUSPEND: frozenset({AgreementStatus.ACTIVE.value}),
+    facts.AgreementAction.REINSTATE: frozenset({AgreementStatus.SUSPENDED.value}),
+    facts.AgreementAction.CANCEL: frozenset(
+        {AgreementStatus.DRAFT.value, AgreementStatus.PROPOSED.value}
+    ),
+    facts.AgreementAction.TERMINATE: frozenset(
+        {AgreementStatus.ACTIVE.value, AgreementStatus.SUSPENDED.value}
+    ),
+    facts.AgreementAction.EXPIRE: frozenset(
+        {AgreementStatus.ACTIVE.value, AgreementStatus.SUSPENDED.value}
+    ),
+    facts.AgreementAction.AMEND: frozenset(status.value for status in AgreementStatus)
+    - TERMINAL_STATUSES,
+}
+
+
+def _from_states(action: facts.AgreementAction) -> frozenset[str]:
+    return _PERMITTED_FROM[action]
+
+
+def _sole_from(action: facts.AgreementAction) -> str:
+    """The single legal source status of a transition that has exactly one.
+
+    Unpacking rather than indexing a sorted list on purpose: if the table ever
+    grows a second source for one of these, this raises at import instead of
+    silently enforcing whichever member happened to sort first.
+    """
+    (state,) = _PERMITTED_FROM[action]
+    return state
 
 
 # ── Commands ────────────────────────────────────────────────────────────────
@@ -581,7 +628,7 @@ def propose(
         row = _load(session, command.agreement_id)
         _require_expected(
             row,
-            expected_status=AgreementStatus.DRAFT.value,
+            expected_status=_sole_from(facts.AgreementAction.PROPOSE),
             expected_version=command.expected_version,
         )
         if not row.lines:
@@ -644,7 +691,7 @@ def approve(db: Session, command: ApproveCommand) -> facts.AgreementView:
         row = _load(session, command.agreement_id)
         _require_expected(
             row,
-            expected_status=AgreementStatus.PROPOSED.value,
+            expected_status=_sole_from(facts.AgreementAction.APPROVE),
             expected_version=command.expected_version,
         )
         _require_bound_approval(row, command.evidence)
@@ -684,7 +731,7 @@ def reject(db: Session, command: TransitionCommand) -> facts.AgreementView:
         row = _load(session, command.agreement_id)
         _require_expected(
             row,
-            expected_status=AgreementStatus.PROPOSED.value,
+            expected_status=_sole_from(facts.AgreementAction.REJECT),
             expected_version=command.expected_version,
         )
         row.accepted_snapshot = None
@@ -733,7 +780,7 @@ def activate(db: Session, command: ActivateCommand) -> facts.AgreementView:
         row = _load(session, command.agreement_id)
         _require_expected(
             row,
-            expected_status=AgreementStatus.APPROVED.value,
+            expected_status=_sole_from(facts.AgreementAction.ACTIVATE),
             expected_version=command.expected_version,
         )
         _require_bound_approval(row, command.approval_evidence)
@@ -794,7 +841,7 @@ def suspend(db: Session, command: TransitionCommand) -> facts.AgreementView:
         db,
         command,
         scope=SCOPE_SUSPEND,
-        allowed=frozenset({AgreementStatus.ACTIVE.value}),
+        allowed=_from_states(facts.AgreementAction.SUSPEND),
         to=AgreementStatus.SUSPENDED,
         event_type=facts.AGREEMENT_SUSPENDED_V1,
         reason_field="suspension_reason",
@@ -807,7 +854,7 @@ def reinstate(db: Session, command: TransitionCommand) -> facts.AgreementView:
         db,
         command,
         scope=SCOPE_REINSTATE,
-        allowed=frozenset({AgreementStatus.SUSPENDED.value}),
+        allowed=_from_states(facts.AgreementAction.REINSTATE),
         to=AgreementStatus.ACTIVE,
         event_type=facts.AGREEMENT_REINSTATED_V1,
     )
@@ -819,9 +866,7 @@ def cancel(db: Session, command: TransitionCommand) -> facts.AgreementView:
         db,
         command,
         scope=SCOPE_CANCEL,
-        allowed=frozenset(
-            {AgreementStatus.DRAFT.value, AgreementStatus.PROPOSED.value}
-        ),
+        allowed=_from_states(facts.AgreementAction.CANCEL),
         to=AgreementStatus.CANCELLED,
         event_type=facts.AGREEMENT_CANCELLED_V1,
     )
@@ -837,10 +882,7 @@ def terminate(db: Session, command: TerminateCommand) -> facts.AgreementView:
             expected_status=command.expected_status,
             expected_version=command.expected_version,
         )
-        _require_status(
-            row,
-            frozenset({AgreementStatus.ACTIVE.value, AgreementStatus.SUSPENDED.value}),
-        )
+        _require_status(row, _from_states(facts.AgreementAction.TERMINATE))
         if not command.impact_acknowledged:
             raise EvidenceRefusedError(
                 f"terminating agreement {row.id} requires an acknowledged impact "
@@ -895,10 +937,7 @@ def expire(
             expected_status=command.expected_status,
             expected_version=command.expected_version,
         )
-        _require_status(
-            row,
-            frozenset({AgreementStatus.ACTIVE.value, AgreementStatus.SUSPENDED.value}),
-        )
+        _require_status(row, _from_states(facts.AgreementAction.EXPIRE))
         if as_of <= row.expiry_date:
             raise TransitionRefusedError(
                 f"agreement {row.id} expires {row.expiry_date}; it is not expired "
@@ -954,7 +993,7 @@ def amend(
             expected_status=None,
             expected_version=command.expected_version,
         )
-        if predecessor.status in TERMINAL_STATUSES:
+        if predecessor.status not in _from_states(facts.AgreementAction.AMEND):
             raise TransitionRefusedError(
                 f"agreement {predecessor.id} is {predecessor.status!r}; a terminal "
                 "agreement is superseded by a new agreement, never amended"
@@ -1062,29 +1101,113 @@ def family(db: Session, agreement_family_id: UUID) -> tuple[facts.AgreementView,
     return tuple(_view(row) for row in rows)
 
 
+def _permitted_actions(row: Agreement) -> tuple[facts.AgreementAction, ...]:
+    """What may legally be done to this agreement next, decided by the owner.
+
+    Read from `_PERMITTED_FROM`, the SAME table the write guards enforce, plus
+    the two conditions that are properties of the row rather than of its status:
+
+    * `PROPOSE` needs promised lines — `propose` refuses an empty agreement, and
+      offering the button on one would be an invitation to a refusal.
+    * `AMEND` needs an unsuperseded predecessor; a family branches once.
+
+    `APPROVE` additionally requires a frozen snapshot for the evidence to bind
+    to. Reaching `proposed` is what freezes it, so the check is defensive rather
+    than load-bearing — but a row that somehow lacked one would otherwise be
+    offered an approval `_require_bound_approval` must then refuse.
+    """
+    actions: list[facts.AgreementAction] = []
+    for action, sources in _PERMITTED_FROM.items():
+        if row.status not in sources:
+            continue
+        if action is facts.AgreementAction.PROPOSE and not row.lines:
+            continue
+        if action is facts.AgreementAction.APPROVE and not row.content_hash:
+            continue
+        if action is facts.AgreementAction.AMEND and row.superseded_by_id is not None:
+            continue
+        actions.append(action)
+    return tuple(actions)
+
+
+def detail(db: Session, agreement_id: UUID) -> facts.AgreementDetail | None:
+    """One agreement, its lifecycle timeline, and what may be done to it next.
+
+    `expected_version` and `expected_status` are this module's reading of the
+    row at read time, carried so a surface hands them straight back on the
+    command it issues. That is what turns a concurrent edit into an
+    `ExpectedStateError` refusal instead of a lost update — the round trip is
+    only reliable when the values travel with the thing being looked at.
+    """
+    row = db.get(Agreement, agreement_id)
+    if row is None:
+        return None
+    return facts.AgreementDetail(
+        agreement=_view(row),
+        timeline=history(db, agreement_id),
+        permitted_actions=_permitted_actions(row),
+        expected_version=row.record_version,
+        expected_status=row.status,
+    )
+
+
 def list_agreements(
     db: Session,
+    filter: facts.AgreementFilter | None = None,
     *,
     after: UUID | None = None,
     limit: int = DEFAULT_AGREEMENT_PAGE_SIZE,
 ) -> facts.AgreementPage:
-    """Read a bounded deterministic page of the complete agreement estate.
+    """Read a bounded deterministic page of the agreement estate.
 
     Agreement id is the stable total key. The ``limit + 1`` probe distinguishes
     a full final page from a page that really has a successor without a count
     query. Views and promised lines are materialized before return; no ORM row
     or lazy loader crosses the module boundary.
+
+    ONE reader, two ways of naming a page. `filter` is the closed typed shape a
+    surface uses and the one that bounds `limit` in the type;
+    ``after=``/``limit=`` is the a1 keyword form, kept because published callers
+    use it, and it simply builds the same filter. There is deliberately no
+    second list implementation — a parallel reader would be a second read
+    authority over these tables with its own drift.
+
+    Naming the page twice is refused rather than silently resolved: a caller
+    that passed both a filter and a cursor has two beliefs about where it is.
     """
-    if not isinstance(limit, int) or isinstance(limit, bool):
-        raise AgreementError("agreement page limit must be a whole number")
-    if not 1 <= limit <= MAX_AGREEMENT_PAGE_SIZE:
+    if filter is not None and (
+        after is not None or limit != DEFAULT_AGREEMENT_PAGE_SIZE
+    ):
         raise AgreementError(
-            f"agreement page limit must be between 1 and {MAX_AGREEMENT_PAGE_SIZE}"
+            "pass a filter or after/limit, not both; two statements of the same "
+            "page are two beliefs about where the caller is"
         )
-    if after is not None and not isinstance(after, UUID):
-        raise AgreementError("agreement page cursor must be a UUID or None")
+    criteria = (
+        filter
+        if filter is not None
+        else facts.AgreementFilter(after=after, limit=limit)
+    )
+
+    # Unpacked to locals deliberately. The keyset and the bound are the SHAPE
+    # `test_commercial_agreements_module.py` detects, and it reads them as the
+    # literal `Agreement.id > after` and `.limit(limit + 1)`. Spelling them
+    # through the filter attribute would have left the shape intact and the
+    # detector blind, which is the worse of the two outcomes.
+    after, limit = criteria.after, criteria.limit
 
     statement = select(Agreement).options(selectinload(Agreement.lines))
+    if criteria.status is not None:
+        statement = statement.where(Agreement.status == criteria.status)
+    if criteria.agreement_type is not None:
+        statement = statement.where(Agreement.agreement_type == criteria.agreement_type)
+    if criteria.counterparty_ref is not None:
+        statement = statement.where(
+            Agreement.counterparty_ref == criteria.counterparty_ref
+        )
+    if criteria.agreement_family_id is not None:
+        statement = statement.where(
+            Agreement.agreement_family_id == criteria.agreement_family_id
+        )
     if after is not None:
         statement = statement.where(Agreement.id > after)
     statement = statement.order_by(Agreement.id).limit(limit + 1)
@@ -1200,6 +1323,7 @@ __all__ = [
     "amend",
     "approve",
     "cancel",
+    "detail",
     "expire",
     "family",
     "get",

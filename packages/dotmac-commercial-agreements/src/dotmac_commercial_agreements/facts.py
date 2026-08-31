@@ -36,10 +36,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Final
+from enum import StrEnum
+from typing import ClassVar, Final
 from uuid import UUID
 
-from dotmac_commercial_agreements.ports import derive_end_exclusive
+from dotmac_commercial_agreements.ports import (
+    DEFAULT_AGREEMENT_PAGE_SIZE,
+    MAX_AGREEMENT_PAGE_SIZE,
+    AgreementError,
+    derive_end_exclusive,
+)
 
 # ── Event types ─────────────────────────────────────────────────────────────
 
@@ -161,6 +167,107 @@ class TransitionRecord:
     command_id: str
 
 
+# ── Read contracts ──────────────────────────────────────────────────────────
+
+
+class AgreementAction(StrEnum):
+    """A lifecycle command that may legally be issued against an agreement.
+
+    Owner-derived, always. Which of these is available is a function of the
+    current status, whether a snapshot has been frozen, and whether the
+    agreement has already been superseded — and the module answers it from the
+    SAME table its write guards enforce (`service._PERMITTED_FROM`). A row
+    action that decided its own eligibility downstream would be a second, weaker
+    copy of the lifecycle, and the two would disagree the moment a status moved
+    between the render and the click.
+    """
+
+    PROPOSE = "propose"
+    APPROVE = "approve"
+    REJECT = "reject"
+    ACTIVATE = "activate"
+    SUSPEND = "suspend"
+    REINSTATE = "reinstate"
+    CANCEL = "cancel"
+    TERMINATE = "terminate"
+    EXPIRE = "expire"
+    AMEND = "amend"
+
+
+@dataclass(frozen=True, slots=True)
+class AgreementDetail:
+    """One agreement, its lifecycle timeline, and what may be done to it next.
+
+    ## Expected-version conflict handling is part of the READ
+
+    `expected_version` and `expected_status` are what a surface hands straight
+    back on the command it issues. Every lifecycle command already carries them
+    and `service._require_expected` refuses on a mismatch with
+    `ExpectedStateError` — but only if the caller actually has the values, and a
+    screen that had to dig them out of a view would eventually forget on one
+    form. Carrying them on the detail makes the round trip the obvious thing to
+    do, and makes a lost update a refusal rather than an overwrite.
+
+    They are deliberately the module's own reading of the row at read time, not
+    something a caller may compose: the point of an expected version is that it
+    was OBSERVED.
+    """
+
+    agreement: AgreementView
+    timeline: tuple[TransitionRecord, ...]
+    permitted_actions: tuple[AgreementAction, ...]
+    expected_version: int
+    expected_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgreementFilter:
+    """What a caller may narrow the agreement estate by, and how far it may read.
+
+    A closed set of typed fields. No predicate, no sort column, no raw `where`:
+    a consumer that could pass one would own every future query over
+    `mod_agreements`, and the module could no longer say what its own read
+    surface is.
+
+    There is deliberately nowhere here to state a permitted action or an
+    expected version. Both are the module's to derive from rows it owns.
+
+    ## It narrows the KEYSET reader; it does not add a second one
+
+    `after`/`limit` are the same cursor and bound `list_agreements` has always
+    taken — agreement id as a stable total key, a `limit + 1` probe instead of a
+    count query. This type gives that reader a closed shape and bounds `limit`
+    in the TYPE rather than in one function body; it does not introduce a
+    parallel list implementation, which would be a second read authority over
+    the same tables with its own drift.
+    """
+
+    status: str | None = None
+    agreement_type: str | None = None
+    counterparty_ref: str | None = None
+    agreement_family_id: UUID | None = None
+    #: Keyset cursor: the `next_after` of the previous page, unchanged. Not an
+    #: offset — an offset over a moving estate skips and repeats rows.
+    after: UUID | None = None
+    limit: int = DEFAULT_AGREEMENT_PAGE_SIZE
+
+    MAX_LIMIT: ClassVar[int] = MAX_AGREEMENT_PAGE_SIZE
+
+    def __post_init__(self) -> None:
+        # `AgreementError` rather than a bare `ValueError`, because this is the
+        # refusal `list_agreements` has raised for these exact inputs since a1
+        # and a caller catching it must keep catching it. It IS a `ValueError`
+        # subclass, so nothing that caught the broader type stops working.
+        if not isinstance(self.limit, int) or isinstance(self.limit, bool):
+            raise AgreementError("agreement page limit must be a whole number")
+        if not 1 <= self.limit <= self.MAX_LIMIT:
+            raise AgreementError(
+                f"agreement page limit must be between 1 and {self.MAX_LIMIT}"
+            )
+        if self.after is not None and not isinstance(self.after, UUID):
+            raise AgreementError("agreement page cursor must be a UUID or None")
+
+
 __all__ = [
     "AGREEMENT_ACTIVATED_V1",
     "AGREEMENT_AMENDED_V1",
@@ -173,6 +280,9 @@ __all__ = [
     "AGREEMENT_SUSPENDED_V1",
     "AGREEMENT_TERMINATED_V1",
     "PUBLISHED_EVENT_TYPES",
+    "AgreementAction",
+    "AgreementDetail",
+    "AgreementFilter",
     "AgreementPage",
     "AgreementView",
     "PromisedLine",
