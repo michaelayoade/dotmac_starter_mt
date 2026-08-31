@@ -3,7 +3,8 @@
 **Status:** Accepted — **fleet-wide**. Amended 2026-08-26 (a guard named for a
 property it does not test — signed release pipelines verify the produced
 artifact's application identity and actual signing certificate, not secret or
-file existence). The amendment is a dated addition; no earlier text is
+file existence), and 2026-08-31 (a guard's subject, extent and lifetime must
+each be correct). Each amendment is a dated addition; no earlier text is
 rewritten.
 **Date:** 2026-08-11
 **Applies to:** every Dotmac repository. Enforcement for repositories other than
@@ -192,3 +193,124 @@ impossible at the scale these reach — 100 scripts, 75 hand-written
 expressions. A ratchet lets coverage land immediately while the backlog
 shrinks under pressure, rather than blocking coverage on a rewrite nobody has
 time for.
+
+## Decision amendment — 2026-08-31 (subject, extent, lifetime)
+
+The 2026-08-26 amendment named one failure: a guard formally inside a check
+whose test does not assert the property it is named for. A single day's evidence
+produced eight more instances, and they do not all have that shape. They have
+three, and the three are worth stating together because **they are one rule**:
+
+> **A guard makes a claim about a SUBJECT, over an EXTENT, for a DURATION.**
+> Each of the three can be wrong independently, while the other two look fine —
+> and all three produce the same thing, which is an unmonitored region that
+> reports as covered.
+
+This is not three new rules. It is the existing rule — an exclusion states an
+enforceable premise — applied to the three properties a guard's premise can be
+wrong about.
+
+### Shape 1 — wrong SUBJECT: the guard checks a name, not the property
+
+Five instances:
+
+- `"PYTHONPATH" not in dockerfile` failing on **the comment explaining its
+  absence**;
+- a ledger test catching **its own docstring**;
+- an executor verb detector reading a **usage comment** as a deployment, and
+  its edge resolver drawing a call edge **backwards** — because a path mention
+  is symmetric while invocation is not;
+- a connector ratchet failing on a **type-annotation import**;
+- a shared rejection vocabulary breaking two other owners who had imported it
+  **verbatim as their contract**.
+
+Every one is the same mistake: matching the *spelling* of a thing instead of
+establishing the *fact*. The repair is always to move from a name to a
+property — parse rather than grep, strip prose before scanning, resolve an
+identity from metadata rather than matching a string. The last instance adds a
+corollary worth stating: **a vocabulary that other owners import verbatim is a
+published contract**, and changing it is a contract change regardless of where
+the file lives.
+
+### Shape 2 — wrong EXTENT: a hand-maintained list, or authored files only
+
+Two instances, and the second is sharper.
+
+`dotmac_vendor_control_plane`'s profile guard **enumerated five stateful modules
+by hand while the assembly composed six**, so `deployment_control` was covered
+by nothing. A guard whose extent is a list drifts the moment the tree grows, and
+it drifts silently, because the list is not wrong about anything it contains.
+
+And in `dotmac_erp` (PR #426, merged `4ab8761d`),
+`test_boot_time_installer_is_retired_from_all_compose_roles` asserted a deleted
+entrypoint's absence — **scoped to the root compose only**. The rendered sibling
+`deploy/rendered/docker-compose.yml` still named `/app/entrypoint-monitoring.sh`
+in every role, a file absent from the image's COPY allowlist. **ERP's rendered
+project could not have started, and the guard for exactly that defect was
+looking one file away.**
+
+That case deserves naming in its own right:
+
+> **A repository that renders deployment artifacts has TWO populations, and a
+> guard written against the authored one is silent over the deployed one —
+> which is the population that matters.**
+
+The repair for both halves is the same: **derive the extent, never declare it.**
+A glob that finds six modules finds the sixth; a walk that does not exclude
+`deploy/rendered/` sees the artifact that ships.
+
+### Shape 3 — no EXPIRY: a relaxation that never says when it ends
+
+`dotmac_erp` carried `require-real-digests: false` **while its descriptor
+already held a real digest**. Nothing recorded the condition under which it
+should be armed, so it was never armed. The relaxation was correct when written,
+became unnecessary, and stayed off — and nothing could notice, because nothing
+had been told what "no longer necessary" looked like.
+
+This is not a new principle. It is § 2 read carefully:
+
+> **An exemption must carry an enforceable premise — and a premise with no
+> expiry is not enforceable. It is permanent by default while reading as
+> temporary.**
+
+The conforming shape exists and should be cited rather than invented:
+`dotmac_vendor_control_plane`'s ADR 0017 records its two gaps **with stated
+retirement conditions**, and this repository's `deployment-adopter.yml` states
+"THE EXACT CONDITION FOR RE-ENABLING" as a numbered list. A relaxation that
+names the place it is re-armed makes a **checkable** claim; one that names
+nothing makes none.
+
+## Enforcement
+
+`tests/architecture/test_guard_subject_extent_lifetime.py`, with a sensitivity
+proof per shape — the guard fires on the planted defect and stays silent on the
+conforming form.
+
+- **Subject** — enforcement ships in `scripts/executor_retirement.py`
+  (`executable_text()` strips prose before detection and before edge
+  resolution; `sanctioned_entry_points()` resolves an identity from installed
+  distribution metadata rather than matching a name). The test asserts the RULE
+  in both directions: a usage comment is not a deployment, and an inline
+  trailing comment still keeps its command — because over-stripping produces
+  false negatives, which is the direction that hides a defect.
+- **Extent** — the Compose population is discovered by glob and a test asserts
+  it is not a literal list; a planted `deploy/rendered/` artifact proves the
+  walk reaches the rendered population; and the loopback guard's scoping
+  premise ("trust auth is here and only here") is now itself checked, so a
+  second file gaining `POSTGRES_HOST_AUTH_METHOD` fails rather than passing
+  unnoticed. That premise was true and unchecked, which is the state every
+  wrong-extent guard is in before it is wrong.
+- **Lifetime** — a relaxation whose premise names where it is re-armed must be
+  armed there. The detector is deliberately narrow: a generic "every `false`
+  needs a comment" check fires on `required: false` and
+  `cancel-in-progress: false`, which are not relaxations at all — that is shape
+  1 arriving inside shape 3's guard.
+
+**This amendment introduces its own guard over a region that already has debt,
+and does it the way § 3 requires**: `docs/inventories/guard-lifetime-baseline.json`
+records the one live instance exactly — `deployment-conformance.yml`'s
+`strict-image-audit`, whose premise says "the release lane turns it on" while
+this repository's only caller is dispatch-only and passes it nothing — and
+ratchets it two-directionally. A blanket allow would have been the easier
+choice and the wrong one.
+

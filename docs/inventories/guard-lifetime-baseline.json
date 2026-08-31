@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "rule": "ADR-0018 amendment 2026-08-31 — a guard's subject, extent and lifetime must each be correct",
+  "what_this_freezes": "Relaxations whose stated premise names a place they are re-armed, where nothing in this repository arms them. A premise with no expiry is not enforceable: it is permanent by default while reading as temporary.",
+  "how_it_moves": "Two-directional (ADR-0018 section 3). A new entry FAILS. Arming a relaxation, or removing it, requires lowering this list in the SAME change. A blanket allow is not permitted.",
+  "unexpired_relaxations": {
+    "deployment-conformance.yml:strict-image-audit": {
+      "premise": "Off by default because a pull-request build has no built image yet; the release lane turns it on, where the image exists and skipping would be a hole.",
+      "why_unexpired": "The premise names a release lane as the place this is armed. This repository's only caller of deployment-conformance.yml is deployment-adopter.yml, which is workflow_dispatch-only and passes no strict-image-audit at all. Nothing here arms it, so the relaxation is permanent while reading as temporary — the same shape as dotmac_erp's require-real-digests.",
+      "expiry_condition": "A workflow in this repository passes `strict-image-audit: true` when calling `deployment-conformance.yml`. Recorded rather than repaired here because this slice may not modify workflows: the Foundation candidate freeze covers them, and the adopter's own re-enabling conditions are a separate owner's decision.",
+      "recorded_at": "2026-08-31",
+      "recorded_by": "michaelayoade"
+    }
+  }
+}
