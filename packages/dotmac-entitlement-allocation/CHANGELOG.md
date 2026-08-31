@@ -15,6 +15,40 @@ audit dependencies.
 
 Nothing in this file is a publication claim except this section.
 
+## Unreleased — `0.1.0a6+dev`
+
+**Public typed READ contracts** (`dotmac_entitlement_allocation.facts`):
+`get_allocation`, `allocations_for_contract`, `list_allocations` over a closed
+page-bounded `AllocationFilter`, and `reconciliation(contract_ref=...,
+content_hash=...)` — the contract-scoped answer to "is this activation staged,
+complete, and issuable against?", with a typed `AllocationRefusal` instead of an
+exception to catch.
+
+`AllocationRecord` is what is on file: capability quantities, an
+`AllocationIntegrity` verdict derived from the `sealed` column, owner-derived
+`permitted_actions`, and the delivery and fingerprint provenance.
+`AllocationView` stays exactly what it was — the OUTCOME of a staging call,
+carrying `replayed` — because "did my delivery do work?" is meaningless to a
+reader who never staged anything.
+
+Nothing on any input can claim the seal. `AllocationFilter.sealed` selects on the
+column this module wrote; no write input has anywhere to assert it.
+
+`AllocationAction` has one member and no `UNSEAL`/`AMEND`/`RESTAGE`: the seal is
+one-way and a trigger refuses to lift it, so an editable action would be one the
+database refuses.
+
+A deliberate asymmetry, now stated: `allocation_product` fails closed on an
+unsealed row, while `get_allocation` returns it — looking at an incomplete write
+is how an operator finds the row that needs repairing.
+
+`AllocationStatus`, `STAGED` and `AllocatedCapability` now live in `facts` and
+are re-exported from `models` and `service`; no caller's import changes.
+
+**The declared version now carries a PEP 440 local development marker.**
+`0.1.0a6` is published and tagged; `src/` has moved since, and one version may
+not name two sets of importable bytes.
+
 ## 0.1.0a6 — released 2026-08-17
 
 ### `platform_audit_log.v1` is declared and verified at deploy
