@@ -9,10 +9,12 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "kernel_release_authorization.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-kernel.yml"
+KERNEL_CHANGELOG = REPO_ROOT / "packages" / "dotmac-kernel" / "CHANGELOG.md"
 
 
 def _load_contract():
@@ -196,7 +198,7 @@ def test_allocation_cannot_smuggle_a_release_input_change(release_repo) -> None:
     with pytest.raises(contract.KernelReleaseAuthorizationError) as refusal:
         contract.validate_current_state()
     assert "CHANGELOG.md" in str(refusal.value)
-    assert "beyond its one version value" in str(refusal.value)
+    assert "unauthorized paths" in str(refusal.value)
 
 
 def test_allocation_cannot_hide_an_unrelated_lock_change(release_repo) -> None:
@@ -273,19 +275,76 @@ def test_record_shape_is_closed_and_target_is_numeric_successor(release_repo) ->
 
 
 def test_release_workflow_rechecks_the_contract_at_all_four_boundaries() -> None:
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-    invocations = [
-        line.strip()
-        for line in workflow.splitlines()
-        if "kernel_release_authorization.py verify-release" in line
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+    def named_steps(job: str) -> dict[str, tuple[int, str]]:
+        return {
+            step["name"]: (index, str(step.get("run", "")))
+            for index, step in enumerate(jobs[job]["steps"])
+            if "name" in step
+        }
+
+    build = named_steps("build")
+    publish = named_steps("publish")
+    verify = named_steps("verify")
+
+    assert (
+        "--phase build"
+        in build["Bind build to the active kernel release authorization"][1]
+    )
+    assert (
+        "--phase publish"
+        in publish["Re-bind publish to the active kernel release authorization"][1]
+    )
+    assert all("--phase verify" not in run for _, run in publish.values())
+
+    readback_freshness = verify[
+        "Re-assert the run SHA is still protected main before read-back"
     ]
-    # The tag invocation is split across two shell lines; count the command and
-    # assert every phase separately so deleting one boundary cannot keep four
-    # copies of another and satisfy a count.
-    assert len(invocations) == 4
-    for phase in ("build", "publish", "verify", "tag"):
-        assert f"--phase {phase}" in workflow
-    assert workflow.index("--phase tag") < workflow.index("git tag -a")
+    readback_binding = verify[
+        "Bind registry verification to the active kernel release authorization"
+    ]
+    registry_wait = verify["Wait for the release on the Forgejo index"]
+    registry_install = verify["Install from the Forgejo registry and verify"]
+    tag_freshness = verify[
+        "Re-assert the run SHA is still protected main before tagging"
+    ]
+    tag = verify["Tag the verified release"]
+
+    assert "assert_current_main.sh" in readback_freshness[1]
+    assert "--phase verify" in readback_binding[1]
+    assert "assert_current_main.sh" in tag_freshness[1]
+    assert "--phase tag" in tag[1]
+    assert "git tag -a" in tag[1]
+    assert readback_binding[0] == readback_freshness[0] + 1
+    assert registry_wait[0] == readback_binding[0] + 1
+    assert registry_wait[0] < registry_install[0] < tag_freshness[0]
+    assert tag[0] == tag_freshness[0] + 1
+
+
+def test_release_cli_refuses_unknown_boundary_name() -> None:
+    contract = _load_contract()
+    with pytest.raises(SystemExit) as refusal:
+        contract.main(
+            [
+                "verify-release",
+                "--phase",
+                "verification-shaped-typo",
+                "--version",
+                "0.1.0a100",
+            ]
+        )
+    assert refusal.value.code == 2
+
+
+def test_a100_does_not_claim_credential_lifecycle_bytes_already_in_a99() -> None:
+    changelog = KERNEL_CHANGELOG.read_text(encoding="utf-8")
+    a100 = changelog.split("## 0.1.0a100", 1)[1].split("## 0.1.0a99", 1)[0]
+    a99 = changelog.split("## 0.1.0a99", 1)[1].split("## 0.1.0a98", 1)[0]
+
+    assert "dotmac_kernel.credential_lifecycle" not in a100
+    assert "dotmac_kernel.credential_lifecycle" in a99
+    assert "already in a99" in a99
 
 
 def test_current_tree_has_no_active_authorization() -> None:

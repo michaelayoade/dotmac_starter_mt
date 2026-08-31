@@ -92,6 +92,25 @@ bytes.
   - The public (`none`) plane can neither be recorded nor required, and a
     tenant-plane principal with no tenant is refused at construction.
 
+### Release integrity
+
+- `KernelReleaseAuthorization.v1` binds the protected-main base, previous
+  annotated tag, next numeric alpha and normalized release-input digest before
+  a version can lose its `+dev` marker. The authorization-only commit and its
+  immediate allocation child are verified again at build, publish, registry
+  read-back and tag creation, then consumed by the automatic release record.
+- The post-tag recorder deterministically refreshes the released-source census,
+  so a new kernel tag cannot leave protected main red on a stale count.
+
+## 0.1.0a99 — 2026-08-26
+
+### Changelog correction — credential lifecycle bytes already in a99
+
+The immutable a99 artifact contains `dotmac_kernel.credential_lifecycle`, but
+its release heading omitted the following notes and left them under
+`Unreleased`. This correction changes no artifact and allocates nothing; it
+records what the existing a99 bytes already contain.
+
 - `dotmac_kernel.credential_lifecycle` — the single owner of HUMAN password
   credential decisions: provisioning, verification, individually authorized
   reset completion, and approved cohort force reset. Stateless and
@@ -124,24 +143,14 @@ bytes.
     no `approved_by`: `approval_decision_ref` points at the product's own
     approval record, which owns the actor. Idempotency is checked BEFORE
     expiry, because returning a stored receipt performs no effect: a false
-    "expired" on work that already happened is how an operator comes to
-    reset a cohort a second time.
+    "expired" on work that already happened is how an operator comes to reset a
+    cohort a second time.
   - Ports: `CredentialStorePort`, `SessionRevocationPort`, `RecoveryIntentPort`,
     `PasswordPolicyPort`, `CredentialAuditPort`. Principal kinds, applications,
     credentials, reason codes and approval decisions are OPAQUE strings the
     engine never parses or branches on.
 
-### Release integrity
-
-- `KernelReleaseAuthorization.v1` binds the protected-main base, previous
-  annotated tag, next numeric alpha and normalized release-input digest before
-  a version can lose its `+dev` marker. The authorization-only commit and its
-  immediate allocation child are verified again at build, publish, registry
-  read-back and tag creation, then consumed by the automatic release record.
-- The post-tag recorder deterministically refreshes the released-source census,
-  so a new kernel tag cannot leave protected main red on a stale count.
-
-### Safety and compatibility
+### Credential-lifecycle safety and compatibility
 
 - **NEW behaviour, not extracted behaviour:** `password_needs_rehash` returns
   zero hits across `dotmac_sub`, `dotmac_erp` and
@@ -161,8 +170,6 @@ bytes.
 - Not adopted by any product. `dotmac_sub` is the named first adopter and its
   cutover has not started; the retirement gate is in
   `docs/inventories/credential-lifecycle-sources.md`.
-
-## 0.1.0a99 — 2026-08-26
 
 ### Added
 

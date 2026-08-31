@@ -43,14 +43,14 @@ POETRY_LOCK = "poetry.lock"
 SCHEMA = "KernelReleaseAuthorization.v1"
 TAG_PREFIX = "dotmac-kernel-v"
 
-# This is an upper bound.  The normalized release-input digest narrows it
-# further: CHANGELOG content, for example, is inside the bound package tree and
-# therefore cannot actually change in the allocation commit.
+# Every allowed allocation path is a mechanical version surface.  The package
+# changelog is already inside the bound release-input digest and is deliberately
+# absent here: an allocation changes no release notes, even if the digest logic
+# would also catch the mutation later.
 ALLOCATION_PATHS = frozenset(
     {
         KERNEL_PYPROJECT,
         KERNEL_INIT,
-        KERNEL_CHANGELOG,
         POETRY_LOCK,
         MODULE_CATALOG,
         PUBLICATION_LEDGER,
@@ -690,7 +690,9 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser.add_argument("--write", action="store_true")
     verify_parser = subparsers.add_parser("verify-release")
     verify_parser.add_argument("--version", required=True)
-    verify_parser.add_argument("--phase", required=True)
+    verify_parser.add_argument(
+        "--phase", required=True, choices=("build", "publish", "verify", "tag")
+    )
     subparsers.add_parser("check-tree")
     args = parser.parse_args(argv)
     try:
