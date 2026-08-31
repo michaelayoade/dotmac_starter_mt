@@ -274,3 +274,9 @@ credential**, explicitly not ordinary server or browser cookie sessions. **Three
 of its four enforcement rows say `none yet` and the fourth is partial, and it
 says why: every in-scope client in the fleet is a Flutter application, and this
 Python repository cannot run a check over any of them.
+
+## Release records
+
+- `release-record-kernel-a99-ui-a8.md` — publication coordinates for `dotmac-kernel`
+  0.1.0a99 and `dotmac-ui` 0.1.0a8 (tags, runs, byte chain, registry read-back,
+  installed-artifact canary). Publication only; it asserts no product adoption.
