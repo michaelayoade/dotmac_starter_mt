@@ -290,6 +290,15 @@ disposition = "not_an_executor"
 premise = "publishes to the index only; commands no deployment verb"
 
 [[entrypoint]]
+name = "workflow:verify-kernel-release"
+family = "workflow"
+path = ".github/workflows/verify-kernel-release.yml"
+trigger = "workflow_dispatch"
+credential = "GITHUB_TOKEN (contents:read, actions:read), FORGEJO_READ_TOKEN"
+disposition = "not_an_executor"
+premise = "reads retained build and private index bytes and emits a receipt only; commands no deployment verb"
+
+[[entrypoint]]
 name = "workflow:release-ui"
 family = "workflow"
 path = ".github/workflows/release-ui.yml"
