@@ -683,12 +683,40 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
     released = tmp_path / "test_released_migrations.py"
     baseline = tmp_path / "published_source_drift_baseline.json"
     authorization_path = tmp_path / "kernel-release-authorization.json"
+    # SELF-CONTAINED, deliberately not seeded from the real ledger.
+    #
+    # This previously read `writer.LEDGER` and rewrote the live kernel row.
+    # That made the test depend on the repository being in its PRE-RECORD
+    # state: the moment the a100 record removed the dotmac-kernel row, the
+    # replacement matched nothing, the fixture ledger had no row to remove,
+    # `write_record` correctly reported no removal, and this assertion failed
+    # -- on the very pull request whose job is to land that record. A test
+    # that cannot survive the change it exists to verify blocks the release
+    # instead of guarding it.
+    #
+    # The row is written here in full, at the 4-space row indentation
+    # `remove_ledger_row` matches, so the fixture describes the pre-record
+    # state permanently rather than borrowing it from a file that moves.
     ledger.write_text(
-        writer.LEDGER.read_text().replace(
-            '"declared": "0.1.0a99+dev"',
-            '"declared": "0.1.0a100"',
-            1,
+        json.dumps(
+            {
+                "$comment": ["fixture"],
+                "unpublished": {
+                    "dotmac-kernel": {
+                        "declared": "0.1.0a100",
+                        "reason": "fixture kernel row awaiting its post-tag record",
+                        "state": "declared-unpublished",
+                    },
+                    "dotmac-fixture-neighbour": {
+                        "declared": "0.1.0a1",
+                        "reason": "fixture neighbour, so the kernel row is not last",
+                        "state": "declared-unpublished",
+                    },
+                },
+            },
+            indent=2,
         )
+        + "\n"
     )
     released.write_text(writer.RELEASED_TAGS_MODULE.read_text())
     baseline.write_text(
