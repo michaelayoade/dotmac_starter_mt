@@ -1094,7 +1094,7 @@ def test_the_three_plants_name_three_different_conditions() -> None:
     assert len(said) == 3, said
 
 
-# ── The conjunction's fourth condition: no pty ──────────────────────────────
+# ── The interactive-shell conjunction's third condition: no pty ─────────────
 #
 # "Incapable of an interactive shell" is `restrict` AND a forced command AND no
 # pty. OpenSSH's own grammar makes the pty clause CO-DEPENDENT with `restrict`
