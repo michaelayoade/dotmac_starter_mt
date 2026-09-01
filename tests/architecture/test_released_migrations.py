@@ -468,6 +468,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-ticketing"
         / "src/dotmac_ticketing/migrations/versions"
     ),
+    "dotmac-deployment-control": (
+        REPO_ROOT
+        / "packages/dotmac-deployment-control"
+        / "src/dotmac_deployment_control/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -550,6 +555,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-web-analytics": "wa_*.py",
     "dotmac-work-orders": "wo_*.py",
     "dotmac-ticketing": "tk_*.py",
+    "dotmac-deployment-control": "dc_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -629,6 +635,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-web-analytics": "dotmac-web-analytics-v",
     "dotmac-work-orders": "dotmac-work-orders-v",
     "dotmac-ticketing": "dotmac-ticketing-v",
+    "dotmac-deployment-control": "dotmac-deployment-control-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -6488,6 +6495,25 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-deployment-control ──
+    "dotmac-deployment-control-v0.1.0a2": (
+        "dotmac-deployment-control",
+        "5c87272a632096850a80e5e9dc1f625a97c3e5d6",
+        {
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+    ),
+    "dotmac-deployment-control-v0.1.0a1": (
+        "dotmac-deployment-control",
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+    ),
 }
 
 
@@ -6680,6 +6706,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-web-analytics": frozenset(),
     "dotmac-work-orders": frozenset(),
     "dotmac-ticketing": frozenset(),
+    "dotmac-deployment-control": frozenset(),
 }
 
 
@@ -6905,16 +6932,223 @@ def test_every_migration_is_either_released_or_declared_unreleased(
     )
 
 
+@dataclass(frozen=True)
+class FrozenReleaseCoordinate:
+    """One published release this repository can no longer reproduce."""
+
+    distribution: str
+    version: str
+    tag: str
+    commit: str
+    #: migration filename -> sha256 AS PUBLISHED under this exact tag.
+    artifacts: dict[str, str]
+    reason: str
+
+
+#: EXACT released coordinates, and deliberately nothing wider.
+#:
+#: The obvious shape for this exception is a publisher: "deployment-control is
+#: released from another repository now, so stop expecting a lane here." That
+#: shape is wrong, and wrong in the direction that matters — it would exempt
+#: EVERY FUTURE release from that publisher, including versions this repository
+#: never saw, cannot read and has no basis to vouch for. An exemption keyed by
+#: publisher grows silently; an exemption keyed by coordinate cannot.
+#:
+#: What is actually true is narrow and checkable. Two versions were built HERE,
+#: from two named commits, producing two named artifact digests. On 2026-08-29
+#: `dotmac-deployment-control` was removed from `.github/release-modules.json`,
+#: and that absence IS the freeze: `release-module.yml` resolves its target
+#: there and fails closed, so a comment saying "do not publish this here" would
+#: only have been a request. `michaelayoade/dotmac_deployment_control` owns the
+#: name now, and `git filter-repo` rewrote every commit during the extraction —
+#: a tag recreated over there would name a different tree. So these two
+#: releases cannot be reconstructed by any repository, including that one, and
+#: their bytes remain this repository's history to freeze.
+#:
+#: That argument covers a1 and a2. It says nothing about a3, which is the
+#: point: a later release from the new owner is not grandfathered by this row,
+#: it is simply not this repository's to monitor, and adding a coordinate for
+#: it would require the amendment below.
+#:
+#: A coordinate here is NOT excused from the byte census. It is excused only
+#: from the module-release allowlist, and every claim it makes is re-derived
+#: from the tag rather than trusted.
+FROZEN_RELEASE_COORDINATES: tuple[FrozenReleaseCoordinate, ...] = (
+    FrozenReleaseCoordinate(
+        distribution="dotmac-deployment-control",
+        version="0.1.0a1",
+        tag="dotmac-deployment-control-v0.1.0a1",
+        commit="fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        artifacts={
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+        reason=(
+            "built in this repository on 2026-08-20 and published from here; "
+            "the distribution moved to "
+            "michaelayoade/dotmac_deployment_control on 2026-08-29 and "
+            "git filter-repo rewrote the commit during the extraction, so no "
+            "repository can reproduce this coordinate"
+        ),
+    ),
+    FrozenReleaseCoordinate(
+        distribution="dotmac-deployment-control",
+        version="0.1.0a2",
+        tag="dotmac-deployment-control-v0.1.0a2",
+        commit="5c87272a632096850a80e5e9dc1f625a97c3e5d6",
+        artifacts={
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+        reason=(
+            "built in this repository on 2026-08-21 and published from here; "
+            "same extraction as a1 — the commit no longer exists in the "
+            "repository that owns the name"
+        ),
+    ),
+)
+
+#: How many frozen coordinates a human has reviewed and accepted.
+#:
+#: Two-directional, per ADR-0018. A NEW coordinate fails until this number is
+#: raised in the same change that adds it, which is what makes the exception
+#: cost a review rather than a paste. A REMOVED coordinate fails too, until the
+#: number is lowered — a quietly shrinking exception list stops describing what
+#: is actually exempt, and the next reader cannot tell "repaired" from
+#: "deleted".
+REVIEWED_FROZEN_COORDINATES = 2
+
+
+def test_a_frozen_coordinate_is_exact_and_still_frozen() -> None:
+    """Every claim a coordinate makes is re-derived, never trusted.
+
+    The row asserts four things a checkout can verify: the tag names the
+    version, the tag peels to the recorded commit, the tag holds the recorded
+    artifact bytes, and the distribution is absent from the live module
+    allowlist. The last one is what stops the row outliving the freeze — if the
+    name comes back into `.github/release-modules.json`, this repository
+    publishes it again and the exemption is stale, not narrow.
+    """
+    allowlist = set(
+        json.loads(
+            (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+        )["modules"]
+    )
+    assert FROZEN_RELEASE_COORDINATES, "the frozen-coordinate exception records nothing"
+    for coordinate in FROZEN_RELEASE_COORDINATES:
+        assert coordinate.reason.strip(), f"{coordinate.tag}: a freeze without a reason"
+        assert coordinate.tag == f"{coordinate.distribution}-v{coordinate.version}", (
+            f"{coordinate.tag}: tag and version disagree, so the row names two "
+            "different releases"
+        )
+        assert coordinate.distribution not in allowlist, (
+            f"{coordinate.distribution} is back in the module release "
+            "allowlist, so it is no longer frozen — drop the row rather than "
+            "keeping two answers"
+        )
+        assert (
+            coordinate.artifacts
+        ), f"{coordinate.tag}: a coordinate with no artifact digest freezes nothing"
+        argv = ["git", "rev-parse", f"{coordinate.tag}^{{commit}}"]
+        peeled = subprocess.run(  # noqa: S603 # nosec B603 B607
+            argv,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert peeled.returncode == 0, (
+            f"{coordinate.tag} does not resolve in this checkout; a frozen "
+            "coordinate must name a tag that exists"
+        )
+        assert peeled.stdout.strip() == coordinate.commit, (
+            f"{coordinate.tag}: recorded commit {coordinate.commit} is not the "
+            f"peeled tag {peeled.stdout.strip()}"
+        )
+        directory = DISTRIBUTIONS[coordinate.distribution].relative_to(REPO_ROOT)
+        for name, digest in sorted(coordinate.artifacts.items()):
+            argv = ["git", "show", f"{coordinate.tag}:{(directory / name).as_posix()}"]
+            blob = subprocess.run(  # noqa: S603 # nosec B603 B607
+                argv,
+                cwd=REPO_ROOT,
+                capture_output=True,
+                check=False,
+            )
+            assert (
+                blob.returncode == 0
+            ), f"{coordinate.tag}: {name} is not in the tagged tree"
+            assert hashlib.sha256(blob.stdout).hexdigest() == digest, (
+                f"{coordinate.tag}: {name} does not hash to the recorded "
+                f"{digest} — the coordinate describes bytes the tag never held"
+            )
+
+
+def test_a_new_frozen_coordinate_needs_an_explicit_amendment() -> None:
+    """Two-directional ratchet: the exception costs a review, not a paste.
+
+    ADR-0018. A list of exemptions that anyone can extend in the same breath as
+    the change needing the exemption is not an exception mechanism, it is a
+    habit. Raising `REVIEWED_FROZEN_COORDINATES` is the amendment, and it is a
+    one-line diff a reviewer cannot miss.
+
+    It fails downward too. A row silently disappearing would quietly re-arm a
+    guard over history nobody re-derived, and would leave the next reader
+    unable to tell a repair from a deletion.
+    """
+    actual = len(FROZEN_RELEASE_COORDINATES)
+    assert actual == REVIEWED_FROZEN_COORDINATES, (
+        f"{actual} frozen release coordinate(s) are declared but "
+        f"{REVIEWED_FROZEN_COORDINATES} have been reviewed. A new coordinate "
+        "is an explicit amendment: add the row AND raise the count, with the "
+        "reason it cannot be reconstructed. Removing one lowers the count."
+    )
+    coordinates = {(c.distribution, c.version) for c in FROZEN_RELEASE_COORDINATES}
+    assert (
+        len(coordinates) == actual
+    ), "two frozen coordinates name the same distribution and version"
+
+
+def test_the_frozen_coordinate_exception_is_narrower_than_its_publisher() -> None:
+    """Sensitivity: the row must not answer for a version it does not name.
+
+    This is the whole reason the map is keyed by coordinate rather than by
+    publisher. A publisher-keyed exemption would say yes to any tag carrying
+    that name; a coordinate-keyed one says yes only to the two releases a human
+    read. Proved by asking about a version deliberately absent from the map.
+    """
+    frozen_versions = {(c.distribution, c.version) for c in FROZEN_RELEASE_COORDINATES}
+    assert ("dotmac-deployment-control", "0.1.0a1") in frozen_versions
+    assert ("dotmac-deployment-control", "0.1.0a99") not in frozen_versions, (
+        "an unreviewed version of a frozen distribution is answered by the "
+        "map, which means the exception is publisher-shaped after all"
+    )
+    frozen_names = {c.distribution for c in FROZEN_RELEASE_COORDINATES}
+    publishable, _ = _publishable_here()
+    assert frozen_names <= publishable, (
+        "a frozen coordinate's distribution must reach `_publishable_here`, or "
+        "enrolling it fails for a reason the row was meant to answer"
+    )
+
+
 def _publishable_here() -> tuple[set[str], set[str]]:
     """Every distribution THIS repository can publish, and the module lane's share.
 
-    Two lanes, kept apart on purpose. The module allowlist is the closed set
-    `release-module.yml` resolves against. The dedicated-workflow set is the
+    Three sources, kept apart on purpose. The module allowlist is the closed
+    set `release-module.yml` resolves against. The dedicated-workflow set is the
     sweep's own enumeration of packages released by a workflow of their own,
     and it is deliberately enumerated there rather than inferred from "absent
     from every lane", because absence is also what an unreleasable package
     looks like. Reusing it keeps one answer to "may this repository publish
     that name?" instead of two that can drift apart.
+
+    `FROZEN_RELEASE_COORDINATES` is the third and narrowest, and it answers a
+    different question from the other two: not "may this repository publish
+    that name?" but "did it, at this exact coordinate?" Past tense is the whole
+    point — released bytes do not stop being history when the publisher moves,
+    and a name that may never be published here again still has releases that
+    were.
     """
     allowlist = set(
         json.loads(
@@ -6923,7 +7157,8 @@ def _publishable_here() -> tuple[set[str], set[str]]:
     )
     sweep = _tag_oracle()
     dedicated = set(sweep.DEDICATED_WORKFLOWS)  # type: ignore[attr-defined]
-    return allowlist | dedicated, allowlist
+    frozen = {coordinate.distribution for coordinate in FROZEN_RELEASE_COORDINATES}
+    return allowlist | dedicated | frozen, allowlist
 
 
 def test_a_dedicated_lane_still_has_to_prove_a_published_tag() -> None:
