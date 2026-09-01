@@ -344,7 +344,8 @@ refused at parse.
 | `forced_command_digest` | `sha256:` over the forced command, or the literal `none` | the command STRING — a near-match gets waved through |
 | `restrict` | `present` or `absent` | silence |
 | `pty`, `agent_forwarding`, `port_forwarding`, `x11_forwarding` | `denied` or `permitted`, each explicit | an omitted permission |
-| `host`, `observed_at`, `observed_by`, `method` | the host-observed evidence coordinate | a repository-tree inference |
+| `evidence_scope` | `host_observed` or `repository_tree` — the SAME vocabulary as a family absence | a second scope vocabulary that drifts from the first |
+| `host`, `observed_at`, `observed_by`, `method` | the evidence coordinate, re-resolvable | `unknown`, `n/a`, `pending`, `assumed` — a filler that reads as an answer |
 
 `restrict = present` beside any `permitted` is refused: OpenSSH's `restrict`
 denies all current and future permissions, so that key cannot exist and the row
@@ -362,16 +363,60 @@ executor still reachable by hand.
 A `retained_rollback` key must be **source-restricted**, **forced-command-only**
 and **incapable of an interactive shell**, each checked independently:
 
-| planted removal | finding |
-| --- | --- |
-| `restrict` removed | must be INCAPABLE OF AN INTERACTIVE SHELL |
-| `from=` removed | must be SOURCE-RESTRICTED |
-| `command=` removed | must be FORCED-COMMAND-ONLY |
+| planted removal | finding | observed |
+| --- | --- | --- |
+| `restrict` removed, nothing else touched | must be INCAPABLE OF AN INTERACTIVE SHELL | exactly one finding |
+| `from=` removed, nothing else touched | must be SOURCE-RESTRICTED | exactly one finding |
+| `command=` removed, nothing else touched | must be FORCED-COMMAND-ONLY | exactly one finding |
 
-Separately, because a detector that fires only when everything is wrong passes
-the realistic failure — one protection quietly dropped. A fully constrained key
-is **admitted** at the same reach, and ERP's measured shape produces exactly
-three independent findings.
+Three plants, three tests, `len(failures) == 1` each, and the three messages
+asserted **distinct** — because three findings that all said "this key is
+unsafe" would satisfy three tests while enforcing one property. One test that
+stripped all three and passed when any of them tripped could not say which
+property it was enforcing, and would stay green if two of the three enforcement
+paths silently died. A fully constrained key is **admitted** at the same reach.
+
+**Incapable of an interactive shell is a conjunction, not a flag:** `restrict`
+AND a forced command AND no pty. A key holding two of the three is not
+two-thirds safe. The pty clause is its own named refusal rather than being
+borrowed from `restrict`'s parse-time implication — if that implication were
+ever relaxed, a gate leaning on it would go on passing with a third of its
+conjunction quietly dead.
+
+OpenSSH's grammar makes the pty clause **co-dependent** with `restrict`, since
+`restrict = present` beside `pty = permitted` is refused at parse as a key that
+cannot exist. A pty-only plant is therefore unconstructible, and the contract
+says so rather than pretending otherwise. It is still observed on its own
+account: holding `restrict` fixed at `absent` and moving only the pty takes one
+finding to two, and the added one names the pty. ERP's measured shape produces
+four independent findings, and repairing `from=` alone leaves three — which is
+how a partial repair gets reported honestly.
+
+### The evidence coordinate is part of the property
+
+Every clause above is a claim about a host. Read from a checkout it is a claim
+about a checkout, so `evidence_scope` carries the same two-value vocabulary as a
+family absence and is derived from it rather than re-typed. The census may
+record either — a key committed to a tree is honestly characterised from that
+tree — but the **gate** requires `host_observed`, on the host the row itself
+names.
+
+This is where absence must not read as satisfaction. A checker never observed
+failing is not known to work, so the sensitivity proof covers the coordinate and
+not only the flags:
+
+| planted | refused by | naming |
+| --- | --- | --- |
+| coordinate omitted (each of `evidence_scope`, `host`, `observed_at`, `observed_by`, `method`) | parse | required |
+| coordinate present but pointing at nothing (`unknown`, `n/a`, `tbd`, `not observed`) | parse | points at nothing |
+| `observed_at` with no moment (`recently`, `2026`, `31/08/2026`) | parse | must be an ISO date |
+| coordinate resolves, but to another host | gate | OBSERVED ON THE HOST THE ROW NAMES |
+| `evidence_scope = repository_tree` | gate | must be `host_observed` |
+
+A required field satisfied by a filler is worse than a missing one: it reads as
+an answer. And a restriction is true at a **moment** — without one, a reading
+taken before the key was loosened is indistinguishable from a reading taken
+after it.
 
 The receipt participates: a `retained_rollback` entry whose identity resolves to
 an inventory row is checked against that row's constraint, so the retention a
@@ -381,7 +426,8 @@ receipt creates cannot be looser than the contract allows.
 unrestricted keys are `active_executor` debt that the ratchet counts and the
 constraint characterises; refusing them at parse would make an honest census
 impossible on day one. The census records reality; the gate guards the retention
-this contract itself creates.
+this contract itself creates. The same split applies to `evidence_scope`: the
+census may hold a `repository_tree` characterisation, the gate may not.
 
 `retired_total` stays **0**.
 

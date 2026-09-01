@@ -1,9 +1,10 @@
 # ADR 0072 — A displaced deployment executor retires on proved evidence, never on adoption
 
 **Status:** Accepted — **fleet-wide**. Amended 2026-08-31 (an eighth
-entry-point family, `runtime_reactivation`, and `DisplacementWindow.v1`), and
-again 2026-08-31 (`SshCredentialConstraintV1`). Each amendment is a dated
-addition; no earlier text is rewritten.
+entry-point family, `runtime_reactivation`, and `DisplacementWindow.v1`), again
+2026-08-31 (`SshCredentialConstraintV1`), and again 2026-09-01 (the conjunction
+is four conditions, and the evidence coordinate is one of the properties). Each
+amendment is a dated addition; no earlier text is rewritten.
 **Date:** 2026-08-30
 **Decision owner:** Michael
 **Extends:** ADR-0018 (a guard exemption states an enforceable premise — this
@@ -451,3 +452,90 @@ CP is installed as a wheel with real entry points, the same
 `sanctioned_entry_points()` shape applies there, and the vocabulary should be
 coordinated before either ratchet hardens.
 
+
+## Decision amendment — 2026-09-01 (the conjunction, and the evidence coordinate)
+
+Two holes in the `SshCredentialConstraintV1` amendment above, found by reading
+its own claims back. Both are ADDITIONS. No clause is withdrawn, and
+`retired_total` stays **0** — this retires, disables and revokes nothing.
+
+### A. "Incapable of an interactive shell" is a conjunction of three, and one of
+them was borrowed
+
+The amendment states the rule as `restrict` + forced command + **no pty**, and
+the gate checked three conditions, of which the pty was not one. It was covered,
+but transitively: `parse_ssh_constraint` refuses `restrict = present` beside any
+`permitted`, so an admitted row could not permit a pty.
+
+That is the wrong shape for the same reason this ADR gives everywhere else. **A
+gate must not borrow one of its own conditions from a different function's
+invariant.** If the parse-time contradiction check were relaxed — and it is a
+plausible relaxation, since somebody will eventually meet a key where OpenSSH's
+implication is not what they expected — the gate would go on passing with a
+third of the conjunction it advertises quietly dead. A check nothing would
+notice dying is the failure this ADR was written about, arriving inside its own
+enforcement.
+
+So the pty is its own named refusal, and the message says PERMITS A PTY rather
+than that the key is unsafe. A key holding two of the three is not two-thirds
+safe; it is a key somebody gets a shell on, and the finding has to say which
+condition it was.
+
+**And the plant is honest about being unconstructible.** Because
+`restrict = present` forbids `pty = permitted` at parse, a pty-ONLY plant cannot
+be written — OpenSSH's grammar makes the two co-dependent. Rather than
+manufacture one, the contract records that and observes the clause on its own
+account a different way: holding `restrict` fixed at `absent` and moving only
+the pty takes the finding set from one to two, and the added finding names the
+pty. A guard whose plant is impossible should say so; the alternative is a
+fixture that proves the plant rather than the property.
+
+`restrict`, `from=` and `command=` remain three separate plants, each asserted
+to produce exactly ONE finding, with the three messages asserted **distinct** —
+because three findings that all read "this key is unsafe" would satisfy three
+tests while enforcing one property, which is the separation being cosmetic.
+
+### B. The evidence coordinate is one of the properties, not metadata beside them
+
+The amendment above required `host`, `observed_at`, `observed_by` and `method`
+and called them "the host-observed evidence coordinate". Nothing made them
+host-observed, and nothing made them point anywhere. `host = "unknown"`,
+`observed_at = "recently"`, `method = "assumed"` — every one a non-empty string,
+every one accepted, and the gate would then report a retention SAFE on the
+strength of nobody having looked.
+
+That is this ADR's §2 lesson arriving at its own newest field. §2 exists because
+a repository walk that finds nothing had been readable as a clean estate; the
+constraint reproduced exactly that by letting a claim about a host be made from
+anywhere, or from nowhere.
+
+Three additions:
+
+- **`evidence_scope` is typed, in the SAME vocabulary as a family absence**, and
+  derived from `ABSENCE_SCOPES` rather than re-declared — a second copy is how
+  two meanings drift apart, and this is the distinction the module most depends
+  on. The census may hold a `repository_tree` characterisation (a key committed
+  to a tree is honestly read from that tree); the **gate** requires
+  `host_observed`, because a restriction lives in a host's `authorized_keys` and
+  a checkout cannot establish one.
+- **A coordinate that points at nothing is refused at parse.** A named filler
+  set — `unknown`, `n/a`, `tbd`, `pending`, `assumed`, `not observed` and the
+  rest — because a required field satisfied by a filler is WORSE than a missing
+  one: it reads as an answer. `observed_at` must additionally be an ISO date,
+  since a restriction is true at a MOMENT and, without one, a reading taken
+  before the key was loosened is indistinguishable from a reading taken after.
+- **Evidence must be observed on the host the row names.** A constraint read on
+  staging describes a different `authorized_keys` and answers a different
+  question. This is a gate finding rather than a parse refusal, so a census can
+  still record a key seen elsewhere.
+
+`evidence_scope` deliberately stays OUT of `canonical()`, with `host`,
+`observed_by` and `method`. The canonical form is the key's CAPABILITY, so
+re-observing the same key by a different method must not move the census digest
+and force a baseline bump for a key that did not change.
+
+### What this does not do
+
+It performs no retirement, touches no `authorized_keys` file anywhere, and makes
+no SSH connection. It defines what a retained credential must prove and what
+counts as having proved it.

@@ -40,6 +40,21 @@ or a third party's webhook registration, so for those families the ONLY thing a
 guard can hold is whether somebody claimed the absence and said how. Pretending
 a walk covers them would be the unmonitored region wearing a guard's costume.
 
+## The retained-rollback gate: three plants, and the coordinate
+
+`restrict`, `from=` and `command=` are planted SEPARATELY, one test each,
+`len(failures) == 1` each, and the three messages asserted distinct. One test
+removing all three would pass when any one of them tripped and could not say
+which property it enforced. The conjunction's fourth condition, no pty, is
+observed by holding `restrict` at `absent` and moving only the pty — a
+pty-ONLY plant is unconstructible, because OpenSSH forbids `restrict = present`
+beside `pty = permitted` and the parser refuses it.
+
+The sensitivity proof covers the EVIDENCE COORDINATE and not only the flags: a
+coordinate that is omitted, points at nothing (`unknown`, `tbd`, `assumed`),
+carries no moment, is scoped to a tree, or names another host must not read as
+satisfaction of the constraint.
+
 ## An in-situ proof, not only fixtures
 
 `dotmac_governance`'s ADR-0018 conformance backlog records 25 starter guard
@@ -971,6 +986,7 @@ def _constraint(**overrides) -> dict:
         "agent_forwarding": "denied",
         "port_forwarding": "denied",
         "x11_forwarding": "denied",
+        "evidence_scope": "host_observed",
         "host": "erp.dotmac.io",
         "observed_at": "2026-08-31",
         "observed_by": "michaelayoade",
@@ -1005,6 +1021,7 @@ def test_the_constraint_records_every_field_michael_enumerated() -> None:
         "agent_forwarding",
         "port_forwarding",
         "x11_forwarding",
+        "evidence_scope",
         "host",
         "observed_at",
         "observed_by",
@@ -1019,18 +1036,27 @@ def test_a_fully_constrained_retained_key_is_admitted() -> None:
     assert sweep.rollback_key_failures(_key_entry(sweep)) == []
 
 
+# ── Three planted removals, each observed to fail ON ITS OWN ────────────────
+#
+# `restrict`, `from=` and `command=` are planted SEPARATELY and each is
+# asserted to produce exactly one finding naming its own condition. One test
+# that strips all three and passes when any one of them trips cannot say which
+# property it is enforcing, and would stay green forever if two of the three
+# enforcement paths silently died. So: one plant per condition, `len == 1`, and
+# the message matched on the condition's own name.
+
+
 def test_removing_restrict_alone_is_refused() -> None:
-    """Planted SEPARATELY. A detector that fires only when everything is wrong
-    passes the realistic failure: one protection quietly dropped."""
+    """Plant 1 of 3 — `restrict` removed, everything else left intact."""
     sweep = _sweep()
-    failures = sweep.rollback_key_failures(
-        _key_entry(sweep, restrict="absent", pty="permitted")
-    )
+    failures = sweep.rollback_key_failures(_key_entry(sweep, restrict="absent"))
     assert len(failures) == 1, failures
     assert "INCAPABLE OF AN INTERACTIVE SHELL" in failures[0]
+    assert "`restrict`" in failures[0]
 
 
 def test_removing_the_source_restriction_alone_is_refused() -> None:
+    """Plant 2 of 3 — `from=` removed, everything else left intact."""
     sweep = _sweep()
     failures = sweep.rollback_key_failures(
         _key_entry(sweep, source_restriction=sweep.SOURCE_UNRESTRICTED)
@@ -1040,6 +1066,7 @@ def test_removing_the_source_restriction_alone_is_refused() -> None:
 
 
 def test_removing_the_forced_command_alone_is_refused() -> None:
+    """Plant 3 of 3 — `command=` removed, everything else left intact."""
     sweep = _sweep()
     failures = sweep.rollback_key_failures(
         _key_entry(sweep, forced_command_digest=sweep.FORCED_COMMAND_NONE)
@@ -1048,22 +1075,158 @@ def test_removing_the_forced_command_alone_is_refused() -> None:
     assert "FORCED-COMMAND-ONLY" in failures[0]
 
 
-def test_erps_measured_shape_fails_all_three_independently() -> None:
-    """Eight unrestricted root keys, none carrying `from=`, `command=` or
-    `restrict`. Asserted as three separate findings, because that is how a
-    partial repair gets reported honestly."""
+def test_the_three_plants_name_three_different_conditions() -> None:
+    """The point of planting them separately, asserted rather than implied.
+
+    Three findings that all said "this key is unsafe" would satisfy the three
+    tests above while enforcing one property. These must be three DISTINCT
+    messages, or the separation is cosmetic.
+    """
     sweep = _sweep()
-    failures = sweep.rollback_key_failures(
+    said = {
+        sweep.rollback_key_failures(_key_entry(sweep, **plant))[0]
+        for plant in (
+            {"restrict": "absent"},
+            {"source_restriction": sweep.SOURCE_UNRESTRICTED},
+            {"forced_command_digest": sweep.FORCED_COMMAND_NONE},
+        )
+    }
+    assert len(said) == 3, said
+
+
+# ── The conjunction's fourth condition: no pty ──────────────────────────────
+#
+# "Incapable of an interactive shell" is `restrict` AND a forced command AND no
+# pty. OpenSSH's own grammar makes the pty clause CO-DEPENDENT with `restrict`
+# — `restrict = present` beside `pty = permitted` is refused at parse as a key
+# that cannot exist — so a pty-only plant is unconstructible, and saying so is
+# more honest than pretending otherwise.
+#
+# It is still observed independently, by holding `restrict` fixed at `absent`
+# and moving ONLY the pty: one finding becomes two, and the second names the
+# pty. That difference is the pty path firing on its own account rather than
+# riding on the `restrict` check.
+
+
+def test_the_pty_clause_fires_on_its_own_account() -> None:
+    sweep = _sweep()
+    without_pty = sweep.rollback_key_failures(_key_entry(sweep, restrict="absent"))
+    with_pty = sweep.rollback_key_failures(
+        _key_entry(sweep, restrict="absent", pty="permitted")
+    )
+    assert len(without_pty) == 1, without_pty
+    assert len(with_pty) == 2, with_pty
+    added = [f for f in with_pty if f not in without_pty]
+    assert len(added) == 1 and "PERMITS A PTY" in added[0], added
+    assert "CONJUNCTION" in added[0]
+
+
+def test_a_key_holding_two_of_the_three_is_not_admitted() -> None:
+    """Two of three is not two-thirds safe. Each pair is still refused, and
+    the refusal names the missing third rather than the key."""
+    sweep = _sweep()
+    for plant, expected in (
+        ({"restrict": "absent"}, "`restrict`"),
+        ({"source_restriction": sweep.SOURCE_UNRESTRICTED}, "SOURCE-RESTRICTED"),
+        ({"forced_command_digest": sweep.FORCED_COMMAND_NONE}, "FORCED-COMMAND-ONLY"),
+    ):
+        failures = sweep.rollback_key_failures(_key_entry(sweep, **plant))
+        assert failures, plant
+        assert expected in " ".join(failures), (plant, failures)
+
+
+def test_erps_measured_shape_fails_every_condition_independently() -> None:
+    """Eight unrestricted root keys, none carrying `from=`, `command=` or
+    `restrict`. Reported as separate findings, because that is how a PARTIAL
+    repair gets reported honestly: fixing `from=` alone must leave two."""
+    sweep = _sweep()
+    entry = _key_entry(
+        sweep,
+        source_restriction=sweep.SOURCE_UNRESTRICTED,
+        forced_command_digest=sweep.FORCED_COMMAND_NONE,
+        restrict="absent",
+        pty="permitted",
+        agent_forwarding="permitted",
+    )
+    failures = sweep.rollback_key_failures(entry)
+    assert len(failures) == 4, failures
+
+    repaired = sweep.rollback_key_failures(
         _key_entry(
             sweep,
-            source_restriction=sweep.SOURCE_UNRESTRICTED,
             forced_command_digest=sweep.FORCED_COMMAND_NONE,
             restrict="absent",
             pty="permitted",
             agent_forwarding="permitted",
         )
     )
-    assert len(failures) == 3, failures
+    assert len(repaired) == 3, repaired
+    assert "SOURCE-RESTRICTED" not in " ".join(repaired), repaired
+
+
+# ── Sensitivity over the EVIDENCE COORDINATE, not only over a flag ──────────
+#
+# Every clause above is a claim about a host. Read from a checkout it is a
+# claim about a checkout, and a coordinate nobody can re-resolve has
+# established nothing. A checker never observed failing is not known to work,
+# and the failure that matters here is the one where absence reads as
+# satisfaction: the key is not proven restricted, it is merely unexamined.
+
+
+def test_a_constraint_that_is_not_host_observed_cannot_hold_a_rollback_key() -> None:
+    """The coordinate points at a TREE. Same vocabulary, same lesson as a
+    family absence: a walk says nothing about any host."""
+    sweep = _sweep()
+    failures = sweep.rollback_key_failures(
+        _key_entry(sweep, evidence_scope="repository_tree")
+    )
+    assert len(failures) == 1, failures
+    assert "host_observed" in failures[0]
+    assert "not having looked must not read as" in failures[0]
+
+
+def test_the_evidence_scope_uses_the_absence_vocabulary_not_a_second_one() -> None:
+    sweep = _sweep()
+    assert set(sweep.EVIDENCE_SCOPES) == set(sweep.ABSENCE_SCOPES)
+
+
+def test_an_absent_evidence_coordinate_is_refused_at_parse() -> None:
+    """Absent, field by field. Every coordinate is required, so a row that
+    simply omits one never reaches the gate to be waved through by it."""
+    sweep = _sweep()
+    for key in (*sweep.SSH_COORDINATE_KEYS, "evidence_scope"):
+        with pytest.raises(sweep.InventoryError, match="required"):
+            sweep.parse_ssh_constraint(_constraint(**{key: None}), "probe")
+
+
+def test_a_coordinate_that_points_at_nothing_is_refused() -> None:
+    """`unknown` is a non-empty string and answers nothing. A required field
+    satisfied by a filler is WORSE than a missing one: it reads as an answer."""
+    sweep = _sweep()
+    for key in sweep.SSH_COORDINATE_KEYS:
+        for filler in ("unknown", "N/A", " TBD ", "not observed"):
+            with pytest.raises(sweep.InventoryError, match="points at nothing"):
+                sweep.parse_ssh_constraint(_constraint(**{key: filler}), "probe")
+
+
+def test_an_observation_with_no_moment_is_refused() -> None:
+    """A restriction is true at a MOMENT. Without one, a reading from before
+    the key was loosened is indistinguishable from a reading after it."""
+    sweep = _sweep()
+    for stamp in ("recently", "2026", "31/08/2026", "last week"):
+        with pytest.raises(sweep.InventoryError, match="must be an ISO date"):
+            sweep.parse_ssh_constraint(_constraint(observed_at=stamp), "probe")
+
+
+def test_evidence_read_on_another_host_does_not_answer_for_this_one() -> None:
+    """The coordinate resolves, and points somewhere ELSE. A reading taken on
+    staging describes a different `authorized_keys`."""
+    sweep = _sweep()
+    entry = _key_entry(sweep, host="erp-staging.dotmac.io")
+    assert entry.host == "erp.dotmac.io", "the ROW still names the production host"
+    failures = sweep.rollback_key_failures(entry)
+    assert len(failures) == 1, failures
+    assert "OBSERVED ON THE HOST THE ROW NAMES" in failures[0]
 
 
 def test_a_forced_command_is_recorded_as_a_digest_not_a_string() -> None:

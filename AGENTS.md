@@ -1329,6 +1329,36 @@ specifics) points here and must never fork these rules.
     the ratchet counts, because the census records reality while the gate guards
     the retention this contract itself creates.
 
+    **Amended 2026-09-01 — the conjunction is three, and the coordinate is
+    one of the properties.** INCAPABLE OF AN INTERACTIVE SHELL is `restrict` AND a
+    forced command AND NO PTY. The pty is its own named refusal rather than
+    borrowed from the parse-time `restrict` implication: a gate must not take
+    one of its own conditions from another function's invariant, or it goes on
+    passing with a third of that conjunction quietly dead. A key holding two of
+    the three is not two-thirds safe. OpenSSH's grammar makes a pty-ONLY plant
+    UNCONSTRUCTIBLE (`restrict = present` forbids `pty = permitted` at parse),
+    and the contract says so rather than manufacturing one — the clause is
+    observed by holding `restrict` at `absent` and moving only the pty, taking
+    the finding set from one to two. The three plants Michael named stay three:
+    each produces exactly ONE finding and the three messages are asserted
+    DISTINCT, since three findings all reading "unsafe" would satisfy three
+    tests while enforcing one property.
+
+    THE EVIDENCE COORDINATE IS PART OF THE PROPERTY, not metadata beside it.
+    Every clause is a claim about a host; read from a checkout it is a claim
+    about a checkout. `evidence_scope` is typed in the SAME vocabulary as a
+    family absence and DERIVED from `ABSENCE_SCOPES` rather than re-declared —
+    the census may hold a `repository_tree` characterisation, the gate requires
+    `host_observed`, on the host the ROW names. A coordinate that points at
+    nothing is refused at parse (`unknown`, `n/a`, `tbd`, `assumed`, …), because
+    a required field satisfied by a filler is worse than a missing one: it reads
+    as an answer. `observed_at` must be an ISO date, since a restriction is true
+    at a MOMENT and without one a reading from before the loosening is
+    indistinguishable from one after. `evidence_scope` stays OUT of the
+    canonical form with the other coordinate fields — the canonical form is the
+    key's CAPABILITY, so re-observing by a different method must not move the
+    census digest.
+
     Building that exposed a wider hole: the census digest was RECORDED and never
     COMPARED, so any change to a row's content that left the row count identical
     passed silently — a target repointed, a trigger changed, a credential
