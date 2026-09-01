@@ -273,6 +273,186 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-kernel": (
         REPO_ROOT / "packages/dotmac-kernel" / "src/dotmac_kernel/migrations/versions"
     ),
+    "dotmac-accounting": (
+        REPO_ROOT
+        / "packages/dotmac-accounting"
+        / "src/dotmac_accounting/migrations/versions"
+    ),
+    "dotmac-analytics": (
+        REPO_ROOT
+        / "packages/dotmac-analytics"
+        / "src/dotmac_analytics/migrations/versions"
+    ),
+    "dotmac-application-directory": (
+        REPO_ROOT
+        / "packages/dotmac-application-directory"
+        / "src/dotmac_application_directory/migrations/versions"
+    ),
+    "dotmac-assets": (
+        REPO_ROOT / "packages/dotmac-assets" / "src/dotmac_assets/migrations/versions"
+    ),
+    "dotmac-banking": (
+        REPO_ROOT / "packages/dotmac-banking" / "src/dotmac_banking/migrations/versions"
+    ),
+    "dotmac-brand-profiles": (
+        REPO_ROOT
+        / "packages/dotmac-brand-profiles"
+        / "src/dotmac_brand_profiles/migrations/versions"
+    ),
+    "dotmac-campaigns": (
+        REPO_ROOT
+        / "packages/dotmac-campaigns"
+        / "src/dotmac_campaigns/migrations/versions"
+    ),
+    "dotmac-content": (
+        REPO_ROOT / "packages/dotmac-content" / "src/dotmac_content/migrations/versions"
+    ),
+    "dotmac-documents": (
+        REPO_ROOT
+        / "packages/dotmac-documents"
+        / "src/dotmac_documents/migrations/versions"
+    ),
+    "dotmac-durable-timers": (
+        REPO_ROOT
+        / "packages/dotmac-durable-timers"
+        / "src/dotmac_durable_timers/migrations/versions"
+    ),
+    "dotmac-expenses": (
+        REPO_ROOT
+        / "packages/dotmac-expenses"
+        / "src/dotmac_expenses/migrations/versions"
+    ),
+    "dotmac-fiber-plant": (
+        REPO_ROOT
+        / "packages/dotmac-fiber-plant"
+        / "src/dotmac_fiber_plant/migrations/versions"
+    ),
+    "dotmac-finance": (
+        REPO_ROOT / "packages/dotmac-finance" / "src/dotmac_finance/migrations/versions"
+    ),
+    "dotmac-inventory": (
+        REPO_ROOT
+        / "packages/dotmac-inventory"
+        / "src/dotmac_inventory/migrations/versions"
+    ),
+    "dotmac-ipam": (
+        REPO_ROOT / "packages/dotmac-ipam" / "src/dotmac_ipam/migrations/versions"
+    ),
+    "dotmac-licensing": (
+        REPO_ROOT
+        / "packages/dotmac-licensing"
+        / "src/dotmac_licensing/migrations/versions"
+    ),
+    "dotmac-media-observations": (
+        REPO_ROOT
+        / "packages/dotmac-media-observations"
+        / "src/dotmac_media_observations/migrations/versions"
+    ),
+    "dotmac-network-access": (
+        REPO_ROOT
+        / "packages/dotmac-network-access"
+        / "src/dotmac_network_access/migrations/versions"
+    ),
+    "dotmac-network-assurance": (
+        REPO_ROOT
+        / "packages/dotmac-network-assurance"
+        / "src/dotmac_network_assurance/migrations/versions"
+    ),
+    "dotmac-network-control": (
+        REPO_ROOT
+        / "packages/dotmac-network-control"
+        / "src/dotmac_network_control/migrations/versions"
+    ),
+    "dotmac-network-inventory": (
+        REPO_ROOT
+        / "packages/dotmac-network-inventory"
+        / "src/dotmac_network_inventory/migrations/versions"
+    ),
+    "dotmac-network-observability": (
+        REPO_ROOT
+        / "packages/dotmac-network-observability"
+        / "src/dotmac_network_observability/migrations/versions"
+    ),
+    "dotmac-network-topology": (
+        REPO_ROOT
+        / "packages/dotmac-network-topology"
+        / "src/dotmac_network_topology/migrations/versions"
+    ),
+    "dotmac-party": (
+        REPO_ROOT / "packages/dotmac-party" / "src/dotmac_party/migrations/versions"
+    ),
+    "dotmac-payables": (
+        REPO_ROOT
+        / "packages/dotmac-payables"
+        / "src/dotmac_payables/migrations/versions"
+    ),
+    "dotmac-payroll": (
+        REPO_ROOT / "packages/dotmac-payroll" / "src/dotmac_payroll/migrations/versions"
+    ),
+    "dotmac-pon-access": (
+        REPO_ROOT
+        / "packages/dotmac-pon-access"
+        / "src/dotmac_pon_access/migrations/versions"
+    ),
+    "dotmac-positioning": (
+        REPO_ROOT
+        / "packages/dotmac-positioning"
+        / "src/dotmac_positioning/migrations/versions"
+    ),
+    "dotmac-procurement": (
+        REPO_ROOT
+        / "packages/dotmac-procurement"
+        / "src/dotmac_procurement/migrations/versions"
+    ),
+    "dotmac-projects": (
+        REPO_ROOT
+        / "packages/dotmac-projects"
+        / "src/dotmac_projects/migrations/versions"
+    ),
+    "dotmac-publishing": (
+        REPO_ROOT
+        / "packages/dotmac-publishing"
+        / "src/dotmac_publishing/migrations/versions"
+    ),
+    "dotmac-records": (
+        REPO_ROOT / "packages/dotmac-records" / "src/dotmac_records/migrations/versions"
+    ),
+    "dotmac-referrals": (
+        REPO_ROOT
+        / "packages/dotmac-referrals"
+        / "src/dotmac_referrals/migrations/versions"
+    ),
+    "dotmac-release-catalog": (
+        REPO_ROOT
+        / "packages/dotmac-release-catalog"
+        / "src/dotmac_release_catalog/migrations/versions"
+    ),
+    "dotmac-reseller-management": (
+        REPO_ROOT
+        / "packages/dotmac-reseller-management"
+        / "src/dotmac_reseller_management/migrations/versions"
+    ),
+    "dotmac-service-orders": (
+        REPO_ROOT
+        / "packages/dotmac-service-orders"
+        / "src/dotmac_service_orders/migrations/versions"
+    ),
+    "dotmac-sites": (
+        REPO_ROOT / "packages/dotmac-sites" / "src/dotmac_sites/migrations/versions"
+    ),
+    "dotmac-surveys": (
+        REPO_ROOT / "packages/dotmac-surveys" / "src/dotmac_surveys/migrations/versions"
+    ),
+    "dotmac-web-analytics": (
+        REPO_ROOT
+        / "packages/dotmac-web-analytics"
+        / "src/dotmac_web_analytics/migrations/versions"
+    ),
+    "dotmac-work-orders": (
+        REPO_ROOT
+        / "packages/dotmac-work-orders"
+        / "src/dotmac_work_orders/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -314,6 +494,46 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-people": "pe_*.py",
     "dotmac-inbox": "ib_*.py",
     "dotmac-kernel": "2*_[0-9][0-9][0-9][0-9]_*.py",
+    "dotmac-accounting": "ac_*.py",
+    "dotmac-analytics": "ay_*.py",
+    "dotmac-application-directory": "ad_*.py",
+    "dotmac-assets": "as_*.py",
+    "dotmac-banking": "bk_*.py",
+    "dotmac-brand-profiles": "bp_*.py",
+    "dotmac-campaigns": "ca_*.py",
+    "dotmac-content": "ct_*.py",
+    "dotmac-documents": "do_*.py",
+    "dotmac-durable-timers": "dt_*.py",
+    "dotmac-expenses": "ex_*.py",
+    "dotmac-fiber-plant": "fp_*.py",
+    "dotmac-finance": "fn_*.py",
+    "dotmac-inventory": "iv_*.py",
+    "dotmac-ipam": "ip_*.py",
+    "dotmac-licensing": "li_*.py",
+    "dotmac-media-observations": "mo_*.py",
+    "dotmac-network-access": "nac_*.py",
+    "dotmac-network-assurance": "na_*.py",
+    "dotmac-network-control": "nc_*.py",
+    "dotmac-network-inventory": "ni_*.py",
+    "dotmac-network-observability": "no_*.py",
+    "dotmac-network-topology": "nt_*.py",
+    "dotmac-party": "pt_*.py",
+    "dotmac-payables": "pa_*.py",
+    "dotmac-payroll": "py_*.py",
+    "dotmac-pon-access": "pn_*.py",
+    "dotmac-positioning": "po_*.py",
+    "dotmac-procurement": "pc_*.py",
+    "dotmac-projects": "pj_*.py",
+    "dotmac-publishing": "pb_*.py",
+    "dotmac-records": "re_*.py",
+    "dotmac-referrals": "rf_*.py",
+    "dotmac-release-catalog": "rl_*.py",
+    "dotmac-reseller-management": "rm_*.py",
+    "dotmac-service-orders": "so_*.py",
+    "dotmac-sites": "si_*.py",
+    "dotmac-surveys": "sv_*.py",
+    "dotmac-web-analytics": "wa_*.py",
+    "dotmac-work-orders": "wo_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -352,6 +572,46 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-people": "dotmac-people-v",
     "dotmac-inbox": "dotmac-inbox-v",
     "dotmac-kernel": "dotmac-kernel-v",
+    "dotmac-accounting": "dotmac-accounting-v",
+    "dotmac-analytics": "dotmac-analytics-v",
+    "dotmac-application-directory": "dotmac-application-directory-v",
+    "dotmac-assets": "dotmac-assets-v",
+    "dotmac-banking": "dotmac-banking-v",
+    "dotmac-brand-profiles": "dotmac-brand-profiles-v",
+    "dotmac-campaigns": "dotmac-campaigns-v",
+    "dotmac-content": "dotmac-content-v",
+    "dotmac-documents": "dotmac-documents-v",
+    "dotmac-durable-timers": "dotmac-durable-timers-v",
+    "dotmac-expenses": "dotmac-expenses-v",
+    "dotmac-fiber-plant": "dotmac-fiber-plant-v",
+    "dotmac-finance": "dotmac-finance-v",
+    "dotmac-inventory": "dotmac-inventory-v",
+    "dotmac-ipam": "dotmac-ipam-v",
+    "dotmac-licensing": "dotmac-licensing-v",
+    "dotmac-media-observations": "dotmac-media-observations-v",
+    "dotmac-network-access": "dotmac-network-access-v",
+    "dotmac-network-assurance": "dotmac-network-assurance-v",
+    "dotmac-network-control": "dotmac-network-control-v",
+    "dotmac-network-inventory": "dotmac-network-inventory-v",
+    "dotmac-network-observability": "dotmac-network-observability-v",
+    "dotmac-network-topology": "dotmac-network-topology-v",
+    "dotmac-party": "dotmac-party-v",
+    "dotmac-payables": "dotmac-payables-v",
+    "dotmac-payroll": "dotmac-payroll-v",
+    "dotmac-pon-access": "dotmac-pon-access-v",
+    "dotmac-positioning": "dotmac-positioning-v",
+    "dotmac-procurement": "dotmac-procurement-v",
+    "dotmac-projects": "dotmac-projects-v",
+    "dotmac-publishing": "dotmac-publishing-v",
+    "dotmac-records": "dotmac-records-v",
+    "dotmac-referrals": "dotmac-referrals-v",
+    "dotmac-release-catalog": "dotmac-release-catalog-v",
+    "dotmac-reseller-management": "dotmac-reseller-management-v",
+    "dotmac-service-orders": "dotmac-service-orders-v",
+    "dotmac-sites": "dotmac-sites-v",
+    "dotmac-surveys": "dotmac-surveys-v",
+    "dotmac-web-analytics": "dotmac-web-analytics-v",
+    "dotmac-work-orders": "dotmac-work-orders-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -5765,6 +6025,433 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-accounting ──
+    "dotmac-accounting-v0.1.0a1": (
+        "dotmac-accounting",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "ac_0001_accounting.py": (
+                "ed2aedd04df0c7446ae7a7b90d6e97d40c2f352f806b9c8eba26558521ef686e"
+            ),
+        },
+    ),
+    # ── dotmac-analytics ──
+    "dotmac-analytics-v0.1.0a1": (
+        "dotmac-analytics",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "ay_0001_analytics.py": (
+                "dd528b1b083e11df7bd47dd590d7440111406d53c21447763ec2bb12c7d60344"
+            ),
+        },
+    ),
+    # ── dotmac-application-directory ──
+    "dotmac-application-directory-v0.1.0a3": (
+        "dotmac-application-directory",
+        "bbc53bac361a1199e4f32738883d59bd27845253",
+        {
+            "ad_0001_application_bindings.py": (
+                "6efcdc37e8c06e2fc436d8db75c8e3813321b7eeb245e35db2b39ad7ced8baac"
+            ),
+        },
+    ),
+    # ── dotmac-assets ──
+    "dotmac-assets-v0.1.0a1": (
+        "dotmac-assets",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "as_0001_assets.py": (
+                "717a44ac90b001f90659a0646d425b86b9f7943b9e89df1b314ce93242023236"
+            ),
+        },
+    ),
+    # ── dotmac-banking ──
+    "dotmac-banking-v0.1.0a1": (
+        "dotmac-banking",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "bk_0001_banking.py": (
+                "1b2118eeeacd18eabb907382d84bdeb1dda1c86427cc627c62acbb96b6f5b261"
+            ),
+        },
+    ),
+    # ── dotmac-brand-profiles ──
+    "dotmac-brand-profiles-v0.1.0a1": (
+        "dotmac-brand-profiles",
+        "ed69f9dfdeea493dab7d7ba25c04e940f0870545",
+        {
+            "bp_0001_brand_profiles.py": (
+                "b6d569955954d6610d06300c0e60a18c02eeaa06cf0758c7f1a85dc8faeb8961"
+            ),
+        },
+    ),
+    # ── dotmac-campaigns ──
+    "dotmac-campaigns-v0.1.0a1": (
+        "dotmac-campaigns",
+        "ae5369c0dcc63b9a9daeba9f522f8906b78a997d",
+        {
+            "ca_0001_campaigns.py": (
+                "ed31a5d91eedf15f182e055fe786f1e7ee3eb364cec561f8ad147343ba125926"
+            ),
+        },
+    ),
+    # ── dotmac-content ──
+    "dotmac-content-v0.1.0a1": (
+        "dotmac-content",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        {
+            "ct_0001_content.py": (
+                "e6f36ce5a0cb83f90d97f67dc6cf7cd463cb9b585387150c5ffbbca9f0118d84"
+            ),
+        },
+    ),
+    # ── dotmac-documents ──
+    "dotmac-documents-v0.1.0a1": (
+        "dotmac-documents",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "do_0001_documents.py": (
+                "54d15a08a950170677846e344c0b7debaa429dddd87b8e091a1ecb947caaa184"
+            ),
+        },
+    ),
+    # ── dotmac-durable-timers ──
+    "dotmac-durable-timers-v0.1.0a1": (
+        "dotmac-durable-timers",
+        "f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
+        {
+            "dt_0001_durable_timers.py": (
+                "12bdaad16e18a2dca53b989adb80b9c6c2873e2971ab4a8713ccbc1a2b8d4370"
+            ),
+        },
+    ),
+    # ── dotmac-expenses ──
+    "dotmac-expenses-v0.1.0a1": (
+        "dotmac-expenses",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "ex_0001_expenses.py": (
+                "985234f5b245372655f33c49f91b00369f6ecc8cf7e1b2ed328f70a8745a6687"
+            ),
+        },
+    ),
+    # ── dotmac-fiber-plant ──
+    "dotmac-fiber-plant-v0.1.0a1": (
+        "dotmac-fiber-plant",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "fp_0001_fiber_plant.py": (
+                "7749f27a97b01c438613639dbc35cc971cab427821920619b6d434ea8b6a821b"
+            ),
+        },
+    ),
+    # ── dotmac-finance ──
+    "dotmac-finance-v0.1.0a1": (
+        "dotmac-finance",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "fn_0001_asset_accounting.py": (
+                "1f503d5056eabbcde45954152f250b631ee43b488d7f4d29056b69042f4c1c79"
+            ),
+        },
+    ),
+    # ── dotmac-inventory ──
+    "dotmac-inventory-v0.1.0a1": (
+        "dotmac-inventory",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "iv_0001_inventory.py": (
+                "625aadcdce6c0b6f92ceecdb5c3f9606407aa720b326286c9c318582243b4114"
+            ),
+        },
+    ),
+    # ── dotmac-ipam ──
+    "dotmac-ipam-v0.1.0a1": (
+        "dotmac-ipam",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "ip_0001_ipam.py": (
+                "ac7292ca9cf580d5a9d00f56160e15482dc57ce3491940559f76056c987e5198"
+            ),
+        },
+    ),
+    # ── dotmac-licensing ──
+    "dotmac-licensing-v0.1.0a1": (
+        "dotmac-licensing",
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "li_0001_licensing.py": (
+                "3c6e610e75016fd652b678674bca4d50c01beb7d9f9c15450a4b1bebf43b2e4d"
+            ),
+        },
+    ),
+    # ── dotmac-media-observations ──
+    "dotmac-media-observations-v0.1.0a1": (
+        "dotmac-media-observations",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        {
+            "mo_0001_media_observations.py": (
+                "b274cb73037d314a275e7c23193229b139dd3d536cf5269b2ebc91b61b035bbf"
+            ),
+        },
+    ),
+    # ── dotmac-network-access ──
+    "dotmac-network-access-v0.1.0a1": (
+        "dotmac-network-access",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "nac_0001_network_access.py": (
+                "1540a2a8ce67bde692865514314f4f50b391b2a0339868e4c27ea839bf0dc198"
+            ),
+        },
+    ),
+    # ── dotmac-network-assurance ──
+    "dotmac-network-assurance-v0.1.0a1": (
+        "dotmac-network-assurance",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "na_0001_network_assurance.py": (
+                "718b4d076ca8bfb71f3e22a2422ac107bba731983e37e522e651ed356416e6e4"
+            ),
+        },
+    ),
+    # ── dotmac-network-control ──
+    "dotmac-network-control-v0.1.0a1": (
+        "dotmac-network-control",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "nc_0001_network_control.py": (
+                "2467b95b53d09fdcfc275fbc995e10393121e86826fa18f0c3b5f18290e67603"
+            ),
+        },
+    ),
+    # ── dotmac-network-inventory ──
+    "dotmac-network-inventory-v0.1.0a1": (
+        "dotmac-network-inventory",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "ni_0001_network_inventory.py": (
+                "6936e411a5fd364113c11d9552d9b190c351b3d187399bfd64982a883713b5f1"
+            ),
+        },
+    ),
+    # ── dotmac-network-observability ──
+    "dotmac-network-observability-v0.1.0a1": (
+        "dotmac-network-observability",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "no_0001_net_observability.py": (
+                "1e992888be2a813d13ff485f28b5af05435995a9bc1013ab81cfd120eaa465f6"
+            ),
+        },
+    ),
+    # ── dotmac-network-topology ──
+    "dotmac-network-topology-v0.1.0a1": (
+        "dotmac-network-topology",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "nt_0001_network_topology.py": (
+                "b47d4600830b07a8d3c1034c397a4e347446e15d84260c4ee473c7a3e9d5632e"
+            ),
+        },
+    ),
+    # ── dotmac-party ──
+    "dotmac-party-v0.1.0a1": (
+        "dotmac-party",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "pt_0001_party_context.py": (
+                "fd84e1bbe1fe9ee97d2a0d26def9e7ca561aaf527fcc24d94faa80afa7d50750"
+            ),
+        },
+    ),
+    # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a1": (
+        "dotmac-payables",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+        },
+    ),
+    # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a1": (
+        "dotmac-payroll",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+        },
+    ),
+    # ── dotmac-pon-access ──
+    "dotmac-pon-access-v0.1.0a1": (
+        "dotmac-pon-access",
+        "bfc112fc8eac58e5ce279c1d0a5868c1f156c0e3",
+        {
+            "pn_0001_pon_access.py": (
+                "241685bf0ccc01bc6e797622c787e2d27c7652b577e645ff9592dcfd463dee3b"
+            ),
+        },
+    ),
+    # ── dotmac-positioning ──
+    "dotmac-positioning-v0.1.0a1": (
+        "dotmac-positioning",
+        "75a26abd3f866ebe24c4881a3958439d423034c7",
+        {
+            "po_0001_positioning.py": (
+                "153136b3f1441e03f26626502808b5081ac3a39678bf7d40be5712c49e70d16f"
+            ),
+        },
+    ),
+    # ── dotmac-procurement ──
+    "dotmac-procurement-v0.1.0a1": (
+        "dotmac-procurement",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "pc_0001_procurement.py": (
+                "d2b5b7b30e72337ecf6ed49833debe58882f6928bab5174d236e2e8a97943101"
+            ),
+        },
+    ),
+    # ── dotmac-projects ──
+    "dotmac-projects-v0.1.0a1": (
+        "dotmac-projects",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "pj_0001_projects.py": (
+                "0342699ea131a1128ab1b112743a56d53e3e37dd9ed4086607c31c8ad4bf19aa"
+            ),
+        },
+    ),
+    # ── dotmac-publishing ──
+    "dotmac-publishing-v0.1.0a1": (
+        "dotmac-publishing",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        {
+            "pb_0001_publishing.py": (
+                "ee75c055bbefac8117f94967705c6d6e5764baa0d21a579085684af0582b216e"
+            ),
+        },
+    ),
+    # ── dotmac-records ──
+    "dotmac-records-v0.1.0a1": (
+        "dotmac-records",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "re_0001_records.py": (
+                "392a43f8eddaa7e6bb011c8e870ede77d064097e5670f9c186c020ac7ce30598"
+            ),
+        },
+    ),
+    # ── dotmac-referrals ──
+    "dotmac-referrals-v0.1.0a1": (
+        "dotmac-referrals",
+        "401f000626fb74898d0d6bda4244fee69849bcf2",
+        {
+            "rf_0001_referrals.py": (
+                "3af67102534e75737ca5a9f58cd9435bab842c8843be8f02e13053382467ffaf"
+            ),
+        },
+    ),
+    # ── dotmac-release-catalog ──
+    "dotmac-release-catalog-v0.1.0a4": (
+        "dotmac-release-catalog",
+        "7556b96e8751d46a8bf3cb014b95a9a64eb03b0c",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a3": (
+        "dotmac-release-catalog",
+        "461aff83d32d73166625be13e5214718f2ade9cf",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a2": (
+        "dotmac-release-catalog",
+        "5a911802e4423d72bb6576fe514d5d4efb23801a",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    "dotmac-release-catalog-v0.1.0a1": (
+        "dotmac-release-catalog",
+        "fb38ee0fd008f26fd7fd56bb65a6ef076328c2ea",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+        },
+    ),
+    # ── dotmac-reseller-management ──
+    "dotmac-reseller-management-v0.1.0a1": (
+        "dotmac-reseller-management",
+        "401f000626fb74898d0d6bda4244fee69849bcf2",
+        {
+            "rm_0001_reseller_management.py": (
+                "948a28e5adeb297d12e8d03599ed2f56a5ba2e45867ca03600821ddc74c7ec2e"
+            ),
+        },
+    ),
+    # ── dotmac-service-orders ──
+    "dotmac-service-orders-v0.1.0a1": (
+        "dotmac-service-orders",
+        "909164420b5a3e14b289af923ddbb13f70ec4020",
+        {
+            "so_0001_service_delivery_orders.py": (
+                "3065f107cfda5914dee7319ae0aacfc5eb2ebfd849d4b558e8dcd2850e97dff9"
+            ),
+        },
+    ),
+    # ── dotmac-sites ──
+    "dotmac-sites-v0.1.0a1": (
+        "dotmac-sites",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        {
+            "si_0001_sites.py": (
+                "1dd7d1f95343001574630c6cd252ed1d7cbe5070654d6aa8a8cd8d4809117de2"
+            ),
+        },
+    ),
+    # ── dotmac-surveys ──
+    "dotmac-surveys-v0.1.0a1": (
+        "dotmac-surveys",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "sv_0001_surveys.py": (
+                "8c86d1b7d756d81bf0aad746b8d222c434bdb2526ba353f3b3d231ce92fda7fe"
+            ),
+        },
+    ),
+    # ── dotmac-web-analytics ──
+    "dotmac-web-analytics-v0.1.0a1": (
+        "dotmac-web-analytics",
+        "8b8e3d26f4b344cf1ed7444e9a2e3836c7115f30",
+        {
+            "wa_0001_web_analytics.py": (
+                "febb356d3e8a280049226803286ea4076150e39af3ad6a65e09d611ec9fe4b71"
+            ),
+        },
+    ),
+    # ── dotmac-work-orders ──
+    "dotmac-work-orders-v0.1.0a1": (
+        "dotmac-work-orders",
+        "20d24703e70e4d361de2f406165df4b36cbee507",
+        {
+            "wo_0001_work_orders.py": (
+                "b34f8f60964b45ffc4bb96b2bc93d089d462c293ded9cf17986a00b874d0580c"
+            ),
+        },
+    ),
 }
 
 
@@ -5864,6 +6551,46 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
     "dotmac-kernel": frozenset(),
+    "dotmac-accounting": frozenset(),
+    "dotmac-analytics": frozenset(),
+    "dotmac-application-directory": frozenset(),
+    "dotmac-assets": frozenset(),
+    "dotmac-banking": frozenset(),
+    "dotmac-brand-profiles": frozenset(),
+    "dotmac-campaigns": frozenset(),
+    "dotmac-content": frozenset(),
+    "dotmac-documents": frozenset(),
+    "dotmac-durable-timers": frozenset(),
+    "dotmac-expenses": frozenset(),
+    "dotmac-fiber-plant": frozenset(),
+    "dotmac-finance": frozenset(),
+    "dotmac-inventory": frozenset(),
+    "dotmac-ipam": frozenset(),
+    "dotmac-licensing": frozenset(),
+    "dotmac-media-observations": frozenset(),
+    "dotmac-network-access": frozenset(),
+    "dotmac-network-assurance": frozenset(),
+    "dotmac-network-control": frozenset(),
+    "dotmac-network-inventory": frozenset(),
+    "dotmac-network-observability": frozenset(),
+    "dotmac-network-topology": frozenset(),
+    "dotmac-party": frozenset(),
+    "dotmac-payables": frozenset(),
+    "dotmac-payroll": frozenset(),
+    "dotmac-pon-access": frozenset(),
+    "dotmac-positioning": frozenset(),
+    "dotmac-procurement": frozenset(),
+    "dotmac-projects": frozenset(),
+    "dotmac-publishing": frozenset(),
+    "dotmac-records": frozenset(),
+    "dotmac-referrals": frozenset(),
+    "dotmac-release-catalog": frozenset(),
+    "dotmac-reseller-management": frozenset(),
+    "dotmac-service-orders": frozenset(),
+    "dotmac-sites": frozenset(),
+    "dotmac-surveys": frozenset(),
+    "dotmac-web-analytics": frozenset(),
+    "dotmac-work-orders": frozenset(),
 }
 
 
