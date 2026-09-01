@@ -22,7 +22,9 @@ would have passed against the broken wheel too.
 
 from __future__ import annotations
 
+import ast
 import copy
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -576,89 +578,326 @@ def test_a_self_executed_dataset_still_gets_its_backup_steps() -> None:
 # ── 7. handed over, never discovered ────────────────────────────────────────
 
 
-#: How near a directory walk has to be to the word "receipt" before it counts as
-#: receipt discovery. A whole-file substring test was tried first and was wrong
-#: in the way that matters: `cli.py` walks the RENDER OUTPUT directory and also
-#: happens to mention receipts, so the coarse check reported a violation that
-#: was not one — and a detector that cries wolf is one someone eventually
-#: silences by deleting it.
-_DISCOVERY_WINDOW = 10
+#: Attribute names that mean "enumerate a directory" WHATEVER the receiver is.
+#: `walk` is deliberately not here — `ast.walk` is pervasive in this repository
+#: and means something else entirely — so it is caught by resolution below
+#: instead, and only when the receiver really is `os`.
+ENUMERATION_ATTRS = frozenset({"glob", "rglob", "iterdir", "scandir", "listdir"})
 
-_WALKS = ("glob(", "rglob(", "iterdir(", "listdir(")
+#: Fully-qualified callables that enumerate. Reached through the import alias
+#: map, so `import os as o; o.walk(...)` and `from os import scandir as s; s(...)`
+#: both resolve here rather than slipping past a substring scan.
+ENUMERATION_DOTTED = frozenset(
+    {"os.walk", "os.scandir", "os.listdir", "os.path.walk", "glob.glob", "glob.iglob"}
+)
+
+#: Constructs that defeat static resolution. Per the rule, an unresolvable
+#: construct in receipt-handling code is REFUSED rather than assumed innocent:
+#: it is exactly where a discovery would hide.
+DYNAMIC_NAMES = frozenset({"eval", "exec", "__import__"})
+DYNAMIC_ATTRS = frozenset({"import_module"})
+
+PACKAGE = (
+    REPO_ROOT
+    / "packages"
+    / "dotmac-deployment-foundation"
+    / "src"
+    / "dotmac_deployment_foundation"
+)
 
 
-def _receipt_discovery(text: str) -> list[int]:
-    """Line numbers where a directory walk sits within the window of "receipt"."""
-    lines = text.splitlines()
-    receipt_lines = {
-        index for index, line in enumerate(lines) if "receipt" in line.lower()
-    }
-    found: list[int] = []
-    for index, line in enumerate(lines):
-        if not any(walk in line for walk in _WALKS):
+def _alias_map(tree: ast.AST) -> dict[str, str]:
+    """Local name → dotted origin, so an alias cannot hide an import."""
+    alias: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for name in node.names:
+                alias[name.asname or name.name.split(".")[0]] = name.name
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for name in node.names:
+                alias[name.asname or name.name] = f"{node.module}.{name.name}"
+    return alias
+
+
+def _enclosing(tree: ast.AST, lineno: int) -> str:
+    best: ast.AST | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.lineno <= lineno <= (node.end_lineno or node.lineno):
+                if best is None or node.lineno > best.lineno:  # type: ignore[attr-defined]
+                    best = node
+    return getattr(best, "name", "<module>")
+
+
+def enumeration_sites(source: str) -> list[tuple[int, str, str]]:
+    """(line, api, enclosing function) for every filesystem enumeration.
+
+    AST over `Call`/`Attribute`/`Name` nodes rather than substrings, because the
+    substring version this replaced was a NAME BLACKLIST: `os.scandir`,
+    `os.walk`, an aliased `iterdir` and a one-line helper each defeated it while
+    it read as well-guarded, planted positives and all.
+
+    An ATTRIBUTE is flagged whether or not it is called, so binding the method
+    first (`walk = root.iterdir`) is caught at the binding.
+    """
+    tree = ast.parse(source)
+    alias = _alias_map(tree)
+    found: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            if node.attr in ENUMERATION_ATTRS:
+                found.append(
+                    (node.lineno, f".{node.attr}", _enclosing(tree, node.lineno))
+                )
+            elif node.attr == "walk" and isinstance(node.value, ast.Name):
+                if alias.get(node.value.id, node.value.id) in {"os", "os.path"}:
+                    found.append(
+                        (node.lineno, "os.walk", _enclosing(tree, node.lineno))
+                    )
+        elif isinstance(node, ast.Name):
+            if alias.get(node.id, "") in ENUMERATION_DOTTED:
+                found.append(
+                    (node.lineno, alias[node.id], _enclosing(tree, node.lineno))
+                )
+    return sorted(set(found))
+
+
+def unresolvable_sites(source: str) -> list[tuple[int, str, str]]:
+    """Constructs whose target this checker cannot resolve, so it refuses them.
+
+    `getattr` is NOT blanket-refused: `getattr(self, f"_do_{kind}")` resolves to
+    methods of the same class, in this same module, every one of which this
+    checker already scans — so it cannot hide a discovery. What it refuses is
+    `getattr` on an IMPORTED MODULE with a computed attribute, and a computed
+    attribute fetched and then called, which can.
+    """
+    tree = ast.parse(source)
+    alias = _alias_map(tree)
+    found: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-        near = range(index - _DISCOVERY_WINDOW, index + _DISCOVERY_WINDOW + 1)
-        if receipt_lines & set(near):
-            found.append(index + 1)
-    return found
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in DYNAMIC_NAMES:
+            found.append((node.lineno, func.id, _enclosing(tree, node.lineno)))
+        elif isinstance(func, ast.Attribute) and func.attr in DYNAMIC_ATTRS:
+            found.append((node.lineno, func.attr, _enclosing(tree, node.lineno)))
+        elif isinstance(func, ast.Name) and func.id == "getattr" and node.args:
+            target = node.args[0]
+            on_module = isinstance(target, ast.Name) and (
+                alias.get(target.id, "") in {"os", "glob", "pathlib", "shutil"}
+                or target.id in {"os", "glob", "pathlib", "shutil"}
+            )
+            computed = len(node.args) > 1 and not isinstance(node.args[1], ast.Constant)
+            if on_module and computed:
+                found.append(
+                    (
+                        node.lineno,
+                        "getattr(<module>, <computed>)",
+                        _enclosing(tree, node.lineno),
+                    )
+                )
+        elif isinstance(func, ast.Call) and isinstance(func.func, ast.Name):
+            if func.func.id == "getattr":
+                found.append(
+                    (node.lineno, "getattr(...)()", _enclosing(tree, node.lineno))
+                )
+    return sorted(set(found))
 
 
-def test_nothing_in_the_package_searches_for_a_receipt() -> None:
-    """Ambient discovery is how a stale receipt from a previous quarter comes to
-    satisfy today's gate — and a facility that goes looking cannot tell "no
-    proof exists" from "no proof was offered"."""
-    package = (
-        REPO_ROOT
-        / "packages"
-        / "dotmac-deployment-foundation"
-        / "src"
-        / "dotmac_deployment_foundation"
-    )
-    offenders = {
-        str(path.relative_to(package)): lines
-        for path in sorted(package.rglob("*.py"))
-        if (lines := _receipt_discovery(path.read_text(encoding="utf-8")))
+#: EVERY filesystem enumeration in the whole facility, each with the reason it
+#: is unrelated to receipts. Scanning the whole package rather than only the
+#: receipt modules is what closes the one-line-helper evasion: a helper cannot
+#: sit in a neighbouring module and be called from receipt code, because there
+#: is nowhere in the package for it to hide.
+#:
+#: Two-directional (ADR-0018): a NEW enumeration anywhere fails until it is
+#: recorded here with a reason, and a removed one fails until the row goes.
+ALLOWED_ENUMERATION: dict[tuple[str, str, str], str] = {
+    ("cli.py", "cmd_render", ".rglob"): (
+        "walks the RENDER OUTPUT directory to report stray files. Reads no "
+        "receipt and is not on any path that obtains one"
+    ),
+    ("conformance.py", "check_rendered_assets_match", ".rglob"): (
+        "the consumer conformance kit, comparing a product's committed rendered "
+        "assets against what its descriptor renders"
+    ),
+    ("launcher.py", "_package_digest", ".rglob"): (
+        "hashes the facility's own .py files to digest the installed package"
+    ),
+}
+
+#: The modules that handle recovery receipts: the contract itself, anything
+#: importing it, and anything constructing the `recovery_receipts` argument that
+#: carries them. Derived, never listed — a new handler joins the scope by
+#: existing rather than by somebody remembering to add it.
+RECEIPT_SYMBOLS = frozenset(
+    {
+        "accept_external_recovery_receipt",
+        "backup_record_from_receipt",
+        "ExternalRecoveryReceiptV1",
+        "recovery_receipts",
     }
+)
+
+
+def _receipt_modules() -> dict[str, str]:
+    modules: dict[str, str] = {}
+    for path in sorted(PACKAGE.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imports_contract = any(
+            isinstance(n, ast.ImportFrom)
+            and n.module
+            and n.module.endswith("external_recovery")
+            for n in ast.walk(tree)
+        )
+        carries = any(
+            (isinstance(n, ast.keyword) and n.arg == "recovery_receipts")
+            or (isinstance(n, ast.arg) and n.arg == "recovery_receipts")
+            for n in ast.walk(tree)
+        )
+        if imports_contract or carries or path.name == "external_recovery.py":
+            modules[str(path.relative_to(PACKAGE))] = source
+    return modules
+
+
+def _handles_receipts(source: str, function: str) -> bool:
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == function
+        ):
+            body = ast.unparse(node)
+            return any(symbol in body for symbol in RECEIPT_SYMBOLS)
+    return False
+
+
+def test_the_facility_enumerates_the_filesystem_in_exactly_these_places() -> None:
+    """A receipt is handed over, never discovered — enforced over the WHOLE
+    package, so a discovery helper has nowhere to hide."""
+    found = {
+        (str(path.relative_to(PACKAGE)), scope, api)
+        for path in sorted(PACKAGE.rglob("*.py"))
+        for _, api, scope in enumeration_sites(path.read_text(encoding="utf-8"))
+    }
+    assert found == set(ALLOWED_ENUMERATION), (
+        "filesystem enumeration in the facility changed.\n"
+        f"  new:     {sorted(found - set(ALLOWED_ENUMERATION))}\n"
+        f"  removed: {sorted(set(ALLOWED_ENUMERATION) - found)}\n"
+        "Record a new one here with the reason it cannot reach a receipt, or "
+        "delete the stale row — this ratchet fails in both directions"
+    )
+
+
+def test_no_receipt_handling_function_enumerates_the_filesystem() -> None:
+    """The property itself. Every allowlisted site must sit in a function that
+    touches no receipt symbol — `cli.cmd_render` walks the render output and is
+    the only enumeration in a receipt-handling MODULE at all."""
+    offenders = [
+        f"{module}::{scope} calls {api}"
+        for module, source in _receipt_modules().items()
+        for _, api, scope in enumeration_sites(source)
+        if _handles_receipts(source, scope)
+    ]
     assert not offenders, (
-        f"a directory walk sits beside receipt handling: {offenders}. Receipts "
-        "are passed in, never discovered"
+        f"receipt-handling code enumerates the filesystem: {offenders}. A search "
+        "cannot tell 'no proof exists' from 'no proof was offered', and will "
+        "happily find last quarter's"
     )
 
 
-def test_the_discovery_detector_actually_bites() -> None:
-    """A check over a clean tree passes for the same reason a check with its
-    body deleted passes (ADR-0018). Planted, and observed refusing."""
-    planted = "\n".join(
-        [
-            "def find_receipt(root):",
-            "    # ambient discovery, which is exactly what must not exist",
-            "    return sorted(root.glob('*.json'))[-1]",
-        ]
+def test_no_receipt_handling_module_hides_a_call_behind_dynamic_resolution() -> None:
+    """Unresolvable is REFUSED, not assumed innocent — it is precisely where a
+    discovery would hide."""
+    offenders = [
+        f"{module}:{line} {api} in {scope}"
+        for module, source in _receipt_modules().items()
+        for line, api, scope in unresolvable_sites(source)
+    ]
+    assert (
+        not offenders
+    ), f"unresolvable construct in receipt-handling code: {offenders}"
+
+
+@pytest.mark.parametrize(
+    ("label", "code"),
+    [
+        (
+            "os.scandir",
+            "import os\ndef find(root):\n    return sorted(os.scandir(root))[-1]",
+        ),
+        (
+            "os.walk",
+            "import os\ndef find(root):\n    for _, _, f in os.walk(root): return f",
+        ),
+        (
+            "aliased iterdir",
+            "def find(root):\n    walk = root.iterdir\n    return sorted(walk())[-1]",
+        ),
+        (
+            "from-import alias",
+            "from os import scandir as s\ndef find(root):\n"
+            "    return sorted(s(root))[-1]",
+        ),
+        ("glob module", "import glob\ndef find(root):\n    return glob.glob(root)"),
+        (
+            "the original planted case",
+            "def find(root):\n    return sorted(root.glob('*.json'))[-1]",
+        ),
+    ],
+)
+def test_the_detector_catches_every_demonstrated_evasion(label: str, code: str) -> None:
+    """Each of these defeated the substring blacklist while it looked guarded.
+    A guard is only worth its planted positives if the plants are the ways it
+    would actually be got round."""
+    assert enumeration_sites(code), f"{label} evaded the detector"
+
+
+def test_the_detector_admits_legitimate_code() -> None:
+    """The other direction, and the reason the previous coarse check had to go:
+    a detector that cries wolf is one somebody eventually silences."""
+    assert not enumeration_sites(
+        "import ast\ndef f(tree):\n    return list(ast.walk(tree))"
     )
-    assert _receipt_discovery(planted) == [3]
-
-
-def test_the_detector_does_not_fire_on_an_unrelated_walk() -> None:
-    """The other half. `cli.py` walks the render OUTPUT directory and mentions
-    receipts elsewhere in the file; a detector that failed on that would be
-    deleted within a week, taking the real check with it."""
-    unrelated = "\n".join(
-        ["for path in out.rglob('*'):", "    ...", *([""] * 30), "# recovery receipt"]
+    assert not unresolvable_sites(
+        'import os\ndef f():\n    return getattr(os, "O_NOFOLLOW", 0)'
     )
-    assert _receipt_discovery(unrelated) == []
+    assert not unresolvable_sites(
+        'def f(self, kind):\n    return getattr(self, f"_do_{kind}", None)'
+    )
 
 
-def test_the_receipt_is_an_explicit_argument_of_the_acceptor() -> None:
-    """The seam, asserted structurally. `accept_external_recovery_receipt` takes
-    the envelope POSITIONALLY and every expectation by keyword; there is no
-    parameter naming a directory, a search root or a filename pattern, so a
-    caller with no receipt has nothing to pass rather than a path to guess."""
-    import inspect
+def test_dynamic_resolution_that_could_hide_a_walk_is_refused() -> None:
+    """`getattr(self, …)` resolves to methods this checker already scans;
+    `getattr(os, name)` resolves to whatever the caller computed."""
+    assert unresolvable_sites("import os\ndef f(n):\n    return getattr(os, n)('/tmp')")
+    assert unresolvable_sites(
+        "import importlib\ndef f(m):\n    return importlib.import_module(m)"
+    )
 
+
+def test_the_receipt_is_the_acceptors_first_positional_argument() -> None:
+    """The seam, asserted structurally and without naming anything.
+
+    The envelope is the only positional parameter and every expectation is
+    keyword-only, so a caller with no receipt has nothing to pass — rather than
+    a path it could be tempted to fill in. This replaced an assertion that the
+    signature contained no parameter called `path`/`directory`/`search_root`/
+    `pattern`, which a parameter named `receipt_dir` or `root` walked straight
+    past.
+    """
     signature = inspect.signature(accept_external_recovery_receipt)
-    parameters = list(signature.parameters)
-    assert parameters[0] == "payload"
-    assert not {"path", "directory", "search_root", "pattern"} & set(parameters)
+    parameters = list(signature.parameters.values())
+    assert parameters[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters[1:]), [
+        (p.name, str(p.kind)) for p in parameters[1:]
+    ]
+    assert not any(
+        p.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+        for p in parameters
+    )
 
 
 def test_a_receipt_document_is_never_mutated_by_acceptance(
