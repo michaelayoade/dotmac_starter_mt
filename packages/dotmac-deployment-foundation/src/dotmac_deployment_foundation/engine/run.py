@@ -42,11 +42,17 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
+from ..backup import BackupRecord
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..evidence import (
     SignatureVerifier,
     TrustPolicy,
     accept_release_evidence,
+)
+from ..external_recovery import (
+    accept_external_recovery_receipt,
+    backup_record_from_receipt,
+    require_restore_proof,
 )
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -219,6 +225,10 @@ class Executor:
         deployment_id: str = "",
         evidence_policy: TrustPolicy | None = None,
         evidence_verifier: SignatureVerifier | None = None,
+        recovery_receipts: Mapping[str, object] | None = None,
+        recovery_verifier: SignatureVerifier | None = None,
+        recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
+        now_epoch: int = 0,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -239,6 +249,22 @@ class Executor:
         # neither of which verifies anything.
         self._evidence_policy = evidence_policy
         self._evidence_verifier = evidence_verifier
+        # HANDED OVER, never discovered. There is no directory scan and no
+        # `Effects.find_receipt()`: the caller passes the exact envelope for
+        # each dataset, exactly as `--authorization` passes an
+        # `AuthorizationReceipt`. Ambient discovery is how a stale receipt from
+        # a previous quarter comes to satisfy today's gate, and a facility that
+        # goes looking cannot tell "no proof exists" from "no proof was offered".
+        self._recovery_receipts: Mapping[str, object] = recovery_receipts or {}
+        self._recovery_verifier = recovery_verifier
+        # Records the deployment already holds for this dataset. The accepted
+        # receipt is APPENDED to them rather than replacing them, so a fresh
+        # receipt cannot make an otherwise-overdue history look current by being
+        # the only thing in the list.
+        self._recovery_records: Mapping[str, Sequence[BackupRecord]] = (
+            recovery_records or {}
+        )
+        self._now_epoch = now_epoch
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -575,6 +601,72 @@ class Executor:
         return (
             f"{len(required)} material(s) resolve; "
             "owner material absent from every role"
+        )
+
+    def _do_verify_external_recovery_receipt(
+        self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
+    ) -> str:
+        """Somebody else restored it. Prove it, bind it, and enforce the window.
+
+        Three things had to be true before this step could exist and each was
+        missing. The descriptor could not name the privilege verifications, so a
+        receipt could only ever claim `schema` and `row_counts`. Nothing turned
+        an external proof into a `BackupRecord`, so `restore_proved_at_epoch` was
+        written by nothing in the package. And `backup.assess()` -- which
+        computes the `restore_proof_max_age_days` window correctly -- had zero
+        callers, so the window was inert. This is the caller.
+        """
+        dataset = next(
+            (item for item in self._spec.backup_datasets if item.code == step.target),
+            None,
+        )
+        if dataset is None or dataset.external_executor is None:
+            raise StepFailed(
+                step.kind.value,
+                f"the plan asks for an external recovery receipt for "
+                f"{step.target!r} and the descriptor declares no external "
+                "executor for it. A plan and a descriptor that disagree about "
+                "who performs recovery must not be resolved by guessing",
+            )
+        envelope = self._recovery_receipts.get(step.target)
+        if envelope is None:
+            raise PreconditionFailed(
+                f"no recovery receipt was supplied for {step.target!r}. It is "
+                "passed in, never discovered: this facility does not go looking, "
+                "because a search cannot tell 'no proof exists' from 'no proof "
+                "was offered' and will happily find last quarter's"
+            )
+        receipt = accept_external_recovery_receipt(
+            envelope,
+            identity=dataset.identity(self._spec.product),
+            descriptor_digest=str(self._spec.to_canonical_document().sha256_digest()),
+            executor=dataset.external_executor,
+            required_verifications=dataset.verify,
+            verifier=self._recovery_verifier,
+        )
+        records = [
+            *self._recovery_records.get(step.target, ()),
+            backup_record_from_receipt(
+                receipt,
+                path=f"external:{receipt.executor.identifier}",
+                size_bytes=max(1, receipt.restore_duration_seconds),
+            ),
+        ]
+        detail = require_restore_proof(
+            self._spec,
+            step.target,
+            records,
+            now_epoch=self._now_epoch or receipt.proved_at_epoch,
+        )
+        outcome.notes.append(
+            f"recovery receipt {receipt.sha256_digest()} for {step.target}: "
+            f"{detail}"
+        )
+        return (
+            f"{receipt.executor.kind}:{receipt.executor.identifier}"
+            f"@{receipt.executor.version} proved {list(receipt.verifications)} "
+            f"on snapshot {receipt.snapshot_checksum_algorithm}="
+            f"{receipt.snapshot_checksum}; {detail}"
         )
 
     def _do_product_preflight(
