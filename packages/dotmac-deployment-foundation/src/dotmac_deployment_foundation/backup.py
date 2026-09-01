@@ -63,9 +63,23 @@ from enum import Enum
 from typing import Final
 
 from .errors import SpecError
-from .spec import BackupDataset, ProductDeploymentSpec
+from .spec import SECONDS_PER_DAY, BackupDataset, ProductDeploymentSpec
 
-SECONDS_PER_DAY: Final = 86_400
+#: Re-exported from `spec`, which owns it now that a descriptor declares a
+#: cadence in seconds. One definition, two names, no drift.
+__all__ = [
+    "SECONDS_PER_DAY",
+    "ArtefactClass",
+    "Assurance",
+    "BackupHealth",
+    "BackupRecord",
+    "RestoreRehearsal",
+    "VerificationPlan",
+    "assess",
+    "restore_rehearsal",
+    "retention_keep",
+    "verification_plan",
+]
 
 
 class ArtefactClass(str, Enum):
@@ -313,10 +327,16 @@ def assess(
     records: Sequence[BackupRecord],
     *,
     now_epoch: int,
-    expected_interval_seconds: int = SECONDS_PER_DAY,
+    expected_backup_interval_seconds: int = SECONDS_PER_DAY,
     stale_multiplier: int = 2,
 ) -> BackupHealth:
     """Assess one dataset's backups as of ``now_epoch``.
+
+    ``expected_backup_interval_seconds`` carries the same name as the descriptor
+    field that supplies it (`BackupDataset`). It used to be
+    ``expected_interval_seconds`` — a second name for one control, and one the
+    descriptor could not state at all, so every caller silently accepted the
+    daily default whatever the product's real cadence was.
 
     ``stale_multiplier`` exists because a backup that is one interval old is
     normal — it is the one taken last night. Alerting at one interval pages
@@ -350,7 +370,7 @@ def assess(
     return BackupHealth(
         dataset=dataset_code,
         age_seconds=age,
-        stale=age > expected_interval_seconds * stale_multiplier,
+        stale=age > expected_backup_interval_seconds * stale_multiplier,
         unverified=not newest.at_least(Assurance.VERIFIED),
         restore_proof_age_seconds=proof_age,
         restore_proof_overdue=proof_age is None or proof_age > window,

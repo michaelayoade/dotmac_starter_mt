@@ -56,7 +56,18 @@ from .database_catalog import (
     DatabaseCatalogScope,
 )
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
+from .recovery_identity import (
+    PRIVILEGE_VERIFICATIONS,
+    DatasetIdentityV1,
+    ExternalExecutorV1,
+)
 from .secrets_guard import require_no_secrets
+
+#: Defined HERE rather than in `backup.py`, which is where it used to live: this
+#: module now declares a cadence in seconds and `backup.py` already imports this
+#: one, so the alternative was two definitions of a constant whose whole value is
+#: that everything agrees on it. `backup.py` re-exports it, so no caller moves.
+SECONDS_PER_DAY: Final = 86_400
 
 
 def _contained_relative_path(value: str, *, key: str, where: str) -> str:
@@ -1404,6 +1415,26 @@ class BackupDataset:
     ``restore_proof_max_age_days`` is the field that separates a backup from a
     belief. An untested backup has never been shown to restore, and the moment
     at which that is discovered is always the worst possible one.
+
+    ``expected_backup_interval_seconds`` is a SEPARATE control and must stay
+    one. It is how often a backup is expected, and it decides staleness; the
+    field above is how old the newest PROVED restore may be, and it decides
+    whether recovery has ever been demonstrated. A product taking hourly backups
+    nobody has ever restored passes the first and fails the second, which is
+    precisely the state the fleet was in — so merging them would delete the only
+    control that was reporting the real problem.
+
+    ``lineage`` names the DATA, independently of the host it currently lives on
+    and the party that holds it (`recovery_identity.DatasetIdentityV1`). Those
+    are the two things that change while the data does not, and a proof keyed to
+    either is orphaned at the exact moment it matters. Optional, because a
+    dataset the product restores itself needs no cross-party identity — but
+    REQUIRED the moment an external executor is declared.
+
+    ``external_executor`` is what turns a `backup` step into a
+    `verify_external_recovery_receipt` step: when another party executes
+    recovery, this deployment cannot observe the restore and must not emit a
+    plan step claiming it performed one.
     """
 
     code: str
@@ -1414,16 +1445,48 @@ class BackupDataset:
     encryption: str
     offsite: str
     restore_proof_max_age_days: int
+    expected_backup_interval_seconds: int
     verify: tuple[str, ...]
+    lineage: str = ""
+    external_executor: ExternalExecutorV1 | None = None
 
     KINDS: ClassVar[tuple[str, ...]] = ("postgres", "object_store", "volume")
     CHECKSUMS: ClassVar[tuple[str, ...]] = ("sha256", "sha512")
     ENCRYPTIONS: ClassVar[tuple[str, ...]] = ("age", "gpg", "none")
+    #: The four privilege verifications are NOT new vocabulary. `recovery.py`
+    #: has modelled `MEMBERSHIPS`, `OBJECT_OWNERSHIP`, role attributes and
+    #: `CatalogEvidence.effective_privileges` since the bundle contract landed;
+    #: this tuple simply did not list them, so a descriptor asking for the checks
+    #: that decide whether a restore is USABLE was refused at parse. Plumbing,
+    #: not design.
     VERIFICATIONS: ClassVar[tuple[str, ...]] = (
         "schema",
         "row_counts",
         "migration_heads",
+        *PRIVILEGE_VERIFICATIONS,
     )
+
+    @property
+    def externally_executed(self) -> bool:
+        return self.external_executor is not None
+
+    def identity(self, product: str) -> DatasetIdentityV1:
+        """The cross-party identity of this dataset.
+
+        Raises rather than inventing one from `code` when no lineage is
+        declared: a lineage silently defaulted to the dataset code would be
+        unique only within one descriptor, so two products would produce
+        colliding identities and a receipt for one would satisfy the other.
+        """
+        if not self.lineage:
+            raise SpecError(
+                f"dataset {self.code!r} declares no `lineage`, so it has no "
+                "identity a receipt from another party can be compared against. "
+                "Mint one opaque token for this data and never change it"
+            )
+        return DatasetIdentityV1(
+            product=product, dataset=self.code, lineage=self.lineage
+        )
 
     @classmethod
     def parse(cls, table: _Table) -> BackupDataset:
@@ -1439,8 +1502,44 @@ class BackupDataset:
         restore_proof = table.int_(
             "restore_proof_max_age_days", default=30, minimum=1, maximum=365
         )
+        # A SEPARATE control from the window above, defaulting to daily. Minimum
+        # 60s rather than 1: a cadence a host cannot meet turns every deployment
+        # into a stale-backup report, which is how a real staleness signal gets
+        # ignored.
+        interval = table.int_(
+            "expected_backup_interval_seconds",
+            default=SECONDS_PER_DAY,
+            minimum=60,
+            maximum=30 * SECONDS_PER_DAY,
+        )
+        lineage = table.str_("lineage", default="")
+        executor_table = table.table("external_executor", optional=True)
         verify = table.str_list("verify", default=("schema", "row_counts"))
         table.done()
+        executor: ExternalExecutorV1 | None = None
+        if executor_table is not None:
+            executor = ExternalExecutorV1(
+                kind=executor_table.str_("kind"),
+                identifier=executor_table.str_("identifier"),
+                # No defaults. An executor whose version is unstated produces
+                # receipts that cannot be compared with the procedure this
+                # descriptor accepted, and a defaulted key id would let any
+                # signer stand in for the declared one.
+                version=executor_table.str_("version"),
+                key_id=executor_table.str_("key_id"),
+            )
+            executor_table.done()
+            if not lineage:
+                raise SpecError(
+                    f"dataset {code!r} declares an external_executor and no "
+                    "`lineage`. A receipt from another party has to be about "
+                    "THIS data, and the dataset code alone is unique only "
+                    "inside one descriptor",
+                    where=table.path,
+                )
+            DatasetIdentityV1(
+                product="", dataset=code, lineage=lineage
+            ).refuse_executor_derived(executor)
         if checksum not in cls.CHECKSUMS:
             raise SpecError(
                 f"checksum must be one of {cls.CHECKSUMS}", where=table.path
@@ -1469,7 +1568,10 @@ class BackupDataset:
             encryption=encryption,
             offsite=offsite,
             restore_proof_max_age_days=restore_proof,
+            expected_backup_interval_seconds=interval,
             verify=verify,
+            lineage=lineage,
+            external_executor=executor,
         )
 
 

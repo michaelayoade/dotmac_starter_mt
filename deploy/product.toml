@@ -90,7 +90,28 @@ retention_days = 14
 checksum = "sha256"
 encryption = "none"
 restore_proof_max_age_days = 30
-verify = ["schema", "row_counts", "migration_heads"]
+# A SEPARATE control from the window above, stated rather than defaulted. This
+# one decides STALENESS (how often a backup is expected); the window decides
+# whether recovery has ever been demonstrated. A product taking hourly backups
+# nobody has restored passes the first and fails the second, so merging them
+# would delete the only control reporting the real problem.
+expected_backup_interval_seconds = 86400
+# Names the DATA, not the host it lives on or the party that holds it. Minted
+# once and never changed: a failover or a change of supplier must not orphan
+# every restore proof about this dataset.
+lineage = "starter-primary-9d41c6b2"
+# The four privilege verifications are what decide whether a restore is USABLE.
+# `recovery.py` has modelled all of them since the bundle contract landed; the
+# descriptor simply could not name them until now.
+verify = [
+  "schema",
+  "row_counts",
+  "migration_heads",
+  "roles",
+  "ownership",
+  "memberships",
+  "effective_privileges",
+]
 
 [telemetry]
 logs = true
