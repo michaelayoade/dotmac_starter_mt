@@ -19,6 +19,43 @@ permission replaces it: a tree that diverges from a built artifact allocates a
 new version. Everything below this heading that was previously filed as
 "unreleased, version unallocated" is `0.3.0a3` work.
 
+### `FoundationExecutionPlanV1` — the middle term of the receipt binding
+
+Control's `plan_digest` hashed the spec **wrapped in six sibling keys**; the
+Foundation hashed the **descriptor alone**. Same serialization rules, different
+payload — so the two values could never be equal, for any input, and nothing
+said so. Both sides were internally consistent, both computed "the plan digest",
+and the comparison was dead on arrival while reading as correct.
+
+Patching either end would leave the shape intact: whoever normalizes decides
+what was authorized and the other party trusts a reconstruction. So the middle
+term is now a document the **Foundation renders** and Control merely **freezes**.
+
+`ExecutionPlanDigestV1 = sha256(canonical FoundationExecutionPlanV1 bytes)`. It
+is **not** the descriptor digest, the authorization-envelope digest, or Control's
+internal snapshot digest — each is a real value a reader could reach for, and
+reaching for the third is how the divergence happened.
+
+The flow: Foundation renders the target-bound plan from the immutable artifact
+and the authorized environment inventory and computes the digest
+(`dotmac-deploy execution-plan --target ... --operation ...`); Platform CP
+submits that exact digest and an explicit operation to Control; Control freezes
+and signs and **never reconstructs or normalizes** the document; Foundation
+**recomputes the digest before execution** (`require_execution_plan_digest`);
+and the execution report carries the same digest and operation.
+
+Canonicalization is stated byte level, because two repositories bind to it:
+UTF-8 of `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True)`;
+ASCII-only and refused otherwise, so NFC/NFD never arises; keys sorted at every
+depth; every declared key always present and `null` never appearing; integers
+only; `steps` in plan order and every other array sorted and deduplicated; **no
+prose**, so an edit to a step's description cannot change a signed digest; the
+digest covering the document ALONE with no wrapper; and `foundation_version`
+inside the document.
+
+The environment inventory carries material NAMES only, never a resolved value
+(ADR-0009), and the finished document is run through `require_no_secrets`.
+
 ### External recovery: a proof from another party, bound so it cannot be claimed
 
 A read-only measurement of the frozen `0.3.0a2` wheel found it could not bind an

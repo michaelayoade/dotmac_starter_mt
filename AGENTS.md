@@ -1536,6 +1536,59 @@ specifics) points here and must never fork these rules.
     `tests/architecture/test_foundation_candidate_disposition.py`,
     `tests/architecture/test_version_binding_guard.py`)
 
+49. **The middle term of a controlled deployment is a document the FOUNDATION
+    renders and Control merely FREEZES.** `ExecutionPlanDigestV1 =
+    sha256(canonical FoundationExecutionPlanV1 bytes)`. It is **not** the
+    descriptor digest, the authorization-envelope digest, or Control's internal
+    snapshot digest — each is a real value a reader could reach for, and
+    reaching for the third is exactly what went wrong: Control's `plan_digest`
+    hashed the spec WRAPPED IN SIX SIBLING KEYS while the Foundation hashed the
+    descriptor ALONE. Same serialization rules, different payload, so the two
+    could never be equal for any input — and both sides were internally
+    consistent, so it read as correct.
+
+    Patching either end preserves the defect's shape: whoever normalizes decides
+    what was authorized and the other party trusts a reconstruction. **Control
+    never reconstructs or normalizes the Foundation plan**, and has no
+    canonicalizer for it by design, because a second canonicalizer is a second
+    answer.
+
+    **The flow, in order.** Foundation renders the target-bound plan from the
+    immutable artifact and the authorized environment inventory and computes the
+    digest (`dotmac-deploy execution-plan --format digest`) → Platform CP
+    submits THAT EXACT DIGEST and an explicit operation to Control → Control
+    freezes and signs → Foundation **recomputes the digest before execution**,
+    because "nothing changed since we were authorized" is what a long-running
+    process cannot assume → the execution report carries the same digest and
+    operation. A digest mismatch means the PLAN CHANGED, never that two
+    canonicalizers disagreed, and the refusal says so — if a mismatch could mean
+    disagreement, the fix a reader reaches for is a normalizer, which is how the
+    original divergence became permanent.
+
+    **Canonicalization is byte level, because two repositories bind to it.**
+    UTF-8 of `json.dumps(sort_keys=True, separators=(",", ":"),
+    ensure_ascii=True)`; ASCII-only and REFUSED otherwise, so the NFC/NFD
+    question never arises rather than being answered; keys sorted at every
+    depth; every declared key always present and `null` never appearing (a
+    missing key and an explicit null are two encodings of one fact); integers
+    only (float repr is platform-sensitive); `steps` in PLAN ORDER because a
+    reordered procedure is a different procedure, every other array sorted and
+    deduplicated; **no prose** — a step's description is excluded, so editing a
+    sentence cannot change a digest Control has already signed; the digest
+    covers the document ALONE, no wrapper; and `foundation_version` sits inside
+    it, because the plan's meaning is the steps THAT version emits.
+
+    The plan binds target, operation, image reference and digest, source
+    revision, manifest digest, descriptor digest, strategy, environment
+    inventory and steps. Dropping any one produces a plan reusable where it was
+    never meant to apply — the enumeration `ExecutionGrant` makes for an
+    approval, applied to the thing approved. The inventory is material NAMES
+    only, never a resolved value (ADR-0009)
+    (`packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/execution_plan.py`;
+    `tests/unit/test_deployment_foundation_execution_plan.py`, whose
+    `test_the_digest_covers_the_document_alone` plants the six-sibling-keys
+    wrapper and observes both a different digest and an outright refusal)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
