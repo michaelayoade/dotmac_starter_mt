@@ -71,6 +71,19 @@ tree; it is not permission for a fourth edit. The static census is paired with
 `tests/test_approvals_released_migration_upgrades.py`, which reconstructs each
 tagged meaning and proves its additive upgrade on PostgreSQL.
 
+## The kernel
+
+``dotmac-kernel`` was the largest hole this file had, and the last one anybody
+would have expected to find open: 61 published tags, 28 migrations, and a pin
+in every product in the fleet. It stayed uncovered because the census below
+read ``.github/release-modules.json`` alone, and the kernel is deliberately
+absent from that allowlist — it has its own workflow with its own inspection
+rules. "Not in the module allowlist" was therefore doing double duty: it meant
+*unreleasable* for a package with no lane, and *released by a different lane*
+for this one. ``_publishable_here`` separates them by reusing the sweep's own
+``DEDICATED_WORKFLOWS``, and the dedicated-lane published-tag proof below
+keeps that second door from becoming a way in for a name no tag supports.
+
 ## Scope
 
 Every distribution named in ``DISTRIBUTIONS``. Each entry's digests were read
@@ -257,6 +270,9 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-inbox": (
         REPO_ROOT / "packages/dotmac-inbox" / "src/dotmac_inbox/migrations/versions"
     ),
+    "dotmac-kernel": (
+        REPO_ROOT / "packages/dotmac-kernel" / "src/dotmac_kernel/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -297,6 +313,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-commercial-agreements": "cg_*.py",
     "dotmac-people": "pe_*.py",
     "dotmac-inbox": "ib_*.py",
+    "dotmac-kernel": "2*_[0-9][0-9][0-9][0-9]_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -334,6 +351,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-commercial-agreements": "dotmac-commercial-agreements-v",
     "dotmac-people": "dotmac-people-v",
     "dotmac-inbox": "dotmac-inbox-v",
+    "dotmac-kernel": "dotmac-kernel-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -1516,6 +1534,4237 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-kernel ────────────────────────────────────────────────────────
+    # Enrolled 2026-09-01. The kernel is deliberately absent from
+    # `.github/release-modules.json` -- it has its own lane
+    # (`.github/workflows/release-kernel.yml`), which is why the census below
+    # reads the sweep's `DEDICATED_WORKFLOWS` rather than the module allowlist
+    # alone. Absence from that allowlist was never a statement that the kernel
+    # has no released bytes: it has 61 published tags and every product in the
+    # fleet pins one, so an in-place edit to any file here reaches more
+    # databases this repository cannot inspect than every module lineage
+    # combined.
+    "dotmac-kernel-v0.1.0a100": (
+        "dotmac-kernel",
+        "917181b38dcc5954bac932b630909afdfb19012b",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a99": (
+        "dotmac-kernel",
+        "8c92943062dbfe7f17bfa35264243709ec3d92c3",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a98": (
+        "dotmac-kernel",
+        "ae7320876ad91d5bf4639d634d65a6e8fd36bb00",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a97": (
+        "dotmac-kernel",
+        "548084fd74779ccf1ad436e1201e03cb9239631a",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a95": (
+        "dotmac-kernel",
+        "188f5eb907a43fb67978d193e7482a57896f84a3",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a94": (
+        "dotmac-kernel",
+        "9e717eb88603f6ef61bded23b2aa468fe4533a95",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a93": (
+        "dotmac-kernel",
+        "8537a9bcb45464af36811a603463c0cfa71f2e4f",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a92": (
+        "dotmac-kernel",
+        "720eeb0a2e5c623ba27837ff9183ffd7958ba5f7",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a91": (
+        "dotmac-kernel",
+        "6c6a38b06829cd7904c52d3a10bb429db2e8ba35",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a90": (
+        "dotmac-kernel",
+        "4999bc492f58a2af60dd87d8b4a25fbb76751918",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a89": (
+        "dotmac-kernel",
+        "17e395d3676bfc50d9cfbe79b5fd819859c0f528",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a88": (
+        "dotmac-kernel",
+        "8673a2d943c63ae90931b7be3603b8e66f35668b",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a86": (
+        "dotmac-kernel",
+        "8b8e3d26f4b344cf1ed7444e9a2e3836c7115f30",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a85": (
+        "dotmac-kernel",
+        "b0310103994618a078eb7a7a1b300c17504eeb49",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a83": (
+        "dotmac-kernel",
+        "4cfdcd76739c9ad6c6dc249c1093849db7c3b752",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a81": (
+        "dotmac-kernel",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a77": (
+        "dotmac-kernel",
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a73": (
+        "dotmac-kernel",
+        "cfa9df8ac8d4f6c2b4faa92d6724be7ae767bbe7",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a72": (
+        "dotmac-kernel",
+        "f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a71": (
+        "dotmac-kernel",
+        "459569afdc6df6b78357d10277cee15820142fc9",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a70": (
+        "dotmac-kernel",
+        "c37b40db9d21869f42c4b9acdcb4f7f1bb9a2233",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a69": (
+        "dotmac-kernel",
+        "7c93ebf9d5ac8805029fe2c978d7732c0bc4f694",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a68": (
+        "dotmac-kernel",
+        "7b20d1567850aa663bd887b70766efc8013db67d",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a67": (
+        "dotmac-kernel",
+        "ed3ac864b350d4556808a69496f999f764682442",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a66": (
+        "dotmac-kernel",
+        "4c282228b53405442effc4159f5db9d50446d335",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a65": (
+        "dotmac-kernel",
+        "1e9c4332dc1dbc2cc81fd18ba3401a079c81d839",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a64": (
+        "dotmac-kernel",
+        "c680621fd8bbf99f8f5a4749743191beb1894724",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a63": (
+        "dotmac-kernel",
+        "67bdfb8b404a92fd455473806a256995bb507524",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a62": (
+        "dotmac-kernel",
+        "7556b96e8751d46a8bf3cb014b95a9a64eb03b0c",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a61": (
+        "dotmac-kernel",
+        "16f11a9ef0df7697558904efa969294bafc3fab3",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a60": (
+        "dotmac-kernel",
+        "3e1f8012c4f45369b6801a709a270d71c5c95a8d",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a59": (
+        "dotmac-kernel",
+        "49f9ccf6738a01a524ccbb450b27f92eb3b2565c",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a58": (
+        "dotmac-kernel",
+        "02006c382a85d68329e3a68a365037ed2c2a4a4b",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a56": (
+        "dotmac-kernel",
+        "2699b2b50091921c498bf16e7819c2736ba2572f",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a50": (
+        "dotmac-kernel",
+        "461aff83d32d73166625be13e5214718f2ade9cf",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a45": (
+        "dotmac-kernel",
+        "3e54d3c71bad4a53568101b7f383d2e8e455199f",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a42": (
+        "dotmac-kernel",
+        "048662dbd944aca95b2e89f133b0c864c3fd5a59",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a40": (
+        "dotmac-kernel",
+        "b37d25b6ab9f94ad5592c717d7b04af11800db15",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a38": (
+        "dotmac-kernel",
+        "58bb1945bdefb93688bece87044151e29e2a2fe8",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a33": (
+        "dotmac-kernel",
+        "21b735c0ded23e6aec5aae55ec3a060a2b84d6d6",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a32": (
+        "dotmac-kernel",
+        "56865b66cda554057fe99ed0f551198a759f24b6",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a31": (
+        "dotmac-kernel",
+        "047759b49a9bd26ed5137e4efd27bfc34a38c38e",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a30": (
+        "dotmac-kernel",
+        "4497e0b4641c6e35f7c1209b045ddde21ae60783",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a27": (
+        "dotmac-kernel",
+        "58ccaab619e4f162175fc7dfcc4e73f6559b8e92",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a25": (
+        "dotmac-kernel",
+        "e663fb57efd33a0aeb30def347012b40d0d6050e",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a24": (
+        "dotmac-kernel",
+        "1717f8dd8f8ea0a6e83effcfaee0c319eaa66097",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a23": (
+        "dotmac-kernel",
+        "f2460f91b5eed507ab8c8525e1396bd31d809b0f",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a21": (
+        "dotmac-kernel",
+        "7fb72df5a34590cd97b74e25975e53c22a5a94f6",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a18": (
+        "dotmac-kernel",
+        "7b8596c240031f7284b5ffefcc440ca3897b06bd",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a14": (
+        "dotmac-kernel",
+        "8472b9ee1b4f11d8388fcf08a558cd975d2450df",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a13": (
+        "dotmac-kernel",
+        "a83d6865565aae597dfbcdd7c80134394c6dc168",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a12": (
+        "dotmac-kernel",
+        "7995c66f6c5093de22f79ffb0d51dd1bf76e13a1",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a9": (
+        "dotmac-kernel",
+        "07b9d36040b5048b49a676795f3148d9a0cf29c2",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a8": (
+        "dotmac-kernel",
+        "1df5f4af1bf2e5479ebb5237592bc5ecca1d5414",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a7": (
+        "dotmac-kernel",
+        "fc546a05d1258d2b9ca0a2859c08c436d4e1455b",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a6": (
+        "dotmac-kernel",
+        "53a1b714cdf7bb5ad47a6e6baf9f367e8e465871",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a5": (
+        "dotmac-kernel",
+        "322e662dd0e4c2898218d9e993c1d3c42baf41ba",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a4": (
+        "dotmac-kernel",
+        "be4b6b4ca54bb3f06d2c610e824a176b98345744",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a3": (
+        "dotmac-kernel",
+        "9878033b16d591b71dfdc32bb0ae134e9764cf40",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a2": (
+        "dotmac-kernel",
+        "a8db2d0a5389f54128b8e631b0d7698452516c4d",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+        },
+    ),
+    "dotmac-kernel-v0.1.0a1": (
+        "dotmac-kernel",
+        "3267a3ba8a4bb22b5fe90b6e2b0b82e01c2e2e56",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+        },
+    ),
 }
 
 
@@ -1614,6 +5863,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
+    "dotmac-kernel": frozenset(),
 }
 
 
@@ -1793,6 +6043,50 @@ def test_every_migration_is_either_released_or_declared_unreleased(
     )
 
 
+def _publishable_here() -> tuple[set[str], set[str]]:
+    """Every distribution THIS repository can publish, and the module lane's share.
+
+    Two lanes, kept apart on purpose. The module allowlist is the closed set
+    `release-module.yml` resolves against. The dedicated-workflow set is the
+    sweep's own enumeration of packages released by a workflow of their own,
+    and it is deliberately enumerated there rather than inferred from "absent
+    from every lane", because absence is also what an unreleasable package
+    looks like. Reusing it keeps one answer to "may this repository publish
+    that name?" instead of two that can drift apart.
+    """
+    allowlist = set(
+        json.loads(
+            (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+        )["modules"]
+    )
+    sweep = _tag_oracle()
+    dedicated = set(sweep.DEDICATED_WORKFLOWS)  # type: ignore[attr-defined]
+    return allowlist | dedicated, allowlist
+
+
+def test_a_dedicated_lane_still_has_to_prove_a_published_tag() -> None:
+    """The union above must not become a way in for an unpublished name.
+
+    A distribution reaching `DISTRIBUTIONS` through the dedicated-workflow lane
+    carries the identical premise as one reaching it through the module
+    allowlist: its bytes are inside a wheel because a TAG says so. A workflow
+    file proves a lane exists, never that it ran.
+    """
+    sweep = _tag_oracle()
+    tags = set(sweep.git_tags(REPO_ROOT))  # type: ignore[attr-defined]
+    dedicated = set(sweep.DEDICATED_WORKFLOWS) & set(DISTRIBUTIONS)  # type: ignore[attr-defined]
+    assert dedicated, (
+        "no dedicated-lane distribution is monitored, so the union in "
+        "`_publishable_here` is currently checking nothing"
+    )
+    for distribution in sorted(dedicated):
+        prefix = TAG_PREFIXES[distribution]
+        assert any(tag.startswith(prefix) for tag in tags), (
+            f"{distribution} is monitored via its dedicated release workflow "
+            f"but this checkout holds no {prefix}* tag — a lane is not a release"
+        )
+
+
 def test_the_unmonitored_distributions_are_named() -> None:
     """ADR-0018: unmonitored and exempt are different labels, and the
     difference has to be visible.
@@ -1806,16 +6100,22 @@ def test_the_unmonitored_distributions_are_named() -> None:
 
     Deliberately NOT an assertion that the set is empty. It will not be for a
     long time, and a failing gate nobody can fix is one somebody deletes.
+
+    The module allowlist is not the whole census of what this repository has
+    published. `dotmac-kernel` is deliberately absent from it — it has its own
+    workflow with its own inspection rules — and reading only that file made
+    "not in the release allowlist" mean two different things: unreleasable, and
+    released by a different lane. The sweep already distinguishes them in
+    `DEDICATED_WORKFLOWS`, so that ONE definition is reused here rather than a
+    second one being written. `_publishable_here` is the union, and every name
+    in it still has to prove a published tag below.
     """
-    allowlist = set(
-        json.loads(
-            (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
-        )["modules"]
-    )
     monitored = set(DISTRIBUTIONS)
-    assert monitored <= allowlist, (
-        f"{sorted(monitored - allowlist)} is monitored here but is not in the "
-        "release allowlist — an unreleasable distribution has no released bytes"
+    publishable, allowlist = _publishable_here()
+    assert monitored <= publishable, (
+        f"{sorted(monitored - publishable)} is monitored here but this "
+        "repository publishes no such distribution — an unreleasable "
+        "distribution has no released bytes"
     )
     unmonitored = sorted(allowlist - monitored)
     print(
