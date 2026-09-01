@@ -30,7 +30,15 @@ names = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]
 
 [[roles]]
 code = "app"
-command = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The product's own launcher, NOT `uvicorn --host 0.0.0.0 ...` spelled out here.
+# `build_canonical_document` refuses an address literal anywhere in a
+# descriptor, and rightly: the canonical document is what deployment control
+# binds its signed authorization to. `0.0.0.0` is not topology though — it is
+# how this process binds inside its own container, a build-time fact this line
+# had turned into a deployment-time one. `app/runtime.py` owns the bind, this
+# descriptor owns the launcher and the port, and the image digest above binds
+# which bytes `python -m app.runtime` runs. See that module's docstring.
+command = ["python", "-m", "app.runtime", "--port", "8000"]
 replicas = 1
 stop_grace_seconds = 30
 materials = ["DATABASE_URL", "SETTINGS_ENCRYPTION_KEY", "METRICS_TOKEN"]

@@ -45,22 +45,23 @@ TARGET = "prod-lagos-01"
 
 
 def _spec() -> ProductDeploymentSpec:
-    """The REAL reference descriptor, with the in-container bind removed.
+    """The REAL reference descriptor, unmodified.
 
-    `deploy/product.toml`'s app role runs `--host 0.0.0.0` and
-    `build_canonical_document` refuses an address literal anywhere in the
-    descriptor — the refusal's own docstring calls this exact case out as an
-    in-container bind rather than topology in Git, and the compose renderer
-    already opts out of it. Anything sending a document to deployment control
-    takes the default and raises, so `to_canonical_document()` raises on this
-    repository's own reference descriptor today.
+    This used to strip `"--host", "0.0.0.0", ` out of the descriptor text
+    before parsing, because `build_canonical_document` refuses an address
+    literal anywhere in a descriptor and the app role spelled its
+    in-container bind out in Git. A test that edits the file it is testing
+    proves nothing about the file that ships, and that workaround is exactly
+    why the defect survived: every contract here passed against a descriptor
+    no deployment would ever use.
 
-    That is pre-existing and is worked around here rather than hidden: building
-    on a hand-written fixture instead would let this contract drift from the
-    descriptor it has to render.
+    The bind now lives in `app/runtime.py`, which the image digest binds, and
+    the descriptor names the launcher and the port. So the real bytes are
+    parsed here, and `to_canonical_document()` below is the strict one.
     """
-    text = DESCRIPTOR.read_text(encoding="utf-8").replace('"--host", "0.0.0.0", ', "")
-    return ProductDeploymentSpec.loads(text, source="test")
+    return ProductDeploymentSpec.loads(
+        DESCRIPTOR.read_text(encoding="utf-8"), source="test"
+    )
 
 
 def _rendered(**overrides: Any) -> FoundationExecutionPlanV1:

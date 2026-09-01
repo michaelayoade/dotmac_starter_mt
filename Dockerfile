@@ -1,8 +1,13 @@
 # syntax note: CMD uses shell-form so ${APP_PORT} is expanded at container
-# start (exec-form CMD ["uvicorn", ..., "--port", "$APP_PORT"] does NOT expand
-# env vars — the shell never sees it, so uvicorn would try to bind literal
-# "$APP_PORT" and fail). Verified: `docker run -e APP_PORT=8081 ...` binds
-# 8081 inside the container (see task-11-report.md for the smoke output).
+# start (exec-form CMD ["python", ..., "--port", "$APP_PORT"] does NOT expand
+# env vars — the shell never sees it, so the launcher would be handed the
+# literal "$APP_PORT" and fail). Verified: `docker run -e APP_PORT=8081 ...`
+# binds 8081 inside the container (see task-11-report.md for the smoke output).
+#
+# The command is the product's own launcher (`app/runtime.py`), not uvicorn
+# with a spelled-out `--host 0.0.0.0`. The bind address is an implementation
+# detail of the image and belongs to code the image digest binds; the
+# deployment descriptor names the launcher and the port. See app/runtime.py.
 #
 # Multi-stage: the `css-builder` stage runs the Tailwind v4 CLI build
 # (package.json's `css:build`) to produce static/css/main.css, which is
@@ -75,4 +80,4 @@ COPY --from=css-builder \
     ./packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css
 
 EXPOSE ${APP_PORT}
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT}
+CMD python -m app.runtime --port ${APP_PORT}
