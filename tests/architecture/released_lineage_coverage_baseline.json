@@ -17,8 +17,8 @@
     "Regenerate: make released-lineage-coverage-baseline"
   ],
   "released_lineages_total": 77,
-  "covered_total": 34,
-  "uncovered_total": 43,
+  "covered_total": 35,
+  "uncovered_total": 42,
   "uncovered": [
     "dotmac-accounting",
     "dotmac-analytics",
@@ -36,7 +36,6 @@
     "dotmac-finance",
     "dotmac-inventory",
     "dotmac-ipam",
-    "dotmac-kernel",
     "dotmac-licensing",
     "dotmac-media-observations",
     "dotmac-network-access",
