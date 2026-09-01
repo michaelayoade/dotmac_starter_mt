@@ -282,26 +282,6 @@ def test_a_well_formed_receipt_is_accepted(
     assert set(PRIVILEGE_VERIFICATIONS) <= set(receipt.verifications)
 
 
-@pytest.mark.parametrize(
-    ("label", "overrides", "match"),
-    [
-        ("descriptor", {"descriptor_digest": "sha256:" + "0" * 64}, "descriptor"),
-        (
-            "lineage",
-            {
-                "dataset_identity": {
-                    "product": "dotmac_starter_mt",
-                    "dataset": "primary",
-                    "lineage": "someother-lineage",
-                }
-            },
-            "another dataset",
-        ),
-        ("isolation", {"isolated_target": False}, "isolated target"),
-        ("snapshot", {"snapshot_checksum": "   "}, "no snapshot checksum"),
-        ("verifications", {"verifications": ["schema"]}, "does not claim"),
-    ],
-)
 def test_the_accepted_receipt_carries_the_declared_key_not_an_echo(
     external_spec: ProductDeploymentSpec, dataset: BackupDataset
 ) -> None:
@@ -325,6 +305,26 @@ def test_the_accepted_receipt_carries_the_declared_key_not_an_echo(
     assert dataset.external_executor.key_id not in receipt.canonical_bytes().decode()
 
 
+@pytest.mark.parametrize(
+    ("label", "overrides", "match"),
+    [
+        ("descriptor", {"descriptor_digest": "sha256:" + "0" * 64}, "descriptor"),
+        (
+            "lineage",
+            {
+                "dataset_identity": {
+                    "product": "dotmac_starter_mt",
+                    "dataset": "primary",
+                    "lineage": "someother-lineage",
+                }
+            },
+            "another dataset",
+        ),
+        ("isolation", {"isolated_target": False}, "isolated target"),
+        ("snapshot", {"snapshot_checksum": "   "}, "no snapshot checksum"),
+        ("verifications", {"verifications": ["schema"]}, "does not claim"),
+    ],
+)
 def test_a_receipt_missing_a_binding_is_refused(
     external_spec: ProductDeploymentSpec,
     dataset: BackupDataset,
@@ -483,7 +483,7 @@ def test_the_restore_proof_window_now_refuses(
     with pytest.raises(PreconditionFailed, match="60 days old"):
         require_restore_proof(external_spec, "primary", [overdue], now_epoch=NOW)
 
-    with pytest.raises(PreconditionFailed, match="never been recorded"):
+    with pytest.raises(PreconditionFailed, match="none has ever been recorded"):
         require_restore_proof(external_spec, "primary", [], now_epoch=NOW)
 
 
