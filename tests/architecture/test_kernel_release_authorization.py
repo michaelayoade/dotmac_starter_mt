@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "kernel_release_authorization.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-kernel.yml"
 KERNEL_CHANGELOG = REPO_ROOT / "packages" / "dotmac-kernel" / "CHANGELOG.md"
+KERNEL_PYPROJECT = REPO_ROOT / "packages" / "dotmac-kernel" / "pyproject.toml"
 
 
 def _load_contract():
@@ -347,7 +349,16 @@ def test_a100_does_not_claim_credential_lifecycle_bytes_already_in_a99() -> None
     assert "already in a99" in a99
 
 
-def test_current_tree_has_no_active_authorization() -> None:
+def test_current_tree_is_in_its_declared_release_lifecycle_state() -> None:
     contract = _load_contract()
-    assert contract.load_authorization() is None
-    assert contract.validate_current_state() == "development"
+    package = tomllib.loads(KERNEL_PYPROJECT.read_text(encoding="utf-8"))
+    version = package["tool"]["poetry"]["version"]
+    active = contract.load_authorization()
+    expected = {
+        (False, True): "development",
+        (True, True): "authorized",
+        (True, False): "allocated",
+        (False, False): "released",
+    }[(active is not None, "+" in version)]
+
+    assert contract.validate_current_state(expected_version=version) == expected
