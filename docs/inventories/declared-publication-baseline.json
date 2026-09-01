@@ -123,7 +123,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a99+dev",
+      "declared": "0.1.0a100",
       "reason": "TRANSITION-BOUND DEVELOPMENT MARKER. 0.1.0a99 IS published and tagged (dotmac-kernel-v0.1.0a99, peeled 8c92943062dbfe7f17bfa35264243709ec3d92c3), while main declares the deliberately unpublishable 0.1.0a99+dev until KernelReleaseAuthorization.v1 binds the next version and its immediate allocation child changes only the approved mechanical surfaces. After that allocation this same row remains the honest declared-unpublished record until the protected workflow installs, independently verifies and tags the authorized bytes; only the post-tag release-record change removes it. Editing the marker off without the typed transition would restore the false claim that let dotmac-ui 0.1.0a7 reach the registry without map_frame. tests/architecture/test_declared_version_matches_published_tree.py and scripts/kernel_release_authorization.py enforce the two states this row spans.",
       "state": "declared-unpublished"
     },
