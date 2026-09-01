@@ -101,6 +101,7 @@ class StepKind(str, Enum):
     VERIFY_RELEASE_EVIDENCE = "verify_release_evidence"
     REFUSE_DIRTY_STATE = "refuse_dirty_state"
     VERIFY_MATERIALS = "verify_materials"
+    VERIFY_EXTERNAL_RECOVERY_RECEIPT = "verify_external_recovery_receipt"
     PRODUCT_PREFLIGHT = "product_preflight"
     BACKUP = "backup"
     VERIFY_BACKUP = "verify_backup"
@@ -127,6 +128,11 @@ _PHASE_OF: Final[Mapping[StepKind, Phase]] = {
     StepKind.VERIFY_RELEASE_EVIDENCE: Phase.GATE,
     StepKind.REFUSE_DIRTY_STATE: Phase.GATE,
     StepKind.VERIFY_MATERIALS: Phase.GATE,
+    # A GATE, and the placement is the point. Accepting somebody else's
+    # signed proof mutates nothing, and it must refuse BEFORE any DDL --
+    # discovering that recovery was never demonstrated after the migration
+    # has run is discovering it at the one moment it cannot help.
+    StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT: Phase.GATE,
     StepKind.PRODUCT_PREFLIGHT: Phase.GATE,
     StepKind.BACKUP: Phase.MUTATE,
     StepKind.VERIFY_BACKUP: Phase.MUTATE,
@@ -346,6 +352,24 @@ def build_plan(
             "material is absent from every runtime role",
         )
     )
+    for dataset in spec.backup_datasets:
+        if not dataset.externally_executed:
+            continue
+        executor = dataset.external_executor
+        assert executor is not None  # nosec B101 -- narrowed by the guard above
+        steps.append(
+            Step(
+                StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT,
+                f"Verify a signed RecoveryReceipt.v1 for {dataset.code!r} from "
+                f"{executor.kind}:{executor.identifier}@{executor.version}, "
+                f"bound to this descriptor, proving an isolated restore inside "
+                f"{dataset.restore_proof_max_age_days} days with "
+                f"{list(dataset.verify)}",
+                target=dataset.code,
+                timeout_seconds=60,
+            )
+        )
+
     for hook in spec.preflight_hooks:
         steps.append(
             Step(
@@ -370,6 +394,22 @@ def build_plan(
         )
     else:
         for dataset in spec.backup_datasets:
+            if dataset.externally_executed:
+                # NO backup step, deliberately. Another party executes recovery
+                # for this dataset, so a `backup` step here would attribute to
+                # the consuming product an act it does not perform -- and a plan
+                # that says a product backed something up is exactly the
+                # artefact that read as green while nothing had ever been
+                # restored. The gate above is what this deployment can honestly
+                # do: demand a current signed proof from the party that can.
+                notes.append(
+                    f"Dataset {dataset.code!r} is executed by "
+                    f"{dataset.external_executor.kind}:"  # type: ignore[union-attr]
+                    f"{dataset.external_executor.identifier}, so this "  # type: ignore[union-attr]
+                    "deployment runs no backup for it and instead requires a "
+                    "signed RecoveryReceipt.v1 before any DDL."
+                )
+                continue
             steps.append(
                 Step(
                     StepKind.BACKUP,

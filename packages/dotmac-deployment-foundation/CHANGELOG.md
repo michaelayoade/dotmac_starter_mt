@@ -19,6 +19,62 @@ permission replaces it: a tree that diverges from a built artifact allocates a
 new version. Everything below this heading that was previously filed as
 "unreleased, version unallocated" is `0.3.0a3` work.
 
+### External recovery: a proof from another party, bound so it cannot be claimed
+
+A read-only measurement of the frozen `0.3.0a2` wheel found it could not bind an
+externally executed recovery contract. Two independent gaps, and neither fixes
+the other:
+
+* `BackupDataset.VERIFICATIONS` was byte-identical to the published 0.2 line, so
+  a descriptor naming `roles`, `ownership`, `memberships` or
+  `effective_privileges` was refused AT PARSE — while `recovery.py` had modelled
+  every one of them since the bundle contract landed. Plumbing, not design.
+* `backup.assess()` computed the `restore_proof_max_age_days` window correctly
+  and had **zero callers**, and `BackupRecord.restore_proved_at_epoch` was
+  written by nothing in the package. The window was inert because nothing
+  supplied the records.
+
+`recovery_identity.ExternalExecutorV1` types WHO executed the recovery — closed
+kind, machine-shaped identifier, a required version and the signing key its
+receipts must carry. Never a free-text owner: `owner = "the DBA team"` cannot be
+compared with anything, so a receipt from the wrong party reads identically to
+one from the right party.
+
+`recovery_identity.DatasetIdentityV1` names WHICH data, independently of host
+and executor — the two things that change while the data does not. A host-shaped
+lineage and one containing the executor's identifier are both refused, because a
+failover or a change of supplier is exactly when the old proofs matter most.
+
+`external_recovery.accept_external_recovery_receipt` accepts a signed
+`RecoveryReceipt.v1` bound to the dataset identity, the descriptor digest, the
+snapshot checksum, the executor identity AND version, and the exact verification
+set. The signature is checked BEFORE any content check, so an attacker cannot
+probe accepted values with documents they never had to sign. **No verifier means
+refuse**, never "skip signature checking".
+
+`backup_record_from_receipt` is the writer `restore_proved_at_epoch` never had,
+and `require_restore_proof` is the caller `assess()` never had. Together they
+close receipt → record → assessment → refusal, and it is a REFUSAL: a window
+producing a warning nobody blocks on is the same artefact as no window.
+
+`StepKind.VERIFY_EXTERNAL_RECOVERY_RECEIPT` is a **GATE**, before any DDL. When
+a dataset declares an external executor the plan emits it and emits NO `backup`
+or `verify_backup` step for that dataset — a backup step there would attribute
+to the consuming product an act it does not perform, which is the artefact that
+read as green while nothing in the fleet had ever been restored.
+
+Receipts are **passed in, never discovered**: `Executor(recovery_receipts=...)`
+and `dotmac-deploy deploy --recovery-receipt DATASET=PATH`, following
+`--authorization`. There is no directory scan, because a search cannot tell "no
+proof exists" from "no proof was offered" and will happily find last quarter's.
+
+`expected_backup_interval_seconds` is now a descriptor field and the name
+`assess()` uses (it was `expected_interval_seconds`, a second name for a control
+the descriptor could not state at all). It stays SEPARATE from
+`restore_proof_max_age_days`: cadence decides staleness, the window decides
+whether recovery has ever been demonstrated, and a product taking hourly backups
+nobody has restored passes the first and fails the second.
+
 `DatabaseDescriptorTransition.v1` pre-authorizes the descriptor state a
 database operation produces, binds the result to its plan and target, and
 requires the live starting descriptor as a compare-and-swap precondition. An
