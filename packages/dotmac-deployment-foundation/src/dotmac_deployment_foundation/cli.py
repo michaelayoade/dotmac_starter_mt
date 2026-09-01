@@ -32,6 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .engine.run import DeploymentOutcome, Effects
     from .exposure import VerificationReport
 
+from .authorization import OPERATIONS
 from .errors import (
     DeploymentFoundationError,
     PreconditionFailed,
@@ -383,6 +384,58 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return EXIT_REFUSED
+
+
+def cmd_execution_plan(args: argparse.Namespace) -> int:
+    """Render `FoundationExecutionPlanV1` and print its `ExecutionPlanDigestV1`.
+
+    This is step 1 of the controlled-deployment flow and the only place the
+    digest is produced. Platform CP submits what `--format digest` prints,
+    verbatim, together with the same `--operation`; Control freezes and signs
+    it and never reconstructs the document. `--format json` is the document
+    itself, for a reviewer -- Control may store it, and must not re-derive the
+    digest from it, because a second canonicalizer is a second answer and two
+    answers is exactly the state this contract replaces.
+    """
+    from .engine.plan import build_plan
+    from .execution_plan import render_execution_plan
+
+    spec = _load(args.descriptor)
+    plan = build_plan(
+        spec,
+        previous_image=args.previous_image or "",
+        skip_backup=args.skip_backup,
+        skip_backup_reason=args.skip_backup_reason or "",
+    )
+    rendered = render_execution_plan(
+        spec,
+        plan,
+        target=args.target,
+        operation=args.operation,
+        # Stated by this caller rather than derived inside the renderer, so the
+        # canonicalization that produced it is visible at the seam where two
+        # canonicalizations diverging is the failure being repaired.
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+    )
+    if args.format == "digest":
+        print(rendered.digest())
+        return EXIT_OK
+    if args.format == "json":
+        sys.stdout.write(rendered.canonical_bytes().decode("ascii") + "\n")
+        return EXIT_OK
+    print(f"execution plan for {rendered.product} -> {rendered.target}")
+    print(f"  operation        {rendered.operation}")
+    print(f"  foundation       {rendered.foundation_version}")
+    print(f"  image            {rendered.image_reference}")
+    print(f"  image digest     {rendered.image_digest}")
+    print(f"  source revision  {rendered.source_revision}")
+    print(f"  manifest digest  {rendered.manifest_digest}")
+    print(f"  descriptor       {rendered.descriptor_digest}")
+    print(f"  strategy         {rendered.strategy}")
+    print(f"  materials        {list(rendered.environment_inventory)} (NAMES only)")
+    print(f"  steps            {len(rendered.steps)}")
+    print(f"  ExecutionPlanDigestV1  {rendered.digest()}")
+    return EXIT_OK
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
@@ -876,6 +929,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = add("plan", cmd_plan, "build and print the ordered deployment plan")
     plan.add_argument("--previous-image")
+
+    execution = add(
+        "execution-plan",
+        cmd_execution_plan,
+        "render FoundationExecutionPlanV1 and print its ExecutionPlanDigestV1",
+    )
+    execution.add_argument(
+        "--target",
+        required=True,
+        help=(
+            "the host this plan is bound to. Required and never inferred: a "
+            "plan with no target is one that authorizes every host"
+        ),
+    )
+    execution.add_argument(
+        "--operation",
+        required=True,
+        choices=list(OPERATIONS),
+        help=(
+            "deploy or rollback, frozen separately -- one decision must not "
+            "both make a change and erase it"
+        ),
+    )
+    execution.add_argument(
+        "--format",
+        default="text",
+        choices=["text", "json", "digest"],
+        help=(
+            "`digest` is the ExecutionPlanDigestV1 to submit to Control, "
+            "verbatim; `json` is the canonical document itself"
+        ),
+    )
+    execution.add_argument("--previous-image")
+    execution.add_argument("--skip-backup", action="store_true")
+    execution.add_argument("--skip-backup-reason", default="")
 
     deploy = add("deploy", cmd_deploy, "deploy (DRY RUN unless --execute)")
     deploy.add_argument("--previous-image")

@@ -9,6 +9,14 @@
   are public contract exactly as the rendered assets are: a change to the
   document's shape changes every consumer's digest at once, which is the
   intended behaviour and makes it a MINOR bump at least.
+- `FoundationExecutionPlanV1` and `ExecutionPlanDigestV1` — the document, its
+  ten canonicalization rules, and the digest over it. The BYTES are the
+  contract and two other systems bind to them: Platform CP submits the digest
+  and Control freezes it, so a change to the document's shape, key set, key
+  names, or any of the ten rules invalidates every frozen digest at once and is
+  a MINOR bump at least. `dotmac-deploy execution-plan --format digest` is the
+  only supported way to produce the value; re-implementing the canonicalization
+  is what this contract exists to stop.
 - `IngressPolicy.v1`: the exposure vocabulary, the provider capability
   matrix, the derived endpoint-token format and the firewall rule shape.
 - The `dotmac-deploy` CLI: its subcommands, its flags, and its **exit codes**

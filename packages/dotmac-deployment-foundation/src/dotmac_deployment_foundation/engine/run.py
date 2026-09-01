@@ -49,6 +49,7 @@ from ..evidence import (
     TrustPolicy,
     accept_release_evidence,
 )
+from ..execution_plan import FoundationExecutionPlanV1, require_execution_plan_digest
 from ..external_recovery import (
     accept_external_recovery_receipt,
     backup_record_from_receipt,
@@ -178,6 +179,13 @@ class DeploymentOutcome:
     mutated: bool = False
     notes: list[str] = field(default_factory=list)
     evidence_path: str = ""
+    #: `ExecutionPlanDigestV1` and the operation, carried onto the report so the
+    #: thing that ran is recognisable as the thing Control froze. Empty when the
+    #: run was not bound to an authorized execution plan -- and empty is REPORTED
+    #: rather than defaulted to something plausible, because a report that
+    #: invents a digest is worse evidence than one that says it has none.
+    execution_plan_digest: str = ""
+    operation: str = ""
 
     def as_evidence(self) -> dict[str, object]:
         return {
@@ -186,6 +194,8 @@ class DeploymentOutcome:
             "image_digest": self.plan.image_digest,
             "source_revision": self.plan.source_revision,
             "manifest_digest": self.plan.manifest_digest,
+            "execution_plan_digest": self.execution_plan_digest,
+            "operation": self.operation,
             "strategy": self.plan.strategy.value,
             "succeeded": self.succeeded,
             "mutated": self.mutated,
@@ -229,6 +239,8 @@ class Executor:
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
         now_epoch: int = 0,
+        execution_plan: FoundationExecutionPlanV1 | None = None,
+        authorized_execution_plan_digest: str = "",
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -265,6 +277,12 @@ class Executor:
             recovery_records or {}
         )
         self._now_epoch = now_epoch
+        # The middle term. Both default to absent and the pair is checked at the
+        # point of use, not at construction: a `plan` or a dry run authorizes
+        # nothing and must stay runnable, while a real run that was authorized
+        # against a digest must re-derive it before mutating anything.
+        self._execution_plan = execution_plan
+        self._authorized_execution_plan_digest = authorized_execution_plan_digest
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -296,7 +314,13 @@ class Executor:
         self._grant.require(
             operation="deploy", descriptor_digest=self._descriptor_digest()
         )
-        outcome = DeploymentOutcome(plan=plan, notes=list(plan.notes))
+        digest = self._require_execution_plan("deploy")
+        outcome = DeploymentOutcome(
+            plan=plan,
+            notes=list(plan.notes),
+            execution_plan_digest=digest,
+            operation="deploy",
+        )
         # The first question about any graph that turned bad at 14:32 is what
         # changed at 14:32. No product in the fleet emits this today, and the
         # annotation is worth almost nothing after the fact — it has to be sent
@@ -328,6 +352,50 @@ class Executor:
             # absent exactly when it is wanted.
             self._persist_evidence(outcome)
         return outcome
+
+    def _require_execution_plan(self, operation: str) -> str:
+        """Step 4: RECOMPUTE the plan digest before executing. Returns it.
+
+        Nothing here reconstructs Control's document and nothing normalizes it.
+        Control froze a digest the Foundation produced; this re-derives that
+        same digest from the plan actually in hand, so a mismatch means the plan
+        CHANGED rather than that two canonicalizers disagreed. That distinction
+        is the whole repair: while Control hashed the spec wrapped in six
+        sibling keys and the Foundation hashed the descriptor alone, a mismatch
+        was unavoidable and told nobody anything.
+
+        Absent on both sides is permitted and REPORTED as absent -- a run that
+        was never bound to an authorized execution plan must not have a digest
+        invented for its report. Absent on ONE side is refused: a plan with no
+        authorized digest is unfrozen, and an authorized digest with no plan is
+        an approval for something this executor cannot show you.
+        """
+        if self._execution_plan is None and not self._authorized_execution_plan_digest:
+            return ""
+        if self._execution_plan is None:
+            raise PreconditionFailed(
+                "an authorized execution plan digest was supplied and no "
+                "execution plan was rendered, so there is nothing to recompute "
+                "it from. An approval for a plan this executor cannot produce is "
+                "not an approval for what is about to run"
+            )
+        if not self._authorized_execution_plan_digest:
+            raise PreconditionFailed(
+                "an execution plan was rendered and no authorized digest was "
+                "supplied, so nothing froze it. Rendering a plan is not the same "
+                "as having it authorized, and running the unfrozen one is the "
+                "gap this contract closes"
+            )
+        if self._execution_plan.operation != operation:
+            raise PreconditionFailed(
+                f"the execution plan authorizes {self._execution_plan.operation!r} "
+                f"and this is a {operation!r}. Deploy and rollback are frozen "
+                "separately, for the same reason they are authorized separately: "
+                "one decision must not both make a change and erase it"
+            )
+        return require_execution_plan_digest(
+            self._execution_plan, authorized=self._authorized_execution_plan_digest
+        )
 
     def _run_steps(
         self,
@@ -408,9 +476,14 @@ class Executor:
         digest rather than the deploying one — which the shared handler would
         otherwise have done, restoring the image that had just failed.
         """
-        outcome = DeploymentOutcome(plan=plan, notes=list(plan.notes))
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
+        )
+        outcome = DeploymentOutcome(
+            plan=plan,
+            notes=list(plan.notes),
+            execution_plan_digest=self._require_execution_plan("rollback"),
+            operation="rollback",
         )
         steps = steps_for_rollback(plan)
         if not steps:
