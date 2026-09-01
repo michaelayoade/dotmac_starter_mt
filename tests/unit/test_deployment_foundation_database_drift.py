@@ -47,7 +47,6 @@ from dotmac_deployment_foundation.database_structure import (
     StructureFactDirection,
     accept_database_structure_comparison,
 )
-from dotmac_deployment_foundation.document import build_canonical_document
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.recovery import (
     CatalogEvidence,
@@ -449,7 +448,7 @@ def test_v2_database_refuses_to_leave_catalog_coordinates_implicit() -> None:
 
 def test_v1_canonical_projection_omits_the_version_gated_catalog_field() -> None:
     spec = _spec()
-    document = build_canonical_document(spec, refuse_resolved_material=False)
+    document = spec.to_canonical_document()
 
     database = document.content["descriptor"]["database"]
     assert document.content["descriptor_schema"] == SCHEMA_V1
@@ -458,7 +457,7 @@ def test_v1_canonical_projection_omits_the_version_gated_catalog_field() -> None
 
 def test_v2_parses_and_digest_binds_catalog_coordinates() -> None:
     spec = ProductDeploymentSpec.loads(_descriptor_text_with_catalog(SCHEMA_V2))
-    document = build_canonical_document(spec, refuse_resolved_material=False)
+    document = spec.to_canonical_document()
 
     assert spec.descriptor_schema == SCHEMA_V2
     assert spec.database is not None
@@ -1248,10 +1247,12 @@ def test_report_binds_the_descriptor_but_does_not_claim_it_matched_across_gaps()
         exclusions=POSTGRES_SYSTEM_EXCLUSIONS,
     )
 
-    # The digest the DEPLOYMENT carries, not one re-derived here. The strict
-    # `to_canonical_document()` refuses a descriptor holding resolved material,
-    # and this repository's own product.toml holds an in-container
-    # `--host 0.0.0.0`, so asserting against it would compare the report to a
-    # document that cannot be built for the descriptor under test.
+    # The digest the DEPLOYMENT carries, and — now that the reference
+    # descriptor no longer holds an in-container `--host 0.0.0.0` — also the
+    # STRICT one deployment control would authorize. The two are asserted
+    # equal because the boundary flag changes no byte of the document, only
+    # whether a tripping descriptor can be rendered at all; this repository's
+    # own descriptor no longer trips it.
     assert report.descriptor_digest == configuration_digest(spec)
+    assert report.descriptor_digest == spec.to_canonical_document().sha256_digest()
     assert report.matched_descriptor_digest == ""

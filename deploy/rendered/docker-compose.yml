@@ -85,7 +85,7 @@ services:
     stop_grace_period: 300s
     restart: "no"
     labels:
-      io.dotmac.deployment.configuration.digest: "sha256:d3fe2db5b186e6b295bc52a816939093286fd02e69d8fbaf1275d3115c977da2"
+      io.dotmac.deployment.configuration.digest: "sha256:eff30b3059ecae6185876fb8dca67960ea40006c250c29d097564568652db0ba"
       io.dotmac.deployment.environment: reference
       io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       io.dotmac.deployment.product: dotmac_starter_mt
@@ -97,10 +97,9 @@ services:
   app:
     image: "ghcr.io/michaelayoade/dotmac_starter_mt@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     command:
-      - uvicorn
-      - "app.main:app"
-      - --host
-      - 0.0.0.0
+      - python
+      - -m
+      - app.runtime
       - --port
       - "8000"
     environment:
@@ -146,7 +145,7 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
     labels:
-      io.dotmac.deployment.configuration.digest: "sha256:d3fe2db5b186e6b295bc52a816939093286fd02e69d8fbaf1275d3115c977da2"
+      io.dotmac.deployment.configuration.digest: "sha256:eff30b3059ecae6185876fb8dca67960ea40006c250c29d097564568652db0ba"
       io.dotmac.deployment.environment: reference
       io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       io.dotmac.deployment.product: dotmac_starter_mt

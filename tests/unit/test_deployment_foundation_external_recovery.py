@@ -86,17 +86,16 @@ _ACCEPTS: Any = _Accepts()
 
 
 def _descriptor_text() -> str:
-    """The REAL reference descriptor, with the address literal removed.
+    """The REAL reference descriptor, unmodified.
 
-    `deploy/product.toml`'s app role runs `--host 0.0.0.0`, and
-    `build_canonical_document` refuses an address literal anywhere in the
-    descriptor — so `to_canonical_document()` raises on this repository's own
-    reference descriptor today. That is a pre-existing condition of the
-    descriptor, not of this contract, and it is worked around here rather than
-    hidden: building these tests on a hand-written fixture instead would have
-    let the contract drift from the descriptor it has to parse.
+    This used to strip `"--host", "0.0.0.0", ` before parsing, because the app
+    role spelled its in-container bind out in Git and
+    `build_canonical_document` refuses an address literal anywhere in a
+    descriptor. Editing the file under test to make the test pass is how that
+    refusal went unrepaired; the bind now lives in `app/runtime.py`, so the
+    real bytes are parsed here.
     """
-    return DESCRIPTOR.read_text(encoding="utf-8").replace('"--host", "0.0.0.0", ', "")
+    return DESCRIPTOR.read_text(encoding="utf-8")
 
 
 def _spec(*, external: bool) -> ProductDeploymentSpec:
