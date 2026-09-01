@@ -85,6 +85,8 @@ PACKAGE_DIR=""
 IMPORT_NAME=""
 MANIFEST_PYTHON=""
 RELEASE_RUN=""
+VERIFICATION_RECEIPT=""
+TAG_DECISION_RECEIPT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -95,6 +97,8 @@ while [ $# -gt 0 ]; do
     --import-name)  IMPORT_NAME="$2";  shift 2 ;;
     --manifest-python) MANIFEST_PYTHON="$2"; shift 2 ;;
     --release-run)  RELEASE_RUN="$2";  shift 2 ;;
+    --verification-receipt) VERIFICATION_RECEIPT="$2"; shift 2 ;;
+    --tag-decision-receipt) TAG_DECISION_RECEIPT="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -153,11 +157,43 @@ if [ -n "${PACKAGE_DIR}" ]; then
   fi
 fi
 
-if ! OUTPUT="$(python scripts/write_release_record.py "${ARGS[@]}" 2>&1)"; then
-  echo "${OUTPUT}"
+OUTPUT=""
+
+# Kernel's independent verifier emits expiring Actions artefacts. Their
+# non-secret chain and exact file hashes also belong in the checked-in record,
+# or the proof disappears when retention ends. Both paths are required
+# together; a partial request is refused rather than silently omitted.
+if [ -n "${VERIFICATION_RECEIPT}" ] || [ -n "${TAG_DECISION_RECEIPT}" ]; then
+  if [ "${DISTRIBUTION}" != "dotmac-kernel" ]; then
+    give_up "kernel verification receipts require distribution dotmac-kernel"
+  fi
+  if [ -z "${VERIFICATION_RECEIPT}" ] || [ -z "${TAG_DECISION_RECEIPT}" ]; then
+    give_up "both kernel receipt paths are required together"
+  fi
+  if ! VERIFICATION_OUTPUT="$(python scripts/write_kernel_release_verification_record.py \
+      --verification-receipt "${VERIFICATION_RECEIPT}" \
+      --tag-decision-receipt "${TAG_DECISION_RECEIPT}" \
+      --expected-version "${VERSION}" \
+      --expected-tag "${TAG}" 2>&1)"; then
+    echo "${VERIFICATION_OUTPUT}"
+    give_up "the permanent kernel verification writer refused (see above)"
+  fi
+  echo "${VERIFICATION_OUTPUT}"
+  OUTPUT="${OUTPUT}
+${VERIFICATION_OUTPUT}"
+fi
+
+# Consume the release authorization only after the durable evidence writer has
+# accepted the same receipts. On a verifier rerun the per-version evidence is
+# already present and the general writer admits only that fully reconciled
+# state; it never reconstructs or re-arms an authorization.
+if ! RECORD_OUTPUT="$(python scripts/write_release_record.py "${ARGS[@]}" 2>&1)"; then
+  echo "${RECORD_OUTPUT}"
   give_up "the record writer refused (see above)"
 fi
-echo "${OUTPUT}"
+echo "${RECORD_OUTPUT}"
+OUTPUT="${OUTPUT}
+${RECORD_OUTPUT}"
 
 # The connector lane's third ledger. Refuses rather than warns, for the same
 # reason `give_up` is loud: a green run with no record is indistinguishable, at

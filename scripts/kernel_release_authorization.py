@@ -433,8 +433,11 @@ def render_document(active: ReleaseAuthorization | None) -> str:
     return json.dumps(_document(active), indent=2) + "\n"
 
 
-def load_authorization() -> ReleaseAuthorization | None:
-    value = json.loads(AUTHORIZATION_PATH.read_text(encoding="utf-8"))
+def parse_authorization_document(value: object) -> ReleaseAuthorization | None:
+    if not isinstance(value, dict):
+        raise KernelReleaseAuthorizationError(
+            "authorization document must be an object"
+        )
     if set(value) != {"$schema", "$comment", "active"}:
         raise KernelReleaseAuthorizationError(
             "authorization document has unknown fields"
@@ -450,6 +453,18 @@ def load_authorization() -> ReleaseAuthorization | None:
     if value["active"] is None:
         return None
     return ReleaseAuthorization.parse(value["active"])
+
+
+def load_authorization() -> ReleaseAuthorization | None:
+    return parse_authorization_document(
+        json.loads(AUTHORIZATION_PATH.read_text(encoding="utf-8"))
+    )
+
+
+def authorization_at(ref: str) -> ReleaseAuthorization | None:
+    return parse_authorization_document(
+        json.loads(_text_at(ref, str(AUTHORIZATION_PATH.relative_to(REPO_ROOT))))
+    )
 
 
 def prepare(base_sha: str, target_version: str) -> ReleaseAuthorization:
@@ -624,6 +639,33 @@ def validate_allocation(
         )
 
 
+def validate_release_source(*, source_sha: str, version: str) -> dict[str, object]:
+    if _SHA.fullmatch(source_sha) is None:
+        raise KernelReleaseAuthorizationError("release source is not a full SHA")
+    resolved = _git("rev-parse", source_sha)
+    assert isinstance(resolved, str)
+    if resolved.strip() != source_sha:
+        raise KernelReleaseAuthorizationError("release source does not resolve exactly")
+    authorization_commit = _parent(source_sha)
+    record = authorization_at(authorization_commit)
+    if record is None:
+        raise KernelReleaseAuthorizationError(
+            "release source parent has no active authorization"
+        )
+    if record.target_version != version:
+        raise KernelReleaseAuthorizationError(
+            "release source authorization targets a different version"
+        )
+    validate_allocation(record, source_sha, allow_target_tag=True)
+    return {
+        "schema": "KernelReleaseSourceBinding.v1",
+        "state": "allocated",
+        "source_sha": source_sha,
+        "authorization_commit": authorization_commit,
+        "authorization": record.as_json(),
+    }
+
+
 def validate_current_state(
     *, expected_version: str | None = None, allow_target_tag: bool = False
 ) -> str:
@@ -702,6 +744,10 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument(
         "--phase", required=True, choices=("build", "publish", "verify", "tag")
     )
+    source_parser = subparsers.add_parser("verify-source")
+    source_parser.add_argument("--source-sha", required=True)
+    source_parser.add_argument("--version", required=True)
+    source_parser.add_argument("--output", type=Path, required=True)
     subparsers.add_parser("check-tree")
     args = parser.parse_args(argv)
     try:
@@ -722,6 +768,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(
                 f"{args.phase}: kernel {args.version} matches its active authorization"
+            )
+        elif args.command == "verify-source":
+            binding = validate_release_source(
+                source_sha=args.source_sha, version=args.version
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(binding, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"verify: kernel {args.version} release source is its allocated state"
             )
         else:
             print(f"kernel release state: {validate_current_state()}")

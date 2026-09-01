@@ -1,32 +1,15 @@
 name: Release kernel
 
-# Kernel-boundary Task 6 — publish `dotmac-kernel` to the PRIVATE Forgejo index
-# at registry.dotmac.io (R0, ratified 2026-07-30). Protected workflow_dispatch,
-# NOT a tag trigger: a maintainer starts it deliberately with an explicit
-# version.
-#
-# Flow: build (on the exact current protected-main SHA; npm css:build ->
-# poetry build -> inspect bytes -> smoke the built wheel) -> publish (the SAME
-# bytes, main-only `registry-release` credential boundary, and a RE-check that
-# the run SHA is still main's tip) -> verify (install the PUBLISHED release
-# from the Forgejo index, smoke it, and only THEN tag the published SHA).
-#
-# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release` environment
-# secret sourced from OpenBao — see the `publish` job for the path and the
-# OIDC-based hardening this phase defers. Not PyPI, and not OIDC Trusted
-# Publishing: an earlier version of this header claimed both, which is wrong.
-# Every THIRD-PARTY action is pinned to a reviewed full commit SHA (immutable)
-# per GitHub secure-use guidance; the trailing comment records the
-# human-readable version. Local composite actions (`./.github/actions/...`) need
-# no SHA — they are this repository's own code at this commit. Poetry comes from
-# the hash-locked bootstrap (`./.github/actions/setup-poetry`), the same one CI
-# uses, so the release path and CI cannot drift apart on the installer.
+# This workflow owns BUILD and PUBLISH only. It cannot tag, open a release
+# record, or call the independent verifier. Publication proves that the upload
+# request succeeded; adoption waits for verify-kernel-release.yml to read the
+# named bytes back, clean-install both, and create or reconcile the tag.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Kernel version to publish (MUST equal packages/dotmac-kernel pyproject version, e.g. 0.1.0a1)"
+        description: Exact allocated kernel version to publish
         required: true
         type: string
 
@@ -36,82 +19,71 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      # Fail closed unless THIS run is the exact current tip of protected main
-      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+          persist-credentials: false
       - name: Assert run is on the current protected main SHA
-        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
-
+        run: bash scripts/assert_current_main.sh "$GITHUB_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Bind build to the active kernel release authorization
-        run: python scripts/kernel_release_authorization.py verify-release --phase build --version "${{ inputs.version }}"
+      - name: Bind build to the allocated release lifecycle
+        run: >-
+          python scripts/kernel_release_authorization.py verify-release
+          --phase build --version "$RELEASE_VERSION"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
       - uses: ./.github/actions/setup-poetry
-
-      # The dispatched version must equal the package metadata — no inference.
       - name: Assert version input matches package metadata
         working-directory: packages/dotmac-kernel
         run: |
           PKG_VERSION="$(poetry version --short)"
-          if [ "${{ inputs.version }}" != "${PKG_VERSION}" ]; then
-            echo "::error::input '${{ inputs.version }}' != package version '${PKG_VERSION}'"
+          if [ "$RELEASE_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::input version does not match package metadata"
             exit 1
           fi
-          echo "version matches: ${PKG_VERSION}"
-
-      # Compile Tailwind CSS into the kernel package-data dir so the wheel ships
-      # the COMPILED static/css/main.css (a published web kernel requires it).
-      - name: Build CSS (npm ci && npm run css:build)
+          echo "version matches package metadata"
+      - name: Build CSS
         run: npm ci && npm run css:build
-
-      - name: Build wheel + sdist
+      - name: Build wheel and sdist once
         working-directory: packages/dotmac-kernel
         run: poetry build
-
-      # Inspection gate (R0 §4): metadata/dep-closure, package data incl. the
-      # compiled main.css + static/fonts, no app/ or secrets leaked.
       - name: Inspect artifacts
-        run: bash packages/dotmac-kernel/scripts/inspect_dist.sh packages/dotmac-kernel/dist
-
-      # Release-artifact smoke (R0 §5): the SAME consumer_boot_check.sh, --wheel
-      # mode, against the freshly built release wheel (compiled CSS required).
-      - name: Release wheel smoke
-        run: bash scripts/consumer_boot_check.sh --wheel packages/dotmac-kernel/dist
-
-      - name: Upload built artifacts
+        run: >-
+          bash packages/dotmac-kernel/scripts/inspect_dist.sh
+          packages/dotmac-kernel/dist
+      - name: Smoke the built wheel
+        run: >-
+          bash scripts/consumer_boot_check.sh --wheel
+          packages/dotmac-kernel/dist
+      - name: Upload the exact built bytes
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dotmac-kernel-dist
           path: packages/dotmac-kernel/dist/*
+          if-no-files-found: error
           retention-days: 90
 
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: registry-release    # main-only release credential boundary; no reviewer wait
+    environment: registry-release
     permissions:
       contents: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
     steps:
-      # RE-check freshness at the irreversible boundary, before anything is
-      # published. `build` proved this run was main's tip at dispatch time, but
-      # a queued job can start after main moves. Without this,
-      # commits landing during the interval are silently absent from a release that
-      # then claims to be current, and the tag `verify` writes would point at a
-      # SHA that is no longer the tip. First step in the job, so it fails
-      # before the artifact is fetched or the publish token is used.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Re-assert the run SHA is still the current protected main
-        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+          persist-credentials: false
+      - name: Assert publish starts on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "$GITHUB_SHA"
       - name: Download the exact built bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -120,104 +92,23 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Re-bind publish to the active kernel release authorization
-        run: python scripts/kernel_release_authorization.py verify-release --phase publish --version "${{ inputs.version }}"
-      # Publish the SAME bytes `build` inspected + smoked (downloaded, not
-      # rebuilt) to the PRIVATE Forgejo index. `FORGEJO_PUBLISH_TOKEN` is a
-      # protected `registry-release` environment secret whose CANONICAL source is
-      # OpenBao (secret/dotmac/forgejo/ci-publisher-token) — rotate there, re-sync
-      # here. It is scoped to write:package on the `dotmac` org only.
-      #   Target hardening (see deploy/forgejo/RUNBOOK.md): a self-hosted runner
-      #   with GitHub OIDC -> OpenBao JWT auth, so no token is stored in GitHub.
-      #   That requires OpenBao to be reachable from the runner (it is not from
-      #   GitHub-hosted runners), which is why phase 1 uses the env secret.
-      - name: Publish to the Forgejo private index
+      - name: Install the hash-locked publisher tool
+        run: >-
+          python -m pip install --isolated --disable-pip-version-check
+          --require-hashes --no-deps
+          -r scripts/requirements/twine.txt
+      - name: Bind publish to the allocated release lifecycle
+        run: >-
+          python scripts/kernel_release_authorization.py verify-release
+          --phase publish --version "$RELEASE_VERSION"
+      - name: Re-assert exact protected main immediately before upload
+        run: bash scripts/assert_current_main.sh "$GITHUB_SHA"
+      - name: Upload the exact wheel and sdist
         env:
           TWINE_USERNAME: ci-publisher
           TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
         run: |
-          python -m pip install --quiet twine
           python -m twine upload \
-            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
-
-  verify:
-    needs: publish
-    runs-on: ubuntu-latest
-    environment: registry-release    # reuse the scoped token; no reviewer wait
-    permissions:
-      contents: write                # create the post-verification tag
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-
-      - name: Re-assert the run SHA is still protected main before read-back
-        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
-
-      - name: Bind registry verification to the active kernel release authorization
-        run: python scripts/kernel_release_authorization.py verify-release --phase verify --version "${{ inputs.version }}"
-
-      # The Forgejo index may lag a few seconds after publish — poll the simple
-      # index for the version before smoking it.
-      - name: Wait for the release on the Forgejo index
-        env:
-          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/dotmac-kernel/
-        run: |
-          for i in $(seq 1 30); do
-            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
-              echo "available on the Forgejo index"; exit 0
-            fi
-            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
-          done
-          echo "::error::dotmac-kernel ${{ inputs.version }} did not appear on the Forgejo index in time"
-          exit 1
-
-      # Install the PUBLISHED release FROM THE FORGEJO INDEX into a clean venv and
-      # smoke it (compiled CSS required). KERNEL_INDEX_URL carries the scoped,
-      # authenticated simple-index URL (token masked in logs).
-      - name: Install from the Forgejo registry and verify
-        env:
-          KERNEL_INDEX_URL: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
-        run: bash scripts/consumer_boot_check.sh --from-registry "${{ inputs.version }}"
-
-      # Only AFTER registry verification: tag the published SHA.
-      - name: Re-assert the run SHA is still protected main before tagging
-        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
-
-      - name: Tag the verified release
-        run: |
-          python scripts/kernel_release_authorization.py verify-release \
-            --phase tag --version "${{ inputs.version }}"
-          TAG="dotmac-kernel-v${{ inputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "dotmac-kernel ${{ inputs.version }} (verified on the Forgejo registry)" "${GITHUB_SHA}"
-          git push origin "${TAG}"
-          echo "tagged ${TAG} on ${GITHUB_SHA}"
-
-      # The tag makes the publication-ledger row false THE MOMENT it lands, and
-      # five gates fail from that instant until the record is written. Leaving
-      # that to memory put `main` red four times in two days, so the record PR
-      # is opened HERE rather than remembered. `if: always()` is deliberate:
-      # the tag is pushed by the step above, so a later failure must not leave
-      # a tag with no record — the exact state this exists to prevent.
-      - name: Mint the narrow release-recorder App token
-        id: recorder-token
-        if: always()
-        uses: ./.github/actions/release-recorder-token
-        with:
-          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
-
-      - name: Open the post-release record
-        if: always()
-        env:
-          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
-        run: |
-          bash scripts/open_release_record_pr.sh \
-            --distribution dotmac-kernel \
-            --version "${{ inputs.version }}" \
-            --tag "dotmac-kernel-v${{ inputs.version }}"
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" \
+            "dist/dotmac_kernel-${RELEASE_VERSION}-py3-none-any.whl" \
+            "dist/dotmac_kernel-${RELEASE_VERSION}.tar.gz"

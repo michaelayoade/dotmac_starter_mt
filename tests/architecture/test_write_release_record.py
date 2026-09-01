@@ -415,6 +415,21 @@ def test_the_only_successful_exits_are_a_record_opened_or_already_complete() -> 
     assert set(exits) <= {"exit 0", "exit 1", "exit 2"}, exits
 
 
+def test_kernel_evidence_and_general_record_are_staged_before_one_commit() -> None:
+    """First run and rerun share one atomic, fail-closed recorder sequence."""
+    script = (PROJECT_ROOT / "scripts" / "open_release_record_pr.sh").read_text(
+        encoding="utf-8"
+    )
+    evidence = script.index("write_kernel_release_verification_record.py")
+    general = script.index('write_release_record.py "${ARGS[@]}"')
+    commit = script.index("git add -A")
+    push = script.index("git push --force-with-lease")
+    assert evidence < general < commit < push
+    before_commit = script[:commit]
+    assert 'give_up "the permanent kernel verification writer refused' in before_commit
+    assert 'give_up "the record writer refused' in before_commit
+
+
 def _record_auto_merge_problems(script: str) -> list[str]:
     problems: list[str] = []
     command = 'gh pr merge "${BRANCH}" --auto --squash'
@@ -733,6 +748,10 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
         KernelReleaseAuthorizationError = FakeAuthorizationError
 
         @staticmethod
+        def load_authorization():
+            return object()
+
+        @staticmethod
         def consume_for_release(**coordinates):
             assert coordinates == {
                 "version": "0.1.0a100",
@@ -763,6 +782,7 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
     monkeypatch.setattr(writer, "SOURCE_DRIFT_BASELINE", baseline)
     monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
+    monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
     monkeypatch.setattr(
         writer,
         "_local_script",
@@ -790,3 +810,78 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
         "recomputed the published-source census from the tagged tree "
         "(78 released, 4 drifted)",
     ]
+
+
+def test_kernel_record_rerun_accepts_only_the_fully_reconciled_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    writer = _writer()
+    ledger = tmp_path / "declared-publication-baseline.json"
+    released = tmp_path / "test_released_migrations.py"
+    baseline = tmp_path / "published_source_drift_baseline.json"
+    authorization_path = tmp_path / "kernel-release-authorization.json"
+    ledger.write_text(json.dumps({"unpublished": {}}, indent=2) + "\n")
+    released.write_text(writer.RELEASED_TAGS_MODULE.read_text())
+    baseline_text = (
+        json.dumps({"released_total": 78, "drifted_total": 4, "drifted": []}, indent=2)
+        + "\n"
+    )
+    baseline.write_text(baseline_text)
+    authorization_path.write_text(
+        json.dumps(
+            {"$schema": "KernelReleaseAuthorization.v1", "active": None},
+            indent=2,
+        )
+        + "\n"
+    )
+
+    class FakeAuthorization:
+        @staticmethod
+        def load_authorization():
+            return None
+
+    class FakeSourceDrift:
+        @staticmethod
+        def render_baseline():
+            return baseline_text
+
+    monkeypatch.setattr(writer, "LEDGER", ledger)
+    monkeypatch.setattr(writer, "RELEASED_TAGS_MODULE", released)
+    monkeypatch.setattr(writer, "SOURCE_DRIFT_BASELINE", baseline)
+    monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
+    monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
+    monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
+    monkeypatch.setattr(
+        writer,
+        "_local_script",
+        lambda name: FakeAuthorization
+        if name == "kernel_release_authorization"
+        else FakeSourceDrift,
+    )
+
+    assert (
+        writer.write_record(
+            distribution="dotmac-kernel",
+            version="0.1.0a100",
+            tag="dotmac-kernel-v0.1.0a100",
+            package_dir=None,
+            import_name=None,
+        )
+        == []
+    )
+
+    ledger.write_text(
+        json.dumps(
+            {"unpublished": {"dotmac-kernel": {"declared": "0.1.0a100"}}},
+            indent=2,
+        )
+        + "\n"
+    )
+    with pytest.raises(writer.ReleaseRecordError, match="ledger remains"):
+        writer.write_record(
+            distribution="dotmac-kernel",
+            version="0.1.0a100",
+            tag="dotmac-kernel-v0.1.0a100",
+            package_dir=None,
+            import_name=None,
+        )

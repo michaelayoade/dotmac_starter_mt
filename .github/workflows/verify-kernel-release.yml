@@ -1,4 +1,10 @@
-name: Verify an existing kernel release
+name: Verify and tag an existing kernel release
+
+# This workflow is the sole post-publication decision owner. `verify` has only
+# read authority and proves retained bytes == registry bytes plus an artifact-
+# only clean install. `tag_and_record` receives that typed receipt and is the
+# only kernel lane allowed to create/reconcile the annotated tag and open the
+# release-record PR. It cannot build or publish and holds no registry writer.
 
 on:
   workflow_dispatch:
@@ -24,14 +30,6 @@ on:
         description: Immutable dotmac-kernel-dist Actions artifact ID
         required: true
         type: string
-      tag_object:
-        description: Exact annotated tag object
-        required: true
-        type: string
-      tag_commit:
-        description: Exact tag peel
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -48,7 +46,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
       - name: Bind the verification facility to current protected main
         run: |
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
@@ -56,7 +53,16 @@ jobs:
             exit 1
           fi
           bash scripts/assert_current_main.sh "$GITHUB_SHA"
-
+      - name: Bind the historical release source to its authorization
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          ORIGINAL_SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_BINDING: ${{ runner.temp }}/observations/source-binding.json
+        run: |
+          python scripts/kernel_release_authorization.py verify-source \
+            --source-sha "$ORIGINAL_SOURCE_SHA" \
+            --version "$RELEASE_VERSION" \
+            --output "$SOURCE_BINDING"
       - name: Collect the retained build bytes from the original run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,7 +77,6 @@ jobs:
           RETAINED_OUTPUT_DIR: ${{ runner.temp }}/retained
           GITHUB_OBSERVATION: ${{ runner.temp }}/observations/github.json
         run: python scripts/collect_github_release_artifact.py
-
       - name: Collect the named bytes from the private registry
         env:
           REGISTRY_PASSWORD: ${{ secrets.FORGEJO_READ_TOKEN }}
@@ -82,7 +87,6 @@ jobs:
           REGISTRY_OUTPUT_DIR: ${{ runner.temp }}/registry
           REGISTRY_OBSERVATION: ${{ runner.temp }}/observations/registry.json
         run: python scripts/collect_private_registry_files.py
-
       - name: Re-assert current protected main before the decision
         run: |
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
@@ -90,13 +94,10 @@ jobs:
             exit 1
           fi
           bash scripts/assert_current_main.sh "$GITHUB_SHA"
-
       - name: Compare every byte and clean-install both artifacts
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_TAG: dotmac-kernel-v${{ inputs.version }}
-          RELEASE_TAG_OBJECT: ${{ inputs.tag_object }}
-          RELEASE_TAG_COMMIT: ${{ inputs.tag_commit }}
           EXPECTED_FILENAMES: |
             dotmac_kernel-${{ inputs.version }}-py3-none-any.whl
             dotmac_kernel-${{ inputs.version }}.tar.gz
@@ -104,6 +105,7 @@ jobs:
           REGISTRY_OUTPUT_DIR: ${{ runner.temp }}/registry
           GITHUB_OBSERVATION: ${{ runner.temp }}/observations/github.json
           REGISTRY_OBSERVATION: ${{ runner.temp }}/observations/registry.json
+          SOURCE_BINDING: ${{ runner.temp }}/observations/source-binding.json
           VERIFICATION_RECEIPT: ${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json
           FACILITY_REPOSITORY: ${{ github.repository }}
           FACILITY_REF: ${{ github.ref }}
@@ -115,7 +117,6 @@ jobs:
           ORIGINAL_SOURCE_SHA: ${{ inputs.source_sha }}
           ORIGINAL_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
         run: python scripts/verify_kernel_release_artifacts.py
-
       - name: Retain the typed verification receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -123,3 +124,80 @@ jobs:
           path: ${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json
           if-no-files-found: error
           retention-days: 90
+
+  tag_and_record:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Download the typed verification receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kernel-release-verification-receipt
+          path: ${{ runner.temp }}/receipt
+      - name: Re-assert the verifier facility is current protected main
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::tag decision must run from main"
+            exit 1
+          fi
+          bash scripts/assert_current_main.sh "$GITHUB_SHA"
+      - name: Re-derive the historical release authorization before tagging
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          LIVE_SOURCE_BINDING: ${{ runner.temp }}/tag/live-source-binding.json
+        run: |
+          python scripts/kernel_release_authorization.py verify-source \
+            --source-sha "$RELEASE_SOURCE_SHA" \
+            --version "$RELEASE_VERSION" \
+            --output "$LIVE_SOURCE_BINDING"
+      - name: Final protected-main reassert immediately before tagging
+        run: bash scripts/assert_current_main.sh "$GITHUB_SHA"
+      - name: Create or reconcile the independently verified tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: dotmac-kernel-v${{ inputs.version }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          VERIFICATION_RECEIPT: ${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json
+          TAG_DECISION_RECEIPT: ${{ runner.temp }}/tag/KernelReleaseTagDecision.v1.json
+          LIVE_SOURCE_BINDING: ${{ runner.temp }}/tag/live-source-binding.json
+          FACILITY_REPOSITORY: ${{ github.repository }}
+          FACILITY_SOURCE_SHA: ${{ github.sha }}
+          FACILITY_RUN_ID: ${{ github.run_id }}
+          FACILITY_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: python scripts/tag_kernel_release_once.py
+      - name: Retain the typed tag decision
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-release-tag-decision
+          path: ${{ runner.temp }}/tag/KernelReleaseTagDecision.v1.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Mint the narrow release-recorder App token
+        id: recorder-token
+        uses: ./.github/actions/release-recorder-token
+        with:
+          client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+      - name: Open the post-release record
+        env:
+          GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution dotmac-kernel \
+            --version "$RELEASE_VERSION" \
+            --tag "dotmac-kernel-v${RELEASE_VERSION}" \
+            --release-run "$RELEASE_RUN_ID" \
+            --verification-receipt "${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json" \
+            --tag-decision-receipt "${{ runner.temp }}/tag/KernelReleaseTagDecision.v1.json"

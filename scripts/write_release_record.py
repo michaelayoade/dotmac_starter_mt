@@ -73,6 +73,9 @@ SOURCE_DRIFT_BASELINE = (
     REPO_ROOT / "tests" / "architecture" / "published_source_drift_baseline.json"
 )
 KERNEL_AUTHORIZATION = REPO_ROOT / ".github" / "kernel-release-authorization.json"
+KERNEL_VERIFICATIONS = (
+    REPO_ROOT / "docs" / "inventories" / "kernel-release-verifications"
+)
 
 #: Where a distribution's migrations live inside its package, if it has any.
 _MIGRATIONS = "src/{import_name}/migrations/versions"
@@ -567,6 +570,60 @@ def add_released_tag(
     return text[:at] + entry + text[at:], True
 
 
+def require_kernel_evidence(
+    *, version: str, tag: str, commit: str
+) -> dict[str, object]:
+    path = KERNEL_VERIFICATIONS / f"{version}.json"
+    if not path.is_file():
+        raise ReleaseRecordError(
+            f"kernel {version} has no durable independent-verification record"
+        )
+    payload = path.read_bytes()
+    record = json.loads(payload)
+    if (
+        not isinstance(record, dict)
+        or set(record)
+        != {
+            "schema",
+            "version",
+            "tag",
+            "tag_object",
+            "tag_disposition",
+            "source_sha",
+            "authorization",
+            "publisher",
+            "verifier",
+            "verification_receipt_sha256",
+            "verification_receipt_artifact",
+            "tag_decision_receipt_sha256",
+            "tag_decision_receipt_artifact",
+            "registry",
+            "files",
+        }
+        or record.get("schema") != "KernelReleaseEvidence.v1"
+        or record.get("version") != version
+        or record.get("tag") != tag
+        or record.get("source_sha") != commit
+        or (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        != payload
+    ):
+        raise ReleaseRecordError("durable kernel verification record differs")
+    evidence = _local_script("write_kernel_release_verification_record")
+    try:
+        evidence.validate_persisted_record(record, version=version)
+    except evidence.RecordRefused as failure:
+        raise ReleaseRecordError(
+            f"durable kernel verification record is invalid: {failure}"
+        ) from failure
+    tag_type = _git("cat-file", "-t", tag).strip()
+    tag_object = _git("rev-parse", tag).strip()
+    if tag_type != "tag" or record.get("tag_object") != tag_object:
+        raise ReleaseRecordError(
+            "durable kernel record does not bind the annotated tag"
+        )
+    return record
+
+
 def write_record(
     *,
     distribution: str,
@@ -643,30 +700,45 @@ def write_record(
                 )
 
     if distribution == "dotmac-kernel":
+        require_kernel_evidence(version=version, tag=tag, commit=commit)
         authorization = _local_script("kernel_release_authorization")
-        try:
-            new_authorization = authorization.consume_for_release(
-                version=version, tag=tag, commit=commit
-            )
-        except authorization.KernelReleaseAuthorizationError as failure:
-            raise ReleaseRecordError(
-                f"kernel release authorization cannot be consumed: {failure}"
-            ) from failure
-        json.loads(new_authorization)
-
         source_drift = _local_script("published_source_drift")
-        new_baseline = source_drift.render_baseline()
-        rendered = json.loads(new_baseline)
-        if rendered["released_total"] <= json.loads(baseline_text)["released_total"]:
-            raise ReleaseRecordError(
-                "kernel tag did not increase the released-source census"
+        active = authorization.load_authorization()
+        if active is None:
+            if row is not None:
+                raise ReleaseRecordError(
+                    "kernel authorization is consumed but publication ledger remains"
+                )
+            rendered_baseline = source_drift.render_baseline()
+            if rendered_baseline != baseline_text:
+                raise ReleaseRecordError(
+                    "kernel authorization is consumed but source census differs"
+                )
+        else:
+            try:
+                new_authorization = authorization.consume_for_release(
+                    version=version, tag=tag, commit=commit
+                )
+            except authorization.KernelReleaseAuthorizationError as failure:
+                raise ReleaseRecordError(
+                    f"kernel release authorization cannot be consumed: {failure}"
+                ) from failure
+            json.loads(new_authorization)
+            new_baseline = source_drift.render_baseline()
+            rendered = json.loads(new_baseline)
+            if (
+                rendered["released_total"]
+                <= json.loads(baseline_text)["released_total"]
+            ):
+                raise ReleaseRecordError(
+                    "kernel tag did not increase the released-source census"
+                )
+            changed.append("consumed the kernel release authorization")
+            changed.append(
+                "recomputed the published-source census from the tagged tree "
+                f"({rendered['released_total']} released, "
+                f"{rendered['drifted_total']} drifted)"
             )
-        changed.append("consumed the kernel release authorization")
-        changed.append(
-            "recomputed the published-source census from the tagged tree "
-            f"({rendered['released_total']} released, "
-            f"{rendered['drifted_total']} drifted)"
-        )
 
     # Validate every premise before any file changes. A refused first
     # enrolment must not leave a half-repair that hides the stale ledger row.
