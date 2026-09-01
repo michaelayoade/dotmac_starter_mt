@@ -29,6 +29,7 @@ import copy
 import importlib.util
 import json
 import subprocess  # nosec B404 -- argv list, shell=False; git only
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,10 @@ def _module():
     spec = importlib.util.spec_from_file_location("foundation_disposition", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Registered BEFORE execution: a module that grows a `@dataclass(slots=True)`
+    # later would otherwise fail here with an error that reads as a bug in the
+    # script rather than in this loader.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

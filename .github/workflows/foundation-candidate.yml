@@ -83,6 +83,25 @@ jobs:
           python-version: "3.12"
       - uses: ./.github/actions/setup-poetry
 
+      # A version binds to ONE source and ONE artifact. `0.3.0a2` is why this
+      # step exists: it was built once from e930f878, commit 0f390a9a (#551)
+      # then changed the facility source under the same declared version, and
+      # for ten days the repository offered one version name over two
+      # contracts. Every fact needed to refuse that was already checked in --
+      # a tag for a published version, a CandidateArtifact.v1 receipt for a
+      # built one, a CandidateDisposition.v1 for a consumed one -- and nothing
+      # read them before dispatching the next build.
+      #
+      # `--purpose candidate` refuses ALL THREE: a version about to be built
+      # must be untouched. Needs the tags `fetch-depth: 0` above already
+      # fetches; without them the guard refuses to answer rather than admitting
+      # a version that is already on the index.
+      - name: Refuse a version that is already bound
+        run: |
+          python scripts/version_binding_guard.py check \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --purpose candidate
+
       # The same allowlist gate the release lane uses. A candidate for an
       # unallowlisted distribution is refused here rather than discovered when
       # the release lane later declines to publish it.

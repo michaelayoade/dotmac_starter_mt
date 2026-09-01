@@ -1220,7 +1220,10 @@ specifics) points here and must never fork these rules.
     identical, costs minutes and is wrong — every downstream receipt names the
     candidate's digest, so re-deriving matching bytes is a claim, not a proof.
     Each dependent receipt carries the `artifact_id` and digest as named fields
-    so invalidation is a query rather than a recollection
+    so invalidation is a query rather than a recollection. Invalidation is
+    RECORDED, and it is recorded beside the receipt rather than inside it — see
+    rule 48 for `CandidateDisposition.v1` and the guard that refuses a bound
+    version
     (`scripts/foundation_candidate.py check|verify`;
     `tests/architecture/test_candidate_lane_cannot_publish.py`)
 
@@ -1481,6 +1484,57 @@ specifics) points here and must never fork these rules.
     `dotmac-entitlement-allocation` took for `PLATFORM_AUDIT_LOG_V1`.
     (ADR-0017 amendment 2026-08-31;
     `tests/unit/test_product_database_catalog.py`)
+
+48. **A version name binds to ONE source and ONE artifact, and a CONSUMED
+    version is never reissued.** `dotmac-deployment-foundation 0.3.0a2` is the
+    live case rule 34 predicted: built once as candidate artifact 9740182233
+    from `e930f878…`, then commit `0f390a9a…` (#551) changed the facility source
+    under that same declared version, so for ten days the repository offered one
+    version name over two different contracts. An installation adopts by digest,
+    so a version naming two contracts makes every pin against either of them
+    unidentifiable.
+
+    **The repair is a NEW version, never an annotation on the old one, and never
+    an edit to the artifact's receipt.** `CandidateArtifact.v1` records bytes
+    that were built once; that record cannot become false, only the candidate's
+    USABILITY can, and a restore proof, an issuer stand-up and Lane 3 all bind
+    to it. So the receipt is preserved byte-for-byte and the judgement is
+    APPENDED as `CandidateDisposition.v1` — original receipt digest, artifact
+    coordinates, disposition, `publishable`, the invalidating commit, the
+    reason. **Editing an entry in place is not a supported operation**; a
+    judgement that turned out wrong is corrected by appending the correction.
+
+    **Append-only is PROVED, not promised.** A hash chain, so editing any entry
+    invalidates every entry after it. An anchor that is not ours to move — entry
+    1 chains to the digest of the receipt it dispositions rather than to a zero
+    genesis, so one check proves both that the log was not rewritten and that
+    `CandidateArtifact.v1` was not touched. Git history as the oracle a single
+    commit cannot forge, because with one entry the chain has nothing to link
+    and the newest entry is otherwise unprotected. Plus an ADR-0018
+    two-directional count ratchet that fails on GROWTH as well as shrinkage, so
+    an append cannot be silent.
+
+    **The record states the fact; a separate guard enforces it.** A record that
+    both states and enforces is one edit away from being neither.
+    `scripts/version_binding_guard.py` reads the real bindings — a git tag (the
+    version is published), a `CandidateArtifact.v1` receipt (it was already
+    built to specific bytes), a `CandidateDisposition.v1` (it was consumed) —
+    and refuses in `foundation-candidate.yml` before a build and in
+    `release-facility.yml` before a publish, including in the job that actually
+    holds the registry credential. `--purpose release` permits a version's own
+    candidate receipt, because publishing those exact bytes IS the designed
+    path; a tag and an unpublishable disposition still refuse.
+
+    **Without tags the guard REFUSES TO ANSWER (exit 2), never passes.** It
+    could otherwise not see publications and would admit a version already on
+    the index — the exact failure it exists to stop. Per Governance ADR 0034 the
+    gate demonstrates a **real-target ADMIT** and not merely synthetic
+    acceptance: `0.3.0a3`, the version this tree declares, is admitted against
+    the repository's own six bindings, while `0.3.0a2`, `0.3.0a1` and all three
+    published tags are refused from that same record set
+    (`scripts/foundation_disposition.py`, `scripts/version_binding_guard.py`;
+    `tests/architecture/test_foundation_candidate_disposition.py`,
+    `tests/architecture/test_version_binding_guard.py`)
 
 ## Everything by config — no hardcoding
 
