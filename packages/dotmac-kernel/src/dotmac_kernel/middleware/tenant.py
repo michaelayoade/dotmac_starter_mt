@@ -28,15 +28,16 @@ to `/health`.
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager
 
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from dotmac_kernel.config import settings
-from dotmac_kernel.db import resolver_session
 from dotmac_kernel.errors import envelope
 from dotmac_kernel.models import Tenant, TenantDomain
 from dotmac_kernel.tenancy import single_tenant_binding
@@ -46,6 +47,25 @@ logger = logging.getLogger(__name__)
 _HEALTH_PATHS = frozenset({"/health", "/health/ready"})
 _STATIC_PATH = "/static"
 _STATIC_PATH_PREFIX = "/static/"
+
+
+def resolver_session() -> AbstractContextManager[Session]:
+    """Enter the reference assembly's resolver boundary only when resolving.
+
+    ``TenantResolverMiddleware`` is imported while ``app_factory`` defines the
+    public ``create_app`` surface.  Importing ``dotmac_kernel.db`` here at
+    module load would therefore build the reference assembly's engines merely
+    to import that public constructor, even though no request is being
+    resolved.  The database runtime is deliberately eager at its OWNER; this
+    adapter is deliberately lazy at the middleware boundary.
+
+    Keep this named adapter rather than importing inside ``_resolve`` directly:
+    the middleware tests replace it with a recording context manager, proving
+    health/static bypasses and ordinary resolution against the same seam.
+    """
+    from dotmac_kernel.db import resolver_session as _resolver_session
+
+    return _resolver_session()
 
 
 def _is_static_path(path: str) -> bool:

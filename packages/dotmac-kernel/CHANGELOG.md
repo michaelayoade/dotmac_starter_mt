@@ -6,6 +6,24 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a101 — Unreleased
+
+This heading records the repair that the next separately authorized kernel
+release will bind. It does not allocate, publish or tag `0.1.0a101`.
+
+### Fixed
+
+- Keep `dotmac_kernel.app_factory.create_app` importable from both its direct
+  module and the package-root public surface before a product installs its
+  database driver or supplies database URLs. Tenant middleware now resolves
+  the assembly-owned `resolver_session` lazily when a request actually needs
+  tenant resolution instead of importing `dotmac_kernel.db` while the
+  application factory is imported. A clean-wheel subprocess gate exercises
+  both public import forms with `DATABASE_URL`, `PLATFORM_DATABASE_URL` and
+  `PYTHONPATH` absent, refuses if `dotmac_kernel.db` or `psycopg` entered the
+  process, and carries a planted eager-import sensitivity case. `psycopg`
+  remains a product/deployment dependency rather than kernel metadata.
+
 ## 0.1.0a100 — 2026-08-31
 
 The version is the numeric successor of the immutable a99 tag. It becomes an

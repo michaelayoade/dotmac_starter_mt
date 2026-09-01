@@ -91,7 +91,7 @@ WORKDIR=$(mktemp -d)
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 
-echo "==> [1/6] Resolve the kernel wheel (mode: ${MODE})"
+echo "==> [1/8] Resolve the kernel wheel (mode: ${MODE})"
 INSTALL_SPEC=""       # what pip installs to provide dotmac_kernel
 case "$MODE" in
   source)
@@ -120,19 +120,20 @@ case "$MODE" in
     ;;
 esac
 
-echo "==> [2/6] Create a CLEAN consumer virtualenv (isolated from the repo venv)"
+echo "==> [2/8] Create a CLEAN consumer virtualenv (isolated from the repo venv)"
 VENV="$WORKDIR/venv"
 "$PYTHON" -m venv "$VENV"
 VPY="$VENV/bin/python"
 "$VPY" -m pip install --quiet --upgrade pip
 
-echo "==> [3/6] Install the kernel + its declared deps into the clean venv"
+echo "==> [3/8] Install the kernel + its declared deps into the clean venv"
 # The wheel's METADATA carries the kernel's declared dependency closure
 # (fastapi, sqlalchemy, pydantic[email], pydantic-settings, jinja2, argon2-cffi) —
 # pip resolves those from the wheel/release alone, which is the "dep set is
 # complete" proof. Two runtime pieces are DELIBERATELY excluded from kernel deps
 # as assembly/deploy concerns (see packages/dotmac-kernel/pyproject.toml) and are
-# supplied HERE by the consumer, exactly as a real deployment would:
+# supplied only AFTER the import-boundary proof, exactly as a real deployment
+# would:
 #   - psycopg[binary] : the DB driver the postgresql+psycopg:// URL names.
 #                       SQLAlchemy imports it eagerly at create_engine() time
 #                       (dotmac_kernel.db builds the engine at import), so
@@ -159,12 +160,30 @@ if [ "$MODE" = "registry" ]; then
   # alone. This is the release VERIFY smoke of an internal alpha.
   "$VPY" -m pip install --quiet --index-url "$KERNEL_INDEX_URL" \
     --extra-index-url "${PUBLIC_INDEX_URL:-https://pypi.org/simple}" \
-    "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX" "$_FASTAPI"
+    "$INSTALL_SPEC" "$_FASTAPI"
 else
-  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX" "$_FASTAPI"
+  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "$_FASTAPI"
 fi
 
-echo "==> [4/6] Write the minimal EXTERNAL consumer app (public names only)"
+echo "==> [4/8] Prove importing create_app does not enter the DB runtime"
+# Bind the subject to the clean venv and remove every ambient path/DSN input.
+# At this point psycopg has NOT been installed.  This is therefore an artifact
+# proof of the package's declared dependency boundary, not a source-checkout
+# import made green by the assembly's environment.
+KERNEL_IMPORT_EXPECTED_PREFIX="$VENV" \
+  env -u DATABASE_URL -u PLATFORM_DATABASE_URL -u PYTHONPATH \
+  "$VPY" "$REPO_ROOT/scripts/check_kernel_app_factory_import.py"
+
+echo "==> [5/8] Install the consumer-owned DB driver and test transport"
+if [ "$MODE" = "registry" ]; then
+  "$VPY" -m pip install --quiet --index-url "$KERNEL_INDEX_URL" \
+    --extra-index-url "${PUBLIC_INDEX_URL:-https://pypi.org/simple}" \
+    "psycopg[binary]" "$_HTTPX"
+else
+  "$VPY" -m pip install --quiet "psycopg[binary]" "$_HTTPX"
+fi
+
+echo "==> [6/8] Write the minimal EXTERNAL consumer app (public names only)"
 cat > "$WORKDIR/consumer_main.py" <<'PY'
 """Minimal external consumer of dotmac-kernel.
 
@@ -190,7 +209,7 @@ app = create_app(
 )
 PY
 
-echo "==> [5/6] Write the boot + package-data proof runner"
+echo "==> [7/8] Write the boot + package-data proof runner"
 cat > "$WORKDIR/consumer_check.py" <<'PY'
 """Boot the external consumer app from the installed kernel and assert:
   1. GET /health == 200 (DB-free liveness, unreachable DATABASE_URL).
@@ -325,7 +344,7 @@ print(f"    migrations 0001..0007 -> {len(revs)} revisions present ({versions_di
 print("\nOK — kernel boots and resolves its package data from the installed kernel.")
 PY
 
-echo "==> [6/6] Boot the consumer from the installed kernel and run the proof"
+echo "==> [8/8] Boot the consumer from the installed kernel and run the proof"
 cd "$WORKDIR"
 DATABASE_URL="$CONSUMER_DB_URL" REPO_ROOT="$REPO_ROOT" \
   REQUIRE_COMPILED_CSS="$REQUIRE_COMPILED_CSS" "$VPY" consumer_check.py

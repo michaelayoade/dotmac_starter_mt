@@ -3000,6 +3000,15 @@ The contract:
   `dotmac_kernel.db` owner. This keeps module manifests and routers importable
   before an assembly resolves `DATABASE_URL` without creating a second session
   or transaction authority.
+- **Tenant middleware enters the resolver boundary lazily.** The middleware is
+  imported by the public `create_app` composition surface, but importing a
+  constructor is not tenant resolution. Its named `resolver_session` adapter
+  performs a function-local import of the eager `dotmac_kernel.db` owner only
+  when `_resolve` handles a request. Consequently `create_app` is importable
+  with both database URLs and `PYTHONPATH` removed, before the consumer-owned
+  `psycopg` driver exists; the clean-wheel consumer gate proves that exact
+  order and asserts neither `dotmac_kernel.db` nor `psycopg` entered
+  `sys.modules`.
 - **Services only mutate and flush.** A feature service never calls
   `db.commit()`, never calls `db.rollback()` directly (hard rule; see the
   savepoint section below), and never constructs a session of its own.

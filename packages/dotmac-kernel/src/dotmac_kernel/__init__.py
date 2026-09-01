@@ -361,7 +361,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a100"
+__version__ = "0.1.0a100+dev"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -482,9 +482,11 @@ INTERNAL_MODULES: frozenset[str] = frozenset(
 
 def __getattr__(name: str):
     """Lazy top-level access to `create_app` (kernel-boundary Task 3A). It lives
-    in `app_factory`, which imports the DB/middleware stack and constructs the
-    SQLAlchemy engine at import — resolving it lazily keeps `import dotmac_kernel`
-    itself DB-free while still allowing `from dotmac_kernel import create_app`."""
+    in `app_factory`, which imports the middleware stack but does not enter the
+    eager reference-assembly DB runtime until an operation actually needs it.
+    Resolving it lazily still keeps the broad package root light, while both
+    `from dotmac_kernel import create_app` and the supported app-factory module
+    remain importable before a consumer installs a DB driver or DSN."""
     if name == "create_app":
         from dotmac_kernel.app_factory import create_app
 
