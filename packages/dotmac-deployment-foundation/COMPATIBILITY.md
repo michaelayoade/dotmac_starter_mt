@@ -181,6 +181,45 @@ different `schema` value, and a v1 reader REFUSES a v2 document rather than
 reading the subset it understands — a field an older reader cannot see may be
 the one that disables a control.
 
+### 0.3.0a3: the external-recovery contract, measured against the version rule
+
+Stated rather than assumed, because the rule above is strict and this change
+touches every clause of it.
+
+**New refusals in `spec.py`, and why this is not the MAJOR case.** Declaring an
+`external_executor` without a `lineage` is refused, and so is a lineage that is
+host-shaped or that repeats the executor's identifier. Both fire only on keys
+that did not exist in any previous version, so **no descriptor that parsed
+yesterday fails today** — the premise of the major-bump rule ("a consumer's
+build breaks") is absent. A refusal reachable only from new syntax is a
+constraint on new syntax, not a retraction of old.
+
+**The verification vocabulary WIDENED.** `roles`, `ownership`, `memberships`
+and `effective_privileges` are now accepted where they were refused at parse.
+That direction cannot break a consumer, and an unknown verification is still
+refused, so the vocabulary is wider and not open.
+
+**One breaking signature change**, named plainly: `backup.assess()`'s
+`expected_interval_seconds` parameter is now `expected_backup_interval_seconds`,
+matching the descriptor field that supplies it. It was a second name for one
+control, and one the descriptor could not state at all — so every caller
+silently took the daily default whatever the product's real cadence was. There
+were **no callers**: `assess()` had none in this package or in any consuming
+product, which is the same fact that made `restore_proof_max_age_days` inert.
+A rename with no callers is recorded here rather than deferred to a major
+release nobody is waiting for.
+
+**`SECONDS_PER_DAY` moved** from `backup` to `spec`, which now declares a
+cadence in seconds and would otherwise hold a second definition of it. `backup`
+re-exports it, so no import moves.
+
+**Rendered bytes changed.** The descriptor gained fields, so
+`io.dotmac.deployment.configuration.digest` moves and `docker-compose.yml` with
+it — the MINOR case. `0.2.0a2` is the newest published version, so the published
+line moves `0.2` → `0.3`, which satisfies it. No consumer has committed
+`0.3.0a2`'s bytes: that candidate was never published and is recorded
+invalidated.
+
 ## Consuming this package
 
 Exact-pin it. A conformance gate resolving to "whatever is newest" cannot

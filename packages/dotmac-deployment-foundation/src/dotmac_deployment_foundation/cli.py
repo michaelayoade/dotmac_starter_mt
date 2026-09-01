@@ -302,6 +302,32 @@ def _require_grant(
     )
 
 
+def _recovery_receipts(pairs: list[str]) -> dict[str, object]:
+    """Parse `DATASET=PATH` pairs into envelopes, refusing anything ambiguous.
+
+    A malformed pair is a REFUSAL rather than a skipped entry: an operator who
+    typed the flag intends a receipt to be supplied, and silently dropping it
+    would produce "no recovery receipt was supplied" for a receipt that is
+    sitting right there on the command line.
+    """
+    receipts: dict[str, object] = {}
+    for pair in pairs:
+        dataset, separator, path = pair.partition("=")
+        if not separator or not dataset.strip() or not path.strip():
+            raise SpecError(
+                f"--recovery-receipt {pair!r} is not DATASET=PATH. A receipt "
+                "names the dataset it proves; one that did not could satisfy a "
+                "gate for data it says nothing about"
+            )
+        if dataset in receipts:
+            raise SpecError(
+                f"--recovery-receipt names {dataset!r} twice. Two proofs for one "
+                "dataset is a choice, and this facility does not make it"
+            )
+        receipts[dataset] = json.loads(Path(path).read_text(encoding="utf-8"))
+    return receipts
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.plan import build_plan, format_plan
 
@@ -322,7 +348,20 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     grant = _require_grant(args, spec, "deploy")
     effects = _build_effects(spec, args)
-    executor = Executor(spec, effects, grant)
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        # HANDED OVER, never discovered -- one `--recovery-receipt CODE=PATH`
+        # per externally executed dataset. No verifier is passed because this
+        # facility declares zero runtime dependencies and must not ship a weak
+        # stdlib substitute (ADR-0009/ADR-0070); the step therefore REFUSES from
+        # the CLI, exactly as `verify_release_evidence` already does, and an
+        # assembly embedding `Executor` supplies the verifier its keys live in.
+        # A `--execute` that quietly accepted unsigned recovery proof would be
+        # the bypass this whole contract exists to close.
+        recovery_receipts=_recovery_receipts(args.recovery_receipt),
+    )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
     # (`engine/run.py`) — a lock released when the first step returns is not
@@ -368,6 +407,24 @@ def cmd_backup(args: argparse.Namespace) -> int:
         print(
             f"  restore proof    at most {dataset.restore_proof_max_age_days} days old"
         )
+        # Printed beside the window rather than merged into it. Cadence decides
+        # STALENESS; the window above decides whether recovery has ever been
+        # demonstrated. A product taking hourly backups nobody has restored
+        # passes the first and fails the second.
+        print(f"  backup cadence   every {dataset.expected_backup_interval_seconds}s")
+        if dataset.external_executor is not None:
+            executor = dataset.external_executor
+            print(
+                f"  executed by      {executor.kind}:{executor.identifier}"
+                f"@{executor.version} (signing key {executor.key_id})"
+            )
+            print(f"  dataset lineage  {dataset.lineage}")
+            print(
+                "  NO backup step runs for this dataset. Another party executes "
+                "recovery, so the plan carries verify_external_recovery_receipt "
+                "instead -- a backup step here would attribute to this product "
+                "an act it does not perform"
+            )
     return EXIT_OK
 
 
@@ -838,6 +895,18 @@ def build_parser() -> argparse.ArgumentParser:
             "path to the Platform CP authorization receipt permitting this "
             "operation on this descriptor and target. REQUIRED with "
             "--execute; the flag alone is intent, not permission"
+        ),
+    )
+    deploy.add_argument(
+        "--recovery-receipt",
+        action="append",
+        default=[],
+        metavar="DATASET=PATH",
+        help=(
+            "a signed RecoveryReceipt.v1 for one externally executed dataset. "
+            "Repeatable. Receipts are passed in, never discovered: a search "
+            "cannot tell 'no proof exists' from 'no proof was offered', and "
+            "will happily find last quarter's"
         ),
     )
     deploy.add_argument("--skip-backup", action="store_true")
