@@ -639,6 +639,23 @@ class Entrypoint:
         }
 
 
+#: How an absence was established. The distinction is the entire ERP lesson:
+#: `dotmac-books.service` was installed and DISABLED on the host and appears in
+#: no tree, and `/etc/cron.d/dotmac_erp_db_backup` is real. A repository walk
+#: that finds nothing has established that the REPOSITORY holds nothing, and a
+#: product that reads that as "there is no such unit" has drawn the one
+#: conclusion the evidence cannot support.
+ABSENCE_SCOPES: Final[dict[str, str]] = {
+    "repository_tree": (
+        "the tree was walked and holds no member. Says NOTHING about any host"
+    ),
+    "host_observed": (
+        "a named host was inspected by a named person at a named time and holds "
+        "no member"
+    ),
+}
+
+
 # ── SshCredentialConstraintV1 ───────────────────────────────────────────────
 #
 # v2 could COUNT an SSH key and could not CHARACTERISE it. ERP's census is the
@@ -660,6 +677,22 @@ class Entrypoint:
 # rather than asserted, and each independently, because a detector that fires
 # only when everything is wrong passes the realistic case — one protection
 # quietly dropped.
+#
+# INCAPABLE OF AN INTERACTIVE SHELL IS A CONJUNCTION, NOT A FLAG. It is
+# `restrict`, AND a forced command, AND no pty. A key holding two of the three
+# is not two-thirds safe; it is a key somebody can get a shell on. So each is
+# its own named refusal, and the message says WHICH condition failed rather
+# than that the key is "unsafe".
+#
+# AND THE EVIDENCE IS PART OF THE PROPERTY. Every clause above is a claim about
+# a host, and a claim about a host that was not read on a host is a claim about
+# nothing. `evidence_scope` is the SAME two-value vocabulary as `ABSENCE_SCOPES`
+# above, for the same reason: `repository_tree` establishes what a checkout
+# holds and says NOTHING about any host. The census may record either — a key
+# committed to a tree is honestly characterised from that tree — but the
+# retained-rollback gate requires `host_observed` on the host the row itself
+# names, because absence of an observation must not read as satisfaction of the
+# constraint.
 
 #: A digest, never the command string. A changed forced command must be
 #: DETECTABLE; a string invites a near-match being waved through in review, and
@@ -673,6 +706,49 @@ SOURCE_UNRESTRICTED: Final[str] = "unrestricted"
 
 PERMISSION_STATES: Final[tuple[str, ...]] = ("denied", "permitted")
 RESTRICT_STATES: Final[tuple[str, ...]] = ("present", "absent")
+
+#: Derived from `ABSENCE_SCOPES`, never re-typed. One scope vocabulary for the
+#: whole contract: a second copy is how the two meanings drift apart, and the
+#: distinction between "the tree holds none" and "the host holds none" is the
+#: single most load-bearing thing this module knows.
+EVIDENCE_SCOPES: Final[tuple[str, ...]] = tuple(sorted(ABSENCE_SCOPES))
+
+#: The scope a retained rollback key's constraint must carry. A restriction
+#: lives in a host's `authorized_keys`; a tree cannot establish it.
+EVIDENCE_HOST_OBSERVED: Final[str] = "host_observed"
+
+#: Fillers that pass `is a non-empty string` and point at nothing. A required
+#: field satisfied by `unknown` is worse than a missing one, because it reads
+#: as an answer. These are refused in the coordinate fields, where the whole
+#: purpose is that a later reader can go and look again.
+PLACEHOLDER_COORDINATES: Final[frozenset[str]] = frozenset(
+    {
+        "-",
+        "?",
+        "assumed",
+        "declared",
+        "n/a",
+        "na",
+        "none",
+        "not observed",
+        "pending",
+        "tbc",
+        "tbd",
+        "todo",
+        "unknown",
+        "unobserved",
+    }
+)
+
+#: The coordinate a later reader re-resolves: which host, read when, by whom,
+#: how, and at what scope. Checked harder than the rest of the row because it
+#: is the half that makes the rest re-checkable.
+SSH_COORDINATE_KEYS: Final[tuple[str, ...]] = (
+    "host",
+    "observed_at",
+    "observed_by",
+    "method",
+)
 
 #: Every permission `restrict` implies. OpenSSH's `restrict` means "deny all
 #: current and future permissions", so a row claiming `restrict = present`
@@ -697,6 +773,7 @@ SSH_CONSTRAINT_KEYS: Final[frozenset[str]] = frozenset(
         "agent_forwarding",
         "port_forwarding",
         "x11_forwarding",
+        "evidence_scope",
         "host",
         "observed_at",
         "observed_by",
@@ -715,6 +792,7 @@ SSH_CONSTRAINT_REQUIRED: Final[tuple[str, ...]] = (
     "agent_forwarding",
     "port_forwarding",
     "x11_forwarding",
+    "evidence_scope",
     "host",
     "observed_at",
     "observed_by",
@@ -735,6 +813,7 @@ class SshConstraint:
     agent_forwarding: str
     port_forwarding: str
     x11_forwarding: str
+    evidence_scope: str
     host: str
     observed_at: str
     observed_by: str
@@ -748,6 +827,25 @@ class SshConstraint:
     @property
     def forced_command_only(self) -> bool:
         return self.forced_command_digest != FORCED_COMMAND_NONE
+
+    @property
+    def restricted(self) -> bool:
+        return self.restrict == "present"
+
+    @property
+    def pty_denied(self) -> bool:
+        """Named on its own even though `restrict` implies it at parse.
+
+        The gate must not borrow one of its own conditions from a different
+        function's invariant. If `parse_ssh_constraint`'s contradiction check
+        were ever relaxed, a gate that leaned on it would go on passing while
+        one third of the conjunction it claims to enforce had quietly died.
+        """
+        return self.pty == "denied"
+
+    @property
+    def host_observed(self) -> bool:
+        return self.evidence_scope == EVIDENCE_HOST_OBSERVED
 
     def canonical(self) -> dict[str, str]:
         """Part of the census digest, so LOOSENING a key moves the digest.
@@ -816,6 +914,29 @@ def parse_ssh_constraint(row: Any, where: str) -> SshConstraint:
                 "A key is identified by FINGERPRINT here; material never "
                 "appears in an inventory"
             )
+    if row["evidence_scope"] not in EVIDENCE_SCOPES:
+        raise InventoryError(
+            f"{where}: ssh_constraint `evidence_scope` must be one of "
+            f"{list(EVIDENCE_SCOPES)}; found {row['evidence_scope']!r}. The same "
+            "vocabulary as a family absence, because it carries the same "
+            "distinction: a tree walk says NOTHING about any host"
+        )
+    for key in SSH_COORDINATE_KEYS:
+        if row[key].strip().lower() in PLACEHOLDER_COORDINATES:
+            raise InventoryError(
+                f"{where}: ssh_constraint `{key}` is {row[key]!r}, which points "
+                "at nothing. A coordinate a later reader cannot re-resolve is "
+                "not weaker evidence, it is none — and a required field "
+                "satisfied by a filler reads as an answer, which is worse than "
+                "leaving it out"
+            )
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", row["observed_at"]):
+        raise InventoryError(
+            f"{where}: ssh_constraint `observed_at` must be an ISO date "
+            f"(`YYYY-MM-DD`); found {row['observed_at']!r}. A restriction is "
+            "true at a MOMENT — without one, a reading from before the key was "
+            "loosened is indistinguishable from a reading after it"
+        )
     if row["restrict"] == "present":
         contradictions = sorted(
             key for key in RESTRICT_IMPLIED_DENIALS if row[key] != "denied"
@@ -837,6 +958,7 @@ def parse_ssh_constraint(row: Any, where: str) -> SshConstraint:
         agent_forwarding=row["agent_forwarding"],
         port_forwarding=row["port_forwarding"],
         x11_forwarding=row["x11_forwarding"],
+        evidence_scope=row["evidence_scope"],
         host=row["host"],
         observed_at=row["observed_at"],
         observed_by=row["observed_by"],
@@ -846,17 +968,31 @@ def parse_ssh_constraint(row: Any, where: str) -> SshConstraint:
 
 
 def rollback_key_failures(entry: Entrypoint) -> list[str]:
-    """The three properties a RETAINED rollback key must prove, independently.
+    """What a RETAINED rollback key must prove, as independent named findings.
 
-    Independent on purpose. A single "is this key safe" check fires only when
+    Independent on purpose. A single "is this key safe" verdict fires only when
     everything is wrong and passes the realistic failure, which is one
     protection quietly dropped — so `restrict`, `from=` and `command=` are
-    three findings, not one.
+    three findings, not one, and each message names the condition that failed
+    rather than the key.
 
-    Together they are the property that matters: the key cannot open an
-    interactive shell. `principal` is RECORDED and does not relax the gate; a
+    Two groups, and the second is not decoration:
+
+    **The capability conjunction.** Source-restricted, forced-command-only,
+    `restrict`, and no pty. "Incapable of an interactive shell" is the AND of
+    those, not any one of them: a key with a forced command but no `restrict`
+    is not two-thirds safe, and neither is one with `restrict` recorded beside
+    a permitted pty. `principal` is RECORDED and does not relax any of it; a
     non-root deploy user holding an unrestricted key is still the executor
     reachable by hand.
+
+    **The evidence coordinate.** Every clause above is a claim about a host.
+    Read from a checkout, it is a claim about a checkout — so the constraint
+    must be `host_observed`, and observed on the host the row itself names.
+    This is where absence must not read as satisfaction: a constraint with no
+    reachable coordinate has not established the properties, and a gate that
+    accepted it would report the retention safe on the strength of nobody
+    having looked.
     """
     constraint = entry.ssh_constraint
     if constraint is None:
@@ -876,7 +1012,7 @@ def rollback_key_failures(entry: Entrypoint) -> list[str]:
             "rollback key must be FORCED-COMMAND-ONLY (`command=`): without one "
             "it executes whatever the client asks for"
         )
-    if constraint.restrict != "present":
+    if not constraint.restricted:
         failures.append(
             f"{entry.name} is retained as a rollback path and its key "
             f"{constraint.fingerprint} carries no `restrict`. A retained "
@@ -884,24 +1020,34 @@ def rollback_key_failures(entry: Entrypoint) -> list[str]:
             "`restrict` is what denies the pty, the forwarding and the agent "
             "that make one usable"
         )
+    if not constraint.pty_denied:
+        failures.append(
+            f"{entry.name} is retained as a rollback path and its key "
+            f"{constraint.fingerprint} PERMITS A PTY. Incapable of an "
+            "interactive shell is a CONJUNCTION — `restrict`, a forced command "
+            "and no pty — and a key holding two of the three is not two-thirds "
+            "safe, it is a key somebody gets a shell on"
+        )
+    if not constraint.host_observed:
+        failures.append(
+            f"{entry.name} is retained as a rollback path and its key "
+            f"{constraint.fingerprint} is characterised at scope "
+            f"`{constraint.evidence_scope}`. A retained rollback key's "
+            f"constraint must be `{EVIDENCE_HOST_OBSERVED}`: a restriction "
+            "lives in a host's `authorized_keys`, so a checkout cannot "
+            "establish one, and not having looked must not read as the key "
+            "being restricted"
+        )
+    if entry.host and constraint.host != entry.host:
+        failures.append(
+            f"{entry.name} is retained as a rollback path on `{entry.host}` "
+            f"and its key {constraint.fingerprint} was observed on "
+            f"`{constraint.host}`. The evidence must be OBSERVED ON THE HOST "
+            "THE ROW NAMES — a reading taken somewhere else describes a "
+            "different `authorized_keys` and answers a different question"
+        )
     return failures
 
-
-#: How an absence was established. The distinction is the entire ERP lesson:
-#: `dotmac-books.service` was installed and DISABLED on the host and appears in
-#: no tree, and `/etc/cron.d/dotmac_erp_db_backup` is real. A repository walk
-#: that finds nothing has established that the REPOSITORY holds nothing, and a
-#: product that reads that as "there is no such unit" has drawn the one
-#: conclusion the evidence cannot support.
-ABSENCE_SCOPES: Final[dict[str, str]] = {
-    "repository_tree": (
-        "the tree was walked and holds no member. Says NOTHING about any host"
-    ),
-    "host_observed": (
-        "a named host was inspected by a named person at a named time and holds "
-        "no member"
-    ),
-}
 
 ABSENCE_KEYS: Final[frozenset[str]] = frozenset(
     {"family", "scope", "observed_at", "observed_by", "method", "host", "note"}
