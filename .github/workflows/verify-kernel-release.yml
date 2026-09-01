@@ -1,0 +1,125 @@
+name: Verify an existing kernel release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact published kernel version
+        required: true
+        type: string
+      source_sha:
+        description: Exact protected-main SHA published by the original run
+        required: true
+        type: string
+      release_run_id:
+        description: Original Release kernel workflow run ID
+        required: true
+        type: string
+      release_run_attempt:
+        description: Original run attempt
+        required: true
+        default: "1"
+        type: string
+      release_artifact_id:
+        description: Immutable dotmac-kernel-dist Actions artifact ID
+        required: true
+        type: string
+      tag_object:
+        description: Exact annotated tag object
+        required: true
+        type: string
+      tag_commit:
+        description: Exact tag peel
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Bind the verification facility to current protected main
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::verification must be dispatched from main"
+            exit 1
+          fi
+          bash scripts/assert_current_main.sh "$GITHUB_SHA"
+
+      - name: Collect the retained build bytes from the original run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          ORIGINAL_RUN_ID: ${{ inputs.release_run_id }}
+          ORIGINAL_RUN_ATTEMPT: ${{ inputs.release_run_attempt }}
+          ORIGINAL_SOURCE_SHA: ${{ inputs.source_sha }}
+          ORIGINAL_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
+          EXPECTED_FILENAMES: |
+            dotmac_kernel-${{ inputs.version }}-py3-none-any.whl
+            dotmac_kernel-${{ inputs.version }}.tar.gz
+          RETAINED_OUTPUT_DIR: ${{ runner.temp }}/retained
+          GITHUB_OBSERVATION: ${{ runner.temp }}/observations/github.json
+        run: python scripts/collect_github_release_artifact.py
+
+      - name: Collect the named bytes from the private registry
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.FORGEJO_READ_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          EXPECTED_FILENAMES: |
+            dotmac_kernel-${{ inputs.version }}-py3-none-any.whl
+            dotmac_kernel-${{ inputs.version }}.tar.gz
+          REGISTRY_OUTPUT_DIR: ${{ runner.temp }}/registry
+          REGISTRY_OBSERVATION: ${{ runner.temp }}/observations/registry.json
+        run: python scripts/collect_private_registry_files.py
+
+      - name: Re-assert current protected main before the decision
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::verification must remain on main"
+            exit 1
+          fi
+          bash scripts/assert_current_main.sh "$GITHUB_SHA"
+
+      - name: Compare every byte and clean-install both artifacts
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: dotmac-kernel-v${{ inputs.version }}
+          RELEASE_TAG_OBJECT: ${{ inputs.tag_object }}
+          RELEASE_TAG_COMMIT: ${{ inputs.tag_commit }}
+          EXPECTED_FILENAMES: |
+            dotmac_kernel-${{ inputs.version }}-py3-none-any.whl
+            dotmac_kernel-${{ inputs.version }}.tar.gz
+          RETAINED_OUTPUT_DIR: ${{ runner.temp }}/retained
+          REGISTRY_OUTPUT_DIR: ${{ runner.temp }}/registry
+          GITHUB_OBSERVATION: ${{ runner.temp }}/observations/github.json
+          REGISTRY_OBSERVATION: ${{ runner.temp }}/observations/registry.json
+          VERIFICATION_RECEIPT: ${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json
+          FACILITY_REPOSITORY: ${{ github.repository }}
+          FACILITY_REF: ${{ github.ref }}
+          FACILITY_SOURCE_SHA: ${{ github.sha }}
+          FACILITY_RUN_ID: ${{ github.run_id }}
+          FACILITY_RUN_ATTEMPT: ${{ github.run_attempt }}
+          ORIGINAL_RUN_ID: ${{ inputs.release_run_id }}
+          ORIGINAL_RUN_ATTEMPT: ${{ inputs.release_run_attempt }}
+          ORIGINAL_SOURCE_SHA: ${{ inputs.source_sha }}
+          ORIGINAL_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
+        run: python scripts/verify_kernel_release_artifacts.py
+
+      - name: Retain the typed verification receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-release-verification-receipt
+          path: ${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json
+          if-no-files-found: error
+          retention-days: 90
