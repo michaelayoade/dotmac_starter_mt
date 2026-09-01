@@ -223,8 +223,20 @@ def test_a_lineage_derived_from_the_executor_is_refused() -> None:
         version="2026.08",
         key_id="recovery-signing-01",
     )
-    with pytest.raises(SpecError, match="changing supplier"):
+    with pytest.raises(SpecError) as caught:
         identity.refuse_executor_derived(executor)
+    # The two load-bearing FACTS the refusal has to name, so an operator can see
+    # which lineage collided with which executor -- not a prose fragment.
+    #
+    # This assertion used to be `match="changing supplier"`, and it failed in CI
+    # against a message that says "Changing supplier": `re.search` is
+    # case-sensitive, and the lowercase phrase existed only in a DOCSTRING a few
+    # lines above the raise. A guard matched to wording is a guard that breaks
+    # when the wording is improved, and -- worse -- one that keeps passing when
+    # the wording survives a change that guts the check behind it.
+    message = str(caught.value)
+    assert identity.lineage in message
+    assert executor.identifier in message
 
 
 def test_an_external_executor_without_a_lineage_is_refused() -> None:
