@@ -1,5 +1,15 @@
 # Foundation `0.3.0a2` — the eight property clusters, measured on one revision
 
+> **INVALIDATED 2026-09-01 — do not build, publish, tag or reuse `0.3.0a2`.**
+> Commit `0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2` (#551) changed the facility
+> source under this same declared version, so the name came to cover two
+> contracts. The successor identity is `0.3.0a3`, which has never been built.
+> The judgement is recorded as `CandidateDisposition.v1` in
+> [`foundation-candidate-dispositions.json`](./foundation-candidate-dispositions.json);
+> the `CandidateArtifact.v1` receipt beside it is preserved byte-for-byte and
+> is NOT edited by that record. This document stays as the historical account
+> of what those bytes are.
+
 Every cluster below was found MISSING by the audit of closed PR #507
 (retained head `d8eebbb38`) against main `83b8a850`, and restored **fresh**
 against current main. Nothing was revived, cherry-picked or reconstructed from

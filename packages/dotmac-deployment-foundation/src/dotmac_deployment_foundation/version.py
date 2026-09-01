@@ -16,43 +16,46 @@ from __future__ import annotations
 
 from typing import Final
 
-#: NO DEVELOPMENT MARKER HERE, DELIBERATELY. Do not "fix" this to
-#: ``0.3.0a2+dev``; it was tried on 2026-08-31 and reverted, and the reason is
-#: specific to this distribution rather than a matter of taste.
+#: ``0.3.0a2`` IS GONE, AND MUST NOT COME BACK. Do not "fix" this number back
+#: down, and do not add a local segment such as ``0.3.0a2+dev`` to it — that was
+#: the previous shape here and it was withdrawn on 2026-09-01, because it was an
+#: annotation on a claim that should not have been made at all.
 #:
-#: The fleet rule that moves a declared version to a PEP 440 local marker after
-#: a release is scoped to PUBLISHED versions: a tree claiming a published
-#: version must be byte-identical to that version's published artifact, so a
-#: diverged tree must stop claiming it. ``0.3.0a2`` is NOT published. It is a
-#: frozen CANDIDATE (artifact 9740182233, built once from
-#: e930f878ce400b766b4a50feb0369021a28ab2fa, never tagged, never uploaded).
-#: There is no published artifact for this tree to make a false claim about, so
-#: the rule's premise is absent.
+#: What happened: ``0.3.0a2`` was built ONCE as candidate artifact 9740182233
+#: from ``e930f878ce400b766b4a50feb0369021a28ab2fa``, never tagged and never
+#: uploaded. Commit ``0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2`` (#551) then
+#: changed the facility's source under that same declared version, so the name
+#: ``0.3.0a2`` came to mean two different contracts — the frozen bytes, and this
+#: tree. A version naming two contracts is exactly what `AGENTS.md` rule 34
+#: exists to prevent, and it was live.
 #:
-#: Applying the marker anyway does active harm, because THIS value is an input
-#: to the deployment's identity. ``VERSION`` sits inside the canonical
-#: descriptor document, so a local segment moves
-#: ``io.dotmac.deployment.configuration.digest`` off the frozen
-#: ``sha256:f481cfa2…`` and moves ``deploy/rendered/docker-compose.yml`` with
-#: it -- two of the candidate's five frozen components -- invalidating the
-#: artifact that the first authorization receipt, Lane 3 and both product
-#: cutovers all bind to. Measured, not argued: with the marker, ``render
-#: --check`` fails on the compose asset; without it, all three rendered assets
-#: match the frozen digests.
+#: The repair is a NEW version, not an annotation on the old one. The frozen
+#: artifact stays exactly as recorded — `docs/inventories/
+#: foundation-candidate-0.3.0a2.json` is `CandidateArtifact.v1` and is preserved
+#: byte-for-byte — and the judgement about it is APPENDED to
+#: `docs/inventories/foundation-candidate-dispositions.json` as
+#: `CandidateDisposition.v1`: invalidated, `publishable: false`, with the
+#: invalidating commit and the reason. Nothing edits the receipt, because the
+#: restore proof, the issuer stand-up and Lane 3 all bind to it.
 #:
-#: The marker would also have MANUFACTURED the divergence it exists to
-#: announce. Main renders byte-identically to a2 in everything except the
-#: marker itself, so the only thing making the tree differ from a2 was the
-#: annotation saying it differs.
+#: There is deliberately no longer a rule here permitting this tree to diverge
+#: from a candidate while keeping its version. That permission is what let one
+#: name cover two contracts; it was removed with the version move rather than
+#: re-argued.
 #:
-#: What guards this version instead is the candidate's five-component frozen
-#: identity (docs/inventories/foundation-candidate-0.3.0a2.json): source,
-#: version, descriptor digest, three rendered asset digests, and the eight
-#: ``io.dotmac.deployment.*`` label keys. Source drift from the candidate is
-#: expected and is recorded there, not by a version string.
+#: ``0.3.0a3`` has NOT been built. It is a declared identity awaiting one
+#: candidate build, and it is unpublished — recorded as such in
+#: `docs/inventories/declared-publication-baseline.json`. It carries no local
+#: segment because there is no published artifact for it to misdescribe; the
+#: fleet's ``+dev`` rule applies to a tree claiming a version that WAS
+#: published, and that premise is absent here.
 #:
-#: When a2 is published or superseded, the ordinary rule resumes and a marker
-#: becomes correct again.
-VERSION: Final = "0.3.0a2"
+#: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
+#: canonical descriptor document, so changing it moves
+#: ``io.dotmac.deployment.configuration.digest`` and the rendered
+#: ``deploy/rendered/docker-compose.yml`` with it. Any change here is therefore
+#: a re-render in the same commit (`make deployment-render`), and
+#: `make deployment-check` is what fails if it was not.
+VERSION: Final = "0.3.0a3"
 
 __all__ = ["VERSION"]

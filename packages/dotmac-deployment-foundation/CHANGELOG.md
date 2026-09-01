@@ -1,14 +1,23 @@
 # Changelog — dotmac-deployment-foundation
 
-## Unreleased changes after the 0.3.0a2 candidate — version unallocated
+## 0.3.0a3 — unreleased, NEVER BUILT
 
-These changes are not part of the frozen 0.3.0a2 candidate and do not allocate
-or name its successor. The package and runtime metadata deliberately remain
-`0.3.0a2`: that version is an unpublished candidate identity embedded in the
-canonical descriptor and rendered deployment assets, and adding a local
-`+dev` segment would change the evidence it is meant to preserve. The release
-owner allocates the next version from immutable publication evidence. Until
-then, this section records source work only and makes no release claim.
+The successor identity, allocated 2026-09-01 because `0.3.0a2` had come to name
+two different contracts and one of them was an artifact nobody could change.
+
+No wheel for `0.3.0a3` exists. It is not tagged, it is on no index, and it is
+recorded as unpublished in `docs/inventories/declared-publication-baseline.json`.
+The next authorized step is ONE candidate build against one final revision —
+never a rebuild of `0.3.0a2` under a new name, and never a second build of this
+one.
+
+The previous section here declined to allocate a successor, on the reasoning
+that the tree could keep declaring `0.3.0a2` while diverging from the frozen
+bytes. That reasoning is withdrawn. It is the exact mechanism by which one
+version name covers two contracts (`AGENTS.md` rule 34), and no equivalent
+permission replaces it: a tree that diverges from a built artifact allocates a
+new version. Everything below this heading that was previously filed as
+"unreleased, version unallocated" is `0.3.0a3` work.
 
 `DatabaseDescriptorTransition.v1` pre-authorizes the descriptor state a
 database operation produces, binds the result to its plan and target, and
@@ -44,7 +53,25 @@ mapping. Changed structural attributes remain reportable in both set-difference
 directions, while partial scope and the v1 sidecar both withhold a
 whole-descriptor match.
 
-## 0.3.0a2 — unreleased, and HELD
+## 0.3.0a2 — INVALIDATED. Never published, never to be rebuilt
+
+Built ONCE as candidate artifact 9740182233 from
+`e930f878ce400b766b4a50feb0369021a28ab2fa`, never tagged and never uploaded.
+Commit `0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2` (#551) then changed the
+facility source under this same declared version, so a consumer resolving
+`0.3.0a2` from the repository and a consumer holding the frozen bytes hold
+different code.
+
+The bytes remain historically real and re-fetchable by the coordinates in
+`docs/inventories/foundation-candidate-0.3.0a2.json`, which is preserved
+byte-for-byte as `CandidateArtifact.v1`. The judgement about them is a separate,
+appended `CandidateDisposition.v1` record in
+`docs/inventories/foundation-candidate-dispositions.json`: **invalidated**,
+`publishable: false`, with the invalidating commit and the reason. This version
+must never be rebuilt, republished, tagged or re-declared.
+
+The section below is what that candidate contained, kept as the historical
+record of what those bytes are.
 
 The eight property clusters an audit of the closed PR #507 found missing, each
 restored fresh against current main rather than revived from that branch.
