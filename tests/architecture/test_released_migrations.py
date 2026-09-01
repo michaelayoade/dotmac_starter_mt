@@ -64,12 +64,17 @@ is repaired by a new revision that alters the result — the same discipline as
 and does not touch `ig_0001` to do it. This guard only insists the repair be
 additive.
 
-Approvals is the measured exception to one-byte-history: `ap_0001` shipped
-three byte sets across a1-a4 before enrolment. `GRANDFATHERED_DIVERGENCES`
-records that closed historical set and the canonical bytes retained by the
-tree; it is not permission for a fourth edit. The static census is paired with
+Approvals and ticketing are the measured exceptions to one-byte-history.
+`ap_0001` shipped three byte sets across a1-a4 before enrolment; `tk_0001`
+shipped two across a3-a4, and that second one was found by ENROLLING the
+lineage on 2026-09-01 rather than by any gate — it is the same in-place edit
+approvals made in the same week, invisible only because nothing was pointed at
+it. `GRANDFATHERED_DIVERGENCES` records each closed historical set and the
+canonical bytes retained by the tree; it is not permission for another edit.
+The approvals census is paired with
 `tests/test_approvals_released_migration_upgrades.py`, which reconstructs each
-tagged meaning and proves its additive upgrade on PostgreSQL.
+tagged meaning and proves its additive upgrade on PostgreSQL. Ticketing has no
+such matrix yet, and its inventory says so rather than implying one exists.
 
 ## The kernel
 
@@ -453,6 +458,16 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-work-orders"
         / "src/dotmac_work_orders/migrations/versions"
     ),
+    "dotmac-deployment-control": (
+        REPO_ROOT
+        / "packages/dotmac-deployment-control"
+        / "src/dotmac_deployment_control/migrations/versions"
+    ),
+    "dotmac-ticketing": (
+        REPO_ROOT
+        / "packages/dotmac-ticketing"
+        / "src/dotmac_ticketing/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -534,6 +549,8 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-surveys": "sv_*.py",
     "dotmac-web-analytics": "wa_*.py",
     "dotmac-work-orders": "wo_*.py",
+    "dotmac-deployment-control": "dc_*.py",
+    "dotmac-ticketing": "tk_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -612,6 +629,8 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-surveys": "dotmac-surveys-v",
     "dotmac-web-analytics": "dotmac-web-analytics-v",
     "dotmac-work-orders": "dotmac-work-orders-v",
+    "dotmac-deployment-control": "dotmac-deployment-control-v",
+    "dotmac-ticketing": "dotmac-ticketing-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -6452,6 +6471,44 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-deployment-control ──
+    "dotmac-deployment-control-v0.1.0a2": (
+        "dotmac-deployment-control",
+        "5c87272a632096850a80e5e9dc1f625a97c3e5d6",
+        {
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+    ),
+    "dotmac-deployment-control-v0.1.0a1": (
+        "dotmac-deployment-control",
+        "fead57bc93d6551450f5e6ae1c9de1296e27b0ae",
+        {
+            "dc_0001_deployment_control.py": (
+                "378ebc8d149d5c187b4339eac9126b9ae75ddf88c6728dc1acc656d6ffb684fa"
+            ),
+        },
+    ),
+    # ── dotmac-ticketing ──
+    "dotmac-ticketing-v0.1.0a4": (
+        "dotmac-ticketing",
+        "16f11a9ef0df7697558904efa969294bafc3fab3",
+        {
+            "tk_0001_tickets.py": (
+                "0e27d341b9b0a26577a55b2a973dcab7335b381c1dc4d5c936ed57a119993727"
+            ),
+        },
+    ),
+    "dotmac-ticketing-v0.1.0a3": (
+        "dotmac-ticketing",
+        "3e1f8012c4f45369b6801a709a270d71c5c95a8d",
+        {
+            "tk_0001_tickets.py": (
+                "4719bb00030931b9c18697ee66e6e183067728582040a90f5189e1fcef0ed7bb"
+            ),
+        },
+    ),
 }
 
 
@@ -6464,11 +6521,23 @@ class GrandfatheredDivergence:
     reason: str
 
 
-#: The ONLY accepted released-byte divergence. This records damage already in
-#: the registry; it does not authorize another in-place edit. The canonical
-#: digest is the latest shipped shape and is the only byte set the current tree
-#: may retain. Each historical variant is still exercised by the PostgreSQL
-#: upgrade matrix in `tests/test_approvals_released_migration_upgrades.py`.
+#: The accepted released-byte divergences. Each records damage already in the
+#: registry; none authorizes another in-place edit. The canonical digest is the
+#: latest shipped shape and is the only byte set the current tree may retain.
+#:
+#: Two rows, and the second is the reason the first was never enough. Approvals
+#: and ticketing made the SAME edit to their lineage roots in the same week —
+#: implicit plane inference rewritten into ADR-0028 explicit selection, in
+#: place, on a published revision. Approvals was enrolled here, so it was
+#: caught, written up and given a PostgreSQL upgrade matrix
+#: (`tests/test_approvals_released_migration_upgrades.py`). Ticketing was not
+#: enrolled, so the identical edit passed every gate and was found only when
+#: this lineage was enrolled on 2026-09-01. That asymmetry is the argument for
+#: closing the coverage baseline, not an argument that one edit was worse.
+#:
+#: Every row must be written up under `docs/inventories/`, which
+#: `test_every_grandfathered_divergence_is_written_up` enforces — a divergence
+#: nobody documented is one the next reader has to reconstruct from digests.
 GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
     ("dotmac-approvals", "ap_0001_approvals.py"): GrandfatheredDivergence(
         canonical_digest=(
@@ -6499,6 +6568,37 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
             "binding; a3/a4/a5 require explicit plane selection. These releases "
             "already exist, so the divergence is preserved as evidence and "
             "each variant must upgrade to the canonical current lineage."
+        ),
+    ),
+    ("dotmac-ticketing", "tk_0001_tickets.py"): GrandfatheredDivergence(
+        canonical_digest=(
+            "0e27d341b9b0a26577a55b2a973dcab7335b381c1dc4d5c936ed57a119993727"
+        ),
+        variants=(
+            (
+                "4719bb00030931b9c18697ee66e6e183067728582040a90f5189e1fcef0ed7bb",
+                frozenset({"dotmac-ticketing-v0.1.0a3"}),
+            ),
+            (
+                "0e27d341b9b0a26577a55b2a973dcab7335b381c1dc4d5c936ed57a119993727",
+                frozenset({"dotmac-ticketing-v0.1.0a4"}),
+            ),
+        ),
+        reason=(
+            "FOUND BY THIS ENROLMENT, 2026-09-01. a3 built the platform plane "
+            "unconditionally and inferred the tenant plane from a bound "
+            "catalogue; a4 rewrote the same revision to build exactly the "
+            "planes the assembly SELECTS (ADR-0028), and granted platform_api "
+            "schema USAGE only where its plane was selected. Both are "
+            "published, so revision tk_0001_tickets names two schema results "
+            "and alembic_version records only that it ran. This is the "
+            "IDENTICAL edit approvals made to ap_0001 in the same week; that "
+            "one was caught because approvals was enrolled and this one was "
+            "not. Recorded as damage already in the registry, exactly as the "
+            "approvals row is: it freezes the census at two byte sets and does "
+            "not authorize a third. The PostgreSQL upgrade evidence approvals "
+            "carries is OUTSTANDING here — see "
+            "docs/inventories/ticketing-released-migration-divergence.md."
         ),
     ),
 }
@@ -6591,6 +6691,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-surveys": frozenset(),
     "dotmac-web-analytics": frozenset(),
     "dotmac-work-orders": frozenset(),
+    "dotmac-deployment-control": frozenset(),
+    "dotmac-ticketing": frozenset(),
 }
 
 
@@ -6731,6 +6833,51 @@ def test_two_tags_agree_unless_the_divergence_is_exactly_grandfathered() -> None
         ), f"{key}: current tree no longer retains the canonical released bytes"
 
 
+#: Where a grandfathered divergence is written up for a human, keyed by
+#: distribution. A digest census proves WHAT diverged; only prose says what the
+#: two byte sets each meant and what is still owed.
+DIVERGENCE_INVENTORIES: dict[str, Path] = {
+    "dotmac-approvals": (
+        REPO_ROOT / "docs/inventories/approvals-released-migration-divergence.md"
+    ),
+    "dotmac-ticketing": (
+        REPO_ROOT / "docs/inventories/ticketing-released-migration-divergence.md"
+    ),
+}
+
+
+def test_every_grandfathered_divergence_is_written_up() -> None:
+    """A second byte history may not enter as a digest literal and nothing else.
+
+    The census in `GRANDFATHERED_DIVERGENCES` is machine-checkable and says
+    nothing a reader can act on: it proves two tags disagree, not what the
+    disagreement did to a database. Requiring the write-up — and requiring it
+    to quote the canonical digest, so it cannot go stale silently while the map
+    moves — is what keeps "grandfathered" from becoming a place to put things.
+    """
+    keys = {distribution for distribution, _ in GRANDFATHERED_DIVERGENCES}
+    assert keys == set(DIVERGENCE_INVENTORIES), (
+        "every grandfathered divergence needs an inventory document, and every "
+        f"document a live divergence: {sorted(keys ^ set(DIVERGENCE_INVENTORIES))}"
+    )
+    for distribution in sorted(keys):
+        document = DIVERGENCE_INVENTORIES[distribution]
+        assert document.is_file(), f"{distribution}: {document} does not exist"
+        prose = document.read_text(encoding="utf-8")
+        for key, declaration in GRANDFATHERED_DIVERGENCES.items():
+            if key[0] != distribution:
+                continue
+            assert declaration.canonical_digest in prose, (
+                f"{distribution}: {document.name} does not record the canonical "
+                f"digest {declaration.canonical_digest} the tree must retain"
+            )
+            for digest, _ in declaration.variants:
+                assert digest in prose, (
+                    f"{distribution}: {document.name} does not record released "
+                    f"variant {digest}"
+                )
+
+
 @pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
 def test_every_migration_is_either_released_or_declared_unreleased(
     distribution: str,
@@ -6770,16 +6917,78 @@ def test_every_migration_is_either_released_or_declared_unreleased(
     )
 
 
+#: Distributions this repository published and may NOT publish again.
+#:
+#: `dotmac-deployment-control` was removed from `.github/release-modules.json`
+#: on 2026-08-29, and the absence IS the freeze: `release-module.yml` resolves
+#: its target there and fails closed, so a comment saying "do not publish this
+#: here" would have been a request. `michaelayoade/dotmac_deployment_control`
+#: owns the distribution now.
+#:
+#: The a1 and a2 tags stay in THIS repository permanently. `git filter-repo`
+#: rewrote every commit during the extraction, so a tag recreated over there
+#: would name a different tree — one version, two commits. That is exactly why
+#: the released bytes are still this repository's history to freeze: the wheels
+#: were built here, from these commits, and no other repository can produce
+#: them.
+#:
+#: A name here is NOT excused from the census; it is excused only from the
+#: module allowlist, and `test_a_frozen_publisher_row_is_still_a_freeze` holds
+#: it to both halves of that claim.
+FROZEN_PUBLISHERS: dict[str, str] = {
+    "dotmac-deployment-control": (
+        "publisher moved to michaelayoade/dotmac_deployment_control on "
+        "2026-08-29; a1 and a2 were built here from commits filter-repo has "
+        "since rewritten, so their bytes are this repository's history"
+    ),
+}
+
+
+def test_a_frozen_publisher_row_is_still_a_freeze() -> None:
+    """The exception may not become a second allowlist.
+
+    A frozen publisher is a name this repository DID publish and no longer
+    may. Both halves are checkable, and both have to be, or the row degrades
+    into "monitored here because somebody wrote it down": the name must be
+    absent from the live module allowlist (or the freeze is over and the row
+    is stale), and it must carry a published tag in this checkout (or there
+    are no released bytes to freeze).
+    """
+    allowlist = set(
+        json.loads(
+            (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+        )["modules"]
+    )
+    sweep = _tag_oracle()
+    tags = set(sweep.git_tags(REPO_ROOT))  # type: ignore[attr-defined]
+    assert FROZEN_PUBLISHERS, "the frozen-publisher exception records nothing"
+    for distribution, reason in sorted(FROZEN_PUBLISHERS.items()):
+        assert reason.strip(), f"{distribution}: a freeze without a reason"
+        assert distribution not in allowlist, (
+            f"{distribution} is back in the module release allowlist, so it is "
+            "no longer frozen — drop the row rather than keeping two answers"
+        )
+        prefix = f"{distribution}-v"
+        assert any(tag.startswith(prefix) for tag in tags), (
+            f"{distribution} is recorded as a frozen publisher but this "
+            f"checkout holds no {prefix}* tag — nothing was ever published"
+        )
+
+
 def _publishable_here() -> tuple[set[str], set[str]]:
     """Every distribution THIS repository can publish, and the module lane's share.
 
-    Two lanes, kept apart on purpose. The module allowlist is the closed set
+    Three sources, kept apart on purpose. The module allowlist is the closed set
     `release-module.yml` resolves against. The dedicated-workflow set is the
     sweep's own enumeration of packages released by a workflow of their own,
     and it is deliberately enumerated there rather than inferred from "absent
     from every lane", because absence is also what an unreleasable package
     looks like. Reusing it keeps one answer to "may this repository publish
     that name?" instead of two that can drift apart.
+
+    `FROZEN_PUBLISHERS` is the third and narrowest: a name this repository
+    published and no longer may. Past tense is the whole point — released bytes
+    do not stop being history when the publisher moves.
     """
     allowlist = set(
         json.loads(
@@ -6788,7 +6997,7 @@ def _publishable_here() -> tuple[set[str], set[str]]:
     )
     sweep = _tag_oracle()
     dedicated = set(sweep.DEDICATED_WORKFLOWS)  # type: ignore[attr-defined]
-    return allowlist | dedicated, allowlist
+    return allowlist | dedicated | set(FROZEN_PUBLISHERS), allowlist
 
 
 def test_a_dedicated_lane_still_has_to_prove_a_published_tag() -> None:
@@ -6951,25 +7160,34 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
         ), "the message must name the digest that shipped, not just 'differs'"
 
 
-def test_the_grandfathered_divergence_refuses_a_fourth_byte_set(
+@pytest.mark.parametrize("key", sorted(GRANDFATHERED_DIVERGENCES))
+def test_the_grandfathered_divergence_refuses_one_more_byte_set(
+    key: tuple[str, str],
     tmp_path: Path,
 ) -> None:
-    """Sensitivity: grandfathering history is not permission to edit again."""
-    distribution = "dotmac-approvals"
+    """Sensitivity: grandfathering history is not permission to edit again.
+
+    Parametrized over every declared divergence, not written once against
+    approvals. A hardcoded proof would have covered the approvals row and said
+    nothing about the ticketing row added beside it — and an exception nobody
+    has watched refuse anything is the shape ADR-0018 calls a guard with no
+    sensitivity.
+    """
+    distribution, filename = key
     copy = tmp_path / "versions"
     shutil.copytree(DISTRIBUTIONS[distribution], copy)
     assert not _drift(copy, distribution), "the canonical copy must start clean"
 
-    victim = copy / "ap_0001_approvals.py"
-    victim.write_bytes(victim.read_bytes() + b"\n# a fourth byte set\n")
+    victim = copy / filename
+    victim.write_bytes(victim.read_bytes() + b"\n# one more byte set\n")
 
     problems = _drift(copy, distribution)
     assert len(problems) == 1, problems
     assert "grandfathered released variants" in problems[0]
     assert "canonical sha256" in problems[0]
-    assert (
-        "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
-        in problems[0]
+    assert GRANDFATHERED_DIVERGENCES[key].canonical_digest in problems[0], (
+        "the message must name the canonical digest the tree must retain, not "
+        "just report that the bytes differ"
     )
 
 

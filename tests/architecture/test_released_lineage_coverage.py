@@ -124,13 +124,37 @@ def test_the_coverage_detector_would_actually_fire():
     """Sensitivity: the matcher must be able to report a distribution uncovered.
 
     Every assertion above passes trivially if `uncovered()` can only ever return
-    an empty set. With 43 rows in the baseline that is visibly not the case
-    today, and asserting it keeps a future refactor from quietly making it so.
+    an empty set.
+
+    This used to assert `uncovered()` was non-empty, which was true while the
+    baseline held 43 rows and stopped being a proof of anything the moment the
+    debt was paid off — a sensitivity check that only works while the defect
+    exists reports "detector healthy" and "no debt" with the same green tick,
+    and cannot tell you which one it meant. It is now proved against the
+    subtraction itself: remove one genuinely covered distribution from the
+    covered set and the difference must name exactly it. That holds at 43 rows
+    and at zero.
+
+    `dotmac-numbering` is the probe on purpose. It is the distribution whose
+    released migration was edited in place, `test_numbering_is_covered_now`
+    already refuses to let it leave the gate, and a probe that stops existing
+    turns this proof into a vacuous one — so the two tests fail together rather
+    than one silently covering for the other.
     """
 
     _require_tags()
-    assert _coverage.uncovered(), (
-        "the coverage detector reports nothing uncovered, which contradicts the "
-        "recorded baseline; the matcher is probably broken"
+    released = set(_coverage.released_lineages())
+    covered = _coverage.covered()
+    assert released, "no lineage classified as released; the matcher is broken"
+    assert covered, "the gate's DISTRIBUTIONS map parsed as empty"
+
+    probe = "dotmac-numbering"
+    assert probe in released and probe in covered, (
+        f"{probe} is no longer a covered released lineage, so it cannot serve "
+        "as the probe; see test_numbering_is_covered_now"
     )
-    assert _coverage.covered(), "the gate's DISTRIBUTIONS map parsed as empty"
+    assert sorted(released - (covered - {probe})) == [probe], (
+        "the coverage matcher does not report a released lineage that is "
+        "absent from the gate's DISTRIBUTIONS map; it can no longer detect an "
+        "unenrolled lineage, whatever the baseline currently says"
+    )

@@ -17,10 +17,7 @@
     "Regenerate: make released-lineage-coverage-baseline"
   ],
   "released_lineages_total": 77,
-  "covered_total": 75,
-  "uncovered_total": 2,
-  "uncovered": [
-    "dotmac-deployment-control",
-    "dotmac-ticketing"
-  ]
+  "covered_total": 77,
+  "uncovered_total": 0,
+  "uncovered": []
 }
