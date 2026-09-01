@@ -362,3 +362,71 @@ def test_current_tree_is_in_its_declared_release_lifecycle_state() -> None:
     }[(active is not None, "+" in version)]
 
     assert contract.validate_current_state(expected_version=version) == expected
+
+
+def test_every_normalizer_accepts_the_real_release_surface() -> None:
+    """Non-vacuity: the fixtures above are not the documents being released.
+
+    Every test in this module built its own miniature repository, and the
+    catalogue fixture is one line. The real `docs/MODULE_CATALOG.md` names
+    `[`dotmac-kernel`]` TWICE -- the summary table row, and the
+    per-distribution `### [`dotmac-kernel`](...)` heading generated since #171 --
+    so `_normalize_catalog` refused the actual document with "found 2" while
+    every fixture passed. `validate_allocation` could therefore never succeed on
+    this repository: the transition shipped in #558, was made lifecycle-aware in
+    #561, and had still never completed a cycle.
+
+    A normalizer is only meaningful against the bytes it will really see, so
+    each one is exercised here on the checked-in file it governs.
+    """
+
+    contract = _load_contract()
+    for path, normalize in (
+        (contract.KERNEL_PYPROJECT, contract._normalize_pyproject),
+        (contract.KERNEL_INIT, contract._normalize_init),
+        (contract.POETRY_LOCK, contract._normalize_lock),
+        (contract.PUBLICATION_LEDGER, contract._normalize_ledger),
+        (contract.MODULE_CATALOG, contract._normalize_catalog),
+    ):
+        data = (REPO_ROOT / path).read_bytes()
+        normalized = normalize(data)
+        assert normalized != data, (
+            f"{path} normalized to itself, so the version literal this "
+            "authorization is supposed to hold constant was never found"
+        )
+        assert b"<AUTHORIZED_KERNEL_VERSION>" in normalized
+
+
+def test_the_catalogue_selector_still_refuses_a_genuinely_ambiguous_table() -> None:
+    """Sensitivity: narrowing the selector must not have made it fail open.
+
+    The repair anchors on the leading cell delimiter. If that had been widened
+    to "first match wins" instead, a catalogue with two real kernel rows -- one
+    version naming two declarations -- would be silently accepted.
+    """
+
+    contract = _load_contract()
+    lines = (
+        (REPO_ROOT / contract.MODULE_CATALOG)
+        .read_text(encoding="utf-8")
+        .splitlines(keepends=True)
+    )
+    row = next(
+        index for index, line in enumerate(lines) if contract._CATALOG_ROW.match(line)
+    )
+    duplicated = "".join(lines[: row + 1] + [lines[row]] + lines[row + 1 :])
+
+    with pytest.raises(contract.KernelReleaseAuthorizationError) as refusal:
+        contract._normalize_catalog(duplicated.encode("utf-8"))
+    assert "found 2" in str(refusal.value)
+
+
+def test_the_catalogue_heading_alone_is_not_a_row() -> None:
+    """The exact shape that broke it: prose linking the distribution is not a row."""
+
+    contract = _load_contract()
+    heading = "### [`dotmac-kernel`](../packages/dotmac-kernel/README.md)\n"
+    assert contract._CATALOG_ROW.match(heading) is None
+    assert contract._CATALOG_ROW.match(
+        "| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | x | `0.1.0a99` |\n"
+    )

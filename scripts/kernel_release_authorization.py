@@ -70,6 +70,12 @@ _PUBLIC_ALPHA = re.compile(r"0\.1\.0a([1-9][0-9]*)")
 _VERSION = re.compile(r"(0\.1\.0a[1-9][0-9]*)(?:\+([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*))?")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
+# A catalogue ROW, never the prose that also links the distribution.  The
+# generated catalogue mentions `[`dotmac-kernel`]` twice: once in the summary
+# table and once as the per-distribution `### [`dotmac-kernel`](...)` heading
+# it has emitted since #171.  Anchoring on the leading cell delimiter is what
+# distinguishes the row carrying the version cell from prose about it.
+_CATALOG_ROW = re.compile(r"^\|.*\[`dotmac-kernel`\]")
 
 
 class KernelReleaseAuthorizationError(RuntimeError):
@@ -338,14 +344,27 @@ def _normalize_ledger(data: bytes) -> bytes:
     return normalized.encode()
 
 
-def _normalize_catalog(data: bytes) -> bytes:
-    lines = data.decode("utf-8").splitlines(keepends=True)
-    rows = [index for index, line in enumerate(lines) if "[`dotmac-kernel`]" in line]
+def _kernel_catalog_row(lines: list[str]) -> int:
+    """Index of the kernel's one catalogue TABLE ROW.
+
+    Selecting every line that merely contains the distribution link matched two
+    lines in the real catalogue -- the summary row and the per-distribution
+    section heading -- so the normalizer refused the actual document while a
+    single-line fixture passed.  Both callers below share this selector so the
+    normalizer and the surface assertion can never disagree about which line
+    carries the version.
+    """
+    rows = [index for index, line in enumerate(lines) if _CATALOG_ROW.match(line)]
     if len(rows) != 1:
         raise KernelReleaseAuthorizationError(
-            f"expected one kernel catalogue row, found {len(rows)}"
+            f"expected one kernel catalogue table row, found {len(rows)}"
         )
-    index = rows[0]
+    return rows[0]
+
+
+def _normalize_catalog(data: bytes) -> bytes:
+    lines = data.decode("utf-8").splitlines(keepends=True)
+    index = _kernel_catalog_row(lines)
     normalized, count = re.subn(
         r"(?<=\| `)0\.1\.0a[1-9][0-9]*(?:\+[A-Za-z0-9.]+)?(?=` \|)",
         "<AUTHORIZED_KERNEL_VERSION>",
@@ -563,12 +582,9 @@ def _assert_version_surfaces(ref: str, version: str) -> None:
         raise KernelReleaseAuthorizationError(
             "publication ledger does not bind dotmac-kernel to the target version"
         )
-    catalog_rows = [
-        line
-        for line in _text_at(ref, MODULE_CATALOG).splitlines()
-        if "[`dotmac-kernel`]" in line
-    ]
-    if len(catalog_rows) != 1 or f"| `{version}` |" not in catalog_rows[0]:
+    catalog_lines = _text_at(ref, MODULE_CATALOG).splitlines()
+    catalog_row = catalog_lines[_kernel_catalog_row(catalog_lines)]
+    if f"| `{version}` |" not in catalog_row:
         raise KernelReleaseAuthorizationError(
             "module catalogue does not bind dotmac-kernel to the target version"
         )
