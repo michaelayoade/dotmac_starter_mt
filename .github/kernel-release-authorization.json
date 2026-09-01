@@ -8,5 +8,12 @@
     "",
     "An empty active value means no unreleased kernel version is authorized."
   ],
-  "active": null
+  "active": {
+    "latest_tag": "dotmac-kernel-v0.1.0a99",
+    "latest_tag_object": "e9b5185d944afb0394eebc63c531809c90bea3b0",
+    "latest_tag_commit": "8c92943062dbfe7f17bfa35264243709ec3d92c3",
+    "base_sha": "733f65e151dce97d72fb439b6ad7909c5866d3ca",
+    "target_version": "0.1.0a100",
+    "normalized_release_input_digest": "sha256:a069918221e82763a9597c76aa2cde0f636de9489b518ab5c75abc937e51b40e"
+  }
 }
