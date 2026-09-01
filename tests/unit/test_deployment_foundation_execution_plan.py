@@ -206,7 +206,15 @@ def test_prose_is_not_part_of_the_digest() -> None:
     """Rule 8. An edit to a step's description must not change a digest Control
     has already signed — prose is not what was authorized."""
     document = _rendered().as_document()
+    # Name check: cheap, readable, and NOT the guard. Rename the field to
+    # `human_label` and re-include it and this line still passes.
     assert all("description" not in step for step in document["steps"])
+    # LOAD-BEARING — do not "simplify" this away. The exact key set is what
+    # actually enforces the property, because it fails for prose under ANY name.
+    # The line above is a readable restatement of the specific field we removed;
+    # this one is the check. Deleting it would leave a guard bound to a name
+    # rather than to the property, which is the failure mode that put a
+    # decorative discovery check into this same stack.
     assert all(
         set(step) == {"command", "kind", "retries", "target", "timeout_seconds"}
         for step in document["steps"]
