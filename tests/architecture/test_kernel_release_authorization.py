@@ -317,6 +317,37 @@ def test_post_tag_consumption_requires_the_bound_bytes(release_repo) -> None:
     assert "tag peels" in str(refusal.value)
 
 
+def test_historical_release_source_remains_provable_after_current_state_moves(
+    release_repo,
+) -> None:
+    contract, repo, base = release_repo
+    _authorize(contract, repo, base)
+    allocation = _allocate(repo)
+    binding = contract.validate_release_source(source_sha=allocation, version="0.1.0a2")
+    assert binding["state"] == "allocated"
+    assert binding["source_sha"] == allocation
+
+    _git(repo, "tag", "-a", "dotmac-kernel-v0.1.0a2", "-m", "kernel a2")
+    contract.AUTHORIZATION_PATH.write_text(contract.render_document(None))
+    _git(repo, "add", str(contract.AUTHORIZATION_PATH.relative_to(repo)))
+    _git(repo, "commit", "-m", "consume release authorization")
+    assert (
+        contract.validate_release_source(source_sha=allocation, version="0.1.0a2")[
+            "state"
+        ]
+        == "allocated"
+    )
+
+    with pytest.raises(
+        contract.KernelReleaseAuthorizationError, match="different version"
+    ):
+        contract.validate_release_source(source_sha=allocation, version="0.1.0a3")
+    with pytest.raises(
+        contract.KernelReleaseAuthorizationError, match="no active authorization"
+    ):
+        contract.validate_release_source(source_sha=base, version="0.1.0a2")
+
+
 def test_record_shape_is_closed_and_target_is_numeric_successor(release_repo) -> None:
     contract, _, base = release_repo
     record = contract.prepare(base, "0.1.0a2")
@@ -330,7 +361,7 @@ def test_record_shape_is_closed_and_target_is_numeric_successor(release_repo) ->
     assert "next numeric alpha 0.1.0a2" in str(wrong_target.value)
 
 
-def test_release_workflow_rechecks_the_contract_at_all_four_boundaries() -> None:
+def test_release_workflow_owns_only_build_and_publish_boundaries() -> None:
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
 
     def named_steps(job: str) -> dict[str, tuple[int, str]]:
@@ -342,40 +373,25 @@ def test_release_workflow_rechecks_the_contract_at_all_four_boundaries() -> None
 
     build = named_steps("build")
     publish = named_steps("publish")
-    verify = named_steps("verify")
 
-    assert (
-        "--phase build"
-        in build["Bind build to the active kernel release authorization"][1]
-    )
+    assert "--phase build" in build["Bind build to the allocated release lifecycle"][1]
     assert (
         "--phase publish"
-        in publish["Re-bind publish to the active kernel release authorization"][1]
+        in publish["Bind publish to the allocated release lifecycle"][1]
     )
-    assert all("--phase verify" not in run for _, run in publish.values())
-
-    readback_freshness = verify[
-        "Re-assert the run SHA is still protected main before read-back"
-    ]
-    readback_binding = verify[
-        "Bind registry verification to the active kernel release authorization"
-    ]
-    registry_wait = verify["Wait for the release on the Forgejo index"]
-    registry_install = verify["Install from the Forgejo registry and verify"]
-    tag_freshness = verify[
-        "Re-assert the run SHA is still protected main before tagging"
-    ]
-    tag = verify["Tag the verified release"]
-
-    assert "assert_current_main.sh" in readback_freshness[1]
-    assert "--phase verify" in readback_binding[1]
-    assert "assert_current_main.sh" in tag_freshness[1]
-    assert "--phase tag" in tag[1]
-    assert "git tag -a" in tag[1]
-    assert readback_binding[0] == readback_freshness[0] + 1
-    assert registry_wait[0] == readback_binding[0] + 1
-    assert registry_wait[0] < registry_install[0] < tag_freshness[0]
-    assert tag[0] == tag_freshness[0] + 1
+    assert set(jobs) == {"build", "publish"}
+    assert jobs["publish"]["needs"] == "build"
+    assert jobs["publish"]["permissions"] == {"contents": "read"}
+    source = WORKFLOW.read_text(encoding="utf-8")
+    for forbidden in (
+        "--phase verify",
+        "--phase tag",
+        "git tag",
+        "git push",
+        "open_release_record_pr",
+        "contents: write",
+    ):
+        assert forbidden not in source
 
 
 def test_release_cli_refuses_unknown_boundary_name() -> None:

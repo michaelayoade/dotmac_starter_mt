@@ -294,9 +294,9 @@ name = "workflow:verify-kernel-release"
 family = "workflow"
 path = ".github/workflows/verify-kernel-release.yml"
 trigger = "workflow_dispatch"
-credential = "GITHUB_TOKEN (contents:read, actions:read), FORGEJO_READ_TOKEN"
+credential = "GITHUB_TOKEN (verify: contents:read/actions:read; tag: contents:write), FORGEJO_READ_TOKEN, RELEASE_RECORDER_PRIVATE_KEY"
 disposition = "not_an_executor"
-premise = "reads retained build and private index bytes and emits a receipt only; commands no deployment verb"
+premise = "reads retained build and private index bytes, emits typed verification/tag receipts, creates or reconciles only the bound release tag, and opens the release-record PR; commands no deployment verb"
 
 [[entrypoint]]
 name = "workflow:release-ui"

@@ -178,6 +178,41 @@ Production remains behind a named human approval until the owning product
 accepts a separate, dated deployment decision with deployment-specific
 evidence and rollback controls.
 
+## Decision amendment — 2026-09-01 (publisher and verifier are separate)
+
+The kernel publisher owns **build and publish only**. It builds one wheel and
+one sdist, retains those exact bytes, and uploads them under a scoped registry
+writer. It has contents-read authority, cannot tag, cannot open or write the
+release record, and does not verify its own upload.
+
+An independently dispatched verifier binds the original first-attempt
+publisher run, retained-artifact id, exact protected-main source and the
+historical release authorization whose immediate child allocated that source.
+Its read-only job retrieves the retained bytes through GitHub and the named
+registry bytes through the non-admin `ci-reader` identity, compares every byte,
+and clean-installs the wheel and sdist separately with only their declared
+dependencies. The same workflow's subsequent tag job independently re-derives
+the historical authorization, reasserts current protected main immediately
+before mutation, and is the sole owner of the annotated tag and mechanical
+record PR. It holds contents-write but no registry writer.
+
+Both jobs emit closed canonical receipts. Actions retains retrieval copies,
+but the record PR projects their non-secret coordinates, receipt digests,
+canonical provider identities and both filename/size/sha256 tuples into one
+immutable checked-in `KernelReleaseEvidence.v1` file per version. From a101,
+the annotated tag set and this record set are bijective and CI validates each
+record against the live tag oracle. The release freeze continues until that
+record reaches protected main.
+
+After the publisher has created the retained artifact, that version's bytes
+must never be rebuilt by rerunning the publisher. A pre-artifact failure burns
+the alpha and starts a newly authorized successor. A post-artifact failure is
+resumed only from those retained bytes through a separately reviewed no-build
+publication path. Kernel a100 predates this corrected facility: it is
+published and tagged but remains unadoptable because the clean artifact import
+fails. Kernel a101 is the first release eligible to traverse the separated
+facility end to end.
+
 ## Follow-ups
 
 1. Stand up per `deploy/forgejo/RUNBOOK.md`; publish + verify `dotmac-kernel

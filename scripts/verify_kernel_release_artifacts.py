@@ -157,21 +157,13 @@ print(json.dumps({
     )
 
 
-def git_output(*args: str) -> str:
-    return subprocess.check_output(["git", *args], text=True).strip()
-
-
 def main() -> int:
     version = required("RELEASE_VERSION")
     expected = canonical_kernel_filenames(version)
     source_sha = required("ORIGINAL_SOURCE_SHA")
     tag_name = required("RELEASE_TAG")
-    tag_object = required("RELEASE_TAG_OBJECT")
-    tag_commit = required("RELEASE_TAG_COMMIT")
     for label, value in (
         ("source SHA", source_sha),
-        ("tag object", tag_object),
-        ("tag commit", tag_commit),
         ("facility source SHA", required("FACILITY_SOURCE_SHA")),
     ):
         if re.fullmatch(r"[0-9a-f]{40}", value) is None:
@@ -179,18 +171,6 @@ def main() -> int:
     require_canonical_facility(
         required("FACILITY_REPOSITORY"), required("FACILITY_REF")
     )
-    if git_output("rev-parse", "HEAD") != required("FACILITY_SOURCE_SHA"):
-        raise SystemExit("kernel verification refused: facility checkout differs")
-    if git_output("cat-file", "-t", tag_object) != "tag":
-        raise SystemExit("kernel verification refused: release tag is not annotated")
-    if git_output("rev-parse", tag_name) != tag_object:
-        raise SystemExit("kernel verification refused: annotated tag object differs")
-    if git_output("rev-parse", f"{tag_name}^{{commit}}") != tag_commit:
-        raise SystemExit("kernel verification refused: tag peel differs")
-    if tag_commit != source_sha:
-        raise SystemExit(
-            "kernel verification refused: tag does not identify release source"
-        )
 
     supplied_names = frozenset(filter(None, required("EXPECTED_FILENAMES").split("\n")))
     if supplied_names != expected:
@@ -274,6 +254,32 @@ def main() -> int:
         or observed_registry_files != expected_registry_files
     ):
         raise SystemExit("kernel verification refused: registry observation differs")
+    source_binding_path = Path(required("SOURCE_BINDING"))
+    source_binding_bytes = source_binding_path.read_bytes()
+    source_binding = json.loads(source_binding_bytes)
+    if canonical_json(source_binding) != source_binding_bytes:
+        raise SystemExit("kernel verification refused: source binding is not canonical")
+    if (
+        not isinstance(source_binding, dict)
+        or set(source_binding)
+        != {
+            "schema",
+            "state",
+            "source_sha",
+            "authorization_commit",
+            "authorization",
+        }
+        or source_binding.get("schema") != "KernelReleaseSourceBinding.v1"
+        or source_binding.get("state") != "allocated"
+        or source_binding.get("source_sha") != source_sha
+        or re.fullmatch(
+            r"[0-9a-f]{40}", str(source_binding.get("authorization_commit"))
+        )
+        is None
+        or not isinstance(source_binding.get("authorization"), dict)
+        or source_binding["authorization"].get("target_version") != version
+    ):
+        raise SystemExit("kernel verification refused: source binding differs")
     decision = verify_release_artifacts(
         expected_names=expected,
         retained=retained_files,
@@ -290,6 +296,7 @@ def main() -> int:
         )
     receipt = {
         "schema": "KernelReleaseVerificationReceipt.v1",
+        "authorization": source_binding,
         "facility": {
             "repository": required("FACILITY_REPOSITORY"),
             "ref": required("FACILITY_REF"),
@@ -300,9 +307,8 @@ def main() -> int:
         "release": {
             "distribution": "dotmac-kernel",
             "version": version,
-            "tag": tag_name,
-            "tag_object": tag_object,
-            "tag_commit": tag_commit,
+            "expected_tag": tag_name,
+            "source_sha": source_sha,
             "retained_build_observation": github_observation,
             "registry_observation": registry_observation,
         },
