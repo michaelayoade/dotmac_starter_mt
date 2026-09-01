@@ -765,7 +765,10 @@ specifics) points here and must never fork these rules.
     machine-readable contract already carries a declared oracle: every declared
     distribution is measured against its real tag, and a declared-unpublished
     one must carry a recorded reason that is removed in the SAME change as its
-    release. Everywhere else this is stated review discipline, NOT a guard —
+    release. The reason must be WRITTEN: a row whose reason is missing, empty
+    or still the generator's own placeholder fails `--check`, because `reason`
+    is the only field separating accepted debt from unnoticed drift and a
+    ledger regenerated after a rebase emits that placeholder by design. Everywhere else this is stated review discipline, NOT a guard —
     ADR 0013 rejects a generic prose scanner, which cannot separate a claim
     from a description of one and would flag its own incident recital. Saying
     so is the point: an unmonitored region is honest, an implied guard is not

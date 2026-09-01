@@ -45,7 +45,18 @@ currently in an unpublished state, with the reason it is acceptable.
 * a ledger entry whose distribution has since been published, or which names a
   package that no longer exists, ALSO fails, and must be removed in the same
   change — otherwise the ledger accumulates stale absolutions and the count
-  drifts downward unnoticed, which is the one-directional failure ADR-0018 names.
+  drifts downward unnoticed, which is the one-directional failure ADR-0018 names;
+* a ledger entry whose `reason` is missing, empty, or still `UNWRITTEN_REASON`
+  fails too. `reason` is the ONLY thing separating accepted debt from unnoticed
+  drift — both produce a row with the same `declared` and the same `state` — and
+  `--write-baseline` emits the marker whenever it has no existing reason to
+  carry forward, which is exactly what a ledger rebase resolved in main's favour
+  leaves behind. Until this check existed, that silently downgraded "we know and
+  accepted this" to "this drifted and nobody noticed", with every gate green.
+
+Axis reachability: deleting any row from the ledger and re-running
+`--write-baseline` (the routine rebase resolution above, reachable today against
+all eighteen rows) regenerates that row with the marker and turns `--check` red.
 
 Stdlib only: this runs before dependencies are installed, like every other gate
 in `scripts/`.
@@ -93,6 +104,19 @@ DEDICATED_WORKFLOWS: Final = {
 PUBLISHED: Final = "published"
 DECLARED_UNPUBLISHED: Final = "declared-unpublished"
 NEVER_PUBLISHED: Final = "never-published"
+
+#: What `--write-baseline` writes for a distribution it has no reason to carry
+#: forward. The sweep can determine THAT a version is unpublished — declared
+#: version against tags, mechanical — and cannot determine WHY that is
+#: acceptable, which is human judgement. So the generator emits a complete
+#: ledger (a MISSING row fails reconciliation, so an incomplete file is not an
+#: option) with an explicit marker meaning "a human owes text here".
+#:
+#: It lives here ONCE. `reconcile` refuses it and `--write-baseline` emits it,
+#: both through this name: a second copy of the literal would be the
+#: second-authority defect in miniature — edit one, and the guard silently
+#: stops recognising what the generator now writes.
+UNWRITTEN_REASON: Final = "TODO: state why this version is not installable"
 
 
 class SweepRefused(SystemExit):
@@ -274,6 +298,69 @@ def _ledger(repo_root: pathlib.Path = REPO_ROOT) -> dict[str, dict]:
     return json.loads(path.read_text(encoding="utf-8"))["unpublished"]
 
 
+def unwritten_reason(distribution: str, recorded: dict) -> list[str]:
+    """Is this row's `reason` still owed by a human?
+
+    Two rejections, both about the SAME property — nobody has stated why this
+    version being uninstallable is acceptable — and neither about a word:
+
+    * nothing there at all (missing, empty, or whitespace);
+    * the generator's own marker, `UNWRITTEN_REASON`, still present verbatim.
+
+    ## Why not `"TODO" in reason`
+
+    That is the tempting form and it is the shape ADR-0018 (amendment
+    2026-08-26) names: a guard that checks a NAME instead of the property it is
+    named for. It fires on a real reason that happens to mention a TODO
+    somewhere else in its prose — the ledger's reasons are paragraphs, several
+    already name follow-up work — and it misses an empty string and a row of
+    spaces, which are the same defect with no name to match on. It would be
+    wrong in both directions at once.
+
+    Matching the generator's whole marker sentence instead makes the rejection
+    mean what the guard is named for: this text was written by the sweep, not
+    by a person. Containment rather than equality, so a marker padded with a
+    few trailing words ("... — will fix after the release") is
+    still refused; half-editing a placeholder is exactly the row that looks
+    reviewed and is not. The cost is stated rather than hidden: the marker
+    sentence is RESERVED, so a genuine reason may not quote it verbatim. The
+    marker is deliberately not repeated here either — this module names it
+    once, at `UNWRITTEN_REASON`, and everything else refers to that.
+
+    ## Why this matters more than it looks
+
+    `reason` is the only thing distinguishing accepted debt from unnoticed
+    drift — both produce a row with the same `declared` and the same `state`.
+    And the placeholder is not hypothetical: when a rebase conflicts on the
+    ledger (routine, on any PR train touching released distributions) the
+    correct resolution is to take main's side wholesale rather than hand-merge
+    JSON, which momentarily removes your own row; the next
+    `--write-baseline` then finds nothing to carry forward and writes the
+    marker. It fired that way on #554 and was caught only because the reasons
+    had been captured beforehand. Every gate was green.
+    """
+    reason = str(recorded.get("reason", "") or "")
+    if not reason.strip():
+        return [
+            f"{distribution}: the ledger entry states no reason. A row with no "
+            "reason records only that something is unpublished — which the "
+            "sweep already computes — and loses the one thing it exists to "
+            "carry: why that is acceptable."
+        ]
+    if UNWRITTEN_REASON.casefold() in " ".join(reason.split()).casefold():
+        return [
+            f"{distribution}: the ledger entry still carries the generator's "
+            "placeholder, so nobody has said why this version is not "
+            "installable. `--write-baseline` writes that marker when it has no "
+            "existing reason to carry forward — which is what a rebase that "
+            "took main's side of the ledger looks like. Restore the row's "
+            "original reason (`git log -p -- "
+            "docs/inventories/declared-publication-baseline.json`) or write "
+            "the reason this version is deliberately unreleased."
+        ]
+    return []
+
+
 def reconcile(survey_result: dict, ledger: dict[str, dict]) -> list[str]:
     """Two-directional, per ADR-0018.
 
@@ -302,8 +389,7 @@ def reconcile(survey_result: dict, ledger: dict[str, dict]) -> list[str]:
                 "the entry in the same change as the bump, so the reason is "
                 "reviewed against the version it now excuses."
             )
-        if not str(recorded.get("reason", "")).strip():
-            problems.append(f"{distribution}: the ledger entry states no reason")
+        problems.extend(unwritten_reason(distribution, recorded))
 
     for distribution in sorted(set(ledger) - set(live)):
         if distribution not in survey_result["distributions"]:
@@ -354,7 +440,7 @@ def main() -> int:
                 "declared": finding["declared"],
                 "state": finding["state"],
                 "reason": existing.get(distribution, {}).get(
-                    "reason", "TODO: state why this version is not installable"
+                    "reason", UNWRITTEN_REASON
                 ),
             }
             for distribution, finding in sorted(unpublished(survey_result).items())
