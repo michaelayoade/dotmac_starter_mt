@@ -94,6 +94,11 @@ from .spec import BackupDataset, ProductDeploymentSpec
 
 EXTERNAL_RECEIPT_SCHEMA: Final = "RecoveryReceipt.v1"
 
+#: Stands in for the key id a signed document deliberately does not carry.
+#: Machine-shaped so `ExternalExecutorV1` accepts it, and obviously not a
+#: key so nobody mistakes it for one.
+_UNATTRIBUTED_KEY: Final = "unattributed-key-id"
+
 #: What each verification is answered BY. Not documentation: a receipt claiming
 #: `effective_privileges` is claiming something about a specific body of
 #: evidence, and a reader deciding whether to trust it needs to know which.
@@ -230,11 +235,19 @@ class ExternalRecoveryReceiptV1:
                 kind=str(executor_raw.get("kind", "")),
                 identifier=str(executor_raw.get("identifier", "")),
                 version=str(executor_raw.get("version", "")),
-                # The key id lives OUTSIDE the signed document, so it is not read
-                # from here — a document carrying its own key id would let a
-                # forger nominate the key that verifies it. Filled from the
-                # DECLARED executor by the caller below.
-                key_id=str(executor_raw.get("identifier", "")),
+                # SENTINEL, not a key. The key id lives OUTSIDE the signed
+                # document — a document carrying its own key id would let a
+                # forger nominate the key that verifies it — so there is
+                # nothing here to read, and this type requires the field.
+                #
+                # Named rather than echoing the identifier, which is what this
+                # line used to do: an echo READS like a real key id to anyone
+                # inspecting `receipt.executor.key_id`, and a plausible-looking
+                # wrong value is worse than an obviously absent one.
+                # `accept_external_recovery_receipt` substitutes the DECLARED
+                # executor before returning, so the sentinel never reaches a
+                # caller through the accepted path.
+                key_id=_UNATTRIBUTED_KEY,
             ),
             verifications=tuple(str(item) for item in document["verifications"]),
             isolated_target=bool(document["isolated_target"]),
@@ -366,7 +379,12 @@ def accept_external_recovery_receipt(
                 if name in VERIFICATION_EVIDENCE
             )
         )
-    return receipt
+    # Return the receipt carrying the DECLARED executor, whose `key_id` is real.
+    # The parsed one holds the sentinel above, because a signed document does not
+    # name its own key. Every other field of the declared executor has just been
+    # compared against the document, so this substitutes a value that is equal
+    # where it was checked and correct where the document was silent.
+    return dataclasses.replace(receipt, executor=executor)
 
 
 def backup_record_from_receipt(

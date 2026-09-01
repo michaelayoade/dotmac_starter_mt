@@ -302,6 +302,29 @@ def test_a_well_formed_receipt_is_accepted(
         ("verifications", {"verifications": ["schema"]}, "does not claim"),
     ],
 )
+def test_the_accepted_receipt_carries_the_declared_key_not_an_echo(
+    external_spec: ProductDeploymentSpec, dataset: BackupDataset
+) -> None:
+    """The signed document does not name its own key — a document carrying its
+    own key id would let a forger nominate the key that verifies it — so the
+    PARSED executor holds a sentinel for that field.
+
+    An earlier version echoed the identifier there instead, which reads like a
+    real key id to anyone inspecting `receipt.executor.key_id`. A
+    plausible-looking wrong value is worse than an obviously absent one, so the
+    accepted receipt substitutes the DECLARED executor, and the signed bytes are
+    unchanged by the substitution.
+    """
+    assert dataset.external_executor is not None
+    receipt = _accept(
+        external_spec, dataset, _envelope(_document(external_spec, dataset))
+    )
+    assert receipt.executor.key_id == dataset.external_executor.key_id
+    assert receipt.executor.key_id != receipt.executor.identifier
+    # The key id stays OUTSIDE the signed message.
+    assert dataset.external_executor.key_id not in receipt.canonical_bytes().decode()
+
+
 def test_a_receipt_missing_a_binding_is_refused(
     external_spec: ProductDeploymentSpec,
     dataset: BackupDataset,
