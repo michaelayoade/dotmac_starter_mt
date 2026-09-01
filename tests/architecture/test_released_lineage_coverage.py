@@ -120,17 +120,55 @@ def test_numbering_is_covered_now():
     assert "dotmac-numbering" not in _coverage.uncovered()
 
 
-def test_the_coverage_detector_would_actually_fire():
+def test_the_coverage_detector_would_actually_fire(monkeypatch):
     """Sensitivity: the matcher must be able to report a distribution uncovered.
 
-    Every assertion above passes trivially if `uncovered()` can only ever return
-    an empty set. With 43 rows in the baseline that is visibly not the case
-    today, and asserting it keeps a future refactor from quietly making it so.
+    Every assertion above passes trivially if `uncovered()` can only ever
+    return an empty set.
+
+    This used to assert `uncovered()` was non-empty. That worked while the
+    baseline held 43 rows and stops proving anything the moment the debt is
+    paid off — a sensitivity check that only holds while the defect exists
+    reports "detector healthy" and "no debt remaining" with the same green
+    tick, and cannot tell you which one it meant. Worse, it inverts: the change
+    that finally closes the last hole is the change that turns this test red,
+    so the reward for finishing the work is a failing suite and the obvious fix
+    is to delete the proof.
+
+    It is now proved by making a genuinely covered distribution look
+    unenrolled and requiring the REAL `uncovered()` to name it. That is the
+    property the baseline depends on — not "the debt list is non-empty" but
+    "an unenrolled released lineage is reported" — and it holds at 43 rows, at
+    two, and at zero, because the existing debt is subtracted rather than
+    assumed present.
+
+    `dotmac-numbering` is the probe on purpose. It is the distribution whose
+    released migration was edited in place, `test_numbering_is_covered_now`
+    already refuses to let it leave the gate, and a probe that stopped existing
+    would turn this proof vacuous — so the two tests fail together rather than
+    one silently covering for the other.
     """
 
     _require_tags()
-    assert _coverage.uncovered(), (
-        "the coverage detector reports nothing uncovered, which contradicts the "
-        "recorded baseline; the matcher is probably broken"
+    released = set(_coverage.released_lineages())
+    covered = _coverage.covered()
+    assert released, "no lineage classified as released; the matcher is broken"
+    assert covered, "the gate's DISTRIBUTIONS map parsed as empty"
+
+    probe = "dotmac-numbering"
+    assert probe in released and probe in covered, (
+        f"{probe} is no longer a covered released lineage, so it cannot serve "
+        "as the probe; see test_numbering_is_covered_now"
     )
-    assert _coverage.covered(), "the gate's DISTRIBUTIONS map parsed as empty"
+
+    known_debt = set(_coverage.uncovered())
+    assert (
+        probe not in known_debt
+    ), f"{probe} is already reported uncovered, so unenrolling it would prove nothing"
+
+    monkeypatch.setattr(_coverage, "covered", lambda: covered - {probe})
+    assert set(_coverage.uncovered()) == known_debt | {probe}, (
+        "with a released lineage removed from the gate's DISTRIBUTIONS map, "
+        "`uncovered()` does not report it — the detector can no longer see an "
+        "unenrolled lineage, whatever the baseline currently says"
+    )
