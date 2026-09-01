@@ -70,6 +70,7 @@ _PUBLIC_ALPHA = re.compile(r"0\.1\.0a([1-9][0-9]*)")
 _VERSION = re.compile(r"(0\.1\.0a[1-9][0-9]*)(?:\+([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*))?")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
+_KERNEL_CATALOG_PACKAGE_CELL = "[`dotmac-kernel`](../packages/dotmac-kernel/README.md)"
 
 
 class KernelReleaseAuthorizationError(RuntimeError):
@@ -338,18 +339,30 @@ def _normalize_ledger(data: bytes) -> bytes:
     return normalized.encode()
 
 
-def _normalize_catalog(data: bytes) -> bytes:
-    lines = data.decode("utf-8").splitlines(keepends=True)
-    rows = [index for index, line in enumerate(lines) if "[`dotmac-kernel`]" in line]
+def _kernel_catalog_row(text: str) -> tuple[int, str]:
+    rows: list[tuple[int, str]] = []
+    for index, line in enumerate(text.splitlines(keepends=True)):
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        cells = tuple(cell.strip() for cell in stripped[1:-1].split("|"))
+        if cells and cells[0] == _KERNEL_CATALOG_PACKAGE_CELL:
+            rows.append((index, line))
     if len(rows) != 1:
         raise KernelReleaseAuthorizationError(
             f"expected one kernel catalogue row, found {len(rows)}"
         )
-    index = rows[0]
+    return rows[0]
+
+
+def _normalize_catalog(data: bytes) -> bytes:
+    text = data.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    index, row = _kernel_catalog_row(text)
     normalized, count = re.subn(
         r"(?<=\| `)0\.1\.0a[1-9][0-9]*(?:\+[A-Za-z0-9.]+)?(?=` \|)",
         "<AUTHORIZED_KERNEL_VERSION>",
-        lines[index],
+        row,
         count=1,
     )
     if count != 1:
@@ -563,12 +576,8 @@ def _assert_version_surfaces(ref: str, version: str) -> None:
         raise KernelReleaseAuthorizationError(
             "publication ledger does not bind dotmac-kernel to the target version"
         )
-    catalog_rows = [
-        line
-        for line in _text_at(ref, MODULE_CATALOG).splitlines()
-        if "[`dotmac-kernel`]" in line
-    ]
-    if len(catalog_rows) != 1 or f"| `{version}` |" not in catalog_rows[0]:
+    _, catalog_row = _kernel_catalog_row(_text_at(ref, MODULE_CATALOG))
+    if f"| `{version}` |" not in catalog_row:
         raise KernelReleaseAuthorizationError(
             "module catalogue does not bind dotmac-kernel to the target version"
         )

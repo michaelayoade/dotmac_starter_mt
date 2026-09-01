@@ -17,6 +17,7 @@ SCRIPT = REPO_ROOT / "scripts" / "kernel_release_authorization.py"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-kernel.yml"
 KERNEL_CHANGELOG = REPO_ROOT / "packages" / "dotmac-kernel" / "CHANGELOG.md"
 KERNEL_PYPROJECT = REPO_ROOT / "packages" / "dotmac-kernel" / "pyproject.toml"
+KERNEL_CATALOG_CELL = "[`dotmac-kernel`](../packages/dotmac-kernel/README.md)"
 
 
 def _load_contract():
@@ -77,7 +78,9 @@ def _version_files(repo: Path, version: str) -> None:
     )
     _write(
         repo / "docs/MODULE_CATALOG.md",
-        f"| [`dotmac-kernel`](kernel) | universal | `{version}` |\n",
+        f"| {KERNEL_CATALOG_CELL} | universal | `{version}` |\n\n"
+        f"### {KERNEL_CATALOG_CELL}\n\n"
+        f"The {KERNEL_CATALOG_CELL} detail section is not a package row.\n",
     )
 
 
@@ -144,6 +147,57 @@ def _allocate(repo: Path) -> str:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", "allocate kernel a2")
     return _git(repo, "rev-parse", "HEAD")
+
+
+def test_catalog_normalization_selects_the_real_row_not_its_detail_heading() -> None:
+    contract = _load_contract()
+    catalog = (REPO_ROOT / "docs/MODULE_CATALOG.md").read_bytes()
+
+    normalized = contract._normalize_catalog(catalog).decode("utf-8")
+
+    assert normalized.count("<AUTHORIZED_KERNEL_VERSION>") == 1
+    assert f"### {KERNEL_CATALOG_CELL}" in normalized
+    assert f"| {KERNEL_CATALOG_CELL} |" in normalized
+
+
+def test_catalog_heading_and_paragraph_mentions_are_not_rows() -> None:
+    contract = _load_contract()
+    mentions = (
+        f"### {KERNEL_CATALOG_CELL}\n\n"
+        f"The {KERNEL_CATALOG_CELL} package is described here.\n"
+    ).encode()
+
+    with pytest.raises(contract.KernelReleaseAuthorizationError) as refusal:
+        contract._normalize_catalog(mentions)
+    assert "expected one kernel catalogue row, found 0" in str(refusal.value)
+
+
+def test_catalog_duplicate_structural_rows_are_refused() -> None:
+    contract = _load_contract()
+    row = f"| {KERNEL_CATALOG_CELL} | universal | `0.1.0a1+dev` |\n"
+    duplicate = (row + row + f"\n### {KERNEL_CATALOG_CELL}\n").encode()
+
+    with pytest.raises(contract.KernelReleaseAuthorizationError) as refusal:
+        contract._normalize_catalog(duplicate)
+    assert "expected one kernel catalogue row, found 2" in str(refusal.value)
+
+
+def test_version_surface_validation_uses_the_same_structural_row(release_repo) -> None:
+    contract, repo, base = release_repo
+    _authorize(contract, repo, base)
+    allocation = _allocate(repo)
+
+    contract._assert_version_surfaces(allocation, "0.1.0a2")
+
+    catalog = repo / "docs/MODULE_CATALOG.md"
+    row = f"| {KERNEL_CATALOG_CELL} | universal | `0.1.0a2` |\n"
+    catalog.write_text(catalog.read_text(encoding="utf-8") + row, encoding="utf-8")
+    _git(repo, "add", str(catalog.relative_to(repo)))
+    _git(repo, "commit", "-m", "plant duplicate kernel catalogue row")
+
+    with pytest.raises(contract.KernelReleaseAuthorizationError) as refusal:
+        contract._assert_version_surfaces("HEAD", "0.1.0a2")
+    assert "expected one kernel catalogue row, found 2" in str(refusal.value)
 
 
 def test_authorization_and_its_immediate_allocation_child_are_accepted(
