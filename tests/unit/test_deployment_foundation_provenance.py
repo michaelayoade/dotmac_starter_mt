@@ -38,8 +38,10 @@ from dotmac_deployment_foundation.provenance import (
     PROVENANCE_SCHEMA,
     AuthorizationReceipt,
     DeploymentProvenanceV1,
+    VerifiedAuthorization,
     build_provenance,
     normalize_digest,
+    verify_authorization,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 from dotmac_deployment_foundation.version import VERSION
@@ -133,15 +135,39 @@ def descriptor_digest(spec: ProductDeploymentSpec) -> str:
     return spec.to_canonical_document().sha256_digest()
 
 
+#: DISTINCT from the descriptor digest and from each other. A fixture reusing
+#: one value for all three terms would pass every test in this file while the
+#: three were still conflated — which is the defect they exist to separate.
+PLAN_DIGEST = "sha256:" + "e" * 64
+CONTROL_PLAN_DIGEST = "f" * 64
+
+
+class _StubVerifier:
+    """Stands in for the verifier the assembly supplies; attests what it is
+    given. These tests exercise the binding, not the cryptography."""
+
+    def attest(self, material: object) -> object:
+        return dict(material)  # type: ignore[call-overload]
+
+
+def _verified(digest: str, **overrides: object) -> VerifiedAuthorization:
+    return verify_authorization(
+        _receipt(digest, **overrides).as_document(), verifier=_StubVerifier()
+    )
+
+
 def _receipt(digest: str, **overrides: object) -> AuthorizationReceipt:
     fields: dict[str, object] = {
         "plan_id": "0f5f3a2c-1111-4444-8888-abcdefabcdef",
         "target_ref": "acme-prod-1",
         "descriptor_digest": digest,
+        "execution_plan_digest": PLAN_DIGEST,
+        "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 3,
         "decision_ref": "approvals:decision:9182",
         "approved_at": "2026-08-30T10:15:00Z",
+        "expires_at": "2026-08-31T10:15:00Z",
         "control_version": "0.1.0a4",
         "operation": "deploy",
     }
@@ -157,7 +183,7 @@ def _build(
         "image_digests": _IMAGES,
         "source_revision": _REVISION,
         "service_roster": _ROSTER,
-        "authorization": _receipt(digest),
+        "authorization": _verified(digest),
     }
     kwargs.update(overrides)
     return build_provenance(spec, **kwargs)  # type: ignore[arg-type]
@@ -240,7 +266,7 @@ def test_the_receipt_binds_in_either_digest_spelling(
     suppressed rather than investigated."""
     bare = descriptor_digest.removeprefix("sha256:")
     assert bare != descriptor_digest
-    record = _build(spec, descriptor_digest, authorization=_receipt(bare))
+    record = _build(spec, descriptor_digest, authorization=_verified(bare))
     assert record.content["authorization"]["descriptor_digest"] == descriptor_digest
 
 

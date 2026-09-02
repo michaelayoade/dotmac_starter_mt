@@ -631,6 +631,145 @@ sys.stdout.write(printed + "\\n")
 """
 
 
+#: THE NINTH PROPERTY, and it is here rather than in `tests/unit/` on purpose.
+#:
+#: Eight tests in `test_deployment_foundation_execution_binding.py` run against
+#: the source tree, and the source tree is not what anyone installs. A wheel can
+#: be built from a repaired tree and still ship an older module, or ship the
+#: right module under a broken entry point — `0.3.0a2` shipped a wheel whose
+#: `__version__` disagreed with its own metadata, and every source-side gate was
+#: green. So the binding is exercised against the INSTALLED distribution, by the
+#: INSTALLED interpreter, in the candidate lane and again against the bytes the
+#: registry served.
+#:
+#: Behaviour, never spelling. Nothing here asks whether a name exists: each
+#: check drives a refusal and fails if the refusal does not happen.
+_EXECUTION_BINDING_PROBE: Final = """\
+import inspect
+import sys
+
+from dotmac_deployment_foundation.authorization import authorize
+from dotmac_deployment_foundation.engine.run import Executor
+from dotmac_deployment_foundation.provenance import (
+    AuthorizationReceipt,
+    VerifiedAuthorization,
+    verify_authorization,
+)
+
+problems = []
+
+RECEIPT = {
+    "plan_id": "00000000-0000-4000-8000-00000000beef",
+    "target_ref": "installed-artifact-probe",
+    "descriptor_digest": "sha256:" + "a" * 64,
+    "execution_plan_digest": "sha256:" + "e" * 64,
+    "control_plan_digest": "f" * 64,
+    "policy_code": "deployment.production",
+    "policy_version": 1,
+    "decision_ref": "approvals:decision:1",
+    "approved_at": "2026-08-30T00:00:00Z",
+    "expires_at": "2026-08-31T00:00:00Z",
+    "control_version": "0.0.0",
+    "operation": "deploy",
+}
+
+
+class _Stub:
+    def attest(self, material):
+        return dict(material)
+
+
+# 1. An UNBOUND executor must be unconstructable. Checked on the installed
+#    signature: `execution_plan` required, and no way to hand the authorized
+#    digest in beside it.
+parameters = inspect.signature(Executor.__init__).parameters
+if "execution_plan" not in parameters:
+    problems.append("the installed Executor takes no execution_plan at all")
+elif parameters["execution_plan"].default is not inspect.Parameter.empty:
+    problems.append(
+        "the installed Executor defaults execution_plan to %r, so an unbound "
+        "executor is constructable" % (parameters["execution_plan"].default,)
+    )
+if "authorized_execution_plan_digest" in parameters:
+    problems.append(
+        "the installed Executor still accepts authorized_execution_plan_digest, "
+        "so an authorized digest can arrive without passing through attestation"
+    )
+
+# 2. Verified terms cannot be hand-built.
+try:
+    VerifiedAuthorization(object(), receipt=AuthorizationReceipt(**RECEIPT))
+    problems.append("the installed VerifiedAuthorization accepted a hand-built witness")
+except Exception:
+    pass
+
+# 3. A receipt that names no frozen plan is refused.
+try:
+    bare = dict(RECEIPT)
+    del bare["execution_plan_digest"]
+    verify_authorization(bare, verifier=_Stub())
+    problems.append(
+        "the installed receipt accepted a document with no execution_plan_digest"
+    )
+except Exception:
+    pass
+
+# 4. An expired approval is refused, with time supplied by the caller.
+import datetime as _dt
+
+verified = verify_authorization(dict(RECEIPT), verifier=_Stub())
+try:
+    authorize(
+        verified=verified,
+        operation="deploy",
+        descriptor_digest="sha256:" + "a" * 64,
+        target="installed-artifact-probe",
+        now=_dt.datetime(2026, 9, 1, tzinfo=_dt.UTC),
+    )
+    problems.append("the installed authorize() accepted an expired approval")
+except Exception:
+    pass
+
+# 5. Control's plan digest arriving as the descriptor digest is refused.
+substituted = dict(RECEIPT)
+substituted["descriptor_digest"] = RECEIPT["control_plan_digest"]
+try:
+    authorize(
+        verified=verify_authorization(substituted, verifier=_Stub()),
+        operation="deploy",
+        descriptor_digest="sha256:" + "a" * 64,
+        target="installed-artifact-probe",
+        now=_dt.datetime(2026, 8, 30, 12, tzinfo=_dt.UTC),
+    )
+    problems.append(
+        "the installed authorize() accepted Control's plan digest as the "
+        "descriptor digest"
+    )
+except Exception:
+    pass
+
+if problems:
+    sys.stderr.write("\\n".join(problems) + "\\n")
+    raise SystemExit(1)
+
+sys.stdout.write("execution binding OK\\n")
+"""
+
+
+def _execution_binding_smoke(venv_python: Path, workdir: Path) -> None:
+    """Run the binding probe with the INSTALLED interpreter."""
+    probe = workdir / "execution_binding_probe.py"
+    probe.write_text(_EXECUTION_BINDING_PROBE, encoding="utf-8")
+    checked = subprocess.run(
+        [str(venv_python), str(probe)], check=False, capture_output=True, text=True
+    )
+    if checked.returncode != 0:
+        raise ReleaseRefused(
+            "the installed bytes do not enforce the execution binding:\n  - "
+            + "\n  - ".join(checked.stderr.strip().splitlines())
+        )
+
+
 def _execution_plan_smoke(
     venv_python: Path, script: Path, descriptor: Path, workdir: Path
 ) -> str:
@@ -730,7 +869,12 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         digest = _execution_plan_smoke(venv_python, script, descriptor, Path(tmp))
+        # The binding, on the same installed bytes. A wheel that renders a plan
+        # and then executes without one is exactly the state this release
+        # repairs, and only the artifact can say whether it still does.
+        _execution_binding_smoke(venv_python, Path(tmp))
     print(f"{entry_point}: execution-plan contract OK ({digest})")
+    print(f"{entry_point}: execution binding enforced on the installed artifact")
 
 
 def cmd_verify_wheel(args: argparse.Namespace) -> None:

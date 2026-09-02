@@ -24,6 +24,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -324,6 +325,10 @@ def _require_grant(
         operation=operation,
         descriptor_digest=spec.to_canonical_document().sha256_digest(),
         target=target,
+        # The clock is read HERE, at the adapter, and nowhere below it. An
+        # expiry check whose `now` came from inside the library could not be
+        # moved by a test, and an expiry nobody can test is a field.
+        now=datetime.now(UTC),
     )
 
 

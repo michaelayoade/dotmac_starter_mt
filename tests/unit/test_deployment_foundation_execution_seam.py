@@ -29,6 +29,7 @@ seam that is working. A refusal has to be *seen* to count.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -42,11 +43,44 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
     UnknownFieldError,
 )
-from dotmac_deployment_foundation.provenance import AuthorizationReceipt
+from dotmac_deployment_foundation.provenance import (
+    AuthorizationReceipt,
+    VerifiedAuthorization,
+    verify_authorization,
+)
 
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
+#: `ExecutionPlanDigestV1` and Control's own snapshot digest. DISTINCT VALUES
+#: throughout this file, and deliberately so: a fixture that reused one digest
+#: for all three terms would pass every test here while the three were still
+#: conflated, which is the defect these fields exist to separate.
+PLAN_DIGEST = "sha256:" + "e" * 64
+CONTROL_PLAN_DIGEST = "f" * 64
 TARGET = "acme-prod-1"
+#: Inside every fixture receipt's window. Stated as a constant rather than read
+#: from a clock, so these tests do not start failing on 2026-08-31.
+NOW = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+
+
+class _StubVerifier:
+    """Stands in for the verifier the ASSEMBLY supplies.
+
+    Attests whatever it is handed. That is correct for this file: these tests
+    exercise the SEAM — that raw material cannot become verified terms without
+    passing through a verifier — not the cryptography, which this facility
+    deliberately does not own (zero runtime dependencies, ADR-0070).
+    """
+
+    def attest(self, material: object) -> object:
+        return dict(material)  # type: ignore[call-overload]
+
+
+def _verified(**overrides: object) -> VerifiedAuthorization:
+    """A receipt round-tripped through the verifier, as production does it."""
+    return verify_authorization(
+        _receipt(**overrides).as_document(), verifier=_StubVerifier()
+    )
 
 
 def _receipt(**overrides: object) -> AuthorizationReceipt:
@@ -54,10 +88,13 @@ def _receipt(**overrides: object) -> AuthorizationReceipt:
         "plan_id": "00000000-0000-4000-8000-000000000001",
         "target_ref": TARGET,
         "descriptor_digest": DIGEST_A,
+        "execution_plan_digest": PLAN_DIGEST,
+        "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 1,
         "decision_ref": "approvals:decision:1",
         "approved_at": "2026-08-30T00:00:00Z",
+        "expires_at": "2026-08-31T00:00:00Z",
         "control_version": "0.1.0a4",
         "operation": "deploy",
     }
@@ -81,6 +118,7 @@ def test_a_hand_built_grant_is_refused() -> None:
             operation="deploy",
             descriptor_digest=DIGEST_A,
             target=TARGET,
+            execution_plan_digest=PLAN_DIGEST,
             receipt=_receipt(),
         )
 
@@ -88,10 +126,11 @@ def test_a_hand_built_grant_is_refused() -> None:
 def test_authorize_issues_a_usable_grant() -> None:
     """The positive control. Without it, refusing everything scores full marks."""
     grant = authorize(
-        receipt=_receipt(),
+        verified=_verified(),
         operation="deploy",
         descriptor_digest=DIGEST_A,
         target=TARGET,
+        now=NOW,
     )
     assert grant.operation == "deploy"
     grant.require(operation="deploy", descriptor_digest=DIGEST_A)
@@ -104,30 +143,33 @@ def test_a_deploy_receipt_cannot_authorize_a_rollback() -> None:
     """One decision must not both make a change and erase it."""
     with pytest.raises(PreconditionFailed, match="authorized 'deploy'"):
         authorize(
-            receipt=_receipt(operation="deploy"),
+            verified=_verified(operation="deploy"),
             operation="rollback",
             descriptor_digest=DIGEST_A,
             target=TARGET,
+            now=NOW,
         )
 
 
 def test_a_rollback_receipt_cannot_authorize_a_deploy() -> None:
     with pytest.raises(PreconditionFailed, match="authorized 'rollback'"):
         authorize(
-            receipt=_receipt(operation="rollback"),
+            verified=_verified(operation="rollback"),
             operation="deploy",
             descriptor_digest=DIGEST_A,
             target=TARGET,
+            now=NOW,
         )
 
 
 def test_a_deploy_grant_is_refused_at_the_rollback_seam() -> None:
     """Checked again at use, not only at issue."""
     grant = authorize(
-        receipt=_receipt(),
+        verified=_verified(),
         operation="deploy",
         descriptor_digest=DIGEST_A,
         target=TARGET,
+        now=NOW,
     )
     with pytest.raises(PreconditionFailed, match="authorizes 'deploy', not 'rollback'"):
         grant.require(operation="rollback", descriptor_digest=DIGEST_A)
@@ -142,10 +184,11 @@ def test_a_receipt_must_name_an_operation() -> None:
 def test_both_declared_operations_are_authorizable(operation: str) -> None:
     """Neither operation is accidentally unreachable."""
     grant = authorize(
-        receipt=_receipt(operation=operation),
+        verified=_verified(operation=operation),
         operation=operation,
         descriptor_digest=DIGEST_A,
         target=TARGET,
+        now=NOW,
     )
     assert grant.operation == operation
 
@@ -156,10 +199,11 @@ def test_both_declared_operations_are_authorizable(operation: str) -> None:
 def test_a_receipt_for_another_descriptor_is_refused() -> None:
     with pytest.raises(PreconditionFailed, match="not an approval for this"):
         authorize(
-            receipt=_receipt(descriptor_digest=DIGEST_B),
+            verified=_verified(descriptor_digest=DIGEST_B),
             operation="deploy",
             descriptor_digest=DIGEST_A,
             target=TARGET,
+            now=NOW,
         )
 
 
@@ -167,20 +211,22 @@ def test_a_receipt_for_another_target_is_refused() -> None:
     """An approval for staging is not an approval for production."""
     with pytest.raises(PreconditionFailed, match="authorizes target"):
         authorize(
-            receipt=_receipt(target_ref="acme-staging-1"),
+            verified=_verified(target_ref="acme-staging-1"),
             operation="deploy",
             descriptor_digest=DIGEST_A,
             target=TARGET,
+            now=NOW,
         )
 
 
 def test_a_descriptor_edited_after_authorization_is_refused_at_use() -> None:
     """The reason `require` re-checks instead of trusting construction."""
     grant = authorize(
-        receipt=_receipt(),
+        verified=_verified(),
         operation="deploy",
         descriptor_digest=DIGEST_A,
         target=TARGET,
+        now=NOW,
     )
     with pytest.raises(PreconditionFailed, match="not the descriptor in hand"):
         grant.require(operation="deploy", descriptor_digest=DIGEST_B)
@@ -189,10 +235,11 @@ def test_a_descriptor_edited_after_authorization_is_refused_at_use() -> None:
 def test_bare_hex_and_prefixed_digests_are_the_same_digest() -> None:
     """The digest-format trap: Control writes bare hex, this facility prefixes."""
     grant = authorize(
-        receipt=_receipt(descriptor_digest="a" * 64),
+        verified=_verified(descriptor_digest="a" * 64),
         operation="deploy",
         descriptor_digest=DIGEST_A,
         target=TARGET,
+        now=NOW,
     )
     grant.require(operation="deploy", descriptor_digest="a" * 64)
 

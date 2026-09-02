@@ -72,6 +72,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .document import build_canonical_document
@@ -91,6 +92,21 @@ __all__ = [
 ]
 
 PROVENANCE_SCHEMA: Final = "DeploymentProvenance.v1"
+
+
+def _instant(value: str, *, field: str) -> datetime:
+    """Parse an ISO-8601 instant, the same way `HostLease` does."""
+    text = str(value).strip()
+    if not text:
+        raise SpecError(f"AuthorizationReceipt.{field} is required")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SpecError(
+            f"AuthorizationReceipt.{field} {value!r} is not an ISO-8601 instant"
+        ) from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
 
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -177,6 +193,14 @@ class AuthorizationReceipt:
     policy_version: int
     #: `ApprovalEvidence.decision_ref` — the approvals decision this rests on.
     decision_ref: str
+    #: When the approval stops being usable, ISO-8601 UTC. REQUIRED and with no
+    #: default, because a default is a policy and this facility does not own
+    #: authorization policy — Control decides how long its own approval is good
+    #: for. An approval with no end is a standing permission, and a standing
+    #: permission to mutate production is what an approval exists to avoid: the
+    #: gap between "this was reviewed" and "this may run" is the whole control.
+    #: `HostLease` already draws exactly this line for the host itself.
+    expires_at: str
     #: `DeploymentPlan.approved_at`, ISO-8601 UTC. A string, because a digest
     #: must be re-derivable from stored JSON months later (document.py rule 1).
     approved_at: str
@@ -220,6 +244,16 @@ class AuthorizationReceipt:
                 "meaning depends on the rules that produced it, and those are "
                 "versioned — an unversioned receipt cannot be re-checked later"
             )
+        approved = _instant(self.approved_at, field="approved_at")
+        expires = _instant(self.expires_at, field="expires_at")
+        if expires <= approved:
+            raise SpecError(
+                f"AuthorizationReceipt expires at {self.expires_at}, which is "
+                f"not after it was approved at {self.approved_at}. An approval "
+                "with no duration authorizes nothing and would refuse every "
+                "run, which reads as a broken deployment rather than as a "
+                "malformed receipt"
+            )
         if not str(self.execution_plan_digest).strip():
             raise SpecError(
                 "AuthorizationReceipt.execution_plan_digest is empty. This is "
@@ -246,6 +280,23 @@ class AuthorizationReceipt:
             raise SpecError(
                 f"AuthorizationReceipt.policy_version must be at least 1, got "
                 f"{self.policy_version!r}"
+            )
+
+    def require_live(self, *, now: datetime) -> None:
+        """Refuse an approval whose window has closed.
+
+        `now` is INJECTED rather than read here — the same rule
+        `build_provenance` follows and for the same reason: a value that reads a
+        clock cannot be re-derived from stored JSON months later, and a test
+        that cannot move time tests nothing about expiry.
+        """
+        expires = _instant(self.expires_at, field="expires_at")
+        if now >= expires:
+            raise PreconditionFailed(
+                f"this authorization expired at {self.expires_at} and it is now "
+                f"{now.isoformat()}. An expired approval is not a weak "
+                "approval: whatever was true about the target when it was "
+                "granted has had the whole window to stop being true"
             )
 
     @property
@@ -282,6 +333,7 @@ class AuthorizationReceipt:
             "plan_id",
             "target_ref",
             "descriptor_digest",
+            "expires_at",
             "execution_plan_digest",
             "control_plan_digest",
             "policy_code",
@@ -307,6 +359,7 @@ class AuthorizationReceipt:
             plan_id=str(document["plan_id"]),
             target_ref=str(document["target_ref"]),
             descriptor_digest=str(document["descriptor_digest"]),
+            expires_at=str(document["expires_at"]),
             execution_plan_digest=str(document["execution_plan_digest"]),
             control_plan_digest=str(document["control_plan_digest"]),
             policy_code=str(document["policy_code"]),
@@ -332,6 +385,7 @@ class AuthorizationReceipt:
             "policy_version": int(self.policy_version),
             "decision_ref": self.decision_ref,
             "approved_at": self.approved_at,
+            "expires_at": self.expires_at,
             "control_version": self.control_version,
         }
 

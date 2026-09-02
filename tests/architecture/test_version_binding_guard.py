@@ -55,6 +55,16 @@ PACKAGE = PROJECT_ROOT / "packages" / "dotmac-deployment-foundation"
 #: re-declared — see `docs/inventories/foundation-candidate-dispositions.json`.
 INVALIDATED = "0.3.0a2"
 
+#: SUPERSEDED, which is not the same thing and must not become it. `0.3.0a3`'s
+#: bytes were never wrong — they remain the sanctioned bootstrap input for
+#: Platform CP's issuer cutover and for Lane 3, resolved by run and artifact id.
+#: What changed is the CONTRACT: it predates the execution binding, so an
+#: executor built from those bytes runs unbound. `publishable=false` therefore
+#: stops a PUBLICATION without withdrawing it from its two supervised consumers,
+#: which is exactly the distinction `TERMINAL_UNPUBLISHABLE` draws by holding
+#: `invalidated` and not `superseded`.
+SUPERSEDED = "0.3.0a3"
+
 #: Versions of this facility that have been PUBLISHED. Written out rather than
 #: read from `git tag`, so this test states an expectation the guard must meet
 #: instead of comparing the guard's answer with the guard's own input.
@@ -65,7 +75,7 @@ PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 #: moved off it, and a constant that held only one of them would have quietly
 #: stopped exercising the second-build refusal on the very version whose freeze
 #: motivated the move.
-BUILT_CANDIDATES = ("0.3.0a1", "0.3.0a3")
+BUILT_CANDIDATES = ("0.3.0a1",)
 
 
 def _module():
@@ -161,7 +171,7 @@ def test_the_admit_is_not_an_empty_record_set() -> None:
     every = GUARD.all_bindings(FACILITY, repo_root=PROJECT_ROOT)
     versions = {binding.version for binding in every}
     assert set(PUBLISHED) <= versions
-    assert {INVALIDATED, *BUILT_CANDIDATES} <= versions
+    assert {INVALIDATED, SUPERSEDED, *BUILT_CANDIDATES} <= versions
     kinds = {binding.kind for binding in every}
     assert "published tag" in kinds
     assert "candidate artifact" in kinds
@@ -200,6 +210,29 @@ def test_a_published_version_is_refused_for_both_purposes(version: str) -> None:
 def test_a_built_candidate_is_refused_for_a_SECOND_build(version: str) -> None:
     found = _bindings(version)
     assert any(binding.kind == "candidate artifact" for binding in found), found
+
+
+def test_a_superseded_candidate_is_refused_for_release() -> None:
+    """The refusal moved to where the REASON is.
+
+    Before the frozen-candidate resolve fix in this same change, `0.3.0a3` was
+    refused for release by a source-version mismatch — a coincidence standing
+    where a reason belongs, which stops holding the moment somebody bumps a
+    version for an unrelated purpose. It is now refused by the record that
+    actually says why, and the guard reads that record.
+    """
+    found = _bindings(SUPERSEDED, purpose="release")
+    assert found, f"{SUPERSEDED} must be refused for release by its disposition"
+    assert any(binding.kind == "disposition (superseded)" for binding in found), (
+        f"{SUPERSEDED} is refused, but not by its disposition: "
+        + "; ".join(binding.kind for binding in found)
+    )
+
+
+def test_a_superseded_candidate_is_still_refused_for_a_second_build() -> None:
+    """Superseded is not permission to rebuild. The bytes are historical fact;
+    a second build of the same version would make one name two artifacts."""
+    assert _bindings(SUPERSEDED, purpose="candidate")
 
 
 @pytest.mark.parametrize("version", BUILT_CANDIDATES)

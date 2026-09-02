@@ -57,6 +57,7 @@ is evidence that two things drifted apart.
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
 from typing import Final
 
 from .errors import PreconditionFailed, SpecError
@@ -167,6 +168,7 @@ def authorize(
     operation: str,
     descriptor_digest: str,
     target: str,
+    now: datetime,
 ) -> ExecutionGrant:
     """Turn ATTESTED terms into permission to run, or refuse.
 
@@ -193,6 +195,11 @@ def authorize(
         )
     wanted = normalize_digest(descriptor_digest, where="authorize.descriptor_digest")
     receipt = verified.receipt
+    # Time first, before any equality check. An expired approval is refused for
+    # being expired rather than for whichever digest happens to disagree — and
+    # if every digest agrees, an expired approval must still refuse. `now` is
+    # supplied by the caller because nothing in this facility reads a clock.
+    receipt.require_live(now=now)
 
     if receipt.operation != operation:
         raise PreconditionFailed(
