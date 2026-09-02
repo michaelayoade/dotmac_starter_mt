@@ -96,7 +96,7 @@ declared expectation — is a refusal, never a fabricated one.
 Nothing here judges whether a promotion succeeded. Health thresholds, target
 expectations, the verdict and the six conditions stay in the control plane.
 
-### Four places ADR-0010 cannot be implemented exactly as written
+### Five places ADR-0010 cannot be implemented exactly as written
 
 1. **`observe`/`rollback` cannot return `LiveState`.** That is a dataclass in
    `dotmac_observability`, and this facility must not import the product it
@@ -125,6 +125,16 @@ expectations, the verdict and the six conditions stay in the control plane.
    facility therefore keeps the standing `PromotionContext` and substitutes the
    restored release, which is why that context is a constructor argument rather
    than a per-call one.
+5. **`integrity_counters` is a LIST and the `integrity` block holds ONE.**
+   `live_verify.integrity_counters` returns every `*_total` token found across
+   every declared gate's integrity predicate, in declaration order, so a control
+   plane with two gates naming different counters legitimately produces two.
+   `observability-live-observation.v1`'s `integrity` block has a single
+   `counter`/`value`/`process_start_time`. Reading the first and filing the
+   document would verify one counter while the read-back reported as complete —
+   a subset presented as the whole. The facility therefore REFUSES a request
+   naming more than one, and the repair is a contract carrying a list, which is
+   not this facility's to make.
 
 ## 0.3.0a3 — unreleased, NEVER BUILT
 

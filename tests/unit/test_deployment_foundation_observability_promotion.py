@@ -940,3 +940,31 @@ def test_the_rollback_read_back_names_the_release_it_rolled_away_from(host, eval
 
     document = facility.rollback(target=TARGET, release=staged.previous or "")
     assert document["release"] == {"current": "r-old", "previous": "r-new"}
+
+
+def test_more_counters_than_the_contract_can_hold_is_refused(host, evaluators):
+    """A subset read cannot be filed as a complete one.
+
+    The control plane derives this list from every gate's integrity predicate
+    and can name several; the contract's `integrity` block holds exactly one.
+    Reading the first would verify one counter and produce a document that
+    reads as a complete read-back.
+    """
+    host.seed_release("r-live", TREE)
+    facility = build(
+        host,
+        evaluators,
+        release_id="r-live",
+        context=PromotionContext(
+            environment="production",
+            host_target_id=TARGET,
+            probe_slots=SLOTS,
+            canary=CANARY,
+            integrity_counters=(
+                "prometheus_tsdb_out_of_order_samples_total",
+                "loki_discarded_samples_total",
+            ),
+        ),
+    )
+    with pytest.raises(PreconditionFailed, match="holds exactly one"):
+        facility.observe(target=TARGET, request=ObservationRequest(release="r-live"))

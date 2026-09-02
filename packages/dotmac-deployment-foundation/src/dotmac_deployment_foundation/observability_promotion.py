@@ -1371,6 +1371,20 @@ class ObservabilityPromotionFacility:
                 "series a baseline is compared against; emitting an unnamed counter "
                 "would let a comparison against a DIFFERENT counter pass silently."
             )
+        if len(counters) > 1:
+            # The control plane derives this list from every gate's integrity
+            # predicate, so it can legitimately name several counters — and the
+            # contract's `integrity` block holds exactly ONE. Reading the first
+            # and filing the document would verify one counter and report a
+            # complete read-back, which is the subset-reported-as-the-whole
+            # failure. Refuse loudly instead: the fix is a contract that carries
+            # a list, and it is not this facility's to make.
+            raise PreconditionFailed(
+                f"{len(counters)} ingestion counters were named "
+                f"({', '.join(counters)}) and `observability-live-observation.v1`"
+                "'s `integrity` block holds exactly one. Reading the first would "
+                "leave the rest unverified while the document read as complete."
+            )
         name = counters[0]
         metrics = self._http.request(
             "GET",
