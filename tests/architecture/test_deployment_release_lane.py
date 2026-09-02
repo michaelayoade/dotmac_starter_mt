@@ -140,9 +140,9 @@ def test_the_listed_facilitys_package_directory_exists_and_matches() -> None:
     pyproject_path = package_dir / "pyproject.toml"
     assert pyproject_path.is_file(), f"{pyproject_path} does not exist"
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    assert pyproject["tool"]["poetry"]["name"] == "dotmac-deployment-foundation", (
-        "the allowlisted package_dir's pyproject.toml declares a different name"
-    )
+    assert (
+        pyproject["tool"]["poetry"]["name"] == "dotmac-deployment-foundation"
+    ), "the allowlisted package_dir's pyproject.toml declares a different name"
 
     dossier_path = package_dir / "EXTRACTION.toml"
     assert dossier_path.is_file(), f"{dossier_path} does not exist"
@@ -262,9 +262,9 @@ def test_the_digest_gate_runs_where_the_publish_credential_does_not_exist() -> N
         "where the publish credential does not exist."
     )
     assert "FORGEJO_PUBLISH_TOKEN" not in _job_strings("build")
-    assert "verify-candidate" in _job_strings("build"), (
-        "the digest gate left the uncredentialed job"
-    )
+    assert "verify-candidate" in _job_strings(
+        "build"
+    ), "the digest gate left the uncredentialed job"
 
 
 def test_the_candidate_is_resolved_from_the_receipt_not_a_hard_coded_repo() -> None:
@@ -452,14 +452,11 @@ def test_every_releasable_candidate_receipt_binds_both_artifacts() -> None:
     unmonitored region.
     """
     facility = _load_release_facility()
-    declared = tomllib.loads(
-        (
-            PROJECT_ROOT
-            / "packages"
-            / "dotmac-deployment-foundation"
-            / "pyproject.toml"
-        ).read_text(encoding="utf-8")
-    )["tool"]["poetry"]["version"]
+    package_dir = PROJECT_ROOT / "packages" / "dotmac-deployment-foundation"
+    pyproject = tomllib.loads(
+        (package_dir / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    declared = pyproject["tool"]["poetry"]["version"]
 
     receipts = sorted(
         (PROJECT_ROOT / "docs" / "inventories").glob("foundation-candidate-*.json")
@@ -493,9 +490,9 @@ def test_the_verify_job_reads_the_index_as_the_read_only_identity() -> None:
     """Whether the PUBLISHER can read its own upload is a different claim, and
     the wait step above already makes it."""
     verify = _job_strings("verify")
-    assert "FORGEJO_READ_TOKEN" in verify, (
-        "the by-name fetch must authenticate as ci-reader, not as the publisher"
-    )
+    assert (
+        "FORGEJO_READ_TOKEN" in verify
+    ), "the by-name fetch must authenticate as ci-reader, not as the publisher"
     assert "ci-reader" in verify
 
 
