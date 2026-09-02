@@ -28,8 +28,9 @@ seam that is working. A refusal has to be *seen* to count.
 
 from __future__ import annotations
 
+import argparse
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,10 @@ def _descriptor(tmp_path: Path) -> str:
     return str(path)
 
 
+#: The CLI's own refusal code, imported rather than written as `1`. A literal
+#: would still pass if `EXIT_REFUSED` and `EXIT_USAGE` were ever swapped.
+
+
 def _run_cli(argv: list[str]) -> int:
     from dotmac_deployment_foundation.cli import main
 
@@ -333,45 +338,85 @@ def test_execute_with_an_unreadable_receipt_refuses(
     assert "authorization receipt" in capsys.readouterr().err
 
 
-def test_execute_with_a_receipt_for_another_target_refuses(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_one_receipt_refused_unattested_and_granted_when_verified(
+    tmp_path: Path,
 ) -> None:
-    """End to end: a real receipt file, for the wrong host.
+    """ONE receipt, two runs, differing only in whether a verifier was supplied.
 
-    The receipt carries the descriptor's REAL digest, so the descriptor check
-    passes and the target check is the one that fires. With a placeholder
-    digest this test would refuse for the wrong reason and would still pass
-    if the target binding were deleted entirely.
+    This test used to drive the whole CLI with a receipt for the WRONG HOST and
+    assert the target refusal's WORDING. Three things were wrong with that, and
+    the third only surfaced by trying to prove the second.
+
+    *The property moved.* Raw authorization material now reaches this facility
+    only through an injected `AuthorizationVerifier`, and the CLI has none — it
+    declares zero runtime dependencies and must not ship a weak signature
+    substitute. Attestation is the FIRST gate, so the target check is no longer
+    reachable from the CLI. It is still asserted where it still lives:
+    `test_a_receipt_for_another_target_is_refused` drives `authorize()`.
+
+    *The assertion read PROSE.* `"authorizes target" in stderr` checks which
+    words a message used — a checker resolving to a spelling rather than to a
+    behaviour, which passes when the behaviour changes underneath it.
+
+    *And an exit code could not replace it.* The obvious repair was to drive a
+    receipt correct in every term and assert `EXIT_REFUSED`, on the reasoning
+    that nothing else could refuse it. Planting the gate's deletion showed that
+    reasoning to be wrong twice over: the first attempt reused the module's
+    fixture receipt, which had already EXPIRED, so it refused for expiry; and
+    once that was fixed the ungated CLI simply proceeded into the deployment and
+    failed there — `EXIT_REFUSED` either way. A single exit code cannot tell
+    "refused before anything happened" from "tried and failed".
+
+    So the discriminator is the seam itself, and it is a DIFFERENCE rather than
+    a value: the same file, the same descriptor, the same target, parsed by the
+    same code, refuses without a verifier and yields a grant with one. Nothing
+    but attestation changes between the two halves, so nothing but attestation
+    can explain the difference — and if the gate were deleted the first half
+    would stop raising rather than merely reword itself.
     """
+    from dotmac_deployment_foundation.cli import _require_grant
     from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
     descriptor = _descriptor(tmp_path)
-    real_digest = (
-        ProductDeploymentSpec.load(descriptor).to_canonical_document().sha256_digest()
-    )
+    spec = ProductDeploymentSpec.load(descriptor)
+    real_digest = spec.to_canonical_document().sha256_digest()
+
+    # LIVE at the moment `_require_grant` reads its own clock, in both
+    # directions. Computed rather than written down: the first version of this
+    # test used the module fixture's `2026-08-31` expiry and was silently
+    # asserting an expiry refusal.
+    now = datetime.now(UTC)
     receipt = tmp_path / "receipt.json"
     receipt.write_text(
         json.dumps(
             _receipt(
-                target_ref="somewhere-else", descriptor_digest=real_digest
+                target_ref=TARGET,
+                descriptor_digest=real_digest,
+                approved_at=(now - timedelta(hours=1))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                expires_at=(now + timedelta(hours=1))
+                .isoformat()
+                .replace("+00:00", "Z"),
             ).as_document()
         ),
         encoding="utf-8",
     )
-    code = _run_cli(
-        [
-            "-f",
-            descriptor,
-            "deploy",
-            "--target",
-            TARGET,
-            "--authorization",
-            str(receipt),
-            "--execute",
-        ]
+
+    args = argparse.Namespace(
+        target=TARGET, authorization=str(receipt), authorization_verifier=None
     )
-    assert code != 0
-    assert "authorizes target" in capsys.readouterr().err
+
+    with pytest.raises(PreconditionFailed):
+        _require_grant(args, spec, "deploy")
+
+    args.authorization_verifier = _StubVerifier()
+    grant = _require_grant(args, spec, "deploy")
+    assert grant.operation == "deploy"
+    assert grant.target == TARGET
+    assert (
+        grant.execution_plan_digest == PLAN_DIGEST
+    ), "the grant must carry the frozen plan digest through from the receipt"
 
 
 def test_a_dry_run_still_needs_no_authorization(tmp_path: Path) -> None:
