@@ -14,6 +14,9 @@ if someone hands them to you.
 - ``artifact_id`` — the addressable handle. A run can hold several artifacts,
   so the run ID alone does not say which bytes came out.
 - ``filename`` — which file inside the artifact is the wheel.
+- ``sdist`` — the same three facts for the SOURCE distribution, because
+  ``twine upload dist/*`` publishes it beside the wheel and an unrecorded sdist
+  reaches the index bound to nothing.
 - ``size_bytes`` — a cheap independent check that a re-fetch got the whole thing.
 - ``sha256`` — identity. But a digest alone lets you *verify* bytes somebody
   gives you; it does not let you *obtain* them, which is the job here.
@@ -103,9 +106,35 @@ def _find_wheel(dist: Path) -> Path:
     return wheels[0]
 
 
+def _find_sdist(dist: Path) -> Path:
+    """The other half of what a release publishes.
+
+    `release-facility.yml` publishes with `twine upload dist/*`, so the sdist
+    lands on the index beside the wheel. A receipt that records only the wheel
+    binds half a release, and the unbound half is the one a resolver never
+    fetches — `pip download` takes the wheel and leaves the sdist, which is
+    correct pip behaviour and no proof at all about the sdist's bytes.
+
+    `dotmac-deployment-control` 0.1.0a3 is the recorded precedent: the sdist was
+    on the index the whole time, nothing had ever compared its bytes, and the
+    version was ruled unprovable. Recording it here is what lets every later
+    seam compare it.
+    """
+    sdists = sorted(dist.glob("*.tar.gz"))
+    if len(sdists) != 1:
+        raise SystemExit(
+            f"expected exactly one sdist in {dist}, found "
+            f"{[s.name for s in sdists]}. A candidate names ONE artifact of "
+            "each form; two sdists means the downstream receipts cannot say "
+            "which bytes they are about."
+        )
+    return sdists[0]
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     dist = Path(args.dist)
     wheel = _find_wheel(dist)
+    sdist = _find_sdist(dist)
     payload = _gh_api(f"repos/{args.repository}/actions/runs/{args.run_id}/artifacts")
     if not isinstance(payload, dict):
         raise SystemExit("unexpected artifacts payload")
@@ -133,6 +162,12 @@ def cmd_record(args: argparse.Namespace) -> int:
         "filename": wheel.name,
         "size_bytes": wheel.stat().st_size,
         "sha256": _sha256(wheel),
+        # ── and the sdist, because `twine upload dist/*` publishes it too ──
+        "sdist": {
+            "filename": sdist.name,
+            "size_bytes": sdist.stat().st_size,
+            "sha256": _sha256(sdist),
+        },
         # ── the expiry, as READ ──
         "expires_at": artifact.get("expires_at"),
         "retention_requested_days": 90,
@@ -166,6 +201,8 @@ def cmd_record(args: argparse.Namespace) -> int:
         "expires_at",
     ):
         lines.append(f"| `{key}` | `{receipt[key]}` |")
+    for key in ("filename", "size_bytes", "sha256"):
+        lines.append(f"| `sdist.{key}` | `{receipt['sdist'][key]}` |")
     summary = "\n".join(lines) + "\n"
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as handle:

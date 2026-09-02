@@ -75,6 +75,13 @@ on:
 permissions:
   contents: read
 
+# The private index root, one knob with a documented default rather than a
+# literal repeated per step (AGENTS.md, "Everything by config"). Credential
+# FREE on purpose: the read credential is supplied in the environment, and the
+# by-name fetch refuses an index URL carrying userinfo.
+env:
+  REGISTRY_SIMPLE_INDEX: ${{ vars.REGISTRY_SIMPLE_INDEX || 'https://registry.dotmac.io/api/packages/dotmac/pypi/simple' }}
+
 # One release of one version at a time, and NEVER cancelled in flight.
 #
 # Two dispatches of the same facility+version could previously run
@@ -397,16 +404,36 @@ jobs:
           echo "::error::${{ inputs.facility }} ${{ inputs.version }} did not appear in time"
           exit 1
 
-      # Install the PUBLISHED release from the index into a clean venv and
-      # re-run the CLI smoke. Unlike the adapter lane this needs no
-      # `--extra-index-url`: the package declares zero runtime dependencies,
-      # so there is nothing for pip to resolve from the public index.
-      - name: Install from the Forgejo registry and re-smoke the CLI
+      # THE BYTES PROOF, and it is a fetch BY NAME rather than a resolution.
+      #
+      # What stood here resolved the pin with `pip download --no-deps
+      # --only-binary :all:` and compared the one wheel that came back. That
+      # asks the resolver's question, not the release's: `publish` runs `twine
+      # upload dist/*`, so the index holds a wheel AND an sdist, and a resolver
+      # has no reason to retrieve the second. The candidate receipt records the
+      # sdist's digest and nothing read it — so the sdist's published bytes
+      # were compared with nothing, at every seam from the candidate fetch to
+      # the index.
+      #
+      # `dotmac-deployment-control` 0.1.0a3 is the recorded precedent, in those
+      # exact terms: the sdist was on the index the whole time and nothing had
+      # ever compared its bytes, and the version was ruled unprovable. Every
+      # filename the receipt binds is now requested from the index BY NAME, the
+      # index must list each exactly once, and every one is compared against
+      # the receipt — never against what `publish` uploaded, which would
+      # compare an upload with itself.
+      #
+      # Read as `ci-reader`, not as the publisher: whether the PUBLISHER can
+      # read its own upload is a different claim, and the step above already
+      # makes it. The credential travels in the environment, never in the index
+      # URL and never in argv.
+      - name: Fetch every published artifact by name and re-smoke the CLI
         env:
-          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+          REGISTRY_PASSWORD: ${{ secrets.FORGEJO_READ_TOKEN }}
         run: |
           python scripts/release_facility.py verify-registry \
-            --index "${INDEX}" \
+            --index "${REGISTRY_SIMPLE_INDEX}" \
+            --login ci-reader \
             --pin "${{ inputs.facility }}==${{ inputs.version }}" \
             --descriptor deploy/product.toml
 
