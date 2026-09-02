@@ -165,10 +165,16 @@ jobs:
           python scripts/require_rehearsal.py "${GITHUB_SHA}" \
             --receipt .rehearsal/receipt.json
 
+      # NO `setup-poetry`, and its absence is the point. This job used to build
+      # the wheel it published; it now fetches the one
+      # `foundation-candidate.yml` already built. Leaving the build toolchain
+      # installed "in case" would leave `poetry build` one edit away from being
+      # reachable again on the path to the publish credential, which is exactly
+      # the reachability this change removes. Enforced by
+      # `test_deployment_release_lane.py`.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: ./.github/actions/setup-poetry
 
       # A version binds to ONE source and ONE artifact, and a CONSUMED version
       # is never reissued. `--purpose release` deliberately does not refuse on
@@ -196,18 +202,66 @@ jobs:
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             | tee -a "${GITHUB_OUTPUT}"
 
-      - name: Build wheel + sdist
-        working-directory: ${{ steps.resolve.outputs.package_dir }}
-        run: poetry build
+      # THE CANDIDATE'S COORDINATES, READ FROM THE COMMITTED RECEIPT.
+      #
+      # Repository included. Nothing below takes an owning repository, a run,
+      # an artifact or a digest from a dispatch input or from a literal:
+      #
+      #   * a dispatch input lets someone name a version whose receipt says
+      #     something else, and the two disagree silently. One already-validated
+      #     record makes that unrepresentable;
+      #   * a hard-coded `michaelayoade/dotmac_starter_mt` becomes wrong the day
+      #     the Foundation's lanes move to their own repository. The receipt
+      #     travels with the artifact and names its own home, so that migration
+      #     edits a record rather than this lane.
+      - name: Resolve the recorded candidate
+        id: candidate
+        run: |
+          python scripts/release_facility.py resolve-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # Fetch by run + artifact ID, the same way a consumer resolves it.
+      # `CANDIDATE_SOURCE_TOKEN` is optional and unset today: the job token can
+      # read this repository's own artifacts. It exists so the split does not
+      # need a workflow edit — after it, the candidate lives in another
+      # repository and the job token cannot read it.
+      - name: Fetch the candidate artifact
+        env:
+          GH_TOKEN: ${{ secrets.CANDIDATE_SOURCE_TOKEN || github.token }}
+          REPOSITORY: ${{ steps.candidate.outputs.candidate_repository }}
+          ARTIFACT_ID: ${{ steps.candidate.outputs.candidate_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-dist
+          gh api "/repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > candidate.zip
+          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            candidate.zip candidate-dist
+          ls -l candidate-dist
+
+      # THE DIGEST GATE, and it lives HERE deliberately. This job declares no
+      # `environment:`, so `FORGEJO_PUBLISH_TOKEN` is unreachable from it: a
+      # mismatched artifact fails where the publish credential does not exist,
+      # rather than after an upload. `dotmac-deployment-control` 0.1.0a3 is the
+      # precedent — a run that published and then failed its own verification,
+      # leaving bytes on an index that are permanently unprovable. Verification
+      # after upload is not verification.
+      - name: Refuse anything that is not the recorded candidate
+        run: |
+          python scripts/release_facility.py verify-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --dist candidate-dist
 
       # Wheel-content policy: the declared surface and py.typed present, no
       # assembly/test/tooling content, NO migration lineage anywhere under the
       # import package, zero third-party dependencies (this package declares
-      # none), no secret-shaped files.
+      # none), no secret-shaped files. Run against the FETCHED bytes, which are
+      # the bytes that will be published.
       - name: Inspect artifacts
         run: |
           python scripts/release_facility.py inspect "${{ inputs.facility }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+            --dist candidate-dist
 
       # Release-artifact smoke: install the freshly built wheel into a clean
       # venv and prove the CONSOLE SCRIPT it exposes runs against a real
@@ -222,14 +276,14 @@ jobs:
       - name: Release wheel CLI smoke
         run: |
           python scripts/release_facility.py verify-wheel "${{ inputs.facility }}" \
-            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --dist candidate-dist \
             --descriptor deploy/product.toml
 
-      - name: Upload built artifacts
+      - name: Upload the verified candidate for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.facility }}-dist
-          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          path: candidate-dist/*
           retention-days: 90
 
   publish:
@@ -276,14 +330,27 @@ jobs:
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             --purpose release
 
-      - name: Download the exact built bytes
+      - name: Download the exact verified bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.facility }}-dist
           path: dist
 
-      # Publish the SAME bytes `build` inspected and smoked — downloaded,
-      # never rebuilt.
+      # Defence in depth, and cheap. `build` already refused anything that is
+      # not the recorded candidate; this re-derives the digest from the bytes
+      # actually in hand on the credentialed side, so a corrupted or swapped
+      # inter-job artifact cannot reach `twine`. Same comparison, same receipt,
+      # different job.
+      - name: Re-assert these are the recorded candidate's bytes
+        run: |
+          python scripts/release_facility.py verify-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --dist dist
+
+      # Publish the SAME bytes `foundation-candidate.yml` built, that `build`
+      # fetched by run + artifact ID, digest-checked against the committed
+      # receipt, inspected and smoked. Nothing on this path can build a wheel:
+      # `poetry` is not installed in either job.
       # A version is CREATE-ONLY. Publishing is the moment a name stops being
       # ours to redefine: every pin, lockfile and receipt that later cites this
       # version assumes the bytes behind it never changed.
