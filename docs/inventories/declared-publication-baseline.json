@@ -123,7 +123,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a100+dev",
+      "declared": "0.1.0a101",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a100 IS published and tagged (dotmac-kernel-v0.1.0a100, peeled 917181b38dcc5954bac932b630909afdfb19012b). The app-factory import-boundary repair changes importable kernel source, so continuing to declare bare 0.1.0a100 would make one released version name two byte sets. The local segment is a PEP 440 development marker: it allocates no successor and is removed only by the separately authorized release transition. Do not edit the marker off to quiet a gate; a fresh authorization-only commit and its immediate allocation child own the next public version.",
       "state": "declared-unpublished"
     },
