@@ -62,7 +62,8 @@ from dotmac_deployment_foundation.provenance import (
     verify_authorization,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
-from test_deployment_foundation_failure_injection import (
+
+from tests.unit.test_deployment_foundation_failure_injection import (
     DESCRIPTOR,
     GOOD_DIGEST,
     OLD_DIGEST,
