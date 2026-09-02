@@ -16,10 +16,14 @@ anything.
 
 So both halves here are real:
 
-* ``0.3.0a3`` — the version this tree actually declares — is ADMITTED against the
-  repository's own six bindings;
-* ``0.3.0a2`` is REFUSED, citing both its candidate receipt and its invalidating
-  disposition;
+* ``0.3.0a3`` — the version this tree actually declares — is ADMITTED for its
+  own RELEASE against the repository's own bindings, and is simultaneously
+  REFUSED for a second CANDIDATE build, because it has now been built once
+  (`docs/inventories/foundation-candidate-0.3.0a3.json`). Those two answers for
+  one version are the whole point of ``--purpose``: a candidate receipt is the
+  release's INPUT and a second build's REFUSAL;
+* ``0.3.0a2`` is REFUSED for both, citing its candidate receipt and its
+  invalidating disposition;
 * every published tag and the other built candidate are refused too, from the
   same record set, so the admit is not an artefact of the guard finding nothing.
 """
@@ -87,20 +91,46 @@ def _bindings(version: str, purpose: str = "candidate"):
 # ── the real-target ADMIT (ADR 0034) ────────────────────────────────────────
 
 
-def test_the_version_this_tree_declares_is_admitted() -> None:
+def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> None:
     """The half a planted refusal cannot substitute for.
 
     Read from `pyproject.toml` rather than hard-coded: this is the assertion
     that keeps the guard and the tree from drifting. If someone re-declares a
-    bound version — the exact mistake that produced `0.3.0a2`'s two contracts —
-    this fails here rather than at a dispatch six weeks later.
+    version that is published or CONSUMED — the exact mistake that produced
+    `0.3.0a2`'s two contracts — this fails here rather than at a dispatch six
+    weeks later.
+
+    `--purpose release`, not `candidate`, and that changed on 2026-09-02 when
+    the declared version was built. Before then this tree declared a version
+    with no artifact, so the meaningful admit was "nothing forbids building
+    it". Now `0.3.0a3` HAS its one candidate, and the meaningful admit is the
+    one publication actually needs: nothing forbids releasing those bytes. The
+    candidate-purpose answer for this same version is a refusal, asserted
+    directly below — dropping this test when it flipped, rather than moving it,
+    would have left the guard with no real-target ADMIT at all (ADR 0034).
     """
     declared = _declared_version()
-    found = _bindings(declared)
+    found = _bindings(declared, purpose="release")
     assert not found, (
-        f"{FACILITY} declares {declared}, which is already bound: "
+        f"{FACILITY} declares {declared}, which is forbidden from release: "
         + "; ".join(str(binding) for binding in found)
     )
+
+
+def test_the_version_this_tree_declares_is_refused_for_a_SECOND_build() -> None:
+    """Built once, and the record is what enforces it.
+
+    `foundation-candidate.yml` passes `--purpose candidate` before it builds.
+    Once the receipt for the declared version is committed, that dispatch must
+    refuse: a second build under the same name produces different bytes with
+    the same identity, which is precisely how `0.3.0a2` came to cover two
+    contracts.
+    """
+    declared = _declared_version()
+    found = _bindings(declared, purpose="candidate")
+    assert any(
+        binding.kind == "candidate artifact" for binding in found
+    ), f"{declared} has been built; a second candidate build must be refused"
 
 
 def test_the_admit_is_not_an_empty_record_set() -> None:
@@ -114,7 +144,7 @@ def test_the_admit_is_not_an_empty_record_set() -> None:
     every = GUARD.all_bindings(FACILITY, repo_root=PROJECT_ROOT)
     versions = {binding.version for binding in every}
     assert set(PUBLISHED) <= versions
-    assert {INVALIDATED, OTHER_CANDIDATE} <= versions
+    assert {INVALIDATED, OTHER_CANDIDATE, _declared_version()} <= versions
     kinds = {binding.kind for binding in every}
     assert "published tag" in kinds
     assert "candidate artifact" in kinds
@@ -201,10 +231,13 @@ def test_an_unknown_purpose_refuses_to_answer() -> None:
 
 
 def test_a_receipt_for_the_declared_version_would_refuse_it(tmp_path: Path) -> None:
-    """Planted, because the live admit and the live refusal are for two fixed
-    version strings, and a guard with `if version == "0.3.0a2"` in it would pass
-    both. Here the CURRENTLY ADMITTED version is given a candidate receipt in a
-    scratch tree and must flip to refused."""
+    """Planted, because the live answers are for fixed version strings and a
+    guard with `if version == "0.3.0a2"` in it would pass them all. Here the
+    declared version is given a candidate receipt in a SCRATCH tree — one whose
+    only record is the planted file — and must be reported from it. That the
+    real tree now also refuses the declared version for a second build is not a
+    substitute: this proves the refusal is derived from whatever records are
+    present, not from the repository's particular ones."""
     declared = _declared_version()
     repo = tmp_path / "repo"
     (repo / ".github").mkdir(parents=True)

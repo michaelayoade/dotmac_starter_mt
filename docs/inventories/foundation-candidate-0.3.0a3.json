@@ -1,0 +1,63 @@
+{
+  "artifact_id": "9830633429",
+  "artifact_size_bytes": 591959,
+  "execution_plan_smoke_observation": {
+    "IS_NOT_A_PLAN_DIGEST": "This value authorizes nothing and must never be submitted to Platform CP, frozen by Deployment Control, or compared against a production ExecutionPlanDigestV1. It is the digest of a THROWAWAY plan rendered against this repository's own reference descriptor and a fictitious target, for the sole purpose of proving the installed wheel can produce a digest at all. A real plan digest is bound to a real target and a real descriptor; this is bound to neither.",
+    "descriptor": "deploy/product.toml",
+    "digest_of_throwaway_smoke_plan": "sha256:6eb1d34d4e045d55fec362c894fd8acb643ce8d712d31d3f8e75574a2bf07172",
+    "operation": "deploy",
+    "proved": "`execution-plan --format json` and `--format digest` both exited zero through the INSTALLED console script; `execution_plan_digest` and `FoundationExecutionPlanV1.digest()` each independently re-derived this value over the document the console script printed; and FoundationExecutionPlanV1 round-tripped that document.",
+    "run_step": "Release wheel CLI smoke",
+    "target": "release-smoke-host"
+  },
+  "expires_at": "2026-12-01T03:35:45Z",
+  "facility": "dotmac-deployment-foundation",
+  "filename": "dotmac_deployment_foundation-0.3.0a3-py3-none-any.whl",
+  "frozen_identity": {
+    "canonical_descriptor_digest": "sha256:eff30b3059ecae6185876fb8dca67960ea40006c250c29d097564568652db0ba",
+    "deployment_identity_label_keys": [
+      "io.dotmac.deployment.configuration.digest",
+      "io.dotmac.deployment.environment",
+      "io.dotmac.deployment.manifest.digest",
+      "io.dotmac.deployment.product",
+      "io.dotmac.deployment.schema",
+      "io.dotmac.deployment.service.kind",
+      "io.dotmac.deployment.service.name",
+      "io.dotmac.deployment.source.revision"
+    ],
+    "rendered_assets": {
+      "alerts.rules.yml": "sha256:b8ccdd5bcf3b593044e6de64fc774a7a441ca9ccb8806828ea3704dc4644b402",
+      "docker-compose.yml": "sha256:6baebbe240e8b49ab27a6970ff2dcf5040834edb863156429eaf0d4b35785866",
+      "otel-collector.yaml": "sha256:1b7e1762ffd79f206f4df53ae5bc7c341325b35246f934057d360b27db1a9fdd"
+    },
+    "schema": "FrozenReleaseIdentity.v1",
+    "source_sha": "005490b278be73112fa9600bffb6e00a37c77a59",
+    "version": "0.3.0a3"
+  },
+  "published": false,
+  "repository": "michaelayoade/dotmac_starter_mt",
+  "retention_requested_days": 90,
+  "run_id": "33587629491",
+  "schema": "CandidateArtifact.v1",
+  "sdist": {
+    "filename": "dotmac_deployment_foundation-0.3.0a3.tar.gz",
+    "sha256": "b64c680595f8ff86c55ec7637cbb8eedcb123b9a13e648c61dd3fc390972103a",
+    "size_bytes": 282413
+  },
+  "sha256": "11978d919f1e910ae16d9b8262ffd3c473b074b4815067ab210fbe88e009d990",
+  "simultaneous_property_evidence": {
+    "event": "push",
+    "executed_success": 20,
+    "head_sha": "005490b278be73112fa9600bffb6e00a37c77a59",
+    "note": "allocation-gate is pull_request/workflow_dispatch only by design; it compares a branch against its merge base, which is undefined on a push. It executed and passed on the PR head (#586) at 22 of 22.",
+    "run_id": "33587497698",
+    "skipped": [
+      "allocation-gate"
+    ],
+    "workflow": "ci.yml"
+  },
+  "size_bytes": 313714,
+  "source_sha": "005490b278be73112fa9600bffb6e00a37c77a59",
+  "tagged": false,
+  "version": "0.3.0a3"
+}
