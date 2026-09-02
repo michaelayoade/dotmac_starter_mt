@@ -1,20 +1,33 @@
 # Changelog — dotmac-deployment-foundation
 
-## Unreleased — work that lands AFTER `0.3.0a3`
+## 0.3.0a4 — unreleased, NEVER BUILT
 
-Everything in this section targets a SUCCESSOR identity. The tree on this
-branch still declares `0.3.0a3` in `pyproject.toml` and `version.py`, and that
-is deliberate rather than settled: `0.3.0a3` has now been built once
-(`docs/inventories/foundation-candidate-0.3.0a3.json`, artifact `9830633429`),
-so a tree carrying this section AND that version number is the shape rule 34
-exists to prevent — one version name over two contracts. The successor is
-allocated at merge, not here, because allocating it on a branch would move
-`VERSION`, which sits inside the canonical descriptor and re-renders
-`deploy/rendered/`, while the frozen candidate is still the Platform CP
-cutover's bootstrap input. The heading above states which of the two it is.
+The successor identity, allocated 2026-09-02 because this release adds
+`observability_promotion.py` to `src/` and `0.3.0a3` had already been built
+once (`docs/inventories/foundation-candidate-0.3.0a3.json`, artifact
+`9830633429`, from `005490b2`, with the package tree byte-identical to it).
+A tree that diverges from a built artifact allocates a new version — the rule
+that came out of the `0.3.0a2` incident, applied here BEFORE the divergence
+shipped rather than after somebody found it.
 
-Note also that the `0.3.0a3` heading below still reads "NEVER BUILT", which was
-true when it was written and is not true now.
+No wheel for `0.3.0a4` exists. It is not tagged, it is on no index, and it is
+recorded as unpublished in `docs/inventories/declared-publication-baseline.json`.
+The next authorized step is ONE candidate build.
+
+**`0.3.0a3` is not superseded as an artifact and must not be rebuilt.** Its
+wheel remains the Platform CP cutover's bootstrap input, and nothing about this
+bump reaches it: a consumer resolves those bytes by RUN AND ARTIFACT ID out of
+the committed `CandidateArtifact.v1`, never by the version this tree declares.
+The version-binding guard still admits `0.3.0a3` for `--purpose release` while
+refusing it for a second build, and
+`tests/architecture/test_version_binding_guard.py` asserts both.
+
+`VERSION` sits inside the canonical descriptor, so this bump moved
+`io.dotmac.deployment.configuration.digest`
+(`sha256:eff30b30…` → `sha256:d1d736c0…`) and `deploy/rendered/docker-compose.yml`
+with it, re-rendered in this same change. That digest is re-derived from the
+tree; the one recorded in a candidate receipt is a historical fact about that
+build and is not touched.
 
 ### `observability_promotion` — the host half of an Observability promotion
 
@@ -136,16 +149,23 @@ expectations, the verdict and the six conditions stay in the control plane.
    naming more than one, and the repair is a contract carrying a list, which is
    not this facility's to make.
 
-## 0.3.0a3 — unreleased, NEVER BUILT
+## 0.3.0a3 — unreleased, BUILT ONCE (artifact 9830633429), never to be rebuilt
 
 The successor identity, allocated 2026-09-01 because `0.3.0a2` had come to name
 two different contracts and one of them was an artifact nobody could change.
 
-No wheel for `0.3.0a3` exists. It is not tagged, it is on no index, and it is
-recorded as unpublished in `docs/inventories/declared-publication-baseline.json`.
-The next authorized step is ONE candidate build against one final revision —
-never a rebuild of `0.3.0a2` under a new name, and never a second build of this
-one.
+The wheel exists and must never be rebuilt. Corrected 2026-09-02: this
+paragraph previously read "No wheel for `0.3.0a3` exists", which was true when
+written and stopped being true on the day of the build. It was built exactly
+once as candidate artifact `9830633429` (run `33587629491`) from merged
+protected main at `005490b278be73112fa9600bffb6e00a37c77a59`, wheel sha256
+`11978d919f1e910ae16d9b8262ffd3c473b074b4815067ab210fbe88e009d990`, expiring
+2026-12-01. It is not tagged and is on no index, and it is the Platform CP
+cutover's bootstrap input — resolved by run and artifact id out of
+`docs/inventories/foundation-candidate-0.3.0a3.json`, never by the version this
+tree declares, which is why the later move to `0.3.0a4` does not reach it. A
+second build under this name would produce different bytes with the same
+identity; publishing these exact bytes is the only remaining step.
 
 The previous section here declined to allocate a successor, on the reasoning
 that the tree could keep declaring `0.3.0a2` while diverging from the frozen

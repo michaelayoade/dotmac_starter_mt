@@ -266,7 +266,7 @@ class HostTransport(Protocol):
     for a remote transport, and this is that seam with the one addition a
     file transport needs: ``stdin``. ``providers/compose_host.Runner`` cannot
     carry bytes to a command, which is why this is a second Protocol rather
-    than a widening of the shipped one — widening it would change ``0.3.0a3``.
+    than a widening of the shipped one: the shipped seam keeps its contract.
     """
 
     def run(

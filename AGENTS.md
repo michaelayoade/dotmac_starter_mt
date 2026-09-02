@@ -1529,9 +1529,15 @@ specifics) points here and must never fork these rules.
     could otherwise not see publications and would admit a version already on
     the index — the exact failure it exists to stop. Per Governance ADR 0034 the
     gate demonstrates a **real-target ADMIT** and not merely synthetic
-    acceptance: `0.3.0a3`, the version this tree declares, is admitted against
-    the repository's own six bindings, while `0.3.0a2`, `0.3.0a1` and all three
-    published tags are refused from that same record set
+    acceptance: `0.3.0a4`, the version this tree declares, is admitted for both
+    purposes against the repository's own bindings, while `0.3.0a2` is refused
+    for both, `0.3.0a1` and `0.3.0a3` are each refused for a SECOND BUILD and
+    admitted for their own release, and all three published tags are refused —
+    all from that same record set. A tree that diverges from a built artifact
+    allocates a new version rather than keeping the old one, which is what
+    moved the declared identity off `0.3.0a3` on 2026-09-02; the wheel built
+    under that name is unaffected, because a consumer resolves it by run and
+    artifact id out of the committed receipt, never by what this tree declares
     (`scripts/foundation_disposition.py`, `scripts/version_binding_guard.py`;
     `tests/architecture/test_foundation_candidate_disposition.py`,
     `tests/architecture/test_version_binding_guard.py`)
