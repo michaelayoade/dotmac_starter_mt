@@ -72,19 +72,22 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any, Final
+from typing import Any, Final, Protocol, runtime_checkable
 
 from .document import build_canonical_document
-from .errors import SpecError, UnknownFieldError
+from .errors import PreconditionFailed, SpecError, UnknownFieldError
 from .spec import ProductDeploymentSpec
 from .version import VERSION
 
 __all__ = [
     "PROVENANCE_SCHEMA",
     "AuthorizationReceipt",
+    "AuthorizationVerifier",
     "DeploymentProvenanceV1",
+    "VerifiedAuthorization",
     "build_provenance",
     "normalize_digest",
+    "verify_authorization",
 ]
 
 PROVENANCE_SCHEMA: Final = "DeploymentProvenance.v1"
@@ -126,19 +129,49 @@ class AuthorizationReceipt:
     another owner's state. The caller — the assembly, which legitimately
     depends on both — reads Control and constructs this.
 
-    `descriptor_digest` is the binding. It is Control's `plan_digest` /
-    `ApprovalEvidence.content_digest`, which Control has already proven equal to
-    the digest of the plan snapshot it froze. This facility re-checks it against
-    the descriptor actually in hand, because the two could only agree by the
-    caller having passed the same descriptor to both.
+    ## THREE DIGESTS, THREE NAMES — and they are not interchangeable
+
+    This type used to carry ONE digest field, `descriptor_digest`, whose own
+    docstring said it held *"Control's `plan_digest` /
+    `ApprovalEvidence.content_digest`"* — and `build_provenance` then refused
+    unless that value equalled the digest of the descriptor in hand. That is
+    two different measurements asserted equal: a digest over Control's frozen
+    plan snapshot, and a digest over this facility's canonical descriptor
+    document. They agree only while both sides canonicalize identically, and
+    `execution_plan.py` records that they once did not — *"Control's
+    plan_digest and the Foundation's came to be permanently unequal while both
+    looked correct"*. That module was written to fix exactly this and its
+    correct design never reached the receipt.
+
+    So each term is named for what it measures, and NOTHING converts between
+    them. Two digest shapes that disagree are a finding, not something to
+    bridge locally:
+
+    * :attr:`descriptor_digest` — **this facility's** digest of the canonical
+      descriptor document, the value Platform CP submitted alongside the plan.
+      Re-checked against the descriptor actually in hand.
+    * :attr:`execution_plan_digest` — `ExecutionPlanDigestV1`, **the binding**.
+      The Foundation renders `FoundationExecutionPlanV1`, Platform CP submits
+      that digest, and Control freezes and signs it **without reconstructing
+      it** (`execution_plan.py` step 3). It is the one term both sides can
+      agree on precisely because only one side ever computes it.
+    * :attr:`control_plan_digest` — Control's own internal snapshot digest.
+      Recorded for traceability into Control's records and **never compared to
+      anything this facility computes**, because it is an implementation detail
+      of a different system. Comparing it is how the divergence above happened.
     """
 
     #: Control's `DeploymentPlan.id`, so the receipt is traceable to one plan.
     plan_id: str
     #: Control's `DeploymentTarget.target_ref` — which target was authorized.
     target_ref: str
-    #: `ApprovalEvidence.content_digest`, in either spelling.
+    #: This facility's digest of the canonical descriptor document, in either
+    #: spelling. NOT Control's plan digest — see the class docstring.
     descriptor_digest: str
+    #: `ExecutionPlanDigestV1` — the middle term Control froze. THE binding.
+    execution_plan_digest: str
+    #: Control's own snapshot digest. Recorded, never compared.
+    control_plan_digest: str
     #: `ApprovalEvidence.policy_code` and `.policy_version`.
     policy_code: str
     policy_version: int
@@ -187,6 +220,21 @@ class AuthorizationReceipt:
                 "meaning depends on the rules that produced it, and those are "
                 "versioned — an unversioned receipt cannot be re-checked later"
             )
+        if not str(self.execution_plan_digest).strip():
+            raise SpecError(
+                "AuthorizationReceipt.execution_plan_digest is empty. This is "
+                "the term Control actually froze, and it is the only one both "
+                "sides agree on without either re-deriving the other's "
+                "document. A receipt without it authorizes a descriptor and a "
+                "target but says nothing about what will be DONE to them"
+            )
+        if not str(self.control_plan_digest).strip():
+            raise SpecError(
+                "AuthorizationReceipt.control_plan_digest is empty. It is "
+                "never compared against anything this facility computes, but "
+                "it is what makes a receipt traceable back into Control's own "
+                "records, and a receipt that cannot be traced there is not one"
+            )
         if self.operation not in ("deploy", "rollback"):
             raise SpecError(
                 f"AuthorizationReceipt.operation must be 'deploy' or "
@@ -199,6 +247,14 @@ class AuthorizationReceipt:
                 f"AuthorizationReceipt.policy_version must be at least 1, got "
                 f"{self.policy_version!r}"
             )
+
+    @property
+    def execution_plan_digest_normalized(self) -> str:
+        """The frozen `ExecutionPlanDigestV1`, in this facility's spelling."""
+        return normalize_digest(
+            self.execution_plan_digest,
+            where="AuthorizationReceipt.execution_plan_digest",
+        )
 
     @property
     def descriptor_digest_normalized(self) -> str:
@@ -226,6 +282,8 @@ class AuthorizationReceipt:
             "plan_id",
             "target_ref",
             "descriptor_digest",
+            "execution_plan_digest",
+            "control_plan_digest",
             "policy_code",
             "policy_version",
             "decision_ref",
@@ -249,6 +307,8 @@ class AuthorizationReceipt:
             plan_id=str(document["plan_id"]),
             target_ref=str(document["target_ref"]),
             descriptor_digest=str(document["descriptor_digest"]),
+            execution_plan_digest=str(document["execution_plan_digest"]),
+            control_plan_digest=str(document["control_plan_digest"]),
             policy_code=str(document["policy_code"]),
             policy_version=int(document["policy_version"]),
             decision_ref=str(document["decision_ref"]),
@@ -262,15 +322,109 @@ class AuthorizationReceipt:
             "plan_id": self.plan_id,
             "target_ref": self.target_ref,
             "operation": self.operation,
-            "descriptor_digest": normalize_digest(
-                self.descriptor_digest, where="AuthorizationReceipt.descriptor_digest"
-            ),
+            "descriptor_digest": self.descriptor_digest_normalized,
+            "execution_plan_digest": self.execution_plan_digest_normalized,
+            # Recorded EXACTLY as Control wrote it. Not normalized, because
+            # normalizing implies this facility understands the value well
+            # enough to restate it, and the whole point is that it does not.
+            "control_plan_digest": str(self.control_plan_digest),
             "policy_code": self.policy_code,
             "policy_version": int(self.policy_version),
             "decision_ref": self.decision_ref,
             "approved_at": self.approved_at,
             "control_version": self.control_version,
         }
+
+
+class _Attestation:
+    """Proof that :func:`verify_authorization` produced this value."""
+
+    __slots__ = ()
+
+
+_ATTESTED: Final = _Attestation()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VerifiedAuthorization:
+    """A receipt an injected verifier has ATTESTED — the typed verified terms.
+
+    The same shape as `ExecutionGrant`, for the same reason and one layer
+    earlier. `ExecutionGrant` made "execute on a flag" unexpressible; this makes
+    "execute on unattested material" unexpressible.
+
+    Without it, raw envelope material reached the executor through
+    :meth:`AuthorizationReceipt.from_document` — a public classmethod any caller
+    can hand a dict. Structural parsing is not attestation: it proves the JSON
+    has the right KEYS, and says nothing about whether Control signed it. A
+    verifier that a caller can route around is decoration.
+
+    So the witness is module-private and only :func:`verify_authorization`
+    holds it. A caller who skips the verifier has nothing to construct this
+    with, which is the difference between a guard and a convention. As with the
+    grant, this does not stop someone importing `_ATTESTED`; it makes the bypass
+    one grep and one obviously-wrong import rather than an omission that reads
+    like ordinary code.
+    """
+
+    #: Positional and first, with no default, so a hand-built value cannot be
+    #: mistaken for an ordinary constructor call in review.
+    witness: _Attestation
+    receipt: AuthorizationReceipt
+
+    def __post_init__(self) -> None:
+        if self.witness is not _ATTESTED:
+            raise PreconditionFailed(
+                "a VerifiedAuthorization may only be produced by "
+                "verify_authorization(). Constructing one directly is an "
+                "authorization that attested itself — the exact failure this "
+                "type exists to make impossible to write by accident"
+            )
+
+
+@runtime_checkable
+class AuthorizationVerifier(Protocol):
+    """Attest raw authorization-envelope material, or raise.
+
+    The PRODUCT supplies this. This facility declares zero runtime dependencies
+    (ADR-0070), so it ships no signature library and must not grow one; a weak
+    in-house verifier would be worse than none, because it would look like
+    coverage. What the facility owns is that attestation is UNAVOIDABLE, not
+    how it is performed.
+
+    `attest` returns the receipt document it vouches for — deliberately the
+    document rather than a `VerifiedAuthorization`, so a product implementation
+    cannot mint verified terms either. Only :func:`verify_authorization`
+    does that, after this returns.
+    """
+
+    def attest(self, material: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+
+def verify_authorization(
+    material: Mapping[str, Any], *, verifier: AuthorizationVerifier
+) -> VerifiedAuthorization:
+    """The ONLY route from raw envelope material to verified terms.
+
+    Two steps that must stay separate: the injected verifier decides whether
+    the material is authentic, and this module decides whether the attested
+    document is a structurally complete receipt. Collapsing them would let a
+    product's verifier also define what a receipt IS.
+    """
+    if verifier is None:  # pragma: no cover - defensive, typed non-optional
+        raise PreconditionFailed(
+            "verify_authorization requires an AuthorizationVerifier. Raw "
+            "authorization material has no other way in"
+        )
+    document = verifier.attest(material)
+    if not isinstance(document, Mapping):
+        raise SpecError(
+            "AuthorizationVerifier.attest must return the receipt document it "
+            f"vouches for, got {type(document).__name__}"
+        )
+    return VerifiedAuthorization(
+        _ATTESTED, receipt=AuthorizationReceipt.from_document(document)
+    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -396,7 +550,7 @@ def build_provenance(
     image_digests: Mapping[str, str],
     source_revision: str,
     service_roster: Sequence[str],
-    authorization: AuthorizationReceipt,
+    authorization: VerifiedAuthorization,
 ) -> DeploymentProvenanceV1:
     """Bind the six, or refuse.
 
@@ -417,10 +571,12 @@ def build_provenance(
     document = build_canonical_document(spec)
     descriptor_digest = document.sha256_digest()
 
-    receipt_digest = normalize_digest(
-        authorization.descriptor_digest,
-        where="AuthorizationReceipt.descriptor_digest",
-    )
+    receipt = authorization.receipt
+    # ONLY the descriptor term is compared, and only against a descriptor
+    # digest. `control_plan_digest` is never brought into this comparison: it
+    # measures Control's own snapshot, and asserting it equals a Foundation
+    # digest is the defect this separation removes.
+    receipt_digest = receipt.descriptor_digest_normalized
     if receipt_digest != descriptor_digest:
         raise SpecError(
             "the authorization does not cover this descriptor: the receipt "
@@ -436,10 +592,15 @@ def build_provenance(
         "foundation_version": VERSION,
         "descriptor_digest": descriptor_digest,
         "descriptor_schema": document.schema,
+        # All three terms persisted under their own names. A reader months
+        # later can tell which measurement each one is without inferring it
+        # from a field that was named for a different thing.
+        "execution_plan_digest": receipt.execution_plan_digest_normalized,
+        "control_plan_digest": str(receipt.control_plan_digest),
         "rendered_digests": _check_rendered(rendered_digests),
         "image_digests": _check_images(spec, image_digests),
         "source_revision": revision,
         "service_roster": list(_check_roster(spec, service_roster)),
-        "authorization": authorization.as_document(),
+        "authorization": receipt.as_document(),
     }
     return DeploymentProvenanceV1(content=content)

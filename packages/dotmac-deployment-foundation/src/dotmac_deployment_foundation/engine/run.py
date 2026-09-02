@@ -185,6 +185,13 @@ class DeploymentOutcome:
     #: rather than defaulted to something plausible, because a report that
     #: invents a digest is worse evidence than one that says it has none.
     execution_plan_digest: str = ""
+    #: The other two terms, persisted under their OWN names. The outcome used to
+    #: carry the execution-plan digest alone (always empty, see `Executor`), no
+    #: descriptor digest at all, and no name for Control's plan digest — so the
+    #: evidence could not distinguish three measurements that must never be
+    #: conflated. `provenance.py` explains why they are separate.
+    descriptor_digest: str = ""
+    control_plan_digest: str = ""
     operation: str = ""
 
     def as_evidence(self) -> dict[str, object]:
@@ -195,6 +202,8 @@ class DeploymentOutcome:
             "source_revision": self.plan.source_revision,
             "manifest_digest": self.plan.manifest_digest,
             "execution_plan_digest": self.execution_plan_digest,
+            "descriptor_digest": self.descriptor_digest,
+            "control_plan_digest": self.control_plan_digest,
             "operation": self.operation,
             "strategy": self.plan.strategy.value,
             "succeeded": self.succeeded,
@@ -239,8 +248,7 @@ class Executor:
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
         now_epoch: int = 0,
-        execution_plan: FoundationExecutionPlanV1 | None = None,
-        authorized_execution_plan_digest: str = "",
+        execution_plan: FoundationExecutionPlanV1,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -277,12 +285,22 @@ class Executor:
             recovery_records or {}
         )
         self._now_epoch = now_epoch
-        # The middle term. Both default to absent and the pair is checked at the
-        # point of use, not at construction: a `plan` or a dry run authorizes
-        # nothing and must stay runnable, while a real run that was authorized
-        # against a digest must re-derive it before mutating anything.
+        # THE MIDDLE TERM, and it is now unavoidable in both halves.
+        #
+        # `execution_plan` used to default to None and the authorized digest to
+        # "", with `_require_execution_plan` PERMITTING "absent on both sides"
+        # and returning "". `cmd_deploy` passed neither and there was no flag to
+        # supply one, so every real deployment took that branch, mutated a host,
+        # and wrote `deploy-evidence.json` with an empty digest. The entire
+        # `ExecutionPlanDigestV1` mechanism was built, tested, and unreachable
+        # from the only path that touches a host.
+        #
+        # The plan is now a REQUIRED keyword argument with no default, and the
+        # authorized digest is not a parameter at all — it is read from the
+        # grant, which carries it from the receipt. So there is no way to
+        # construct an executor bound to a plan nobody froze, and no way to
+        # supply an authorized digest that did not come through attestation.
         self._execution_plan = execution_plan
-        self._authorized_execution_plan_digest = authorized_execution_plan_digest
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -319,6 +337,11 @@ class Executor:
             plan=plan,
             notes=list(plan.notes),
             execution_plan_digest=digest,
+            # Each from the side that OWNS it: the descriptor digest re-derived
+            # from the spec in hand, Control's plan digest copied verbatim off
+            # the receipt and never recomputed here.
+            descriptor_digest=self._descriptor_digest(),
+            control_plan_digest=str(self._grant.receipt.control_plan_digest),
             operation="deploy",
         )
         # The first question about any graph that turned bad at 14:32 is what
@@ -364,27 +387,30 @@ class Executor:
         sibling keys and the Foundation hashed the descriptor alone, a mismatch
         was unavoidable and told nobody anything.
 
-        Absent on both sides is permitted and REPORTED as absent -- a run that
-        was never bound to an authorized execution plan must not have a digest
-        invented for its report. Absent on ONE side is refused: a plan with no
-        authorized digest is unfrozen, and an authorized digest with no plan is
-        an approval for something this executor cannot show you.
+        ABSENT IS NO LONGER PERMITTED. This used to return "" when neither a
+        plan nor an authorized digest was present, on the reasoning that a run
+        never bound to one must not have a digest invented for its report. The
+        reasoning was sound and the consequence was not: the only production
+        caller supplied neither, so "unbound" was not an unusual case being
+        reported honestly, it was every deployment this facility has ever run.
+        A branch that is only ever taken by the path it was meant to describe as
+        exceptional is not a fallback, it is the behaviour.
         """
-        if self._execution_plan is None and not self._authorized_execution_plan_digest:
-            return ""
         if self._execution_plan is None:
             raise PreconditionFailed(
-                "an authorized execution plan digest was supplied and no "
-                "execution plan was rendered, so there is nothing to recompute "
-                "it from. An approval for a plan this executor cannot produce is "
-                "not an approval for what is about to run"
+                "this executor has no execution plan, so nothing can be "
+                "recomputed and nothing was frozen. An unbound executor is "
+                "refused BEFORE any effect: the plan is what says what will be "
+                "DONE to this target under this operation, and a descriptor "
+                "approval alone does not say that"
             )
-        if not self._authorized_execution_plan_digest:
+        authorized = self._grant.execution_plan_digest
+        if not authorized:
             raise PreconditionFailed(
-                "an execution plan was rendered and no authorized digest was "
-                "supplied, so nothing froze it. Rendering a plan is not the same "
-                "as having it authorized, and running the unfrozen one is the "
-                "gap this contract closes"
+                "the grant carries no authorized execution plan digest, so "
+                "nothing froze this plan. Rendering a plan is not the same as "
+                "having it authorized, and running the unfrozen one is the gap "
+                "this contract closes"
             )
         if self._execution_plan.operation != operation:
             raise PreconditionFailed(
@@ -394,7 +420,7 @@ class Executor:
                 "one decision must not both make a change and erase it"
             )
         return require_execution_plan_digest(
-            self._execution_plan, authorized=self._authorized_execution_plan_digest
+            self._execution_plan, authorized=authorized
         )
 
     def _run_steps(
@@ -483,6 +509,8 @@ class Executor:
             plan=plan,
             notes=list(plan.notes),
             execution_plan_digest=self._require_execution_plan("rollback"),
+            descriptor_digest=self._descriptor_digest(),
+            control_plan_digest=str(self._grant.receipt.control_plan_digest),
             operation="rollback",
         )
         steps = steps_for_rollback(plan)

@@ -60,7 +60,7 @@ import dataclasses
 from typing import Final
 
 from .errors import PreconditionFailed, SpecError
-from .provenance import AuthorizationReceipt, normalize_digest
+from .provenance import AuthorizationReceipt, VerifiedAuthorization, normalize_digest
 
 __all__ = [
     "OPERATIONS",
@@ -93,7 +93,10 @@ class ExecutionGrant:
       erases it;
     - without `descriptor_digest`, an approval for a reviewed descriptor
       authorizes an edited one;
-    - without `target`, an approval for staging authorizes production.
+    - without `target`, an approval for staging authorizes production;
+    - without `execution_plan_digest`, an approval for a descriptor authorizes
+      any plan derived from it — and one descriptor yields a different plan per
+      target and per operation, so that is not the same permission at all.
     """
 
     #: Positional and first, with no default, so a hand-built grant cannot be
@@ -102,6 +105,11 @@ class ExecutionGrant:
     operation: str
     descriptor_digest: str
     target: str
+    #: `ExecutionPlanDigestV1`, carried FROM the receipt so the executor cannot
+    #: be handed an authorized digest that came from anywhere else. This is
+    #: what makes an unbound executor unconstructable rather than merely
+    #: discouraged: every `Executor` has a grant, and every grant has this.
+    execution_plan_digest: str
     receipt: AuthorizationReceipt
 
     def __post_init__(self) -> None:
@@ -155,12 +163,18 @@ class ExecutionGrant:
 
 def authorize(
     *,
-    receipt: AuthorizationReceipt,
+    verified: VerifiedAuthorization,
     operation: str,
     descriptor_digest: str,
     target: str,
 ) -> ExecutionGrant:
-    """Turn Control's receipt into permission to run, or refuse.
+    """Turn ATTESTED terms into permission to run, or refuse.
+
+    Takes a :class:`~.provenance.VerifiedAuthorization`, never a bare
+    `AuthorizationReceipt`. A receipt is a structurally complete document; it
+    becomes verified terms only by passing through an injected
+    `AuthorizationVerifier`, and requiring the verified type here is what stops
+    a caller parsing a JSON file straight into an execution.
 
     The ONLY issuer of :class:`ExecutionGrant`. Every refusal below is a
     mismatch between what Control authorized and what the caller is holding —
@@ -178,6 +192,7 @@ def authorize(
             f"unknown operation {operation!r}; expected one of {list(OPERATIONS)}"
         )
     wanted = normalize_digest(descriptor_digest, where="authorize.descriptor_digest")
+    receipt = verified.receipt
 
     if receipt.operation != operation:
         raise PreconditionFailed(
@@ -200,5 +215,6 @@ def authorize(
         operation=operation,
         descriptor_digest=wanted,
         target=target,
+        execution_plan_digest=receipt.execution_plan_digest_normalized,
         receipt=receipt,
     )
