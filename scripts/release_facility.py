@@ -270,6 +270,170 @@ def _bin(venv_python: Path, entry_point: str) -> Path:
     )
 
 
+#: A concrete host, stated by this caller. `render_execution_plan` refuses an
+#: empty target — "a plan with no target is a plan that authorizes every host" —
+#: and a target derived from the descriptor would make the comparison below
+#: compare the descriptor with itself and pass for every input.
+SMOKE_TARGET: Final = "release-smoke-host"
+
+#: The execution-plan proof, executed by the INSTALLED interpreter against the
+#: INSTALLED bytes. It reads the document and the digest the console script
+#: just printed and re-derives both through the library surface two other
+#: repositories bind to.
+#:
+#: Written as a probe rather than as `import`-and-`hasattr` on purpose. A name
+#: present in a wheel's source is not a contract that works: `execution_plan.py`
+#: being an entry in the zip — which is all `inspect` can see — says nothing
+#: about whether the module imports, and `hasattr(module, "...")` says nothing
+#: about whether the thing it names produces the value Control freezes.
+#:
+#: `ExecutionPlanDigestV1` is deliberately NOT looked for as a name here, in any
+#: form — not as an attribute, and not by comparing a constant's text against
+#: the literal. It names a VALUE, not an importable object, so both of those
+#: would be checking the spelling with extra steps, and a wheel can carry the
+#: right spelling and produce nothing. What is checked instead is the value: the
+#: console script must print a `sha256:` digest, and `execution_plan_digest` and
+#: `FoundationExecutionPlanV1.digest()` must each INDEPENDENTLY re-derive that
+#: exact digest over the exact document the console script printed.
+_EXECUTION_PLAN_PROBE: Final = """\
+import json
+import re
+import sys
+
+from dotmac_deployment_foundation.execution_plan import (
+    EXECUTION_PLAN_SCHEMA,
+    FoundationExecutionPlanV1,
+    execution_plan_digest,
+)
+
+document = json.loads(open(sys.argv[1], encoding="ascii").read())
+printed = open(sys.argv[2], encoding="ascii").read().strip()
+
+problems = []
+
+if document.get("schema") != EXECUTION_PLAN_SCHEMA:
+    problems.append(
+        "the console script emitted schema %r, the installed module names %r"
+        % (document.get("schema"), EXECUTION_PLAN_SCHEMA)
+    )
+
+# The document type, resolved as a TYPE: the class must round-trip the very
+# document its own CLI printed. A class that merely exists under the right name
+# would pass an import check and fail here.
+rebuilt = FoundationExecutionPlanV1(
+    product=document["product"],
+    target=document["target"],
+    operation=document["operation"],
+    foundation_version=document["foundation_version"],
+    image_reference=document["image_reference"],
+    image_digest=document["image_digest"],
+    source_revision=document["source_revision"],
+    manifest_digest=document["manifest_digest"],
+    descriptor_digest=document["descriptor_digest"],
+    strategy=document["strategy"],
+    environment_inventory=tuple(document["environment_inventory"]),
+    steps=tuple(
+        (
+            step["kind"],
+            step["target"],
+            tuple(step["command"]),
+            step["timeout_seconds"],
+            step["retries"],
+        )
+        for step in document["steps"]
+    ),
+)
+if rebuilt.as_document() != document:
+    problems.append(
+        "FoundationExecutionPlanV1 does not round-trip the document its own "
+        "CLI printed"
+    )
+
+# The digest VALUE, re-derived twice and never asserted by name.
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", printed):
+    problems.append("the console script printed %r, not a sha256 digest" % printed)
+if execution_plan_digest(document) != printed:
+    problems.append(
+        "execution_plan_digest re-derived %r over the document the console "
+        "script printed, which printed %r"
+        % (execution_plan_digest(document), printed)
+    )
+if rebuilt.digest() != printed:
+    problems.append(
+        "FoundationExecutionPlanV1.digest() re-derived %r, the console script "
+        "printed %r" % (rebuilt.digest(), printed)
+    )
+
+if problems:
+    sys.stderr.write("\\n".join(problems) + "\\n")
+    raise SystemExit(1)
+
+sys.stdout.write(printed + "\\n")
+"""
+
+
+def _execution_plan_smoke(
+    venv_python: Path, script: Path, descriptor: Path, workdir: Path
+) -> str:
+    """Prove the EXECUTION-PLAN contract on the installed artifact.
+
+    Three other repositories are downstream of this one value. Platform CP
+    submits an `ExecutionPlanDigestV1` and Control freezes and signs it, so a
+    wheel that installs cleanly, answers `--help` and validates a descriptor —
+    everything the smoke above checks — and then cannot render a plan leaves
+    both of them unable to produce the value at all, while every gate in the
+    release lane stays green.
+
+    `inspect`'s `wheel_contents.required` list cannot close this: it asserts
+    that `dotmac_deployment_foundation/execution_plan.py` is an entry in the
+    zip. A file present in an archive is a spelling. This runs the path.
+    """
+    document_path = workdir / "execution-plan.json"
+    digest_path = workdir / "execution-plan.digest"
+
+    for fmt, destination in (("json", document_path), ("digest", digest_path)):
+        rendered = subprocess.run(
+            [
+                str(script),
+                "-f",
+                str(descriptor),
+                "execution-plan",
+                "--target",
+                SMOKE_TARGET,
+                "--operation",
+                "deploy",
+                "--format",
+                fmt,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if rendered.returncode != 0:
+            raise ReleaseRefused(
+                f"the installed `{script.name} execution-plan --format {fmt}` "
+                f"path exited {rendered.returncode}. The wheel cannot produce "
+                "the value Platform CP submits and Control freezes.\n"
+                f"{rendered.stderr.strip()}"
+            )
+        destination.write_text(rendered.stdout, encoding="ascii")
+
+    probe = workdir / "execution_plan_probe.py"
+    probe.write_text(_EXECUTION_PLAN_PROBE, encoding="utf-8")
+    checked = subprocess.run(
+        [str(venv_python), str(probe), str(document_path), str(digest_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if checked.returncode != 0:
+        raise ReleaseRefused(
+            "the installed bytes do not carry a working execution-plan "
+            "contract:\n  - " + "\n  - ".join(checked.stderr.strip().splitlines())
+        )
+    return checked.stdout.strip()
+
+
 def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
     """The facility's answer to the adapter lane's `__all__` proof.
 
@@ -281,6 +445,14 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
     can produce a wheel whose `[project.scripts]` entry point is broken (a
     missing `console_scripts` line, a typo'd target) while `import
     dotmac_deployment_foundation` still succeeds cleanly.
+
+    That argument is unchanged, and it is one-directional: it says an import
+    proof cannot stand in for a console-script proof. The converse is also
+    true, and `execution-plan` is where it bites — `--help` and `validate`
+    both pass on a wheel whose `execution_plan` module does not import, and
+    the failure would surface in Platform CP and in Control rather than here.
+    So the console script stays the surface, and the execution-plan path is
+    RUN rather than assumed.
     """
     script = _bin(venv_python, entry_point)
     if not script.is_file():
@@ -294,6 +466,12 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
         check=True,
         capture_output=True,
     )
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        digest = _execution_plan_smoke(venv_python, script, descriptor, Path(tmp))
+    print(f"{entry_point}: execution-plan contract OK ({digest})")
 
 
 def cmd_verify_wheel(args: argparse.Namespace) -> None:
