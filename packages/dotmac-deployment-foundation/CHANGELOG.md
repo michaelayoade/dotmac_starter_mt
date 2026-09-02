@@ -1,5 +1,126 @@
 # Changelog — dotmac-deployment-foundation
 
+## Unreleased — work that lands AFTER `0.3.0a3`
+
+Everything in this section targets a SUCCESSOR identity. The tree on this
+branch still declares `0.3.0a3` in `pyproject.toml` and `version.py`, and that
+is deliberate rather than settled: `0.3.0a3` has now been built once
+(`docs/inventories/foundation-candidate-0.3.0a3.json`, artifact `9830633429`),
+so a tree carrying this section AND that version number is the shape rule 34
+exists to prevent — one version name over two contracts. The successor is
+allocated at merge, not here, because allocating it on a branch would move
+`VERSION`, which sits inside the canonical descriptor and re-renders
+`deploy/rendered/`, while the frozen candidate is still the Platform CP
+cutover's bootstrap input. The heading above states which of the two it is.
+
+Note also that the `0.3.0a3` heading below still reads "NEVER BUILT", which was
+true when it was written and is not true now.
+
+### `observability_promotion` — the host half of an Observability promotion
+
+Observability ADR-0010 owns the promotion DECISION and no host effect: every
+host effect is a method on `promote.PromotionFacility`, a Protocol it declares
+and does not implement. `dotmac_deployment_foundation.observability_promotion`
+is that implementation.
+
+None of it existed. The shipped executor's "switch" is `docker compose up -d
+--force-recreate` against a re-rendered Compose file
+(`providers/compose_host.py`); nothing staged a directory, nothing swapped a
+pointer, `previous_image` was supplied by the caller rather than read off the
+host, there was no transport of any kind, the only reload primitive was
+`nginx -s reload` and nothing anywhere queried Prometheus or Alertmanager.
+
+What is here, and the failure each part prevents:
+
+- **Immutable release-directory staging.** The whole tree is written to a new
+  release directory, made unwritable, and refused outright if that directory
+  already exists. Never file by file: a single-file bind mount is bound to an
+  inode, which is how the Observer host became append-only by hand (ADR-0002).
+- **A previous-pointer READER.** `read_previous_pointer` reads the symlink off
+  the host before anything changes. Three broken shapes that used to be
+  indistinguishable from a fresh host are now refusals: a regular file where
+  the pointer belongs (activation here was never atomic), a symlink into
+  nothing (the rollback target is already gone), and an unreadable link. `None`
+  means one thing — no pointer at all.
+- **Exact-byte transport.** Files go out over an injectable `HostTransport`
+  (`LocalTransport`, and `SshTransport`, which quotes with `shlex.join` because
+  ssh's far end is a shell). Every staged file is then read BACK and compared,
+  byte for byte, against what was sent, and the path set is compared in both
+  directions. A mismatch refuses with the staging directory removed and the
+  pointer untouched — a corrupt release can never be activated. The comparison
+  is over bytes fetched from the host and hashed here, never over a digest the
+  host computed: the host cannot be the authority on whether the host received
+  the right file.
+- **Atomic activation.** `ln -s` into a temporary name then `mv -T` over the
+  pointer — a `rename(2)`. `ln -sfn` is an unlink followed by a symlink and has
+  a window with no pointer at all. The pointer is then RE-READ, and a swap that
+  does not read back is `ActivationNotObserved`.
+- **Prometheus and Alertmanager reloads, each checked.** Each is reloaded over
+  its lifecycle endpoint rather than by recreating the container, which would
+  discard the scrape window the verification is about to read. A `200` from
+  `/-/reload` is the request being accepted; the evaluator's own
+  `*_config_last_reload_successful` and
+  `*_config_last_reload_success_timestamp_seconds`, read straight after, are
+  the process saying it adopted a configuration — and only a success timestamp
+  later than the moment we posted says it adopted THIS one. Otherwise
+  `ReloadNotObserved`, which fails the promotion at `RELOADED` and rolls back.
+  An evaluator that does not export the metric at all is also a refusal: an
+  unexported metric is not a successful reload.
+- **A complete read-back**, as an `observability-live-observation.v1` document:
+  the whole active tree by path and sha256, targets, rules, resolved routes,
+  the named ingestion counter and `process_start_time_seconds` in ONE read,
+  the canary, and one probe per surface per address family with its positive
+  control nested inside it.
+- **Exact rollback, and a read-back of the restored host.** `rollback` restores
+  the pointer and returns the observation, carrying a `rollback` block whose
+  `restored_release` is RE-READ from the pointer rather than echoed from the
+  argument, and whose `restored_digest` is computed from bytes fetched back off
+  the host. A rollback whose evaluators never took the restored configuration
+  reports `succeeded: false` rather than raising, because the read-back is the
+  most useful thing an operator can be handed at that point.
+
+Everything it cannot obtain itself arrives through a seam and defaults to an
+honest absence. No `ReceiverWitness` means `delivered: false` with no evidence
+reference, which the verifier refuses — rather than reporting Alertmanager's
+outbound `200` as a human having been reached. No `SurfaceProber` means
+`inconclusive`, not `refused`, because an unplugged cable and a shut port look
+identical from here. A required contract block the facility was given nothing
+for — an unnamed ingestion counter, an unplanned canary, a probe slot with no
+declared expectation — is a refusal, never a fabricated one.
+
+Nothing here judges whether a promotion succeeded. Health thresholds, target
+expectations, the verdict and the six conditions stay in the control plane.
+
+### Four places ADR-0010 cannot be implemented exactly as written
+
+1. **`observe`/`rollback` cannot return `LiveState`.** That is a dataclass in
+   `dotmac_observability`, and this facility must not import the product it
+   serves (ADR-0070; the zero-runtime-dependency and forbidden-import gates
+   both bite). They return the `observability-live-observation.v1` DOCUMENT —
+   the actual contract — and the control plane's own `live_verify.live_state`
+   types it. One call, on the side that owns the type.
+2. **`restored_digest` is order-dependent and a read-back has no order.**
+   `render.tree_digest` hashes `path\0contents\0` in the RENDERER'S order,
+   which is not alphabetical, and condition 6 compares `restored_digest`
+   against `previous_digest` with `!=`. A directory walk cannot recover that
+   order. `stage` therefore writes a `ReleaseTreeManifest.v1` recording it,
+   stored OUTSIDE the release directory because a file inside would read back
+   as a path the renderer does not produce. The manifest supplies ORDER only:
+   every path and byte is still read off the host, the manifest's path list is
+   compared with the walk in both directions, and a missing manifest yields a
+   `None` digest rather than a guessed one.
+3. **`ObservationRequest` does not carry what the schema requires.** It has
+   `release`, `paths`, `integrity_counters` and `probe_slots` — and the schema
+   needs a per-probe `expectation` "derived from the desired state", a route
+   list by declared id, a canary plan with its receiver, an `environment` and a
+   `host_target_id`. None of those are things the facility holds. They arrive
+   here on a `PromotionContext` supplied at construction; the alternative is
+   the facility inventing them, and a guessed expectation manufactures a pass.
+4. **`rollback(target, release)` is handed no observation request.** The
+   facility therefore keeps the standing `PromotionContext` and substitutes the
+   restored release, which is why that context is a constructor argument rather
+   than a per-call one.
+
 ## 0.3.0a3 — unreleased, NEVER BUILT
 
 The successor identity, allocated 2026-09-01 because `0.3.0a2` had come to name
