@@ -1,18 +1,23 @@
 # Kernel 0.1.0a101 release handoff
 
-Status: blocked until the separated publisher/verifier facility and the a101
-import-boundary repair have both reached protected `main`.
+Status: ready for the separately authorized a101 release transition. The
+separated publisher/verifier facility and the a101 import-boundary repair are
+both on protected `main`.
 
 Kernel 0.1.0a100 is published and tagged but is not adoptable: a clean install
-of its declared dependency set cannot import the package surface because the
-root import reaches a product-owned PostgreSQL driver. The a101 repair keeps
-that driver in the product deployment and makes the kernel's package-root and
-application-factory imports database-free.
+of its declared dependency set cannot import the public `create_app` symbol
+when a product supplies database URLs but has not installed its PostgreSQL
+driver. The package-root import itself is database-free. This is a
+long-standing public import-boundary defect observed identically in a98, a99
+and a100, not an a100 regression. The a101 repair keeps the driver in the
+product deployment and makes the application-factory import database-free.
 
 The a101 release is single-dispatch:
 
-1. Merge the publisher/verifier separation and durable-record facility.
-2. Rebase and merge the import-boundary repair.
+1. Confirm the publisher/verifier separation and durable-record facility are
+   on protected `main`.
+2. Confirm import-boundary repair `6f1a2a47` is an ancestor of protected
+   `main`.
 3. Authorize a101 in a dedicated authorization-only commit, then allocate it
    in the immediate child commit.
 4. Dispatch the publisher once from that exact protected-main source.
