@@ -91,6 +91,28 @@ def _string_values(node: Any) -> list[str]:
     return found
 
 
+def _load_release_facility():
+    """Import `scripts/release_facility.py` so its refusals can be EXERCISED.
+
+    The AST checks above read shape; a refusal is behaviour, and a guard that
+    only reads shape cannot tell a real refusal from a well-named one.
+    """
+    import importlib.util
+    import sys
+
+    scripts = PROJECT_ROOT / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    spec = importlib.util.spec_from_file_location(
+        "release_facility", scripts / "release_facility.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _references(path: Path, needle: str) -> bool:
     """Does the PARSED document contain `needle` in any string value?"""
     tree = _load_yaml(path)
@@ -118,9 +140,9 @@ def test_the_listed_facilitys_package_directory_exists_and_matches() -> None:
     pyproject_path = package_dir / "pyproject.toml"
     assert pyproject_path.is_file(), f"{pyproject_path} does not exist"
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    assert (
-        pyproject["tool"]["poetry"]["name"] == "dotmac-deployment-foundation"
-    ), "the allowlisted package_dir's pyproject.toml declares a different name"
+    assert pyproject["tool"]["poetry"]["name"] == "dotmac-deployment-foundation", (
+        "the allowlisted package_dir's pyproject.toml declares a different name"
+    )
 
     dossier_path = package_dir / "EXTRACTION.toml"
     assert dossier_path.is_file(), f"{dossier_path} does not exist"
@@ -240,9 +262,9 @@ def test_the_digest_gate_runs_where_the_publish_credential_does_not_exist() -> N
         "where the publish credential does not exist."
     )
     assert "FORGEJO_PUBLISH_TOKEN" not in _job_strings("build")
-    assert "verify-candidate" in _job_strings(
-        "build"
-    ), "the digest gate left the uncredentialed job"
+    assert "verify-candidate" in _job_strings("build"), (
+        "the digest gate left the uncredentialed job"
+    )
 
 
 def test_the_candidate_is_resolved_from_the_receipt_not_a_hard_coded_repo() -> None:
@@ -287,6 +309,194 @@ def test_the_registry_readback_compares_against_the_receipt() -> None:
         "committed receipt"
     )
     assert "candidate_receipt" in called
+
+
+# ── 2b. the registry proof covers EVERY published artifact, fetched by name ──
+#
+# The defect this section exists for: `cmd_verify_registry` fetched with
+# `pip download --no-deps --only-binary :all:` and compared the one wheel that
+# came back. `publish` runs `twine upload dist/*`, so the index holds a wheel
+# AND an sdist, and a resolver has no reason to retrieve the second one — the
+# candidate receipt records the sdist's digest and nothing read it.
+#
+# `dotmac-deployment-control` 0.1.0a3 is the recorded precedent, in those exact
+# terms: the sdist was on the index the whole time, nothing had ever compared
+# its bytes, and the version was ruled unprovable.
+
+
+def _facility_function(name: str) -> ast.FunctionDef:
+    script = PROJECT_ROOT / "scripts" / "release_facility.py"
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    return next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def _resolver_fetch(function: ast.AST) -> bool:
+    """Does this function ask a RESOLVER for the artifacts?
+
+    Structural rather than textual, for the same reason `_string_values` is:
+    the function's docstring argues at length about `pip download`, and a grep
+    would match the argument against itself. Only the string constants that are
+    actual subprocess arguments are read, and a docstring is an `ast.Expr`
+    statement rather than a call argument.
+    """
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        for argument in ast.walk(node):
+            if isinstance(argument, ast.Constant) and argument.value in {
+                "download",
+                "--index-url",
+                "--extra-index-url",
+            }:
+                return True
+    return False
+
+
+def test_the_registry_proof_does_not_ask_a_resolver_for_the_artifacts() -> None:
+    assert not _resolver_fetch(_facility_function("cmd_verify_registry")), (
+        "verify-registry resolves the pin instead of requesting each recorded "
+        "filename. A resolver takes the wheel and leaves the sdist, which is "
+        "correct pip behaviour and no proof at all about the sdist's bytes."
+    )
+
+
+def test_the_resolver_detector_would_catch_a_reinstated_pip_download() -> None:
+    """The check above passes over an absence. Plant it and watch it fire."""
+    planted = ast.parse(
+        "def cmd_verify_registry(args):\n"
+        "    subprocess.run([str(pip), 'download', '--index-url', args.index])\n"
+    )
+    assert _resolver_fetch(planted)
+
+
+def test_the_registry_proof_requests_every_filename_the_receipt_binds() -> None:
+    """Both distribution forms, enumerated from the receipt and fetched by name."""
+    called = {
+        node.func.id
+        for node in ast.walk(_facility_function("cmd_verify_registry"))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "candidate_filenames" in called, (
+        "the fetch must enumerate the filenames the receipt binds, so the sdist "
+        "is requested rather than left to a resolver's preference"
+    )
+    attributes = {
+        node.func.attr
+        for node in ast.walk(_facility_function("cmd_verify_registry"))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "collect" in attributes, "the by-name registry read is not performed"
+
+
+def test_the_receipt_binds_the_sdist_too_or_the_release_refuses() -> None:
+    """A receipt that names only the wheel binds half of what `publish` uploads.
+
+    Read as behaviour, not as a spelling: the function is executed against a
+    receipt with no sdist block and must refuse.
+    """
+    facility = _load_release_facility()
+    with pytest.raises(facility.ReleaseRefused, match="no sdist"):
+        facility.candidate_artifacts(
+            {"filename": "x-1-py3-none-any.whl", "sha256": "0" * 64}
+        )
+
+
+def test_the_candidate_producer_records_the_sdist_it_will_publish() -> None:
+    """The receipt is the manifest, so the producer has to write both halves.
+
+    `foundation_candidate.py record` wrote the wheel's filename, size and
+    digest and nothing about the sdist — which is why `0.3.0a3`'s sdist block
+    had to be added to its receipt by hand. A comparison can only be as
+    complete as the record it compares against, so this asserts the RECORD.
+    """
+    source = (PROJECT_ROOT / "scripts" / "foundation_candidate.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    record = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "cmd_record"
+    )
+    keys = {
+        node.value
+        for node in ast.walk(record)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert "sdist" in keys, (
+        "the candidate receipt records only the wheel. `twine upload dist/*` "
+        "publishes the sdist too, and an unrecorded artifact reaches the index "
+        "bound to nothing."
+    )
+
+
+def test_every_releasable_candidate_receipt_binds_both_artifacts() -> None:
+    """Two committed receipts predate the sdist binding, and they are EXEMPT
+    on an enforceable premise rather than grandfathered (AGENTS.md rule 25).
+
+    `foundation-candidate-0.3.0a1.json` and `-0.3.0a2.json` name a wheel and no
+    sdist. Neither may be edited: `CandidateArtifact.v1` describes bytes that
+    were built once and cannot become false, and `0.3.0a2`'s digest is the
+    ANCHOR of the disposition log's hash chain — backfilling it would rewrite
+    an append-only record to make a guard quieter.
+
+    The premise that makes their exemption enforceable, and that this test
+    ASSERTS rather than assumes: `cmd_resolve` refuses any version that is not
+    the version this tree declares, so a receipt whose version is not the
+    declared one cannot reach a release at all. Re-declare one of them and this
+    fails here — which is the whole difference between an exemption and an
+    unmonitored region.
+    """
+    facility = _load_release_facility()
+    declared = tomllib.loads(
+        (
+            PROJECT_ROOT
+            / "packages"
+            / "dotmac-deployment-foundation"
+            / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+    )["tool"]["poetry"]["version"]
+
+    receipts = sorted(
+        (PROJECT_ROOT / "docs" / "inventories").glob("foundation-candidate-*.json")
+    )
+    assert receipts, "no candidate receipts found; this check would be vacuous"
+    unbound: list[str] = []
+    bound = 0
+    for path in receipts:
+        document = _load_json(path)
+        if document.get("schema") != "CandidateArtifact.v1":
+            continue
+        try:
+            names = facility.candidate_filenames(document)
+        except SystemExit:
+            unbound.append(str(document.get("version")))
+            continue
+        bound += 1
+        assert len(names) == 2, f"{path.name} binds {sorted(names)}"
+        assert any(name.endswith(".whl") for name in names), path.name
+        assert any(name.endswith(".tar.gz") for name in names), path.name
+
+    assert bound, "no receipt binds both artifacts; this check would be vacuous"
+    assert declared not in unbound, (
+        f"this tree declares {declared}, whose committed receipt binds no "
+        "sdist. The exemption's premise was that such a receipt can never be "
+        "released; declaring it removes the premise."
+    )
+
+
+def test_the_verify_job_reads_the_index_as_the_read_only_identity() -> None:
+    """Whether the PUBLISHER can read its own upload is a different claim, and
+    the wait step above already makes it."""
+    verify = _job_strings("verify")
+    assert "FORGEJO_READ_TOKEN" in verify, (
+        "the by-name fetch must authenticate as ci-reader, not as the publisher"
+    )
+    assert "ci-reader" in verify
 
 
 # ── 3 & 4. deployment-conformance.yml: no publish token, no public PyPI ─────

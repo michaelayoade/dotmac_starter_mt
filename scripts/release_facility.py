@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -71,6 +72,7 @@ from typing import Any, Final
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import version_binding_guard
+from registry_read import RegistryReader
 from release_module import ReleaseRefused, secret_shaped
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -347,20 +349,91 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def require_candidate_bytes(receipt: dict[str, Any], wheel: Path) -> None:
-    """The wheel in hand must BE the recorded candidate. Digest first."""
+def candidate_artifacts(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every file the receipt binds, keyed by filename.
+
+    BOTH distribution forms, and the sdist is not optional. `twine upload
+    dist/*` publishes the sdist beside the wheel, so a receipt that names only
+    the wheel binds half of what a release puts on the index — and the half it
+    leaves loose is the one a resolver never fetches, which is precisely how
+    `dotmac-deployment-control` 0.1.0a3 became permanently unprovable. A
+    receipt that cannot name the sdist cannot authorise the upload, so this
+    refuses rather than silently verifying one file out of two.
+    """
+    wheel_name = receipt.get("filename")
+    wheel_digest = receipt.get("sha256")
+    if not wheel_name or not wheel_digest:
+        raise ReleaseRefused(
+            "the candidate receipt names no wheel filename/sha256; it cannot "
+            "bind the bytes a release publishes"
+        )
+    sdist = receipt.get("sdist")
+    if (
+        not isinstance(sdist, dict)
+        or not sdist.get("filename")
+        or not sdist.get("sha256")
+    ):
+        raise ReleaseRefused(
+            "the candidate receipt carries no sdist filename/sha256. `twine "
+            "upload dist/*` publishes the sdist too, so an unrecorded sdist "
+            "reaches the index bound to nothing. Record it, or do not publish."
+        )
+    return {
+        str(wheel_name): {
+            "sha256": str(wheel_digest),
+            "size_bytes": receipt.get("size_bytes"),
+        },
+        str(sdist["filename"]): {
+            "sha256": str(sdist["sha256"]),
+            "size_bytes": sdist.get("size_bytes"),
+        },
+    }
+
+
+def candidate_filenames(receipt: dict[str, Any]) -> frozenset[str]:
+    """The exact filename set an enumerated by-name fetch must request."""
+    return frozenset(candidate_artifacts(receipt))
+
+
+def require_candidate_bytes(receipt: dict[str, Any], dist: Path) -> None:
+    """EVERY file in hand must BE the recorded candidate. Digest first.
+
+    Both directions, and the second one matters as much as the first: a file
+    the receipt does not name is refused too, because `publish` uploads the
+    whole directory and an unrecorded file in it would reach the index having
+    been compared with nothing.
+    """
+    dist = Path(dist)
+    expected = candidate_artifacts(receipt)
+    present = {
+        path.name: path
+        for path in sorted(dist.iterdir())
+        if path.is_file()
+        and (path.name.endswith(".whl") or path.name.endswith(".tar.gz"))
+    }
+
     problems: list[str] = []
-    actual = sha256_of(wheel)
-    if actual != receipt["sha256"]:
-        problems.append(f"sha256 {actual} != the receipt's {receipt['sha256']}")
-    if wheel.name != receipt["filename"]:
-        problems.append(f"filename {wheel.name!r} != {receipt['filename']!r}")
-    expected_size = receipt.get("size_bytes")
-    if isinstance(expected_size, int) and wheel.stat().st_size != expected_size:
-        problems.append(f"size {wheel.stat().st_size} != the receipt's {expected_size}")
+    for name in sorted(set(expected) - set(present)):
+        problems.append(f"{name}: recorded by the receipt, absent here")
+    for name in sorted(set(present) - set(expected)):
+        problems.append(f"{name}: present here, named by no receipt entry")
+
+    for name in sorted(set(expected) & set(present)):
+        path = present[name]
+        actual = sha256_of(path)
+        if actual != expected[name]["sha256"]:
+            problems.append(
+                f"{name}: sha256 {actual} != the receipt's {expected[name]['sha256']}"
+            )
+        expected_size = expected[name]["size_bytes"]
+        if isinstance(expected_size, int) and path.stat().st_size != expected_size:
+            problems.append(
+                f"{name}: size {path.stat().st_size} != the receipt's {expected_size}"
+            )
+
     if problems:
         raise ReleaseRefused(
-            "the fetched artifact is NOT the recorded candidate:\n  - "
+            "the artifacts in hand are NOT the recorded candidate:\n  - "
             + "\n  - ".join(problems)
             + "\nRebuilding is not the repair. The downstream receipts name "
             "these bytes; bytes that merely resemble them are a claim."
@@ -387,9 +460,9 @@ def cmd_verify_candidate(args: argparse.Namespace) -> None:
     """
     resolve(args.distribution)
     _, receipt = candidate_receipt(args.distribution, args.version)
-    wheel = _sole_wheel(Path(args.dist))
-    require_candidate_bytes(receipt, wheel)
-    print(f"{wheel.name}: matches the recorded candidate ({receipt['sha256']})")
+    require_candidate_bytes(receipt, Path(args.dist))
+    for name in sorted(candidate_filenames(receipt)):
+        print(f"{name}: matches the recorded candidate")
 
 
 def _venv(path: Path) -> tuple[Path, Path]:
@@ -644,67 +717,72 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
 
 
 def cmd_verify_registry(args: argparse.Namespace) -> None:
-    """Post-publish: install the PUBLISHED release from the private index and
-    re-run the same CLI smoke.
+    """Post-publish: prove the index holds EVERY recorded byte, then install
+    those exact bytes and re-run the CLI smoke.
 
-    `--index` carries the authenticated simple-index URL. An exact pin only: a
-    range would let this pass against a version nobody published in this run.
+    `--index` is the CREDENTIAL-FREE simple-index URL; the read credential
+    arrives in `REGISTRY_PASSWORD` and never appears in `argv` or in a URL. An
+    exact pin only: a range would let this pass against a version nobody
+    published in this run.
 
-    Unlike `release_adapter.py verify-registry`, there is deliberately NO
-    `--extra-index-url` here. `dotmac-deployment-foundation` declares zero
-    runtime dependencies (its own `pyproject.toml` names nothing beyond
-    `python`), so there is nothing for pip to need from the public index —
-    pairing one in would only add a public name to the resolution the private
-    package never asked for.
+    ## Why the fetch is BY NAME and not a resolver's choice
+
+    This step used to fetch with `pip download --no-deps --only-binary :all:`
+    and compare the one wheel that came back. That asks the resolver's
+    question, not the release's: `publish` runs `twine upload dist/*`, so the
+    index ends up holding a wheel AND an sdist, and a resolver has no reason to
+    retrieve the second one. The receipt records the sdist's digest and nothing
+    read it — so the sdist's published bytes were compared with nothing, from
+    the candidate fetch all the way to the index.
+
+    That is the exact gap that made `dotmac-deployment-control` 0.1.0a3
+    unprovable, and it is recorded there in those terms: "The sdist was on the
+    index the whole time; nothing had ever compared its bytes." The repair is
+    not to narrow the claim to whatever pip retrieves. Every filename the
+    receipt binds is requested from the index BY NAME, the index must list each
+    exactly once, and every one is compared.
+
+    The comparison is against the RECEIPT, never against what `publish`
+    uploaded — comparing a download with the upload compares an upload with
+    itself and passes however wrong the upload was.
     """
     distribution, _, version = args.pin.partition("==")
     if not version:
         raise ReleaseRefused(f"{args.pin!r} is not an exact pin (name==version)")
     entry = resolve(distribution)
     _, receipt = candidate_receipt(distribution, version)
+    expected = candidate_filenames(receipt)
+
+    password = os.environ.get("REGISTRY_PASSWORD", "")
+    if not password:
+        raise ReleaseRefused(
+            "REGISTRY_PASSWORD is required. The index read is authenticated as "
+            f"{args.login!r}, and the credential is passed in the environment "
+            "rather than in the index URL or in argv."
+        )
+    project_index = args.index.rstrip("/") + f"/{distribution}/"
+    reader = RegistryReader(project_index, args.login, password)
+    password = ""
 
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
 
-        # FETCH FIRST, and compare against the RECEIPT. The thing being tested
-        # is "did the index end up holding the candidate's bytes", and the only
-        # answer that settles it comes from the index. Comparing the download
-        # with what `publish` uploaded would compare an upload with itself and
-        # pass however wrong the upload was.
         fetched = Path(tmp) / "fetched"
-        fetched.mkdir()
-        subprocess.run(
-            [
-                str(pip),
-                "download",
-                "--quiet",
-                "--no-deps",
-                "--only-binary",
-                ":all:",
-                "--index-url",
-                args.index,
-                "--dest",
-                str(fetched),
-                args.pin,
-            ],
-            check=True,
-        )
-        served = _sole_wheel(fetched)
-        require_candidate_bytes(receipt, served)
-        print(
-            f"the index serves the recorded candidate: {served.name} "
-            f"({receipt['sha256']})"
-        )
+        reader.collect(expected, fetched)
+        require_candidate_bytes(receipt, fetched)
+        for name in sorted(expected):
+            print(f"the index serves the recorded candidate: {name}")
 
         # Install THOSE bytes, not a second resolution of the same pin.
+        served = _sole_wheel(fetched)
         subprocess.run(
             [str(pip), "install", "--quiet", "--no-index", str(served)],
             check=True,
         )
         _cli_smoke(python, entry["entry_point"], Path(args.descriptor))
-    print(f"registry verification OK for {args.pin}")
+    print(f"registry verification OK for {args.pin} ({len(expected)} artifacts)")
 
 
 def main() -> int:
@@ -746,9 +824,18 @@ def main() -> int:
 
     p = sub.add_parser(
         "verify-registry",
-        help="install an exact pin from the index and smoke its CLI",
+        help="fetch every published artifact by name, compare, install, smoke",
     )
-    p.add_argument("--index", required=True)
+    p.add_argument(
+        "--index",
+        required=True,
+        help="credential-free simple-index root (no project path, no userinfo)",
+    )
+    p.add_argument(
+        "--login",
+        default="ci-reader",
+        help="the READ-only registry identity; the credential is REGISTRY_PASSWORD",
+    )
     p.add_argument("--pin", required=True)
     p.add_argument("--descriptor", required=True)
     p.set_defaults(func=cmd_verify_registry)
