@@ -769,6 +769,15 @@ class ObservabilityPromotionFacility:
         self._command_timeout = command_timeout_seconds
         self._transfer_timeout = transfer_timeout_seconds
         self._http_timeout = http_timeout_seconds
+        #: What :meth:`stage` read off the host, PRESERVED for every later
+        #: read-back on this facility. Reading the previous pointer is only
+        #: half of requirement 2; carrying it forward is the other half, and
+        #: nothing else can. The control plane's own ``ObservationRequest``
+        #: has no field for it, and a null ``release.previous`` on a promotion
+        #: that is not the first is `RECEIPT-NO-ROLLBACK-TARGET` — the receipt
+        #: is refused. So the pointer this facility READ is the pointer this
+        #: facility reports, rather than one the caller re-supplies.
+        self._staged: StagedRelease | None = None
 
     # ── target binding ──────────────────────────────────────────────────
 
@@ -975,12 +984,13 @@ class ObservabilityPromotionFacility:
             raise
         self._run([self._tools.chmod, "-R", self._tools.immutable_mode, release_dir])
         self._activate(release)
-        return StagedRelease(
+        self._staged = StagedRelease(
             current=release,
             previous=previous,
             tree_digest=digest,
             previous_shape=shape,
         )
+        return self._staged
 
     def _verify_transport(
         self, directory: str, entries: Sequence[tuple[str, bytes]]
@@ -1151,8 +1161,10 @@ class ObservabilityPromotionFacility:
                 integrity_counters=tuple(getattr(request, "integrity_counters", ())),
                 probe_slots=self._expect(getattr(request, "probe_slots", ())),
             )
+        preserved = self._staged.previous if self._staged is not None else None
         return replace(
             merged,
+            previous=merged.previous if merged.previous is not None else preserved,
             probe_slots=merged.probe_slots or self._context.probe_slots,
             route_probes=merged.route_probes or self._context.route_probes,
             canary=merged.canary or self._context.canary,
@@ -1511,8 +1523,15 @@ class ObservabilityPromotionFacility:
             reload_ok = False
         digest = self.release_tree_digest(restored) if restored else None
         succeeded = bool(reload_ok and restored == release and digest is not None)
+        # `previous` for the RESTORED host is the release that was just
+        # rolled away from — the pointer that was live immediately before this
+        # activation, which is exactly what the field means. Leaving it null
+        # would file a rolled-back receipt carrying `RECEIPT-NO-ROLLBACK-TARGET`
+        # for a promotion whose rollback target was never in doubt.
         request = replace(
-            self._standing_request(release), release=release, previous=None
+            self._standing_request(release),
+            release=release,
+            previous=self._staged.current if self._staged is not None else None,
         )
         return self._observe(
             request,

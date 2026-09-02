@@ -893,3 +893,50 @@ def test_accept_refuses_a_release_the_host_is_not_running(host, evaluators):
     facility.stage(SECOND_TREE, target=TARGET)
     with pytest.raises(ActivationNotObserved, match="host is running"):
         facility.accept(target=TARGET, release="r-old")
+
+
+# ── preservation: the pointer that was READ is the pointer that is REPORTED ──
+
+
+def test_the_read_pointer_is_preserved_into_a_later_read_back(host, evaluators):
+    """Reading the previous pointer is only half of the capability.
+
+    The control plane's own `ObservationRequest` has no field for it, and a
+    null `release.previous` on a promotion that is not the first is
+    `RECEIPT-NO-ROLLBACK-TARGET` — the receipt is refused. So the facility
+    carries forward what IT read, rather than letting the caller re-supply a
+    belief; that is the same defect `previous_image` has, one layer up.
+    """
+    host.seed_release("r-old", TREE)
+    facility = build(host, evaluators)
+    facility.stage(SECOND_TREE, target=TARGET)
+
+    class BareRequest:
+        release = "r-new"
+        paths = ()
+        integrity_counters = CONTEXT.integrity_counters
+        probe_slots = SLOTS
+
+    document = facility.observe(target=TARGET, request=BareRequest())
+    assert document["release"] == {"current": "r-new", "previous": "r-old"}
+
+
+def test_a_first_promotion_preserves_a_null_because_that_is_what_it_read(
+    host, evaluators
+):
+    facility = build(host, evaluators)
+    facility.stage(TREE, target=TARGET)
+    document = facility.observe(
+        target=TARGET, request=ObservationRequest(release="r-new")
+    )
+    assert document["release"] == {"current": "r-new", "previous": None}
+
+
+def test_the_rollback_read_back_names_the_release_it_rolled_away_from(host, evaluators):
+    """`previous` means the pointer live immediately before THIS activation."""
+    host.seed_release("r-old", TREE)
+    facility = build(host, evaluators)
+    staged = facility.stage(SECOND_TREE, target=TARGET)
+
+    document = facility.rollback(target=TARGET, release=staged.previous or "")
+    assert document["release"] == {"current": "r-old", "previous": "r-new"}

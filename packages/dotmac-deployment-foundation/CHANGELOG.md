@@ -36,8 +36,13 @@ What is here, and the failure each part prevents:
   release directory, made unwritable, and refused outright if that directory
   already exists. Never file by file: a single-file bind mount is bound to an
   inode, which is how the Observer host became append-only by hand (ADR-0002).
-- **A previous-pointer READER.** `read_previous_pointer` reads the symlink off
-  the host before anything changes. Three broken shapes that used to be
+- **A previous-pointer READER, and preservation.** `read_previous_pointer`
+  reads the symlink off the host before anything changes, and the value it read
+  is carried into every later read-back on that facility. Reading it is only
+  half the capability: the control plane's `ObservationRequest` has no field
+  for it, and a null `release.previous` on a promotion that is not the first is
+  `RECEIPT-NO-ROLLBACK-TARGET` — the receipt is refused. Letting the caller
+  re-supply it would reintroduce `previous_image`'s defect one layer up. Three broken shapes that used to be
   indistinguishable from a fresh host are now refusals: a regular file where
   the pointer belongs (activation here was never atomic), a symlink into
   nothing (the rollback target is already gone), and an unreadable link. `None`
