@@ -240,9 +240,9 @@ def test_the_digest_gate_runs_where_the_publish_credential_does_not_exist() -> N
         "where the publish credential does not exist."
     )
     assert "FORGEJO_PUBLISH_TOKEN" not in _job_strings("build")
-    assert "verify-candidate" in _job_strings("build"), (
-        "the digest gate left the uncredentialed job"
-    )
+    assert "verify-candidate" in _job_strings(
+        "build"
+    ), "the digest gate left the uncredentialed job"
 
 
 def test_the_candidate_is_resolved_from_the_receipt_not_a_hard_coded_repo() -> None:

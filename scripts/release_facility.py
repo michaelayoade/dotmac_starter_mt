@@ -352,16 +352,12 @@ def require_candidate_bytes(receipt: dict[str, Any], wheel: Path) -> None:
     problems: list[str] = []
     actual = sha256_of(wheel)
     if actual != receipt["sha256"]:
-        problems.append(
-            f"sha256 {actual} != the receipt's {receipt['sha256']}"
-        )
+        problems.append(f"sha256 {actual} != the receipt's {receipt['sha256']}")
     if wheel.name != receipt["filename"]:
         problems.append(f"filename {wheel.name!r} != {receipt['filename']!r}")
     expected_size = receipt.get("size_bytes")
     if isinstance(expected_size, int) and wheel.stat().st_size != expected_size:
-        problems.append(
-            f"size {wheel.stat().st_size} != the receipt's {expected_size}"
-        )
+        problems.append(f"size {wheel.stat().st_size} != the receipt's {expected_size}")
     if problems:
         raise ReleaseRefused(
             "the fetched artifact is NOT the recorded candidate:\n  - "
