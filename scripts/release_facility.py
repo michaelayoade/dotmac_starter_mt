@@ -59,16 +59,18 @@ Stdlib only, deliberately: this runs before anything is installed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
 import tomllib
 import zipfile
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import version_binding_guard
 from release_module import ReleaseRefused, secret_shaped
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -189,12 +191,7 @@ def cmd_inspect(args: argparse.Namespace) -> None:
     """
     entry = resolve(args.distribution)
     policy = entry["wheel_contents"]
-    wheels = sorted(Path(args.dist).glob("*.whl"))
-    if len(wheels) != 1:
-        raise ReleaseRefused(
-            f"expected exactly one wheel in {args.dist}, found {len(wheels)}"
-        )
-    wheel = wheels[0]
+    wheel = _sole_wheel(Path(args.dist))
 
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
@@ -256,6 +253,143 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             + "\n  - ".join(problems)
         )
     print(f"{wheel.name}: content policy OK ({len(names)} entries)")
+
+
+def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, Any]]:
+    """The committed `CandidateArtifact.v1` for exactly this facility+version.
+
+    THE RECEIPT IS THE ONLY SOURCE OF THE CANDIDATE'S COORDINATES — repository
+    included. Nothing here takes an owning repository, a run, an artifact or a
+    digest from a workflow input or from a constant, and that is a correctness
+    property rather than tidiness:
+
+      * a dispatch input lets someone name a version whose receipt says
+        something else, and the two would disagree silently. Reading digest,
+        repository, run and artifact from ONE already-validated record makes
+        that unrepresentable;
+      * `michaelayoade/dotmac_starter_mt` as a literal becomes wrong the day
+        the Foundation's lanes move to their own repository. The receipt
+        travels with the artifact and names its own home, so that migration
+        edits a record, not this lane.
+
+    Discovered by SCHEMA rather than by filename, and by the SAME schema
+    constant `version_binding_guard` binds versions with — imported rather
+    than respelled, because two copies of a schema name drift silently and
+    this one decides whether a receipt is seen at all.
+    """
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    directory = REPO_ROOT / version_binding_guard.INVENTORIES
+    for path in sorted(directory.glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        if document.get("schema") != version_binding_guard.CANDIDATE_SCHEMA:
+            continue
+        if document.get("facility") != distribution:
+            continue
+        if str(document.get("version")) != version:
+            continue
+        matches.append((path, document))
+
+    if not matches:
+        raise ReleaseRefused(
+            f"{distribution} {version}: no committed "
+            f"{version_binding_guard.CANDIDATE_SCHEMA} receipt. This lane "
+            "publishes the bytes `foundation-candidate.yml` already built; it "
+            "does not build them. Build the candidate, then commit its "
+            "receipt, then release."
+        )
+    if len(matches) > 1:
+        listed = ", ".join(str(path.relative_to(REPO_ROOT)) for path, _ in matches)
+        raise ReleaseRefused(
+            f"{distribution} {version}: {len(matches)} candidate receipts name "
+            f"this version ({listed}). One version, one artifact — refusing "
+            "rather than choosing one."
+        )
+
+    path, receipt = matches[0]
+    missing = [
+        field
+        for field in ("repository", "run_id", "artifact_id", "filename", "sha256")
+        if not receipt.get(field)
+    ]
+    if missing:
+        raise ReleaseRefused(
+            f"{path.relative_to(REPO_ROOT)} is missing {', '.join(missing)}. A "
+            "receipt that cannot be resolved back to bytes is not a coordinate."
+        )
+    if receipt.get("published"):
+        raise ReleaseRefused(
+            f"{path.relative_to(REPO_ROOT)} already records published=true for "
+            f"{distribution} {version}. Republishing a version cannot produce "
+            "the same identity twice."
+        )
+    return path, receipt
+
+
+def _sole_wheel(dist: Path) -> Path:
+    wheels = sorted(Path(dist).glob("*.whl"))
+    if len(wheels) != 1:
+        raise ReleaseRefused(
+            f"expected exactly one wheel in {dist}, found {len(wheels)}"
+        )
+    return wheels[0]
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def require_candidate_bytes(receipt: dict[str, Any], wheel: Path) -> None:
+    """The wheel in hand must BE the recorded candidate. Digest first."""
+    problems: list[str] = []
+    actual = sha256_of(wheel)
+    if actual != receipt["sha256"]:
+        problems.append(f"sha256 {actual} != the receipt's {receipt['sha256']}")
+    if wheel.name != receipt["filename"]:
+        problems.append(f"filename {wheel.name!r} != {receipt['filename']!r}")
+    expected_size = receipt.get("size_bytes")
+    if isinstance(expected_size, int) and wheel.stat().st_size != expected_size:
+        problems.append(f"size {wheel.stat().st_size} != the receipt's {expected_size}")
+    if problems:
+        raise ReleaseRefused(
+            "the fetched artifact is NOT the recorded candidate:\n  - "
+            + "\n  - ".join(problems)
+            + "\nRebuilding is not the repair. The downstream receipts name "
+            "these bytes; bytes that merely resemble them are a claim."
+        )
+
+
+def cmd_resolve_candidate(args: argparse.Namespace) -> None:
+    """Emit the recorded candidate's coordinates for the workflow to fetch."""
+    resolve(args.distribution)
+    path, receipt = candidate_receipt(args.distribution, args.version)
+    for key in ("repository", "run_id", "artifact_id", "filename", "sha256"):
+        print(f"candidate_{key}={receipt[key]}")
+    print(f"candidate_receipt={path.relative_to(REPO_ROOT)}")
+
+
+def cmd_verify_candidate(args: argparse.Namespace) -> None:
+    """Refuse unless the fetched bytes are the recorded candidate.
+
+    Runs in the job that has NO access to the publish credential, so a
+    mismatched artifact fails before the token is reachable. The precedent is
+    `dotmac-deployment-control` 0.1.0a3: a run that published and then failed
+    its own verification, leaving bytes on an index that are permanently
+    unprovable. Verification after upload is not verification.
+    """
+    resolve(args.distribution)
+    _, receipt = candidate_receipt(args.distribution, args.version)
+    wheel = _sole_wheel(Path(args.dist))
+    require_candidate_bytes(receipt, wheel)
+    print(f"{wheel.name}: matches the recorded candidate ({receipt['sha256']})")
 
 
 def _venv(path: Path) -> tuple[Path, Path]:
@@ -527,20 +661,46 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     if not version:
         raise ReleaseRefused(f"{args.pin!r} is not an exact pin (name==version)")
     entry = resolve(distribution)
+    _, receipt = candidate_receipt(distribution, version)
 
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
+
+        # FETCH FIRST, and compare against the RECEIPT. The thing being tested
+        # is "did the index end up holding the candidate's bytes", and the only
+        # answer that settles it comes from the index. Comparing the download
+        # with what `publish` uploaded would compare an upload with itself and
+        # pass however wrong the upload was.
+        fetched = Path(tmp) / "fetched"
+        fetched.mkdir()
         subprocess.run(
             [
                 str(pip),
-                "install",
+                "download",
                 "--quiet",
+                "--no-deps",
+                "--only-binary",
+                ":all:",
                 "--index-url",
                 args.index,
+                "--dest",
+                str(fetched),
                 args.pin,
             ],
+            check=True,
+        )
+        served = _sole_wheel(fetched)
+        require_candidate_bytes(receipt, served)
+        print(
+            f"the index serves the recorded candidate: {served.name} "
+            f"({receipt['sha256']})"
+        )
+
+        # Install THOSE bytes, not a second resolution of the same pin.
+        subprocess.run(
+            [str(pip), "install", "--quiet", "--no-index", str(served)],
             check=True,
         )
         _cli_smoke(python, entry["entry_point"], Path(args.descriptor))
@@ -560,6 +720,23 @@ def main() -> int:
     p.add_argument("distribution")
     p.add_argument("--dist", required=True)
     p.set_defaults(func=cmd_inspect)
+
+    p = sub.add_parser(
+        "resolve-candidate",
+        help="emit the recorded candidate's coordinates (repo, run, artifact)",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.set_defaults(func=cmd_resolve_candidate)
+
+    p = sub.add_parser(
+        "verify-candidate",
+        help="refuse unless the fetched bytes ARE the recorded candidate",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--dist", required=True)
+    p.set_defaults(func=cmd_verify_candidate)
 
     p = sub.add_parser("verify-wheel", help="install the built wheel and smoke its CLI")
     p.add_argument("distribution")

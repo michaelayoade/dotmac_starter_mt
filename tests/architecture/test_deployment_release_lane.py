@@ -41,6 +41,7 @@ heuristic that has to remember to strip it.
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import tomllib
@@ -177,6 +178,115 @@ def test_release_facility_reasserts_freshness_before_publish_and_before_verify()
         steps = workflow["jobs"][job_name]["steps"]
         blob = "\n".join(str(step.get("run", "")) for step in steps)
         assert "assert_current_main.sh" in blob, job_name
+
+
+# ── the lane consumes a candidate and cannot build one ──────────────────────
+
+
+def _job_strings(job_name: str) -> str:
+    workflow = _load_yaml(RELEASE_WORKFLOW)
+    return "\n".join(_string_values(workflow["jobs"][job_name]))
+
+
+def _mentions_poetry(tree: Any) -> bool:
+    """Structural, so the explanatory COMMENTS naming `poetry build` — which
+    exist precisely to stop someone reinstating it — cannot trip this."""
+    return any("poetry" in value.lower() for value in _string_values(tree))
+
+
+def test_the_release_lane_cannot_build_what_it_publishes() -> None:
+    """`poetry build` GONE from the publish path, not merely unused.
+
+    This lane used to build the wheel it published. It now fetches the one
+    `foundation-candidate.yml` already built, digest-checked against the
+    committed receipt. Leaving the build toolchain installed "in case" would
+    leave `poetry build` one edit away from being reachable again on the path
+    to the publish credential — so the toolchain is absent, and this is what
+    keeps it absent.
+    """
+    assert not _mentions_poetry(_load_yaml(RELEASE_WORKFLOW)), (
+        "release-facility.yml references poetry. This lane publishes the "
+        "candidate's exact bytes; a build step here means the published "
+        "artifact is not the one the downstream receipts name."
+    )
+
+
+def test_the_poetry_detector_would_catch_a_reinstated_build() -> None:
+    """The check above passes over an absence, which passes for the wrong
+    reason if the predicate is broken. Plant the thing and watch it fire."""
+    workflow = _load_yaml(RELEASE_WORKFLOW)
+    assert not _mentions_poetry(workflow)
+    planted = copy.deepcopy(workflow)
+    planted["jobs"]["build"]["steps"].append(
+        {"name": "Build wheel + sdist", "run": "poetry build"}
+    )
+    assert _mentions_poetry(planted)
+
+
+def test_the_digest_gate_runs_where_the_publish_credential_does_not_exist() -> None:
+    """Structural, not incidental — the point the review asked to nail down.
+
+    A mismatched artifact must fail in a job the publish token cannot reach.
+    `build` declares no `environment:`, so `FORGEJO_PUBLISH_TOKEN` is
+    unreachable from it; the digest gate lives there. Moving `verify-candidate`
+    into `publish` — or giving `build` the environment — would silently
+    reproduce `dotmac-deployment-control` 0.1.0a3: published first, verified
+    after, permanently unprovable.
+    """
+    workflow = _load_yaml(RELEASE_WORKFLOW)
+    build_job = workflow["jobs"]["build"]
+    assert "environment" not in build_job, (
+        "the build job acquired an environment. The digest gate must run "
+        "where the publish credential does not exist."
+    )
+    assert "FORGEJO_PUBLISH_TOKEN" not in _job_strings("build")
+    assert "verify-candidate" in _job_strings(
+        "build"
+    ), "the digest gate left the uncredentialed job"
+
+
+def test_the_candidate_is_resolved_from_the_receipt_not_a_hard_coded_repo() -> None:
+    """The owning repository is DATA, because it stops being this one.
+
+    After the Foundation's lanes move to their own repository the candidate is
+    no longer here. A literal owner would be wrong that day; the receipt
+    travels with the artifact and names its own home, so the migration edits a
+    record rather than this lane. It also removes an error class now: a
+    dispatch input could name a version whose receipt says something else.
+    """
+    build = _job_strings("build")
+    assert "candidate_repository" in build, "the fetch must read the receipt"
+    assert "resolve-candidate" in build
+    assert "michaelayoade/dotmac_starter_mt" not in build, (
+        "the candidate's owning repository is hard-coded. It comes from the "
+        "receipt, which is what survives the split."
+    )
+
+
+def test_the_registry_readback_compares_against_the_receipt() -> None:
+    """Never against what `publish` uploaded.
+
+    Comparing the download with the upload compares an upload with itself and
+    passes however wrong the upload was. The question is whether the INDEX
+    ended up holding the candidate's bytes, and only the receipt answers it.
+    """
+    script = PROJECT_ROOT / "scripts" / "release_facility.py"
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "cmd_verify_registry"
+    )
+    called = {
+        node.func.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "require_candidate_bytes" in called, (
+        "verify-registry must compare the bytes the index served against the "
+        "committed receipt"
+    )
+    assert "candidate_receipt" in called
 
 
 # ── 3 & 4. deployment-conformance.yml: no publish token, no public PyPI ─────
