@@ -164,12 +164,43 @@ def cmd_resolve(args: argparse.Namespace) -> None:
             f"pyproject declares {manifest['name']!r}, dispatched "
             f"{args.distribution!r}"
         )
-    if args.version and manifest["version"] != args.version:
-        raise ReleaseRefused(
-            f"{args.distribution}: dispatched version {args.version!r} != "
-            f"package version {manifest['version']!r}. The version is not "
-            "inferred; fix one of them."
-        )
+    # A FROZEN CANDIDATE'S IDENTITY COMES FROM ITS RECEIPT, NOT FROM SOURCE.
+    #
+    # This used to compare the dispatched version against `pyproject.toml`
+    # unconditionally, and that is the `[image]` circularity in a new coat: a
+    # candidate whose identity is re-derived from the CURRENT tree is not
+    # frozen. Once `foundation-candidate.yml` has built a version, its bytes
+    # and its version are one immutable fact recorded in
+    # `CandidateArtifact.v1`; the tree then moves on, and the moment it
+    # declares a successor the already-built candidate became unreleasable —
+    # not because anything was wrong with it, but because the lane was asking
+    # the wrong document who it was.
+    #
+    # It also refused for the WRONG REASON, which is the sharper defect. A
+    # frozen candidate that must not ship has a record that says so — a
+    # `CandidateDisposition.v1` — and the version-binding guard reads it. A
+    # source-version mismatch that happens to block the same release is a
+    # coincidence standing where a reason belongs, and it stops holding the
+    # instant somebody bumps a version for an unrelated purpose.
+    #
+    # So: if a receipt names this version, the receipt is the identity and no
+    # source comparison happens at all. If none does — the version has never
+    # been built — the tree is the only identity there is, and equality is
+    # still required, because a version nobody has built must be the version
+    # this tree declares or it names nothing.
+    version = args.version
+    if version:
+        frozen = find_candidate_receipt(args.distribution, version)
+        if frozen is None and manifest["version"] != version:
+            raise ReleaseRefused(
+                f"{args.distribution}: dispatched version {version!r} != "
+                f"package version {manifest['version']!r}, and no committed "
+                f"{version_binding_guard.CANDIDATE_SCHEMA} receipt names "
+                f"{version!r}. An unbuilt version is identified by this tree "
+                "alone, so the two must agree; fix one of them."
+            )
+    else:
+        version = manifest["version"]
 
     # Consumed by the workflow via $GITHUB_OUTPUT. Deliberately no db_schema,
     # manifest_attr or kernel_floor — a facility has none, and emitting an
@@ -177,8 +208,8 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     # "absent".
     for key in ("package_dir", "entry_point", "tag_prefix"):
         print(f"{key}={entry[key]}")
-    print(f"version={manifest['version']}")
-    print(f"tag={entry['tag_prefix']}{manifest['version']}")
+    print(f"version={version}")
+    print(f"tag={entry['tag_prefix']}{version}")
 
 
 def cmd_inspect(args: argparse.Namespace) -> None:
@@ -257,8 +288,17 @@ def cmd_inspect(args: argparse.Namespace) -> None:
     print(f"{wheel.name}: content policy OK ({len(names)} entries)")
 
 
-def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, Any]]:
-    """The committed `CandidateArtifact.v1` for exactly this facility+version.
+def find_candidate_receipt(
+    distribution: str, version: str
+) -> tuple[Path, dict[str, Any]] | None:
+    """The committed `CandidateArtifact.v1` for this facility+version, or None.
+
+    ABSENCE IS A DIFFERENT ANSWER FROM A DEFECT, and separating them is what
+    lets `cmd_resolve` ask "is this version frozen?" without swallowing the
+    refusals that must still bite. Returns None only when NO receipt names the
+    version; a duplicate, an unresolvable or an already-published receipt still
+    raises, because each of those is a reason to stop rather than a reason to
+    fall back to the source tree.
 
     THE RECEIPT IS THE ONLY SOURCE OF THE CANDIDATE'S COORDINATES — repository
     included. Nothing here takes an owning repository, a run, an artifact or a
@@ -297,13 +337,7 @@ def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, 
         matches.append((path, document))
 
     if not matches:
-        raise ReleaseRefused(
-            f"{distribution} {version}: no committed "
-            f"{version_binding_guard.CANDIDATE_SCHEMA} receipt. This lane "
-            "publishes the bytes `foundation-candidate.yml` already built; it "
-            "does not build them. Build the candidate, then commit its "
-            "receipt, then release."
-        )
+        return None
     if len(matches) > 1:
         listed = ", ".join(str(path.relative_to(REPO_ROOT)) for path, _ in matches)
         raise ReleaseRefused(
@@ -330,6 +364,24 @@ def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, 
             "the same identity twice."
         )
     return path, receipt
+
+
+def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, Any]]:
+    """As :func:`find_candidate_receipt`, but absence is a refusal.
+
+    The release path proper needs the receipt to EXIST — it publishes bytes
+    somebody already built and does not build them.
+    """
+    found = find_candidate_receipt(distribution, version)
+    if found is None:
+        raise ReleaseRefused(
+            f"{distribution} {version}: no committed "
+            f"{version_binding_guard.CANDIDATE_SCHEMA} receipt. This lane "
+            "publishes the bytes `foundation-candidate.yml` already built; it "
+            "does not build them. Build the candidate, then commit its "
+            "receipt, then release."
+        )
+    return found
 
 
 def _sole_wheel(dist: Path) -> Path:
