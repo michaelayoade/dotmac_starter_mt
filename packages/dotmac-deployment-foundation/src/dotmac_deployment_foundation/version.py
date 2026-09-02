@@ -16,46 +16,60 @@ from __future__ import annotations
 
 from typing import Final
 
-#: ``0.3.0a2`` IS GONE, AND MUST NOT COME BACK. Do not "fix" this number back
-#: down, and do not add a local segment such as ``0.3.0a2+dev`` to it — that was
-#: the previous shape here and it was withdrawn on 2026-09-01, because it was an
-#: annotation on a claim that should not have been made at all.
+#: ``0.3.0a2`` AND ``0.3.0a3`` ARE BOTH SPENT NAMES. Do not "fix" this number
+#: back down to either, and do not add a local segment such as ``0.3.0a4+dev``
+#: — that shape was withdrawn on 2026-09-01, because it is an annotation on a
+#: claim that should not have been made at all.
 #:
-#: What happened: ``0.3.0a2`` was built ONCE as candidate artifact 9740182233
-#: from ``e930f878ce400b766b4a50feb0369021a28ab2fa``, never tagged and never
+#: The rule this file exists to hold: **a tree that diverges from a built
+#: artifact allocates a new version.** It has now been applied twice, and the
+#: second application is the one to read, because the first was a repair and
+#: the second was the rule working as intended.
+#:
+#: ``0.3.0a2`` — built ONCE as candidate artifact 9740182233 from
+#: ``e930f878ce400b766b4a50feb0369021a28ab2fa``, never tagged and never
 #: uploaded. Commit ``0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2`` (#551) then
 #: changed the facility's source under that same declared version, so the name
-#: ``0.3.0a2`` came to mean two different contracts — the frozen bytes, and this
-#: tree. A version naming two contracts is exactly what `AGENTS.md` rule 34
-#: exists to prevent, and it was live.
+#: ``0.3.0a2`` came to mean two different contracts — the frozen bytes, and
+#: that tree. A version naming two contracts is exactly what `AGENTS.md` rule
+#: 34 exists to prevent, and it was live. Recorded `invalidated` and
+#: `publishable: false` in
+#: `docs/inventories/foundation-candidate-dispositions.json`; the
+#: `CandidateArtifact.v1` receipt is preserved byte-for-byte, because a restore
+#: proof, an issuer stand-up and Lane 3 all bind to it.
 #:
-#: The repair is a NEW version, not an annotation on the old one. The frozen
-#: artifact stays exactly as recorded — `docs/inventories/
-#: foundation-candidate-0.3.0a2.json` is `CandidateArtifact.v1` and is preserved
-#: byte-for-byte — and the judgement about it is APPENDED to
-#: `docs/inventories/foundation-candidate-dispositions.json` as
-#: `CandidateDisposition.v1`: invalidated, `publishable: false`, with the
-#: invalidating commit and the reason. Nothing edits the receipt, because the
-#: restore proof, the issuer stand-up and Lane 3 all bind to it.
+#: ``0.3.0a3`` — built ONCE as candidate artifact 9830633429 from
+#: ``005490b278be73112fa9600bffb6e00a37c77a59`` (run 33587629491, wheel sha256
+#: ``11978d919f1e910ae16d9b8262ffd3c473b074b4815067ab210fbe88e009d990``,
+#: expires 2026-12-01). Unpublished and untagged, and it is the **Platform CP
+#: cutover's bootstrap input**. Those bytes stay valid and stay the bootstrap
+#: input: Platform CP resolves the wheel by RUN AND ARTIFACT ID out of the
+#: committed `CandidateArtifact.v1`, never from the version this tree happens
+#: to declare. Nothing about this bump reaches it, and it must never be
+#: rebuilt — a second build under that name produces different bytes with the
+#: same identity.
 #:
-#: There is deliberately no longer a rule here permitting this tree to diverge
-#: from a candidate while keeping its version. That permission is what let one
-#: name cover two contracts; it was removed with the version move rather than
-#: re-argued.
+#: ``0.3.0a4`` is the successor, allocated 2026-09-02 when
+#: `observability_promotion.py` was added. This time the rule was applied
+#: BEFORE the divergence shipped rather than after somebody found it: the
+#: package source changed, so the declared identity moved, and `0.3.0a3`'s one
+#: candidate is left describing exactly the tree it was built from. It has NOT
+#: been built. It is unpublished, and recorded as such in
+#: `docs/inventories/declared-publication-baseline.json`.
 #:
-#: ``0.3.0a3`` has NOT been built. It is a declared identity awaiting one
-#: candidate build, and it is unpublished — recorded as such in
-#: `docs/inventories/declared-publication-baseline.json`. It carries no local
-#: segment because there is no published artifact for it to misdescribe; the
-#: fleet's ``+dev`` rule applies to a tree claiming a version that WAS
-#: published, and that premise is absent here.
+#: There is deliberately no rule here permitting this tree to diverge from a
+#: candidate while keeping its version. That permission is what let one name
+#: cover two contracts; it was removed with the ``0.3.0a3`` move rather than
+#: re-argued, and it stays removed.
 #:
 #: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
 #: canonical descriptor document, so changing it moves
 #: ``io.dotmac.deployment.configuration.digest`` and the rendered
 #: ``deploy/rendered/docker-compose.yml`` with it. Any change here is therefore
 #: a re-render in the same commit (`make deployment-render`), and
-#: `make deployment-check` is what fails if it was not.
-VERSION: Final = "0.3.0a3"
+#: `make deployment-check` is what fails if it was not. The digest recorded in
+#: a candidate receipt is a historical fact about THAT build and is not
+#: re-derived from this tree, so a re-render never invalidates one.
+VERSION: Final = "0.3.0a4"
 
 __all__ = ["VERSION"]

@@ -189,6 +189,31 @@ different `schema` value, and a v1 reader REFUSES a v2 document rather than
 reading the subset it understands — a field an older reader cannot see may be
 the one that disables a control.
 
+### 0.3.0a4: `observability_promotion`, and why it is ADDITIVE
+
+A new module, `dotmac_deployment_foundation.observability_promotion`, implementing
+the host half of Observability ADR-0010's promotion facility: immutable
+release-directory staging, a previous-release-pointer reader, an exact-byte
+transport, `rename(2)` activation, per-evaluator reload with a read-back that
+proves the process took the bytes, a complete live read-back, and a rollback that
+returns one.
+
+**Nothing existing changed.** No signature, no refusal and no rendered byte of any
+prior surface moved. `providers/compose_host.py`'s `Runner` in particular is
+untouched: a file transport needs to feed a command bytes on stdin and that
+`Runner` cannot, so this module declares its own `HostTransport` Protocol rather
+than widening the shipped one. Widening it would have been a MINOR-at-best change
+to a seam every existing provider implements.
+
+**The declared version moved for a reason unrelated to compatibility.**
+`0.3.0a3` had already been built, so adding source under it would have made one
+version name two contracts. The bump is the version rule above being applied, not
+a signal that anything broke.
+
+**Zero runtime dependencies still.** The module is stdlib-only — `urllib` rather
+than `requests`/`httpx`, `subprocess` with an argv list — so the facility remains
+something a build runner can adopt without adopting a runtime.
+
 ### 0.3.0a3: the external-recovery contract, measured against the version rule
 
 Stated rather than assumed, because the rule above is strict and this change

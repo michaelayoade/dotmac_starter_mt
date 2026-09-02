@@ -16,16 +16,23 @@ anything.
 
 So both halves here are real:
 
-* ``0.3.0a3`` — the version this tree actually declares — is ADMITTED for its
-  own RELEASE against the repository's own bindings, and is simultaneously
-  REFUSED for a second CANDIDATE build, because it has now been built once
+* ``0.3.0a4`` — the version this tree actually declares — is ADMITTED for both
+  purposes, because it is unbound: never built, never tagged, on no index. That
+  is the whole reason it was allocated on 2026-09-02, when
+  `observability_promotion.py` was added to a tree that still declared a version
+  whose artifact already existed;
+* ``0.3.0a3`` is ADMITTED for its own RELEASE and REFUSED for a second CANDIDATE
+  build, because it has been built once
   (`docs/inventories/foundation-candidate-0.3.0a3.json`). Those two answers for
   one version are the whole point of ``--purpose``: a candidate receipt is the
-  release's INPUT and a second build's REFUSAL;
+  release's INPUT and a second build's REFUSAL. It is also the case this file
+  most needs to keep asserting — those bytes are the Platform CP cutover's
+  bootstrap input, and the bump away from the version must not have loosened
+  anything about them;
 * ``0.3.0a2`` is REFUSED for both, citing its candidate receipt and its
   invalidating disposition;
-* every published tag and the other built candidate are refused too, from the
-  same record set, so the admit is not an artefact of the guard finding nothing.
+* every published tag is refused too, from the same record set, so the admit is
+  not an artefact of the guard finding nothing.
 """
 
 from __future__ import annotations
@@ -53,8 +60,12 @@ INVALIDATED = "0.3.0a2"
 #: instead of comparing the guard's answer with the guard's own input.
 PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 
-#: The other built-but-unpublished candidate.
-OTHER_CANDIDATE = "0.3.0a1"
+#: Every built-but-unpublished candidate. A tuple rather than a single name
+#: since 2026-09-02: `0.3.0a3` joined `0.3.0a1` here when the declared version
+#: moved off it, and a constant that held only one of them would have quietly
+#: stopped exercising the second-build refusal on the very version whose freeze
+#: motivated the move.
+BUILT_CANDIDATES = ("0.3.0a1", "0.3.0a3")
 
 
 def _module():
@@ -110,27 +121,33 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
     would have left the guard with no real-target ADMIT at all (ADR 0034).
     """
     declared = _declared_version()
-    found = _bindings(declared, purpose="release")
-    assert not found, (
-        f"{FACILITY} declares {declared}, which is forbidden from release: "
-        + "; ".join(str(binding) for binding in found)
-    )
+    for purpose in ("candidate", "release"):
+        found = _bindings(declared, purpose=purpose)
+        assert not found, (
+            f"{FACILITY} declares {declared}, which is forbidden from {purpose}: "
+            + "; ".join(str(binding) for binding in found)
+        )
 
 
-def test_the_version_this_tree_declares_is_refused_for_a_SECOND_build() -> None:
-    """Built once, and the record is what enforces it.
+def test_the_declared_version_is_not_one_that_has_already_been_built() -> None:
+    """The refusal the 2026-09-02 bump exists to keep true.
 
-    `foundation-candidate.yml` passes `--purpose candidate` before it builds.
-    Once the receipt for the declared version is committed, that dispatch must
-    refuse: a second build under the same name produces different bytes with
-    the same identity, which is precisely how `0.3.0a2` came to cover two
-    contracts.
+    This is the assertion that fails if somebody re-declares a version that is
+    published or has a candidate receipt — the exact mistake that produced
+    `0.3.0a2`'s two contracts, and the one that would have recurred when
+    `observability_promotion.py` was added under `0.3.0a3`.
+
+    It reads the tree rather than a literal deliberately. A hard-coded version
+    here would keep passing after the next bump while describing the release
+    before it.
     """
     declared = _declared_version()
-    found = _bindings(declared, purpose="candidate")
-    assert any(
-        binding.kind == "candidate artifact" for binding in found
-    ), f"{declared} has been built; a second candidate build must be refused"
+    assert declared not in BUILT_CANDIDATES, (
+        f"{FACILITY} declares {declared}, which already has a candidate "
+        "artifact. A tree that diverges from a built artifact allocates a new "
+        "version; it does not keep the old one."
+    )
+    assert declared not in PUBLISHED and declared != INVALIDATED
 
 
 def test_the_admit_is_not_an_empty_record_set() -> None:
@@ -144,7 +161,7 @@ def test_the_admit_is_not_an_empty_record_set() -> None:
     every = GUARD.all_bindings(FACILITY, repo_root=PROJECT_ROOT)
     versions = {binding.version for binding in every}
     assert set(PUBLISHED) <= versions
-    assert {INVALIDATED, OTHER_CANDIDATE, _declared_version()} <= versions
+    assert {INVALIDATED, *BUILT_CANDIDATES} <= versions
     kinds = {binding.kind for binding in every}
     assert "published tag" in kinds
     assert "candidate artifact" in kinds
@@ -179,16 +196,23 @@ def test_a_published_version_is_refused_for_both_purposes(version: str) -> None:
         ), f"{version} is published and must be refused for {purpose}"
 
 
-def test_a_built_candidate_is_refused_for_a_SECOND_build() -> None:
-    found = _bindings(OTHER_CANDIDATE)
+@pytest.mark.parametrize("version", BUILT_CANDIDATES)
+def test_a_built_candidate_is_refused_for_a_SECOND_build(version: str) -> None:
+    found = _bindings(version)
     assert any(binding.kind == "candidate artifact" for binding in found), found
 
 
-def test_a_built_candidate_is_admitted_for_its_own_release() -> None:
+@pytest.mark.parametrize("version", BUILT_CANDIDATES)
+def test_a_built_candidate_is_admitted_for_its_own_release(version: str) -> None:
     """The exception, stated as a test so it cannot quietly widen. A candidate
     receipt is the release lane's INPUT — `foundation-candidate.yml` builds once
-    so publication reuses those bytes rather than rebuilding them."""
-    assert not _bindings(OTHER_CANDIDATE, purpose="release")
+    so publication reuses those bytes rather than rebuilding them.
+
+    `0.3.0a3` is the live case: its wheel is the Platform CP cutover's bootstrap
+    input, resolved by run and artifact id out of the committed receipt rather
+    than by the version this tree declares. Moving the declared identity to
+    `0.3.0a4` must leave this admit exactly where it was."""
+    assert not _bindings(version, purpose="release")
 
 
 # ── the guard's own failure modes ───────────────────────────────────────────
