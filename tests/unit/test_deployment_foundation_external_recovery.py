@@ -163,6 +163,142 @@ def _envelope(document: dict[str, Any], **overrides: Any) -> dict[str, Any]:
     return envelope
 
 
+# ── 0. THE STEP, through a real Executor ────────────────────────────────────
+#
+# The coverage gap: every test below drives the pure functions or the plan
+# SHAPE, and `VERIFY_EXTERNAL_RECOVERY_RECEIPT` — the one recovery-shaped
+# thing actually wired into the engine — had no Executor-level test at all.
+# `test_deployment_foundation_failure_injection.py` drives BACKUP and
+# VERIFY_BACKUP through a real Executor and never this. So the step that
+# decides whether a deploy proceeds on somebody else's restore proof was
+# exercised only as functions it calls, which is the shape of a seam nobody
+# has watched refuse.
+
+
+def _executor_for(spec: ProductDeploymentSpec, effects: Any, **kwargs: Any) -> Any:
+    from dotmac_deployment_foundation.engine.run import Executor
+
+    from tests.unit.test_deployment_foundation_execution_binding import (
+        _grant,
+        _plan_and_digest,
+    )
+    from tests.unit.test_deployment_foundation_failure_injection import (
+        AcceptingVerifier,
+        evidence_policy,
+    )
+
+    plan = build_plan(spec)
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    kwargs.setdefault("evidence_policy", evidence_policy())
+    kwargs.setdefault("evidence_verifier", AcceptingVerifier())
+    return plan, Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        now_epoch=NOW,
+        **kwargs,
+    )
+
+
+def _recording_effects(spec: ProductDeploymentSpec) -> Any:
+    from tests.unit.test_deployment_foundation_execution_binding import (
+        RecordingEffects,
+    )
+    from tests.unit.test_deployment_foundation_failure_injection import (
+        signed_evidence,
+    )
+
+    effects = RecordingEffects(
+        labels={"org.opencontainers.image.revision": spec.source_revision},
+        evidence=signed_evidence(revision=spec.source_revision),
+        manifest=spec.manifest_digest,
+    )
+    materials = set(spec.runtime_materials)
+    for role in spec.roles:
+        materials.update(role.materials)
+    if spec.migration is not None:
+        materials.add(spec.migration.owner_material)
+    effects.materials = sorted(materials)
+    effects.roles = {
+        role.code: type(next(iter(effects.roles.values())))(
+            role.code, True, "sha256:" + "b" * 64, 0
+        )
+        for role in spec.roles
+        if role.replicas > 0
+    }
+    return effects
+
+
+def _assert_no_deployment_effect(effects: Any) -> None:
+    """Failure evidence may be written; the deployment target may not move."""
+    non_evidence = [
+        mutation
+        for mutation in effects.mutations
+        if mutation[0] not in {"emit_annotation", "write_evidence"}
+    ]
+    assert non_evidence == []
+    assert getattr(effects, "stopped", []) == []
+    assert getattr(effects, "started", []) == []
+    assert getattr(effects, "switched_to", []) == []
+
+
+def test_a_missing_recovery_receipt_refuses_before_any_effect(
+    external_spec: ProductDeploymentSpec, dataset: BackupDataset
+) -> None:
+    """HANDED OVER, never discovered — asserted at the engine, with the host
+    proven untouched. A search cannot tell "no proof exists" from "no proof was
+    offered", and would happily find last quarter's."""
+    effects = _recording_effects(external_spec)
+    plan, executor = _executor_for(external_spec, effects)
+    outcome = executor.run(plan)
+    assert not outcome.succeeded
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "verify_external_recovery_receipt"
+    assert "no recovery receipt was supplied" in outcome.failure
+    _assert_no_deployment_effect(effects)
+
+
+def test_an_accepted_recovery_receipt_lets_the_deploy_proceed(
+    external_spec: ProductDeploymentSpec, dataset: BackupDataset
+) -> None:
+    """The ADMIT half — without it, the refusal above is equally consistent
+    with a step that can never pass."""
+    effects = _recording_effects(external_spec)
+    plan, executor = _executor_for(
+        external_spec,
+        effects,
+        recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
+        recovery_verifier=_ACCEPTS,
+    )
+    outcome = executor.run(plan)
+    steps = {record.kind.value: record for record in outcome.records}
+    receipt_step = steps.get("verify_external_recovery_receipt")
+    assert receipt_step is not None and receipt_step.ok, outcome.failure
+    assert "hetzner-managed-pg" in receipt_step.detail
+    assert any("recovery receipt" in note for note in outcome.notes)
+
+
+def test_an_unsigned_recovery_receipt_refuses_at_the_engine(
+    external_spec: ProductDeploymentSpec, dataset: BackupDataset
+) -> None:
+    """A verifier that refuses must stop the DEPLOY, not merely return False
+    to a function nobody checks."""
+    effects = _recording_effects(external_spec)
+    plan, executor = _executor_for(
+        external_spec,
+        effects,
+        recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
+        recovery_verifier=_Rejects(),
+    )
+    outcome = executor.run(plan)
+    assert not outcome.succeeded
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "verify_external_recovery_receipt"
+    _assert_no_deployment_effect(effects)
+
+
 # ── 1. a typed executor, never a free-text owner ────────────────────────────
 
 

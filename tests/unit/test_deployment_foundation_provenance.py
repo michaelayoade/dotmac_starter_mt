@@ -162,6 +162,8 @@ def _receipt(digest: str, **overrides: object) -> AuthorizationReceipt:
         "target_ref": "acme-prod-1",
         "descriptor_digest": digest,
         "execution_plan_digest": PLAN_DIGEST,
+        "execution_sequence": 7,
+        "attempt_no": 1,
         "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 3,

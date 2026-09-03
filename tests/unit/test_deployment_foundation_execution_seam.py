@@ -90,6 +90,8 @@ def _receipt(**overrides: object) -> AuthorizationReceipt:
         "target_ref": TARGET,
         "descriptor_digest": DIGEST_A,
         "execution_plan_digest": PLAN_DIGEST,
+        "execution_sequence": 7,
+        "attempt_no": 1,
         "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 1,
@@ -120,6 +122,8 @@ def test_a_hand_built_grant_is_refused() -> None:
             descriptor_digest=DIGEST_A,
             target=TARGET,
             execution_plan_digest=PLAN_DIGEST,
+            execution_sequence=7,
+            attempt_no=1,
             receipt=_receipt(),
         )
 

@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .authorization import ExecutionGrant
     from .engine.run import DeploymentOutcome, Effects
+    from .execution_bindings import ExecutionBindings
+    from .execution_plan import HostPrestateV1
     from .exposure import VerificationReport
 
 from .authorization import OPERATIONS
@@ -51,9 +53,10 @@ DEFAULT_OUTPUT_DIR = "deploy/rendered"
 DEFAULT_DEPLOY_DIR = "."
 # The only provider this package ships (`providers/compose_host.py`) — the
 # dedicated-VM Docker Compose profile. `--provider` is still a real flag,
-# not a decoration: `build_parser`'s `choices=[...]` refuses an unknown value
-# as a usage error rather than silently falling back to this one, so a typo
-# fails loudly instead of quietly deploying through the wrong provider.
+# not a decoration: `_provider_name` refuses an unknown value as a usage error
+# naming the entry-point discovery seam rather than silently falling back to
+# this one, so a typo fails loudly instead of deploying through the wrong
+# provider.
 PROVIDER_COMPOSE_HOST = "compose-host"
 
 
@@ -93,16 +96,77 @@ def _load(path: str) -> ProductDeploymentSpec:
     return ProductDeploymentSpec.load(path)
 
 
-def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Effects:
+def _declared_provider_names() -> tuple[str, ...]:
+    from .execution_bindings import declared_provider_names
+
+    return declared_provider_names()
+
+
+def _provider_name(value: str) -> str:
+    """Parse a provider name without importing the provider implementation.
+
+    ``argparse.choices`` says only "invalid choice" after an installed
+    bindings distribution disappears.  That hides the repair: restore the
+    distribution declaring the execution-bindings entry point.  Keep the
+    metadata-only enumeration, but make the refusal name the discovery seam.
+    """
+    from .execution_bindings import ENTRY_POINT_GROUP
+
+    allowed = (PROVIDER_COMPOSE_HOST, *_declared_provider_names())
+    if value not in allowed:
+        available = ", ".join(repr(name) for name in allowed)
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not declared by the {ENTRY_POINT_GROUP!r} entry-point "
+            f"group; available providers: {available}"
+        )
+    return value
+
+
+def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
+    """Discover the assembly's bindings, once, on the execute path only.
+
+    An embedder that already set `args.execution_bindings` wins — it IS the
+    assembly, and discovering around it would let an installed distribution
+    shadow the very thing that is embedding us.
+    """
+    supplied = getattr(args, "execution_bindings", None)
+    if supplied is not None:
+        return supplied
+    from .execution_bindings import discover_bindings
+
+    return discover_bindings()
+
+
+def _build_effects(
+    spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
+) -> Effects:
     """The `Effects` implementation `--execute` runs the plan against.
 
-    `args.provider` is constrained to `PROVIDER_COMPOSE_HOST` by argparse's
-    own `choices=[...]` (`build_parser`), so an unrecognised value never
-    reaches here — it fails as a usage error before the descriptor is even
-    loaded. This function exists only to keep the one `if` legible as the
-    facility grows a second provider, and to keep the import lazy like every
-    other `cmd_*` handler in this module.
+    `args.provider` is constrained by `_provider_name` (`build_parser`), so an
+    unrecognised value never reaches here — it fails as a usage error before
+    the descriptor is even loaded, naming the metadata group that must declare
+    it. This function exists only to keep the one `if` legible as the facility
+    grows a second provider, and to keep the import lazy like every other
+    `cmd_*` handler in this module.
     """
+    if args.provider != PROVIDER_COMPOSE_HOST:
+        # A DISCOVERED provider. The menu offered this name from metadata; the
+        # load already happened in `_load_bindings`, so a name with no bindings
+        # behind it here means the environment changed between parse and use.
+        if bindings is None or str(bindings.provider) != str(args.provider):
+            raise PreconditionFailed(
+                f"--provider {args.provider!r} was offered from declared entry "
+                "points, but no loaded execution bindings answer to it. The "
+                "environment changed between parsing and use; re-run, and if "
+                "this persists the bindings distribution is broken"
+            )
+        if bindings.build_effects is None:
+            raise PreconditionFailed(
+                f"the execution bindings for {args.provider!r} declare no "
+                "effects factory. They inject verifiers only, so select the "
+                f"in-package provider ({PROVIDER_COMPOSE_HOST!r}) instead"
+            )
+        return bindings.build_effects(spec, Path(args.deploy_dir))
     if args.provider == PROVIDER_COMPOSE_HOST:
         from .providers.compose_host import ComposeHostEffects
         from .toolchain import DEFAULT_TOOLS, resolve_tool
@@ -252,7 +316,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def _require_grant(
-    args: argparse.Namespace, spec: ProductDeploymentSpec, operation: str
+    args: argparse.Namespace,
+    spec: ProductDeploymentSpec,
+    operation: str,
+    *,
+    bindings=None,
 ) -> ExecutionGrant:
     """Turn `--authorization` into an :class:`ExecutionGrant`, or refuse.
 
@@ -310,14 +378,19 @@ def _require_grant(
     # that quietly accepted an unsigned receipt would be the bypass this whole
     # contract exists to close.
     verifier = getattr(args, "authorization_verifier", None)
+    if verifier is None and bindings is not None:
+        verifier = bindings.authorization_verifier
     if verifier is None:
+        from .execution_bindings import ENTRY_POINT_GROUP
+
         raise PreconditionFailed(
             f"the authorization receipt {path} was read but nothing can attest "
             "it: this facility declares zero runtime dependencies and ships no "
             "signature verifier, and parsing a JSON document is not "
-            "verification. Supply an AuthorizationVerifier through an assembly "
-            "that embeds Executor. Refusing to execute on material this "
-            "process cannot authenticate"
+            "verification. Install the assembly's bindings distribution (one "
+            f"{ENTRY_POINT_GROUP!r} entry point) or embed Executor from an "
+            "assembly that supplies an AuthorizationVerifier directly. "
+            "Refusing to execute on material this process cannot authenticate"
         )
     verified = verify_authorization(document, verifier=verifier)
     return authorize(
@@ -375,10 +448,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
-    from .execution_plan import render_execution_plan
+    from .execution_plan import HostPrestateV1, render_execution_plan
 
-    grant = _require_grant(args, spec, "deploy")
-    effects = _build_effects(spec, args)
+    bindings = _load_bindings(args)
+    grant = _require_grant(args, spec, "deploy", bindings=bindings)
+    effects = _build_effects(spec, args, bindings=bindings)
     # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
     # authorized digest -- that rides on the grant, which took it from the
     # attested receipt. This renders the plan the digest is recomputed FROM, so
@@ -391,21 +465,27 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         target=args.target,
         operation="deploy",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        # Observed through the SAME effects the run will mutate through, at
+        # render time; the executor re-observes at the last moment before
+        # mutation and refuses a host that moved in between.
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
     )
     executor = Executor(
         spec,
         effects,
         grant,
         execution_plan=execution_plan,
-        # HANDED OVER, never discovered -- one `--recovery-receipt CODE=PATH`
-        # per externally executed dataset. No verifier is passed because this
-        # facility declares zero runtime dependencies and must not ship a weak
-        # stdlib substitute (ADR-0009/ADR-0070); the step therefore REFUSES from
-        # the CLI, exactly as `verify_release_evidence` already does, and an
-        # assembly embedding `Executor` supplies the verifier its keys live in.
-        # A `--execute` that quietly accepted unsigned recovery proof would be
-        # the bypass this whole contract exists to close.
+        # Receipts are HANDED OVER (one `--recovery-receipt CODE=PATH` per
+        # externally executed dataset); the VERIFIERS and the trust policy come
+        # from the assembly's discovered bindings, because this facility ships
+        # no signature code of its own (ADR-0009/ADR-0070) and a weak stdlib
+        # substitute would read as coverage. With no bindings installed every
+        # verifying step still REFUSES, exactly as before — discovery makes the
+        # admit representable, never the refusal weaker.
         recovery_receipts=_recovery_receipts(args.recovery_receipt),
+        evidence_policy=bindings.evidence_policy if bindings else None,
+        evidence_verifier=bindings.evidence_verifier if bindings else None,
+        recovery_verifier=bindings.recovery_verifier if bindings else None,
     )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
@@ -413,7 +493,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     # a lock, it is a lock-shaped gap between the check and the mutation the
     # 2026-07-12 incident (`engine/lock.py`) actually needed closed.
     with deployment_lock(
-        spec.product, label=f"dotmac-deploy deploy {plan.image_digest}"
+        spec.product,
+        label=f"dotmac-deploy deploy {plan.image_digest}",
+        directory=args.lock_dir,
     ):
         outcome = executor.run(plan)
     print()
@@ -428,6 +510,48 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return EXIT_REFUSED
+
+
+def _load_prestate(path: str) -> HostPrestateV1:
+    """Read a HostPrestateV1 document from a file, refusing loudly.
+
+    The file form exists because the digest is produced OFF-HOST: Platform CP
+    renders the plan it will submit, and the host's state has to travel to it
+    as a document. `observe-prestate` (below) is what produces one on the
+    host, so the two ends of that trip share one shape and one parser.
+    """
+    from .execution_plan import HostPrestateV1
+
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PreconditionFailed(
+            f"cannot read the prestate file {path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise PreconditionFailed(
+            f"the prestate file {path} is not valid JSON: {exc}"
+        ) from exc
+    return HostPrestateV1.from_document(document)
+
+
+def cmd_observe_prestate(args: argparse.Namespace) -> int:
+    """Print the host's CURRENT prestate document. Read-only, by construction.
+
+    Run on the target host; feed the output to `execution-plan --prestate` so
+    the plan Platform CP submits is bound to the state this host actually had.
+    Only `observe_roles` is touched — nothing here can mutate.
+    """
+    spec = _load(args.descriptor)
+    bindings = _load_bindings(args)
+    effects = _build_effects(spec, args, bindings=bindings)
+    from .execution_plan import HostPrestateV1
+
+    prestate = HostPrestateV1.from_observations(effects.observe_roles())
+    sys.stdout.write(
+        json.dumps(prestate.as_document(), indent=2, sort_keys=True) + "\n"
+    )
+    return EXIT_OK
 
 
 def cmd_execution_plan(args: argparse.Namespace) -> int:
@@ -460,6 +584,12 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
         # canonicalization that produced it is visible at the seam where two
         # canonicalizations diverging is the failure being repaired.
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        # Required, and a FILE rather than an implicit observation: this
+        # subcommand runs off-host (Platform CP renders the digest it will
+        # submit), so the host's state travels to it as a document produced by
+        # `observe-prestate` on the target. An empty {"roles": []} document is
+        # the explicit first-deploy claim, not a default.
+        prestate=_load_prestate(args.prestate),
     )
     if args.format == "digest":
         print(rendered.digest())
@@ -476,6 +606,7 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
     print(f"  manifest digest  {rendered.manifest_digest}")
     print(f"  descriptor       {rendered.descriptor_digest}")
     print(f"  strategy         {rendered.strategy}")
+    print(f"  prestate         {rendered.host_prestate.as_document()['roles']}")
     print(f"  materials        {list(rendered.environment_inventory)} (NAMES only)")
     print(f"  steps            {len(rendered.steps)}")
     print(f"  ExecutionPlanDigestV1  {rendered.digest()}")
@@ -840,12 +971,13 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
-    from .execution_plan import render_execution_plan
+    from .execution_plan import HostPrestateV1, render_execution_plan
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
-    grant = _require_grant(args, spec, "rollback")
-    effects = _build_effects(spec, args)
+    bindings = _load_bindings(args)
+    grant = _require_grant(args, spec, "rollback", bindings=bindings)
+    effects = _build_effects(spec, args, bindings=bindings)
     # A SEPARATE plan too, and for the same reason: one descriptor yields a
     # different plan per operation, so a deploy's frozen digest must not
     # recompute equal to a rollback's.
@@ -855,11 +987,22 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         target=args.target,
         operation="rollback",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
     )
-    executor = Executor(spec, effects, grant, execution_plan=execution_plan)
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        evidence_policy=bindings.evidence_policy if bindings else None,
+        evidence_verifier=bindings.evidence_verifier if bindings else None,
+        recovery_verifier=bindings.recovery_verifier if bindings else None,
+    )
     # Same rule as `cmd_deploy`: the lock wraps the whole run.
     with deployment_lock(
-        spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
+        spec.product,
+        label=f"dotmac-deploy rollback {plan.previous_image}",
+        directory=args.lock_dir,
     ):
         outcome = executor.rollback(plan)
     print()
@@ -1008,6 +1151,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     execution.add_argument(
+        "--prestate",
+        required=True,
+        help=(
+            "path to the HostPrestateV1 document `observe-prestate` printed on "
+            "the target. Required: a plan that does not state its starting "
+            'point binds to every starting point. {"roles": []} is the '
+            "explicit first-deploy claim"
+        ),
+    )
+    execution.add_argument(
         "--format",
         default="text",
         choices=["text", "json", "digest"],
@@ -1065,7 +1218,12 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument(
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
+        # The in-package provider plus every DECLARED binding name. Names come
+        # from package metadata only — parsing this value imports no assembly
+        # code, so `validate` and a dry run stay side-effect free. Loading
+        # happens once, on the execute path (`_load_bindings`).
+        type=_provider_name,
+        metavar="PROVIDER",
         help="the Effects implementation `--execute` runs the plan against",
     )
 
@@ -1163,16 +1321,53 @@ def build_parser() -> argparse.ArgumentParser:
     rollback.add_argument(
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
+        # The in-package provider plus every DECLARED binding name. Names come
+        # from package metadata only — parsing this value imports no assembly
+        # code, so `validate` and a dry run stay side-effect free. Loading
+        # happens once, on the execute path (`_load_bindings`).
+        type=_provider_name,
+        metavar="PROVIDER",
         help="the Effects implementation `--execute` runs the plan against",
     )
 
     # Derived from the host-tool registry rather than listed again, so a tool
     # entering or leaving that registry cannot leave a flag behind that
     # configures nothing.
-    from .toolchain import DEFAULT_TOOLS as _HOST_TOOLS
+    observe = add(
+        "observe-prestate",
+        cmd_observe_prestate,
+        "print the host's current HostPrestateV1 document (read-only)",
+    )
+    observe.add_argument(
+        "--deploy-dir",
+        default=DEFAULT_DEPLOY_DIR,
+        help=f"the host directory to observe, default {DEFAULT_DEPLOY_DIR!r}",
+    )
+    observe.add_argument(
+        "--provider",
+        default=PROVIDER_COMPOSE_HOST,
+        type=_provider_name,
+        metavar="PROVIDER",
+        help="the Effects implementation whose observation this is",
+    )
+
+    from .engine.lock import DEFAULT_LOCK_DIR as _LOCK_DIR
 
     for _sub in (deploy, rollback):
+        _sub.add_argument(
+            "--lock-dir",
+            default=_LOCK_DIR,
+            help=(
+                f"directory holding the product deployment lock, default "
+                f"{_LOCK_DIR!r}. Overridable per deployment (never hardcoded), "
+                "and what lets a release smoke take ITS lock in a private "
+                "directory instead of contending for the host-global one"
+            ),
+        )
+
+    from .toolchain import DEFAULT_TOOLS as _HOST_TOOLS
+
+    for _sub in (deploy, rollback, observe):
         for _tool in _HOST_TOOLS:
             _sub.add_argument(
                 f"--{_tool.replace('_', '-')}-bin",

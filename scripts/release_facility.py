@@ -562,6 +562,7 @@ import sys
 from dotmac_deployment_foundation.execution_plan import (
     EXECUTION_PLAN_SCHEMA,
     FoundationExecutionPlanV1,
+    HostPrestateV1,
     execution_plan_digest,
 )
 
@@ -589,6 +590,7 @@ rebuilt = FoundationExecutionPlanV1(
     source_revision=document["source_revision"],
     manifest_digest=document["manifest_digest"],
     descriptor_digest=document["descriptor_digest"],
+    host_prestate=HostPrestateV1.from_document(document["host_prestate"]),
     strategy=document["strategy"],
     environment_inventory=tuple(document["environment_inventory"]),
     steps=tuple(
@@ -664,6 +666,8 @@ RECEIPT = {
     "descriptor_digest": "sha256:" + "a" * 64,
     "execution_plan_digest": "sha256:" + "e" * 64,
     "control_plan_digest": "f" * 64,
+    "execution_sequence": 7,
+    "attempt_no": 1,
     "policy_code": "deployment.production",
     "policy_version": 1,
     "decision_ref": "approvals:decision:1",
@@ -756,6 +760,432 @@ sys.stdout.write("execution binding OK\\n")
 """
 
 
+#: The probe BINDINGS DISTRIBUTION, installed as a real wheel for the ADMIT.
+#:
+#: Item 11's second half. The unit tests drive discovery through an injectable
+#: `entries` parameter, which proves every refusal shape and cannot prove the
+#: one thing a4 died on: that a REAL installed distribution's metadata reaches
+#: the installed console script. So the smoke builds this module into a wheel
+#: (a wheel is a zip with dist-info; no build backend, no index), pip-installs
+#: it, drives `dotmac-deploy deploy --execute` END TO END through discovery to
+#: a successful outcome — then UNINSTALLS it and drives the same command to the
+#: refusal that names the entry-point group. One mechanism, shown admitting and
+#: refusing, on the installed artifact.
+#:
+#: The fake Effects here derives every healthy answer FROM THE SPEC it is
+#: handed, so the probe cannot drift from the descriptor: labels carry the
+#: spec's revision, the manifest digest is the spec's, heads are the declared
+#: heads, and `switch` flips the observed roles to the digest it was given.
+#: Evidence is written content-addressed into the deploy dir so the outer
+#: smoke can assert on a real artefact.
+_PROBE_BINDINGS_SOURCE: Final = """\
+import hashlib
+import json
+import os
+from pathlib import Path
+
+from dotmac_deployment_foundation.engine.run import (
+    BackupResult,
+    CommandResult,
+    RoleObservation,
+)
+from dotmac_deployment_foundation.evidence import (
+    ReleaseEvidenceV1,
+    SignedEvidenceEnvelope,
+    TrustPolicy,
+)
+from dotmac_deployment_foundation.execution_bindings import ExecutionBindings
+
+PREVIOUS_DIGEST = "sha256:" + "b" * 64
+KEY_ID = "probe-signer"
+
+
+class _Verifier:
+    def attest(self, material):
+        return dict(material)
+
+
+class _Signatures:
+    def verify(self, *, key_id, message, signature):
+        return signature == "probe-valid" and key_id == KEY_ID
+
+
+class ProbeEffects:
+    \"\"\"Every healthy answer derived from the spec; every mutation in memory,
+    except evidence, which lands on disk so the smoke can assert on it.\"\"\"
+
+    def __init__(self, spec, deploy_dir):
+        self.spec = spec
+        self.deploy_dir = Path(deploy_dir)
+        self.roles = {
+            role.code: RoleObservation(role.code, True, PREVIOUS_DIGEST, 0)
+            for role in spec.roles
+            if role.replicas > 0
+        }
+
+    # ── gates ──
+    def image_present(self, reference):
+        return True
+
+    def image_labels(self, reference):
+        return {"org.opencontainers.image.revision": self.spec.source_revision}
+
+    def release_evidence(self, revision):
+        document = ReleaseEvidenceV1(
+            revision=revision,
+            repository="michaelayoade/dotmac_starter_mt",
+            repository_id="1001",
+            head_repository_id="1001",
+            ref="refs/heads/main",
+            run_id="1",
+            workflow="ci.yml",
+            conclusion="success",
+        ).as_document()
+        return SignedEvidenceEnvelope(
+            document=document, signature="probe-valid", key_id=KEY_ID
+        )
+
+    def manifest_digest(self, manifest_path):
+        return self.spec.manifest_digest
+
+    def observe_roles(self):
+        return list(self.roles.values())
+
+    def working_tree_dirty(self):
+        return False
+
+    def untracked_compose_overrides(self):
+        return []
+
+    def resolved_materials(self):
+        names = set(self.spec.runtime_materials)
+        for role in self.spec.roles:
+            names.update(role.materials)
+        if self.spec.migration is not None:
+            names.add(self.spec.migration.owner_material)
+        return sorted(names)
+
+    # ── mutations ──
+    def run_command(self, command, *, timeout_seconds, materials=()):
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+    def run_migration_command(
+        self, command, *, timeout_seconds, materials=(), image
+    ):
+        assert image, "the engine must state the candidate image"
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+    def backup(self, dataset_code, *, timeout_seconds):
+        return BackupResult(
+            dataset=dataset_code,
+            path="probe://backup",
+            size_bytes=1,
+            checksum="probe-checksum",
+            checksum_algorithm="sha256",
+        )
+
+    def verify_backup(self, result):
+        return True
+
+    def migration_heads(self, *, image):
+        assert image, "the engine must state the candidate image"
+        return list(self.spec.migration.expected_heads)
+
+    def stop_roles(self, roles, *, timeout_seconds):
+        for code in roles:
+            seen = self.roles[code]
+            self.roles[code] = RoleObservation(code, False, seen.image_digest, 0)
+
+    def start_candidate(self, role, *, timeout_seconds, image):
+        return image.rsplit("@", 1)[1] if "@" in image else image
+
+    def candidate_ready(self, role):
+        return True
+
+    def role_ready(self, role):
+        return True
+
+    def switch(self, *, timeout_seconds, image):
+        digest = image.rsplit("@", 1)[1] if "@" in image else image
+        for code in self.roles:
+            self.roles[code] = RoleObservation(code, True, digest, 0)
+
+    def worker_responds(self, role):
+        return True
+
+    def scheduler_last_tick_age_seconds(self, role):
+        return 0
+
+    def write_evidence(self, evidence):
+        canonical = (
+            json.dumps(dict(evidence), indent=2, sort_keys=True, default=str) + "\\n"
+        ).encode("utf-8")
+        records = self.deploy_dir / "evidence-records"
+        records.mkdir(parents=True, exist_ok=True)
+        record = records / (hashlib.sha256(canonical).hexdigest() + ".json")
+        if not record.exists():
+            record.write_bytes(canonical)
+        return str(record)
+
+    def read_evidence(self, path):
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def prune_images(self, *, retain):
+        return None
+
+    def emit_annotation(self, annotation):
+        return None
+
+
+def build():
+    return ExecutionBindings(
+        provider="probe-host",
+        build_effects=lambda spec, deploy_dir: ProbeEffects(spec, deploy_dir),
+        authorization_verifier=_Verifier(),
+        evidence_policy=TrustPolicy(
+            repository="michaelayoade/dotmac_starter_mt",
+            accepted_key_ids=frozenset({KEY_ID}),
+        ),
+        evidence_verifier=_Signatures(),
+        recovery_verifier=_Signatures(),
+    )
+"""
+
+
+def _build_probe_wheel(workdir: Path) -> Path:
+    """A real wheel, by hand: a zip with dist-info. No build backend, no index.
+
+    pip installs it exactly as it installs any wheel, which is the point — the
+    ADMIT must exercise real distribution metadata reaching
+    `importlib.metadata`, not a fixture handed to a parameter.
+    """
+    import base64
+    import zipfile
+
+    name, version = "probe_deploy_bindings", "0.0.1"
+    wheel = workdir / f"{name}-{version}-py3-none-any.whl"
+    info = f"{name}-{version}.dist-info"
+    members = {
+        f"{name}.py": _PROBE_BINDINGS_SOURCE,
+        f"{info}/METADATA": (
+            f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\n"
+            f"Version: {version}\n"
+        ),
+        f"{info}/WHEEL": (
+            "Wheel-Version: 1.0\nGenerator: release_facility probe\n"
+            "Root-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+        f"{info}/entry_points.txt": (
+            "[dotmac_deployment_foundation.execution_bindings]\n"
+            f"probe-host = {name}:build\n"
+        ),
+    }
+    record_lines = []
+    with zipfile.ZipFile(wheel, "w", zipfile.ZIP_DEFLATED) as archive:
+        for member, text in members.items():
+            data = text.encode("utf-8")
+            archive.writestr(member, data)
+            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(
+                b"="
+            )
+            record_lines.append(f"{member},sha256={digest.decode()},{len(data)}")
+        record_lines.append(f"{info}/RECORD,,")
+        archive.writestr(f"{info}/RECORD", "\n".join(record_lines) + "\n")
+    return wheel
+
+
+def _installed_admit_smoke(
+    venv_python: Path, pip: Path, entry_point: str, descriptor: Path, workdir: Path
+) -> None:
+    """Item 11: the installed CLI, end to end — one real ADMIT, one planted
+    refusal, through the SAME mechanism.
+
+    a4's inadmissibility was discovered at exactly this seam: every refusal was
+    provable on the installed artifact and no admit was representable, so the
+    proof of the refusals said nothing about whether the CLI could ever work.
+    The ADMIT half installs a real bindings wheel and drives a deploy to a
+    successful, evidence-backed outcome; the refusal half UNINSTALLS it and
+    drives the identical command to the refusal that names the discovery
+    group. A refusal proven only in a world where discovery never worked would
+    be the old vacancy back again.
+    """
+    script = _bin(venv_python, entry_point)
+    target = "installed-admit-target"
+
+    subprocess.run(
+        [
+            str(pip),
+            "install",
+            "--quiet",
+            "--no-index",
+            str(_build_probe_wheel(workdir)),
+        ],
+        check=True,
+    )
+
+    lock_dir = workdir / "lock"
+    deploy_dir = workdir / "deploy"
+    lock_dir.mkdir(exist_ok=True)
+    deploy_dir.mkdir(exist_ok=True)
+
+    # The prestate the probe effects will observe: every replicated role on
+    # the previous digest. Written as a document because that is how the
+    # off-host renderer receives it.
+    prestate = subprocess.run(
+        [
+            str(venv_python),
+            "-c",
+            (
+                "import json,sys\n"
+                "from dotmac_deployment_foundation.spec import ProductDeploymentSpec\n"
+                "spec = ProductDeploymentSpec.load(sys.argv[1])\n"
+                "roles = [\n"
+                "    {'role': role.code, 'image_digest': 'sha256:' + 'b' * 64}\n"
+                "    for role in sorted(spec.roles, key=lambda r: r.code)\n"
+                "    if role.replicas > 0\n"
+                "]\n"
+                "print(json.dumps({'roles': roles}))\n"
+                "print(spec.to_canonical_document().sha256_digest(), "
+                "file=sys.stderr)\n"
+            ),
+            str(descriptor),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    prestate_path = workdir / "admit-prestate.json"
+    prestate_path.write_text(prestate.stdout, encoding="utf-8")
+    descriptor_digest = prestate.stderr.strip()
+
+    digest_run = subprocess.run(
+        [
+            str(script),
+            "-f",
+            str(descriptor),
+            "execution-plan",
+            "--target",
+            target,
+            "--operation",
+            "deploy",
+            "--prestate",
+            str(prestate_path),
+            "--format",
+            "digest",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    plan_digest = digest_run.stdout.strip()
+
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.UTC)
+    receipt_path = workdir / "admit-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "plan_id": "00000000-0000-4000-8000-00000000ad17",
+                "target_ref": target,
+                "descriptor_digest": descriptor_digest,
+                "execution_plan_digest": plan_digest,
+                "control_plan_digest": "f" * 64,
+                "execution_sequence": 7,
+                "attempt_no": 1,
+                "policy_code": "deployment.release-smoke",
+                "policy_version": 1,
+                "decision_ref": "approvals:decision:release-smoke",
+                "approved_at": (now - _dt.timedelta(minutes=5))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "expires_at": (now + _dt.timedelta(hours=1))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "control_version": "0.0.0-probe",
+                "operation": "deploy",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    deploy_argv = [
+        str(script),
+        "-f",
+        str(descriptor),
+        "deploy",
+        "--target",
+        target,
+        "--authorization",
+        str(receipt_path),
+        "--provider",
+        "probe-host",
+        "--lock-dir",
+        str(lock_dir),
+        "--deploy-dir",
+        str(deploy_dir),
+        "--execute",
+    ]
+
+    admitted = subprocess.run(deploy_argv, capture_output=True, text=True)
+    if admitted.returncode != 0:
+        raise ReleaseRefused(
+            "the installed CLI could not ADMIT through discovered bindings — "
+            "the a4 defect, on these bytes:\n"
+            + (admitted.stderr or admitted.stdout)[-2000:]
+        )
+    records = sorted((deploy_dir / "evidence-records").glob("*.json"))
+    if not records:
+        raise ReleaseRefused(
+            "the admitted deploy left no evidence record, so the outcome "
+            "cannot be inspected and the admit proves an exit code only"
+        )
+    outcomes = [json.loads(record.read_text(encoding="utf-8")) for record in records]
+    successful = [outcome for outcome in outcomes if outcome.get("succeeded") is True]
+    if len(successful) != 1:
+        raise ReleaseRefused(
+            "the admitted deploy must leave exactly one successful final evidence "
+            f"record; observed {len(successful)} across {len(outcomes)} records"
+        )
+    outcome = successful[0]
+    problems = []
+    if outcome.get("execution_plan_digest") != plan_digest:
+        problems.append("the evidence does not carry the frozen execution plan digest")
+    if outcome.get("descriptor_digest") != descriptor_digest:
+        problems.append("the evidence does not carry the descriptor digest")
+    if outcome.get("control_plan_digest") != "f" * 64:
+        problems.append("the evidence does not carry Control's plan digest")
+    if problems:
+        raise ReleaseRefused(
+            "the installed admit ran but its evidence is wrong:\n  - "
+            + "\n  - ".join(problems)
+        )
+
+    # ── the planted refusal: SAME command, bindings REMOVED ──
+    subprocess.run(
+        [str(pip), "uninstall", "--quiet", "-y", "probe-deploy-bindings"],
+        check=True,
+    )
+    refused = subprocess.run(deploy_argv, capture_output=True, text=True)
+    if refused.returncode == 0:
+        raise ReleaseRefused(
+            "with the bindings distribution UNINSTALLED, the installed CLI "
+            "still deployed. The attestation gate is not holding on these "
+            "bytes, and everything the admit proved is now proof of a bypass"
+        )
+    said = (refused.stderr or "") + (refused.stdout or "")
+    if "execution_bindings" not in said:
+        raise ReleaseRefused(
+            "the no-bindings refusal does not name the discovery group, so an "
+            "operator cannot know the fix is to install the assembly's "
+            "bindings distribution:\n" + said[-800:]
+        )
+    print(
+        f"{entry_point}: installed end-to-end ADMIT through discovered "
+        "bindings, and the same command refused once they were removed"
+    )
+
+
 def _execution_binding_smoke(venv_python: Path, workdir: Path) -> None:
     """Run the binding probe with the INSTALLED interpreter."""
     probe = workdir / "execution_binding_probe.py"
@@ -789,6 +1219,13 @@ def _execution_plan_smoke(
     document_path = workdir / "execution-plan.json"
     digest_path = workdir / "execution-plan.digest"
 
+    # The explicit first-deploy claim, as a document — the a5 contract binds
+    # every plan to an observed prestate, and the smoke's fictitious target
+    # has no containers by definition. Written out rather than defaulted,
+    # because the absence of a prestate is exactly what the field refuses.
+    prestate_path = workdir / "prestate.json"
+    prestate_path.write_text('{"roles": []}\n', encoding="ascii")
+
     for fmt, destination in (("json", document_path), ("digest", digest_path)):
         rendered = subprocess.run(
             [
@@ -800,6 +1237,8 @@ def _execution_plan_smoke(
                 SMOKE_TARGET,
                 "--operation",
                 "deploy",
+                "--prestate",
+                str(prestate_path),
                 "--format",
                 fmt,
             ],
@@ -873,6 +1312,12 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
         # and then executes without one is exactly the state this release
         # repairs, and only the artifact can say whether it still does.
         _execution_binding_smoke(venv_python, Path(tmp))
+        # And the whole journey: install a real bindings wheel, ADMIT end to
+        # end through the console script, uninstall it, watch the identical
+        # command refuse. Item 11 of the a5 audit.
+        _installed_admit_smoke(
+            venv_python, venv_python.parent / "pip", entry_point, descriptor, Path(tmp)
+        )
     print(f"{entry_point}: execution-plan contract OK ({digest})")
     print(f"{entry_point}: execution binding enforced on the installed artifact")
 

@@ -111,6 +111,10 @@ class ExecutionGrant:
     #: what makes an unbound executor unconstructable rather than merely
     #: discouraged: every `Executor` has a grant, and every grant has this.
     execution_plan_digest: str
+    #: Control's replay coordinate, carried FROM the receipt so host
+    #: consumption and the execution report cannot source it anywhere else.
+    execution_sequence: int
+    attempt_no: int
     receipt: AuthorizationReceipt
 
     def __post_init__(self) -> None:
@@ -223,5 +227,7 @@ def authorize(
         descriptor_digest=wanted,
         target=target,
         execution_plan_digest=receipt.execution_plan_digest_normalized,
+        execution_sequence=int(receipt.execution_sequence),
+        attempt_no=int(receipt.attempt_no),
         receipt=receipt,
     )

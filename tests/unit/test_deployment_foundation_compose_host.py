@@ -826,13 +826,48 @@ def test_a_stringified_document_is_refused_by_name_not_verified_as_garbage(
 # ── migration_heads: tolerant parsing ────────────────────────────────────────
 
 
+CANDIDATE_IMAGE = "ghcr.io/example/app@sha256:" + "a" * 64
+
+
 def test_migration_heads_parses_alembic_style_output(tmp_path: Path) -> None:
     runner = ScriptedRunner()
     runner.when(
         lambda a: "current" in a, CommandResult(0, "a003 (head)\nk012 (head)\n")
     )
     effects = make_effects(tmp_path, runner=runner)
-    assert set(effects.migration_heads()) == {"a003", "k012"}
+    assert set(effects.migration_heads(image=CANDIDATE_IMAGE)) == {"a003", "k012"}
+
+
+def test_migration_family_env_injects_the_candidate_image(tmp_path: Path) -> None:
+    """Item 7's provider half, asserted at the seam that carries it.
+
+    The compose file interpolates the image env var; a process-env value
+    overrides the on-disk env file for one invocation. So the injection is an
+    ENV fact, and the assertion reads the env the runner was actually handed —
+    not the argv, where no image appears by design.
+    """
+    runner = ScriptedRunner()
+    runner.when(lambda a: "current" in a, CommandResult(0, "a003 (head)\n"))
+    runner.when(lambda a: "upgrade" in a, CommandResult(0, ""))
+    effects = make_effects(tmp_path, runner=runner)
+    effects.migration_heads(image=CANDIDATE_IMAGE)
+    effects.run_migration_command(
+        ["alembic", "upgrade", "heads"], timeout_seconds=5, image=CANDIDATE_IMAGE
+    )
+    assert len(runner.envs) == 2
+    for env in runner.envs:
+        assert env is not None
+        assert CANDIDATE_IMAGE in dict(env).values(), (
+            "the candidate image never reached the invocation's environment, "
+            "so compose would fall back to the env file — the previous release"
+        )
+
+
+def test_an_empty_image_is_refused_not_defaulted(tmp_path: Path) -> None:
+    """Falling back to the env file IS the previous release. Refuse."""
+    effects = make_effects(tmp_path, runner=ScriptedRunner())
+    with pytest.raises(PreconditionFailed, match="previous release"):
+        effects.run_migration_command(["alembic"], timeout_seconds=5, image="  ")
 
 
 def test_the_heads_command_comes_from_the_DESCRIPTOR_and_is_never_inferred() -> None:
@@ -853,6 +888,77 @@ def test_the_heads_command_comes_from_the_DESCRIPTOR_and_is_never_inferred() -> 
     with tempfile.TemporaryDirectory() as tmp:
         effects = ComposeHostEffects(spec, Path(tmp))
         assert tuple(effects._migration_heads_command) == spec.migration.heads_command
+
+
+# ── evidence: immutable, content-addressed, read back (item 9) ──────────────
+
+
+def _evidence_effects(tmp_path: Path):  # type: ignore[no-untyped-def]
+    return make_effects(tmp_path, runner=ScriptedRunner())
+
+
+def test_evidence_lands_content_addressed_and_immutable(tmp_path: Path) -> None:
+    """The record's name IS the sha256 of its bytes, so a record can never
+    change — changed bytes are a different name. The well-known path survives
+    as a POINTER for operators, updated only after the record is proven."""
+    import hashlib
+
+    effects = _evidence_effects(tmp_path)
+    record_path = Path(effects.write_evidence({"operation": "deploy", "ok": True}))
+    assert record_path.parent.name == "evidence-records"
+    body = record_path.read_bytes()
+    assert (
+        record_path.stem == hashlib.sha256(body).hexdigest()
+    ), "the record is not named by its own content"
+    # the operator-facing pointer carries the same bytes
+    assert (tmp_path / "deploy-evidence.json").read_bytes() == body
+
+
+def test_recording_the_same_outcome_twice_is_idempotent(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    first = effects.write_evidence({"operation": "deploy", "ok": True})
+    second = effects.write_evidence({"operation": "deploy", "ok": True})
+    assert first == second
+
+
+def test_two_outcomes_are_two_records_and_the_first_survives(tmp_path: Path) -> None:
+    """The defect this repairs: one well-known file, atomically REPLACED per
+    deployment, gave the host an evidence memory exactly one release deep."""
+    effects = _evidence_effects(tmp_path)
+    first = Path(effects.write_evidence({"operation": "deploy", "n": 1}))
+    second = Path(effects.write_evidence({"operation": "deploy", "n": 2}))
+    assert first != second
+    assert first.exists(), "the earlier record was destroyed by the later one"
+    assert json.loads(first.read_text())["n"] == 1
+    assert json.loads(second.read_text())["n"] == 2
+
+
+def test_a_tampered_record_is_refused_not_overwritten(tmp_path: Path) -> None:
+    """A content-addressed name disagreeing with its content can only mean the
+    file was edited in place — and an evidence store that can be edited is not
+    evidence. Refused BY NAME, never quietly repaired, because repairing it
+    would destroy the one proof that tampering happened."""
+    effects = _evidence_effects(tmp_path)
+    record = Path(effects.write_evidence({"operation": "deploy", "ok": True}))
+    record.chmod(0o644)
+    record.write_text('{"edited": "in place"}')
+    with pytest.raises(PreconditionFailed, match="DIFFERENT bytes"):
+        effects.write_evidence({"operation": "deploy", "ok": True})
+
+
+def test_read_evidence_round_trips_the_record(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    written = {"operation": "deploy", "steps": [{"kind": "switch", "ok": True}]}
+    path = effects.write_evidence(written)
+    assert effects.read_evidence(path) == json.loads(
+        json.dumps(written, sort_keys=True, default=str)
+    )
+
+
+def test_an_unreadable_record_refuses_on_read_back(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    with pytest.raises(PreconditionFailed, match="cannot be read back"):
+        effects.read_evidence(str(tmp_path / "evidence-records" / "missing.json"))
 
 
 # ── worker_responds ──────────────────────────────────────────────────────────

@@ -55,8 +55,11 @@ from dotmac_deployment_foundation.engine.plan import build_plan
 from dotmac_deployment_foundation.engine.run import (
     Executor,
 )
-from dotmac_deployment_foundation.errors import PreconditionFailed
-from dotmac_deployment_foundation.execution_plan import render_execution_plan
+from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
+from dotmac_deployment_foundation.execution_plan import (
+    HostPrestateV1,
+    render_execution_plan,
+)
 from dotmac_deployment_foundation.provenance import (
     AuthorizationReceipt,
     verify_authorization,
@@ -68,6 +71,7 @@ from tests.unit.test_deployment_foundation_failure_injection import (
     GOOD_DIGEST,
     OLD_DIGEST,
     AcceptingVerifier,
+    FakeClock,
     FakeEffects,
     evidence_policy,
     load,
@@ -134,6 +138,10 @@ class RecordingEffects(FakeEffects):  # type: ignore[misc]
         self.mutations.append(("run_command", " ".join(command)))
         return super().run_command(command, **kwargs)
 
+    def run_migration_command(self, command: Sequence[str], **kwargs: Any) -> Any:
+        self.mutations.append(("run_migration_command", " ".join(command)))
+        return super().run_migration_command(command, **kwargs)
+
     def backup(self, dataset_code: str, **kwargs: Any) -> Any:
         self.mutations.append(("backup", dataset_code))
         return super().backup(dataset_code, **kwargs)
@@ -169,6 +177,8 @@ def _receipt(spec: ProductDeploymentSpec, **overrides: object) -> AuthorizationR
         "target_ref": TARGET,
         "descriptor_digest": spec.to_canonical_document().sha256_digest(),
         "execution_plan_digest": "sha256:" + "e" * 64,
+        "execution_sequence": 7,
+        "attempt_no": 1,
         "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 1,
@@ -194,13 +204,21 @@ def _grant(spec: ProductDeploymentSpec, *, now: datetime = NOW, **overrides: obj
     )
 
 
-def _plan_and_digest(spec: ProductDeploymentSpec, plan, operation: str = "deploy"):  # type: ignore[no-untyped-def]
+def _plan_and_digest(
+    spec: ProductDeploymentSpec, plan, operation: str = "deploy", *, effects=None
+):  # type: ignore[no-untyped-def]
+    prestate = (
+        HostPrestateV1.from_observations(effects.observe_roles())
+        if effects is not None
+        else HostPrestateV1.first_deploy()
+    )
     execution_plan = render_execution_plan(
         spec,
         plan,
         target=TARGET,
         operation=operation,
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        prestate=prestate,
     )
     return execution_plan, execution_plan.digest()
 
@@ -235,7 +253,7 @@ def test_absent_authorization_produces_zero_effects() -> None:
     already closed, restated here in terms of EFFECTS rather than of types."""
     spec, plan, effects = _fixture()
     before = effects.snapshot()
-    execution_plan, _ = _plan_and_digest(spec, plan)
+    execution_plan, _ = _plan_and_digest(spec, plan, effects=effects)
     with pytest.raises(TypeError):
         Executor(spec, effects, execution_plan=execution_plan)  # type: ignore[call-arg]
     _assert_untouched(effects, before)
@@ -274,7 +292,7 @@ def test_an_unfrozen_plan_produces_zero_effects() -> None:
     """The plan is real and internally consistent; nothing froze THIS one."""
     spec, plan, effects = _fixture()
     before = effects.snapshot()
-    execution_plan, _ = _plan_and_digest(spec, plan)
+    execution_plan, _ = _plan_and_digest(spec, plan, effects=effects)
     executor = Executor(
         spec,
         effects,
@@ -304,7 +322,7 @@ def test_a_plan_for_an_unauthorized_image_produces_zero_effects() -> None:
     )
     other_plan = build_plan(other)
     frozen, frozen_digest = _plan_and_digest(other, other_plan)
-    running, _ = _plan_and_digest(spec, plan)
+    running, _ = _plan_and_digest(spec, plan, effects=effects)
     assert frozen.image_digest != running.image_digest, (
         "the fixture no longer varies the image, so this test would pass "
         "against a broken binding"
@@ -319,6 +337,209 @@ def test_a_plan_for_an_unauthorized_image_produces_zero_effects() -> None:
     with pytest.raises(PreconditionFailed):
         executor.run(plan)
     _assert_untouched(effects, before)
+
+
+# ── the host prestate: authorized against a state, executed against it ─────
+
+
+def test_a_host_that_moved_after_authorization_refuses_with_zero_effects() -> None:
+    """Item 6's enforcement half. The plan binds the OBSERVED starting point
+    into the digest Control froze; between authorization and execution another
+    deployment moves the host, and applying a reviewed change to an unreviewed
+    starting point must refuse — before any effect, target untouched."""
+    from dotmac_deployment_foundation.engine.run import RoleObservation
+
+    spec, plan, effects = _fixture()
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    executor = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    )
+    # The host moves: some OTHER deployment lands a different digest.
+    moved = "sha256:" + "7" * 64
+    for code, observation in list(effects.roles.items()):
+        effects.roles[code] = RoleObservation(
+            code, observation.running, moved, observation.restarts
+        )
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
+        executor.run(plan)
+    _assert_untouched(effects, before)
+
+
+def test_an_empty_prestate_is_a_claim_a_populated_host_fails() -> None:
+    """{"roles": []} says FIRST DEPLOY. Executing it against a host that turns
+    out to have containers is a mismatch like any other, not a pass."""
+    spec, plan, effects = _fixture()
+    execution_plan, digest = _plan_and_digest(spec, plan)  # first-deploy claim
+    executor = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+    )
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
+        executor.run(plan)
+    _assert_untouched(effects, before)
+
+
+# ── item 7: the candidate image reaches every migration-family invocation ──
+
+
+def test_migration_family_work_runs_in_the_candidate_image() -> None:
+    """Before this, `migrate` and its preflight were bare host commands with
+    no image concept at all, and `verify_heads`/`start_candidate` used the
+    on-disk compose file — which still pins the PREVIOUS image until `switch`
+    re-renders it at the end. The engine now states the image for every one of
+    them, and it is the plan's: the one the grant authorized."""
+    spec, plan, effects = _fixture()
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    outcome = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert outcome.succeeded, outcome.failure
+    assert effects.migration_images, "no migration-family work was recorded"
+    for command, image in effects.migration_images:
+        assert (
+            image == plan.image
+        ), f"{command} ran against {image!r}, not the authorized {plan.image!r}"
+    for role, image in effects.candidate_started_with:
+        assert (
+            image == plan.image
+        ), f"candidate {role} started on {image!r}, not {plan.image!r}"
+
+
+# ── item 8: readiness is REAL for every strategy, after the switch ─────────
+
+
+def test_a_role_that_never_becomes_ready_fails_the_deployment() -> None:
+    """Running is not ready. A process that binds its port and hangs on a dead
+    dependency is running, on the right digest, with zero restarts — and the
+    old verification declared victory on exactly those three facts plus a
+    sleep. The role's own declared probe is now polled, and polled more than
+    once, for every strategy."""
+    spec, plan, effects = _fixture()
+    effects.role_never_ready = True
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    # A FAKE clock, so the readiness poll's deadline ARRIVES instead of the
+    # loop spinning against the wall clock with a no-op sleep. The first
+    # version of this test did exactly that and hung the suite — a poll whose
+    # time cannot be moved is untestable, which is itself why the executor
+    # takes an injected clock.
+    clock = FakeClock()
+    outcome = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=clock.sleep,
+        clock=clock.read,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert not outcome.succeeded
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "verify_roles"
+    assert "readiness probe" in outcome.failure
+    assert effects._role_ready_calls > 1, (
+        "the probe was consulted once or never; a readiness gate that does "
+        "not poll is a coin flip against a service still starting"
+    )
+
+
+# ── item 9: evidence must persist and read back, on the success path ───────
+
+
+def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
+    """An unrecorded deployment is indistinguishable from an unauthorized one
+    a week later, so on the SUCCESS path the evidence is mandatory and its
+    read-back must equal the outcome. The failure path keeps its own rule —
+    a write failure there is a note, because masking the real failure with
+    "could not write evidence" is worse — and that rule has its own test."""
+    spec, plan, effects = _fixture()
+    effects.evidence_read_back_corrupt = True
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    outcome = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert not outcome.succeeded
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "record_evidence"
+    assert "read" in outcome.failure and "back" in outcome.failure
+
+
+# ── item 5: Control's replay coordinate, echoed and never invented ─────────
+
+
+def test_the_replay_coordinate_reaches_the_execution_report() -> None:
+    """`(execution_sequence, attempt_no)` travels grant -> host consumption ->
+    receipt, verbatim.
+
+    Read from the published bytes of `dotmac-deployment-control` 0.1.0a10
+    (peeled `4a56f583`): Control assigns `execution_sequence` as
+    `max(Rollout.execution_sequence) + 1` per target, and compares the PAIR as
+    a tuple against the target's high-water mark — strictly lower is
+    STALE_OBSERVATION, equal-with-a-different-state-digest is
+    EXECUTION_COORDINATE_CONFLICT. So the coordinate is what makes a replayed
+    report distinguishable from the run it repeats, and a Foundation that
+    invented either half would be manufacturing the fact Control decides on.
+    """
+    spec, plan, effects = _fixture()
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    grant = _grant(
+        spec, execution_plan_digest=digest, execution_sequence=42, attempt_no=3
+    )
+    assert grant.execution_sequence == 42
+    assert grant.attempt_no == 3
+    outcome = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert outcome.succeeded, outcome.failure
+    assert (outcome.execution_sequence, outcome.attempt_no) == (42, 3)
+    evidence = outcome.as_evidence()
+    assert evidence["execution_sequence"] == 42
+    assert evidence["attempt_no"] == 3
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [0, -1, "3", 1.0, None, True],
+    ids=["zero", "negative", "str", "float", "none", "bool"],
+)
+def test_a_coordinate_that_is_not_a_positive_integer_is_refused(bad: object) -> None:
+    """`True` is the one worth naming: `bool` IS an `int` in Python, so a bare
+    isinstance check would accept it as the coordinate 1. Control refuses it on
+    its own side; so does this."""
+    spec, _plan, _effects = _fixture()
+    with pytest.raises(SpecError, match="positive integer"):
+        _receipt(spec, execution_sequence=bad)
+    with pytest.raises(SpecError, match="positive integer"):
+        _receipt(spec, attempt_no=bad)
 
 
 # ── 5. the substitution ────────────────────────────────────────────────────
@@ -367,7 +588,7 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
     """The positive control, without which every refusal above could be a
     permanently broken executor rather than a discriminating one."""
     spec, plan, effects = _fixture()
-    execution_plan, digest = _plan_and_digest(spec, plan)
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
     executor = Executor(
         spec,
         effects,
@@ -412,7 +633,7 @@ def test_a_second_execution_of_one_authorization_switches_again_not_silently() -
     evidence, and the evidence is the only account of what happened.
     """
     spec, plan, effects = _fixture()
-    execution_plan, digest = _plan_and_digest(spec, plan)
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
 
     def run_once() -> Any:
         executor = Executor(
