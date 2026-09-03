@@ -218,6 +218,19 @@ def test_provider_names_come_from_metadata_without_loading() -> None:
     )
 
 
+def test_a_provider_removed_after_install_refuses_naming_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The usage refusal names the repair, not merely an invalid choice."""
+    from dotmac_deployment_foundation import cli
+
+    monkeypatch.setattr(cli, "_declared_provider_names", lambda: ())
+    with pytest.raises(argparse.ArgumentTypeError) as caught:
+        cli._provider_name("removed-provider")
+    assert ENTRY_POINT_GROUP in str(caught.value)
+    assert "removed-provider" in str(caught.value)
+
+
 # ── the CLI consumes what discovery found ──────────────────────────────────
 
 

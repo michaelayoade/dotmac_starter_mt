@@ -52,9 +52,10 @@ DEFAULT_OUTPUT_DIR = "deploy/rendered"
 DEFAULT_DEPLOY_DIR = "."
 # The only provider this package ships (`providers/compose_host.py`) — the
 # dedicated-VM Docker Compose profile. `--provider` is still a real flag,
-# not a decoration: `build_parser`'s `choices=[...]` refuses an unknown value
-# as a usage error rather than silently falling back to this one, so a typo
-# fails loudly instead of quietly deploying through the wrong provider.
+# not a decoration: `_provider_name` refuses an unknown value as a usage error
+# naming the entry-point discovery seam rather than silently falling back to
+# this one, so a typo fails loudly instead of deploying through the wrong
+# provider.
 PROVIDER_COMPOSE_HOST = "compose-host"
 
 
@@ -100,6 +101,26 @@ def _declared_provider_names() -> tuple[str, ...]:
     return declared_provider_names()
 
 
+def _provider_name(value: str) -> str:
+    """Parse a provider name without importing the provider implementation.
+
+    ``argparse.choices`` says only "invalid choice" after an installed
+    bindings distribution disappears.  That hides the repair: restore the
+    distribution declaring the execution-bindings entry point.  Keep the
+    metadata-only enumeration, but make the refusal name the discovery seam.
+    """
+    from .execution_bindings import ENTRY_POINT_GROUP
+
+    allowed = (PROVIDER_COMPOSE_HOST, *_declared_provider_names())
+    if value not in allowed:
+        available = ", ".join(repr(name) for name in allowed)
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not declared by the {ENTRY_POINT_GROUP!r} entry-point "
+            f"group; available providers: {available}"
+        )
+    return value
+
+
 def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
     """Discover the assembly's bindings, once, on the execute path only.
 
@@ -120,12 +141,12 @@ def _build_effects(
 ) -> Effects:
     """The `Effects` implementation `--execute` runs the plan against.
 
-    `args.provider` is constrained to `PROVIDER_COMPOSE_HOST` by argparse's
-    own `choices=[...]` (`build_parser`), so an unrecognised value never
-    reaches here — it fails as a usage error before the descriptor is even
-    loaded. This function exists only to keep the one `if` legible as the
-    facility grows a second provider, and to keep the import lazy like every
-    other `cmd_*` handler in this module.
+    `args.provider` is constrained by `_provider_name` (`build_parser`), so an
+    unrecognised value never reaches here — it fails as a usage error before
+    the descriptor is even loaded, naming the metadata group that must declare
+    it. This function exists only to keep the one `if` legible as the facility
+    grows a second provider, and to keep the import lazy like every other
+    `cmd_*` handler in this module.
     """
     if args.provider != PROVIDER_COMPOSE_HOST:
         # A DISCOVERED provider. The menu offered this name from metadata; the
@@ -471,7 +492,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     # a lock, it is a lock-shaped gap between the check and the mutation the
     # 2026-07-12 incident (`engine/lock.py`) actually needed closed.
     with deployment_lock(
-        spec.product, label=f"dotmac-deploy deploy {plan.image_digest}"
+        spec.product,
+        label=f"dotmac-deploy deploy {plan.image_digest}",
+        directory=args.lock_dir,
     ):
         outcome = executor.run(plan)
     print()
@@ -976,7 +999,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     )
     # Same rule as `cmd_deploy`: the lock wraps the whole run.
     with deployment_lock(
-        spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
+        spec.product,
+        label=f"dotmac-deploy rollback {plan.previous_image}",
+        directory=args.lock_dir,
     ):
         outcome = executor.rollback(plan)
     print()
@@ -1193,10 +1218,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
         # The in-package provider plus every DECLARED binding name. Names come
-        # from package metadata only — building this menu imports no assembly
+        # from package metadata only — parsing this value imports no assembly
         # code, so `validate` and a dry run stay side-effect free. Loading
         # happens once, on the execute path (`_load_bindings`).
-        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
+        type=_provider_name,
+        metavar="PROVIDER",
         help="the Effects implementation `--execute` runs the plan against",
     )
 
@@ -1295,10 +1321,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
         # The in-package provider plus every DECLARED binding name. Names come
-        # from package metadata only — building this menu imports no assembly
+        # from package metadata only — parsing this value imports no assembly
         # code, so `validate` and a dry run stay side-effect free. Loading
         # happens once, on the execute path (`_load_bindings`).
-        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
+        type=_provider_name,
+        metavar="PROVIDER",
         help="the Effects implementation `--execute` runs the plan against",
     )
 
@@ -1318,9 +1345,24 @@ def build_parser() -> argparse.ArgumentParser:
     observe.add_argument(
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
+        type=_provider_name,
+        metavar="PROVIDER",
         help="the Effects implementation whose observation this is",
     )
+
+    from .engine.lock import DEFAULT_LOCK_DIR as _LOCK_DIR
+
+    for _sub in (deploy, rollback):
+        _sub.add_argument(
+            "--lock-dir",
+            default=_LOCK_DIR,
+            help=(
+                f"directory holding the product deployment lock, default "
+                f"{_LOCK_DIR!r}. Overridable per deployment (never hardcoded), "
+                "and what lets a release smoke take ITS lock in a private "
+                "directory instead of contending for the host-global one"
+            ),
+        )
 
     from .toolchain import DEFAULT_TOOLS as _HOST_TOOLS
 

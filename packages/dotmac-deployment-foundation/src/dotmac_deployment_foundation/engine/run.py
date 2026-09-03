@@ -246,6 +246,11 @@ class DeploymentOutcome:
     #: conflated. `provenance.py` explains why they are separate.
     descriptor_digest: str = ""
     control_plan_digest: str = ""
+    #: Control's replay coordinate, echoed onto the report so Control can place
+    #: this execution against its target's high-water mark. Zero means "not
+    #: carried", which `authorize()` makes unreachable on a real run.
+    execution_sequence: int = 0
+    attempt_no: int = 0
     operation: str = ""
 
     def as_evidence(self) -> dict[str, object]:
@@ -258,6 +263,8 @@ class DeploymentOutcome:
             "execution_plan_digest": self.execution_plan_digest,
             "descriptor_digest": self.descriptor_digest,
             "control_plan_digest": self.control_plan_digest,
+            "execution_sequence": int(self.execution_sequence),
+            "attempt_no": int(self.attempt_no),
             "operation": self.operation,
             "strategy": self.plan.strategy.value,
             "succeeded": self.succeeded,
@@ -396,6 +403,8 @@ class Executor:
             # the receipt and never recomputed here.
             descriptor_digest=self._descriptor_digest(),
             control_plan_digest=str(self._grant.receipt.control_plan_digest),
+            execution_sequence=int(self._grant.execution_sequence),
+            attempt_no=int(self._grant.attempt_no),
             operation="deploy",
         )
         # The first question about any graph that turned bad at 14:32 is what
@@ -585,6 +594,8 @@ class Executor:
             execution_plan_digest=self._require_execution_plan("rollback"),
             descriptor_digest=self._descriptor_digest(),
             control_plan_digest=str(self._grant.receipt.control_plan_digest),
+            execution_sequence=int(self._grant.execution_sequence),
+            attempt_no=int(self._grant.attempt_no),
             operation="rollback",
         )
         steps = steps_for_rollback(plan)

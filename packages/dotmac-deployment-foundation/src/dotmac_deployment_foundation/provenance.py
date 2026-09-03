@@ -186,6 +186,26 @@ class AuthorizationReceipt:
     descriptor_digest: str
     #: `ExecutionPlanDigestV1` — the middle term Control froze. THE binding.
     execution_plan_digest: str
+    #: THE REPLAY COORDINATE, echoed verbatim — never derived, never
+    #: incremented, never defaulted. Read from the published bytes of
+    #: `dotmac-deployment-control` 0.1.0a10 (peeled
+    #: `4a56f5836cab48fa2ed7ca00e5affc4364114b31`), where
+    #: `AuthorizationStatementV2.execution_sequence` is assigned by Control as
+    #: `max(Rollout.execution_sequence) + 1` per target, and
+    #: `ExecutionObservationStatementV1` carries the PAIR
+    #: `(execution_sequence, attempt_no)`.
+    #:
+    #: Control compares that pair as a tuple against the target's high-water
+    #: mark: strictly lower is `STALE_OBSERVATION`, equal-with-a-different
+    #: state digest is `EXECUTION_COORDINATE_CONFLICT`, and only a strictly
+    #: greater pair advances. So the coordinate is what makes a re-executed or
+    #: replayed deployment report distinguishable from the run it repeats —
+    #: and a Foundation that invented, defaulted or re-derived either half
+    #: would be manufacturing the very fact Control uses to decide staleness.
+    #: Same rule as `control_plan_digest`: this facility does not restate what
+    #: it does not own.
+    execution_sequence: int
+    attempt_no: int
     #: Control's own snapshot digest. Recorded, never compared.
     control_plan_digest: str
     #: `ApprovalEvidence.policy_code` and `.policy_version`.
@@ -254,6 +274,18 @@ class AuthorizationReceipt:
                 "run, which reads as a broken deployment rather than as a "
                 "malformed receipt"
             )
+        for field in ("execution_sequence", "attempt_no"):
+            value = getattr(self, field)
+            # `bool` is an `int` in Python, and `True` would sail through a
+            # bare `isinstance(value, int)` as the coordinate 1. Refused
+            # explicitly, exactly as Control refuses it on its own side.
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise SpecError(
+                    f"AuthorizationReceipt.{field} must be a positive integer, "
+                    f"got {value!r}. It is Control's replay coordinate: this "
+                    "facility echoes it and never derives it, so a missing or "
+                    "invented value is a report Control cannot place in order"
+                )
         if not str(self.execution_plan_digest).strip():
             raise SpecError(
                 "AuthorizationReceipt.execution_plan_digest is empty. This is "
@@ -332,7 +364,9 @@ class AuthorizationReceipt:
         known = {
             "plan_id",
             "target_ref",
+            "attempt_no",
             "descriptor_digest",
+            "execution_sequence",
             "expires_at",
             "execution_plan_digest",
             "control_plan_digest",
@@ -360,6 +394,8 @@ class AuthorizationReceipt:
             target_ref=str(document["target_ref"]),
             descriptor_digest=str(document["descriptor_digest"]),
             expires_at=str(document["expires_at"]),
+            execution_sequence=int(document["execution_sequence"]),
+            attempt_no=int(document["attempt_no"]),
             execution_plan_digest=str(document["execution_plan_digest"]),
             control_plan_digest=str(document["control_plan_digest"]),
             policy_code=str(document["policy_code"]),
@@ -377,6 +413,8 @@ class AuthorizationReceipt:
             "operation": self.operation,
             "descriptor_digest": self.descriptor_digest_normalized,
             "execution_plan_digest": self.execution_plan_digest_normalized,
+            "execution_sequence": int(self.execution_sequence),
+            "attempt_no": int(self.attempt_no),
             # Recorded EXACTLY as Control wrote it. Not normalized, because
             # normalizing implies this facility understands the value well
             # enough to restate it, and the whole point is that it does not.
