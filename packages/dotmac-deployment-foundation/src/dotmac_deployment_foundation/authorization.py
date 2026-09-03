@@ -71,7 +71,24 @@ __all__ = [
 
 #: The operations Control can authorize. An open string would let a caller
 #: invent an operation nobody wrote a policy for.
-OPERATIONS: Final[tuple[str, ...]] = ("deploy", "rollback")
+#:
+#: ``recover`` was added once its EXECUTOR existed, and the ordering is the
+#: whole argument. `dotmac-deployment-control` 0.1.0a10 declared a third member
+#: first and its comment stated the expectation — *"Michael named it required,
+#: and the Deployment Foundation's a5 is being built against the same
+#: three-member vocabulary"*. a5 did not widen, because at that point this
+#: facility had no restore capability at all: `RESTORE_PROCEDURE` was text and
+#: the deployment `Effects` had no restore method, so `recover` would have
+#: named an operation nothing could perform. `recovery_execution.py` is that
+#: executor; this line follows it rather than preceding it.
+#:
+#: The three are mutually non-authorizing. A deploy approval that also
+#: permitted the rollback would let one decision make a change and erase it; a
+#: deploy or rollback approval that also permitted a RECOVER would let one
+#: decision reach a restore path that creates a cluster and destroys targets.
+#: Each is its own consent conversation, which is the same reason Control gives
+#: for keeping them three separate words.
+OPERATIONS: Final[tuple[str, ...]] = ("deploy", "rollback", "recover")
 
 
 class _Witness:
@@ -153,9 +170,11 @@ class ExecutionGrant:
         if self.operation != operation:
             raise PreconditionFailed(
                 f"this grant authorizes {self.operation!r}, not {operation!r}. "
-                "Deploy and rollback are authorized separately: a deploy "
+                f"Each of {list(OPERATIONS)} is authorized separately: a deploy "
                 "approval that also permitted the rollback would let one "
-                "decision both make a change and erase it"
+                "decision both make a change and erase it, and one that also "
+                "permitted a recover would reach a path that creates clusters "
+                "and destroys targets"
             )
         if self.descriptor_digest != wanted:
             raise PreconditionFailed(
@@ -209,7 +228,8 @@ def authorize(
         raise PreconditionFailed(
             f"Control authorized {receipt.operation!r} but {operation!r} was "
             "requested. Ask Control for a receipt naming this operation — a "
-            "deploy approval is not a rollback approval"
+            "deploy approval is not a rollback approval, and neither is a "
+            "recovery approval"
         )
     if receipt.descriptor_digest_normalized != wanted:
         raise PreconditionFailed(
