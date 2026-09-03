@@ -43,6 +43,12 @@ from typing import Any
 
 import pytest
 from dotmac_deployment_foundation import discovery
+from dotmac_deployment_foundation.application_profile import (
+    ApplicationFoundationProfile,
+    ConcernBinding,
+    FoundationConcern,
+    discover_profile,
+)
 from dotmac_deployment_foundation.discovery import (
     DISCOVERY_AMBIGUOUS,
     DISCOVERY_FACTORY_RAISED,
@@ -95,6 +101,21 @@ def _bindings(provider: str = "acme-host") -> ExecutionBindings:
     return ExecutionBindings(provider=provider, authorization_verifier=_Verifier())
 
 
+def _profile(application: str = "acme-host") -> ApplicationFoundationProfile:
+    """A complete thirteen-slot profile. Every concern bound to the same
+    placeholder, because THIS file is about discovery — what a slot holds is
+    `test_deployment_foundation_application_profile.py`'s subject."""
+    binding = ConcernBinding(
+        implementation="acme-foundation",
+        version="1.0.0",
+        coordinates="acme-foundation@sha256:" + "b" * 64,
+    )
+    return ApplicationFoundationProfile(
+        application=application,
+        slots=dict.fromkeys(FoundationConcern, binding),
+    )
+
+
 class _Consumer:
     """One real caller of `discover_one`, and enough to drive every refusal."""
 
@@ -115,6 +136,13 @@ CONSUMERS: dict[str, _Consumer] = {
         name="acme-host",
         make=lambda: _bindings(),
         wrong_name=lambda: _bindings(provider="somebody-else"),
+    ),
+    "application_profile": _Consumer(
+        module="application_profile.py",
+        discover=discover_profile,
+        name="acme-host",
+        make=lambda: _profile(),
+        wrong_name=lambda: _profile(application="somebody-else"),
     ),
 }
 
@@ -168,10 +196,12 @@ def test_the_sweep_would_actually_find_a_caller() -> None:
 
 
 def test_the_core_has_a_consumer_count_this_file_admits_to() -> None:
-    """ONE consumer today. A generic with a single caller is a generalization
-    asserted rather than proven, so the count is recorded and its change is a
-    diff somebody reads. The profile discovery makes it two."""
-    assert len(CONSUMERS) == 1
+    """TWO consumers, which is what makes the extraction proven rather than
+    asserted. It shipped with one, recorded as a limitation; the profile
+    discovery is the second, and it could not have landed without appearing in
+    the table above — the AST sweep failed until it did. The count is recorded
+    so a third is a diff somebody reads."""
+    assert len(CONSUMERS) == 2
 
 
 def test_every_refusal_is_covered_by_a_test_in_this_file() -> None:

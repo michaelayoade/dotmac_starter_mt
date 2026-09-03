@@ -272,6 +272,9 @@ class FoundationExecutionPlanV1:
       authorizes an edited one;
     - without ``environment_inventory``, the same image against a different set
       of resolved materials is the same plan, which it is not;
+    - without ``application_profile_digest``, an approval for an artifact whose
+      foundation bindings were verified also authorizes one whose bindings
+      changed underneath it (ADR 0039 § 8);
     - without ``steps``, "deploy" is a word rather than a procedure.
     """
 
@@ -290,6 +293,16 @@ class FoundationExecutionPlanV1:
     #: Required with no default: a plan that does not state its starting point
     #: binds to every starting point.
     host_prestate: HostPrestateV1
+    #: `ApplicationFoundationProfile.v1`'s digest, or `""` when the candidate
+    #: declares no profile. ADR 0039 § 8: the digest travels with the release
+    #: and is read back from the running system and COMPARED.
+    #:
+    #: Required with no default, and `""` is a stated value rather than an
+    #: omission — rule 5 of this module's canonicalization. A default would let
+    #: a caller carry "no profile" without deciding it, which is the difference
+    #: between an assembly that declares none and one whose plumbing forgot to
+    #: ask.
+    application_profile_digest: str
     steps: tuple[tuple[str, str, tuple[str, ...], int, int], ...]
 
     def __post_init__(self) -> None:
@@ -311,6 +324,7 @@ class FoundationExecutionPlanV1:
         """The document the digest covers. No wrapper, ever."""
         return {
             "schema": EXECUTION_PLAN_SCHEMA,
+            "application_profile_digest": self.application_profile_digest,
             "descriptor_digest": self.descriptor_digest,
             "environment_inventory": list(self.environment_inventory),
             "foundation_version": self.foundation_version,
@@ -388,6 +402,7 @@ def render_execution_plan(
     operation: str,
     descriptor_digest: str,
     prestate: HostPrestateV1,
+    application_profile_digest: str,
 ) -> FoundationExecutionPlanV1:
     """Render the target-bound execution plan. The Foundation owns this.
 
@@ -420,6 +435,7 @@ def render_execution_plan(
         manifest_digest=spec.manifest_digest,
         descriptor_digest=descriptor_digest,
         host_prestate=prestate,
+        application_profile_digest=application_profile_digest,
         strategy=plan.strategy.value,
         environment_inventory=tuple(inventory),
         steps=tuple(

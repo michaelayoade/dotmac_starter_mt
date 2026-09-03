@@ -168,6 +168,7 @@ def _plan(**overrides: Any) -> FoundationExecutionPlanV1:
         "operation": "deploy",
         "descriptor_digest": spec.to_canonical_document().sha256_digest(),
         "prestate": HostPrestateV1.first_deploy(),
+        "application_profile_digest": "",
     }
     kwargs.update(overrides)
     return render_execution_plan(spec, build_plan(spec), **kwargs)
@@ -212,6 +213,7 @@ def test_the_launcher_reaches_the_plan_digest_through_the_descriptor() -> None:
         operation="deploy",
         descriptor_digest=relaunched.to_canonical_document().sha256_digest(),
         prestate=HostPrestateV1.first_deploy(),
+        application_profile_digest="",
     )
     assert moved.digest() != _plan().digest()
 

@@ -219,6 +219,7 @@ def _plan_and_digest(
         operation=operation,
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
         prestate=prestate,
+        application_profile_digest="",
     )
     return execution_plan, execution_plan.digest()
 
