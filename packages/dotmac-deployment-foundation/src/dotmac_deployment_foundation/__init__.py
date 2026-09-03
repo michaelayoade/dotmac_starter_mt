@@ -238,6 +238,13 @@ from .recovery import (
     verify_plane_isolation,
     verify_recovery,
 )
+from .recovery_execution import (
+    RecoveryEffects,
+    RecoveryExecutor,
+    RecoveryOutcome,
+    RecoverySession,
+    RestoreTarget,
+)
 from .recovery_identity import (
     EXECUTOR_KINDS,
     PRIVILEGE_VERIFICATIONS,
@@ -433,6 +440,11 @@ __all__ = [
     "REQUIRED_ITEMS",
     "RESOURCE_ATTRIBUTES",
     "RESTORE_PROCEDURE",
+    "RecoveryEffects",
+    "RecoveryExecutor",
+    "RecoveryOutcome",
+    "RecoverySession",
+    "RestoreTarget",
     "RecoveryBundleManifestV1",
     "RecoveryNotProved",
     "RecoveryReceiptV1",

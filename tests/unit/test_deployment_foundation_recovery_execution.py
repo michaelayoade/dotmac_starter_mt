@@ -296,3 +296,137 @@ def test_an_unstarted_outcome_carries_no_invented_facts() -> None:
     assert evidence["exit_status"] is None
     assert evidence["disposition"] == ""
     assert evidence["proved"] is False
+
+
+# ── Shape B: reachable, and the premise for needing no ExecutionGrant ────────
+
+
+def test_every_recovery_effect_acts_on_a_target_this_executor_created() -> None:
+    """THE ENFORCEABLE PREMISE, checked as a property rather than asserted.
+
+    `deploy` and `rollback` need an `ExecutionGrant` because `Executor` mutates
+    the product host. This executor needs none, and the reason has to be
+    checkable or it is an exemption wearing a premise's clothes: every method on
+    `RecoveryEffects` either CREATES a target or takes one as a parameter, so
+    there is no method by which it can name, reach or mutate a running
+    deployment.
+
+    Signature inspection, not a name list. Adding `restart_product_role(self,
+    role: str)` to the protocol fails HERE — which is the point, because that
+    method would silently give a grant-free executor a way onto the product
+    host, and nothing else in this package would notice.
+    """
+    import inspect
+
+    from dotmac_deployment_foundation.recovery_execution import RecoveryEffects
+
+    methods = {
+        name: getattr(RecoveryEffects, name)
+        for name in vars(RecoveryEffects)
+        if not name.startswith("_") and callable(getattr(RecoveryEffects, name))
+    }
+    assert methods, "the protocol exposes no methods; this check would be vacuous"
+
+    offenders = []
+    for name, method in sorted(methods.items()):
+        params = inspect.signature(method).parameters
+        if name == "create_fresh_target":
+            continue
+        annotations = {str(p.annotation) for p in params.values()}
+        if not any("RestoreTarget" in item for item in annotations):
+            offenders.append(name)
+    assert not offenders, (
+        f"RecoveryEffects methods {offenders} do not take a RestoreTarget. "
+        "Every effect must act on a target this executor created, or the "
+        "premise for running without an ExecutionGrant no longer holds and "
+        "this executor needs the authorization chain a7 builds"
+    )
+
+
+def test_the_executor_is_on_the_packages_public_surface() -> None:
+    """It was importable only as a private submodule, which is not reachability.
+    An embedder could not reach it through `__all__`, and the CLI did not call
+    it — so every seam was real in principle and unreachable in practice."""
+    import dotmac_deployment_foundation as facility
+
+    for name in (
+        "RecoveryExecutor",
+        "RecoveryEffects",
+        "RecoverySession",
+        "RecoveryOutcome",
+        "RestoreTarget",
+    ):
+        assert name in facility.__all__, name
+        assert hasattr(facility, name), name
+
+
+def test_recover_is_not_an_authorizable_operation() -> None:
+    """Withdrawn in a6. The executor performs an isolated REHEARSAL; `recover`
+    names recovering a failed production system, which it cannot do. See
+    `authorization.OPERATIONS` for the reasoning and the a7 successor."""
+    from dotmac_deployment_foundation.authorization import OPERATIONS
+
+    assert "recover" not in OPERATIONS
+    assert set(OPERATIONS) == {"deploy", "rollback"}
+
+
+# ── the session, refused on typed CODES ─────────────────────────────────────
+
+
+def _session(**overrides):
+    from dotmac_deployment_foundation.recovery import CatalogEvidence
+    from dotmac_deployment_foundation.recovery_execution import RecoverySession
+
+    fields = {
+        "effects": RecordingRecoveryEffects(),
+        "source_evidence": CatalogEvidence(),
+        "product_image": "ghcr.io/x@sha256:" + "a" * 64,
+        "bundle": {},
+    }
+    fields.update(overrides)
+    return RecoverySession(**fields)
+
+
+def test_a_valid_recovery_session_constructs() -> None:
+    """POSITIVE CONTROL. A refusal suite whose subject can never be built
+    proves nothing about the refusals."""
+    assert _session().product_image
+
+
+def test_a_session_whose_effects_are_a_look_alike_is_refused_by_code() -> None:
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+    from dotmac_deployment_foundation.recovery_execution import (
+        SESSION_EFFECTS_INVALID,
+    )
+
+    class LookAlike:
+        pass
+
+    with pytest.raises(PreconditionFailed) as caught:
+        _session(effects=LookAlike())
+    assert caught.value.code == SESSION_EFFECTS_INVALID
+
+
+def test_a_session_without_real_source_evidence_is_refused_by_code() -> None:
+    """No default and no empty-CatalogEvidence fallback anywhere upstream: an
+    empty source catalogue compares clean against an empty restored one, so a
+    defaulted session reports a created database as a proved recovery."""
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+    from dotmac_deployment_foundation.recovery_execution import (
+        SESSION_EVIDENCE_INVALID,
+    )
+
+    with pytest.raises(PreconditionFailed) as caught:
+        _session(source_evidence={"roles": []})
+    assert caught.value.code == SESSION_EVIDENCE_INVALID
+
+
+def test_a_session_with_no_product_image_is_refused_by_code() -> None:
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+    from dotmac_deployment_foundation.recovery_execution import (
+        SESSION_IMAGE_MISSING,
+    )
+
+    with pytest.raises(PreconditionFailed) as caught:
+        _session(product_image="   ")
+    assert caught.value.code == SESSION_IMAGE_MISSING

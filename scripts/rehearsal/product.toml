@@ -120,7 +120,9 @@ retention_days = 1
 checksum = "sha256"
 encryption = "none"
 restore_proof_max_age_days = 1
-verify = ["schema", "row_counts", "migration_heads"]
+# `row_counts` removed: unobservable by this facility and refused at parse for
+# a dataset with no external executor. A false claim retired, not a check lost.
+verify = ["schema", "migration_heads"]
 
 [telemetry]
 logs = false

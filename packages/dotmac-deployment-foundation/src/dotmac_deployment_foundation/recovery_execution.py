@@ -32,15 +32,68 @@ a database-destroying capability on the object every deploy already holds, and
 "the executor happened not to call it" is not a boundary. `RecoveryEffects` is
 its own protocol for the same reason `ExposureHostEffects` is.
 
-## What this module does NOT do yet, deliberately
+## What this module IS reachable as, and what it is NOT
 
-**It is not reachable.** There is no CLI subcommand, no authorization binding
-and no `recover` member in `authorization.OPERATIONS`. That is the ordering the
-a6 slice plan requires and it is not an oversight: a vocabulary widened before
-its executor exists authorizes an operation nothing can perform, which is the
-defect this facility spent two releases removing. The executor lands first and
-is exercised through its own seam; the authorization binding and the CLI follow
-in the next slice, and only then can anything call this.
+This docstring previously asserted three things about its own unreachability —
+no CLI subcommand, no authorization binding, no `recover` member — and the
+commit that added the executor made the third false while leaving the sentence
+in place. A module that misdescribes its own reachability is how an executor
+comes to sit outside the authorization chain without anyone noticing, so what
+follows states what is TRUE rather than deleting what became false.
+
+**Reachable, as `dotmac-deploy restore-rehearsal --execute`.** The assembly
+supplies a :class:`RecoverySession` through its execution-bindings entry point
+(`build_recovery_session`), because everything this executor needs beyond the
+descriptor is something only the assembly can produce: a `RecoveryEffects` that
+can create and destroy a cluster, the bundle bytes, and the SOURCE
+`CatalogEvidence` captured when the backup was taken. This facility parses no
+bundle bytes and holds no database driver, by design — see "Why the source
+evidence is not read here" below.
+
+**NOT reachable as an authorized operation, and that is the boundary.** There is
+no `recover` member in `authorization.OPERATIONS`; it was added in a6 and
+withdrawn in the same release, with the reasoning recorded at that constant.
+This executor performs a restore REHEARSAL: step 1 creates a fresh, isolated
+cluster that must not be the product's, and the adjudicator's terminal verdict
+destroys it.
+
+## The premise for having no `ExecutionGrant`, stated so it can be checked
+
+An `ExecutionGrant` exists because `Executor` mutates the product host. This
+executor cannot: it acts only on a target IT created through
+`create_fresh_target`, and `RecoveryEffects` has no method that names, reaches
+or mutates a running deployment. That is an enforceable premise rather than an
+exemption — the protocol is the enforcement, and
+`test_deployment_foundation_recovery_execution.py` asserts the surface stays
+that way, so widening `RecoveryEffects` to touch a product host fails there and
+sends the reader here.
+
+What that premise does NOT cover is a recovery of a failed production system.
+That act needs a captured prestate, the failed system's own observed state and a
+desired poststate; it mutates something that already exists; and it therefore
+needs the grant, a replay coordinate, Control settlement and a signed result.
+It is a7's subject, with its own `RecoveryExecutionPlanV1`, because a
+deployment-shaped plan is not a recovery plan.
+
+## Why the source evidence is not read here
+
+`verify_recovery` compares the restored catalogue against the SOURCE catalogue
+as captured. The manifest deliberately carries digests and counts, not facts —
+that value-free split is what lets this module run with no database and no
+credential — so a `CatalogEvidence` cannot be reconstructed from it, and there
+is no deserializer for one anywhere in this package.
+
+The facts themselves are in the BUNDLE, as the components the manifest digests.
+The assembly already holds those bytes and is the only thing that reads them, so
+it is the only correct supplier. Reaching instead for a fourteenth
+`BundleComponent` carrying serialized catalogue facts is the turn a later reader
+will take first, and it is wrong twice: it changes a closed vocabulary, and it
+puts parsed facts inside the very document whose value-free-ness this module
+depends on.
+
+(`BundleComponent` has thirteen members. So does `ApplicationFoundationProfile`'s
+concern set. They are unrelated vocabularies and must never be conflated — and
+these thirteen ARE the fact set the verification registry compares.)
 """
 
 from __future__ import annotations
@@ -63,11 +116,67 @@ from .recovery import (
 )
 
 __all__ = [
+    "SESSION_ABSENT",
+    "SESSION_EFFECTS_INVALID",
+    "SESSION_EVIDENCE_INVALID",
+    "SESSION_IMAGE_MISSING",
     "RecoveryEffects",
+    "RecoverySession",
     "RecoveryExecutor",
     "RecoveryOutcome",
     "RestoreTarget",
 ]
+
+
+#: Stable identifiers for this module's refusals. Assert these, read the prose.
+SESSION_EFFECTS_INVALID: Final = "recovery.session.effects_invalid"
+SESSION_EVIDENCE_INVALID: Final = "recovery.session.evidence_invalid"
+SESSION_IMAGE_MISSING: Final = "recovery.session.image_missing"
+SESSION_ABSENT: Final = "recovery.session.absent"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RecoverySession:
+    """Everything the executor needs that only the ASSEMBLY can produce.
+
+    One object rather than four CLI flags, because these four are meaningless
+    apart: effects that can reach a cluster, the bundle bytes, the source
+    catalogue those bytes were captured from, and the image the restore must be
+    proved able to run. A caller holding three of them has nothing.
+
+    There is no default and no empty `CatalogEvidence` fallback. An empty source
+    catalogue compares clean against an empty restored one, so a defaulted
+    session is a rehearsal that proves a database was created — the exact shape
+    of "a check that passes because it looked at nothing".
+    """
+
+    effects: RecoveryEffects
+    source_evidence: CatalogEvidence
+    product_image: str
+    bundle: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.effects, RecoveryEffects):
+            raise PreconditionFailed(
+                "RecoverySession.effects does not implement RecoveryEffects; "
+                f"got {type(self.effects).__name__}. The typed protocol is the "
+                "contract, and a look-alike is what it exists to refuse",
+                code=SESSION_EFFECTS_INVALID,
+            )
+        if not isinstance(self.source_evidence, CatalogEvidence):
+            raise PreconditionFailed(
+                "RecoverySession.source_evidence must be a CatalogEvidence "
+                f"captured from the SOURCE, got "
+                f"{type(self.source_evidence).__name__}",
+                code=SESSION_EVIDENCE_INVALID,
+            )
+        if not str(self.product_image).strip():
+            raise PreconditionFailed(
+                "RecoverySession.product_image is empty; step 9 starts the "
+                "real application against the restored database, and a restore "
+                "nothing has started the application against is a copy",
+                code=SESSION_IMAGE_MISSING,
+            )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

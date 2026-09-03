@@ -22,10 +22,20 @@ class DeploymentFoundationError(Exception):
 
 
 class SpecError(DeploymentFoundationError):
-    """The descriptor is malformed, incomplete, or self-contradictory."""
+    """The descriptor is malformed, incomplete, or self-contradictory.
 
-    def __init__(self, message: str, *, where: str = "") -> None:
+    ``code`` is an optional STABLE identifier for the refusal, defaulting to
+    empty so every existing raise site is unchanged. It exists because a module
+    with more than one refusal has to be testable on WHICH refusal fired, and
+    matching on the prose makes the message the contract — after which the
+    sentence cannot be improved without breaking a test, and a test that only
+    ever saw one wording cannot tell two refusals apart. Assert the code; read
+    the prose.
+    """
+
+    def __init__(self, message: str, *, where: str = "", code: str = "") -> None:
         self.where = where
+        self.code = code
         super().__init__(f"{where}: {message}" if where else message)
 
 
@@ -73,7 +83,16 @@ class PreconditionFailed(DeploymentError):
 
     The important property: nothing has changed, so the caller may resolve the
     stated cause and re-run the identical command.
+
+    ``code`` is an optional STABLE identifier, defaulting to empty so every
+    existing raise site is unchanged. Same reason as `SpecError`: a module with
+    more than one refusal has to be testable on WHICH refusal fired, and
+    matching on prose makes the sentence the contract.
     """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class StepFailed(DeploymentError):

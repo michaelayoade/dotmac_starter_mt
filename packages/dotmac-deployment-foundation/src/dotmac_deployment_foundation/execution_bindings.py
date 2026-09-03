@@ -86,6 +86,18 @@ class ExecutionBindings:
     evidence_policy: TrustPolicy | None = None
     evidence_verifier: SignatureVerifier | None = None
     recovery_verifier: SignatureVerifier | None = None
+    #: ``(spec, manifest) -> RecoverySession``. Supplies what only an assembly
+    #: can: a `RecoveryEffects` that reaches a cluster, the bundle bytes, and
+    #: the SOURCE `CatalogEvidence` those bytes were captured from. None means
+    #: `restore-rehearsal --execute` refuses; it never means "rehearse against
+    #: nothing", because an empty source catalogue compares clean against an
+    #: empty restored one.
+    #:
+    #: An ADDITIVE field on a mechanism this facility already owns and already
+    #: extends — deliberately not a fourteenth `BundleComponent`, which would
+    #: change a closed vocabulary AND put parsed catalogue facts inside the
+    #: document whose value-free-ness lets `recovery.py` run with no database.
+    build_recovery_session: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         name = str(self.provider).strip()
@@ -101,6 +113,14 @@ class ExecutionBindings:
                 "facility's own in-package provider. A distribution shadowing "
                 "the built-in name would swap effects under an unchanged "
                 "command line"
+            )
+        if self.build_recovery_session is not None and not callable(
+            self.build_recovery_session
+        ):
+            raise SpecError(
+                "ExecutionBindings.build_recovery_session must be callable "
+                "((spec, manifest) -> RecoverySession), got "
+                f"{type(self.build_recovery_session).__name__}"
             )
         if self.build_effects is not None and not callable(self.build_effects):
             raise SpecError(
@@ -133,6 +153,7 @@ class ExecutionBindings:
                 )
         if (
             self.build_effects is None
+            and self.build_recovery_session is None
             and self.authorization_verifier is None
             and self.evidence_policy is None
             and self.evidence_verifier is None

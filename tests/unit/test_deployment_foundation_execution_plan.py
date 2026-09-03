@@ -114,18 +114,23 @@ def test_the_operation_vocabulary_is_closed_and_shared_with_control() -> None:
     `authorization.OPERATIONS` rather than restated, so the plan and the grant
     cannot come to disagree about what a deployment can be.
 
-    THREE since a6, and the third arrived in the right order. Control 0.1.0a10
-    declared `recover` first, expecting this facility to match; a5 did NOT
-    match, because at that point there was no restore capability here at all —
-    `RESTORE_PROCEDURE` was text and the deployment `Effects` had no restore
-    method, so the member would have named an operation nothing could perform.
-    `recovery_execution.py` landed first and this widened after it.
+    TWO members, and the history of the third is the part worth reading.
+    Control 0.1.0a10 declared `recover` first, expecting this facility to
+    match; a5 did NOT match, because at that point there was no restore
+    capability here at all.
+    a6 briefly widened to three once `recovery_execution.py` existed, then
+    WITHDREW it — the executor performs an isolated restore REHEARSAL, and
+    `recover` names recovering a failed production system, which it cannot do.
+    `authorization.OPERATIONS` carries the full reasoning and the a7 successor.
 
-    Written out rather than derived, deliberately: this states an expectation
-    the vocabulary must meet, so a member appearing or disappearing is a diff
-    somebody reviews rather than a constant that silently followed the code.
+    Written out rather than derived, deliberately, and this is the file that
+    does the stating: a member appearing or disappearing has to be a diff
+    somebody reviews, never a constant that silently followed the code. The
+    pair-separation test in `test_deployment_foundation_execution_seam.py`
+    derives its EXTENT from this tuple so it cannot go stale — that is safe
+    only because the membership is asserted longhand HERE.
     """
-    assert set(OPERATIONS) == {"deploy", "rollback", "recover"}
+    assert set(OPERATIONS) == {"deploy", "rollback"}
     with pytest.raises(SpecError, match="unknown operation"):
         _rendered(operation="reconcile")
 

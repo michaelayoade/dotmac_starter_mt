@@ -86,7 +86,7 @@ code = "primary"
 kind = "postgres"
 material = "BACKUP_DATABASE_URL"
 retention_days = 30
-verify = ["schema", "row_counts"]
+verify = ["schema"]
 
 [[roles]]
 code = "app"

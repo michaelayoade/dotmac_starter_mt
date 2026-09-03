@@ -672,7 +672,94 @@ def cmd_restore_rehearsal(args: argparse.Namespace) -> int:
             "rehearsal that restores anywhere the product can reach is not a "
             "rehearsal, it is a restore"
         )
-    return EXIT_OK
+    if not args.execute:
+        print(
+            "\nCONTRACT ONLY. Nothing was executed. Re-run with --execute "
+            "--manifest PATH to drive the restore procedure against the "
+            "assembly's recovery session."
+        )
+        return EXIT_OK
+    return _execute_restore_rehearsal(args, spec)
+
+
+def _execute_restore_rehearsal(
+    args: argparse.Namespace, spec: ProductDeploymentSpec
+) -> int:
+    """Drive `RESTORE_PROCEDURE` against the assembly's recovery session.
+
+    NO `ExecutionGrant`, and the premise is enforceable rather than asserted:
+    this executor acts only on a target it created itself through
+    `create_fresh_target`, and `RecoveryEffects` has no method that names,
+    reaches or mutates a running deployment. `deploy` and `rollback` need a
+    grant because `Executor` mutates the product host; this cannot.
+
+    That premise stops exactly where the act does. Recovering a FAILED
+    PRODUCTION SYSTEM mutates something that already exists and needs the whole
+    chain — grant, replay coordinate, Control settlement, signed result. It is
+    a7's, it is not this, and `recover` is deliberately absent from
+    `authorization.OPERATIONS` until it exists.
+    """
+    from .execution_bindings import ENTRY_POINT_GROUP
+    from .recovery import load_manifest
+    from .recovery_execution import (
+        SESSION_ABSENT,
+        RecoveryExecutor,
+        RecoverySession,
+    )
+
+    if not args.manifest:
+        raise PreconditionFailed(
+            "--execute requires --manifest naming the recovery bundle manifest "
+            "to rehearse. The procedure is derived from the bundle, so a "
+            "rehearsal with no manifest has nothing to drive"
+        )
+    manifest = load_manifest(Path(args.manifest).read_text(encoding="utf-8"))
+
+    bindings = _load_bindings(args)
+    factory = getattr(bindings, "build_recovery_session", None) if bindings else None
+    if factory is None:
+        raise PreconditionFailed(
+            "a restore rehearsal needs a RecoverySession and this facility "
+            "cannot build one: it ships no database driver, opens no socket, "
+            "and deliberately parses no bundle bytes, so the SOURCE "
+            "CatalogEvidence a restore is compared against can only come from "
+            "the assembly that captured it. Install the assembly's bindings "
+            f"distribution (one {ENTRY_POINT_GROUP!r} entry point) declaring "
+            "`build_recovery_session`. Refusing rather than rehearsing against "
+            "an empty source catalogue, which compares clean against an empty "
+            "restored one and would report a created database as a proved "
+            "recovery",
+            code=SESSION_ABSENT,
+        )
+
+    session = factory(spec, manifest)
+    if not isinstance(session, RecoverySession):
+        raise PreconditionFailed(
+            f"build_recovery_session returned {type(session).__name__}, not a "
+            "RecoverySession. The typed object is the contract; a look-alike "
+            "is exactly what the type exists to refuse"
+        )
+
+    outcome = RecoveryExecutor(
+        spec,
+        manifest,
+        session.effects,
+        source_evidence=session.source_evidence,
+        product_image=session.product_image,
+    ).run(session.bundle)
+
+    print()
+    for step in outcome.steps_completed:
+        print(f"  ok    {step}")
+    if outcome.destroyed:
+        print("  target DESTROYED by the adjudicator's verdict")
+    for finding in outcome.findings:
+        print(f"  finding: {finding}", file=sys.stderr)
+    if outcome.proved:
+        print("\nRESTORE REHEARSAL PROVED")
+        return EXIT_OK
+    print(f"\nRESTORE REHEARSAL REFUSED: {outcome.failure}", file=sys.stderr)
+    return EXIT_REFUSED
 
 
 def cmd_recovery_bundle(args: argparse.Namespace) -> int:
@@ -1108,9 +1195,23 @@ def build_parser() -> argparse.ArgumentParser:
     add("backup", cmd_backup, "show the backup policy and what verification means")
 
     rehearse = add(
-        "restore-rehearsal", cmd_restore_rehearsal, "show the restore proof required"
+        "restore-rehearsal",
+        cmd_restore_rehearsal,
+        "show the restore proof required, or DRIVE it with --execute",
     )
     rehearse.add_argument("--dataset")
+    rehearse.add_argument(
+        "--manifest", help="recovery bundle manifest to rehearse (with --execute)"
+    )
+    rehearse.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "drive RESTORE_PROCEDURE against the assembly's recovery session. "
+            "Creates and destroys its OWN isolated target; never touches the "
+            "product host, which is why it needs no authorization receipt"
+        ),
+    )
 
     bundle = add(
         "recovery-bundle",

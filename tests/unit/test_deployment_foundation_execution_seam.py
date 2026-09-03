@@ -183,23 +183,29 @@ def test_a_deploy_grant_is_refused_at_the_rollback_seam() -> None:
 @pytest.mark.parametrize(
     ("granted", "requested"),
     [
-        ("deploy", "rollback"),
-        ("deploy", "recover"),
-        ("rollback", "deploy"),
-        ("rollback", "recover"),
-        ("recover", "deploy"),
-        ("recover", "rollback"),
+        (granted, requested)
+        for granted in OPERATIONS
+        for requested in OPERATIONS
+        if granted != requested
     ],
 )
 def test_no_operation_authorizes_any_other(granted: str, requested: str) -> None:
-    """All SIX ordered pairs, not a sample.
+    """EVERY ordered pair, DERIVED from OPERATIONS rather than counted by hand.
 
-    The vocabulary went from two members to three in a6, and a two-member
-    separation tested as one pair each way does not become a three-member
-    separation by adding a member — it becomes four untested pairs. The two
-    that matter most are the new ones: a deploy or rollback approval that also
-    permitted a RECOVER would reach a path that creates clusters and destroys
-    targets, which is a strictly larger consent than the one that was given.
+    The vocabulary went two -> three when `recover` was added, then three -> two
+    when it was withdrawn (see `authorization.OPERATIONS` for why). Each move
+    changes the number of ordered pairs, and a hand-written list silently stops
+    being exhaustive on the way UP: two members are two pairs, three are six, so
+    adding a member without adding four rows here leaves four untested pairs
+    that look tested. This file did carry all six while there were three.
+
+    Deriving a test's expectation from the thing under test is usually the
+    defect, so the distinction is worth stating: this test does NOT assert which
+    operations exist — `test_deployment_foundation_execution_plan.py` states the
+    membership longhand, exactly so it cannot follow the code silently. It
+    asserts that no member authorizes any OTHER member, which is a property of
+    every pair whatever the membership is. Deriving the EXTENT keeps it
+    exhaustive; the membership stays stated elsewhere.
     """
     with pytest.raises(PreconditionFailed, match="Control authorized"):
         authorize(
