@@ -164,12 +164,43 @@ def cmd_resolve(args: argparse.Namespace) -> None:
             f"pyproject declares {manifest['name']!r}, dispatched "
             f"{args.distribution!r}"
         )
-    if args.version and manifest["version"] != args.version:
-        raise ReleaseRefused(
-            f"{args.distribution}: dispatched version {args.version!r} != "
-            f"package version {manifest['version']!r}. The version is not "
-            "inferred; fix one of them."
-        )
+    # A FROZEN CANDIDATE'S IDENTITY COMES FROM ITS RECEIPT, NOT FROM SOURCE.
+    #
+    # This used to compare the dispatched version against `pyproject.toml`
+    # unconditionally, and that is the `[image]` circularity in a new coat: a
+    # candidate whose identity is re-derived from the CURRENT tree is not
+    # frozen. Once `foundation-candidate.yml` has built a version, its bytes
+    # and its version are one immutable fact recorded in
+    # `CandidateArtifact.v1`; the tree then moves on, and the moment it
+    # declares a successor the already-built candidate became unreleasable —
+    # not because anything was wrong with it, but because the lane was asking
+    # the wrong document who it was.
+    #
+    # It also refused for the WRONG REASON, which is the sharper defect. A
+    # frozen candidate that must not ship has a record that says so — a
+    # `CandidateDisposition.v1` — and the version-binding guard reads it. A
+    # source-version mismatch that happens to block the same release is a
+    # coincidence standing where a reason belongs, and it stops holding the
+    # instant somebody bumps a version for an unrelated purpose.
+    #
+    # So: if a receipt names this version, the receipt is the identity and no
+    # source comparison happens at all. If none does — the version has never
+    # been built — the tree is the only identity there is, and equality is
+    # still required, because a version nobody has built must be the version
+    # this tree declares or it names nothing.
+    version = args.version
+    if version:
+        frozen = find_candidate_receipt(args.distribution, version)
+        if frozen is None and manifest["version"] != version:
+            raise ReleaseRefused(
+                f"{args.distribution}: dispatched version {version!r} != "
+                f"package version {manifest['version']!r}, and no committed "
+                f"{version_binding_guard.CANDIDATE_SCHEMA} receipt names "
+                f"{version!r}. An unbuilt version is identified by this tree "
+                "alone, so the two must agree; fix one of them."
+            )
+    else:
+        version = manifest["version"]
 
     # Consumed by the workflow via $GITHUB_OUTPUT. Deliberately no db_schema,
     # manifest_attr or kernel_floor — a facility has none, and emitting an
@@ -177,8 +208,8 @@ def cmd_resolve(args: argparse.Namespace) -> None:
     # "absent".
     for key in ("package_dir", "entry_point", "tag_prefix"):
         print(f"{key}={entry[key]}")
-    print(f"version={manifest['version']}")
-    print(f"tag={entry['tag_prefix']}{manifest['version']}")
+    print(f"version={version}")
+    print(f"tag={entry['tag_prefix']}{version}")
 
 
 def cmd_inspect(args: argparse.Namespace) -> None:
@@ -257,8 +288,17 @@ def cmd_inspect(args: argparse.Namespace) -> None:
     print(f"{wheel.name}: content policy OK ({len(names)} entries)")
 
 
-def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, Any]]:
-    """The committed `CandidateArtifact.v1` for exactly this facility+version.
+def find_candidate_receipt(
+    distribution: str, version: str
+) -> tuple[Path, dict[str, Any]] | None:
+    """The committed `CandidateArtifact.v1` for this facility+version, or None.
+
+    ABSENCE IS A DIFFERENT ANSWER FROM A DEFECT, and separating them is what
+    lets `cmd_resolve` ask "is this version frozen?" without swallowing the
+    refusals that must still bite. Returns None only when NO receipt names the
+    version; a duplicate, an unresolvable or an already-published receipt still
+    raises, because each of those is a reason to stop rather than a reason to
+    fall back to the source tree.
 
     THE RECEIPT IS THE ONLY SOURCE OF THE CANDIDATE'S COORDINATES — repository
     included. Nothing here takes an owning repository, a run, an artifact or a
@@ -297,13 +337,7 @@ def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, 
         matches.append((path, document))
 
     if not matches:
-        raise ReleaseRefused(
-            f"{distribution} {version}: no committed "
-            f"{version_binding_guard.CANDIDATE_SCHEMA} receipt. This lane "
-            "publishes the bytes `foundation-candidate.yml` already built; it "
-            "does not build them. Build the candidate, then commit its "
-            "receipt, then release."
-        )
+        return None
     if len(matches) > 1:
         listed = ", ".join(str(path.relative_to(REPO_ROOT)) for path, _ in matches)
         raise ReleaseRefused(
@@ -330,6 +364,24 @@ def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, 
             "the same identity twice."
         )
     return path, receipt
+
+
+def candidate_receipt(distribution: str, version: str) -> tuple[Path, dict[str, Any]]:
+    """As :func:`find_candidate_receipt`, but absence is a refusal.
+
+    The release path proper needs the receipt to EXIST — it publishes bytes
+    somebody already built and does not build them.
+    """
+    found = find_candidate_receipt(distribution, version)
+    if found is None:
+        raise ReleaseRefused(
+            f"{distribution} {version}: no committed "
+            f"{version_binding_guard.CANDIDATE_SCHEMA} receipt. This lane "
+            "publishes the bytes `foundation-candidate.yml` already built; it "
+            "does not build them. Build the candidate, then commit its "
+            "receipt, then release."
+        )
+    return found
 
 
 def _sole_wheel(dist: Path) -> Path:
@@ -579,6 +631,145 @@ sys.stdout.write(printed + "\\n")
 """
 
 
+#: THE NINTH PROPERTY, and it is here rather than in `tests/unit/` on purpose.
+#:
+#: Eight tests in `test_deployment_foundation_execution_binding.py` run against
+#: the source tree, and the source tree is not what anyone installs. A wheel can
+#: be built from a repaired tree and still ship an older module, or ship the
+#: right module under a broken entry point — `0.3.0a2` shipped a wheel whose
+#: `__version__` disagreed with its own metadata, and every source-side gate was
+#: green. So the binding is exercised against the INSTALLED distribution, by the
+#: INSTALLED interpreter, in the candidate lane and again against the bytes the
+#: registry served.
+#:
+#: Behaviour, never spelling. Nothing here asks whether a name exists: each
+#: check drives a refusal and fails if the refusal does not happen.
+_EXECUTION_BINDING_PROBE: Final = """\
+import inspect
+import sys
+
+from dotmac_deployment_foundation.authorization import authorize
+from dotmac_deployment_foundation.engine.run import Executor
+from dotmac_deployment_foundation.provenance import (
+    AuthorizationReceipt,
+    VerifiedAuthorization,
+    verify_authorization,
+)
+
+problems = []
+
+RECEIPT = {
+    "plan_id": "00000000-0000-4000-8000-00000000beef",
+    "target_ref": "installed-artifact-probe",
+    "descriptor_digest": "sha256:" + "a" * 64,
+    "execution_plan_digest": "sha256:" + "e" * 64,
+    "control_plan_digest": "f" * 64,
+    "policy_code": "deployment.production",
+    "policy_version": 1,
+    "decision_ref": "approvals:decision:1",
+    "approved_at": "2026-08-30T00:00:00Z",
+    "expires_at": "2026-08-31T00:00:00Z",
+    "control_version": "0.0.0",
+    "operation": "deploy",
+}
+
+
+class _Stub:
+    def attest(self, material):
+        return dict(material)
+
+
+# 1. An UNBOUND executor must be unconstructable. Checked on the installed
+#    signature: `execution_plan` required, and no way to hand the authorized
+#    digest in beside it.
+parameters = inspect.signature(Executor.__init__).parameters
+if "execution_plan" not in parameters:
+    problems.append("the installed Executor takes no execution_plan at all")
+elif parameters["execution_plan"].default is not inspect.Parameter.empty:
+    problems.append(
+        "the installed Executor defaults execution_plan to %r, so an unbound "
+        "executor is constructable" % (parameters["execution_plan"].default,)
+    )
+if "authorized_execution_plan_digest" in parameters:
+    problems.append(
+        "the installed Executor still accepts authorized_execution_plan_digest, "
+        "so an authorized digest can arrive without passing through attestation"
+    )
+
+# 2. Verified terms cannot be hand-built.
+try:
+    VerifiedAuthorization(object(), receipt=AuthorizationReceipt(**RECEIPT))
+    problems.append("the installed VerifiedAuthorization accepted a hand-built witness")
+except Exception:
+    pass
+
+# 3. A receipt that names no frozen plan is refused.
+try:
+    bare = dict(RECEIPT)
+    del bare["execution_plan_digest"]
+    verify_authorization(bare, verifier=_Stub())
+    problems.append(
+        "the installed receipt accepted a document with no execution_plan_digest"
+    )
+except Exception:
+    pass
+
+# 4. An expired approval is refused, with time supplied by the caller.
+import datetime as _dt
+
+verified = verify_authorization(dict(RECEIPT), verifier=_Stub())
+try:
+    authorize(
+        verified=verified,
+        operation="deploy",
+        descriptor_digest="sha256:" + "a" * 64,
+        target="installed-artifact-probe",
+        now=_dt.datetime(2026, 9, 1, tzinfo=_dt.UTC),
+    )
+    problems.append("the installed authorize() accepted an expired approval")
+except Exception:
+    pass
+
+# 5. Control's plan digest arriving as the descriptor digest is refused.
+substituted = dict(RECEIPT)
+substituted["descriptor_digest"] = RECEIPT["control_plan_digest"]
+try:
+    authorize(
+        verified=verify_authorization(substituted, verifier=_Stub()),
+        operation="deploy",
+        descriptor_digest="sha256:" + "a" * 64,
+        target="installed-artifact-probe",
+        now=_dt.datetime(2026, 8, 30, 12, tzinfo=_dt.UTC),
+    )
+    problems.append(
+        "the installed authorize() accepted Control's plan digest as the "
+        "descriptor digest"
+    )
+except Exception:
+    pass
+
+if problems:
+    sys.stderr.write("\\n".join(problems) + "\\n")
+    raise SystemExit(1)
+
+sys.stdout.write("execution binding OK\\n")
+"""
+
+
+def _execution_binding_smoke(venv_python: Path, workdir: Path) -> None:
+    """Run the binding probe with the INSTALLED interpreter."""
+    probe = workdir / "execution_binding_probe.py"
+    probe.write_text(_EXECUTION_BINDING_PROBE, encoding="utf-8")
+    checked = subprocess.run(
+        [str(venv_python), str(probe)], check=False, capture_output=True, text=True
+    )
+    if checked.returncode != 0:
+        raise ReleaseRefused(
+            "the installed bytes do not enforce the execution binding:\n  - "
+            + "\n  - ".join(checked.stderr.strip().splitlines())
+        )
+
+
 def _execution_plan_smoke(
     venv_python: Path, script: Path, descriptor: Path, workdir: Path
 ) -> str:
@@ -678,7 +869,12 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         digest = _execution_plan_smoke(venv_python, script, descriptor, Path(tmp))
+        # The binding, on the same installed bytes. A wheel that renders a plan
+        # and then executes without one is exactly the state this release
+        # repairs, and only the artifact can say whether it still does.
+        _execution_binding_smoke(venv_python, Path(tmp))
     print(f"{entry_point}: execution-plan contract OK ({digest})")
+    print(f"{entry_point}: execution binding enforced on the installed artifact")
 
 
 def cmd_verify_wheel(args: argparse.Namespace) -> None:

@@ -24,6 +24,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -265,7 +266,7 @@ def _require_grant(
     cannot accidentally treat "refused" as "granted" by forgetting to check.
     """
     from .authorization import authorize
-    from .provenance import AuthorizationReceipt
+    from .provenance import verify_authorization
 
     target = getattr(args, "target", "") or ""
     if not target:
@@ -294,12 +295,40 @@ def _require_grant(
         raise PreconditionFailed(
             f"the authorization receipt {path} is not valid JSON: {exc}"
         ) from exc
-    receipt = AuthorizationReceipt.from_document(document)
+    # RAW MATERIAL ONLY THROUGH A VERIFIER, and this facility ships none.
+    #
+    # The same line `recovery_receipts` already draws, one layer up and for the
+    # same reason: a zero-dependency build runner (ADR-0009/ADR-0070) must not
+    # ship a weak stdlib signature substitute, because a weak verifier reads as
+    # coverage. What stood here was
+    # `AuthorizationReceipt.from_document(document)` — a public classmethod
+    # over a JSON file, which proves the document has the right KEYS and says
+    # nothing about whether Control signed it. Parsing is not attestation.
+    #
+    # So the CLI refuses rather than self-attesting, and an assembly embedding
+    # `Executor` supplies the verifier its trust roots live in. A `--execute`
+    # that quietly accepted an unsigned receipt would be the bypass this whole
+    # contract exists to close.
+    verifier = getattr(args, "authorization_verifier", None)
+    if verifier is None:
+        raise PreconditionFailed(
+            f"the authorization receipt {path} was read but nothing can attest "
+            "it: this facility declares zero runtime dependencies and ships no "
+            "signature verifier, and parsing a JSON document is not "
+            "verification. Supply an AuthorizationVerifier through an assembly "
+            "that embeds Executor. Refusing to execute on material this "
+            "process cannot authenticate"
+        )
+    verified = verify_authorization(document, verifier=verifier)
     return authorize(
-        receipt=receipt,
+        verified=verified,
         operation=operation,
         descriptor_digest=spec.to_canonical_document().sha256_digest(),
         target=target,
+        # The clock is read HERE, at the adapter, and nowhere below it. An
+        # expiry check whose `now` came from inside the library could not be
+        # moved by a test, and an expiry nobody can test is a field.
+        now=datetime.now(UTC),
     )
 
 
@@ -346,13 +375,28 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
+    from .execution_plan import render_execution_plan
 
     grant = _require_grant(args, spec, "deploy")
     effects = _build_effects(spec, args)
+    # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
+    # authorized digest -- that rides on the grant, which took it from the
+    # attested receipt. This renders the plan the digest is recomputed FROM, so
+    # `_require_execution_plan` compares what will run against what Control
+    # froze. Before this, `cmd_deploy` passed neither and every deployment ran
+    # unbound with an empty digest in its evidence.
+    execution_plan = render_execution_plan(
+        spec,
+        plan,
+        target=args.target,
+        operation="deploy",
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+    )
     executor = Executor(
         spec,
         effects,
         grant,
+        execution_plan=execution_plan,
         # HANDED OVER, never discovered -- one `--recovery-receipt CODE=PATH`
         # per externally executed dataset. No verifier is passed because this
         # facility declares zero runtime dependencies and must not ship a weak
@@ -796,12 +840,23 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
+    from .execution_plan import render_execution_plan
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
     grant = _require_grant(args, spec, "rollback")
     effects = _build_effects(spec, args)
-    executor = Executor(spec, effects, grant)
+    # A SEPARATE plan too, and for the same reason: one descriptor yields a
+    # different plan per operation, so a deploy's frozen digest must not
+    # recompute equal to a rollback's.
+    execution_plan = render_execution_plan(
+        spec,
+        plan,
+        target=args.target,
+        operation="rollback",
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+    )
+    executor = Executor(spec, effects, grant, execution_plan=execution_plan)
     # Same rule as `cmd_deploy`: the lock wraps the whole run.
     with deployment_lock(
         spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"

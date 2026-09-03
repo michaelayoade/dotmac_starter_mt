@@ -35,17 +35,8 @@
     "the version-binding guard, which reads this log. A record that both",
     "states a fact and enforces it is one edit away from being neither."
   ],
-  "schema": "CandidateDispositionLog.v1",
   "entries": [
     {
-      "schema": "CandidateDisposition.v1",
-      "sequence": 1,
-      "previous_digest": "sha256:67aba5a128397fa82d1c1245edd6475a46b88d2ca85953c2aef94dc5d10526bf",
-      "facility": "dotmac-deployment-foundation",
-      "version": "0.3.0a2",
-      "receipt_path": "docs/inventories/foundation-candidate-0.3.0a2.json",
-      "receipt_digest": "sha256:67aba5a128397fa82d1c1245edd6475a46b88d2ca85953c2aef94dc5d10526bf",
-      "receipt_bytes_sha256": "sha256:18e983fb161536496c306dc13c13cba95d67e63e267ae49784377d15c62e1e16",
       "artifact": {
         "artifact_id": "9740182233",
         "filename": "dotmac_deployment_foundation-0.3.0a2-py3-none-any.whl",
@@ -56,10 +47,42 @@
         "source_sha": "e930f878ce400b766b4a50feb0369021a28ab2fa"
       },
       "disposition": "invalidated",
-      "publishable": false,
+      "facility": "dotmac-deployment-foundation",
       "invalidating_commit": "0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2",
+      "previous_digest": "sha256:67aba5a128397fa82d1c1245edd6475a46b88d2ca85953c2aef94dc5d10526bf",
+      "publishable": false,
+      "reason": "The version 0.3.0a2 names two different contracts, and only one of them is the artifact. The wheel was built once from e930f878ce400b766b4a50feb0369021a28ab2fa; commit 0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2 (#551, \"bind database catalogues in descriptor v2\") then changed the facility source under the same declared version -- spec.py, document.py and render/compose.py were modified and database_catalog.py and database_structure.py were added -- so a consumer resolving 0.3.0a2 from the repository and a consumer holding the frozen bytes are holding different code. That is the shape AGENTS.md rule 34 exists to prevent, and recording it is the only repair that does not require editing the receipt. Independently, a read-only measurement of the frozen wheel on 2026-08-31 found it cannot bind an externally executed recovery contract: BackupDataset.VERIFICATIONS is byte-identical to the published 0.2 line, so the four privilege verifications (roles, ownership, memberships, effective_privileges) are refused at parse; and backup.assess() has zero callers, so restore_proof_max_age_days computes a window nothing consults. The bytes remain historically real and re-fetchable by the coordinates above; they are simply no longer admissible as an input to a release, a restore proof, an issuer stand-up or Lane 3.",
+      "receipt_bytes_sha256": "sha256:18e983fb161536496c306dc13c13cba95d67e63e267ae49784377d15c62e1e16",
+      "receipt_digest": "sha256:67aba5a128397fa82d1c1245edd6475a46b88d2ca85953c2aef94dc5d10526bf",
+      "receipt_path": "docs/inventories/foundation-candidate-0.3.0a2.json",
       "recorded_at": "2026-09-01",
-      "reason": "The version 0.3.0a2 names two different contracts, and only one of them is the artifact. The wheel was built once from e930f878ce400b766b4a50feb0369021a28ab2fa; commit 0f390a9aa93b0bb1cb78621ab1e9febc90bc48d2 (#551, \"bind database catalogues in descriptor v2\") then changed the facility source under the same declared version -- spec.py, document.py and render/compose.py were modified and database_catalog.py and database_structure.py were added -- so a consumer resolving 0.3.0a2 from the repository and a consumer holding the frozen bytes are holding different code. That is the shape AGENTS.md rule 34 exists to prevent, and recording it is the only repair that does not require editing the receipt. Independently, a read-only measurement of the frozen wheel on 2026-08-31 found it cannot bind an externally executed recovery contract: BackupDataset.VERIFICATIONS is byte-identical to the published 0.2 line, so the four privilege verifications (roles, ownership, memberships, effective_privileges) are refused at parse; and backup.assess() has zero callers, so restore_proof_max_age_days computes a window nothing consults. The bytes remain historically real and re-fetchable by the coordinates above; they are simply no longer admissible as an input to a release, a restore proof, an issuer stand-up or Lane 3."
+      "schema": "CandidateDisposition.v1",
+      "sequence": 1,
+      "version": "0.3.0a2"
+    },
+    {
+      "artifact": {
+        "artifact_id": "9830633429",
+        "filename": "dotmac_deployment_foundation-0.3.0a3-py3-none-any.whl",
+        "repository": "michaelayoade/dotmac_starter_mt",
+        "run_id": "33587629491",
+        "sha256": "11978d919f1e910ae16d9b8262ffd3c473b074b4815067ab210fbe88e009d990",
+        "size_bytes": 313714,
+        "source_sha": "005490b278be73112fa9600bffb6e00a37c77a59"
+      },
+      "disposition": "superseded",
+      "facility": "dotmac-deployment-foundation",
+      "previous_digest": "sha256:5befbf931f802ee5d8c2a85c64716b087c9e07c21a93b221f10761892d431e88",
+      "publishable": false,
+      "reason": "SUPERSEDED, NOT INVALIDATED, and the distinction is load-bearing in both directions. 0.3.0a3 was never wrong: its bytes are exactly what run 33587629491 built from 005490b2, they remain Michael's sanctioned bootstrap input for Platform CP's first issuer cutover and for Lane 3, and both consumers resolve them by run and artifact id rather than by any version this tree declares. Marking it `invalidated` would say those bytes are unsafe and would break a lane that depends on them, which is why `invalidated` is the only member of TERMINAL_UNPUBLISHABLE and `superseded` deliberately is not. What changed is the CONTRACT, not the bytes. The a4 repair makes the execution binding unavoidable: `Executor` cannot be constructed without a FoundationExecutionPlanV1, the authorized digest arrives only on the grant that carried it from an attested receipt, raw authorization material reaches the facility only through an injected AuthorizationVerifier, and the receipt names descriptor_digest, execution_plan_digest and control_plan_digest as three separate terms instead of asserting Control's plan digest IS the descriptor digest. 0.3.0a3 predates all of it: its Executor permits 'absent on both sides' and returns an empty digest, so a deployment driven by those bytes runs unbound and records `execution_plan_digest: \"\"` in its evidence. Publishing it would put on an index an artifact whose whole authorization chain is decorative. publishable=false therefore records that it must not be PUBLISHED; it does not withdraw it from the two supervised consumers, which is the separation this log exists to express. The refusal that acts on this is the version-binding guard, which reads this file and refuses --purpose release; before the frozen-candidate resolve fix in this same change, a3 was refused instead by a source-version mismatch \u2014 a coincidence standing where a reason belongs, which stops holding the moment somebody bumps a version for an unrelated purpose. The successor is 0.3.0a4, which must be built exactly once by foundation-candidate.yml after this change merges. Do not rebuild 0.3.0a3.",
+      "receipt_bytes_sha256": "sha256:f1c42336bed68c22111d4e6e7b842a51b9ca085070386561f70f4cb31d342694",
+      "receipt_digest": "sha256:76e777f624bd8e6900c618ee7874e46b62c2a65f50f427749bbee2a4e38e1cff",
+      "receipt_path": "docs/inventories/foundation-candidate-0.3.0a3.json",
+      "recorded_at": "2026-09-02",
+      "schema": "CandidateDisposition.v1",
+      "sequence": 2,
+      "version": "0.3.0a3"
     }
-  ]
+  ],
+  "schema": "CandidateDispositionLog.v1"
 }

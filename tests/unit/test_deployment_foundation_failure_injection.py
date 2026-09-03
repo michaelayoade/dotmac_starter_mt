@@ -21,6 +21,7 @@ one. These do.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 import pytest
 from dotmac_deployment_foundation.authorization import authorize
@@ -41,7 +42,11 @@ from dotmac_deployment_foundation.errors import (
     StepFailed,
 )
 from dotmac_deployment_foundation.evidence import ReleaseEvidenceV1, TrustPolicy
-from dotmac_deployment_foundation.provenance import AuthorizationReceipt
+from dotmac_deployment_foundation.execution_plan import render_execution_plan
+from dotmac_deployment_foundation.provenance import (
+    AuthorizationReceipt,
+    verify_authorization,
+)
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 GOOD_DIGEST = "sha256:" + "a" * 64
@@ -195,7 +200,20 @@ class AcceptingVerifier:
 TEST_TARGET = "failure-injection-target"
 
 
-def grant_for(spec: ProductDeploymentSpec, operation: str = "deploy"):  # type: ignore[no-untyped-def]
+class _StubVerifier:
+    """Stands in for the assembly's verifier; attests what it is given. These
+    tests inject FAILURES, not forged authorizations."""
+
+    def attest(self, material: object) -> object:
+        return dict(material)  # type: ignore[call-overload]
+
+
+def grant_for(  # type: ignore[no-untyped-def]
+    spec: ProductDeploymentSpec,
+    operation: str = "deploy",
+    *,
+    execution_plan_digest: str = "",
+):
     """A real grant for a test executor.
 
     Built through `authorize()` rather than by constructing `ExecutionGrant`
@@ -208,19 +226,46 @@ def grant_for(spec: ProductDeploymentSpec, operation: str = "deploy"):  # type: 
         plan_id="00000000-0000-4000-8000-000000000001",
         target_ref=TEST_TARGET,
         descriptor_digest=digest,
+        # The frozen middle term. Defaulted only so callers that never build an
+        # executor stay short; every executor here goes through `_bound`, which
+        # supplies the digest of the plan it is about to hand over.
+        execution_plan_digest=execution_plan_digest or ("sha256:" + "e" * 64),
+        control_plan_digest="f" * 64,
         policy_code="deployment.test",
         policy_version=1,
         decision_ref="approvals:decision:test",
         approved_at="2026-08-30T00:00:00Z",
+        expires_at="2026-08-31T00:00:00Z",
         control_version="0.1.0a4",
         operation=operation,
     )
     return authorize(
-        receipt=receipt,
+        verified=verify_authorization(receipt.as_document(), verifier=_StubVerifier()),
         operation=operation,
         descriptor_digest=digest,
         target=TEST_TARGET,
+        now=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
     )
+
+
+def _bound(spec: ProductDeploymentSpec, plan, operation: str = "deploy"):  # type: ignore[no-untyped-def]
+    """The PAIR `Executor` now requires: a plan, and a grant that froze it.
+
+    Kept together in one helper on purpose. The two are only meaningful as a
+    pair — the executor recomputes the plan's digest and compares it to the
+    grant's — so a helper returning one of them would invite a caller to source
+    the other from somewhere that does not agree, which is the state this
+    binding exists to make unreachable.
+    """
+    execution_plan = render_execution_plan(
+        spec,
+        plan,
+        target=TEST_TARGET,
+        operation=operation,
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+    )
+    grant = grant_for(spec, operation, execution_plan_digest=execution_plan.digest())
+    return grant, execution_plan
 
 
 def load(**overrides: str) -> ProductDeploymentSpec:
@@ -387,10 +432,12 @@ class FakeClock:
 def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object):  # type: ignore[no-untyped-def]
     plan = build_plan(spec, **plan_kwargs)  # type: ignore[arg-type]
     clock = FakeClock()
+    grant, execution_plan = _bound(spec, plan)
     executor = Executor(
         spec,
         effects,
-        grant_for(spec),
+        grant,
+        execution_plan=execution_plan,
         sleep=clock.sleep,
         clock=clock.read,
         evidence_policy=evidence_policy(),
@@ -1042,10 +1089,12 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
     spec = load()
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
+    grant, execution_plan = _bound(spec, plan, "rollback")
     executor = Executor(
         spec,
         effects,
-        grant_for(spec, "rollback"),
+        grant,
+        execution_plan=execution_plan,
         sleep=FakeClock().sleep,
         clock=FakeClock().read,
         evidence_policy=evidence_policy(),
@@ -1072,8 +1121,9 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     )
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
+    grant, execution_plan = _bound(spec, plan, "rollback")
     executor = Executor(
-        spec, effects, grant_for(spec, "rollback"), sleep=lambda _: None
+        spec, effects, grant, execution_plan=execution_plan, sleep=lambda _: None
     )
     with pytest.raises(PreconditionFailed) as caught:
         executor.rollback(plan)
@@ -1123,10 +1173,12 @@ def test_a_rollback_annotates_itself() -> None:
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     clock = FakeClock()
+    grant, execution_plan = _bound(spec, plan, "rollback")
     Executor(
         spec,
         effects,
-        grant_for(spec, "rollback"),
+        grant,
+        execution_plan=execution_plan,
         sleep=clock.sleep,
         clock=clock.read,
         evidence_policy=evidence_policy(),
