@@ -1,0 +1,38 @@
+{
+  "$comment": [
+    "Facilities whose DECLARED version was already built as a",
+    "candidate to DIFFERENT importable bytes. Each row is one version",
+    "name covering two contracts.",
+    "",
+    "Owner and checker: scripts/candidate_source_binding.py.",
+    "Gate: tests/architecture/test_candidate_source_binding.py.",
+    "",
+    "This is FROZEN DEBT, ratcheted in BOTH directions: a newly",
+    "drifted facility fails, and a REPAIRED one fails too until this",
+    "file is regenerated with --write. A count that can fall silently",
+    "stops describing reality, which is how a known-debt list becomes",
+    "a place defects go to be forgotten (ADR-0018).",
+    "",
+    "Repair a row by allocating a NEW version and appending a",
+    "CandidateDisposition.v1 for the superseded candidate. NEVER by",
+    "editing the receipt: it is a frozen fact about bytes that were",
+    "built once, and a restore proof or a cutover may already bind to",
+    "it.",
+    "",
+    "An EMPTY rows array is the healthy state and is a claim, not an",
+    "absence: it says every facility's declared version either has no",
+    "candidate yet or still ships exactly the source that candidate",
+    "was built from."
+  ],
+  "rows": [
+    {
+      "declared_src_tree": "44f3c4d60ea2213688f1d4cec9fad2cff36c0419",
+      "facility": "dotmac-deployment-foundation",
+      "receipt": "docs/inventories/foundation-candidate-0.3.0a5.json",
+      "recorded_src_tree": "ff508afdf7ccfb4daa4d02c3d50270fa941c6099",
+      "source_sha": "27bee8fc43919a5ed7f4853ccdedc2f996ad8d86",
+      "version": "0.3.0a5"
+    }
+  ],
+  "total": 1
+}

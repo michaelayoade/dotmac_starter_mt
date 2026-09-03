@@ -103,6 +103,17 @@ deployment-plan: ## Print the ordered deployment plan, gates marked (never deplo
 
 product-writer-check: ## Require one typed, exact-pinned writer claim for every inventoried product
 	poetry run python scripts/product_writer_check.py --check
+# DELIBERATELY NOT a prerequisite of `check`. It compares this tree against the
+# `source_sha` a candidate receipt records, so it needs history; `check` and the
+# CI `quality` matrix run on a default SHALLOW checkout and must stay runnable
+# offline, where this can only exit 2 (cannot answer). The gate that actually
+# runs it is `tests/architecture/test_candidate_source_binding.py`, in the
+# `unit` job, which declares `fetch-depth: 0` — the same split the
+# manifest-digest ledger already uses for the same reason.
+candidate-source-check: ## Fail if a declared version's candidate was built from other source
+	python3 scripts/candidate_source_binding.py --check
+candidate-source-write: ## Re-record the candidate-source drift baseline
+	python3 scripts/candidate_source_binding.py --write
 rehearsal-status-check: ## Fail if the GENERATED Lane 3 status document drifted
 	poetry run python scripts/generate_rehearsal_status.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
