@@ -72,6 +72,7 @@ def _rendered(**overrides: Any) -> FoundationExecutionPlanV1:
         "operation": "deploy",
         "descriptor_digest": str(spec.to_canonical_document().sha256_digest()),
         "prestate": HostPrestateV1.first_deploy(),
+        "application_profile_digest": "",
     }
     kwargs.update(overrides)
     return render_execution_plan(spec, build_plan(spec), **kwargs)

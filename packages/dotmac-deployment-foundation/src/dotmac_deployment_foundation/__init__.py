@@ -37,6 +37,13 @@ from .ancestry import (
     ReleaseOrdering,
     refuse_backwards_deploy,
 )
+from .application_profile import (
+    ApplicationFoundationProfile,
+    ConcernBinding,
+    FoundationConcern,
+    InapplicableConcern,
+    WriterClaim,
+)
 from .authorization import OPERATIONS, ExecutionGrant, authorize
 from .backup import (
     ArtefactClass,
@@ -387,6 +394,11 @@ __all__ = [
     "EffectivePrivilegeFact",
     "EffectivePrivilegeKey",
     "Effects",
+    "ApplicationFoundationProfile",
+    "ConcernBinding",
+    "FoundationConcern",
+    "InapplicableConcern",
+    "WriterClaim",
     "ExecutionGrant",
     "Executor",
     "ExposureEffects",

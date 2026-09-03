@@ -285,6 +285,7 @@ def _bound(
             if effects is not None
             else HostPrestateV1.first_deploy()
         ),
+        application_profile_digest="",
     )
     grant = grant_for(spec, operation, execution_plan_digest=execution_plan.digest())
     return grant, execution_plan

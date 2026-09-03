@@ -122,6 +122,33 @@ def _provider_name(value: str) -> str:
     return value
 
 
+def _application_profile_digest() -> str:
+    """The candidate's profile digest, or `""` when it declares none.
+
+    REPORT-ONLY, and the distinction matters. This does not check whether the
+    profile is complete, whether its bindings resolve, or whether its concerns
+    are satisfied — ADR 0039 § 4's refusal is not composed into any deployment
+    path, because nine of the thirteen concerns have no fleet owner mature
+    enough to bind and gating on completeness today would stop every assembly
+    from deploying.
+
+    What it DOES do is carry the digest into the plan so it travels with the
+    release and can be read back and compared (§ 8). An assembly declaring no
+    profile yields `""`, which is a stated value, not a failure.
+
+    A discovery REFUSAL still refuses, and that is not the completeness gate in
+    disguise: two distributions declaring the profile group, or one that fails
+    to import, is a broken deployment environment. Refusing there is the same
+    judgement `discover_bindings` already makes, about the same kind of fact.
+    """
+    from .application_profile import discover_profile, profile_digest
+
+    found = discover_profile()
+    if found is None:
+        return ""
+    return profile_digest(found.as_document())
+
+
 def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
     """Discover the assembly's bindings, once, on the execute path only.
 
@@ -469,6 +496,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         # render time; the executor re-observes at the last moment before
         # mutation and refuses a host that moved in between.
         prestate=HostPrestateV1.from_observations(effects.observe_roles()),
+        application_profile_digest=_application_profile_digest(),
     )
     executor = Executor(
         spec,
@@ -590,6 +618,7 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
         # `observe-prestate` on the target. An empty {"roles": []} document is
         # the explicit first-deploy claim, not a default.
         prestate=_load_prestate(args.prestate),
+        application_profile_digest=_application_profile_digest(),
     )
     if args.format == "digest":
         print(rendered.digest())
@@ -1075,6 +1104,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         operation="rollback",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
         prestate=HostPrestateV1.from_observations(effects.observe_roles()),
+        application_profile_digest=_application_profile_digest(),
     )
     executor = Executor(
         spec,
