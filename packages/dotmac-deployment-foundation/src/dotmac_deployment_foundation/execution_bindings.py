@@ -43,10 +43,11 @@ and only the execute path calls it.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, Final
 
-from .errors import PreconditionFailed, SpecError
+from .discovery import declared_names, discover_one
+from .errors import SpecError
 from .evidence import SignatureVerifier, TrustPolicy
 from .provenance import AuthorizationVerifier
 
@@ -166,20 +167,6 @@ class ExecutionBindings:
             )
 
 
-def _distribution_of(entry: Any) -> str:
-    dist = getattr(entry, "dist", None)
-    name = getattr(dist, "name", None)
-    return str(name) if name else "<unknown distribution>"
-
-
-def _declared(entries: Iterable[Any] | None) -> Sequence[Any]:
-    if entries is not None:
-        return list(entries)
-    import importlib.metadata
-
-    return list(importlib.metadata.entry_points(group=ENTRY_POINT_GROUP))
-
-
 def declared_provider_names(*, entries: Iterable[Any] | None = None) -> tuple[str, ...]:
     """Every declared provider name, WITHOUT importing any assembly code.
 
@@ -187,7 +174,7 @@ def declared_provider_names(*, entries: Iterable[Any] | None = None) -> tuple[st
     reported by :func:`discover_bindings`; here they simply collapse, because
     a choices list is a menu rather than a gate.
     """
-    return tuple(sorted({str(entry.name) for entry in _declared(entries)}))
+    return declared_names(ENTRY_POINT_GROUP, entries=entries)
 
 
 def discover_bindings(
@@ -195,57 +182,21 @@ def discover_bindings(
 ) -> ExecutionBindings | None:
     """Locate THE declared bindings, or None, or refuse the ambiguous shapes.
 
-    The single place a declaration is LOADED. Zero declarations is a valid
-    environment (the CLI's refusals stand, and name this group); one is loaded
-    and validated; two or more refuse naming every declarer, because which one
-    wins must never be an iteration-order accident.
-    """
-    declared = _declared(entries)
-    if not declared:
-        return None
-    if len(declared) > 1:
-        listed = ", ".join(
-            sorted(f"{_distribution_of(entry)}:{entry.name}" for entry in declared)
-        )
-        raise PreconditionFailed(
-            f"{len(declared)} distributions declare "
-            f"{ENTRY_POINT_GROUP!r} entry points ({listed}). One environment "
-            "carries one set of execution bindings; a second declaration is "
-            "either a stale install or an attempt to swap effects under an "
-            "unchanged command line, and neither is a thing to pick a winner "
-            "from. Remove all but one and redeploy"
-        )
+    A thin call into :func:`discovery.discover_one`, which owns all five
+    refusals. This function used to own them itself, and the extraction is the
+    point rather than a tidy-up: a second kind of declaration needs the same
+    five, and a parallel forty-line copy would be a second authority over one
+    question. Copies agree right up until they don't — see that module's
+    docstring, and `authorization.OPERATIONS` for the same defect one layer
+    down, found twice in one evening.
 
-    entry = declared[0]
-    try:
-        factory = entry.load()
-    except Exception as exc:
-        raise PreconditionFailed(
-            f"the execution bindings declared by {_distribution_of(entry)} "
-            f"({ENTRY_POINT_GROUP}:{entry.name}) failed to import: {exc}. A "
-            "broken bindings distribution is a broken deployment environment, "
-            "not a thing to skip"
-        ) from exc
-    try:
-        bindings = factory()
-    except Exception as exc:
-        raise PreconditionFailed(
-            f"the execution bindings factory from {_distribution_of(entry)} "
-            f"({ENTRY_POINT_GROUP}:{entry.name}) raised: {exc}"
-        ) from exc
-    if not isinstance(bindings, ExecutionBindings):
-        raise PreconditionFailed(
-            f"the entry point {ENTRY_POINT_GROUP}:{entry.name} from "
-            f"{_distribution_of(entry)} returned "
-            f"{type(bindings).__name__}, not ExecutionBindings. The typed "
-            "object is the contract; a look-alike is exactly what the type "
-            "exists to refuse"
-        )
-    if str(bindings.provider) != str(entry.name):
-        raise PreconditionFailed(
-            f"the entry point is named {str(entry.name)!r} but its bindings "
-            f"declare provider {str(bindings.provider)!r}. The entry point "
-            "name is what `--provider` offered before anything was imported; "
-            "bindings answering to a different name were selected by nobody"
-        )
-    return bindings
+    The provider NAME is the entry point name: `name_of` reads it back off the
+    bindings so the two cannot drift, which is refusal 5.
+    """
+    return discover_one(
+        group=ENTRY_POINT_GROUP,
+        expected_type=ExecutionBindings,
+        subject="execution bindings",
+        name_of=lambda bindings: str(bindings.provider),
+        entries=entries,
+    )
