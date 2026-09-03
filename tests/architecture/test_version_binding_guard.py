@@ -79,7 +79,7 @@ PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 #: quietly stop exercising the second-build refusal on later frozen candidates.
 #: `0.3.0a4` left this set on 2026-09-03 when its disposition landed — it is
 #: still refused for a second build, exercised via `SUPERSEDED` below.
-BUILT_CANDIDATES = ("0.3.0a1",)
+BUILT_CANDIDATES = ("0.3.0a1", "0.3.0a5")
 
 
 def _module():
@@ -126,31 +126,54 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
     weeks later.
 
     WHICH purposes are admitted flips with the declared version's lifecycle
-    stage, and the flip is part of the record: while `0.3.0a3`/`0.3.0a4` were
-    declared AND built, only `release` could admit (the candidate purpose
-    refused a second build). `0.3.0a5` is declared and UNBUILT, so the
-    meaningful admits are both: nothing forbids building it once, and nothing
-    forbids the release that will reuse that build.
+    stage, and the flip is part of the record rather than a loosening. While
+    `0.3.0a5` was declared and UNBUILT both purposes admitted: nothing forbade
+    building it once, and nothing forbade the release that would reuse that
+    build. It was BUILT on 2026-09-03 (run 33780438726, artifact 9903418260),
+    so the candidate purpose now refuses a SECOND build — asserted directly
+    below — and the meaningful admit is the one publication actually needs:
+    nothing forbids releasing those exact bytes.
+
+    This is the same transition `0.3.0a3` and `0.3.0a4` each made. Reading the
+    two tests together is what shows it as a state machine advancing rather
+    than as a constraint being relaxed.
     """
     declared = _declared_version()
-    for purpose in ("candidate", "release"):
-        found = _bindings(declared, purpose=purpose)
-        assert not found, (
-            f"{FACILITY} declares {declared}, which is forbidden from {purpose}: "
-            + "; ".join(str(binding) for binding in found)
-        )
+    found = _bindings(declared, purpose="release")
+    assert not found, (
+        f"{FACILITY} declares {declared}, which is forbidden from release: "
+        + "; ".join(str(binding) for binding in found)
+    )
 
 
-def test_the_declared_version_is_a_fresh_name() -> None:
+def test_the_declared_version_is_refused_for_a_SECOND_build() -> None:
+    """The other half of the flip: its one candidate receipt is the refusal."""
+    declared = _declared_version()
+    found = _bindings(declared, purpose="candidate")
+    assert any(binding.kind == "candidate artifact" for binding in found), found
+
+
+def test_the_declared_version_is_not_a_SPENT_name() -> None:
     """The drift-catcher: a re-declared spent name fails HERE, not at a
-    dispatch six weeks later. Every spent set is checked, because each one was
-    the live mistake once — a2 re-declared would be the two-contracts defect,
-    a3/a4 re-declared would put a superseded candidate back in play."""
+    dispatch six weeks later. Each spent set was the live mistake once — a2
+    re-declared would be the two-contracts defect, a3/a4 re-declared would put
+    a superseded candidate back in play.
+
+    `BUILT_CANDIDATES` is deliberately NOT one of them, and this is the whole
+    distinction the test turns on. A version having its OWN one candidate is
+    not a spent name — it is the normal built state, which every release
+    passes through between its candidate build and its publication, and which
+    `0.3.0a3` and `0.3.0a4` each occupied in turn. Spent means CONSUMED BY
+    SOMETHING ELSE: published under a tag, invalidated, or superseded. An
+    earlier revision of this test asserted `declared not in BUILT_CANDIDATES`,
+    which was true only while the declared version was unbuilt and became
+    false the moment its candidate existed — it was asserting a lifecycle
+    STAGE while claiming to assert name freshness.
+    """
     declared = _declared_version()
     assert declared not in PUBLISHED
     assert declared != INVALIDATED
     assert declared not in SUPERSEDED
-    assert declared not in BUILT_CANDIDATES
 
 
 def test_the_admit_is_not_an_empty_record_set() -> None:

@@ -1,0 +1,43 @@
+{
+  "artifact_id": "9903418260",
+  "artifact_size_bytes": 668774,
+  "expires_at": "2026-12-02T16:44:35Z",
+  "facility": "dotmac-deployment-foundation",
+  "filename": "dotmac_deployment_foundation-0.3.0a5-py3-none-any.whl",
+  "item_scope": {
+    "IS_A_DECISION_NOT_AN_OVERSIGHT": "These bytes carry nine of the eleven items in Michael's 2026-09-03 a5 audit. Item 4 (typed signed-evidence pass-through) landed earlier, in Starter #597, and IS in this build. Item 10 (executable authorized recovery support) is ABSENT BY DECISION and is not a defect in this candidate. Do not 'complete' it by inventing what looks missing.",
+    "item_10_owner": "Michael (ruling pending). Raised 2026-09-03; visible at the Platform cutover level as 'no authorized restore executor or deadman'.",
+    "item_10_reason": "A cross-repository operations-vocabulary question, held for Michael's ruling. Foundation's authorization.py:74 declares OPERATIONS = ('deploy', 'rollback'), closed on the stated grounds that an open string lets a caller invent an operation nobody wrote a policy for. dotmac-deployment-control 0.1.0a10 (published; peeled 4a56f5836cab48fa2ed7ca00e5affc4364114b31) declares a third member at operations.py:75, RECOVER = 'recover'. IMPORTANT AND NOT A COLLISION OF IGNORANCE: Control added it deliberately and its own comment states the expectation -- 'Michael named it required, and the Deployment Foundation's a5 is being built against the same three-member vocabulary'. This candidate is NOT, and that gap is the decision being surfaced rather than a defect being hidden. Control can today authorize an operation this facility cannot name, let alone execute.",
+    "item_10_why_widening_alone_would_be_wrong": "There is no restore capability anywhere in this facility: the Effects protocol has no restore method, `grep 'def restore'` over the package returns zero, and RESTORE_PROCEDURE's ten steps are RestoreStepSpec TEXT consumed only by cmd_recovery_bundle's print loop. Recovery today is a GATE inside a deploy plan -- VERIFY_EXTERNAL_RECOVERY_RECEIPT verifies a document about a restore somebody else performed, riding deploy's own grant -- so ('deploy','rollback') is correct for what this facility can actually do. Adding 'recover' without a restore executor would authorize an operation nothing can perform: the same shape as the defect this very release repairs, where ExecutionPlanDigestV1 existed and was unreachable from every real deployment. The standalone recovery grant is a DESIGN slice and is deferred to after the first receipt.",
+    "items_absent": [
+      10
+    ],
+    "items_present": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      11
+    ]
+  },
+  "published": false,
+  "repository": "michaelayoade/dotmac_starter_mt",
+  "retention_requested_days": 90,
+  "run_id": "33780438726",
+  "schema": "CandidateArtifact.v1",
+  "sdist": {
+    "filename": "dotmac_deployment_foundation-0.3.0a5.tar.gz",
+    "sha256": "df9753e0ab6dddbfbbbaa6f468d3d633fa66088fb3b89d0d9f4cc7c7d969ab18",
+    "size_bytes": 319907
+  },
+  "sha256": "17b3464ede04a182958753b493d08c5f06e2b5643960c113ecf6584d4ed56e1b",
+  "size_bytes": 353149,
+  "source_sha": "27bee8fc43919a5ed7f4853ccdedc2f996ad8d86",
+  "tagged": false,
+  "version": "0.3.0a5"
+}
