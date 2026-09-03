@@ -112,8 +112,20 @@ def test_the_digest_is_bound_to_the_descriptor() -> None:
 def test_the_operation_vocabulary_is_closed_and_shared_with_control() -> None:
     """An open operation is one nobody wrote a policy for. Read from
     `authorization.OPERATIONS` rather than restated, so the plan and the grant
-    cannot come to disagree about what a deployment can be."""
-    assert set(OPERATIONS) == {"deploy", "rollback"}
+    cannot come to disagree about what a deployment can be.
+
+    THREE since a6, and the third arrived in the right order. Control 0.1.0a10
+    declared `recover` first, expecting this facility to match; a5 did NOT
+    match, because at that point there was no restore capability here at all —
+    `RESTORE_PROCEDURE` was text and the deployment `Effects` had no restore
+    method, so the member would have named an operation nothing could perform.
+    `recovery_execution.py` landed first and this widened after it.
+
+    Written out rather than derived, deliberately: this states an expectation
+    the vocabulary must meet, so a member appearing or disappearing is a diff
+    somebody reviews rather than a constant that silently followed the code.
+    """
+    assert set(OPERATIONS) == {"deploy", "rollback", "recover"}
     with pytest.raises(SpecError, match="unknown operation"):
         _rendered(operation="reconcile")
 

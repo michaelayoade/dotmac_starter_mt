@@ -180,6 +180,53 @@ def test_a_deploy_grant_is_refused_at_the_rollback_seam() -> None:
         grant.require(operation="rollback", descriptor_digest=DIGEST_A)
 
 
+@pytest.mark.parametrize(
+    ("granted", "requested"),
+    [
+        ("deploy", "rollback"),
+        ("deploy", "recover"),
+        ("rollback", "deploy"),
+        ("rollback", "recover"),
+        ("recover", "deploy"),
+        ("recover", "rollback"),
+    ],
+)
+def test_no_operation_authorizes_any_other(granted: str, requested: str) -> None:
+    """All SIX ordered pairs, not a sample.
+
+    The vocabulary went from two members to three in a6, and a two-member
+    separation tested as one pair each way does not become a three-member
+    separation by adding a member — it becomes four untested pairs. The two
+    that matter most are the new ones: a deploy or rollback approval that also
+    permitted a RECOVER would reach a path that creates clusters and destroys
+    targets, which is a strictly larger consent than the one that was given.
+    """
+    with pytest.raises(PreconditionFailed, match="Control authorized"):
+        authorize(
+            verified=_verified(operation=granted),
+            operation=requested,
+            descriptor_digest=DIGEST_A,
+            target=TARGET,
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+def test_every_declared_operation_is_authorizable(operation: str) -> None:
+    """The positive control across the whole vocabulary. Without it the six
+    refusals above are equally consistent with an `authorize()` that refuses
+    everything — and a member could be declared and unusable, which is the
+    defect the ordering of this slice exists to prevent."""
+    grant = authorize(
+        verified=_verified(operation=operation),
+        operation=operation,
+        descriptor_digest=DIGEST_A,
+        target=TARGET,
+        now=NOW,
+    )
+    assert grant.operation == operation
+
+
 def test_a_receipt_must_name_an_operation() -> None:
     with pytest.raises(SpecError, match="operation must be"):
         _receipt(operation="")

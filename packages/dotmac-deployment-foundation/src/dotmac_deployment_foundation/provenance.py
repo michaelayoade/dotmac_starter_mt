@@ -301,12 +301,20 @@ class AuthorizationReceipt:
                 "it is what makes a receipt traceable back into Control's own "
                 "records, and a receipt that cannot be traced there is not one"
             )
-        if self.operation not in ("deploy", "rollback"):
+        # READ from the vocabulary, never respelled. This was the literal pair
+        # `("deploy", "rollback")`, which meant widening `OPERATIONS` would have
+        # left the receipt refusing the new member — one layer saying three and
+        # the next saying two, with the disagreement invisible until a real
+        # receipt arrived. The import is local to avoid a module cycle
+        # (`authorization` imports this module).
+        from .authorization import OPERATIONS
+
+        if self.operation not in OPERATIONS:
             raise SpecError(
-                f"AuthorizationReceipt.operation must be 'deploy' or "
-                f"'rollback', got {self.operation!r}. An unnamed operation "
-                "would make one approval cover both making a change and "
-                "rolling it back"
+                f"AuthorizationReceipt.operation must be one of "
+                f"{list(OPERATIONS)}, got {self.operation!r}. An unnamed "
+                "operation would make one approval cover making a change, "
+                "erasing it, and restoring over it"
             )
         if int(self.policy_version) < 1:
             raise SpecError(
