@@ -1,0 +1,22 @@
+{
+  "artifact_id": "9880868637",
+  "artifact_size_bytes": 640950,
+  "expires_at": "2026-12-02T06:22:06Z",
+  "facility": "dotmac-deployment-foundation",
+  "filename": "dotmac_deployment_foundation-0.3.0a4-py3-none-any.whl",
+  "published": false,
+  "repository": "michaelayoade/dotmac_starter_mt",
+  "retention_requested_days": 90,
+  "run_id": "33722884347",
+  "schema": "CandidateArtifact.v1",
+  "sdist": {
+    "filename": "dotmac_deployment_foundation-0.3.0a4.tar.gz",
+    "sha256": "6c954bf56b4fb85d1b06fc05bfe45ff8f9d7a77c88f41c0de6bd10770084a598",
+    "size_bytes": 306530
+  },
+  "sha256": "abf054174cfd2f1af368283724dc191ce994fd4beaa30e71a6ba248770d7805d",
+  "size_bytes": 338644,
+  "source_sha": "14f7d9fe7d49f10d0212775c914b1f1ee7bcda2f",
+  "tagged": false,
+  "version": "0.3.0a4"
+}
