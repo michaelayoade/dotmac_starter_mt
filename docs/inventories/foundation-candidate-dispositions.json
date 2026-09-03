@@ -105,6 +105,29 @@
       "schema": "CandidateDisposition.v1",
       "sequence": 3,
       "version": "0.3.0a4"
+    },
+    {
+      "artifact": {
+        "artifact_id": "9903418260",
+        "filename": "dotmac_deployment_foundation-0.3.0a5-py3-none-any.whl",
+        "repository": "michaelayoade/dotmac_starter_mt",
+        "run_id": "33780438726",
+        "sha256": "17b3464ede04a182958753b493d08c5f06e2b5643960c113ecf6584d4ed56e1b",
+        "size_bytes": 353149,
+        "source_sha": "27bee8fc43919a5ed7f4853ccdedc2f996ad8d86"
+      },
+      "disposition": "superseded",
+      "facility": "dotmac-deployment-foundation",
+      "previous_digest": "sha256:987a381fe869a10e8f5d3edf45944e8771af8da8435e7547354c7f1357c8e07e",
+      "publishable": false,
+      "reason": "SUPERSEDED BY 0.3.0a6, AND NOT DEFECTIVE. The bytes are exactly what run 33780438726 built once from 27bee8fc43919a5ed7f4853ccdedc2f996ad8d86; they are preserved, never rebuilt and never relabelled. Unlike 0.3.0a2 this is not an invalidation and unlike 0.3.0a4 it is not a defect finding: 0.3.0a5 is a coherent, complete contract carrying nine of the eleven items in Michael's 2026-09-03 audit (item 4 landed earlier in Starter #597 and is in this build; item 10 is ABSENT BY DECISION and this receipt says so itself). WHAT SUPERSEDED IT is the third application of the rule that a tree diverging from a built artifact allocates a new version, and the first application caught late rather than before it shipped. PR #600 (4e22d913) added 405 lines and removed 9 across authorization.py, provenance.py and recovery_execution.py -- widening OPERATIONS to a third member and landing the restore executor -- while version.py and pyproject.toml still declared 0.3.0a5. The facility src tree moved from ff508afdf7ccfb4daa4d02c3d50270fa941c6099 to 44f3c4d60ea2213688f1d4cec9fad2cff36c0419, so for the length of that merge one version name covered two contracts, and the second contradicted the first IN WRITING: this receipt's item_scope records items_absent: [10] and argues, in a committed field tagged IS_A_DECISION_NOT_AN_OVERSIGHT, that ('deploy', 'rollback') is the correct vocabulary for what the facility can perform. Nothing mechanical caught it -- version_binding_guard.py runs only when a build is requested, and test_declared_version_matches_published_tree.py compares against a git tag an untagged candidate does not have. scripts/candidate_source_binding.py now closes that gap between the two. publishable=false stops publication to the index; it does not disparage the bytes and does not withdraw this receipt, which stays byte-for-byte as written -- the same standing 0.3.0a3 holds while remaining Platform CP's bootstrap input, resolved by run and artifact id rather than by the index. The successor is 0.3.0a6, which carries item 10 as EXECUTABLE restore rehearsal reachability (the act the executor actually performs) and withdraws 'recover' from OPERATIONS until an authorized failed-production recovery path exists. Build 0.3.0a6 exactly once by foundation-candidate.yml after the a6 changes merge. Do not rebuild 0.3.0a5.",
+      "receipt_bytes_sha256": "sha256:a3dcfea8a55fc0fc64a34107d9d66828c00d60865dcd4ecc6ade19170204a9f3",
+      "receipt_digest": "sha256:0694f28c5d4d774968b6e7cde16a5ab51efa4c930c0394f5b9b8b4972c601868",
+      "receipt_path": "docs/inventories/foundation-candidate-0.3.0a5.json",
+      "recorded_at": "2026-09-03",
+      "schema": "CandidateDisposition.v1",
+      "sequence": 4,
+      "version": "0.3.0a5"
     }
   ],
   "schema": "CandidateDispositionLog.v1"

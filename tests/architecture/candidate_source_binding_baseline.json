@@ -24,15 +24,6 @@
     "candidate yet or still ships exactly the source that candidate",
     "was built from."
   ],
-  "rows": [
-    {
-      "declared_src_tree": "44f3c4d60ea2213688f1d4cec9fad2cff36c0419",
-      "facility": "dotmac-deployment-foundation",
-      "receipt": "docs/inventories/foundation-candidate-0.3.0a5.json",
-      "recorded_src_tree": "ff508afdf7ccfb4daa4d02c3d50270fa941c6099",
-      "source_sha": "27bee8fc43919a5ed7f4853ccdedc2f996ad8d86",
-      "version": "0.3.0a5"
-    }
-  ],
-  "total": 1
+  "rows": [],
+  "total": 0
 }

@@ -1,6 +1,34 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.3.0a5 — unreleased, NEVER BUILT
+## 0.3.0a6 — unreleased, NEVER BUILT
+
+Allocated 2026-09-03, the third application of *a tree that diverges from a
+built artifact allocates a new version* — and the first one caught LATE.
+`0.3.0a5` was built once (artifact `9903418260`, run `33780438726`, from
+`27bee8fc`); PR #600 then added 405 lines and removed 9 across
+`authorization.py`, `provenance.py` and `recovery_execution.py` while
+`version.py` and `pyproject.toml` still declared `0.3.0a5`. The facility
+`src/` tree moved from `ff508afd` to `44f3c4d6`, so one version name covered
+two contracts — and the second contradicted the first in writing, because the
+a5 receipt's `item_scope` records `items_absent: [10]` and argues in a
+committed field that `("deploy", "rollback")` is the correct vocabulary.
+
+**Nothing mechanical caught it, and that is the durable part.**
+`version_binding_guard.py` runs only when a build is requested;
+`test_declared_version_matches_published_tree.py` compares against a git tag
+an untagged candidate does not have. Two real guards, one blind spot between
+them. `scripts/candidate_source_binding.py` now closes it and fails CI on
+every merge, so a fourth application of this rule is a red build rather than
+an audit finding.
+
+This release also withdraws `recover` from `authorization.OPERATIONS` and
+makes the restore executor reachable under the act it actually performs. See
+the entry for that change below when it lands.
+
+No wheel for `0.3.0a6` exists. It must be built exactly once, by
+`foundation-candidate.yml`, after these changes merge.
+
+## 0.3.0a5 — built once, SUPERSEDED and unpublishable (2026-09-03); heading below written at allocation
 
 Allocated 2026-09-03, when Michael's audit ruled `0.3.0a4` not
 cutover-admissible and its candidate (artifact `9880868637`, built once from
@@ -26,6 +54,18 @@ recovery, and an installed end-to-end ADMIT proof.
 
 No wheel for `0.3.0a5` exists. It must be built exactly once, by
 `foundation-candidate.yml`, after these changes merge.
+
+> **Amended 2026-09-03.** The paragraph above was written at allocation and
+> is now false in its first sentence, which is why it is amended rather than
+> edited: `0.3.0a5` WAS built, exactly once, as candidate artifact
+> `9903418260` (run `33780438726`) from `27bee8fc`. Those bytes are preserved,
+> are never rebuilt and are never relabelled. They are recorded **superseded**
+> and `publishable: false` at `CandidateDisposition.v1` sequence 4 — superseded
+> is not invalidated, and this candidate was never wrong: it is a coherent
+> contract carrying nine of the eleven a5-audit items plus item 4 from #597,
+> with item 10 absent by decision and its own receipt saying so. The successor
+> is `0.3.0a6`. The list of what this release "will add" above also stands as
+> written at allocation: executable authorized recovery is NOT in these bytes.
 
 ## 0.3.0a4 — built once, SUPERSEDED and unpublishable (2026-09-03); heading below written at allocation
 
