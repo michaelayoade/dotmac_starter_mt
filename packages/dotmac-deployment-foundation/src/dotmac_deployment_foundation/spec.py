@@ -56,6 +56,7 @@ from .database_catalog import (
     DatabaseCatalogScope,
 )
 from .errors import SpecError, UnknownFieldError, UnknownSchemaError
+from .recovery import EXTERNAL_ONLY_VERIFICATIONS
 from .recovery_identity import (
     PRIVILEGE_VERIFICATIONS,
     DatasetIdentityV1,
@@ -1551,8 +1552,41 @@ class BackupDataset:
         unknown = set(verify) - set(cls.VERIFICATIONS)
         if unknown:
             raise SpecError(
-                f"unknown verification(s) {sorted(unknown)}", where=table.path
+                f"unknown verification(s) {sorted(unknown)}",
+                where=table.path,
+                code=UNKNOWN_VERIFICATION,
             )
+        # A verification this facility cannot PERFORM, on a dataset it will
+        # verify itself. Refused here, in one place, rather than left as a
+        # declaration nothing honours.
+        #
+        # `verify_recovery` never received this list — it compared what it knew
+        # how to compare, regardless of what the descriptor asked for — so on
+        # the internally executed path the declaration and the check were never
+        # connected at all. `row_counts` is the member that exposes it:
+        # `CatalogEvidence` carries no row counts and nothing in this package
+        # can observe one, so a descriptor declaring it was asserting a check
+        # that could not run.
+        #
+        # It stays DECLARABLE for an externally executed dataset, where a
+        # receipt from an executor that can count rows genuinely claims it
+        # (`external_recovery.VERIFICATION_EVIDENCE`). The refusal is therefore
+        # about who will do the verifying, not about the check being worthless.
+        if executor is None:
+            unperformable = sorted(set(verify) & EXTERNAL_ONLY_VERIFICATIONS)
+            if unperformable:
+                raise SpecError(
+                    f"verification(s) {unperformable} cannot be performed by "
+                    "this facility, and this dataset declares no external "
+                    "executor to perform them. `verify_recovery` compares two "
+                    "catalogues, and nothing it can observe carries row counts "
+                    "— so declaring this asks for a check that will never run "
+                    "and reports as satisfied. Either remove it, or declare "
+                    "the [backup.datasets.external_executor] whose signed "
+                    "receipt claims it",
+                    where=table.path,
+                    code=UNPERFORMABLE_VERIFICATION,
+                )
         if kind == "postgres" and "schema" not in verify:
             raise SpecError(
                 "a postgres dataset must verify 'schema'; a restore that produces "
@@ -1573,6 +1607,14 @@ class BackupDataset:
             lineage=lineage,
             external_executor=executor,
         )
+
+
+#: Stable identifiers for this module's backup-verification refusals. Assert
+#: these in tests; read the prose. A module with more than one refusal has to be
+#: testable on WHICH one fired, and `match=` on a sentence makes the sentence
+#: the contract.
+UNKNOWN_VERIFICATION: Final = "backup.verification.unknown"
+UNPERFORMABLE_VERIFICATION: Final = "backup.verification.unperformable"
 
 
 @dataclass(frozen=True, slots=True)

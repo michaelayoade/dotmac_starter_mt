@@ -111,9 +111,15 @@ lineage = "starter-primary-9d41c6b2"
 # The four privilege verifications are what decide whether a restore is USABLE.
 # `recovery.py` has modelled all of them since the bundle contract landed; the
 # descriptor simply could not name them until now.
+#
+# `row_counts` was here and is REMOVED — a false claim retired, not a capability
+# given up. `CatalogEvidence` carries no row counts, nothing in the facility can
+# observe one, and `verify_recovery` never received this list in the first
+# place, so the check it named could not run. `spec.py` now refuses it at parse
+# for a dataset with no external executor. It becomes declarable again the day
+# this dataset names an executor whose signed receipt claims it.
 verify = [
   "schema",
-  "row_counts",
   "migration_heads",
   "roles",
   "ownership",

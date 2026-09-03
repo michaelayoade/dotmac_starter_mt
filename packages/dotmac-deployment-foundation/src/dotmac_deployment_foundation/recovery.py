@@ -108,7 +108,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Any, ClassVar, Final
 
@@ -151,6 +151,10 @@ __all__ = [
     "load_manifest",
     "refuse_identity_stripping",
     "restore_plan",
+    "EXTERNAL_ONLY_VERIFICATIONS",
+    "UNDECLARED_COMPARISONS",
+    "VERIFICATION_CHECKS",
+    "VERIFICATION_ORDER",
     "verify_recovery",
 ]
 
@@ -1288,26 +1292,143 @@ def _policy_map(evidence: CatalogEvidence) -> dict[tuple[str, str], PolicyFact]:
     return {(fact.table, fact.name): fact for fact in evidence.policies}
 
 
-def verify_recovery(
-    *,
-    manifest: RecoveryBundleManifestV1,
-    source: CatalogEvidence,
-    restored: CatalogEvidence,
-    isolation: Sequence[Any] = (),
-) -> tuple[str, ...]:
-    """Every way ``restored`` differs from ``source``. Empty means proved.
+# ── the verification registry ────────────────────────────────────────────────
+#
+# ONE named checker per comparison, and `verify_recovery` drives the registry
+# rather than a hand-written sequence. The point is not tidiness.
+#
+# `BackupDataset.verify` is a CLOSED vocabulary a descriptor uses to say what a
+# dataset must have verified, and `VERIFICATION_EVIDENCE` publishes the same
+# seven names across a repository boundary for external receipts to claim. But
+# `verify_recovery` never received that list. It computed what it knew how to
+# compute, regardless of what was declared — so on the internally executed path
+# the declaration and the check were never connected AT ALL, and the fact that
+# three of the seven happened to go unperformed was a coincidence rather than
+# the defect. A vocabulary with no consumer cannot be wrong, which is exactly
+# why nobody noticed it was.
+#
+# Naming every comparison makes both directions checkable, and both are real:
+#
+#   * DECLARED AND NOT PERFORMED — a descriptor requires something nothing does.
+#     `schema` was the sharpest case: `spec.py` makes it MANDATORY at parse for
+#     every postgres dataset, with the refusal text stating exactly why ("a
+#     restore that produces an empty database succeeds against every other
+#     check"), and nothing compared `CatalogEvidence.schemas`.
+#   * PERFORMED AND NOT DECLARABLE — the mirror, and the one nobody would ever
+#     notice, because the check works. A descriptor cannot require it and an
+#     external receipt cannot claim it, so an externally executed restore can
+#     claim every declarable name while never having looked at row security.
+#
+#: Every comparison this module performs, by name. Adding one without a name is
+#: not possible: `verify_recovery` iterates this mapping.
 
-    Returns findings rather than raising so an operator sees all of them at once:
-    a recovery that lost the roles lost the grants and the memberships too, and
-    reporting them one per run turns one repair into five.
 
-    The ordering is deliberate — roles first, then what depends on roles. A
-    missing role makes every downstream difference derivative, and a report that
-    leads with 56 missing grants sends the reader to the wrong system.
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Comparison:
+    """The inputs every checker receives — one shape, so the registry is uniform."""
+
+    manifest: RecoveryBundleManifestV1
+    source: CatalogEvidence
+    restored: CatalogEvidence
+    isolation: Sequence[Any]
+
+
+def _check_schema(comparison: _Comparison) -> list[str]:
+    """The declared verification `spec.py` makes MANDATORY and nothing performed.
+
+    `CatalogEvidence.schemas` has been captured and serialized into the bundle
+    manifest since the contract landed, and no comparison ever read it back. The
+    descriptor's own refusal says what that costs: *"a restore that produces an
+    empty database succeeds against every other check"* — a role comparison over
+    two empty sets passes, an ownership comparison over two empty sets passes,
+    and so does every other check here.
+
+    An EXTRA schema is a finding too. A restore that produced more than the
+    source is not a restore, and a schema nobody expected is where an old
+    tenant's data comes back from.
     """
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
+    mine, theirs = set(source.schemas), set(restored.schemas)
+    for name in sorted(mine - theirs):
+        findings.append(
+            f"schema {name!r} is in the bundle and absent from the restored "
+            "database. Every table, policy and grant that lived in it is gone, "
+            "and a comparison over what remains cannot see the hole"
+        )
+    for name in sorted(theirs - mine):
+        findings.append(
+            f"schema {name!r} exists in the restored database and not in the "
+            "source. A recovery that produced MORE than was captured is not a "
+            "recovery, and an unexpected schema is where data nobody asked for "
+            "comes back"
+        )
+    return findings
+
+
+def _check_effective_privileges(comparison: _Comparison) -> list[str]:
+    """The declared verification that ran only when invariants happened to exist.
+
+    `EffectivePrivilegeFact` was consumed in exactly one place — `invariant_
+    breaches`, which iterates the DECLARED isolation invariants. Two of the
+    executor's three prove-steps pass no invariants at all, so they did no
+    effective-privilege work whatever; and there was no source-to-restored
+    comparison of the effective surface anywhere. What stood in for it was the
+    direct-grant diff over `CatalogEvidence.privileges`, and this module's own
+    documentation convicts that substitution: answering from direct grants alone
+    *"reads as satisfied for a role holding the privilege through PUBLIC,
+    through a group, or through a column-level grant. That is the one check that
+    would go green exactly when the boundary is broken."*
+
+    So this compares the EFFECTIVE surface itself, independently of whether any
+    invariant was declared. An unobserved fact is a finding rather than a pass —
+    silence is UNKNOWN, and a restore whose effective privileges were never read
+    has not been shown to have kept them.
+    """
+    source, restored = comparison.source, comparison.restored
     findings: list[str] = []
 
-    # ── roles ──
+    def _surface(evidence: CatalogEvidence) -> dict[tuple[str, str, str, str], bool]:
+        return {
+            (fact.scope, fact.identity, fact.role, fact.privilege): fact.holds
+            for fact in evidence.effective_privileges
+        }
+
+    mine, theirs = _surface(source), _surface(restored)
+    for key in sorted(set(mine) & set(theirs)):
+        scope, identity, role, privilege = key
+        if mine[key] == theirs[key]:
+            continue
+        if theirs[key]:
+            findings.append(
+                f"{role!r} EFFECTIVELY holds {privilege} on {scope} "
+                f"{identity!r} after the restore and did not in the source. "
+                "This is the escalation a direct-grant comparison cannot see: "
+                "the privilege can arrive through PUBLIC, through a group, or "
+                "through a column-level grant, and none of those appears as a "
+                "grant to this role"
+            )
+        else:
+            findings.append(
+                f"{role!r} effectively lost {privilege} on {scope} "
+                f"{identity!r}; the source had it"
+            )
+    for key in sorted(set(mine) - set(theirs)):
+        scope, identity, role, privilege = key
+        findings.append(
+            f"the effective privilege {privilege} for {role!r} on {scope} "
+            f"{identity!r} was captured in the source and NOT OBSERVED on the "
+            "restored target. An unobserved privilege is unknown, not absent, "
+            "and a boundary nobody read is a boundary nobody proved"
+        )
+    return findings
+
+
+def _check_roles(comparison: _Comparison) -> list[str]:
+    """Role closure and per-role attributes."""
+    source, restored = comparison.source, comparison.restored
+    manifest = comparison.manifest
+    findings: list[str] = []
     for name in sorted(manifest.role_closure - restored.role_names):
         findings.append(
             f"role {name!r} is in the bundle's closure and absent from the "
@@ -1339,7 +1460,13 @@ def verify_recovery(
                     f"had {mine}"
                 )
 
-    # ── memberships, including PostgreSQL 16's per-membership options ──
+    return findings
+
+
+def _check_memberships(comparison: _Comparison) -> list[str]:
+    """Memberships, including PostgreSQL 16's per-membership options."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_members = _membership_map(source)
     restored_members = _membership_map(restored)
     for key in sorted(set(source_members) - set(restored_members)):
@@ -1365,7 +1492,13 @@ def verify_recovery(
                     "own rolinherit"
                 )
 
-    # ── ownership ──
+    return findings
+
+
+def _check_ownership(comparison: _Comparison) -> list[str]:
+    """Object ownership."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_owners = _ownership_map(source)
     restored_owners = _ownership_map(restored)
     for key in sorted(set(source_owners) - set(restored_owners)):
@@ -1382,7 +1515,17 @@ def verify_recovery(
                 "whoever ran pg_restore"
             )
 
-    # ── privileges, including column-level ──
+    return findings
+
+
+def _check_direct_privileges(comparison: _Comparison) -> list[str]:
+    """The DIRECT grant set, including column-level.
+
+    Kept, and deliberately NOT the answer to `effective_privileges`: it
+    catches a lost or added grant precisely, and it cannot see a privilege
+    reaching a role through PUBLIC, a group, or a column. Both run."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_privs = _privilege_set(source)
     restored_privs = _privilege_set(restored)
     for scope, identity, grantee, privilege in sorted(source_privs - restored_privs):
@@ -1394,7 +1537,13 @@ def verify_recovery(
             "regression, not a rounding error"
         )
 
-    # ── default privileges ──
+    return findings
+
+
+def _check_default_privileges(comparison: _Comparison) -> list[str]:
+    """Default privileges — nothing is wrong until the next migration."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_defaults = _default_privilege_set(source)
     restored_defaults = _default_privilege_set(restored)
     for owner, schema, kind, grantee, privilege in sorted(
@@ -1407,7 +1556,13 @@ def verify_recovery(
             "the application cannot read"
         )
 
-    # ── policies and row security ──
+    return findings
+
+
+def _check_row_security(comparison: _Comparison) -> list[str]:
+    """Policies and row-security state."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_policies = _policy_map(source)
     restored_policies = _policy_map(restored)
     for key in sorted(set(source_policies) - set(restored_policies)):
@@ -1436,7 +1591,13 @@ def verify_recovery(
                 "that looks correct in pg_policies"
             )
 
-    # ── SECURITY DEFINER routines ──
+    return findings
+
+
+def _check_security_definer_routines(comparison: _Comparison) -> list[str]:
+    """SECURITY DEFINER routines — the path a privilege walk does not see."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_functions = {fact.signature: fact for fact in source.functions}
     restored_functions = {fact.signature: fact for fact in restored.functions}
     for signature in sorted(source_functions):
@@ -1469,24 +1630,140 @@ def verify_recovery(
                 "PUBLIC, and for a SECURITY DEFINER routine that is an escalation"
             )
 
-    # ── extensions and heads ──
+    return findings
+
+
+def _check_extensions(comparison: _Comparison) -> list[str]:
+    """Installed extensions and their versions."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     source_ext = {(fact.name, fact.version) for fact in source.extensions}
     restored_ext = {(fact.name, fact.version) for fact in restored.extensions}
     for name, version in sorted(source_ext - restored_ext):
         findings.append(
             f"extension {name} {version} is missing or at a different version"
         )
+    return findings
+
+
+def _check_migration_heads(comparison: _Comparison) -> list[str]:
+    """Migration heads."""
+    source, restored = comparison.source, comparison.restored
+    findings: list[str] = []
     if tuple(sorted(source.migration_heads)) != tuple(sorted(restored.migration_heads)):
         findings.append(
             f"migration heads are {sorted(restored.migration_heads)} and the "
             f"source was at {sorted(source.migration_heads)}"
         )
+    return findings
 
-    findings.extend(
+
+def _check_isolation_invariants(comparison: _Comparison) -> list[str]:
+    """Declared isolation invariants, classified as restore defect or drift."""
+    return list(
         classify_invariant_breaches(
-            source=source, restored=restored, isolation=isolation
+            source=comparison.source,
+            restored=comparison.restored,
+            isolation=comparison.isolation,
         )
     )
+
+
+#: The order findings are reported in. Roles first, then what depends on roles:
+#: a missing role makes every downstream difference derivative, and a report
+#: leading with 56 missing grants sends the reader to the wrong system.
+VERIFICATION_ORDER: Final[tuple[str, ...]] = (
+    "roles",
+    "memberships",
+    "ownership",
+    "direct_privileges",
+    "effective_privileges",
+    "default_privileges",
+    "row_security",
+    "security_definer_routines",
+    "schema",
+    "extensions",
+    "migration_heads",
+    "isolation_invariants",
+)
+
+VERIFICATION_CHECKS: Final[dict[str, Callable[[_Comparison], list[str]]]] = {
+    "roles": _check_roles,
+    "memberships": _check_memberships,
+    "ownership": _check_ownership,
+    "direct_privileges": _check_direct_privileges,
+    "effective_privileges": _check_effective_privileges,
+    "default_privileges": _check_default_privileges,
+    "row_security": _check_row_security,
+    "security_definer_routines": _check_security_definer_routines,
+    "schema": _check_schema,
+    "extensions": _check_extensions,
+    "migration_heads": _check_migration_heads,
+    "isolation_invariants": _check_isolation_invariants,
+}
+
+#: Declarable in a descriptor and NOT performable here. One member, and it is a
+#: statement about this facility rather than about the check: `CatalogEvidence`
+#: carries no row counts, nothing in this package can observe one, and a name
+#: only an external executor can satisfy should SAY so rather than pass
+#: silently. `spec.py` refuses it at parse for a dataset with no external
+#: executor — the refusal lives in one place instead of in every descriptor.
+EXTERNAL_ONLY_VERIFICATIONS: Final[frozenset[str]] = frozenset({"row_counts"})
+
+#: Performed here and NOT declarable in a descriptor — the mirror defect, and
+#: FROZEN DEBT rather than a design.
+#:
+#: Every one of these is a real check that works. What none of them has is a
+#: name a descriptor can require or an external receipt can claim, so an
+#: externally executed restore may claim every declarable verification while
+#: never having looked at row security or a SECURITY DEFINER routine.
+#:
+#: Retiring a member means adding it to `BackupDataset.VERIFICATIONS` and to
+#: `external_recovery.VERIFICATION_EVIDENCE` — the second of which is read
+#: ACROSS A REPOSITORY BOUNDARY by receipt acceptance, so it is a contract
+#: change and not a line in this file. That is the stated retirement condition;
+#: it is not "someday".
+#:
+#: Ratcheted in BOTH directions by `test_deployment_foundation_recovery_bundle
+#: .py`: growing this set fails, and shrinking it without moving the name into
+#: the declarable vocabulary fails too.
+UNDECLARED_COMPARISONS: Final[frozenset[str]] = frozenset(
+    {
+        "direct_privileges",
+        "default_privileges",
+        "row_security",
+        "security_definer_routines",
+        "extensions",
+        "isolation_invariants",
+    }
+)
+
+
+def verify_recovery(
+    *,
+    manifest: RecoveryBundleManifestV1,
+    source: CatalogEvidence,
+    restored: CatalogEvidence,
+    isolation: Sequence[Any] = (),
+) -> tuple[str, ...]:
+    """Every way ``restored`` differs from ``source``. Empty means proved.
+
+    Returns findings rather than raising so an operator sees all of them at
+    once: a recovery that lost the roles lost the grants and the memberships
+    too, and reporting them one per run turns one repair into five.
+
+    Driven by :data:`VERIFICATION_CHECKS` in :data:`VERIFICATION_ORDER` rather
+    than by a hand-written sequence, so every comparison this module performs
+    has a NAME — which is what makes "declared but never performed" and
+    "performed but never declarable" both checkable. See the registry's own
+    comment for why a vocabulary nothing consumed could not be wrong.
+    """
+    comparison = _Comparison(
+        manifest=manifest, source=source, restored=restored, isolation=isolation
+    )
+    findings: list[str] = []
+    for name in VERIFICATION_ORDER:
+        findings.extend(VERIFICATION_CHECKS[name](comparison))
     return tuple(findings)
 
 
