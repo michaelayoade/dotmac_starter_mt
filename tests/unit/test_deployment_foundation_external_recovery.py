@@ -239,9 +239,18 @@ def _assert_no_deployment_effect(effects: Any) -> None:
         if mutation[0] not in {"emit_annotation", "write_evidence"}
     ]
     assert non_evidence == []
-    assert getattr(effects, "stopped", []) == []
-    assert getattr(effects, "started", []) == []
-    assert getattr(effects, "switched_to", []) == []
+    # `switched_to` is a REAL attribute of `FakeEffects`, so this is a real
+    # check. There are deliberately NO `stopped`/`started` assertions beside
+    # it, and that absence is the point rather than an oversight:
+    # `FakeEffects.stop_roles` mutates `self.roles` and keeps no such lists, so
+    # `effects.stopped` raises AttributeError and
+    # `getattr(effects, "stopped", [])` is a no-op that reads like coverage.
+    # Both shapes are worse than nothing — one errors for an unrelated reason,
+    # the other cannot fail. Do NOT "restore" them by inventing the attributes
+    # to satisfy them: the mutation-log assertion above already carries the
+    # property, because `RecordingEffects` records `stop_roles`,
+    # `start_candidate` and `switch` as mutations.
+    assert effects.switched_to == []
 
 
 def test_a_missing_recovery_receipt_refuses_before_any_effect(
