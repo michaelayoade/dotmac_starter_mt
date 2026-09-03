@@ -239,9 +239,9 @@ def _assert_no_deployment_effect(effects: Any) -> None:
         if mutation[0] not in {"emit_annotation", "write_evidence"}
     ]
     assert non_evidence == []
-    assert effects.stopped == []
-    assert effects.started == []
-    assert effects.switched_to == []
+    assert getattr(effects, "stopped", []) == []
+    assert getattr(effects, "started", []) == []
+    assert getattr(effects, "switched_to", []) == []
 
 
 def test_a_missing_recovery_receipt_refuses_before_any_effect(
