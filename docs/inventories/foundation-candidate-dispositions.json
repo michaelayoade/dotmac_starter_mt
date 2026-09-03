@@ -82,6 +82,29 @@
       "schema": "CandidateDisposition.v1",
       "sequence": 2,
       "version": "0.3.0a3"
+    },
+    {
+      "artifact": {
+        "artifact_id": "9880868637",
+        "filename": "dotmac_deployment_foundation-0.3.0a4-py3-none-any.whl",
+        "repository": "michaelayoade/dotmac_starter_mt",
+        "run_id": "33722884347",
+        "sha256": "abf054174cfd2f1af368283724dc191ce994fd4beaa30e71a6ba248770d7805d",
+        "size_bytes": 338644,
+        "source_sha": "14f7d9fe7d49f10d0212775c914b1f1ee7bcda2f"
+      },
+      "disposition": "superseded",
+      "facility": "dotmac-deployment-foundation",
+      "previous_digest": "sha256:2dc3188b870604789d7d883d0c9737b4170f2fa7946fd38284ff8b2c6845e669",
+      "publishable": false,
+      "reason": "SUPERSEDED AND NOT CUTOVER-ADMISSIBLE, per Michael's 2026-09-03 audit. The bytes are exactly what run 33722884347 built once from 14f7d9fe; they are preserved, never rebuilt and never relabelled. Two defects in those bytes make them inadmissible for cutover and therefore unpublishable. FIRST: the installed CLI cannot load an assembly's Effects provider or AuthorizationVerifier -- `authorization_verifier` is read from an argparse namespace attribute that no flag, no entry point and no discovery mechanism ever sets, and `_build_effects` is a closed switch over the one in-package provider -- so the installed `dotmac-deploy` can refuse honestly but can never ADMIT: attestation is unreachable from the console script. SECOND: the release-evidence reader corrupts signed envelopes -- the `Effects.release_evidence` seam was typed Mapping[str, str], and the compose-host provider satisfied that type with {str(key): str(value)}, flattening the envelope's nested `document` (the very thing the signature covers) into its Python repr. A signature is over exact canonical bytes; a verifier judging a restatement verifies nothing, so the evidence gate could never pass against a genuine signed envelope on the real provider. The successor is 0.3.0a5, which types the seam (SignedEvidenceEnvelope, refusing a stringified document at construction) and adds provider-neutral execution-bindings discovery so an assembly's effects and verifiers are loadable by the installed CLI, with an installed end-to-end ADMIT proof. publishable=false stops publication; it does not withdraw the receipt, which stays byte-for-byte as written. Build 0.3.0a5 exactly once by foundation-candidate.yml after the a5 changes merge. Do not rebuild 0.3.0a4.",
+      "receipt_bytes_sha256": "sha256:aa35a0dba260050f8e39c7b61278e1f4647cc5858cd5e1482a51f870a12507d7",
+      "receipt_digest": "sha256:44b10c3a16c44819fd74ab9837be6d9c1cae42e56bb760e97bfcea5cc3ebd1bc",
+      "receipt_path": "docs/inventories/foundation-candidate-0.3.0a4.json",
+      "recorded_at": "2026-09-03",
+      "schema": "CandidateDisposition.v1",
+      "sequence": 3,
+      "version": "0.3.0a4"
     }
   ],
   "schema": "CandidateDispositionLog.v1"

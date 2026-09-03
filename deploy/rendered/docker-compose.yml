@@ -85,7 +85,7 @@ services:
     stop_grace_period: 300s
     restart: "no"
     labels:
-      io.dotmac.deployment.configuration.digest: "sha256:d1d736c03ec82a0eb020e4b95f31a860be1377381297971eafefb83cfd4025be"
+      io.dotmac.deployment.configuration.digest: "sha256:e1dc0c66c1df1b8a845e255c6e035f36adbf439bad58fa534db620e242a88552"
       io.dotmac.deployment.environment: reference
       io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       io.dotmac.deployment.product: dotmac_starter_mt
@@ -145,7 +145,7 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
     labels:
-      io.dotmac.deployment.configuration.digest: "sha256:d1d736c03ec82a0eb020e4b95f31a860be1377381297971eafefb83cfd4025be"
+      io.dotmac.deployment.configuration.digest: "sha256:e1dc0c66c1df1b8a845e255c6e035f36adbf439bad58fa534db620e242a88552"
       io.dotmac.deployment.environment: reference
       io.dotmac.deployment.manifest.digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
       io.dotmac.deployment.product: dotmac_starter_mt

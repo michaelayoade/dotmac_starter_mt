@@ -41,7 +41,12 @@ from pathlib import Path
 
 import pytest
 from dotmac_deployment_foundation.engine.run import BackupResult, CommandResult, Effects
-from dotmac_deployment_foundation.errors import PreconditionFailed, StepFailed
+from dotmac_deployment_foundation.errors import (
+    PreconditionFailed,
+    SpecError,
+    StepFailed,
+)
+from dotmac_deployment_foundation.evidence import SignedEvidenceEnvelope
 from dotmac_deployment_foundation.providers.compose_host import (
     ComposeHostEffects,
     NginxInstaller,
@@ -736,22 +741,86 @@ def test_image_labels_parses_the_revision_label(tmp_path: Path) -> None:
     assert labels["org.opencontainers.image.revision"] == REVISION
 
 
-def test_release_evidence_returns_empty_mapping_when_the_file_is_absent(
-    tmp_path: Path,
-) -> None:
+def test_release_evidence_is_none_when_the_file_is_absent(tmp_path: Path) -> None:
+    """None, not an empty mapping. The empty mapping doubled as "no evidence"
+    and as what a half-broken reader returns, and the engine's `if not raw`
+    could not tell those apart."""
     effects = make_effects(tmp_path, runner=ScriptedRunner())
-    assert effects.release_evidence(REVISION) == {}
+    assert effects.release_evidence(REVISION) is None
 
 
-def test_release_evidence_reads_the_checked_in_file_keyed_by_revision(
+def _envelope_document() -> dict[str, object]:
+    """A realistic signed document — nested values, keyed by revision."""
+    return {
+        "schema": "ReleaseEvidence.v1",
+        "revision": REVISION,
+        "repository": "michaelayoade/dotmac_starter_mt",
+        "repository_id": "1001",
+        "head_repository_id": "1001",
+        "ref": "refs/heads/main",
+        "run_id": "42",
+        "workflow": "ci.yml",
+        "conclusion": "success",
+    }
+
+
+def test_release_evidence_passes_the_signed_envelope_through_typed_and_untouched(
     tmp_path: Path,
 ) -> None:
+    """THE a4 REPAIR, asserted where the corruption lived.
+
+    The document that comes back must be EQUAL to the document that was parsed
+    from disk — not a restatement of it. A signature is over the canonical
+    bytes of exactly this document, so any restringification between the file
+    and the verifier is a forgery-shaped no-op: what gets verified is no
+    longer what was signed.
+    """
+    document = _envelope_document()
     (tmp_path / "release-evidence.json").write_text(
-        json.dumps({REVISION: {"ci": "passed", "run": "42"}})
+        json.dumps(
+            {REVISION: {"document": document, "signature": "sig", "key_id": "k1"}}
+        )
     )
     effects = make_effects(tmp_path, runner=ScriptedRunner())
-    assert effects.release_evidence(REVISION) == {"ci": "passed", "run": "42"}
-    assert effects.release_evidence("f" * 40) == {}
+    envelope = effects.release_evidence(REVISION)
+    assert isinstance(envelope, SignedEvidenceEnvelope)
+    assert envelope.document == document, "the document was restated in transit"
+    assert not isinstance(envelope.document, str)
+    assert envelope.signature == "sig"
+    assert envelope.key_id == "k1"
+    # And the canonical bytes a verifier would judge are derivable from what
+    # came through — the round trip a stringified document cannot survive.
+    from dotmac_deployment_foundation.evidence import ReleaseEvidenceV1
+
+    assert ReleaseEvidenceV1.from_document(envelope.document).canonical_bytes()
+    assert effects.release_evidence("f" * 40) is None
+
+
+def test_a_stringified_document_is_refused_by_name_not_verified_as_garbage(
+    tmp_path: Path,
+) -> None:
+    """The corrupted shape a4's reader PRODUCED, planted as an input.
+
+    `{str(key): str(value) …}` flattened the nested document into its Python
+    repr. If a file arrives already carrying that shape, the reader must
+    refuse it as a restatement — never hand it onward for a verifier to judge
+    as if it were the signed document.
+    """
+    document = _envelope_document()
+    (tmp_path / "release-evidence.json").write_text(
+        json.dumps(
+            {
+                REVISION: {
+                    "document": str(document),  # the repr, exactly as a4 made it
+                    "signature": "sig",
+                    "key_id": "k1",
+                }
+            }
+        )
+    )
+    effects = make_effects(tmp_path, runner=ScriptedRunner())
+    with pytest.raises(SpecError, match="restatement"):
+        effects.release_evidence(REVISION)
 
 
 # ── migration_heads: tolerant parsing ────────────────────────────────────────

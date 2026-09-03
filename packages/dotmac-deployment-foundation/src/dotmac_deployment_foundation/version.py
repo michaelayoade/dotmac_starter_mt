@@ -62,6 +62,15 @@ from typing import Final
 #: cover two contracts; it was removed with the ``0.3.0a3`` move rather than
 #: re-argued, and it stays removed.
 #:
+#: ``0.3.0a4`` was built exactly once (2026-09-02, candidate artifact
+#: 9880868637 from ``14f7d9fe``, expires 2026-12-02) and is recorded
+#: **superseded and unpublishable** in the disposition log (2026-09-03):
+#: Michael's audit found its installed CLI cannot load an assembly's effects
+#: or verifiers, and its release-evidence reader stringified signed envelopes
+#: at the ``Mapping[str, str]`` seam — a verifier judging a restatement
+#: verifies nothing. The bytes stay preserved and are never rebuilt; the
+#: repairs are ``0.3.0a5``'s subject.
+#:
 #: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
 #: canonical descriptor document, so changing it moves
 #: ``io.dotmac.deployment.configuration.digest`` and the rendered
@@ -70,6 +79,6 @@ from typing import Final
 #: `make deployment-check` is what fails if it was not. The digest recorded in
 #: a candidate receipt is a historical fact about THAT build and is not
 #: re-derived from this tree, so a re-render never invalidates one.
-VERSION: Final = "0.3.0a4"
+VERSION: Final = "0.3.0a5"
 
 __all__ = ["VERSION"]

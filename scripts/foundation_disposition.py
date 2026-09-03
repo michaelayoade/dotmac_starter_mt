@@ -94,7 +94,7 @@ TERMINAL_UNPUBLISHABLE: Final[frozenset[str]] = frozenset({"invalidated"})
 #: ADR-0018's two-directional ratchet. This fails on growth as well as on
 #: shrinkage — an append is fine and must be VISIBLE, and a deletion cannot hide
 #: behind a coincidental later append.
-EXPECTED_ENTRIES: Final = 2
+EXPECTED_ENTRIES: Final = 3
 
 #: The six coordinates `CandidateArtifact.v1` exists to preserve, plus the
 #: repository they are addressable in. Compared field by field rather than only

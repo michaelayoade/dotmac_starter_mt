@@ -59,6 +59,7 @@ from typing import IO
 
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, StepFailed
+from ..evidence import SignedEvidenceEnvelope
 from ..recovery import refuse_identity_stripping
 from ..render.compose import render_compose
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
@@ -552,15 +553,27 @@ class ComposeHostEffects:
             ) from exc
         return dict(labels) if labels else {}
 
-    def release_evidence(self, revision: str) -> Mapping[str, str]:
+    def release_evidence(self, revision: str) -> SignedEvidenceEnvelope | None:
         """Reads a checked-in evidence FILE — no network call, ever.
 
         The facility does not reach GitHub; a product's CI writes this file
-        (coordinate -> value, keyed by revision) as part of publishing a
-        release, and this method only reads it.
+        (envelope keyed by revision) as part of publishing a release, and this
+        method only reads it.
+
+        PARSED ONCE AND NEVER RESTATED. What stood here was
+
+            return {str(key): str(value) for key, value in entry.items()}
+
+        — written to satisfy the seam's old ``Mapping[str, str]`` type, and it
+        flattened the envelope's nested `document` (the very thing the
+        signature covers) into a Python repr. Against a GENUINE signed
+        envelope, the verifier then judged a restatement and the gate could
+        never pass; this is the corruption that made 0.3.0a4 inadmissible.
+        The typed envelope refuses a stringified document at construction, so
+        this method now has no way to repeat the mistake and still typecheck.
         """
         if not self._release_evidence_file.is_file():
-            return {}
+            return None
         try:
             data = json.loads(self._release_evidence_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -569,9 +582,9 @@ class ComposeHostEffects:
                 f"read: {exc}"
             ) from exc
         entry = data.get(revision) if isinstance(data, dict) else None
-        if not isinstance(entry, dict):
-            return {}
-        return {str(key): str(value) for key, value in entry.items()}
+        if entry is None:
+            return None
+        return SignedEvidenceEnvelope.from_payload(entry)
 
     def _parse_compose_ps(self, stdout: str) -> list[dict]:
         """`docker compose ps --format json` — one JSON array on older

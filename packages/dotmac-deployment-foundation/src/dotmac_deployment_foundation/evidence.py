@@ -61,6 +61,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+from collections.abc import Mapping
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .digest import Digest
@@ -70,6 +71,7 @@ __all__ = [
     "RELEASE_EVIDENCE_SCHEMA",
     "ReleaseEvidenceV1",
     "SignatureVerifier",
+    "SignedEvidenceEnvelope",
     "TrustPolicy",
     "accept_release_evidence",
 ]
@@ -226,8 +228,93 @@ class ReleaseEvidenceV1:
         )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class SignedEvidenceEnvelope:
+    """The on-disk envelope, parsed once and carried TYPED to the verifier.
+
+    ## Why this type exists — the seam itself forced a corruption
+
+    `Effects.release_evidence` used to be typed ``Mapping[str, str]``, and the
+    compose-host provider dutifully satisfied that type:
+
+        return {str(key): str(value) for key, value in entry.items()}
+
+    ``entry["document"]`` is a NESTED OBJECT — the very thing the signature
+    covers — and ``str()`` of a dict is its Python repr. So the envelope
+    reached `accept_release_evidence` with its document flattened into
+    ``"{'schema': ...}"``, `ReleaseEvidenceV1.from_document` blew up on a
+    string, and the gate could never pass against a GENUINE signed envelope on
+    the real provider. The type at the seam did not merely permit the bug; it
+    REQUIRED it — every conforming implementation had to stringify.
+
+    A signature is over exact canonical bytes. Any restringification between
+    the file and the verifier is a forgery-shaped no-op: what gets verified is
+    a restatement, not the document — the same reason
+    `AuthorizationReceipt.control_plan_digest` is recorded verbatim and never
+    normalized. This facility must not restate what it does not own.
+
+    So the seam now carries THIS type, and the type makes the corruption
+    unrepresentable rather than discouraged: construction refuses a document
+    that is not a mapping, so there is no conforming implementation left that
+    stringifies. The fix has the same shape as the defect — compiler-shaped
+    pressure, pointing the other way.
+    """
+
+    #: The signed document EXACTLY as parsed from disk. Never rebuilt, never
+    #: restated; `ReleaseEvidenceV1.from_document` reads it and re-derives the
+    #: canonical bytes the signer signed.
+    document: Mapping[str, Any]
+    #: Outside the document on purpose — a document carrying its own key id
+    #: would let a forger nominate the key that verifies it.
+    signature: str
+    key_id: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.document, str) or not isinstance(self.document, Mapping):
+            raise SpecError(
+                "SignedEvidenceEnvelope.document must be the parsed JSON "
+                f"object the signature covers, got {type(self.document).__name__}. "
+                "A stringified document is a restatement, and a signature "
+                "verified over a restatement verifies nothing"
+            )
+        if not str(self.signature).strip():
+            raise PreconditionFailed(
+                "the release evidence carries no signature. An unsigned file "
+                "proves only that somebody could write to this directory"
+            )
+        if not str(self.key_id).strip():
+            raise PreconditionFailed(
+                "the release evidence names no signing key, so no policy can "
+                "accept it. A signature that does not say which key made it "
+                "cannot be checked against anything"
+            )
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> SignedEvidenceEnvelope:
+        """Parse the on-disk shape ``{"document": .., "signature": .., "key_id": ..}``.
+
+        The ONE place file bytes become this type, so a reader cannot
+        half-parse an envelope and hand the rest along loose.
+        """
+        if not isinstance(payload, Mapping):
+            raise SpecError("release evidence envelope must be a JSON object")
+        unknown = sorted(set(payload) - {"document", "signature", "key_id"})
+        if unknown:
+            raise SpecError(
+                f"release evidence envelope has unknown member(s) {unknown}. "
+                "An envelope carrying more than the document, its signature "
+                "and its key id may have been produced by something this "
+                "version cannot judge"
+            )
+        return cls(
+            document=payload.get("document"),  # type: ignore[arg-type]
+            signature=str(payload.get("signature") or ""),
+            key_id=str(payload.get("key_id") or ""),
+        )
+
+
 def accept_release_evidence(
-    payload: Any,
+    envelope: SignedEvidenceEnvelope | Any,
     *,
     revision: str,
     policy: TrustPolicy,
@@ -235,11 +322,12 @@ def accept_release_evidence(
 ) -> ReleaseEvidenceV1:
     """Accept evidence for `revision`, or refuse and say which property failed.
 
-    `payload` is the on-disk envelope: ``{"document": {...}, "signature": ...,
-    "key_id": ...}``. The signature and key id sit OUTSIDE the signed document
-    on purpose — a document carrying its own key id would let a forger nominate
-    the key that verifies it, and the policy's `accepted_key_ids` is what makes
-    that nomination worthless.
+    Takes the TYPED envelope, and a raw mapping is parsed through the same one
+    door (`SignedEvidenceEnvelope.from_payload`) rather than picked apart here —
+    two parse paths for one on-disk shape is how they drift. The signature and
+    key id sit OUTSIDE the signed document on purpose — a document carrying its
+    own key id would let a forger nominate the key that verifies it, and the
+    policy's `accepted_key_ids` is what makes that nomination worthless.
     """
     if verifier is None:
         raise PreconditionFailed(
@@ -249,17 +337,12 @@ def accept_release_evidence(
             "degrading to trust when the verifier is missing is a bypass "
             "anyone can trigger by deleting configuration"
         )
-    if not isinstance(payload, dict):
-        raise SpecError("release evidence envelope must be a JSON object")
+    if not isinstance(envelope, SignedEvidenceEnvelope):
+        envelope = SignedEvidenceEnvelope.from_payload(envelope)
 
-    document = payload.get("document")
-    signature = str(payload.get("signature") or "")
-    key_id = str(payload.get("key_id") or "")
-    if not signature:
-        raise PreconditionFailed(
-            "the release evidence carries no signature. An unsigned file "
-            "proves only that somebody could write to this directory"
-        )
+    document = envelope.document
+    signature = envelope.signature
+    key_id = envelope.key_id
     if key_id not in policy.accepted_key_ids:
         raise PreconditionFailed(
             f"release evidence is signed by {key_id!r}, which is not an "

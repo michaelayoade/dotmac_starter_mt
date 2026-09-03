@@ -41,7 +41,11 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
     StepFailed,
 )
-from dotmac_deployment_foundation.evidence import ReleaseEvidenceV1, TrustPolicy
+from dotmac_deployment_foundation.evidence import (
+    ReleaseEvidenceV1,
+    SignedEvidenceEnvelope,
+    TrustPolicy,
+)
 from dotmac_deployment_foundation.execution_plan import render_execution_plan
 from dotmac_deployment_foundation.provenance import (
     AuthorizationReceipt,
@@ -155,13 +159,14 @@ EVIDENCE_KEY = "test-release-signer"
 EVIDENCE_REPO = "michaelayoade/dotmac_starter_mt"
 
 
-def signed_evidence(**overrides: object) -> dict[str, object]:
+def signed_evidence(**overrides: object) -> SignedEvidenceEnvelope:
     """A signed, non-fork, protected-ref evidence envelope for the fake host.
 
     Built through the real `ReleaseEvidenceV1` rather than as a hand-written
     dict so that a change to the required fields shows up here as a failure
     instead of these tests quietly exercising a shape the verifier no longer
-    accepts.
+    accepts — and returned as the TYPED envelope, because that is what the
+    `Effects.release_evidence` seam now carries.
     """
     fields: dict[str, object] = {
         "revision": REVISION,
@@ -175,7 +180,9 @@ def signed_evidence(**overrides: object) -> dict[str, object]:
     }
     fields.update(overrides)
     document = ReleaseEvidenceV1(**fields).as_document()  # type: ignore[arg-type]
-    return {"document": document, "signature": "valid", "key_id": EVIDENCE_KEY}
+    return SignedEvidenceEnvelope(
+        document=document, signature="valid", key_id=EVIDENCE_KEY
+    )
 
 
 def evidence_policy() -> TrustPolicy:
@@ -294,6 +301,8 @@ class FakeEffects:
         self.present = True
         self.labels: dict[str, str] = {"org.opencontainers.image.revision": REVISION}
         self.evidence: object = signed_evidence()
+        # `evidence=None` means "no evidence for this revision"; the old
+        # sentinel for that was an empty mapping, retired with the typed seam.
         self.manifest = MANIFEST_DIGEST
         self.dirty = False
         self.overrides_found: list[str] = []
@@ -326,8 +335,8 @@ class FakeEffects:
     def image_labels(self, reference: str) -> Mapping[str, str]:
         return self.labels
 
-    def release_evidence(self, revision: str) -> Mapping[str, str]:
-        return self.evidence
+    def release_evidence(self, revision: str) -> SignedEvidenceEnvelope | None:
+        return self.evidence  # type: ignore[return-value]
 
     def manifest_digest(self, manifest_path: str) -> str:
         return self.manifest
@@ -507,11 +516,36 @@ def test_an_image_with_no_revision_label_is_refused() -> None:
 
 def test_a_revision_with_no_release_evidence_is_refused() -> None:
     spec = load()
-    _, outcome = run(spec, FakeEffects(evidence={}))
+    _, outcome = run(spec, FakeEffects(evidence=None))
     assert (
         outcome.failed_step is not None
         and outcome.failed_step.value == "verify_release_evidence"
     )
+    assert not outcome.mutated
+
+
+def test_a_loose_mapping_from_an_effects_implementation_is_refused() -> None:
+    """The seam's OLD shape, offered by a nonconforming implementation.
+
+    `Effects.release_evidence` is typed `SignedEvidenceEnvelope | None` now,
+    but a Protocol return type is documentation to an implementation that
+    ignores it. An implementation still returning the pre-a5 loose mapping —
+    the shape whose `str(value)` restatement made a4 inadmissible — must be
+    refused at the engine, by name, before any verifier judges a restated
+    document.
+    """
+    spec = load()
+    _, outcome = run(
+        spec,
+        FakeEffects(
+            evidence={"document": {"schema": "x"}, "signature": "s", "key_id": "k"}
+        ),
+    )
+    assert (
+        outcome.failed_step is not None
+        and outcome.failed_step.value == "verify_release_evidence"
+    )
+    assert "SignedEvidenceEnvelope" in outcome.failure, outcome.failure
     assert not outcome.mutated
 
 
