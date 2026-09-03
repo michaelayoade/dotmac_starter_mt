@@ -72,23 +72,47 @@ __all__ = [
 #: The operations Control can authorize. An open string would let a caller
 #: invent an operation nobody wrote a policy for.
 #:
-#: ``recover`` was added once its EXECUTOR existed, and the ordering is the
-#: whole argument. `dotmac-deployment-control` 0.1.0a10 declared a third member
-#: first and its comment stated the expectation — *"Michael named it required,
-#: and the Deployment Foundation's a5 is being built against the same
-#: three-member vocabulary"*. a5 did not widen, because at that point this
-#: facility had no restore capability at all: `RESTORE_PROCEDURE` was text and
-#: the deployment `Effects` had no restore method, so `recover` would have
-#: named an operation nothing could perform. `recovery_execution.py` is that
-#: executor; this line follows it rather than preceding it.
+#: ``recover`` WAS a member for one commit and is WITHDRAWN. That reversal is
+#: the record, so read it before adding it back.
 #:
-#: The three are mutually non-authorizing. A deploy approval that also
-#: permitted the rollback would let one decision make a change and erase it; a
-#: deploy or rollback approval that also permitted a RECOVER would let one
-#: decision reach a restore path that creates a cluster and destroys targets.
-#: Each is its own consent conversation, which is the same reason Control gives
-#: for keeping them three separate words.
-OPERATIONS: Final[tuple[str, ...]] = ("deploy", "rollback", "recover")
+#: The ordering argument was applied correctly and to the wrong half. `recover`
+#: was added once `recovery_execution.py` existed — an executor first, then the
+#: vocabulary — and the executor is real. What it executes is a restore
+#: REHEARSAL: `RESTORE_PROCEDURE` step 1 creates a FRESH, ISOLATED cluster that
+#: must not be the product's, and the terminal verdict destroys it. That is not
+#: what `recover` means to the party asking for it. An operator naming a
+#: `recover` operation is asking to recover a FAILED PRODUCTION SYSTEM, which
+#: needs a captured prestate, the failed system's own observed state, and a
+#: desired poststate — none of which this executor takes or could take.
+#:
+#: So the member named an operation this facility could not perform, which is
+#: the exact defect the ordering rule exists to prevent, arrived at by
+#: satisfying the rule's letter. An executor existing is not the test; an
+#: executor for THE NAMED ACT is.
+#:
+#: Building the authorization chain around it anyway would have been worse than
+#: the gap. A grant, a replay coordinate, a Control settlement and a signed
+#: result wrapped around an isolated rehearsal is a chain whose every link is
+#: correct and whose SUBJECT is the wrong act — and it would read as done.
+#:
+#: This returns the vocabulary to the state `0.3.0a5`'s candidate receipt
+#: already records as deliberate: Control 0.1.0a10 declares a `recover` member
+#: this facility does not. That asymmetry is known, written down, and honest.
+#: Control can authorize an operation this facility cannot name; it could
+#: previously authorize one this facility could name and not perform, which is
+#: strictly worse.
+#:
+#: The successor is a7: authorized failed-production recovery, with its own
+#: `RecoveryExecutionPlanV1` (a deployment-shaped plan is not a recovery plan),
+#: an `ExecutionGrant`, the replay coordinate, Control settlement, a signed
+#: result, and the three bindings above. `recover` is re-added THEN, by that
+#: change, against an executor for the act it names.
+#:
+#: The two are mutually non-authorizing. A deploy approval that also permitted
+#: the rollback would let one decision make a change and erase it. Each is its
+#: own consent conversation, which is the same reason Control gives for keeping
+#: them separate words.
+OPERATIONS: Final[tuple[str, ...]] = ("deploy", "rollback")
 
 
 class _Witness:

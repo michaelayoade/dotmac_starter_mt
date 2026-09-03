@@ -1515,7 +1515,13 @@ class BackupDataset:
         )
         lineage = table.str_("lineage", default="")
         executor_table = table.table("external_executor", optional=True)
-        verify = table.str_list("verify", default=("schema", "row_counts"))
+        # DEFAULT IS `schema` ALONE. It used to be ("schema", "row_counts"),
+        # which would now refuse every dataset that simply omits `verify` — and
+        # a default that cannot be parsed is worse than a missing one. The
+        # default must name only what this facility can actually perform;
+        # `row_counts` is declarable deliberately, by a dataset that names an
+        # external executor able to satisfy it.
+        verify = table.str_list("verify", default=("schema",))
         table.done()
         executor: ExternalExecutorV1 | None = None
         if executor_table is not None:

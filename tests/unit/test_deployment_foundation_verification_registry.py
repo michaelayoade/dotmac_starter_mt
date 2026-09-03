@@ -361,3 +361,28 @@ def test_row_counts_stays_declarable_for_an_EXTERNALLY_executed_dataset() -> Non
 
     assert "row_counts" in VERIFICATION_EVIDENCE
     assert "row_counts" in BackupDataset.VERIFICATIONS
+
+
+def test_the_default_verify_list_is_itself_parseable() -> None:
+    """A default that the refusal would reject is worse than a missing one.
+
+    The default WAS `("schema", "row_counts")`. Adding the unperformable-name
+    refusal without narrowing it would have refused every dataset that simply
+    omits `verify` — a descriptor that never mentioned verification failing to
+    parse, with a message about a name it never wrote. Caught before it shipped;
+    asserted here so it cannot come back.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "deploy" / "product.toml").read_text(encoding="utf-8")
+    stripped = re.sub(r"verify = \[[^\]]*\]\n", "", text, count=1)
+    spec = ProductDeploymentSpec.loads(stripped, source="omitted-verify")
+    default = spec.backup_datasets[0].verify
+    assert default, "the default cannot be empty; a postgres dataset must verify schema"
+    assert not set(default) & set(R.EXTERNAL_ONLY_VERIFICATIONS), (
+        f"the default verify list {list(default)} contains a name this facility "
+        "cannot perform, so a descriptor that omits `verify` entirely would be "
+        "refused for something it never declared"
+    )

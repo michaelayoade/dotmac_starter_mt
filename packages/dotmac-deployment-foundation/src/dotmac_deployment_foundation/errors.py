@@ -83,7 +83,16 @@ class PreconditionFailed(DeploymentError):
 
     The important property: nothing has changed, so the caller may resolve the
     stated cause and re-run the identical command.
+
+    ``code`` is an optional STABLE identifier, defaulting to empty so every
+    existing raise site is unchanged. Same reason as `SpecError`: a module with
+    more than one refusal has to be testable on WHICH refusal fired, and
+    matching on prose makes the sentence the contract.
     """
+
+    def __init__(self, message: str, *, code: str = "") -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class StepFailed(DeploymentError):
