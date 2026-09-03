@@ -182,9 +182,15 @@ def _executor_for(spec: ProductDeploymentSpec, effects: Any, **kwargs: Any) -> A
         _grant,
         _plan_and_digest,
     )
+    from tests.unit.test_deployment_foundation_failure_injection import (
+        AcceptingVerifier,
+        evidence_policy,
+    )
 
     plan = build_plan(spec)
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    kwargs.setdefault("evidence_policy", evidence_policy())
+    kwargs.setdefault("evidence_verifier", AcceptingVerifier())
     return plan, Executor(
         spec,
         effects,
@@ -200,8 +206,21 @@ def _recording_effects(spec: ProductDeploymentSpec) -> Any:
     from tests.unit.test_deployment_foundation_execution_binding import (
         RecordingEffects,
     )
+    from tests.unit.test_deployment_foundation_failure_injection import (
+        signed_evidence,
+    )
 
-    effects = RecordingEffects()
+    effects = RecordingEffects(
+        labels={"org.opencontainers.image.revision": spec.source_revision},
+        evidence=signed_evidence(revision=spec.source_revision),
+        manifest=spec.manifest_digest,
+    )
+    materials = set(spec.runtime_materials)
+    for role in spec.roles:
+        materials.update(role.materials)
+    if spec.migration is not None:
+        materials.add(spec.migration.owner_material)
+    effects.materials = sorted(materials)
     effects.roles = {
         role.code: type(next(iter(effects.roles.values())))(
             role.code, True, "sha256:" + "b" * 64, 0
@@ -212,25 +231,33 @@ def _recording_effects(spec: ProductDeploymentSpec) -> Any:
     return effects
 
 
+def _assert_no_deployment_effect(effects: Any) -> None:
+    """Failure evidence may be written; the deployment target may not move."""
+    non_evidence = [
+        mutation
+        for mutation in effects.mutations
+        if mutation[0] not in {"emit_annotation", "write_evidence"}
+    ]
+    assert non_evidence == []
+    assert effects.stopped == []
+    assert effects.started == []
+    assert effects.switched_to == []
+
+
 def test_a_missing_recovery_receipt_refuses_before_any_effect(
     external_spec: ProductDeploymentSpec, dataset: BackupDataset
 ) -> None:
     """HANDED OVER, never discovered — asserted at the engine, with the host
     proven untouched. A search cannot tell "no proof exists" from "no proof was
     offered", and would happily find last quarter's."""
-    from tests.unit.test_deployment_foundation_execution_binding import (
-        _assert_untouched,
-    )
-
     effects = _recording_effects(external_spec)
     plan, executor = _executor_for(external_spec, effects)
-    before = effects.snapshot()
     outcome = executor.run(plan)
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_external_recovery_receipt"
     assert "no recovery receipt was supplied" in outcome.failure
-    _assert_untouched(effects, before)
+    _assert_no_deployment_effect(effects)
 
 
 def test_an_accepted_recovery_receipt_lets_the_deploy_proceed(
@@ -244,8 +271,6 @@ def test_an_accepted_recovery_receipt_lets_the_deploy_proceed(
         effects,
         recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
         recovery_verifier=_ACCEPTS,
-        evidence_policy=None,
-        evidence_verifier=None,
     )
     outcome = executor.run(plan)
     steps = {record.kind.value: record for record in outcome.records}
@@ -260,10 +285,6 @@ def test_an_unsigned_recovery_receipt_refuses_at_the_engine(
 ) -> None:
     """A verifier that refuses must stop the DEPLOY, not merely return False
     to a function nobody checks."""
-    from tests.unit.test_deployment_foundation_execution_binding import (
-        _assert_untouched,
-    )
-
     effects = _recording_effects(external_spec)
     plan, executor = _executor_for(
         external_spec,
@@ -271,12 +292,11 @@ def test_an_unsigned_recovery_receipt_refuses_at_the_engine(
         recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
         recovery_verifier=_Rejects(),
     )
-    before = effects.snapshot()
     outcome = executor.run(plan)
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_external_recovery_receipt"
-    _assert_untouched(effects, before)
+    _assert_no_deployment_effect(effects)
 
 
 # ── 1. a typed executor, never a free-text owner ────────────────────────────

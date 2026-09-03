@@ -32,6 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .authorization import ExecutionGrant
     from .engine.run import DeploymentOutcome, Effects
     from .execution_bindings import ExecutionBindings
+    from .execution_plan import HostPrestateV1
     from .exposure import VerificationReport
 
 from .authorization import OPERATIONS
@@ -511,7 +512,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return EXIT_REFUSED
 
 
-def _load_prestate(path: str) -> HostPrestateV1:  # noqa: F821 - lazy import below
+def _load_prestate(path: str) -> HostPrestateV1:
     """Read a HostPrestateV1 document from a file, refusing loudly.
 
     The file form exists because the digest is produced OFF-HOST: Platform CP
