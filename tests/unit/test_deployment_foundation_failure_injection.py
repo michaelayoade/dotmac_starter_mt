@@ -241,6 +241,8 @@ def grant_for(  # type: ignore[no-untyped-def]
         # supplies the digest of the plan it is about to hand over.
         execution_plan_digest=execution_plan_digest or ("sha256:" + "e" * 64),
         control_plan_digest="f" * 64,
+        execution_sequence=7,
+        attempt_no=1,
         policy_code="deployment.test",
         policy_version=1,
         decision_ref="approvals:decision:test",

@@ -985,9 +985,9 @@ def _build_probe_wheel(workdir: Path) -> Path:
         for member, text in members.items():
             data = text.encode("utf-8")
             archive.writestr(member, data)
-            digest = base64.urlsafe_b64encode(
-                hashlib.sha256(data).digest()
-            ).rstrip(b"=")
+            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(
+                b"="
+            )
             record_lines.append(f"{member},sha256={digest.decode()},{len(data)}")
         record_lines.append(f"{info}/RECORD,,")
         archive.writestr(f"{info}/RECORD", "\n".join(record_lines) + "\n")
@@ -1140,9 +1140,7 @@ def _installed_admit_smoke(
             "the admitted deploy left no evidence record, so the outcome "
             "cannot be inspected and the admit proves an exit code only"
         )
-    outcomes = [
-        json.loads(record.read_text(encoding="utf-8")) for record in records
-    ]
+    outcomes = [json.loads(record.read_text(encoding="utf-8")) for record in records]
     successful = [outcome for outcome in outcomes if outcome.get("succeeded") is True]
     if len(successful) != 1:
         raise ReleaseRefused(
@@ -1152,9 +1150,7 @@ def _installed_admit_smoke(
     outcome = successful[0]
     problems = []
     if outcome.get("execution_plan_digest") != plan_digest:
-        problems.append(
-            "the evidence does not carry the frozen execution plan digest"
-        )
+        problems.append("the evidence does not carry the frozen execution plan digest")
     if outcome.get("descriptor_digest") != descriptor_digest:
         problems.append("the evidence does not carry the descriptor digest")
     if outcome.get("control_plan_digest") != "f" * 64:

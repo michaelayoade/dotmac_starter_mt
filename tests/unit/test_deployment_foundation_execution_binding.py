@@ -55,7 +55,7 @@ from dotmac_deployment_foundation.engine.plan import build_plan
 from dotmac_deployment_foundation.engine.run import (
     Executor,
 )
-from dotmac_deployment_foundation.errors import PreconditionFailed
+from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.execution_plan import (
     HostPrestateV1,
     render_execution_plan,
@@ -177,6 +177,8 @@ def _receipt(spec: ProductDeploymentSpec, **overrides: object) -> AuthorizationR
         "target_ref": TARGET,
         "descriptor_digest": spec.to_canonical_document().sha256_digest(),
         "execution_plan_digest": "sha256:" + "e" * 64,
+        "execution_sequence": 7,
+        "attempt_no": 1,
         "control_plan_digest": CONTROL_PLAN_DIGEST,
         "policy_code": "deployment.production",
         "policy_version": 1,
@@ -483,6 +485,61 @@ def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "record_evidence"
     assert "read" in outcome.failure and "back" in outcome.failure
+
+
+# ── item 5: Control's replay coordinate, echoed and never invented ─────────
+
+
+def test_the_replay_coordinate_reaches_the_execution_report() -> None:
+    """`(execution_sequence, attempt_no)` travels grant -> host consumption ->
+    receipt, verbatim.
+
+    Read from the published bytes of `dotmac-deployment-control` 0.1.0a10
+    (peeled `4a56f583`): Control assigns `execution_sequence` as
+    `max(Rollout.execution_sequence) + 1` per target, and compares the PAIR as
+    a tuple against the target's high-water mark — strictly lower is
+    STALE_OBSERVATION, equal-with-a-different-state-digest is
+    EXECUTION_COORDINATE_CONFLICT. So the coordinate is what makes a replayed
+    report distinguishable from the run it repeats, and a Foundation that
+    invented either half would be manufacturing the fact Control decides on.
+    """
+    spec, plan, effects = _fixture()
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    grant = _grant(
+        spec, execution_plan_digest=digest, execution_sequence=42, attempt_no=3
+    )
+    assert grant.execution_sequence == 42
+    assert grant.attempt_no == 3
+    outcome = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert outcome.succeeded, outcome.failure
+    assert (outcome.execution_sequence, outcome.attempt_no) == (42, 3)
+    evidence = outcome.as_evidence()
+    assert evidence["execution_sequence"] == 42
+    assert evidence["attempt_no"] == 3
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [0, -1, "3", 1.0, None, True],
+    ids=["zero", "negative", "str", "float", "none", "bool"],
+)
+def test_a_coordinate_that_is_not_a_positive_integer_is_refused(bad: object) -> None:
+    """`True` is the one worth naming: `bool` IS an `int` in Python, so a bare
+    isinstance check would accept it as the coordinate 1. Control refuses it on
+    its own side; so does this."""
+    spec, _plan, _effects = _fixture()
+    with pytest.raises(SpecError, match="positive integer"):
+        _receipt(spec, execution_sequence=bad)
+    with pytest.raises(SpecError, match="positive integer"):
+        _receipt(spec, attempt_no=bad)
 
 
 # ── 5. the substitution ────────────────────────────────────────────────────
