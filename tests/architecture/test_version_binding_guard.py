@@ -16,11 +16,9 @@ anything.
 
 So both halves here are real:
 
-* ``0.3.0a4`` — the version this tree actually declares — is ADMITTED for both
-  purposes, because it is unbound: never built, never tagged, on no index. That
-  is the whole reason it was allocated on 2026-09-02, when
-  `observability_promotion.py` was added to a tree that still declared a version
-  whose artifact already existed;
+* ``0.3.0a4`` — the version this tree actually declares — is ADMITTED for its
+  own RELEASE and REFUSED for a second CANDIDATE build, because its one build is
+  now bound by `docs/inventories/foundation-candidate-0.3.0a4.json`;
 * ``0.3.0a3`` is ADMITTED for its own RELEASE and REFUSED for a second CANDIDATE
   build, because it has been built once
   (`docs/inventories/foundation-candidate-0.3.0a3.json`). Those two answers for
@@ -70,12 +68,10 @@ SUPERSEDED = "0.3.0a3"
 #: instead of comparing the guard's answer with the guard's own input.
 PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 
-#: Every built-but-unpublished candidate. A tuple rather than a single name
-#: since 2026-09-02: `0.3.0a3` joined `0.3.0a1` here when the declared version
-#: moved off it, and a constant that held only one of them would have quietly
-#: stopped exercising the second-build refusal on the very version whose freeze
-#: motivated the move.
-BUILT_CANDIDATES = ("0.3.0a1",)
+#: Every built-but-unpublished, publishable candidate. A tuple rather than a
+#: single name: a constant that held only one would quietly stop exercising the
+#: second-build refusal on later frozen candidates.
+BUILT_CANDIDATES = ("0.3.0a1", "0.3.0a4")
 
 
 def _module():
@@ -131,32 +127,18 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
     would have left the guard with no real-target ADMIT at all (ADR 0034).
     """
     declared = _declared_version()
-    for purpose in ("candidate", "release"):
-        found = _bindings(declared, purpose=purpose)
-        assert not found, (
-            f"{FACILITY} declares {declared}, which is forbidden from {purpose}: "
-            + "; ".join(str(binding) for binding in found)
-        )
-
-
-def test_the_declared_version_is_not_one_that_has_already_been_built() -> None:
-    """The refusal the 2026-09-02 bump exists to keep true.
-
-    This is the assertion that fails if somebody re-declares a version that is
-    published or has a candidate receipt — the exact mistake that produced
-    `0.3.0a2`'s two contracts, and the one that would have recurred when
-    `observability_promotion.py` was added under `0.3.0a3`.
-
-    It reads the tree rather than a literal deliberately. A hard-coded version
-    here would keep passing after the next bump while describing the release
-    before it.
-    """
-    declared = _declared_version()
-    assert declared not in BUILT_CANDIDATES, (
-        f"{FACILITY} declares {declared}, which already has a candidate "
-        "artifact. A tree that diverges from a built artifact allocates a new "
-        "version; it does not keep the old one."
+    found = _bindings(declared, purpose="release")
+    assert not found, (
+        f"{FACILITY} declares {declared}, which is forbidden from release: "
+        + "; ".join(str(binding) for binding in found)
     )
+
+
+def test_the_declared_version_is_refused_for_a_SECOND_build() -> None:
+    """The candidate receipt is the second-build refusal."""
+    declared = _declared_version()
+    found = _bindings(declared, purpose="candidate")
+    assert any(binding.kind == "candidate artifact" for binding in found), found
     assert declared not in PUBLISHED and declared != INVALIDATED
 
 
