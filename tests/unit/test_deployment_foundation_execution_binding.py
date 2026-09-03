@@ -458,6 +458,33 @@ def test_a_role_that_never_becomes_ready_fails_the_deployment() -> None:
     )
 
 
+# ── item 9: evidence must persist and read back, on the success path ───────
+
+
+def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
+    """An unrecorded deployment is indistinguishable from an unauthorized one
+    a week later, so on the SUCCESS path the evidence is mandatory and its
+    read-back must equal the outcome. The failure path keeps its own rule —
+    a write failure there is a note, because masking the real failure with
+    "could not write evidence" is worse — and that rule has its own test."""
+    spec, plan, effects = _fixture()
+    effects.evidence_read_back_corrupt = True
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    outcome = Executor(
+        spec,
+        effects,
+        _grant(spec, execution_plan_digest=digest),
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        evidence_policy=evidence_policy(),
+        evidence_verifier=AcceptingVerifier(),
+    ).run(plan)
+    assert not outcome.succeeded
+    assert outcome.failed_step is not None
+    assert outcome.failed_step.value == "record_evidence"
+    assert "read" in outcome.failure and "back" in outcome.failure
+
+
 # ── 5. the substitution ────────────────────────────────────────────────────
 
 

@@ -36,6 +36,7 @@ becomes a recorded note rather than an undocumented `|| true`.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -203,6 +204,8 @@ class Effects(Protocol):
     def scheduler_last_tick_age_seconds(self, role: str) -> int | None: ...
 
     def write_evidence(self, evidence: Mapping[str, object]) -> str: ...
+
+    def read_evidence(self, path: str) -> Mapping[str, object]: ...
 
     def prune_images(self, *, retain: int) -> None: ...
 
@@ -1179,8 +1182,42 @@ class Executor:
         # remains in the plan because a reader of the plan should see that
         # evidence is written, and because the interim copy captures the state
         # before pruning touches anything.
+        #
+        # MANDATORY here, best-effort in the `finally` — deliberately split.
+        # On the SUCCESS path, evidence that failed to persist or does not
+        # read back must fail the deployment before success is declared: an
+        # unrecorded deployment is indistinguishable from an unauthorized one
+        # a week later. On the FAILURE path (`_persist_evidence` from
+        # `finally`), a write failure stays a note, because replacing the real
+        # failure with "could not write the evidence file" is worse — that
+        # rule has its own test and it is not weakened here.
         self._persist_evidence(outcome)
-        return outcome.evidence_path or "(evidence write failed; see notes)"
+        if not outcome.evidence_path:
+            raise StepFailed(
+                step.kind.value,
+                "the evidence artefact could not be written, and this is the "
+                "success path: a deployment whose only account of itself "
+                "failed to persist must not be declared successful. "
+                f"{'; '.join(outcome.notes[-1:]) or ''}",
+            )
+        document = json.loads(
+            json.dumps(outcome.as_evidence(), sort_keys=True, default=str)
+        )
+        read_back = json.loads(
+            json.dumps(
+                dict(self._effects.read_evidence(outcome.evidence_path)),
+                sort_keys=True,
+                default=str,
+            )
+        )
+        if read_back != document:
+            raise StepFailed(
+                step.kind.value,
+                f"the evidence record at {outcome.evidence_path} does not read "
+                "back as the outcome this run produced. A record that cannot "
+                "be read back identical is a hope, not evidence",
+            )
+        return outcome.evidence_path
 
     def _do_prune_images(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome

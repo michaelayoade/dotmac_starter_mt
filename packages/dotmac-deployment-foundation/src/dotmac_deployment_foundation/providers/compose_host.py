@@ -1327,7 +1327,68 @@ class ComposeHostEffects:
             raise
 
     def write_evidence(self, evidence: Mapping[str, object]) -> str:
-        """Atomic JSON write: temp file, then `os.replace`."""
+        """An IMMUTABLE, content-addressed record, read back before believed.
+
+        What stood here wrote one well-known file with `os.replace` — so every
+        deployment's evidence REPLACED the previous deployment's, and the only
+        account of what happened to this host had a memory exactly one release
+        deep. An incident review that needs "what ran here on Tuesday" found
+        whatever ran on Wednesday.
+
+        Three properties now, each carried by mechanism rather than promise:
+
+        * **Immutable** — the record's name IS the sha256 of its canonical
+          bytes, under `evidence-records/`. A record can never change, because
+          changed bytes are a different name; a name already present with
+          DIFFERENT bytes is refused as tampering, not overwritten. Writing
+          the same outcome twice is idempotent by construction.
+        * **Read back** — the record is re-read from disk and byte-compared
+          before this returns. A write the filesystem quietly lost or
+          truncated is a refusal here, not a surprise during an incident.
+        * **The latest pointer survives** — operators keep the well-known
+          path; it is updated (atomically) only AFTER the immutable record is
+          proven, and it is a POINTER, never the record of anything.
+        """
+        canonical = (
+            json.dumps(dict(evidence), indent=2, sort_keys=True, default=str) + "\n"
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        records = self._evidence_path.parent / "evidence-records"
+        records.mkdir(parents=True, exist_ok=True)
+        record = records / f"{digest}.json"
+
+        if record.exists():
+            existing = record.read_bytes()
+            if existing != canonical:
+                raise PreconditionFailed(
+                    f"evidence record {record} exists with DIFFERENT bytes than "
+                    "its own content address. A content-addressed name can only "
+                    "disagree with its content if the file was edited in place, "
+                    "and an evidence store that can be edited is not evidence"
+                )
+            # Same bytes, same name: recording the same outcome twice is a
+            # no-op, not an error.
+        else:
+            fd = os.open(record, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(canonical)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            except BaseException:
+                record.unlink(missing_ok=True)
+                raise
+
+        read_back = record.read_bytes()
+        if read_back != canonical:
+            raise PreconditionFailed(
+                f"evidence record {record} did not read back as written "
+                f"({len(read_back)} bytes back, {len(canonical)} written). "
+                "Persistence that cannot be proven is a hope, not a record"
+            )
+
+        # The operator-facing LATEST pointer, updated only after the record is
+        # proven. Atomic replace, exactly as before.
         path = self._evidence_path
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
@@ -1335,16 +1396,27 @@ class ComposeHostEffects:
         )
         tmp_path = Path(tmp_name)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(dict(evidence), fh, indent=2, sort_keys=True, default=str)
-                fh.write("\n")
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(canonical)
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp_path, path)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
-        return str(path)
+        return str(record)
+
+    def read_evidence(self, path: str) -> Mapping[str, object]:
+        """Read one immutable record back. The engine's round-trip proof."""
+        try:
+            document = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PreconditionFailed(
+                f"evidence record {path} cannot be read back: {exc}"
+            ) from exc
+        if not isinstance(document, dict):
+            raise PreconditionFailed(f"evidence record {path} is not a JSON object")
+        return document
 
     def _used_image_ids(self) -> set[str]:
         result = self._run(

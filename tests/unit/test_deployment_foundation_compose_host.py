@@ -890,6 +890,77 @@ def test_the_heads_command_comes_from_the_DESCRIPTOR_and_is_never_inferred() -> 
         assert tuple(effects._migration_heads_command) == spec.migration.heads_command
 
 
+# ── evidence: immutable, content-addressed, read back (item 9) ──────────────
+
+
+def _evidence_effects(tmp_path: Path):  # type: ignore[no-untyped-def]
+    return make_effects(tmp_path, runner=ScriptedRunner())
+
+
+def test_evidence_lands_content_addressed_and_immutable(tmp_path: Path) -> None:
+    """The record's name IS the sha256 of its bytes, so a record can never
+    change — changed bytes are a different name. The well-known path survives
+    as a POINTER for operators, updated only after the record is proven."""
+    import hashlib
+
+    effects = _evidence_effects(tmp_path)
+    record_path = Path(effects.write_evidence({"operation": "deploy", "ok": True}))
+    assert record_path.parent.name == "evidence-records"
+    body = record_path.read_bytes()
+    assert (
+        record_path.stem == hashlib.sha256(body).hexdigest()
+    ), "the record is not named by its own content"
+    # the operator-facing pointer carries the same bytes
+    assert (tmp_path / "deploy-evidence.json").read_bytes() == body
+
+
+def test_recording_the_same_outcome_twice_is_idempotent(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    first = effects.write_evidence({"operation": "deploy", "ok": True})
+    second = effects.write_evidence({"operation": "deploy", "ok": True})
+    assert first == second
+
+
+def test_two_outcomes_are_two_records_and_the_first_survives(tmp_path: Path) -> None:
+    """The defect this repairs: one well-known file, atomically REPLACED per
+    deployment, gave the host an evidence memory exactly one release deep."""
+    effects = _evidence_effects(tmp_path)
+    first = Path(effects.write_evidence({"operation": "deploy", "n": 1}))
+    second = Path(effects.write_evidence({"operation": "deploy", "n": 2}))
+    assert first != second
+    assert first.exists(), "the earlier record was destroyed by the later one"
+    assert json.loads(first.read_text())["n"] == 1
+    assert json.loads(second.read_text())["n"] == 2
+
+
+def test_a_tampered_record_is_refused_not_overwritten(tmp_path: Path) -> None:
+    """A content-addressed name disagreeing with its content can only mean the
+    file was edited in place — and an evidence store that can be edited is not
+    evidence. Refused BY NAME, never quietly repaired, because repairing it
+    would destroy the one proof that tampering happened."""
+    effects = _evidence_effects(tmp_path)
+    record = Path(effects.write_evidence({"operation": "deploy", "ok": True}))
+    record.chmod(0o644)
+    record.write_text('{"edited": "in place"}')
+    with pytest.raises(PreconditionFailed, match="DIFFERENT bytes"):
+        effects.write_evidence({"operation": "deploy", "ok": True})
+
+
+def test_read_evidence_round_trips_the_record(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    written = {"operation": "deploy", "steps": [{"kind": "switch", "ok": True}]}
+    path = effects.write_evidence(written)
+    assert effects.read_evidence(path) == json.loads(
+        json.dumps(written, sort_keys=True, default=str)
+    )
+
+
+def test_an_unreadable_record_refuses_on_read_back(tmp_path: Path) -> None:
+    effects = _evidence_effects(tmp_path)
+    with pytest.raises(PreconditionFailed, match="cannot be read back"):
+        effects.read_evidence(str(tmp_path / "evidence-records" / "missing.json"))
+
+
 # ── worker_responds ──────────────────────────────────────────────────────────
 
 

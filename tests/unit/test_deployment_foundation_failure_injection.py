@@ -327,6 +327,7 @@ class FakeEffects:
         self.heads = ["a003", "k012"]
         self.candidate_never_ready = False
         self.role_never_ready = False
+        self.evidence_read_back_corrupt = False
         self._role_ready_calls = 0
         self.migration_images: list[tuple[tuple[str, ...], str]] = []
         self.candidate_started_with: list[tuple[str, str]] = []
@@ -443,7 +444,14 @@ class FakeEffects:
 
     def write_evidence(self, evidence: Mapping[str, object]) -> str:
         self.evidence_written.append(evidence)
-        return "/var/lib/dotmac/deploy-evidence.json"
+        return "/var/lib/dotmac/evidence-records/fake.json"
+
+    def read_evidence(self, path: str) -> Mapping[str, object]:
+        if self.evidence_read_back_corrupt:
+            return {"schema": "not what was written"}
+        # The last write, exactly as recorded — the honest fake of a store
+        # that persisted what it was given.
+        return dict(self.evidence_written[-1]) if self.evidence_written else {}
 
     def prune_images(self, *, retain: int) -> None:
         self.pruned = retain
