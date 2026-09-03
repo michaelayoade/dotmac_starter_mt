@@ -826,13 +826,48 @@ def test_a_stringified_document_is_refused_by_name_not_verified_as_garbage(
 # ── migration_heads: tolerant parsing ────────────────────────────────────────
 
 
+CANDIDATE_IMAGE = "ghcr.io/example/app@sha256:" + "a" * 64
+
+
 def test_migration_heads_parses_alembic_style_output(tmp_path: Path) -> None:
     runner = ScriptedRunner()
     runner.when(
         lambda a: "current" in a, CommandResult(0, "a003 (head)\nk012 (head)\n")
     )
     effects = make_effects(tmp_path, runner=runner)
-    assert set(effects.migration_heads()) == {"a003", "k012"}
+    assert set(effects.migration_heads(image=CANDIDATE_IMAGE)) == {"a003", "k012"}
+
+
+def test_migration_family_env_injects_the_candidate_image(tmp_path: Path) -> None:
+    """Item 7's provider half, asserted at the seam that carries it.
+
+    The compose file interpolates the image env var; a process-env value
+    overrides the on-disk env file for one invocation. So the injection is an
+    ENV fact, and the assertion reads the env the runner was actually handed —
+    not the argv, where no image appears by design.
+    """
+    runner = ScriptedRunner()
+    runner.when(lambda a: "current" in a, CommandResult(0, "a003 (head)\n"))
+    runner.when(lambda a: "upgrade" in a, CommandResult(0, ""))
+    effects = make_effects(tmp_path, runner=runner)
+    effects.migration_heads(image=CANDIDATE_IMAGE)
+    effects.run_migration_command(
+        ["alembic", "upgrade", "heads"], timeout_seconds=5, image=CANDIDATE_IMAGE
+    )
+    assert len(runner.envs) == 2
+    for env in runner.envs:
+        assert env is not None
+        assert CANDIDATE_IMAGE in dict(env).values(), (
+            "the candidate image never reached the invocation's environment, "
+            "so compose would fall back to the env file — the previous release"
+        )
+
+
+def test_an_empty_image_is_refused_not_defaulted(tmp_path: Path) -> None:
+    """Falling back to the env file IS the previous release. Refuse."""
+    effects = make_effects(tmp_path, runner=ScriptedRunner())
+    with pytest.raises(PreconditionFailed, match="previous release"):
+        effects.run_migration_command(["alembic"], timeout_seconds=5, image="  ")
 
 
 def test_the_heads_command_comes_from_the_DESCRIPTOR_and_is_never_inferred() -> None:

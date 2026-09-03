@@ -562,6 +562,7 @@ import sys
 from dotmac_deployment_foundation.execution_plan import (
     EXECUTION_PLAN_SCHEMA,
     FoundationExecutionPlanV1,
+    HostPrestateV1,
     execution_plan_digest,
 )
 
@@ -589,6 +590,7 @@ rebuilt = FoundationExecutionPlanV1(
     source_revision=document["source_revision"],
     manifest_digest=document["manifest_digest"],
     descriptor_digest=document["descriptor_digest"],
+    host_prestate=HostPrestateV1.from_document(document["host_prestate"]),
     strategy=document["strategy"],
     environment_inventory=tuple(document["environment_inventory"]),
     steps=tuple(
@@ -789,6 +791,13 @@ def _execution_plan_smoke(
     document_path = workdir / "execution-plan.json"
     digest_path = workdir / "execution-plan.digest"
 
+    # The explicit first-deploy claim, as a document — the a5 contract binds
+    # every plan to an observed prestate, and the smoke's fictitious target
+    # has no containers by definition. Written out rather than defaulted,
+    # because the absence of a prestate is exactly what the field refuses.
+    prestate_path = workdir / "prestate.json"
+    prestate_path.write_text('{"roles": []}\n', encoding="ascii")
+
     for fmt, destination in (("json", document_path), ("digest", digest_path)):
         rendered = subprocess.run(
             [
@@ -800,6 +809,8 @@ def _execution_plan_smoke(
                 SMOKE_TARGET,
                 "--operation",
                 "deploy",
+                "--prestate",
+                str(prestate_path),
                 "--format",
                 fmt,
             ],

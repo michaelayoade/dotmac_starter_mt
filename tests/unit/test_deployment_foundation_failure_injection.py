@@ -46,7 +46,10 @@ from dotmac_deployment_foundation.evidence import (
     SignedEvidenceEnvelope,
     TrustPolicy,
 )
-from dotmac_deployment_foundation.execution_plan import render_execution_plan
+from dotmac_deployment_foundation.execution_plan import (
+    HostPrestateV1,
+    render_execution_plan,
+)
 from dotmac_deployment_foundation.provenance import (
     AuthorizationReceipt,
     verify_authorization,
@@ -255,7 +258,9 @@ def grant_for(  # type: ignore[no-untyped-def]
     )
 
 
-def _bound(spec: ProductDeploymentSpec, plan, operation: str = "deploy"):  # type: ignore[no-untyped-def]
+def _bound(
+    spec: ProductDeploymentSpec, plan, operation: str = "deploy", *, effects=None
+):  # type: ignore[no-untyped-def]
     """The PAIR `Executor` now requires: a plan, and a grant that froze it.
 
     Kept together in one helper on purpose. The two are only meaningful as a
@@ -270,6 +275,14 @@ def _bound(spec: ProductDeploymentSpec, plan, operation: str = "deploy"):  # typ
         target=TEST_TARGET,
         operation=operation,
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        # Observed from the SAME fake the executor will re-observe, exactly as
+        # the CLI observes through the effects the run mutates through. A test
+        # that fabricated a prestate here would be testing the fabrication.
+        prestate=(
+            HostPrestateV1.from_observations(effects.observe_roles())
+            if effects is not None
+            else HostPrestateV1.first_deploy()
+        ),
     )
     grant = grant_for(spec, operation, execution_plan_digest=execution_plan.digest())
     return grant, execution_plan
@@ -313,6 +326,10 @@ class FakeEffects:
         self.backup_verifies = True
         self.heads = ["a003", "k012"]
         self.candidate_never_ready = False
+        self.role_never_ready = False
+        self._role_ready_calls = 0
+        self.migration_images: list[tuple[tuple[str, ...], str]] = []
+        self.candidate_started_with: list[tuple[str, str]] = []
         self.candidate_digest = GOOD_DIGEST
         self.roles: dict[str, RoleObservation] = {
             code: RoleObservation(code, True, GOOD_DIGEST, 0)
@@ -363,6 +380,21 @@ class FakeEffects:
     ) -> CommandResult:
         return self.command_results.get(command[0], self.default_command_result)
 
+    def run_migration_command(
+        self,
+        command: Sequence[str],
+        *,
+        timeout_seconds: int,
+        materials: Sequence[str] = (),
+        image: str,
+    ) -> CommandResult:
+        # Same scripted-result lookup as `run_command`, so every existing
+        # failure scenario keyed on "alembic"/"python" keeps injecting — plus
+        # a record of WHICH image the engine said this work is about, which is
+        # the item-7 assertion's whole subject.
+        self.migration_images.append((tuple(command), image))
+        return self.command_results.get(command[0], self.default_command_result)
+
     def backup(self, dataset_code: str, *, timeout_seconds: int) -> BackupResult:
         if not self.backup_ok:
             raise StepFailed("backup", "pg_dump exited 1: connection refused")
@@ -377,14 +409,16 @@ class FakeEffects:
     def verify_backup(self, result: BackupResult) -> bool:
         return self.backup_verifies
 
-    def migration_heads(self) -> Sequence[str]:
+    def migration_heads(self, *, image: str) -> Sequence[str]:
+        self.migration_images.append((("<heads>",), image))
         return self.heads
 
     def stop_roles(self, roles: Sequence[str], *, timeout_seconds: int) -> None:
         for code in roles:
             self.roles[code] = RoleObservation(code, False, GOOD_DIGEST, 0)
 
-    def start_candidate(self, role: str, *, timeout_seconds: int) -> str:
+    def start_candidate(self, role: str, *, timeout_seconds: int, image: str) -> str:
+        self.candidate_started_with.append((role, image))
         return self.candidate_digest
 
     def candidate_ready(self, role: str) -> bool:
@@ -396,6 +430,10 @@ class FakeEffects:
         self.switched_to.append(digest)
         for code in self.roles:
             self.roles[code] = RoleObservation(code, True, digest, 0)
+
+    def role_ready(self, role: str) -> bool:
+        self._role_ready_calls += 1
+        return not self.role_never_ready
 
     def worker_responds(self, role: str) -> bool:
         return self.worker_ok
@@ -441,7 +479,7 @@ class FakeClock:
 def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object):  # type: ignore[no-untyped-def]
     plan = build_plan(spec, **plan_kwargs)  # type: ignore[arg-type]
     clock = FakeClock()
-    grant, execution_plan = _bound(spec, plan)
+    grant, execution_plan = _bound(spec, plan, effects=effects)
     executor = Executor(
         spec,
         effects,
@@ -1123,7 +1161,7 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
     spec = load()
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
-    grant, execution_plan = _bound(spec, plan, "rollback")
+    grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     executor = Executor(
         spec,
         effects,
@@ -1155,7 +1193,7 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     )
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
-    grant, execution_plan = _bound(spec, plan, "rollback")
+    grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     executor = Executor(
         spec, effects, grant, execution_plan=execution_plan, sleep=lambda _: None
     )
@@ -1207,7 +1245,7 @@ def test_a_rollback_annotates_itself() -> None:
     effects = FakeEffects()
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     clock = FakeClock()
-    grant, execution_plan = _bound(spec, plan, "rollback")
+    grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     Executor(
         spec,
         effects,

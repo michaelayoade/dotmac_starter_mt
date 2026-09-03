@@ -1002,7 +1002,56 @@ class ComposeHostEffects:
             return False
         return True
 
-    def migration_heads(self) -> Sequence[str]:
+    def _candidate_image_env(
+        self, materials: Sequence[str], *, image: str
+    ) -> dict[str, str]:
+        """Materials env plus the CANDIDATE image, injected per invocation.
+
+        The compose file interpolates `${<image_env_var>}`; a process-env
+        value overrides the on-disk env file for exactly one invocation, so a
+        `compose run` here uses the candidate image while the RUNNING
+        containers — and the file `switch` will later pin durably — stay
+        untouched. That is the whole of item 7's injection: no early file
+        mutation, no window where the on-disk state points at an image nothing
+        verified, and no pre-switch command left running old code.
+        """
+        if not str(image).strip():
+            raise PreconditionFailed(
+                "a migration-family command needs the image it is about; an "
+                "empty image would fall back to whatever the env file still "
+                "pins, which is the previous release — the exact drift this "
+                "parameter removes"
+            )
+        return {**self._materials_env(materials), self._image_env_var: str(image)}
+
+    def run_migration_command(
+        self,
+        command: Sequence[str],
+        *,
+        timeout_seconds: int,
+        materials: Sequence[str] = (),
+        image: str,
+    ) -> CommandResult:
+        """Migration-family work runs IN the candidate image, via compose.
+
+        `run_command` runs the descriptor's argv on the bare host — right for
+        host tools, and how the migration itself used to run: the HOST's
+        alembic and code, mutating a schema the candidate's code owns. This
+        runs the same argv inside a one-off container of the candidate image,
+        on the compose project's network, with the migration owner material.
+        """
+        argv = [
+            *self._compose_argv,
+            "run",
+            "--rm",
+            "--no-deps",
+            self._migration_service,
+            *command,
+        ]
+        env = self._candidate_image_env(materials, image=image)
+        return self._run(argv, timeout_seconds=timeout_seconds, env=env)
+
+    def migration_heads(self, *, image: str) -> Sequence[str]:
         argv = [
             *self._compose_argv,
             "run",
@@ -1014,7 +1063,11 @@ class ComposeHostEffects:
         result = self._run(
             argv,
             timeout_seconds=self._migration_heads_timeout_seconds,
-            env=self._materials_env((self._spec.migration.owner_material,)),
+            # The heads READ runs in the candidate image too: the previous
+            # image's alembic may not know the new lineage's branch labels.
+            env=self._candidate_image_env(
+                (self._spec.migration.owner_material,), image=image
+            ),
         )
         if not result.ok:
             raise StepFailed(
@@ -1062,7 +1115,7 @@ class ComposeHostEffects:
             )
         return result.stdout.strip()
 
-    def start_candidate(self, role: str, *, timeout_seconds: int) -> str:
+    def start_candidate(self, role: str, *, timeout_seconds: int, image: str) -> str:
         role_spec = self._spec.role(role)
         port, container_port = _candidate_ports(
             self._spec, role, candidate_port_base=self._candidate_port_base
@@ -1089,7 +1142,12 @@ class ComposeHostEffects:
         result = self._run(
             argv,
             timeout_seconds=timeout_seconds,
-            env=self._materials_env(role_spec.materials),
+            # The candidate starts on the CANDIDATE image, injected for this
+            # one invocation — before this, it started from the on-disk
+            # compose file, which still pins the previous image until `switch`
+            # re-renders it, and only the engine's post-hoc digest comparison
+            # stood between that and gating traffic onto the old release.
+            env=self._candidate_image_env(role_spec.materials, image=image),
         )
         if not result.ok:
             raise StepFailed(
@@ -1111,6 +1169,24 @@ class ComposeHostEffects:
         )
         url = f"http://{self._loopback}:{port}{probe.path}"
         return self._readiness_probe(url, float(probe.timeout_seconds))
+
+    def role_ready(self, role: str) -> bool:
+        """The ROLE's own readiness probe, on its own upstream port.
+
+        `candidate_ready` probes the candidate's derived port before traffic;
+        this probes the real role after the switch, and exists because two of
+        the three strategies never create a candidate — for them, "ready" used
+        to mean docker-inspect facts plus a sleep.
+        """
+        role_spec = self._spec.role(role)
+        probe = role_spec.ready
+        if probe is None:
+            return False
+        for ingress_role, port in _nginx_ingress_roles(self._spec):
+            if ingress_role == role:
+                url = f"http://{self._loopback}:{port}{probe.path}"
+                return self._readiness_probe(url, float(probe.timeout_seconds))
+        return False
 
     def switch(self, *, timeout_seconds: int, image: str) -> None:
         """Pins `image` into the env file, then `up -d --force-recreate`.

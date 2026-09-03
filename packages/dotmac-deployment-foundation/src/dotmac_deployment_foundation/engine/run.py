@@ -50,7 +50,11 @@ from ..evidence import (
     TrustPolicy,
     accept_release_evidence,
 )
-from ..execution_plan import FoundationExecutionPlanV1, require_execution_plan_digest
+from ..execution_plan import (
+    FoundationExecutionPlanV1,
+    HostPrestateV1,
+    require_execution_plan_digest,
+)
 from ..external_recovery import (
     accept_external_recovery_receipt,
     backup_record_from_receipt,
@@ -58,7 +62,15 @@ from ..external_recovery import (
 )
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
-from .plan import DeploymentPlan, Step, StepKind, steps_for_rollback
+from .plan import (
+    DeploymentPlan,
+    Step,
+    StepKind,
+    steps_for_rollback,
+)
+from .plan import (
+    _ingress_roles as _plan_ingress_roles,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,11 +163,36 @@ class Effects(Protocol):
 
     def verify_backup(self, result: BackupResult) -> bool: ...
 
-    def migration_heads(self) -> Sequence[str]: ...
+    # ── candidate-image injected work (item 7 of the a5 audit) ──
+    #
+    # Every method below takes the image the ENGINE says this deployment is
+    # about, because each one used to run against whatever happened to be
+    # lying around instead: `migration_preflight` and `migrate` were bare
+    # host-shell commands with no image concept at all — `alembic` from the
+    # host PATH migrating a schema the CANDIDATE image's code owns — and
+    # `verify_heads`/`start_candidate` used the on-disk compose file, which
+    # still pins the PREVIOUS image until `switch` re-renders it at step
+    # sixteen. A migration run by the old code against the new release's
+    # schema expectations is the exact drift `require_prerequisites` exists
+    # to catch one layer down, reintroduced by the executor itself.
+    def run_migration_command(
+        self,
+        command: Sequence[str],
+        *,
+        timeout_seconds: int,
+        materials: Sequence[str] = (),
+        image: str,
+    ) -> CommandResult: ...
+
+    def migration_heads(self, *, image: str) -> Sequence[str]: ...
 
     def stop_roles(self, roles: Sequence[str], *, timeout_seconds: int) -> None: ...
 
-    def start_candidate(self, role: str, *, timeout_seconds: int) -> str: ...
+    def start_candidate(
+        self, role: str, *, timeout_seconds: int, image: str
+    ) -> str: ...
+
+    def role_ready(self, role: str) -> bool: ...
 
     def candidate_ready(self, role: str) -> bool: ...
 
@@ -425,6 +462,26 @@ class Executor:
                 "nothing froze this plan. Rendering a plan is not the same as "
                 "having it authorized, and running the unfrozen one is the gap "
                 "this contract closes"
+            )
+        # THE HOST IS RE-OBSERVED, not remembered. The plan's prestate is what
+        # the host looked like when the plan was rendered and authorized; this
+        # is what it looks like NOW, at the moment before mutation. Between the
+        # two, another deployment, a manual compose invocation or a rollback
+        # can have moved the base state — and an authorized change applied to
+        # an unreviewed starting point is not the change that was reviewed.
+        # A read, deliberately BEFORE any effect, so the refusal leaves the
+        # host byte-identical.
+        observed = HostPrestateV1.from_observations(self._effects.observe_roles())
+        if observed != self._execution_plan.host_prestate:
+            authorized_state = self._execution_plan.host_prestate.as_document()
+            raise PreconditionFailed(
+                "the host is not the host that was authorized: the plan was "
+                f"rendered against prestate {authorized_state} "
+                f"and the target now observes {observed.as_document()}. "
+                "Something deployed, rolled back or hand-mutated this target "
+                "after authorization. Re-render the plan against the current "
+                "state and have it re-authorized; executing anyway would apply "
+                "a reviewed change to an unreviewed starting point"
             )
         if self._execution_plan.operation != operation:
             raise PreconditionFailed(
@@ -854,10 +911,15 @@ class Executor:
     ) -> str:
         if not step.command:
             return "no preflight command is declared"
-        result = self._effects.run_command(
+        # IN THE CANDIDATE IMAGE. This was `run_command` — the bare host
+        # shell — so the preflight proved the HOST's alembic and the host's
+        # code could talk to the database, about a release whose code it was
+        # not running. The image is the plan's: the one the grant authorized.
+        result = self._effects.run_migration_command(
             step.command,
             timeout_seconds=step.timeout_seconds,
             materials=[self._spec.migration.owner_material],
+            image=plan.image,
         )
         if not result.ok:
             raise StepFailed(
@@ -881,10 +943,15 @@ class Executor:
     ) -> str:
         last = ""
         for attempt in range(1, step.retries + 1):
-            result = self._effects.run_command(
+            # IN THE CANDIDATE IMAGE — the migration is the candidate's code
+            # changing the schema to what the candidate expects. Run by the
+            # previous release's code (or the host's PATH), it is the drift
+            # `require_prerequisites` exists to catch, reintroduced here.
+            result = self._effects.run_migration_command(
                 step.command,
                 timeout_seconds=step.timeout_seconds,
                 materials=[self._spec.migration.owner_material],
+                image=plan.image,
             )
             if result.ok:
                 return f"migrated on attempt {attempt}"
@@ -911,7 +978,9 @@ class Executor:
     def _do_verify_heads(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
     ) -> str:
-        observed = set(self._effects.migration_heads())
+        # The heads READ also runs in the candidate image: the previous
+        # image's alembic may not even know the new lineage's branch labels.
+        observed = set(self._effects.migration_heads(image=plan.image))
         expected = set(self._spec.migration.expected_heads)
         if observed != expected:
             raise StepFailed(
@@ -926,8 +995,13 @@ class Executor:
     def _do_start_candidate(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
     ) -> str:
+        # The image is INJECTED into the start, not hoped for: before this,
+        # the candidate started from the on-disk compose file — which still
+        # pins the PREVIOUS image until `switch` re-renders it — and only a
+        # post-hoc digest comparison stood between that and gating traffic
+        # onto the old release. The comparison stays, as a canary.
         digest = self._effects.start_candidate(
-            step.target, timeout_seconds=step.timeout_seconds
+            step.target, timeout_seconds=step.timeout_seconds, image=plan.image
         )
         if digest and digest != plan.image_digest:
             raise StepFailed(
@@ -985,12 +1059,18 @@ class Executor:
             # role moved together.
             checked = [role.code for role in self._spec.roles if role.replicas > 0]
             for code in checked:
-                self._verify_one_role(code, expected, plan)
+                self._verify_one_role(
+                    code, expected, plan, step_timeout=step.timeout_seconds
+                )
             return f"{len(checked)} role(s) verified on {expected}"
-        self._verify_one_role(step.target, expected, plan)
+        self._verify_one_role(
+            step.target, expected, plan, step_timeout=step.timeout_seconds
+        )
         return f"{step.target} verified on {expected}"
 
-    def _verify_one_role(self, code: str, expected: str, plan: DeploymentPlan) -> None:
+    def _verify_one_role(
+        self, code: str, expected: str, plan: DeploymentPlan, *, step_timeout: int = 60
+    ) -> None:
         step_kind = StepKind.VERIFY_ROLES.value
         role = self._spec.role(code)
         if role.replicas == 0:
@@ -1019,6 +1099,33 @@ class Executor:
             raise StepFailed(
                 step_kind, f"role {code!r} bind-mounts source into the container"
             )
+        if role.ready is not None and code in set(_plan_ingress_roles(self._spec)):
+            # REAL readiness, every strategy. `GATE_CANDIDATE` polls the
+            # candidate's probe before traffic — but only the warm-candidate
+            # strategy ever creates that step, so a maintenance or recreate
+            # deployment used to declare victory on docker-inspect facts plus
+            # a sleep: running, right digest, zero restarts — and an app that
+            # binds its port then hangs on a dead dependency passes all three.
+            # The role's own declared probe is polled here, bounded by the
+            # step's budget, for every strategy including warm-candidate
+            # (whose candidate is gone by now; the REAL role must be ready
+            # too).
+            deadline = self._clock() + step_timeout
+            attempts = 0
+            while True:
+                attempts += 1
+                if self._effects.role_ready(code):
+                    break
+                if self._clock() >= deadline:
+                    raise StepFailed(
+                        step_kind,
+                        f"role {code!r} is running the right digest and never "
+                        f"answered its readiness probe within {step_timeout}s "
+                        f"across {attempts} attempt(s). Running is not ready: "
+                        "a process that bound its port and hangs on a dead "
+                        "dependency looks exactly like this",
+                    )
+                self._sleep(role.ready.interval_seconds)
         if role.worker is not None and not self._effects.worker_responds(code):
             raise StepFailed(
                 step_kind,

@@ -40,6 +40,7 @@ from dotmac_deployment_foundation.engine.plan import build_plan
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.execution_plan import (
     FoundationExecutionPlanV1,
+    HostPrestateV1,
     execution_plan_digest,
     render_execution_plan,
     require_execution_plan_digest,
@@ -166,6 +167,7 @@ def _plan(**overrides: Any) -> FoundationExecutionPlanV1:
         "target": TARGET,
         "operation": "deploy",
         "descriptor_digest": spec.to_canonical_document().sha256_digest(),
+        "prestate": HostPrestateV1.first_deploy(),
     }
     kwargs.update(overrides)
     return render_execution_plan(spec, build_plan(spec), **kwargs)
@@ -209,6 +211,7 @@ def test_the_launcher_reaches_the_plan_digest_through_the_descriptor() -> None:
         target=TARGET,
         operation="deploy",
         descriptor_digest=relaunched.to_canonical_document().sha256_digest(),
+        prestate=HostPrestateV1.first_deploy(),
     )
     assert moved.digest() != _plan().digest()
 

@@ -105,6 +105,7 @@ __all__ = [
     "EXECUTION_PLAN_DIGEST_SCHEMA",
     "EXECUTION_PLAN_SCHEMA",
     "FoundationExecutionPlanV1",
+    "HostPrestateV1",
     "canonical_execution_plan_bytes",
     "execution_plan_digest",
     "render_execution_plan",
@@ -117,6 +118,95 @@ EXECUTION_PLAN_SCHEMA: Final = "FoundationExecutionPlanV1"
 #: CP submits a digest and Control stores one; both need a word for the thing
 #: they are handling that is not the word for the document they never parse.
 EXECUTION_PLAN_DIGEST_SCHEMA: Final = "ExecutionPlanDigestV1"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HostPrestateV1:
+    """What the host LOOKED LIKE when this plan was rendered — inside the plan.
+
+    A plan without an observed prestate binds to any host state at all: it says
+    "apply this change" without saying "to the host as it stood when this was
+    reviewed". Between authorization and execution a host can move — another
+    deployment, a manual `docker compose up`, a rollback — and a plan digest
+    that cannot see the base state authorizes applying a reviewed change to an
+    unreviewed starting point. The prestate closes that: it is part of the
+    document, therefore part of `ExecutionPlanDigestV1`, therefore part of what
+    Control froze — and the executor RE-OBSERVES before mutating and refuses a
+    host that no longer matches.
+
+    ## Deliberately identity, not liveness
+
+    `roles` carries ``(role_code, image_digest)`` pairs and nothing else.
+    `running` and `restarts` are OBSERVED by `observe_roles` and deliberately
+    excluded here: they are liveness facts that flap between authorization and
+    execution (a restart, a crash-loop settling), and a prestate that flaps
+    makes every authorized plan unexecutable in practice — after which the
+    check gets removed rather than fixed. Which image each existing role
+    container is on IS stable, and it is the fact a concurrent deployment
+    changes. Liveness stays owned by `verify_roles` and the stabilise window,
+    where it is judged at the right time: after the switch.
+
+    An EMPTY prestate is a claim, not an absence: it says "this target has no
+    role containers — a first deployment", and executing against a host that
+    turns out to have containers refuses like any other mismatch.
+    """
+
+    #: Sorted ``(role_code, image_digest)`` pairs, one per existing role
+    #: container. Sorted because it is a set-shaped fact (rule 3: canonicalize
+    #: unordered collections); a digest must not depend on discovery order.
+    roles: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        codes = [code for code, _ in self.roles]
+        if codes != sorted(codes):
+            raise SpecError(
+                "HostPrestateV1.roles must be sorted by role code; an ordering "
+                "that depends on discovery would make one host state hash two "
+                "ways"
+            )
+        if len(set(codes)) != len(codes):
+            raise SpecError(
+                "HostPrestateV1.roles names a role twice; one container per "
+                "role is the shape everything downstream assumes"
+            )
+
+    @classmethod
+    def from_observations(cls, observations: Any) -> HostPrestateV1:
+        """From `Effects.observe_roles()` output, identity facts only."""
+        return cls(
+            roles=tuple(
+                sorted(
+                    (str(item.code), str(item.image_digest)) for item in observations
+                )
+            )
+        )
+
+    @classmethod
+    def first_deploy(cls) -> HostPrestateV1:
+        """The explicit empty claim: no role containers exist on this target."""
+        return cls(roles=())
+
+    @classmethod
+    def from_document(cls, document: Any) -> HostPrestateV1:
+        if not isinstance(document, dict):
+            raise SpecError(
+                f"host prestate must be a JSON object, got {type(document).__name__}"
+            )
+        roles = document.get("roles")
+        if not isinstance(roles, list):
+            raise SpecError("host prestate must carry a 'roles' list")
+        return cls(
+            roles=tuple(
+                (str(item["role"]), str(item["image_digest"])) for item in roles
+            )
+        )
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "roles": [
+                {"image_digest": digest, "role": role} for role, digest in self.roles
+            ]
+        }
 
 
 def _refuse_non_ascii(value: Any, *, path: str) -> None:
@@ -196,6 +286,10 @@ class FoundationExecutionPlanV1:
     descriptor_digest: str
     strategy: str
     environment_inventory: tuple[str, ...]
+    #: The observed base state this plan applies TO — see `HostPrestateV1`.
+    #: Required with no default: a plan that does not state its starting point
+    #: binds to every starting point.
+    host_prestate: HostPrestateV1
     steps: tuple[tuple[str, str, tuple[str, ...], int, int], ...]
 
     def __post_init__(self) -> None:
@@ -220,6 +314,7 @@ class FoundationExecutionPlanV1:
             "descriptor_digest": self.descriptor_digest,
             "environment_inventory": list(self.environment_inventory),
             "foundation_version": self.foundation_version,
+            "host_prestate": self.host_prestate.as_document(),
             "image_digest": self.image_digest,
             "image_reference": self.image_reference,
             "manifest_digest": self.manifest_digest,
@@ -292,6 +387,7 @@ def render_execution_plan(
     target: str,
     operation: str,
     descriptor_digest: str,
+    prestate: HostPrestateV1,
 ) -> FoundationExecutionPlanV1:
     """Render the target-bound execution plan. The Foundation owns this.
 
@@ -323,6 +419,7 @@ def render_execution_plan(
         source_revision=spec.source_revision,
         manifest_digest=spec.manifest_digest,
         descriptor_digest=descriptor_digest,
+        host_prestate=prestate,
         strategy=plan.strategy.value,
         environment_inventory=tuple(inventory),
         steps=tuple(

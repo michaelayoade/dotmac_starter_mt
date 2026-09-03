@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .authorization import ExecutionGrant
     from .engine.run import DeploymentOutcome, Effects
+    from .execution_bindings import ExecutionBindings
     from .exposure import VerificationReport
 
 from .authorization import OPERATIONS
@@ -99,7 +100,7 @@ def _declared_provider_names() -> tuple[str, ...]:
     return declared_provider_names()
 
 
-def _load_bindings(args: argparse.Namespace):  # type: ignore[no-untyped-def]
+def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
     """Discover the assembly's bindings, once, on the execute path only.
 
     An embedder that already set `args.execution_bindings` wins — it IS the
@@ -425,7 +426,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
-    from .execution_plan import render_execution_plan
+    from .execution_plan import HostPrestateV1, render_execution_plan
 
     bindings = _load_bindings(args)
     grant = _require_grant(args, spec, "deploy", bindings=bindings)
@@ -442,6 +443,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         target=args.target,
         operation="deploy",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        # Observed through the SAME effects the run will mutate through, at
+        # render time; the executor re-observes at the last moment before
+        # mutation and refuses a host that moved in between.
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
     )
     executor = Executor(
         spec,
@@ -483,6 +488,48 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return EXIT_REFUSED
 
 
+def _load_prestate(path: str) -> HostPrestateV1:  # noqa: F821 - lazy import below
+    """Read a HostPrestateV1 document from a file, refusing loudly.
+
+    The file form exists because the digest is produced OFF-HOST: Platform CP
+    renders the plan it will submit, and the host's state has to travel to it
+    as a document. `observe-prestate` (below) is what produces one on the
+    host, so the two ends of that trip share one shape and one parser.
+    """
+    from .execution_plan import HostPrestateV1
+
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PreconditionFailed(
+            f"cannot read the prestate file {path}: {exc}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise PreconditionFailed(
+            f"the prestate file {path} is not valid JSON: {exc}"
+        ) from exc
+    return HostPrestateV1.from_document(document)
+
+
+def cmd_observe_prestate(args: argparse.Namespace) -> int:
+    """Print the host's CURRENT prestate document. Read-only, by construction.
+
+    Run on the target host; feed the output to `execution-plan --prestate` so
+    the plan Platform CP submits is bound to the state this host actually had.
+    Only `observe_roles` is touched — nothing here can mutate.
+    """
+    spec = _load(args.descriptor)
+    bindings = _load_bindings(args)
+    effects = _build_effects(spec, args, bindings=bindings)
+    from .execution_plan import HostPrestateV1
+
+    prestate = HostPrestateV1.from_observations(effects.observe_roles())
+    sys.stdout.write(
+        json.dumps(prestate.as_document(), indent=2, sort_keys=True) + "\n"
+    )
+    return EXIT_OK
+
+
 def cmd_execution_plan(args: argparse.Namespace) -> int:
     """Render `FoundationExecutionPlanV1` and print its `ExecutionPlanDigestV1`.
 
@@ -513,6 +560,12 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
         # canonicalization that produced it is visible at the seam where two
         # canonicalizations diverging is the failure being repaired.
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        # Required, and a FILE rather than an implicit observation: this
+        # subcommand runs off-host (Platform CP renders the digest it will
+        # submit), so the host's state travels to it as a document produced by
+        # `observe-prestate` on the target. An empty {"roles": []} document is
+        # the explicit first-deploy claim, not a default.
+        prestate=_load_prestate(args.prestate),
     )
     if args.format == "digest":
         print(rendered.digest())
@@ -529,6 +582,7 @@ def cmd_execution_plan(args: argparse.Namespace) -> int:
     print(f"  manifest digest  {rendered.manifest_digest}")
     print(f"  descriptor       {rendered.descriptor_digest}")
     print(f"  strategy         {rendered.strategy}")
+    print(f"  prestate         {rendered.host_prestate.as_document()['roles']}")
     print(f"  materials        {list(rendered.environment_inventory)} (NAMES only)")
     print(f"  steps            {len(rendered.steps)}")
     print(f"  ExecutionPlanDigestV1  {rendered.digest()}")
@@ -893,7 +947,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
     from .engine.lock import deployment_lock
     from .engine.run import Executor
-    from .execution_plan import render_execution_plan
+    from .execution_plan import HostPrestateV1, render_execution_plan
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
@@ -909,6 +963,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         target=args.target,
         operation="rollback",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
     )
     executor = Executor(
         spec,
@@ -1067,6 +1122,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "deploy or rollback, frozen separately -- one decision must not "
             "both make a change and erase it"
+        ),
+    )
+    execution.add_argument(
+        "--prestate",
+        required=True,
+        help=(
+            "path to the HostPrestateV1 document `observe-prestate` printed on "
+            "the target. Required: a plan that does not state its starting "
+            'point binds to every starting point. {"roles": []} is the '
+            "explicit first-deploy claim"
         ),
     )
     execution.add_argument(
@@ -1240,9 +1305,26 @@ def build_parser() -> argparse.ArgumentParser:
     # Derived from the host-tool registry rather than listed again, so a tool
     # entering or leaving that registry cannot leave a flag behind that
     # configures nothing.
+    observe = add(
+        "observe-prestate",
+        cmd_observe_prestate,
+        "print the host's current HostPrestateV1 document (read-only)",
+    )
+    observe.add_argument(
+        "--deploy-dir",
+        default=DEFAULT_DEPLOY_DIR,
+        help=f"the host directory to observe, default {DEFAULT_DEPLOY_DIR!r}",
+    )
+    observe.add_argument(
+        "--provider",
+        default=PROVIDER_COMPOSE_HOST,
+        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
+        help="the Effects implementation whose observation this is",
+    )
+
     from .toolchain import DEFAULT_TOOLS as _HOST_TOOLS
 
-    for _sub in (deploy, rollback):
+    for _sub in (deploy, rollback, observe):
         for _tool in _HOST_TOOLS:
             _sub.add_argument(
                 f"--{_tool.replace('_', '-')}-bin",
