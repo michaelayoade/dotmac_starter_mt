@@ -1,6 +1,33 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.3.0a4 — unreleased, NEVER BUILT
+## 0.3.0a5 — unreleased, NEVER BUILT
+
+Allocated 2026-09-03, when Michael's audit ruled `0.3.0a4` not
+cutover-admissible and its candidate (artifact `9880868637`, built once from
+`14f7d9fe`) was recorded superseded and unpublishable in
+`docs/inventories/foundation-candidate-dispositions.json`. Two defects, both in
+the a4 bytes and both structural:
+
+- **The installed CLI could not load an assembly's effects or verifiers.**
+  `authorization_verifier` was an argparse-namespace attribute nothing ever
+  set, and `_build_effects` a closed switch over the one in-package provider —
+  so the installed `dotmac-deploy` could refuse honestly but never ADMIT.
+- **The release-evidence reader corrupted signed envelopes.** The
+  `Effects.release_evidence` seam was typed `Mapping[str, str]`, so every
+  conforming provider had to stringify the envelope's nested `document` — the
+  very thing the signature covers — and the verifier judged a Python repr.
+
+This release types the seam (`SignedEvidenceEnvelope`, refusing a stringified
+document at construction, passed through parsed and never restated) and will
+add provider-neutral execution-bindings discovery, injection for effects and
+all verifiers, replay coordinates, observed prestate, candidate-image
+injection, real readiness, immutable evidence read-back, executable authorized
+recovery, and an installed end-to-end ADMIT proof.
+
+No wheel for `0.3.0a5` exists. It must be built exactly once, by
+`foundation-candidate.yml`, after these changes merge.
+
+## 0.3.0a4 — built once, SUPERSEDED and unpublishable (2026-09-03); heading below written at allocation
 
 The successor identity, allocated 2026-09-02 because this release adds
 `observability_promotion.py` to `src/` and `0.3.0a3` had already been built

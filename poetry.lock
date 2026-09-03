@@ -973,7 +973,7 @@ url = "packages/dotmac-deployment-control"
 
 [[package]]
 name = "dotmac-deployment-foundation"
-version = "0.3.0a4"
+version = "0.3.0a5"
 description = "Stateless build- and deploy-time facility for Dotmac product assemblies"
 optional = false
 python-versions = ">=3.11,<3.14"

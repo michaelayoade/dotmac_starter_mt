@@ -46,6 +46,7 @@ from ..backup import BackupRecord
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..evidence import (
     SignatureVerifier,
+    SignedEvidenceEnvelope,
     TrustPolicy,
     accept_release_evidence,
 )
@@ -112,7 +113,20 @@ class Effects(Protocol):
 
     def image_labels(self, reference: str) -> Mapping[str, str]: ...
 
-    def release_evidence(self, revision: str) -> Mapping[str, str]: ...
+    def release_evidence(self, revision: str) -> SignedEvidenceEnvelope | None:
+        """The signed envelope for `revision`, parsed and TYPED — or None.
+
+        Typed at the SEAM, deliberately. This was ``Mapping[str, str]``, and
+        that type did not merely permit the corruption that made a4
+        inadmissible — it required it: the envelope's `document` is a nested
+        object, so every conforming provider had to stringify it, and the
+        signature was then judged over a Python repr. `SignedEvidenceEnvelope`
+        refuses a stringified document at construction, so a conforming
+        implementation CANNOT corrupt it. None means "no evidence for this
+        revision" and is refused downstream; an empty mapping used to mean
+        that, and an empty mapping is also what a half-broken reader returns.
+        """
+        ...
 
     def manifest_digest(self, manifest_path: str) -> str: ...
 
@@ -620,11 +634,20 @@ class Executor:
         describes happened, or whether it happened in this repository.
         """
         raw = self._effects.release_evidence(plan.source_revision)
-        if not raw:
+        if raw is None:
             raise PreconditionFailed(
                 f"no release evidence exists for revision {plan.source_revision}. "
                 "CI is the acceptance owner; a deployment of a revision CI never "
                 "accepted is a deployment of an unreviewed tree"
+            )
+        if not isinstance(raw, SignedEvidenceEnvelope):
+            raise PreconditionFailed(
+                "the Effects implementation returned release evidence as "
+                f"{type(raw).__name__}, not as a SignedEvidenceEnvelope. The "
+                "typed envelope is the contract that keeps the signed document "
+                "un-restated between the file and the verifier; a loose "
+                "mapping here is exactly the seam that stringified a4's "
+                "envelopes"
             )
         if self._evidence_policy is None:
             raise PreconditionFailed(
