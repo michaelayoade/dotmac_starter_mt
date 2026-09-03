@@ -67,7 +67,7 @@ INVALIDATED = "0.3.0a2"
 #: `publishable=false` stops a PUBLICATION without invalidating the preserved
 #: receipts, which is exactly the distinction `TERMINAL_UNPUBLISHABLE` draws by
 #: holding `invalidated` and not `superseded`.
-SUPERSEDED = ("0.3.0a3", "0.3.0a4")
+SUPERSEDED = ("0.3.0a3", "0.3.0a4", "0.3.0a5")
 
 #: Versions of this facility that have been PUBLISHED. Written out rather than
 #: read from `git tag`, so this test states an expectation the guard must meet
@@ -77,9 +77,17 @@ PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 #: Every built-but-unpublished candidate still ADMITTED for its own release.
 #: A tuple rather than a single name: a constant that held only one would
 #: quietly stop exercising the second-build refusal on later frozen candidates.
-#: `0.3.0a4` left this set on 2026-09-03 when its disposition landed — it is
-#: still refused for a second build, exercised via `SUPERSEDED` below.
-BUILT_CANDIDATES = ("0.3.0a1", "0.3.0a5")
+#: `0.3.0a4` left this set on 2026-09-03 when its disposition landed, and
+#: `0.3.0a5` left it the same day for the same reason — both are still refused
+#: for a second build, exercised via `SUPERSEDED` below.
+#:
+#: It is down to ONE member, which is exactly the state the paragraph above
+#: warns about, so it is recorded rather than left to be noticed: the
+#: second-build refusal is still exercised on all four frozen candidates
+#: through `SUPERSEDED`, and this constant now covers only the narrower
+#: property that a live candidate is ADMITTED for its own release. The next
+#: candidate build restores it to two.
+BUILT_CANDIDATES = ("0.3.0a1",)
 
 
 def _module():
@@ -126,17 +134,30 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
     weeks later.
 
     WHICH purposes are admitted flips with the declared version's lifecycle
-    stage, and the flip is part of the record rather than a loosening. While
-    `0.3.0a5` was declared and UNBUILT both purposes admitted: nothing forbade
-    building it once, and nothing forbade the release that would reuse that
-    build. It was BUILT on 2026-09-03 (run 33780438726, artifact 9903418260),
-    so the candidate purpose now refuses a SECOND build — asserted directly
-    below — and the meaningful admit is the one publication actually needs:
-    nothing forbids releasing those exact bytes.
+    stage, and the flip is part of the record rather than a loosening. The
+    declared version is now `0.3.0a6`, declared and UNBUILT, so both purposes
+    admit: nothing forbids building it once, and nothing forbids the release
+    that would reuse that build.
+
+    `0.3.0a5` walked the whole cycle inside a single day and is worth reading as
+    the complete state machine. Declared and unbuilt: both purposes admitted.
+    BUILT on 2026-09-03 (run 33780438726, artifact 9903418260): the candidate
+    purpose began refusing a SECOND build while release still admitted, because
+    publishing the exact bytes a candidate lane built is the correct release
+    path. SUPERSEDED the same day, once PR #600 changed the facility source
+    under that declared name: release refuses too, by the disposition record
+    that says why.
+
+    That last transition is the one this guard could not have prompted, and the
+    distinction matters for anyone reading this as coverage. This test asks
+    whether a DECLARED version may be built or released. It does not ask whether
+    the tree still ships the source an already-built candidate was built from —
+    a different question, over a population with no tag, answered by
+    `test_candidate_source_binding.py`.
 
     This is the same transition `0.3.0a3` and `0.3.0a4` each made. Reading the
-    two tests together is what shows it as a state machine advancing rather
-    than as a constraint being relaxed.
+    tests together is what shows it as a state machine advancing rather than as
+    a constraint being relaxed.
     """
     declared = _declared_version()
     found = _bindings(declared, purpose="release")
@@ -146,11 +167,46 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
     )
 
 
-def test_the_declared_version_is_refused_for_a_SECOND_build() -> None:
-    """The other half of the flip: its one candidate receipt is the refusal."""
+def test_the_declared_version_has_no_candidate_artifact_yet() -> None:
+    """The other half of the flip, in its UNBUILT position — and this test is
+    deliberately a lifecycle-stage assertion rather than an invariant.
+
+    It has exactly two forms and it flips between them at a build:
+
+    - **declared and unbuilt** (this one): no `candidate artifact` binding
+      exists, so a first build is admitted.
+    - **built** (`..._is_refused_for_a_SECOND_build`): the one candidate receipt
+      IS the refusal.
+
+    `0.3.0a3`, `0.3.0a4` and `0.3.0a5` each walked both positions, and the flip
+    is performed by hand at each transition ON PURPOSE. Deriving it — asking
+    whether a receipt exists and expecting the guard to agree — would compare
+    the guard's answer with the guard's own input, which is precisely what
+    `PUBLISHED` is written out longhand to avoid. A stated expectation can be
+    wrong and get caught; a derived one agrees with the guard for every input,
+    including the inputs where the guard is broken.
+
+    **What this is NOT.** It is not the name-freshness invariant — that is
+    `test_the_declared_version_is_not_a_SPENT_name`, which holds in every stage
+    and must stay separate. #597 briefly merged the two by adding
+    `declared not in BUILT_CANDIDATES` to the freshness test, and #599 removed
+    it again with the reason recorded in that test's docstring: it was
+    "asserting a lifecycle STAGE while claiming to assert name freshness". Do
+    not re-merge them. The stage belongs here, where the name says so.
+
+    It still bites in this position: a hand-written `0.3.0a6` receipt for a
+    build that never happened, or a guard reporting a candidate that does not
+    exist, fails here.
+    """
     declared = _declared_version()
     found = _bindings(declared, purpose="candidate")
-    assert any(binding.kind == "candidate artifact" for binding in found), found
+    assert not any(binding.kind == "candidate artifact" for binding in found), (
+        f"{FACILITY} declares {declared}, which is recorded as already BUILT: "
+        + "; ".join(str(binding) for binding in found)
+        + ". If the a6 candidate has now been built, this test flips back to "
+        "test_the_declared_version_is_refused_for_a_SECOND_build — see its "
+        "docstring; do not delete the assertion"
+    )
 
 
 def test_the_declared_version_is_not_a_SPENT_name() -> None:

@@ -71,6 +71,34 @@ from typing import Final
 #: verifies nothing. The bytes stay preserved and are never rebuilt; the
 #: repairs are ``0.3.0a5``'s subject.
 #:
+#: ``0.3.0a5`` was built exactly once (candidate artifact 9903418260, run
+#: 33780438726, from ``27bee8fc43919a5ed7f4853ccdedc2f996ad8d86``, expires
+#: 2026-12-02) and is recorded **superseded** in the disposition log
+#: (2026-09-03). NOT invalidated: those bytes were never wrong. They are exactly
+#: the nine-of-eleven contract their own receipt describes, they stay preserved,
+#: and they are never rebuilt.
+#:
+#: What superseded them is the third application of this file's rule, and it is
+#: the one that was caught LATE rather than early. PR #600 added 405 lines and
+#: removed 9 across ``authorization.py``, ``provenance.py`` and
+#: ``recovery_execution.py`` — widening ``OPERATIONS`` to three members and
+#: landing the restore executor — while this constant still said ``0.3.0a5``. So
+#: for the length of that merge the name covered two contracts, and the second
+#: one contradicted the first in writing: the a5 receipt's ``item_scope`` records
+#: ``items_absent: [10]`` and argues, in a committed field tagged
+#: ``IS_A_DECISION_NOT_AN_OVERSIGHT``, that ``("deploy", "rollback")`` is the
+#: correct vocabulary for what the facility can perform.
+#:
+#: The a2 divergence was found by an audit ten days later. This one was found by
+#: reading the receipt against the tree — and nothing mechanical would have
+#: found it, which is the part worth recording here. ``version_binding_guard.py``
+#: only runs when a build is requested, and
+#: ``test_declared_version_matches_published_tree.py`` compares against a git
+#: TAG that a candidate does not have. Two real guards, one blind spot between
+#: them, described in ``scripts/candidate_source_binding.py`` — which now closes
+#: it and is the reason a fourth application of this rule should fail CI rather
+#: than wait for an audit.
+#:
 #: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
 #: canonical descriptor document, so changing it moves
 #: ``io.dotmac.deployment.configuration.digest`` and the rendered
@@ -79,6 +107,6 @@ from typing import Final
 #: `make deployment-check` is what fails if it was not. The digest recorded in
 #: a candidate receipt is a historical fact about THAT build and is not
 #: re-derived from this tree, so a re-render never invalidates one.
-VERSION: Final = "0.3.0a5"
+VERSION: Final = "0.3.0a6"
 
 __all__ = ["VERSION"]
