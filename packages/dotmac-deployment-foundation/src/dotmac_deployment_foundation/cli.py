@@ -93,7 +93,30 @@ def _load(path: str) -> ProductDeploymentSpec:
     return ProductDeploymentSpec.load(path)
 
 
-def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Effects:
+def _declared_provider_names() -> tuple[str, ...]:
+    from .execution_bindings import declared_provider_names
+
+    return declared_provider_names()
+
+
+def _load_bindings(args: argparse.Namespace):  # type: ignore[no-untyped-def]
+    """Discover the assembly's bindings, once, on the execute path only.
+
+    An embedder that already set `args.execution_bindings` wins — it IS the
+    assembly, and discovering around it would let an installed distribution
+    shadow the very thing that is embedding us.
+    """
+    supplied = getattr(args, "execution_bindings", None)
+    if supplied is not None:
+        return supplied
+    from .execution_bindings import discover_bindings
+
+    return discover_bindings()
+
+
+def _build_effects(
+    spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
+) -> Effects:
     """The `Effects` implementation `--execute` runs the plan against.
 
     `args.provider` is constrained to `PROVIDER_COMPOSE_HOST` by argparse's
@@ -103,6 +126,24 @@ def _build_effects(spec: ProductDeploymentSpec, args: argparse.Namespace) -> Eff
     facility grows a second provider, and to keep the import lazy like every
     other `cmd_*` handler in this module.
     """
+    if args.provider != PROVIDER_COMPOSE_HOST:
+        # A DISCOVERED provider. The menu offered this name from metadata; the
+        # load already happened in `_load_bindings`, so a name with no bindings
+        # behind it here means the environment changed between parse and use.
+        if bindings is None or str(bindings.provider) != str(args.provider):
+            raise PreconditionFailed(
+                f"--provider {args.provider!r} was offered from declared entry "
+                "points, but no loaded execution bindings answer to it. The "
+                "environment changed between parsing and use; re-run, and if "
+                "this persists the bindings distribution is broken"
+            )
+        if bindings.build_effects is None:
+            raise PreconditionFailed(
+                f"the execution bindings for {args.provider!r} declare no "
+                "effects factory. They inject verifiers only, so select the "
+                f"in-package provider ({PROVIDER_COMPOSE_HOST!r}) instead"
+            )
+        return bindings.build_effects(spec, Path(args.deploy_dir))
     if args.provider == PROVIDER_COMPOSE_HOST:
         from .providers.compose_host import ComposeHostEffects
         from .toolchain import DEFAULT_TOOLS, resolve_tool
@@ -252,7 +293,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def _require_grant(
-    args: argparse.Namespace, spec: ProductDeploymentSpec, operation: str
+    args: argparse.Namespace,
+    spec: ProductDeploymentSpec,
+    operation: str,
+    *,
+    bindings=None,
 ) -> ExecutionGrant:
     """Turn `--authorization` into an :class:`ExecutionGrant`, or refuse.
 
@@ -310,14 +355,19 @@ def _require_grant(
     # that quietly accepted an unsigned receipt would be the bypass this whole
     # contract exists to close.
     verifier = getattr(args, "authorization_verifier", None)
+    if verifier is None and bindings is not None:
+        verifier = bindings.authorization_verifier
     if verifier is None:
+        from .execution_bindings import ENTRY_POINT_GROUP
+
         raise PreconditionFailed(
             f"the authorization receipt {path} was read but nothing can attest "
             "it: this facility declares zero runtime dependencies and ships no "
             "signature verifier, and parsing a JSON document is not "
-            "verification. Supply an AuthorizationVerifier through an assembly "
-            "that embeds Executor. Refusing to execute on material this "
-            "process cannot authenticate"
+            "verification. Install the assembly's bindings distribution (one "
+            f"{ENTRY_POINT_GROUP!r} entry point) or embed Executor from an "
+            "assembly that supplies an AuthorizationVerifier directly. "
+            "Refusing to execute on material this process cannot authenticate"
         )
     verified = verify_authorization(document, verifier=verifier)
     return authorize(
@@ -377,8 +427,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.run import Executor
     from .execution_plan import render_execution_plan
 
-    grant = _require_grant(args, spec, "deploy")
-    effects = _build_effects(spec, args)
+    bindings = _load_bindings(args)
+    grant = _require_grant(args, spec, "deploy", bindings=bindings)
+    effects = _build_effects(spec, args, bindings=bindings)
     # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
     # authorized digest -- that rides on the grant, which took it from the
     # attested receipt. This renders the plan the digest is recomputed FROM, so
@@ -397,15 +448,17 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         effects,
         grant,
         execution_plan=execution_plan,
-        # HANDED OVER, never discovered -- one `--recovery-receipt CODE=PATH`
-        # per externally executed dataset. No verifier is passed because this
-        # facility declares zero runtime dependencies and must not ship a weak
-        # stdlib substitute (ADR-0009/ADR-0070); the step therefore REFUSES from
-        # the CLI, exactly as `verify_release_evidence` already does, and an
-        # assembly embedding `Executor` supplies the verifier its keys live in.
-        # A `--execute` that quietly accepted unsigned recovery proof would be
-        # the bypass this whole contract exists to close.
+        # Receipts are HANDED OVER (one `--recovery-receipt CODE=PATH` per
+        # externally executed dataset); the VERIFIERS and the trust policy come
+        # from the assembly's discovered bindings, because this facility ships
+        # no signature code of its own (ADR-0009/ADR-0070) and a weak stdlib
+        # substitute would read as coverage. With no bindings installed every
+        # verifying step still REFUSES, exactly as before — discovery makes the
+        # admit representable, never the refusal weaker.
         recovery_receipts=_recovery_receipts(args.recovery_receipt),
+        evidence_policy=bindings.evidence_policy if bindings else None,
+        evidence_verifier=bindings.evidence_verifier if bindings else None,
+        recovery_verifier=bindings.recovery_verifier if bindings else None,
     )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
@@ -844,8 +897,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
-    grant = _require_grant(args, spec, "rollback")
-    effects = _build_effects(spec, args)
+    bindings = _load_bindings(args)
+    grant = _require_grant(args, spec, "rollback", bindings=bindings)
+    effects = _build_effects(spec, args, bindings=bindings)
     # A SEPARATE plan too, and for the same reason: one descriptor yields a
     # different plan per operation, so a deploy's frozen digest must not
     # recompute equal to a rollback's.
@@ -856,7 +910,15 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         operation="rollback",
         descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
     )
-    executor = Executor(spec, effects, grant, execution_plan=execution_plan)
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        evidence_policy=bindings.evidence_policy if bindings else None,
+        evidence_verifier=bindings.evidence_verifier if bindings else None,
+        recovery_verifier=bindings.recovery_verifier if bindings else None,
+    )
     # Same rule as `cmd_deploy`: the lock wraps the whole run.
     with deployment_lock(
         spec.product, label=f"dotmac-deploy rollback {plan.previous_image}"
@@ -1065,7 +1127,11 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument(
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
+        # The in-package provider plus every DECLARED binding name. Names come
+        # from package metadata only — building this menu imports no assembly
+        # code, so `validate` and a dry run stay side-effect free. Loading
+        # happens once, on the execute path (`_load_bindings`).
+        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
         help="the Effects implementation `--execute` runs the plan against",
     )
 
@@ -1163,7 +1229,11 @@ def build_parser() -> argparse.ArgumentParser:
     rollback.add_argument(
         "--provider",
         default=PROVIDER_COMPOSE_HOST,
-        choices=[PROVIDER_COMPOSE_HOST],
+        # The in-package provider plus every DECLARED binding name. Names come
+        # from package metadata only — building this menu imports no assembly
+        # code, so `validate` and a dry run stay side-effect free. Loading
+        # happens once, on the execute path (`_load_bindings`).
+        choices=[PROVIDER_COMPOSE_HOST, *_declared_provider_names()],
         help="the Effects implementation `--execute` runs the plan against",
     )
 
