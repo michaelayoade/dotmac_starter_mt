@@ -40,7 +40,6 @@ from dotmac_deployment_foundation.execution_bindings import (
     ENTRY_POINT_GROUP,
     ExecutionBindings,
     declared_provider_names,
-    discover_bindings,
 )
 
 TARGET = "bindings-target"
@@ -137,73 +136,22 @@ def test_bindings_carrying_nothing_are_refused() -> None:
         ExecutionBindings(provider="acme-host")
 
 
-# ── discovery: zero, one, many ─────────────────────────────────────────────
-
-
-def test_zero_declarations_is_none_not_an_error() -> None:
-    assert discover_bindings(entries=[]) is None
-
-
-def test_one_declaration_is_loaded_and_typed() -> None:
-    found = discover_bindings(entries=[_Entry()])
-    assert isinstance(found, ExecutionBindings)
-    assert found.provider == "acme-host"
-
-
-def test_two_declarations_refuse_naming_both() -> None:
-    """THE SYMMETRIC TRAP. A malicious or accidental second distribution
-    declaring the same entry point must be a refusal — and the refusal must
-    name BOTH declarers, so the operator removes the right one instead of
-    guessing which won an iteration-order lottery."""
-    with pytest.raises(PreconditionFailed) as caught:
-        discover_bindings(
-            entries=[
-                _Entry(name="acme-host", dist="acme-deploy-bindings"),
-                _Entry(name="rival-host", dist="rival-bindings"),
-            ]
-        )
-    message = str(caught.value)
-    assert "acme-deploy-bindings:acme-host" in message
-    assert "rival-bindings:rival-host" in message
-
-
-def test_a_declaration_that_fails_to_import_refuses_not_skips() -> None:
-    with pytest.raises(PreconditionFailed, match="failed to import"):
-        discover_bindings(
-            entries=[_Entry(load_error=ImportError("missing native dep"))]
-        )
-
-
-def test_a_factory_that_raises_refuses_naming_the_distribution() -> None:
-    def broken() -> None:
-        raise RuntimeError("keys unreadable")
-
-    with pytest.raises(PreconditionFailed, match="acme-deploy-bindings"):
-        discover_bindings(entries=[_Entry(factory=broken)])
-
-
-def test_a_look_alike_result_is_refused() -> None:
-    """A duck-typed object with the right attributes is exactly what the typed
-    contract exists to refuse — same rule as VerifiedAuthorization."""
-
-    class LookAlike:
-        provider = "acme-host"
-        authorization_verifier = _Verifier()
-
-    with pytest.raises(PreconditionFailed, match="not ExecutionBindings"):
-        discover_bindings(entries=[_Entry(factory=lambda: LookAlike())])
-
-
-def test_a_name_answering_differently_than_declared_is_refused() -> None:
-    """The entry point's NAME is what `--provider` offered before anything was
-    imported. Bindings answering to a different name were selected by nobody."""
-    with pytest.raises(PreconditionFailed, match="selected by nobody"):
-        discover_bindings(
-            entries=[
-                _Entry(name="acme-host", factory=lambda: _bindings(provider="other"))
-            ]
-        )
-
+# ── discovery: MOVED, and deliberately not duplicated here ─────────────────
+#
+# Seven tests lived here covering zero/one/many declarations and the five
+# refusals. They now live in `test_deployment_foundation_discovery.py`, which
+# proves EVERY consumer of `discovery.discover_one` against all five — on typed
+# codes rather than on prose, and over a consumer list derived from the package
+# by an AST sweep rather than hand-maintained.
+#
+# They are removed rather than left alongside, because this whole change is
+# about not keeping a second authority over one question. Two suites asserting
+# the same refusals is the test-side shape of the same defect: they agree until
+# one is updated and the other is not, and then the stale one still passes.
+#
+# What stays in THIS file is what is specific to `ExecutionBindings` — the
+# typed object's own construction refusals above, the provider-name enumeration
+# below, and the CLI actually consuming what discovery found.
 
 # ── name enumeration imports nothing ───────────────────────────────────────
 
