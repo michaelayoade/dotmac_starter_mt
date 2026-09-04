@@ -81,6 +81,51 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # Can this SOURCE produce a Lane 3 rehearsal receipt at all?
+      #
+      # This lane deliberately does NOT gate on a PASSING rehearsal - that is
+      # what breaks the bootstrap loop, and it stays. What was missing is that
+      # nothing stopped a candidate being spent at a SHA whose runner cannot
+      # produce a receipt in the first place: today the far-end sentinel makes
+      # `qualify_vantage` refuse before the first `results.record`, so the run
+      # dies at qualification and `build_receipt` is never reached. A candidate
+      # built at such a SHA is spent on a rehearsal that cannot report.
+      #
+      # `Lane3RunnerCapability.v1` is structurally incapable of claiming a
+      # rehearsal ran or passed: its only inputs are paths to files in this
+      # repository, its verdict vocabulary has two members and neither is an
+      # outcome, and it may not import the receipt's six-member
+      # `RequirementStatus`. So it can answer "could this ever green?" and
+      # cannot answer "did it?" - which is what keeps the loop broken.
+      #
+      # It runs BEFORE the version binding, the facility resolve and the build,
+      # because refusing after any of those spends a version name or bytes on a
+      # revision that was never eligible. Stdlib only; no dependencies needed.
+      - name: Refuse a source whose runner cannot produce a rehearsal receipt
+        run: |
+          python scripts/lane3_runner_capability.py \
+            --root . \
+            --out lane3-runner-capability.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      # Preserved whatever the verdict, because a refusal is the more useful
+      # record of the two: it names which reasons blocked this revision, and the
+      # next attempt is measured against it rather than against a recollection.
+      - name: Upload the capability record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lane3-runner-capability
+          path: lane3-runner-capability.json
+          retention-days: 90
+          # `error`, matching every other upload in this lane. The record is
+          # written before the script exits on either verdict, so an absent file
+          # means the step did not run to completion — and a missing capability
+          # record must not pass quietly, which is the whole failure this gate
+          # exists to end.
+          if-no-files-found: error
+
       - uses: ./.github/actions/setup-poetry
 
       # A version binds to ONE source and ONE artifact. `0.3.0a2` is why this

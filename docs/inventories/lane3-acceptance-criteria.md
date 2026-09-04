@@ -300,6 +300,24 @@ observation was taken relative to the apply — the current `detail` cannot, and
 
 ## 4. The compose-project claim — a correctness defect, and it is inside the receipt
 
+> **REPAIRED 2026-09-04**, by the route this section's own criteria list second:
+> the derivation and its dead check are gone and item 1's evidence now names
+> `spec.product`, the value `apply_compose` actually passes to `--project-name`.
+>
+> The first route — adopt the derived name — was NOT taken, and the reason is
+> this section's own third vacuous satisfaction: adopting it without confirming
+> teardown scopes to it converts a documentation defect into a host-cleanup
+> defect. Confirming that needs a host, and no host may be contacted yet.
+>
+> The dead check was removed rather than given a new premise. The premise it was
+> gesturing at — does the lease's prefix cover `spec.product`? — is real and
+> still open, and it cannot be decided from this source: the prefix lives in the
+> lease record, which Platform CP owns. Replacing a check that could never fire
+> with one that might refuse every run, untested, is the same trade in the other
+> direction. It is named in the runner rather than guessed.
+>
+> Everything below records what was true before the repair.
+
 ### What is true today
 
 ```python
@@ -379,7 +397,7 @@ checkable and wrong is worse than an empty one.
 | 12 | `privileged_vantage_refused` | `executed_failed` — emitted `null` | Real probe from inside an accepted source set |
 | 16 | `private_from_source` | `executed_failed` — hardcoded `false` | Measure from a vantage inside the source set |
 | 13–15 | `service_running` | asserted `true`, before apply | Measure, at a moment when the service is up |
-| 1 | compose project | passes with a **false evidence pointer** | Use the name, or stop claiming it |
+| 1 | compose project | ~~passes with a **false evidence pointer**~~ **REPAIRED** — stopped claiming it; see § 4 | Use the name, or stop claiming it |
 
 **Sixteen `executed_passed` is the requirement. Reaching it by any route that
 would not survive a reader checking the `detail` and `evidence` against the host
