@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import ast
 import copy
+import importlib.util
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,13 +105,28 @@ def _lane3_findings(document: dict[str, Any]) -> list[str]:
         ),
         "",
     )
+    # ONE string covering both properties, because they are only jointly
+    # sufficient: the candidate venv makes the wheel importable and `-E -P`
+    # makes it the ONLY importable copy. A venv reached with PYTHONPATH still
+    # pointing at the checkout exercises the source.
     candidate_runner = (
-        ".lane3-foundation/bin/python scripts/exposure_rehearsal_runner.py"
+        ".lane3-foundation/bin/python -E -P scripts/exposure_rehearsal_runner.py"
     )
     if candidate_runner not in execute:
         findings.append("the rehearsal runner is not driven by the candidate venv")
     if "steps.candidate.outputs.candidate_sha256" not in execute:
         findings.append("the receipt digest is not derived from the candidate receipt")
+    if "-E -P" not in execute:
+        findings.append("the rehearsal runner is not launched with PYTHONPATH cleared")
+    # THREE revisions, three expressions. The candidate source revision comes
+    # only from the resolved receipt; the runner revision is this workflow's own
+    # head SHA. One expression serving both is the conflation.
+    if "steps.candidate.outputs.candidate_source_sha" not in execute:
+        findings.append("the candidate SOURCE revision is not passed at all")
+    if "--candidate-source-revision" not in execute:
+        findings.append("the candidate source revision is not named as its own input")
+    if '--foundation-revision "${GITHUB_SHA}"' not in execute:
+        findings.append("the runner revision is not this workflow's own head SHA")
     return findings
 
 
@@ -119,8 +140,23 @@ def _release_findings(document: dict[str, Any]) -> list[str]:
         ),
         "",
     )
-    if ".foundation-candidate/bin/python scripts/require_rehearsal.py" not in verify:
-        findings.append("the receipt verifier is not driven by the candidate venv")
+    if ".foundation-candidate/bin/python -E -P scripts/require_rehearsal.py" not in (
+        verify
+    ):
+        findings.append(
+            "the receipt verifier is not driven by the candidate venv with "
+            "PYTHONPATH cleared"
+        )
+    # The binding that makes the CANDIDATE SOURCE revision real: the digest
+    # identifies exactly one CandidateArtifact.v1, and that record names exactly
+    # one source_sha. Without it a rehearsal of candidate A satisfies a
+    # publication of candidate B whenever both ran at one commit.
+    if "--artifact-digest" not in verify:
+        findings.append("publication does not bind the receipt to the artifact")
+    if "steps.candidate.outputs.candidate_sha256" not in verify:
+        findings.append(
+            "the artifact digest the gate compares is not the resolved " "candidate's"
+        )
     return findings
 
 
@@ -180,6 +216,251 @@ def test_the_lane3_guard_bites_on_each_identity_regression() -> None:
     inputs = _dispatch_inputs(supplied_digest)
     inputs["foundation_artifact"] = {"required": True, "type": "string"}
     assert _lane3_findings(supplied_digest)
+
+
+def test_the_lane3_guard_bites_on_each_revision_and_isolation_regression() -> None:
+    """Sensitivity for the three additions, one planted defect each.
+
+    The assertions above pass over workflows that are already correct, which
+    says nothing about their ability to fail. Each mutation below is a shape a
+    reviewer could plausibly ship.
+    """
+    original = _document(LANE3)
+
+    # Isolation removed. A venv alone does not make the wheel the only
+    # importable copy: PYTHONPATH is honoured by every interpreter, so the
+    # rehearsal would exercise the checkout and pass identically whether or not
+    # the wheel is correct.
+    unisolated = copy.deepcopy(original)
+    for step in unisolated["jobs"]["rehearse"]["steps"]:
+        if "scripts/exposure_rehearsal_runner.py" in str(step.get("run", "")):
+            step["run"] = str(step["run"]).replace(
+                ".lane3-foundation/bin/python -E -P",
+                ".lane3-foundation/bin/python",
+            )
+    assert _lane3_findings(unisolated)
+
+    # The conflation itself: the candidate source revision replaced by the
+    # workflow's own head SHA, so two of the three questions get one answer and
+    # nothing can say they disagreed.
+    conflated = copy.deepcopy(original)
+    for step in conflated["jobs"]["rehearse"]["steps"]:
+        if "scripts/exposure_rehearsal_runner.py" in str(step.get("run", "")):
+            step["run"] = str(step["run"]).replace(
+                "${{ steps.candidate.outputs.candidate_source_sha }}",
+                "${GITHUB_SHA}",
+            )
+    assert _lane3_findings(conflated)
+
+    # And the other direction: the runner revision taken from the candidate
+    # receipt, which would make a rehearsal claim to have run at whatever commit
+    # built the wheel.
+    swapped = copy.deepcopy(original)
+    for step in swapped["jobs"]["rehearse"]["steps"]:
+        if "scripts/exposure_rehearsal_runner.py" in str(step.get("run", "")):
+            step["run"] = str(step["run"]).replace(
+                '--foundation-revision "${GITHUB_SHA}"',
+                "--foundation-revision "
+                '"${{ steps.candidate.outputs.candidate_source_sha }}"',
+            )
+    assert _lane3_findings(swapped)
+
+
+def test_the_release_guard_bites_when_the_receipt_is_not_bound_to_the_artifact() -> (
+    None
+):
+    """The substitution this binding exists for, planted.
+
+    A publication that drops `--artifact-digest` still checks the lane, the
+    revision and all sixteen statuses — everything except which bytes the run
+    was about. `candidate_version` is a dispatch input precisely so two
+    candidates can be rehearsed from one SHA, so this is a reachable shape and
+    not a hypothetical one.
+    """
+    unbound = _document(RELEASE)
+    for step in unbound["jobs"]["build"]["steps"]:
+        run = str(step.get("run", ""))
+        if "scripts/require_rehearsal.py" in run:
+            step["run"] = "\n".join(
+                line for line in run.splitlines() if "--artifact-digest" not in line
+            )
+    assert _release_findings(unbound)
+
+
+# ── the third revision is emitted at all, and is usable when it is ─────────
+
+
+def _release_facility():  # type: ignore[no-untyped-def]
+    """`scripts/release_facility.py`, imported by path — it is a script."""
+    spec = importlib.util.spec_from_file_location(
+        "_release_facility", ROOT / "scripts" / "release_facility.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_release_facility"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_every_committed_candidate_receipt_names_the_commit_it_was_built_from() -> None:
+    """Non-vacuity over the real records rather than a fixture.
+
+    The candidate source revision is the one of the three that had no name
+    downstream at all: it sat in these files and nothing emitted it, so nothing
+    could compare it. A receipt that cannot answer would make the binding
+    unreachable for that version, and it is better to learn that here than in a
+    release lane.
+    """
+    facility = _release_facility()
+    seen = 0
+    for path in sorted((ROOT / "docs" / "inventories").glob("*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        if document.get("schema") != "CandidateArtifact.v1":
+            continue
+        seen += 1
+        revision = facility.candidate_source_revision(document)
+        assert len(revision) == 40, f"{path.name}: {revision!r}"
+    assert seen, "no CandidateArtifact.v1 receipt was found, so this proved nothing"
+
+
+def test_an_unusable_source_revision_refuses_rather_than_being_passed_on() -> None:
+    """Sensitivity, with the near-miss that matters most.
+
+    Absent and empty are the obvious defects. The ABBREVIATED one is the
+    dangerous member: it looks like an answer, and a binding built on it is a
+    comparison that can only ever fail — reported to an operator as "the
+    revisions disagree" when the actual defect is a truncated field.
+    """
+    facility = _release_facility()
+    good = "a" * 40
+    assert facility.candidate_source_revision({"source_sha": good}) == good
+    for bad in (
+        {},
+        {"source_sha": ""},
+        {"source_sha": good[:12]},
+        {"source_sha": None},
+    ):
+        with pytest.raises(facility.ReleaseRefused):
+            facility.candidate_source_revision(bad)
+
+
+def test_resolve_candidate_emits_the_source_revision_under_its_own_name() -> None:
+    """It must be a SEPARATE output from `candidate_sha256` and from the
+    workflow's `GITHUB_SHA`. Three questions, three names — a value folded into
+    another's is a value nothing downstream can refer to."""
+    tree = ast.parse(
+        (ROOT / "scripts" / "release_facility.py").read_text(encoding="utf-8")
+    )
+    resolver = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "cmd_resolve_candidate"
+    )
+    literals = [
+        node.value
+        for node in ast.walk(resolver)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    assert any("candidate_source_sha=" in text for text in literals), (
+        "resolve-candidate emits no `candidate_source_sha`, so nothing "
+        "downstream can name the revision the artifact was built from"
+    )
+    # And it is not the DIGEST wearing another name. `sha256` is emitted
+    # through the coordinate loop, so it appears as a bare key rather than in a
+    # `candidate_...=` literal; both values must be there, separately.
+    assert "sha256" in literals, (
+        "the artifact digest is no longer emitted, so the two values a reader "
+        "must not confuse are down to one"
+    )
+
+
+# ── the isolation is proved, not asserted ──────────────────────────────────
+#
+# `-E -P` in a workflow is a string in a YAML file, and every check above is a
+# check on that string. None of them establishes that the flags DO anything —
+# and an isolation nobody has watched work is exactly as good as one that does
+# not. So this pair runs a real interpreter, twice, over a decoy the checkout
+# stands in for.
+
+
+def _decoy(tmp_path: Path) -> Path:
+    """A directory holding a module named as the package under isolation.
+
+    It stands in for `packages/dotmac-deployment-foundation/src`, which is what
+    `PYTHONPATH` would actually be pointing at on a runner that leaked it.
+    """
+    root = tmp_path / "checkout-src"
+    (root / "dotmac_deployment_foundation").mkdir(parents=True)
+    (root / "dotmac_deployment_foundation" / "__init__.py").write_text(
+        "ORIGIN = 'the checkout, not the wheel'\n", encoding="utf-8"
+    )
+    return root
+
+
+def _import_origin(tmp_path: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    script = tmp_path / "probe.py"
+    script.write_text(
+        "import dotmac_deployment_foundation as m\nprint(m.ORIGIN)\n", encoding="utf-8"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(_decoy(tmp_path))
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, *flags, str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+
+
+def test_PYTHONPATH_alone_really_does_reach_the_checkout(tmp_path: Path) -> None:
+    """The half that makes the isolation non-vacuous.
+
+    Without `-E`, an interpreter — venv or not — imports whatever `PYTHONPATH`
+    names. If this failed, `-E` would be guarding against nothing and every
+    assertion above would be decorative.
+    """
+    result = _import_origin(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "the checkout, not the wheel" in result.stdout
+
+
+def test_dash_E_dash_P_makes_the_checkout_unreachable(tmp_path: Path) -> None:
+    """And the half the workflows rely on: with the flags, that same path is
+    not importable at all, so the only copy left is the installed one."""
+    result = _import_origin(tmp_path, "-E", "-P")
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
+
+
+def test_the_runner_re_adds_its_OWN_directory_so_dash_P_costs_nothing() -> None:
+    """`-P` drops the script's directory from `sys.path`, and the runner imports
+    `lane3_provocation` and `lane3_inside_vantage` from exactly there.
+
+    It survives because it puts that directory back itself, from an absolute
+    path derived from `__file__` rather than from whatever the launcher left
+    behind. If that line were ever removed, `-P` would turn a working rehearsal
+    into an ImportError at collection — so the two belong in one test.
+    """
+    tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    own_dir = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and ast.unparse(node.func) == "sys.path.insert"
+        and "__file__" in ast.unparse(node)
+        and "packages" not in ast.unparse(node)
+    ]
+    assert len(own_dir) == 1, (
+        "the runner no longer re-adds its own directory to sys.path, and it is "
+        "launched with -P, which removes it. Its `lane3_*` siblings become "
+        "unimportable"
+    )
 
 
 def test_the_release_guard_bites_when_checkout_python_verifies_the_receipt() -> None:

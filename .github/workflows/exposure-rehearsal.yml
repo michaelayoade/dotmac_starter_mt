@@ -158,6 +158,22 @@ jobs:
             "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
             --dist candidate-dist
 
+      # ISOLATED means the installed wheel is the ONLY importable copy, and the
+      # venv alone does not achieve that. `PYTHONPATH` is honoured by every
+      # interpreter regardless of which venv it lives in, so a job step that
+      # exported it — or a runner image that ships it — would put the checkout's
+      # `packages/dotmac-deployment-foundation/src` back on the path ahead of
+      # site-packages. The rehearsal would then exercise the SOURCE and pass
+      # identically whether or not the wheel is correct, which is the one
+      # outcome this whole sequence exists to make impossible.
+      #
+      # So the runner is launched `-E -P`:
+      #   -E  ignore PYTHONPATH and every other PYTHON* variable
+      #   -P  do not put the script's own directory on sys.path
+      # `-P` costs nothing here: the runner puts its own directory back
+      # explicitly, because it must import its `lane3_*` siblings and does so
+      # by an absolute path derived from `__file__` rather than by inheriting
+      # whatever the launcher happened to leave on the path.
       - name: Install the verified candidate in an isolated environment
         run: |
           set -euo pipefail
@@ -210,8 +226,10 @@ jobs:
                  "16 need a probe that genuinely originates inside the accepted" \
                  "source set; this host is outside it by construction" >&2
             exit 1; }
-          .lane3-foundation/bin/python scripts/exposure_rehearsal_runner.py \
+          .lane3-foundation/bin/python -E -P scripts/exposure_rehearsal_runner.py \
             --foundation-revision "${GITHUB_SHA}" \
+            --candidate-source-revision \
+              "${{ steps.candidate.outputs.candidate_source_sha }}" \
             --foundation-artifact "${{ steps.candidate.outputs.candidate_sha256 }}" \
             --authorization-run "${AUTHZ}" \
             --authorization-doc-digest "${{ inputs.authorization_doc_digest }}" \

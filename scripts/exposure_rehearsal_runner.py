@@ -36,7 +36,14 @@ this narrowing would become the hole its critics would expect.
 
 ## Every input is required, and the run refuses without it
 
-    --foundation-revision   the exact protected-main commit under test
+    --foundation-revision   the commit whose RUNNER drives this rehearsal —
+                            this workflow's own head SHA, and what the receipt
+                            records and publication compares
+    --candidate-source-revision
+                            the commit the CANDIDATE WAS BUILT FROM, read from
+                            the committed CandidateArtifact.v1. A DIFFERENT
+                            question from the one above and never the same
+                            argument, however often the two happen to agree
     --foundation-artifact   digest read from the candidate receipt after the
                             downloaded wheel was verified
     --authorization-run     Platform CP authorization run id
@@ -364,6 +371,28 @@ def classify_refusal(
                 return TerminalRefusal.HOST_STATE_UNCERTIFIED
             return member
     return TerminalRefusal.HOST_STATE_UNCERTIFIED
+
+
+def require_commit(value: str, *, field: str) -> str:
+    """A full 40-character commit, or a refusal. Decidable from the argument.
+
+    Same shape and same reason as parsing `--controller-identity`: whether a
+    string IS a commit needs no host, no lease and no descriptor, so it is asked
+    where "nothing was attempted" is still true.
+
+    Short, empty and abbreviated revisions all refuse. An abbreviated one is the
+    dangerous member of that set — it looks like an answer and compares equal to
+    nothing, so a binding built on it would be a comparison that can only ever
+    fail, silently reported as "the revisions disagree".
+    """
+    text = str(value).strip().lower()
+    if len(text) != 40 or any(c not in "0123456789abcdef" for c in text):
+        raise PreconditionUnfit(
+            f"{field} {value!r} is not a full 40-character commit. A rehearsal "
+            "binds three revisions and each of them is evidence about one exact "
+            "commit or about nothing"
+        )
+    return text
 
 
 @contextlib.contextmanager
@@ -1125,6 +1154,14 @@ def record_terminal(
         "version": 1,
         "target": str(args.target),
         "authorization_run_id": str(args.authorization_run),
+        # THREE revisions, named separately, on the record this run leaves
+        # behind. The release revision is not this run's to state -- it belongs
+        # to whichever release run later reads the receipt -- so the two this
+        # run can establish are stated, and the third is bound at the gate that
+        # holds it, through the artifact digest below.
+        "runner_revision": str(args.foundation_revision),
+        "candidate_source_revision": str(args.candidate_source_revision),
+        "candidate_artifact_digest": str(args.foundation_artifact),
         "outcome": (
             outcome.as_document()
             if outcome is not None
@@ -1312,6 +1349,25 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
             args.controller_identity, field="--controller-identity"
         )
     ctx.controller_identity = controller_identity
+
+    # The SECOND and THIRD revisions this run binds, asked in the same place and
+    # for the same reason: both are decidable from the arguments alone, so a
+    # malformed one refuses with the host genuinely untouched.
+    #
+    # They are kept as separate values on purpose. `--foundation-revision` is
+    # the commit whose RUNNER is executing, and it is what the receipt records
+    # and publication compares; `--candidate-source-revision` is the commit the
+    # ARTIFACT was built from, read from the committed CandidateArtifact.v1.
+    # They agree on a run that rehearses a candidate built from the same commit
+    # and they do not have to — `foundation-candidate.yml` exists precisely
+    # because the candidate must be buildable BEFORE the commit that rehearses
+    # it. One variable serving both would make that difference unrepresentable,
+    # and unrepresentable is how it stops being noticed.
+    with refusal_of(PreconditionUnfit):
+        require_commit(args.foundation_revision, field="--foundation-revision")
+        require_commit(
+            args.candidate_source_revision, field="--candidate-source-revision"
+        )
 
     descriptor = pathlib.Path(args.descriptor)
     fixture_bytes = descriptor.read_bytes()
@@ -1761,7 +1817,14 @@ def main(argv: list[str] | None = None) -> int:
         description="Execute Lane 3 through the controller and emit a receipt.",
     )
     for flag, help_text in (
-        ("--foundation-revision", "exact protected-main commit under test"),
+        (
+            "--foundation-revision",
+            "the commit whose Lane 3 RUNNER drives this rehearsal",
+        ),
+        (
+            "--candidate-source-revision",
+            "the commit the candidate artifact was BUILT FROM",
+        ),
         (
             "--foundation-artifact",
             "digest read from the verified candidate receipt",

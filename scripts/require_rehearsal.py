@@ -232,6 +232,21 @@ def main(argv: list[str] | None = None) -> int:
             "says what it established"
         ),
     )
+    # REQUIRED, and that is the whole design. The receipt says what a run
+    # established and at which revision; nothing in it was ever compared with
+    # the BYTES about to be published, so a rehearsal of candidate A satisfied
+    # a publication of candidate B whenever both ran at one commit. A default
+    # here would be a check the caller may omit; argparse refusing is a check
+    # whose absence stops the lane.
+    parser.add_argument(
+        "--artifact-digest",
+        required=True,
+        help=(
+            "sha256 of the candidate the release is about to publish, as "
+            "`release_facility.py resolve-candidate` emitted it. The receipt "
+            "must record a rehearsal of exactly these bytes"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.repo:
@@ -253,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     from dotmac_deployment_foundation.errors import SpecError
     from dotmac_deployment_foundation.rehearsal import (
         RehearsalReceiptV1,
+        require_rehearsed_artifact,
         verify_publication,
     )
 
@@ -267,6 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         receipt = RehearsalReceiptV1.from_json(receipt_path.read_text(encoding="utf-8"))
         verify_publication(receipt, revision=args.sha)
+        # THE THIRD BINDING. `verify_publication` above compares the LANE 3
+        # RUNNER revision with the RELEASE revision; this compares the receipt
+        # with the ARTIFACT, which is what makes the CANDIDATE SOURCE revision
+        # bound rather than merely recorded — the digest identifies exactly one
+        # `CandidateArtifact.v1`, and that record names exactly one `source_sha`.
+        require_rehearsed_artifact(receipt, artifact_digest=args.artifact_digest)
     except SpecError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
@@ -277,6 +299,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rehearsal_lane={receipt.lane}")
     print(f"rehearsal_receipt_digest={receipt.sha256_digest()}")
     print(f"rehearsal_authorization_run={receipt.authorization_run_id}")
+    # All THREE revisions, named separately, on the record that decides the
+    # publish. A reader comparing them should not have to join two files.
+    print(f"rehearsal_runner_revision={receipt.foundation_revision}")
+    print(f"release_revision={args.sha}")
+    print(f"rehearsed_artifact_digest={receipt.foundation_artifact_digest}")
     return EXIT_OK
 
 
