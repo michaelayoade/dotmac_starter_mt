@@ -111,7 +111,10 @@ from .spec import BackupDataset
 from .version import VERSION
 
 __all__ = [
-    "PRESTATE_UNEXECUTABLE",
+    "PRESTATE_UNKNOWN_DISCRIMINATOR",
+    "PRESTATE_UNDISCRIMINATED",
+    "KNOWN_PRESTATE_DISCRIMINATORS",
+    "INCUMBENT_PRESTATE_DISCRIMINATOR",
     "require_incumbent_prestate_digest",
     "incumbent_prestate_digest",
     "canonical_prestate_bytes",
@@ -173,19 +176,41 @@ INCUMBENT_PRESTATE_DIGEST_SCHEMA: Final = "IncumbentPrestateDigestV1"
 #: Refused: the prestate in hand is not the one that was authorized.
 PRESTATE_MISMATCH: Final = "recovery_plan.prestate_mismatch"
 
-#: Refused: there IS no authorized prestate digest, so nothing can be compared.
+#: THE FOUNDATION-OWNED DISCRIMINATOR Control stores BESIDE the digest.
 #:
-#: A separate code from a mismatch on purpose. "The incumbent is not the one
-#: approved" and "no incumbent was ever approved" are different facts, and only
-#: one of them is repaired by re-observing the host.
+#: A digest alone is 64 hex characters. It cannot say which encoding produced it,
+#: so a stored value is unfalsifiable the moment more than one encoding could
+#: have: `incumbent_prestate_digest NOT NULL` proves only that a string exists.
 #:
-#: **A missing or legacy value is UNEXECUTABLE and is never defaulted.** A grant
-#: written before the term existed does not acquire a computed value at read
-#: time and does not fall back to empty-matches-anything. The defect being
-#: repaired here is a term nobody produced; defaulting it would recreate that
-#: defect with a friendlier face, and the recovery would proceed against an
-#: incumbent no one authorized.
-PRESTATE_UNEXECUTABLE: Final = "recovery_plan.prestate_unexecutable"
+#: The discriminator names the observation schema AND the rules that turned it
+#: into bytes. Control stores it and REQUIRES it; Control does not own it, and
+#: neither its migration nor a `RecoveryGrantV1` version may redefine the
+#: encoding — that would be the second canonicalizer this whole binding exists
+#: to prevent, arriving as a schema change rather than as code.
+INCUMBENT_PRESTATE_DISCRIMINATOR: Final = (
+    "dotmac.deployment_foundation.incumbent_prestate.v1"
+)
+
+#: Every discriminator THIS version can honour. Closed, and it is what makes an
+#: unknown one refusable: a consumer that accepted any string would be trusting
+#: a producer it has never met to have used rules it cannot check.
+KNOWN_PRESTATE_DISCRIMINATORS: Final[frozenset[str]] = frozenset(
+    {INCUMBENT_PRESTATE_DISCRIMINATOR}
+)
+
+#: Refused: the stored row carries no discriminator.
+#:
+#: **An undiscriminated row is HISTORICAL AND UNEXECUTABLE, and is never
+#: backfilled as V1 by assumption.** It predates the term, so nobody produced its
+#: digest under rules anyone can name — and assuming V1 would manufacture
+#: provenance for a value whose provenance is exactly what is missing. That is
+#: the defect this term exists to close, re-created by a migration.
+PRESTATE_UNDISCRIMINATED: Final = "recovery_plan.prestate_undiscriminated"
+
+#: Refused: the discriminator names an encoding this version cannot produce.
+#: Distinct from a mismatch, because the repair is a version rather than a
+#: re-observation — comparing under rules you do not have is not comparing.
+PRESTATE_UNKNOWN_DISCRIMINATOR: Final = "recovery_plan.prestate_unknown_discriminator"
 
 #: Stable identifiers for this module's refusals. Assert these; read the prose.
 #: A module with more than one refusal has to be testable on WHICH one fired,
@@ -554,7 +579,10 @@ def incumbent_prestate_digest(document: Any) -> str:
 
 
 def require_incumbent_prestate_digest(
-    observation: FailedSystemObservationV1, *, authorized: str
+    observation: FailedSystemObservationV1,
+    *,
+    authorized: str,
+    discriminator: str,
 ) -> str:
     """Recompute before acting, or refuse.
 
@@ -570,19 +598,26 @@ def require_incumbent_prestate_digest(
             f"{FailedSystemObservationV1.__name__}",
             code=RECOVERY_PLAN_WRONG_TYPE,
         )
-    if not str(authorized).strip():
-        # NOT a mismatch, and not a pass. A grant with no prestate term is
-        # UNEXECUTABLE: it authorized a recovery without saying which incumbent,
-        # and computing one here from the observation in hand would make the
-        # check compare the observation with itself.
+    stated = str(discriminator).strip()
+    if not stated:
         raise PreconditionFailed(
-            "this authorization carries no incumbent prestate digest, so there "
-            "is nothing to compare the failed system against. A missing or "
-            "legacy value is UNEXECUTABLE and is never defaulted: deriving one "
-            "from the observation in hand would compare it with itself, and "
-            "treating empty as 'any incumbent' would authorize recovering a "
-            "system nobody approved. Obtain a grant that names the incumbent",
-            code=PRESTATE_UNEXECUTABLE,
+            "this authorization carries no Foundation prestate discriminator, so "
+            "the stored digest cannot say which encoding produced it. An "
+            "undiscriminated row is HISTORICAL AND UNEXECUTABLE and is never "
+            "backfilled as "
+            f"{INCUMBENT_PRESTATE_DISCRIMINATOR!r} by assumption: that would "
+            "manufacture provenance for a value whose provenance is exactly what "
+            "is missing",
+            code=PRESTATE_UNDISCRIMINATED,
+        )
+    if stated not in KNOWN_PRESTATE_DISCRIMINATORS:
+        raise PreconditionFailed(
+            f"the authorization names prestate encoding {stated!r}, which this "
+            f"facility cannot produce; it knows "
+            f"{sorted(KNOWN_PRESTATE_DISCRIMINATORS)}. Comparing under rules "
+            "this version does not have is not comparing — the repair is a "
+            "version, not a re-observation",
+            code=PRESTATE_UNKNOWN_DISCRIMINATOR,
         )
     actual = observation.digest()
     if actual != authorized:

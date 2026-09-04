@@ -365,13 +365,25 @@ canonicalizer. `FailedSystemObservationV1` carries its own document schema so it
 can be canonicalized alone — Control signs a digest of the observation, never of
 the plan containing it, and a fragment has no kind for the shared guard to check.
 
-**A missing or legacy value is UNEXECUTABLE and is never defaulted**, with its
-own code distinct from a mismatch. A grant written before the term existed does
-not acquire a computed value at read time and does not fall back to
-empty-matches-anything. The defect being repaired is a term nobody produced;
-defaulting it would recreate that defect with a friendlier face — and computing
-it from the observation in hand would make the check compare the observation with
-itself.
+**Foundation also publishes the DISCRIMINATOR Control stores beside the digest.**
+A digest alone is 64 hex characters and cannot say which encoding produced it, so
+`incumbent_prestate_digest NOT NULL` proves only that a string exists. The
+discriminator names the observation schema AND the rules that turned it into
+bytes; Control stores and REQUIRES it without owning it, and neither its
+migration nor a `RecoveryGrantV1` version may redefine the encoding — that would
+be the second canonicalizer this binding exists to prevent, arriving as a schema
+change rather than as code.
+
+**An undiscriminated row is HISTORICAL AND UNEXECUTABLE and is never backfilled
+by assumption.** It predates the term, so nobody produced its digest under rules
+anyone can name, and assuming the current one would manufacture provenance for a
+value whose provenance is exactly what is missing. An unknown discriminator
+refuses separately, because the repair is a version rather than a re-observation:
+comparing under rules this facility does not have is not comparing.
+
+The earlier "missing digest" refusal is WITHDRAWN. Control's column is NOT NULL,
+so the case has no subject — and a refusal for a condition that cannot arise is
+the false coverage this lane has removed twice already.
 
 The tests do the two distinct jobs the ruling names. **Mutating every bound
 field** proves each is genuinely inside the canonical bytes rather than merely

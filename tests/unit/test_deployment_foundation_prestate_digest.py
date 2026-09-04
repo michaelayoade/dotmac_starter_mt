@@ -39,9 +39,12 @@ from dotmac_deployment_foundation.execution_plan import (
 )
 from dotmac_deployment_foundation.recovery_plan import (
     INCUMBENT_PRESTATE_DIGEST_SCHEMA,
+    INCUMBENT_PRESTATE_DISCRIMINATOR,
+    KNOWN_PRESTATE_DISCRIMINATORS,
     PRESTATE_MISMATCH,
     PRESTATE_SCHEMA,
-    PRESTATE_UNEXECUTABLE,
+    PRESTATE_UNDISCRIMINATED,
+    PRESTATE_UNKNOWN_DISCRIMINATOR,
     RECOVERY_PLAN_SCHEMA,
     FailedSystemObservationV1,
     canonical_prestate_bytes,
@@ -106,7 +109,10 @@ def test_the_matching_pair_is_admitted() -> None:
     function that refuses everything."""
     one = _observation()
     assert (
-        require_incumbent_prestate_digest(one, authorized=one.digest()) == one.digest()
+        require_incumbent_prestate_digest(
+            one, authorized=one.digest(), discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+        )
+        == one.digest()
     )
 
 
@@ -116,7 +122,11 @@ def test_document_A_against_digest_B_refuses() -> None:
     is exactly the `x == x` failure this clause exists to detect."""
     other = _observation(target="prod-abuja-02")
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(_observation(), authorized=other.digest())
+        require_incumbent_prestate_digest(
+            _observation(),
+            authorized=other.digest(),
+            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+        )
     assert exc.value.code == PRESTATE_MISMATCH
 
 
@@ -126,7 +136,11 @@ def test_document_B_against_digest_A_refuses() -> None:
     one = _observation()
     other = _observation(target="prod-abuja-02")
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(other, authorized=one.digest())
+        require_incumbent_prestate_digest(
+            other,
+            authorized=one.digest(),
+            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+        )
     assert exc.value.code == PRESTATE_MISMATCH
 
 
@@ -137,9 +151,13 @@ def test_moving_BOTH_together_is_not_a_pass_against_the_original() -> None:
     """
     original = _observation().digest()
     moved = _observation(target="prod-abuja-02")
-    assert require_incumbent_prestate_digest(moved, authorized=moved.digest())
+    assert require_incumbent_prestate_digest(
+        moved, authorized=moved.digest(), discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+    )
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(moved, authorized=original)
+        require_incumbent_prestate_digest(
+            moved, authorized=original, discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+        )
     assert exc.value.code == PRESTATE_MISMATCH
 
 
@@ -193,41 +211,71 @@ def test_the_prestate_digest_is_not_the_recovery_plan_digest() -> None:
     assert plan.failed_state.digest() != plan.digest()
 
 
-# ── a missing value is UNEXECUTABLE, never defaulted ──────────────────────
+# ── the discriminator: a digest cannot say which encoding produced it ──────
 
 
-@pytest.mark.parametrize("absent", ["", "   "])
-def test_an_absent_authorized_digest_is_unexecutable(absent: str) -> None:
-    """The clause that stops this becoming a soft migration.
+def test_an_undiscriminated_row_is_historical_and_unexecutable() -> None:
+    """Never backfilled as V1 by assumption.
 
-    A grant written before the term existed does not acquire a computed value at
-    read time and does not fall back to empty-matches-anything. The defect being
-    repaired is a term nobody produced; defaulting it would recreate that defect
-    with a friendlier face.
+    An older stored row predates the term, so nobody produced its digest under
+    rules anyone can name. Assuming the current discriminator would manufacture
+    provenance for a value whose provenance is exactly what is missing — the
+    defect this term exists to close, re-created by a migration.
     """
+    one = _observation()
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(_observation(), authorized=absent)
-    assert exc.value.code == PRESTATE_UNEXECUTABLE
-
-
-def test_absent_is_a_DIFFERENT_code_from_mismatch() -> None:
-    """ "The incumbent is not the one approved" and "no incumbent was ever
-    approved" are different facts, and only one is repaired by re-observing the
-    host. A single code would send an operator to look at the wrong thing."""
-    assert PRESTATE_UNEXECUTABLE != PRESTATE_MISMATCH
-    with pytest.raises(PreconditionFailed) as absent:
-        require_incumbent_prestate_digest(_observation(), authorized="")
-    with pytest.raises(PreconditionFailed) as wrong:
         require_incumbent_prestate_digest(
-            _observation(), authorized="sha256:" + "9" * 64
+            one, authorized=one.digest(), discriminator=""
         )
-    assert absent.value.code != wrong.value.code
+    assert exc.value.code == PRESTATE_UNDISCRIMINATED
 
 
-def test_an_absent_value_is_not_COMPUTED_from_the_observation() -> None:
-    """The specific default that would look most reasonable: derive the missing
-    authorization from the observation in hand. That makes the check compare the
-    observation with itself and pass for every input."""
+def test_an_unknown_discriminator_refuses() -> None:
+    """The repair is a VERSION, not a re-observation: comparing under rules this
+    facility does not have is not comparing."""
+    one = _observation()
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(_observation(), authorized="")
-    assert exc.value.code == PRESTATE_UNEXECUTABLE
+        require_incumbent_prestate_digest(
+            one,
+            authorized=one.digest(),
+            discriminator="dotmac.deployment_foundation.incumbent_prestate.v9",
+        )
+    assert exc.value.code == PRESTATE_UNKNOWN_DISCRIMINATOR
+
+
+def test_the_correct_discriminator_with_a_wrong_digest_still_refuses() -> None:
+    """The discriminator does not vouch for the value. Naming the right encoding
+    and carrying the wrong digest is still the wrong incumbent."""
+    one = _observation()
+    with pytest.raises(PreconditionFailed) as exc:
+        require_incumbent_prestate_digest(
+            one,
+            authorized="sha256:" + "9" * 64,
+            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+        )
+    assert exc.value.code == PRESTATE_MISMATCH
+
+
+def test_the_three_prestate_refusals_are_distinct() -> None:
+    """Undiscriminated, unknown encoding, and wrong value send an operator to
+    three different places: a historical row, a version, and the host."""
+    assert (
+        len(
+            {
+                PRESTATE_UNDISCRIMINATED,
+                PRESTATE_UNKNOWN_DISCRIMINATOR,
+                PRESTATE_MISMATCH,
+            }
+        )
+        == 3
+    )
+
+
+def test_the_discriminator_names_the_schema_and_is_closed() -> None:
+    """It names the observation schema AND the rules that turned it into bytes.
+    A consumer accepting any string would trust a producer it has never met to
+    have used rules it cannot check."""
+    assert INCUMBENT_PRESTATE_DISCRIMINATOR == (
+        "dotmac.deployment_foundation.incumbent_prestate.v1"
+    )
+    assert KNOWN_PRESTATE_DISCRIMINATORS == {INCUMBENT_PRESTATE_DISCRIMINATOR}
