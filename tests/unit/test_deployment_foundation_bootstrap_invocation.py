@@ -560,3 +560,42 @@ def test_the_sweep_refuses_rather_than_falling_back(tmp_path: Path) -> None:
     """
     with pytest.raises(RuntimeError, match="refuses"):
         _python_files(tmp_path / "not-a-checkout")
+
+
+def test_the_PROTOCOL_ITSELF_is_deliberately_not_counted() -> None:
+    """Whether this sweep reports 5 or 6 depends entirely on this one exclusion.
+
+    Two lanes counting the same tree reported 6 and 5 and each had a coherent
+    story. The whole difference was `engine/run.py:Effects` — the protocol
+    DEFINITION, excluded here by `_effects_implementations`'s explicit skip — and
+    the discrepancy arrived in the same change that narrowed the sweep's field of
+    view, which made a benign counting convention look exactly like a dropped
+    implementation.
+
+    A count cannot distinguish those two. A name can. So the convention is
+    pinned here by name instead of living in a skip expression that a reader has
+    to notice, and the second assertion is the control: the definition really
+    does define `prune_images`, so its absence from the set is a DELIBERATE
+    exclusion rather than the sweep failing to reach it — which is the reading
+    that would have been true if the fix had dropped something.
+    """
+    assert "run.py:Effects" not in _effects_implementations()
+
+    run_py = Path(Effects.__module__.replace(".", "/"))
+    source = (REPO / "packages/dotmac-deployment-foundation/src" / run_py).with_suffix(
+        ".py"
+    )
+    defines = [
+        node.name
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ClassDef)
+        and any(
+            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
+            for b in node.body
+        )
+    ]
+    assert defines == ["Effects"], (
+        "the protocol definition no longer matches what the sweep looks for, so "
+        "the exclusion above is now excluding nothing and the count it explains "
+        "means something different"
+    )
