@@ -162,6 +162,13 @@ class RecordingEffects(FakeEffects):  # type: ignore[misc]
         self.mutations.append(("write_evidence", str(evidence.get("operation", ""))))
         return super().write_evidence(evidence)
 
+    def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+        # A MUTATION, recorded like every other one — `_assert_untouched` is the
+        # assertion this file exists to get right, and a bootstrap that did not
+        # register here would be invisible to it.
+        self.mutations.append(("bootstrap_principal_credential", bootstrap.principal))
+        return super().bootstrap_principal_credential(bootstrap)
+
     def prune_images(self, *, retain: int) -> None:
         self.mutations.append(("prune_images", str(retain)))
         super().prune_images(retain=retain)

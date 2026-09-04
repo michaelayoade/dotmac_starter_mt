@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 import pytest
 from dotmac_deployment_foundation.authorization import authorize
+from dotmac_deployment_foundation.deployment_evidence import StepStanding
 from dotmac_deployment_foundation.engine.plan import (
     Strategy,
     build_plan,
@@ -345,6 +346,10 @@ class FakeEffects:
         self.switched_to: list[str] = []
         self.annotations: list[dict[str, str]] = []
         self.pruned = 0
+        self.bootstrapped: list[str] = []
+        # `installed` by default: the absent-to-present answer a real provider
+        # gives. Tests that need the crash-recovery history or a refusal set it.
+        self.bootstrap_standing = StepStanding.INSTALLED
         self._ready_calls = 0
         for key, value in overrides.items():
             setattr(self, key, value)
@@ -455,6 +460,10 @@ class FakeEffects:
         # The last write, exactly as recorded — the honest fake of a store
         # that persisted what it was given.
         return dict(self.evidence_written[-1]) if self.evidence_written else {}
+
+    def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+        self.bootstrapped.append(bootstrap.principal)
+        return self.bootstrap_standing
 
     def prune_images(self, *, retain: int) -> None:
         self.pruned = retain

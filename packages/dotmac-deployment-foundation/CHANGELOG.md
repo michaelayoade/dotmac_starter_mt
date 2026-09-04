@@ -263,6 +263,47 @@ publication gate installs — non-conforming until updated, so it is held pendin
 ruling. Same staging as `RecoveryExecutionPlanV1`: the type refuses first,
 reachability later, so a half-built chain cannot read as done.
 
+### The bootstrap invocation — `Effects` widened, every implementation updated
+
+The half `FoundationExecutionPlanV2` was landed without. `Effects` gains
+`bootstrap_principal_credential(bootstrap) -> StepStanding`, and the executor
+performs each bootstrap the authorized plan carries.
+
+**The seam is shaped so this facility cannot do the work.** It receives the TYPED
+plan member — there is no parameter SQL, a DSN or a command could arrive through
+— it resolves nothing, and the implementation reads the OpenBao reference on the
+target. PostgreSQL mechanics stay in the product (ADR-0070).
+
+**It returns a STANDING, not a boolean.** Any answer other than `installed` or
+`reconciled_after_commit` is refused: "it is present now" is true of both an
+install and a reconciliation after a crash, and a provider that will not say
+which has not answered.
+
+**The step is NOT emitted by `build_plan`, and that is a constraint rather than a
+shortcut.** A step in the built plan lands in `FoundationExecutionPlanV1.steps`,
+which is inside the V1 digest — so emitting one would move every existing V1
+digest, including ones Control has already frozen, for deployments that
+bootstrap nothing. The act is driven from `principal_bootstraps` on the
+authorized V2 plan, which is itself inside the digest, and the ordering (before
+the step loop, so a migration can rely on the role) is a constant of this
+facility version. Asserted, not commented.
+
+**Every implementation is updated in the same change** — the compose-host
+provider, both test doubles, and `_PROBE_BINDINGS_SOURCE` in
+`scripts/release_facility.py`, which is the probe wheel the publication gate
+installs. A protocol widened without that last one makes the gate that publishes
+this facility non-conforming. The test that proves it DERIVES the implementer
+list rather than listing one, and names the probe separately because it is a
+string of Python inside a script that every sweep over `.py` files misses.
+
+The in-package provider conforms by REFUSING rather than by lacking the method:
+a missing method fails as an `AttributeError` mid-deployment, a present one that
+refuses fails as a `PreconditionFailed` before any effect, naming what to
+install.
+
+`Executor` now accepts V1 or V2 and still refuses a recovery plan, which
+completes the 3x3 substitution matrix at its third acceptance point.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**

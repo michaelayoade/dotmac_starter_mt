@@ -63,6 +63,11 @@ from ..execution_plan import (
     HostPrestateV1,
     require_execution_plan_digest,
 )
+from ..execution_plan_v2 import (
+    FoundationExecutionPlanV2,
+    PostgresPrincipalCredentialBootstrapV1,
+    require_execution_plan_v2_digest,
+)
 from ..external_recovery import (
     accept_external_recovery_receipt,
     backup_record_from_receipt,
@@ -213,6 +218,32 @@ class Effects(Protocol):
     def write_evidence(self, evidence: Mapping[str, object]) -> str: ...
 
     def read_evidence(self, path: str) -> Mapping[str, object]: ...
+
+    def bootstrap_principal_credential(
+        self, bootstrap: PostgresPrincipalCredentialBootstrapV1
+    ) -> StepStanding:
+        """Install a database principal's credential from the named reference.
+
+        THE ONLY WIDENING THIS PROTOCOL HAS TAKEN FOR THE BOOTSTRAP, and it is
+        deliberately shaped so the Foundation cannot do the work:
+
+        * it receives the TYPED plan member, not a command, a DSN or a
+          statement — there is no parameter SQL could arrive through;
+        * it resolves nothing. The implementation reads the OpenBao reference on
+          the target and performs the compare-and-set; this facility neither
+          holds the material nor sees it;
+        * it RETURNS A STANDING rather than a boolean, and the executor refuses
+          any standing other than `installed` or `reconciled_after_commit`. A
+          provider that answers "true" has not said which history happened, and
+          those two are the pair that must never collapse: one run installed the
+          credential, another found it already present because an earlier
+          attempt died after its commit point.
+
+        Raise `PreconditionFailed` when the store refuses the compare-and-set —
+        that is the expected answer for a record that already exists, and it is
+        a refusal rather than a failure because nothing was mutated.
+        """
+        ...
 
     def prune_images(self, *, retain: int) -> None: ...
 
@@ -412,17 +443,24 @@ class Executor:
         # and replaces a diagnosis with a type name. Two different faults, two
         # different sentences, and the wrong-type one must not eat the other.
         if execution_plan is not None and not isinstance(
-            execution_plan, FoundationExecutionPlanV1
+            execution_plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2
         ):
             raise PreconditionFailed(
                 f"Executor was given a {type(execution_plan).__name__} as its "
-                f"execution plan, not a {FoundationExecutionPlanV1.__name__}. "
+                f"execution plan, not a {FoundationExecutionPlanV1.__name__} or "
+                f"{FoundationExecutionPlanV2.__name__}. "
                 "This executor mutates a product host under a deployment "
                 "authorization, and a plan of another kind describes another "
                 "act that nothing this class holds authorizes",
                 code=EXECUTION_PLAN_WRONG_TYPE,
             )
         self._execution_plan = execution_plan
+        # AUTHORIZED bootstraps, read off the plan and nowhere else. They are
+        # inside `ExecutionPlanDigestV1`, so Control froze them; a set taken
+        # from anywhere but the plan would be a set nobody approved.
+        self._bootstraps: tuple[PostgresPrincipalCredentialBootstrapV1, ...] = tuple(
+            getattr(execution_plan, "principal_bootstraps", ()) or ()
+        )
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -481,6 +519,7 @@ class Executor:
         # case with no marker at all.
         self._annotate("deployment.start", plan)
         try:
+            self._bootstrap_principals(outcome)
             self._run_steps(plan.steps, plan, outcome)
             outcome.succeeded = True
             outcome.standing = RunStanding.SUCCEEDED
@@ -575,9 +614,95 @@ class Executor:
                 "separately, for the same reason they are authorized separately: "
                 "one decision must not both make a change and erase it"
             )
+        # Each plan kind through its OWN gate. Both refuse the other's type
+        # before computing anything, so a wrong kind reaching here is a typed
+        # refusal rather than a digest mismatch that reads as a changed plan.
+        if isinstance(self._execution_plan, FoundationExecutionPlanV2):
+            return require_execution_plan_v2_digest(
+                self._execution_plan, authorized=authorized
+            )
         return require_execution_plan_digest(
             self._execution_plan, authorized=authorized
         )
+
+    def _bootstrap_principals(self, outcome: DeploymentOutcome) -> None:
+        """Install the credentials this plan was authorized to install.
+
+        BEFORE the step loop, and the ordering is the act's rather than a
+        preference: a migration may need the role to exist and be able to
+        authenticate, so a bootstrap after `migrate` would be a bootstrap for
+        the run after this one. It adds a credential and destroys nothing, so it
+        does not sit behind the backup gate.
+
+        NOT a member of `plan.steps`, and that is a constraint rather than a
+        shortcut. A step emitted by `build_plan` lands in
+        `FoundationExecutionPlanV1.steps`, which is inside the V1 digest — so
+        adding one would move every existing V1 digest, including ones Control
+        has already frozen, for deployments that perform no bootstrap at all.
+        The act is driven from `principal_bootstraps` on the authorized V2 plan,
+        which is itself inside the digest, and the ordering above is a constant
+        of this facility version. That is the same argument
+        `RecoveryExecutionPlanV1` makes for not listing `RESTORE_PROCEDURE`'s
+        ten steps in a document.
+
+        A V1 plan carries no bootstraps, so this is a no-op and no record is
+        written — a step that always appears and usually does nothing is noise
+        in every deployment that never asked for one.
+        """
+        for bootstrap in self._bootstraps:
+            started = self._clock()
+            # Claimed BEFORE the call, like every other mutating step: an
+            # install that failed partway has still touched the store.
+            outcome.mutated = True
+            try:
+                standing = self._effects.bootstrap_principal_credential(bootstrap)
+                if standing not in (
+                    StepStanding.INSTALLED,
+                    StepStanding.RECONCILED_AFTER_COMMIT,
+                ):
+                    # Raised INSIDE the try so it is recorded by the same handler
+                    # as a provider failure. An earlier version raised after it,
+                    # which left `failed_step` and the run standing unset — the
+                    # run failed and the record could not say where. A refusal
+                    # the evidence cannot locate is barely a refusal.
+                    raise StepFailed(
+                        StepKind.BOOTSTRAP_PRINCIPALS.value,
+                        f"the provider reported {standing!r} for principal "
+                        f"{bootstrap.principal!r}. A bootstrap must report "
+                        f"{StepStanding.INSTALLED.value!r} or "
+                        f"{StepStanding.RECONCILED_AFTER_COMMIT.value!r}: same "
+                        "end state, different histories, and the crash path is "
+                        "exactly when someone needs to tell them apart",
+                    )
+            except DeploymentError as exc:
+                refused = isinstance(exc, PreconditionFailed)
+                outcome.records.append(
+                    StepRecord(
+                        StepKind.BOOTSTRAP_PRINCIPALS,
+                        bootstrap.principal,
+                        False,
+                        str(exc),
+                        self._clock() - started,
+                        StepStanding.REFUSED if refused else StepStanding.FAILED,
+                    )
+                )
+                outcome.failed_step = StepKind.BOOTSTRAP_PRINCIPALS
+                outcome.failure = str(exc)
+                outcome.succeeded = False
+                outcome.standing = (
+                    RunStanding.REFUSED if refused else RunStanding.FAILED
+                )
+                raise
+            outcome.records.append(
+                StepRecord(
+                    StepKind.BOOTSTRAP_PRINCIPALS,
+                    bootstrap.principal,
+                    True,
+                    f"credential {standing.value} for {bootstrap.principal}",
+                    self._clock() - started,
+                    standing,
+                )
+            )
 
     def _run_steps(
         self,
