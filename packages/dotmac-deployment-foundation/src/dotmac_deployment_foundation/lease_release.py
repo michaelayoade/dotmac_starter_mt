@@ -93,6 +93,7 @@ __all__ = [
     "RELEASE_FOREIGN",
     "RELEASE_MALFORMED",
     "RELEASE_MISSING",
+    "RELEASE_NOT_DESTROYABLE",
     "RELEASE_NOT_TERMINAL",
     "RELEASE_PREMATURE",
     "RELEASE_STALE",
@@ -120,6 +121,9 @@ RELEASE_MALFORMED: Final = "lease_release.malformed"
 RELEASE_PREMATURE: Final = "lease_release.premature"
 RELEASE_DUPLICATE: Final = "lease_release.duplicate"
 RELEASE_NOT_TERMINAL: Final = "lease_release.not_terminal"
+
+#: Refused: a release exists and does not permit destroying this host.
+RELEASE_NOT_DESTROYABLE: Final = "lease_release.not_destroyable"
 
 _TOKEN: Final = re.compile(r"^[a-z][a-z0-9_.:-]{2,127}$")
 
@@ -902,6 +906,21 @@ def require_release_before_destruction(
             f"the release is dated {release.released_at}, before the lease "
             f"began at {lease.starts_at}",
             code=RELEASE_STALE,
+        )
+    # THE CLOSURE MUST PERMIT DESTRUCTION, and an explicit release is not by
+    # itself permission. `inspection_required` says a human looks BEFORE anything
+    # else uses this host — and destroying it is the one act that makes the
+    # inspection impossible. Reading "a release exists" as "the host may be
+    # wiped" would collapse the second axis back into the first, which is the
+    # whole reason `HostClosure` is separate from the refusal.
+    if release.closure is HostClosure.INSPECTION_REQUIRED:
+        raise PreconditionFailed(
+            f"the release closes this host as {release.closure.value!r}, which "
+            "requires a human to look at it. Destroying it is the one act that "
+            "makes that inspection impossible, so an explicit release is not by "
+            "itself permission to wipe — re-close it as "
+            f"{HostClosure.DESTROY_ONLY.value!r} once the inspection is done",
+            code=RELEASE_NOT_DESTROYABLE,
         )
     if release.digest() in seen_release_digests:
         raise PreconditionFailed(

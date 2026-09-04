@@ -34,6 +34,7 @@ from dotmac_deployment_foundation.lease_release import (
     RELEASE_FOREIGN,
     RELEASE_MALFORMED,
     RELEASE_MISSING,
+    RELEASE_NOT_DESTROYABLE,
     RELEASE_NOT_TERMINAL,
     RELEASE_PREMATURE,
     RELEASE_STALE,
@@ -227,19 +228,19 @@ def test_the_two_host_state_refusals_are_opposite_operator_actions() -> None:
     assert (
         TerminalRefusal.PRECONDITION_UNFIT != TerminalRefusal.PROVOCATION_UNESTABLISHED
     )
-    assert _destroy(
-        _release(
-            outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
-            cleanup=CleanupDisposition.NOT_ATTEMPTED,
-            closure=HostClosure.REUSABLE,
-        )
+    # CONSTRUCTIBILITY, not destroyability. The two are different claims and this
+    # test is about the first: `inspection_required` is a legitimate closure that
+    # deliberately does NOT authorize a wipe, which is
+    # `test_inspection_required_does_NOT_authorize_destruction`'s subject.
+    assert _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
+        cleanup=CleanupDisposition.NOT_ATTEMPTED,
+        closure=HostClosure.REUSABLE,
     )
-    assert _destroy(
-        _release(
-            outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
-            cleanup=CleanupDisposition.NOT_ATTEMPTED,
-            closure=HostClosure.INSPECTION_REQUIRED,
-        )
+    assert _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        cleanup=CleanupDisposition.NOT_ATTEMPTED,
+        closure=HostClosure.INSPECTION_REQUIRED,
     )
 
 
@@ -626,3 +627,34 @@ def test_the_two_constraints_compose_rather_than_replace() -> None:
             cleanup=CleanupDisposition.OUTCOME_UNKNOWN,
             closure=HostClosure.REUSABLE,
         )
+
+
+# ── an explicit release is not by itself permission to destroy ────────────
+
+
+def test_inspection_required_does_NOT_authorize_destruction() -> None:
+    """The second axis has to bite at the gate too, or it is decorative.
+
+    `inspection_required` says a human looks BEFORE anything else uses this host,
+    and destroying it is the one act that makes that inspection impossible.
+    Reading "a release exists" as "the host may be wiped" collapses the closure
+    axis back into the refusal axis — which is the whole reason they are separate.
+    """
+    release = _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        cleanup=CleanupDisposition.FAILED,
+        closure=HostClosure.INSPECTION_REQUIRED,
+    )
+    with pytest.raises(PreconditionFailed) as exc:
+        _destroy(release)
+    assert exc.value.code == RELEASE_NOT_DESTROYABLE
+
+
+@pytest.mark.parametrize("closure", [HostClosure.DESTROY_ONLY, HostClosure.REUSABLE])
+def test_the_other_two_closures_do_authorize_destruction(
+    closure: HostClosure,
+) -> None:
+    """The positive control: the gate must not be one that refuses every
+    release. `destroy_only` is fit for nothing else; `reusable` is a host nobody
+    needs to look at first."""
+    assert _destroy(_release(closure=closure))

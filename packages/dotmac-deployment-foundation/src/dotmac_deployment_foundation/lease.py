@@ -116,7 +116,7 @@ class HostLease:
     #: credential touched the machine. `released_by` must equal THIS value, so a
     #: changed workload principal requires a newly issued lease rather than a
     #: quietly re-used one.
-    workload_principal: str = ""
+    workload_principal: str
 
     def __post_init__(self) -> None:
         for field in (
@@ -236,6 +236,30 @@ class HistoricalLeaseV1:
         )
 
 
+def _required_key(content: Any, key: str, path: Any) -> str:
+    """Read a key that must be PRESENT, never defaulted.
+
+    ``content.get(key, "")`` would turn an absent field into an empty one, and
+    the empty one is then refused at construction — which looks like the same
+    outcome and is not. A defaulted read means the DOCUMENT was accepted as
+    carrying a value it does not carry, and every later reader sees a lease that
+    claims an empty principal rather than a lease that names none.
+
+    Same rule as the prestate discriminator: **a record does not acquire a fact
+    by being read.** This is the second place it is enforced, and the first place
+    it was violated — by the author who wrote the rule.
+    """
+    if key not in content:
+        raise SpecError(
+            f"the lease at {path} carries no {key!r}. A {HOST_LEASE_SCHEMA} "
+            "record names its workload principal; a missing field is NOT an "
+            "empty one, and defaulting it would let a document be read as "
+            "carrying a value it does not carry",
+            code=LEASE_HISTORICAL,
+        )
+    return str(content[key])
+
+
 def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
     safe = "".join(ch if ch.isalnum() or ch in ".-" else "_" for ch in str(target))
     return Path(directory) / f"{safe}.json"
@@ -310,7 +334,7 @@ def load_lease(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Hos
     if found != HOST_LEASE_SCHEMA:
         raise SpecError(f"expected {HOST_LEASE_SCHEMA} at {path}, got {found!r}")
     return HostLease(
-        workload_principal=str(content.get("workload_principal", "")),
+        workload_principal=_required_key(content, "workload_principal", path),
         target=str(content.get("target", "")),
         holder=str(content.get("holder", "")),
         authorization_run_id=str(content.get("authorization_run_id", "")),

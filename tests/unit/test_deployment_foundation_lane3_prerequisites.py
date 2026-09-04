@@ -31,6 +31,7 @@ from dotmac_deployment_foundation.vantage import (
 )
 
 RUN = "pcp-run-9182"
+PRINCIPAL = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
 
 
@@ -43,6 +44,10 @@ def _lease(**overrides: str) -> HostLease:
         "expires_at": "2026-08-30T15:00:00+00:00",
         "compose_project_prefix": "lane3-",
         "controller_identity_fingerprint": "SHA256:abc",
+        # REQUIRED on HostLease.v2 and deliberately not defaulted: a lease
+        # names the authenticated workload that holds it, and a fixture
+        # omitting it would be a lease this facility cannot issue.
+        "workload_principal": PRINCIPAL,
     }
     fields.update(overrides)
     return HostLease(**fields)  # type: ignore[arg-type]
