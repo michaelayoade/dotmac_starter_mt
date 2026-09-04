@@ -51,6 +51,7 @@ from dotmac_deployment_foundation.lease_release import (
 )
 
 SLOT = "dotmacproxmox/102"
+PRINCIPAL_SUBJECT = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
 LIVE = datetime(2026, 9, 4, 3, 0, tzinfo=UTC)
 AFTER = datetime(2026, 9, 4, 7, 0, tzinfo=UTC)
 
@@ -64,6 +65,7 @@ def _lease(**over) -> HostLease:
         "expires_at": "2026-09-04T06:00:00Z",
         "compose_project_prefix": "rehearsal-",
         "controller_identity_fingerprint": "sha256:" + "a" * 64,
+        "workload_principal": PRINCIPAL_SUBJECT,
     }
     kwargs.update(over)
     return HostLease(**kwargs)
@@ -83,7 +85,7 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
         "released_at": "2026-09-04T05:00:00Z",
         "released_by": ReleasingPrincipal(
             kind="github_actions_workload",
-            subject="repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main",
+            subject=PRINCIPAL_SUBJECT,
             run_binding="33860000001",
         ),
         "host_mutation_evidence": "sha256:" + "a" * 64,
@@ -358,6 +360,8 @@ def test_cleanup_is_closed_and_has_no_default() -> None:
         "purged",
         "retained_for_inspection",
         "not_attempted",
+        "failed",
+        "outcome_unknown",
     }
     with pytest.raises(SpecError) as exc:
         _release(cleanup="done")  # type: ignore[arg-type]
@@ -477,7 +481,7 @@ def test_a_principal_from_ANOTHER_run_is_refused() -> None:
         _release(
             released_by=ReleasingPrincipal(
                 kind="github_actions_workload",
-                subject="repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main",
+                subject=PRINCIPAL_SUBJECT,
                 run_binding="some-other-run",
             )
         )
@@ -496,3 +500,129 @@ def test_host_mutation_evidence_must_be_this_leases_controller() -> None:
     with pytest.raises(PreconditionFailed) as exc:
         _destroy(_release(host_mutation_evidence="sha256:" + "c" * 64))
     assert exc.value.code == RELEASE_FOREIGN
+
+
+# ── HostLease.v2: three fields, three facts ───────────────────────────────
+
+
+def test_the_lease_writes_v2_and_v1_is_historical() -> None:
+    """V1's reader and writer shipped in five built candidate wheels, including
+    the one that is Platform CP's bootstrap input. A contract that has crossed an
+    artifact boundary cannot be widened."""
+    from dotmac_deployment_foundation.lease import (
+        HOST_LEASE_SCHEMA,
+        HOST_LEASE_SCHEMA_V1,
+        HistoricalLeaseV1,
+    )
+
+    assert HOST_LEASE_SCHEMA == "HostLease.v2"
+    assert HOST_LEASE_SCHEMA_V1 == "HostLease.v1"
+    assert _lease().as_document()["schema"] == HOST_LEASE_SCHEMA
+    # Readable, and structurally unable to authorize: no `covers()` to call and
+    # no principal to bind. Not "it would be rejected".
+    assert not hasattr(HistoricalLeaseV1, "covers")
+    assert "workload_principal" not in {
+        f.name for f in HistoricalLeaseV1.__dataclass_fields__.values()
+    }
+
+
+def test_all_three_identity_fields_are_in_the_canonical_bytes() -> None:
+    """The fingerprint is a separate FACT but not a separate DOCUMENT, so a lease
+    that swapped credentials while keeping its principal must digest
+    differently."""
+    base = _lease()
+    for field, value in (
+        ("holder", "deployment-foundation-rehearsal"),
+        ("workload_principal", "repo:michaelayoade/other:ref:refs/heads/main"),
+        ("controller_identity_fingerprint", "sha256:" + "b" * 64),
+    ):
+        if field == "holder":
+            continue  # a fixed token; the other two are the movable ones
+        assert lease_digest(_lease(**{field: value})) != lease_digest(base), field
+
+
+def test_released_by_must_be_THIS_leases_workload_principal() -> None:
+    """A principal that merely authenticated is not the party that took the
+    host."""
+    other = _lease(workload_principal="repo:michaelayoade/other:ref:refs/heads/main")
+    release = _release(other)
+    with pytest.raises(PreconditionFailed) as exc:
+        require_release_before_destruction(
+            _lease(),
+            release,
+            now=AFTER,
+            vm_slot=SLOT,
+            candidate_version="0.4.0a1",
+        )
+    assert exc.value.code in {RELEASE_FOREIGN}
+
+
+def test_a_workload_rotation_requires_a_NEW_lease() -> None:
+    """The property that stops a long-lived lease outliving the identity that
+    took it. Rotating the principal makes every release under the old lease
+    refuse — there is no way to keep the lease and change who holds it."""
+    rotated = ReleasingPrincipal(
+        kind="github_actions_workload",
+        subject="repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/rotated",
+        run_binding="33860000001",
+    )
+    with pytest.raises(PreconditionFailed) as exc:
+        _destroy(_release(released_by=rotated))
+    assert exc.value.code == RELEASE_FOREIGN
+
+
+# ── cleanup: failed OR unknown never reaches general availability ─────────
+
+
+@pytest.mark.parametrize(
+    "cleanup", [CleanupDisposition.FAILED, CleanupDisposition.OUTCOME_UNKNOWN]
+)
+def test_failed_or_unknown_cleanup_may_not_be_generally_reusable(
+    cleanup: CleanupDisposition,
+) -> None:
+    """Both, and for different reasons landing in the same place: something the
+    lease created is either still there, or nobody can say it is not."""
+    with pytest.raises(SpecError) as exc:
+        _release(cleanup=cleanup, closure=HostClosure.REUSABLE)
+    assert exc.value.code == RELEASE_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "cleanup", [CleanupDisposition.FAILED, CleanupDisposition.OUTCOME_UNKNOWN]
+)
+@pytest.mark.parametrize(
+    "closure", [HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY]
+)
+def test_failed_or_unknown_cleanup_may_take_the_restricted_closures(
+    cleanup: CleanupDisposition, closure: HostClosure
+) -> None:
+    assert _release(cleanup=cleanup, closure=closure)
+
+
+def test_unknown_cleanup_does_not_borrow_not_attempteds_answer() -> None:
+    """ "We did not try" and "we tried and do not know" are different facts, and
+    the borrowed answer is always the one that looks safer. `not_attempted` may
+    still be reusable; `outcome_unknown` may not."""
+    assert _release(
+        cleanup=CleanupDisposition.NOT_ATTEMPTED, closure=HostClosure.REUSABLE
+    )
+    with pytest.raises(SpecError):
+        _release(
+            cleanup=CleanupDisposition.OUTCOME_UNKNOWN, closure=HostClosure.REUSABLE
+        )
+
+
+def test_the_two_constraints_compose_rather_than_replace() -> None:
+    """A refusal's permitted set and a cleanup's are intersected. Either alone
+    would let the other's restricted case through."""
+    assert _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
+        cleanup=CleanupDisposition.OUTCOME_UNKNOWN,
+        closure=HostClosure.DESTROY_ONLY,
+    )
+    with pytest.raises(SpecError):
+        _release(
+            outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
+            cleanup=CleanupDisposition.OUTCOME_UNKNOWN,
+            closure=HostClosure.REUSABLE,
+        )

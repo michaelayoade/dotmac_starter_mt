@@ -381,6 +381,11 @@ _PERMITTED_CLOSURES: Final[dict[TerminalRefusal, frozenset[HostClosure]]] = {
     ),
 }
 
+#: The RESTRICTED set, reached by two independent routes.
+_RESTRICTED: Final[frozenset[HostClosure]] = frozenset(
+    {HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY}
+)
+
 
 class CleanupDisposition(str, Enum):
     """What became of what the lease created. Closed.
@@ -394,11 +399,40 @@ class CleanupDisposition(str, Enum):
     #: Cleanup was not attempted — an honest answer for a refusal that stopped
     #: before creating anything, and a loud one for a run that should have.
     NOT_ATTEMPTED = "not_attempted"
+    #: Cleanup was attempted and FAILED. Something the lease created is still
+    #: there.
+    FAILED = "failed"
+    #: Cleanup was attempted and NOBODY CAPTURED THE OUTCOME.
+    #:
+    #: Its own member rather than borrowing `NOT_ATTEMPTED`'s, which is the
+    #: fourth time this session that two values were asked to cover three cases —
+    #: after `HostStanding`, the tri-state renderings, and expiry-versus-release.
+    #: "We did not try" and "we tried and do not know" are different facts, and
+    #: the borrowed answer is always the one that looks safer.
+    #:
+    #: Live case: `withdraw_foreign_rules` currently ignores its failures
+    #: deliberately, so the outcomes exist and are discarded. An uncaptured
+    #: cleanup is not a successful one.
+    OUTCOME_UNKNOWN = "outcome_unknown"
 
 
 CLEANUP_DISPOSITIONS: Final[tuple[str, ...]] = tuple(
     d.value for d in CleanupDisposition
 )
+
+
+#: Which closures each CLEANUP outcome may resolve to — a SECOND constraint,
+#: composed with the refusal's by intersection rather than replacing it.
+#:
+#: Failed AND unknown both reach the restricted set, and neither may reach
+#: general availability. They are separate members for the reason above, and
+#: they land in the same place for a different one: something the lease created
+#: is either still there, or nobody can say it is not. A next lease inheriting
+#: that host as clean is the same failure in both cases.
+_PERMITTED_BY_CLEANUP: Final[dict[CleanupDisposition, frozenset[HostClosure]]] = {
+    CleanupDisposition.FAILED: _RESTRICTED,
+    CleanupDisposition.OUTCOME_UNKNOWN: _RESTRICTED,
+}
 
 
 #: How a releasing principal proves itself. Closed, and deliberately not "a
@@ -663,18 +697,28 @@ class HostLeaseReleaseV1:
                 f"closure must be a HostClosure, got {type(self.closure).__name__}",
                 code=RELEASE_MALFORMED,
             )
+        # TWO independent constraints, composed by intersection. A release must
+        # satisfy what its refusal permits AND what its cleanup outcome permits;
+        # either alone would let the other's restricted case through.
         refusal = self.outcome.refusal
-        permitted = _PERMITTED_CLOSURES.get(refusal) if refusal else None
-        if permitted is not None and self.closure not in permitted:
-            raise SpecError(
-                f"a {refusal.value!r} release may close only into "
-                f"{sorted(c.value for c in permitted)}, not "
-                f"{self.closure.value!r}. That refusal is the one where the host "
-                "was MUTATED and the mutation FAILED, with a partial unwind, so "
-                "the machine is in a state nobody has certified — advertising it "
-                "as generally reusable is how the next lease inherits it as clean",
-                code=RELEASE_MALFORMED,
+        constraints: list[tuple[str, frozenset[HostClosure]]] = []
+        if refusal is not None and refusal in _PERMITTED_CLOSURES:
+            constraints.append((refusal.value, _PERMITTED_CLOSURES[refusal]))
+        if self.cleanup in _PERMITTED_BY_CLEANUP:
+            constraints.append(
+                (f"cleanup {self.cleanup.value}", _PERMITTED_BY_CLEANUP[self.cleanup])
             )
+        for why, permitted in constraints:
+            if self.closure not in permitted:
+                raise SpecError(
+                    f"a release with {why!r} may close only into "
+                    f"{sorted(c.value for c in permitted)}, not "
+                    f"{self.closure.value!r}. Something the lease created is "
+                    "either still there or nobody can say it is not, and "
+                    "advertising the host as generally reusable is how the next "
+                    "lease inherits it as clean",
+                    code=RELEASE_MALFORMED,
+                )
         if not isinstance(self.cleanup, CleanupDisposition):
             raise SpecError(
                 f"cleanup must be a CleanupDisposition, got "
@@ -836,6 +880,17 @@ def require_release_before_destruction(
             f"{lease.controller_identity_fingerprint}. A release whose "
             "host-mutation evidence is not this lease's controller is bound to "
             "the wrong work",
+            code=RELEASE_FOREIGN,
+        )
+    if str(release.released_by.subject) != str(lease.workload_principal):
+        raise PreconditionFailed(
+            f"the release was written by principal "
+            f"{release.released_by.subject!r} and this lease is held by "
+            f"{lease.workload_principal!r}. `released_by` must equal the "
+            "workload principal bound into THIS lease — a principal that merely "
+            "authenticated is not the party that took the host, and a changed "
+            "workload principal requires a newly issued lease rather than a "
+            "quietly re-used one",
             code=RELEASE_FOREIGN,
         )
     released = _instant(release.released_at, field="released_at")
