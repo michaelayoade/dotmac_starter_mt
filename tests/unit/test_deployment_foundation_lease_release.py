@@ -39,8 +39,10 @@ from dotmac_deployment_foundation.lease_release import (
     RELEASE_STALE,
     TERMINAL_REFUSALS,
     CleanupDisposition,
+    HostClosure,
     HostLeaseReleaseV1,
     HostStanding,
+    ReleasingPrincipal,
     TerminalOutcome,
     TerminalRefusal,
     host_standing,
@@ -79,7 +81,13 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
         "rehearsal_run_id": "33860000001",
         "outcome": TerminalOutcome(receipt_digest="sha256:" + "b" * 64),
         "released_at": "2026-09-04T05:00:00Z",
-        "released_by": "lane3-runner",
+        "released_by": ReleasingPrincipal(
+            kind="github_actions_workload",
+            subject="repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main",
+            run_binding="33860000001",
+        ),
+        "host_mutation_evidence": "sha256:" + "a" * 64,
+        "closure": HostClosure.REUSABLE,
         "cleanup": CleanupDisposition.PURGED,
     }
     kwargs.update(over)
@@ -183,7 +191,7 @@ def test_the_refusal_vocabulary_is_closed_and_owned_here() -> None:
         "evidence_incomplete",
         "probe_refused",
         "receipt_inconsistent",
-        "descriptor_unfit",
+        "precondition_unfit",
         "provocation_unestablished",
     }
     assert len(set(TERMINAL_REFUSALS)) == 6
@@ -214,17 +222,23 @@ def test_the_two_host_state_refusals_are_opposite_operator_actions() -> None:
     `provocation_unestablished` means inspect the machine before re-running —
     it is the only refusal where the host was mutated and the mutation failed.
     One member cannot carry both."""
-    assert TerminalRefusal.DESCRIPTOR_UNFIT != TerminalRefusal.PROVOCATION_UNESTABLISHED
-    for member in (
-        TerminalRefusal.DESCRIPTOR_UNFIT,
-        TerminalRefusal.PROVOCATION_UNESTABLISHED,
-    ):
-        assert _destroy(
-            _release(
-                outcome=TerminalOutcome(refusal=member),
-                cleanup=CleanupDisposition.NOT_ATTEMPTED,
-            )
+    assert (
+        TerminalRefusal.PRECONDITION_UNFIT != TerminalRefusal.PROVOCATION_UNESTABLISHED
+    )
+    assert _destroy(
+        _release(
+            outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
+            cleanup=CleanupDisposition.NOT_ATTEMPTED,
+            closure=HostClosure.REUSABLE,
         )
+    )
+    assert _destroy(
+        _release(
+            outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+            cleanup=CleanupDisposition.NOT_ATTEMPTED,
+            closure=HostClosure.INSPECTION_REQUIRED,
+        )
+    )
 
 
 def test_an_open_string_is_not_a_refusal() -> None:
@@ -332,7 +346,7 @@ def test_nothing_required_is_producible_ONLY_by_a_graceful_path() -> None:
     time.
     """
     assert _release(
-        outcome=TerminalOutcome(refusal=TerminalRefusal.DESCRIPTOR_UNFIT),
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
         cleanup=CleanupDisposition.NOT_ATTEMPTED,
         vm_installation_id="",
     )
@@ -389,3 +403,96 @@ def test_the_two_subprocess_sites_still_cannot_discriminate() -> None:
         "That is the change that makes `vantage_unavailable` derivable rather "
         "than guessed — revisit TerminalRefusal and add it with its site"
     )
+
+
+# ── the closure axis: the refusal BOUNDS what the host may be used for ─────
+
+
+def test_provocation_unestablished_may_NEVER_be_generally_reusable() -> None:
+    """The constraint enforced by the type, not by the writer's discipline.
+
+    The failure it prevents is concrete: a run that seeded a foreign rule,
+    failed, and partially unwound, releasing a host the NEXT lease treats as
+    clean.
+    """
+    with pytest.raises(SpecError) as exc:
+        _release(
+            outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+            closure=HostClosure.REUSABLE,
+        )
+    assert exc.value.code == RELEASE_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "closure", [HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY]
+)
+def test_provocation_unestablished_may_close_into_the_two_it_is_allowed(
+    closure: HostClosure,
+) -> None:
+    assert _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        closure=closure,
+    )
+
+
+def test_precondition_unfit_CAN_take_the_releasable_pole() -> None:
+    """Both directions, or the constraint only ever says no and cannot be shown
+    to permit anything. Untouched and safely releasable is the whole point of
+    this pole — in site 134's unset-key case not one TCP connection is opened."""
+    assert _release(
+        outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
+        closure=HostClosure.REUSABLE,
+    )
+
+
+def test_the_two_axes_do_not_collapse() -> None:
+    """Why the run ended, and what the host may now be used for. A refusal code
+    that only describes is one an operator cannot act against."""
+    assert {c.value for c in HostClosure} == {
+        "reusable",
+        "inspection_required",
+        "destroy_only",
+    }
+    assert len({c.value for c in HostClosure} & set(TERMINAL_REFUSALS)) == 0
+
+
+# ── released_by is a derived principal, not a name ────────────────────────
+
+
+def test_an_operator_name_is_refused_as_the_releasing_principal() -> None:
+    """A non-empty string is satisfied by whoever was watching. The principal
+    that CLOSED the lease is the authenticated workload."""
+    with pytest.raises(SpecError) as exc:
+        ReleasingPrincipal(
+            kind="github_actions_workload",
+            subject="Michael Ayoade",
+            run_binding="33860000001",
+        )
+    assert exc.value.code == RELEASE_MALFORMED
+
+
+def test_a_principal_from_ANOTHER_run_is_refused() -> None:
+    """`run_binding` is what makes it derived rather than declared."""
+    with pytest.raises(SpecError) as exc:
+        _release(
+            released_by=ReleasingPrincipal(
+                kind="github_actions_workload",
+                subject="repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main",
+                run_binding="some-other-run",
+            )
+        )
+    assert exc.value.code == RELEASE_FOREIGN
+
+
+def test_the_controller_fingerprint_is_NOT_the_releasing_principal() -> None:
+    """Two facts, two fields: who touched the host, and who closed the lease."""
+    document = _release().as_document()
+    assert document["host_mutation_evidence"].startswith("sha256:")
+    assert document["released_by"]["kind"] == "github_actions_workload"
+    assert "sha256:" not in document["released_by"]["subject"]
+
+
+def test_host_mutation_evidence_must_be_this_leases_controller() -> None:
+    with pytest.raises(PreconditionFailed) as exc:
+        _destroy(_release(host_mutation_evidence="sha256:" + "c" * 64))
+    assert exc.value.code == RELEASE_FOREIGN

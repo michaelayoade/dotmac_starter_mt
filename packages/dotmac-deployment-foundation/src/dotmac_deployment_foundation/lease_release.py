@@ -98,9 +98,12 @@ __all__ = [
     "RELEASE_STALE",
     "TERMINAL_REFUSALS",
     "CleanupDisposition",
+    "HostClosure",
     "HostLeaseReleaseV1",
     "HostStanding",
     "TerminalOutcome",
+    "ReleasingPrincipal",
+    "RELEASING_PRINCIPAL_KINDS",
     "TerminalRefusal",
     "host_standing",
     "lease_digest",
@@ -164,12 +167,29 @@ class TerminalRefusal(str, Enum):
     runner 304   the probe phase refused        `probe_refused`
     runner 311   probe phase emitted no JSON    `evidence_unreadable`
     runner 543   no `service_running` recorded  `evidence_incomplete`
-    vantage 134  inside probe refused           `probe_refused`
+    vantage 134  the probe HARNESS could not run `precondition_unfit`
     vantage 141  inside probe emitted no JSON   `evidence_unreadable`
     provoke 150  foreign rule could not be set  `provocation_unestablished`
-    provoke 216  descriptor declares no private `descriptor_unfit`
-    provoke 236  private port names no sources  `descriptor_unfit`
+    provoke 216  descriptor declares no private `precondition_unfit`
+    provoke 236  private port names no sources  `precondition_unfit`
     ==========================================  ============================
+
+    **TWELVE terminal refusals, not thirteen.** There are thirteen `raise`
+    statements across the three files and the thirteenth is
+    ``raise SystemExit(main())`` — an exit, not a refusal. Stated here so the
+    next reader does not go hunting for a mapping that should not exist.
+
+    **Site 134 is not a probe refusal, and its name misled everyone including
+    the lane that wrote it.** Reading the SCRIPT rather than the raise settles
+    it: `classify()` wraps its `ssh` in ``|| true`` and its `case` falls through
+    totally to ``unknown``, so EVERY way the vantage can be unavailable is
+    reported as DATA — ``prohibited``, ``silent``, ``unknown`` — and never as a
+    failure. That was the point of the three-outcome split: a jump that refuses
+    must not be indistinguishable from a closed port. The script therefore exits
+    non-zero only on its ``${…:?}`` guards — a missing positional argument, or
+    ``LANE3_JUMP_KEY`` unset. So 134 means the probe HARNESS could not be
+    invoked: nothing measured, and in the unset-key case nothing attempted.
+    That is the precondition pole, not the probe pole.
 
     ## The granularity is the DESTROY DECISION's, not the runner's
 
@@ -245,20 +265,28 @@ class TerminalRefusal(str, Enum):
     #: The runner's own record contradicted itself. Runner 154 — "overwriting an
     #: outcome is how a failure becomes a pass without anyone deciding to".
     RECEIPT_INCONSISTENT = "receipt_inconsistent"
-    #: The DESCRIPTOR cannot support the rehearsal: no `private` port, or a
-    #: private port naming no source set. Provocation 216, 236.
+    #: A PRECONDITION of the rehearsal is unfit, so it could not begin.
+    #: Provocation 216 and 236 (no `private` port; a private port naming no
+    #: source set) and inside-vantage 134 (the probe harness could not be
+    #: invoked — a missing argument or an unset jump key).
     #:
-    #: A distinct fact because the operator action is opposite: nothing was
-    #: attempted, nothing was mutated, the host is untouched, and re-running
-    #: against the same fixture fails identically. The repair is editing a
-    #: descriptor, not inspecting a machine.
-    DESCRIPTOR_UNFIT = "descriptor_unfit"
+    #: Named for the invariant rather than the instance. The ruling called this
+    #: `descriptor_unfit`, which fits 216 and 236 and not 134 — and the
+    #: difference between "the descriptor names no private port" and "no jump key
+    #: was configured" is not one anyone deciding whether to wipe a machine can
+    #: act on. Same granularity rule the rest of this vocabulary was derived at.
+    #:
+    #: The pole is UNTOUCHED AND SAFELY RELEASABLE: nothing attempted, nothing
+    #: mutated, and re-running against the same fixture fails identically. In
+    #: 134's unset-key case not a single TCP connection is opened. The repair is
+    #: fixing an input, never inspecting a machine.
+    PRECONDITION_UNFIT = "precondition_unfit"
     #: The provocation could not be established — the seeder failed to place the
     #: foreign rule. Provocation 150.
     #:
     #: THE ONLY REFUSAL WHERE THE HOST WAS MUTATED AND THE MUTATION FAILED.
     #: Partial rollback was attempted, so the machine is in a state nobody has
-    #: certified. `DESCRIPTOR_UNFIT` means *do not touch the machine, fix the
+    #: certified. `PRECONDITION_UNFIT` means *do not touch the machine, fix the
     #: input*; this means *inspect the machine before re-running*. Opposite
     #: operator actions, and one member cannot carry both — which is why this is
     #: not `PROBE_REFUSED` by elimination: no probe ran.
@@ -288,6 +316,50 @@ class HostStanding(str, Enum):
     RELEASED = "released"
 
 
+class HostClosure(str, Enum):
+    """What the host may be used FOR after this release. A SECOND AXIS.
+
+    `TerminalRefusal` says why the run ended. This says what the machine may now
+    be used for, and the two must not collapse into one: a refusal code that only
+    describes is a refusal code an operator can act against.
+
+    The failure this exists to prevent is concrete — a run that seeded a foreign
+    rule, failed, and partially unwound, releasing a host the NEXT lease treats
+    as clean.
+    """
+
+    #: A next lease may take this host as it stands.
+    REUSABLE = "reusable"
+    #: Something was mutated and the unwind is uncertified. A human looks before
+    #: anything else uses it.
+    INSPECTION_REQUIRED = "inspection_required"
+    #: Fit only for destruction — the state is not one anybody should build on.
+    DESTROY_ONLY = "destroy_only"
+
+
+#: Which closures each terminal refusal may resolve to. ENFORCED BY THE TYPE,
+#: not a convention the writer is trusted to honour.
+#:
+#: Two entries are ruled and the rest are deliberately unconstrained:
+#:
+#: * `PROVOCATION_UNESTABLISHED` may NEVER advertise the host as generally
+#:   reusable. It is the one refusal where the host was mutated and the mutation
+#:   failed, with a partial unwind, so the machine is in a state nobody has
+#:   certified.
+#: * `PRECONDITION_UNFIT` means untouched and safely releasable, and must be ABLE
+#:   to take `REUSABLE` — a constraint that can only ever say no cannot be shown
+#:   to permit anything, so the permissive pole is asserted as well.
+#:
+#: The others are unconstrained BY RULING rather than by this module's judgement.
+#: Narrowing one is a reviewed diff here, with the reason a destroy decision
+#: would turn on.
+_PERMITTED_CLOSURES: Final[dict[TerminalRefusal, frozenset[HostClosure]]] = {
+    TerminalRefusal.PROVOCATION_UNESTABLISHED: frozenset(
+        {HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY}
+    ),
+}
+
+
 class CleanupDisposition(str, Enum):
     """What became of what the lease created. Closed.
 
@@ -305,6 +377,69 @@ class CleanupDisposition(str, Enum):
 CLEANUP_DISPOSITIONS: Final[tuple[str, ...]] = tuple(
     d.value for d in CleanupDisposition
 )
+
+
+#: How a releasing principal proves itself. Closed, and deliberately not "a
+#: name": an operator's free text is exactly what this field may not be.
+RELEASING_PRINCIPAL_KINDS: Final[tuple[str, ...]] = ("github_actions_workload",)
+
+#: A workload subject, e.g. ``repo:michaelayoade/dotmac_starter_mt:ref:...``.
+_SUBJECT: Final = re.compile(r"^[a-z][a-z0-9_.:/-]{7,254}$")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ReleasingPrincipal:
+    """WHO closed the lease, derived from the run rather than typed by a human.
+
+    ``released_by`` was a non-empty string, which anything satisfies — including
+    an operator's name, which is precisely what it may not be. The ruling: the
+    authenticated Lane 3 workload principal that writes the terminal transition,
+    derived from trusted runner/lease identity, never operator free text, and
+    never the SSH/controller key fingerprint.
+
+    ``run_binding`` is what makes it DERIVED rather than declared: it must equal
+    the release's own ``rehearsal_run_id``, so a principal is tied to the run
+    that produced it and cannot be carried over from another.
+
+    **If the writer cannot prove its principal there is no release, and the host
+    stays held.** That is the designed outcome rather than a validation error to
+    work around — a lease nobody can close is safer than one closed by an
+    unprovable claim.
+    """
+
+    kind: str
+    subject: str
+    run_binding: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in RELEASING_PRINCIPAL_KINDS:
+            raise SpecError(
+                f"releasing principal kind {self.kind!r} is not one of "
+                f"{list(RELEASING_PRINCIPAL_KINDS)}. An open kind is operator "
+                "free text with a schema around it",
+                code=RELEASE_MALFORMED,
+            )
+        if not _SUBJECT.match(str(self.subject)):
+            raise SpecError(
+                f"releasing principal subject {self.subject!r} is not a workload "
+                "subject. A human name is what this field exists to refuse: the "
+                "principal that CLOSED the lease is the authenticated workload, "
+                "not whoever was watching",
+                code=RELEASE_MALFORMED,
+            )
+        if not str(self.run_binding).strip():
+            raise SpecError(
+                "a releasing principal with no run binding is a claim rather "
+                "than a derivation",
+                code=RELEASE_MALFORMED,
+            )
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "run_binding": str(self.run_binding),
+            "subject": self.subject,
+        }
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -420,7 +555,16 @@ class HostLeaseReleaseV1:
     rehearsal_run_id: str
     outcome: TerminalOutcome
     released_at: str
-    released_by: str
+    #: The authenticated workload that CLOSED the lease. See `ReleasingPrincipal`.
+    released_by: ReleasingPrincipal
+    #: The SSH/controller key that MUTATED the host — a different fact from who
+    #: closed the lease, kept in its own field rather than folded into the one
+    #: above. Two facts, two fields: who touched the host, and who closed it.
+    #: Must equal the lease's own controller identity.
+    host_mutation_evidence: str
+    #: What the host may be used for now. See `HostClosure` — a second axis from
+    #: why the run ended, and constrained by it.
+    closure: HostClosure
     cleanup: CleanupDisposition
 
     def __post_init__(self) -> None:
@@ -454,7 +598,6 @@ class HostLeaseReleaseV1:
             "source_revision",
             "authorization_run_id",
             "rehearsal_run_id",
-            "released_by",
         ):
             if not str(getattr(self, field)).strip():
                 raise SpecError(
@@ -466,6 +609,48 @@ class HostLeaseReleaseV1:
             raise SpecError(
                 f"outcome must be a TerminalOutcome, got "
                 f"{type(self.outcome).__name__}",
+                code=RELEASE_MALFORMED,
+            )
+        if not isinstance(self.released_by, ReleasingPrincipal):
+            raise SpecError(
+                "released_by must be a ReleasingPrincipal, got "
+                f"{type(self.released_by).__name__}. A non-empty string is "
+                "satisfied by an operator's name, which is what the ruling "
+                "excludes; no provable principal means no release, and the host "
+                "stays held",
+                code=RELEASE_MALFORMED,
+            )
+        if str(self.released_by.run_binding) != str(self.rehearsal_run_id):
+            raise SpecError(
+                f"the releasing principal is bound to run "
+                f"{self.released_by.run_binding!r} and this release is for "
+                f"{self.rehearsal_run_id!r}. A principal carried over from "
+                "another run is a claim rather than a derivation",
+                code=RELEASE_FOREIGN,
+            )
+        if not _DIGEST.match(str(self.host_mutation_evidence)):
+            raise SpecError(
+                f"host_mutation_evidence {self.host_mutation_evidence!r} is not "
+                "a sha256 fingerprint. The controller key that mutated the host "
+                "is retained as evidence in its own right — it is simply not the "
+                "principal that closed the lease",
+                code=RELEASE_MALFORMED,
+            )
+        if not isinstance(self.closure, HostClosure):
+            raise SpecError(
+                f"closure must be a HostClosure, got {type(self.closure).__name__}",
+                code=RELEASE_MALFORMED,
+            )
+        refusal = self.outcome.refusal
+        permitted = _PERMITTED_CLOSURES.get(refusal) if refusal else None
+        if permitted is not None and self.closure not in permitted:
+            raise SpecError(
+                f"a {refusal.value!r} release may close only into "
+                f"{sorted(c.value for c in permitted)}, not "
+                f"{self.closure.value!r}. That refusal is the one where the host "
+                "was MUTATED and the mutation FAILED, with a partial unwind, so "
+                "the machine is in a state nobody has certified — advertising it "
+                "as generally reusable is how the next lease inherits it as clean",
                 code=RELEASE_MALFORMED,
             )
         if not isinstance(self.cleanup, CleanupDisposition):
@@ -486,7 +671,9 @@ class HostLeaseReleaseV1:
             "outcome": self.outcome.as_document(),
             "rehearsal_run_id": self.rehearsal_run_id,
             "released_at": self.released_at,
-            "released_by": self.released_by,
+            "closure": self.closure.value,
+            "host_mutation_evidence": str(self.host_mutation_evidence),
+            "released_by": self.released_by.as_document(),
             "schema": LEASE_RELEASE_SCHEMA,
             "source_revision": self.source_revision,
             "vm_installation_id": str(self.vm_installation_id),
@@ -616,6 +803,17 @@ def require_release_before_destruction(
             f"{lease.authorization_run_id!r}. `HostLease` already refuses to be "
             "self-granted; a release that could be self-granted would reopen "
             "that at the other end",
+            code=RELEASE_FOREIGN,
+        )
+    if str(release.host_mutation_evidence) != str(
+        lease.controller_identity_fingerprint
+    ):
+        raise PreconditionFailed(
+            f"the release records host mutation by "
+            f"{release.host_mutation_evidence} and the lease was taken by "
+            f"{lease.controller_identity_fingerprint}. A release whose "
+            "host-mutation evidence is not this lease's controller is bound to "
+            "the wrong work",
             code=RELEASE_FOREIGN,
         )
     released = _instant(release.released_at, field="released_at")
