@@ -304,6 +304,48 @@ install.
 `Executor` now accepts V1 or V2 and still refuses a recovery plan, which
 completes the 3x3 substitution matrix at its third acceptance point.
 
+### The fifth signing identity becomes a TYPE
+
+Five signing identities exist in this estate — authorization, dispatch,
+observation, recovery and release evidence. Four were types that refuse a wrong
+purpose at construction. The fifth was a dict literal and a JSON field, and
+Platform's own source said so: *"`deployment_dispatch` and
+`platform_release_evidence` do not exist as types yet, so they are named here as
+literals until they do."*
+
+The measured cost was **4 typed diagonals and 16 typed refusals** where five
+identities' worth of enrolled material supports 5 and 20. The shortfall was never
+a skipped test — **data does not refuse anything.**
+
+This adds, beside `ReleaseEvidence.v1`'s verifier: the canonical
+`RELEASE_EVIDENCE_PURPOSE`, a `ReleaseEvidenceVerificationIdentity` that refuses
+any other purpose AT CONSTRUCTION, and a machine-readable `PURPOSE_MISMATCH`
+code. A caller deciding what to do about a wrong-purpose key branches on the
+code; a caller matching on a sentence is coupled to the wording, which is the
+thing most likely to be improved.
+
+It mirrors the shape Control's four identities use rather than importing one —
+this facility declares zero runtime dependencies, the line
+`provenance.AuthorizationReceipt` already draws. It validates the fingerprint's
+SHAPE and never the key: no crypto library enters this package.
+
+`from_document` is the one door from the installed
+`PlatformCpPublicVerificationIdentity.v1` to the type, and an ABSENT purpose is
+refused rather than defaulted — a document that says nothing must not be read as
+saying the right thing. `require_release_evidence_key` binds the identity to the
+key the envelope actually nominated, because a correct identity sitting beside a
+signature made by some other trusted key proves nothing about that signature.
+
+The suite carries the control that makes the four refusals mean something: **a
+verifier broken shut produces four perfect refusals and reads as success**, so
+the positive control asserts the identity accepts its OWN purpose. The five
+enrolled fingerprints are asserted physically distinct rather than assumed.
+
+NOT included, deliberately: wiring the identity into `accept_release_evidence`.
+That is the composition step, and it needs Platform's typed
+`ReleaseEvidenceSignerPointer` and its producer to exist first — a pointer that
+cannot be constructed from what this publishes is two halves that do not meet.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**

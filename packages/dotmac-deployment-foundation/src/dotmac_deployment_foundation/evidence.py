@@ -68,6 +68,13 @@ from .digest import Digest
 from .errors import PreconditionFailed, SpecError
 
 __all__ = [
+    "IDENTITY_KEY_MISMATCH",
+    "IDENTITY_MALFORMED",
+    "PURPOSE_MISMATCH",
+    "RELEASE_EVIDENCE_IDENTITY_SCHEMA",
+    "RELEASE_EVIDENCE_PURPOSE",
+    "ReleaseEvidenceVerificationIdentity",
+    "require_release_evidence_key",
     "RELEASE_EVIDENCE_SCHEMA",
     "ReleaseEvidenceV1",
     "SignatureVerifier",
@@ -77,6 +84,35 @@ __all__ = [
 ]
 
 RELEASE_EVIDENCE_SCHEMA: Final = "ReleaseEvidence.v1"
+
+#: The purpose this facility's release-evidence signing key exists for, and the
+#: ONLY purpose a key verifying release evidence may declare.
+#:
+#: Five signing identities exist in this estate — authorization, dispatch,
+#: observation, recovery and this one. Before this constant, four of them were
+#: TYPES that refuse a wrong purpose at construction and the fifth was a dict
+#: literal and a JSON field. `vendor_cp/deployment/signers.py` said so outright:
+#: *"`deployment_dispatch` and `platform_release_evidence` do not exist as types
+#: yet, so they are named here as literals until they do."*
+#:
+#: The measured cost of that asymmetry was 4 typed diagonals and 16 typed
+#: refusals where the material supports 5 and 20. The shortfall was never a
+#: skipped test — it was an identity that could not refuse, because data does
+#: not refuse anything.
+RELEASE_EVIDENCE_PURPOSE: Final = "platform_release_evidence"
+
+#: The document schema the public verification identity is installed as on a
+#: target. Named here because this facility READS that file; it does not write
+#: it, and the custody adapter that installs it belongs to the product.
+RELEASE_EVIDENCE_IDENTITY_SCHEMA: Final = "PlatformCpPublicVerificationIdentity.v1"
+
+#: MACHINE-READABLE, and that is the point rather than a nicety. A caller
+#: deciding what to do about a wrong-purpose key must be able to branch on the
+#: refusal; a caller that has to match on a sentence is coupled to the wording,
+#: and the wording is the thing most likely to be improved.
+PURPOSE_MISMATCH: Final = "release_evidence.purpose_mismatch"
+IDENTITY_MALFORMED: Final = "release_evidence.identity_malformed"
+IDENTITY_KEY_MISMATCH: Final = "release_evidence.identity_key_mismatch"
 
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 
@@ -106,6 +142,140 @@ class SignatureVerifier(Protocol):
     """
 
     def verify(self, *, key_id: str, message: bytes, signature: str) -> bool: ...
+
+
+#: `sha256:` + 64 lower-case hex. Foundation validates the SHAPE and never the
+#: key: this package holds no crypto library and must not acquire one — that is
+#: the same zero-dependency line `provenance.py` draws when it declines to import
+#: Control's `ApprovalEvidence`.
+_FINGERPRINT: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ReleaseEvidenceVerificationIdentity:
+    """WHO may verify release evidence, as a type that refuses a wrong purpose.
+
+    Mirrors the shape Control's four signer identities already use —
+    ``key_id``, ``algorithm``, ``public_key_fingerprint``, ``purpose``, refusing
+    at construction — because the estate's fifth identity being a dict literal
+    while the other four were types is the whole defect. Deliberately NOT an
+    import of Control's class: this facility declares zero runtime dependencies,
+    and `provenance.AuthorizationReceipt` already draws that line and says why.
+
+    ## What the construction-time refusal buys
+
+    An off-diagonal case becomes PROVABLE rather than argued. A caller cannot
+    hold one of these bearing the authorization, dispatch, observation or
+    recovery purpose — not "it would be rejected later", but the value does not
+    exist. That is what turns four typed refusals into twenty.
+
+    ## What it does NOT do
+
+    It verifies no signature and reads no key. `SignatureVerifier` remains the
+    assembly's, and this type says which key it is entitled to be — not whether
+    the bytes check out. Binding the two is :func:`require_release_evidence_key`.
+    """
+
+    key_id: str
+    algorithm: str
+    public_key_fingerprint: str
+    purpose: str = RELEASE_EVIDENCE_PURPOSE
+
+    def __post_init__(self) -> None:
+        for field in ("key_id", "algorithm"):
+            value = str(getattr(self, field)).strip()
+            if not value or len(value) > 200:
+                raise SpecError(
+                    f"ReleaseEvidenceVerificationIdentity.{field} must be "
+                    "non-empty and at most 200 characters",
+                    code=IDENTITY_MALFORMED,
+                )
+        if not _FINGERPRINT.match(str(self.public_key_fingerprint)):
+            raise SpecError(
+                "public_key_fingerprint must be sha256: followed by 64 "
+                f"lower-case hex characters, got "
+                f"{self.public_key_fingerprint!r}",
+                code=IDENTITY_MALFORMED,
+            )
+        if self.purpose != RELEASE_EVIDENCE_PURPOSE:
+            raise SpecError(
+                f"a release-evidence verification identity must declare "
+                f"{RELEASE_EVIDENCE_PURPOSE!r}, not {self.purpose!r}. The four "
+                "other signing purposes in this estate have their own identity "
+                "types for the same reason: a key minted to authorize a "
+                "deployment must not be able to vouch for a release, and the "
+                "only way to make that unrepresentable is to refuse it here",
+                code=PURPOSE_MISMATCH,
+            )
+
+    @classmethod
+    def from_document(cls, document: Any) -> ReleaseEvidenceVerificationIdentity:
+        """Read the identity a target carries, refusing anything else.
+
+        The installed file is `PlatformCpPublicVerificationIdentity.v1`. This is
+        the ONE door from that document to this type, so a caller cannot
+        half-parse it and pass the rest along loose — the same rule Control's
+        `RecoveryGrantV1.parse` states for its envelope.
+        """
+        if not isinstance(document, Mapping):
+            raise SpecError(
+                "a verification identity must be a JSON object, got "
+                f"{type(document).__name__}",
+                code=IDENTITY_MALFORMED,
+            )
+        schema = document.get("schema")
+        if schema != RELEASE_EVIDENCE_IDENTITY_SCHEMA:
+            raise SpecError(
+                f"this is not a {RELEASE_EVIDENCE_IDENTITY_SCHEMA} document "
+                f"(schema {schema!r})",
+                code=IDENTITY_MALFORMED,
+            )
+        missing = sorted(
+            {"key_id", "algorithm", "public_key_fingerprint", "purpose"} - set(document)
+        )
+        if missing:
+            raise SpecError(
+                f"the verification identity is missing {missing}. A purpose "
+                "absent from the document is NOT a purpose defaulted to this "
+                "one — that would let a document say nothing and be read as "
+                "saying the right thing",
+                code=IDENTITY_MALFORMED,
+            )
+        return cls(
+            key_id=str(document["key_id"]),
+            algorithm=str(document["algorithm"]),
+            public_key_fingerprint=str(document["public_key_fingerprint"]),
+            purpose=str(document["purpose"]),
+        )
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "algorithm": self.algorithm,
+            "key_id": self.key_id,
+            "public_key_fingerprint": self.public_key_fingerprint,
+            "purpose": self.purpose,
+            "schema": RELEASE_EVIDENCE_IDENTITY_SCHEMA,
+        }
+
+
+def require_release_evidence_key(
+    identity: ReleaseEvidenceVerificationIdentity, *, key_id: str
+) -> None:
+    """The identity must be the identity of the key that actually signed.
+
+    An identity held beside a verification proves nothing on its own — it has to
+    be bound to the key the envelope nominated, or a correct release-evidence
+    identity could sit next to a signature made by any other key in the trust
+    policy. That is the same reason `TrustPolicy.accepted_key_ids` exists and
+    the same reason a document may not carry its own key id.
+    """
+    if str(identity.key_id) != str(key_id):
+        raise SpecError(
+            f"the release-evidence identity names key {identity.key_id!r} and "
+            f"the envelope was signed by {key_id!r}. An identity that is not "
+            "the signing key's is a statement about a different key",
+            code=IDENTITY_KEY_MISMATCH,
+        )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
