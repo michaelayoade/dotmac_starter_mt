@@ -39,9 +39,25 @@ on:
       target:
         description: "the leased rehearsal target"
         required: true
+      # The thing that gets DESTROYED is a slot, not an address: the addresses
+      # are exactly what a destroy-and-restore can change, so a release binding
+      # one would bind a value that survives the wipe by coincidence. Required
+      # and undefaulted — a default here would hardcode which machine this lane
+      # is allowed to release.
+      vm_slot:
+        description: "the Proxmox slot the target occupies, `node/vmid`"
+        required: true
+      candidate_version:
+        description: "the Foundation candidate version under test"
+        required: true
 
 permissions:
   contents: read
+  # The releasing principal is the AUTHENTICATED workload, read from an identity
+  # token this job requests for itself. Without this the runner cannot prove who
+  # closed the lease, writes no release, and the host stays held — which is the
+  # designed outcome rather than a failure to route around.
+  id-token: write
 
 concurrency:
   # One exposure rehearsal per commit, and NEVER cancelled in flight. This lane
@@ -149,6 +165,8 @@ jobs:
             --controller-identity "${{ inputs.controller_identity }}" \
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \
+            --vm-slot "${{ inputs.vm_slot }}" \
+            --candidate-version "${{ inputs.candidate_version }}" \
             --probe-host "${{ vars.LANE3_PROBE_HOST }}" \
             --inside-vantage "${{ vars.LANE3_INSIDE_VANTAGE }}" \
             --inside-jump-key "${{ vars.LANE3_JUMP_KEY }}" \
@@ -157,7 +175,9 @@ jobs:
             --probe-evidence probe-evidence.json \
             --descriptor scripts/exposure-rehearsal/product.toml \
             --receipt-out receipt.json \
-            --status-out docs/inventories/deployment-exposure-rehearsal-status.md
+            --status-out docs/inventories/deployment-exposure-rehearsal-status.md \
+            --release-out lane3-lease-release.json \
+            --terminal-evidence-out lane3-terminal-evidence.json
 
       # `if: always()` so a FAILED rehearsal still publishes its receipt. A
       # failure that records nothing is indistinguishable from a run that never
@@ -172,3 +192,23 @@ jobs:
             probe-evidence.json
             docs/inventories/deployment-exposure-rehearsal-status.md
           if-no-files-found: error
+
+      # A SECOND artifact, and its own step, because the terminal record must
+      # reach the store on runs where NO receipt exists. The step above lists
+      # `receipt.json` under `if-no-files-found: error`; folding these paths into
+      # it would tie the record of a refusal to the presence of a receipt, and a
+      # refused run is precisely the case where there is none.
+      #
+      # `warn`, not `error`, and the difference is the whole point of this lane's
+      # terminal contract: absence here means the process died before it could
+      # say anything, the lease is still HELD, and turning that into a second red
+      # step would replace the real signal with a different one.
+      - name: Publish the terminal lease record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lane3-terminal-release
+          path: |
+            lane3-lease-release.json
+            lane3-terminal-evidence.json
+          if-no-files-found: warn
