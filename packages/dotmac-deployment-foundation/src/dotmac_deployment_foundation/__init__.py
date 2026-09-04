@@ -128,6 +128,11 @@ from .engine import (
     format_plan,
     steps_for_rollback,
 )
+from .engine.run import (
+    STAGE_TWO_ABSENT,
+    STAGE_TWO_REFUSED,
+    bind_authorized_effects,
+)
 from .errors import (
     DeploymentError,
     DeploymentFoundationError,
@@ -470,6 +475,9 @@ __all__ = [
     "MembershipFact",
     "NameExclusion",
     "OPERATIONS",
+    "STAGE_TWO_ABSENT",
+    "STAGE_TWO_REFUSED",
+    "bind_authorized_effects",
     "KNOWN_PRESTATE_DISCRIMINATORS",
     "PRESTATE_DIGEST_SCHEMA",
     "PRESTATE_DISCRIMINATOR",
