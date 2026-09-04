@@ -346,6 +346,41 @@ That is the composition step, and it needs Platform's typed
 `ReleaseEvidenceSignerPointer` and its producer to exist first — a pointer that
 cannot be constructed from what this publishes is two halves that do not meet.
 
+### `IncumbentPrestateDigestV1` — the value with no producer
+
+Control's `RecoveryGrantStatementV1` carries `incumbent_prestate_digest` as a
+SIGNED term and its `RecoverySubject` requires a caller to state one. Measured at
+the peeled `0.1.0a12` tag, **Control never computes it**: no canonicalizer, no
+hash, only storage and comparison.
+
+So the value existed in the contract with **no authority computing it on either
+side** — the exact asymmetry `ExecutionPlanDigestV1` was created to fix. Two
+sides computing it independently would diverge for the reason `plan_digest` did,
+and the failure would be a `PRESTATE_MISMATCH` that told nobody anything.
+
+Foundation now defines the canonical bytes and the typed digest function;
+Platform's INSTALLED ADAPTER computes it, so the producer is the artifact rather
+than a source tree; Control stores, signs and compares and implements no second
+canonicalizer. `FailedSystemObservationV1` carries its own document schema so it
+can be canonicalized alone — Control signs a digest of the observation, never of
+the plan containing it, and a fragment has no kind for the shared guard to check.
+
+**A missing or legacy value is UNEXECUTABLE and is never defaulted**, with its
+own code distinct from a mismatch. A grant written before the term existed does
+not acquire a computed value at read time and does not fall back to
+empty-matches-anything. The defect being repaired is a term nobody produced;
+defaulting it would recreate that defect with a friendlier face — and computing
+it from the observation in hand would make the check compare the observation with
+itself.
+
+The tests do the two distinct jobs the ruling names. **Mutating every bound
+field** proves each is genuinely inside the canonical bytes rather than merely
+present in the document, with the field list asserted to be the whole document so
+a new one cannot go unmutated. **Exchanging document and digest independently in
+both directions** proves the comparison is not passing on identity — and a third
+case moves both together and requires the pair to still refuse against the
+ORIGINAL authorization, which is the half a same-direction test cannot reach.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**

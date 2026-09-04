@@ -111,6 +111,13 @@ from .spec import BackupDataset
 from .version import VERSION
 
 __all__ = [
+    "PRESTATE_UNEXECUTABLE",
+    "require_incumbent_prestate_digest",
+    "incumbent_prestate_digest",
+    "canonical_prestate_bytes",
+    "PRESTATE_MISMATCH",
+    "INCUMBENT_PRESTATE_DIGEST_SCHEMA",
+    "PRESTATE_SCHEMA",
     "RECOVERY_PLAN_DIGEST_MISMATCH",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
     "RECOVERY_PLAN_EMPTY_FIELD",
@@ -136,6 +143,49 @@ RECOVERY_PLAN_SCHEMA: Final = "RecoveryExecutionPlanV1"
 #: digest needs a word for it that is not the word for a document they never
 #: parse.
 RECOVERY_PLAN_DIGEST_SCHEMA: Final = "RecoveryExecutionPlanDigestV1"
+
+#: The DOCUMENT schema of the incumbent prestate, so it can be canonicalized and
+#: digested on its own rather than only as a member of a recovery plan.
+PRESTATE_SCHEMA: Final = "FailedSystemObservationV1"
+
+#: The VALUE schema — the name of the digest, kept apart from the name of the
+#: document, the same split `ExecutionPlanDigestV1` draws.
+#:
+#: **This is a third cross-repository binding and it has an owner.** Control's
+#: `RecoveryGrantStatementV1` carries `incumbent_prestate_digest` as a signed
+#: term and its `RecoverySubject` requires a caller to state one — and Control
+#: NEVER COMPUTES IT. Measured at the peeled `0.1.0a12` tag: no canonicalizer, no
+#: hash, only storage and comparison, refusing with `PRESTATE_MISMATCH`.
+#:
+#: So the value existed in the contract with no authority computing it on either
+#: side. That is the exact asymmetry `ExecutionPlanDigestV1` was created to fix —
+#: *"Control freezes and signs it without reconstructing it, because a second
+#: canonicalizer is a second answer."* If both sides computed a prestate digest
+#: independently they would diverge for the same reason `plan_digest` did, and
+#: the failure would be a `PRESTATE_MISMATCH` that told nobody anything.
+#:
+#: The ruled split: Foundation defines these bytes and this function; Platform's
+#: INSTALLED ADAPTER computes it, so the producer is the artifact rather than a
+#: source tree; Control stores, signs and compares, and implements no second
+#: canonicalizer.
+INCUMBENT_PRESTATE_DIGEST_SCHEMA: Final = "IncumbentPrestateDigestV1"
+
+#: Refused: the prestate in hand is not the one that was authorized.
+PRESTATE_MISMATCH: Final = "recovery_plan.prestate_mismatch"
+
+#: Refused: there IS no authorized prestate digest, so nothing can be compared.
+#:
+#: A separate code from a mismatch on purpose. "The incumbent is not the one
+#: approved" and "no incumbent was ever approved" are different facts, and only
+#: one of them is repaired by re-observing the host.
+#:
+#: **A missing or legacy value is UNEXECUTABLE and is never defaulted.** A grant
+#: written before the term existed does not acquire a computed value at read
+#: time and does not fall back to empty-matches-anything. The defect being
+#: repaired here is a term nobody produced; defaulting it would recreate that
+#: defect with a friendlier face, and the recovery would proceed against an
+#: incumbent no one authorized.
+PRESTATE_UNEXECUTABLE: Final = "recovery_plan.prestate_unexecutable"
 
 #: Stable identifiers for this module's refusals. Assert these; read the prose.
 #: A module with more than one refusal has to be testable on WHICH one fired,
@@ -283,11 +333,31 @@ class FailedSystemObservationV1:
         )
 
     def as_document(self) -> dict[str, Any]:
+        """The document the prestate digest covers. Carries its own schema.
+
+        A nested member of a recovery plan AND a standalone canonical document,
+        because Control signs a digest of THIS observation and never of the plan
+        that contains it. A sub-document without its own schema cannot be
+        canonicalized on its own — the shared core's guard is what stops one
+        document kind being hashed as another, and a fragment has no kind.
+        """
         return {
+            "schema": PRESTATE_SCHEMA,
             "observed_descriptor_digest": self.observed_descriptor_digest,
             "roles": self.roles.as_document(),
             "target": self.target,
         }
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_prestate_bytes(self.as_document())
+
+    def digest(self) -> str:
+        """``IncumbentPrestateDigestV1`` for this observation.
+
+        The one authority. Control stores, signs and compares this value and
+        computes nothing; Platform's installed adapter calls this function.
+        """
+        return incumbent_prestate_digest(self.as_document())
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -460,6 +530,70 @@ class RecoveryExecutionPlanV1:
     def digest(self) -> str:
         """``RecoveryExecutionPlanDigestV1`` for this plan."""
         return recovery_plan_digest(self.as_document())
+
+
+def canonical_prestate_bytes(document: Any) -> bytes:
+    """The exact bytes of an incumbent prestate, per the ten shared rules.
+
+    Through the same core as every other document in this package. A local
+    canonicalizer here would be the second answer this whole binding exists to
+    prevent — and it would be a second answer to a question ANOTHER REPOSITORY
+    is signing.
+    """
+    return canonical_plan_bytes(document, schema=PRESTATE_SCHEMA, path="prestate")
+
+
+def incumbent_prestate_digest(document: Any) -> str:
+    """``IncumbentPrestateDigestV1 = sha256(canonical FailedSystemObservationV1)``.
+
+    Not the recovery plan digest, not the bundle manifest digest, not the
+    descriptor digest. Control carries all four as separate signed terms and
+    refuses each with its own code.
+    """
+    return str(Digest.of(canonical_prestate_bytes(document)))
+
+
+def require_incumbent_prestate_digest(
+    observation: FailedSystemObservationV1, *, authorized: str
+) -> str:
+    """Recompute before acting, or refuse.
+
+    The comparison is against the AUTHORIZED value passed in, never against a
+    digest re-derived from the same document and compared with itself. That
+    distinction is why the tests exchange document and digest INDEPENDENTLY: a
+    check that only ever sees both moved together cannot tell a real comparison
+    from ``x == x``.
+    """
+    if not isinstance(observation, FailedSystemObservationV1):
+        raise PreconditionFailed(
+            f"this is a {type(observation).__name__}, not a "
+            f"{FailedSystemObservationV1.__name__}",
+            code=RECOVERY_PLAN_WRONG_TYPE,
+        )
+    if not str(authorized).strip():
+        # NOT a mismatch, and not a pass. A grant with no prestate term is
+        # UNEXECUTABLE: it authorized a recovery without saying which incumbent,
+        # and computing one here from the observation in hand would make the
+        # check compare the observation with itself.
+        raise PreconditionFailed(
+            "this authorization carries no incumbent prestate digest, so there "
+            "is nothing to compare the failed system against. A missing or "
+            "legacy value is UNEXECUTABLE and is never defaulted: deriving one "
+            "from the observation in hand would compare it with itself, and "
+            "treating empty as 'any incumbent' would authorize recovering a "
+            "system nobody approved. Obtain a grant that names the incumbent",
+            code=PRESTATE_UNEXECUTABLE,
+        )
+    actual = observation.digest()
+    if actual != authorized:
+        raise PreconditionFailed(
+            f"the authorized incumbent prestate digest is {authorized} and the "
+            f"observation in hand digests to {actual}. The failed system is not "
+            "the one the recovery was authorized against — recovering a "
+            "different incumbent is not the act that was approved",
+            code=PRESTATE_MISMATCH,
+        )
+    return actual
 
 
 def canonical_recovery_plan_bytes(document: Any) -> bytes:
