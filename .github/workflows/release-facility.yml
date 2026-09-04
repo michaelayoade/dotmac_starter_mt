@@ -224,11 +224,38 @@ jobs:
           python -m venv .foundation-candidate
           .foundation-candidate/bin/python -m pip install --no-deps candidate-dist/*.whl
 
-      # THE REHEARSAL ORACLE. This package executes migrations, backup, the
-      # warm-candidate handoff and rollback. In-repo fakes cannot prove the real
-      # socket, firewall and proxy behaviour, so publication needs two oracles:
-      # a successful Lane 3 run on this exact SHA and its sixteen-item receipt.
-      # The receipt is parsed by the digest-verified candidate installed above.
+      # THE REHEARSAL ORACLE, and THREE REVISIONS bound rather than one shared.
+      #
+      # This package executes migrations, backup, the warm-candidate handoff and
+      # rollback. In-repo fakes cannot prove the real socket, firewall and proxy
+      # behaviour, so publication needs two oracles: a successful Lane 3 run on
+      # this exact SHA and its sixteen-item receipt. The receipt is parsed by the
+      # digest-verified candidate installed above.
+      #
+      # Three commits are in play and they are three different questions:
+      #
+      #   * the RELEASE/TAG revision — ${GITHUB_SHA} here, the commit that
+      #     publishes;
+      #   * the LANE 3 RUNNER revision — the rehearsal run's own head SHA, which
+      #     `gh run list --commit` selects on and which the receipt records.
+      #     `verify_publication` compares the two, so an old green run on
+      #     another commit cannot stand in;
+      #   * the CANDIDATE SOURCE revision — the commit the artifact was BUILT
+      #     from, recorded in the committed CandidateArtifact.v1 and resolved
+      #     above as `candidate_source_sha`.
+      #
+      # The third was unbound: nothing compared the receipt with the BYTES, so a
+      # rehearsal of candidate A satisfied a publication of candidate B whenever
+      # both ran at one commit — and `candidate_version` is a dispatch input
+      # precisely so that two candidates CAN be rehearsed from one SHA.
+      # `--artifact-digest` closes it, and closes it transitively for the source
+      # revision too: the digest identifies exactly one CandidateArtifact.v1,
+      # and that record names exactly one source_sha.
+      #
+      # `-E -P` for the same reason Lane 3 uses it: the point of installing the
+      # candidate is that it is the ONLY importable copy, and a PYTHONPATH
+      # pointing at the checkout would quietly make the gate validate the
+      # source it was written beside instead of the bytes about to be published.
       - name: Require a passing Lane 3 rehearsal on this exact SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -244,8 +271,11 @@ jobs:
           fi
           mkdir -p .rehearsal
           gh run download "${run_id}" -n lane3-rehearsal-receipt -D .rehearsal
-          .foundation-candidate/bin/python scripts/require_rehearsal.py \
-            "${GITHUB_SHA}" --receipt .rehearsal/receipt.json
+          echo "release_revision=${GITHUB_SHA}"
+          echo "candidate_source_revision=${{ steps.candidate.outputs.candidate_source_sha }}"
+          .foundation-candidate/bin/python -E -P scripts/require_rehearsal.py \
+            "${GITHUB_SHA}" --receipt .rehearsal/receipt.json \
+            --artifact-digest "${{ steps.candidate.outputs.candidate_sha256 }}"
 
       # Wheel-content policy: the declared surface and py.typed present, no
       # assembly/test/tooling content, NO migration lineage anywhere under the

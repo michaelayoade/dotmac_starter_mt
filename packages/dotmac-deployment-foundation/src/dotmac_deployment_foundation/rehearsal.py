@@ -55,6 +55,7 @@ __all__ = [
     "build_receipt",
     "render_pending_document",
     "render_status_document",
+    "require_rehearsed_artifact",
     "verify_publication",
 ]
 
@@ -256,7 +257,26 @@ class RehearsalReceiptV1:
 
     @property
     def foundation_revision(self) -> str:
+        """The commit whose Lane 3 RUNNER drove this rehearsal.
+
+        Not the commit the artifact was built from. Those are two questions and
+        the receipt answers only this one; the other lives in the candidate's
+        own ``CandidateArtifact.v1`` and is reached through
+        :attr:`foundation_artifact_digest`.
+        """
         return str(self.content["foundation_revision"])
+
+    @property
+    def foundation_artifact_digest(self) -> str:
+        """The digest of the bytes this rehearsal actually executed.
+
+        A READER for a field ``build_receipt`` has always written
+        unconditionally — no document changes shape and no v1 receipt in
+        existence lacks it. It is exposed because nothing could previously ASK
+        the receipt which artifact it was about, so publication compared the
+        revision and never the bytes.
+        """
+        return str(self.content["foundation_artifact_digest"])
 
     @property
     def authorization_run_id(self) -> str:
@@ -396,6 +416,51 @@ def build_receipt(
         "results": sorted(rows, key=lambda row: _BY_CODE[str(row["code"])].number),
     }
     return RehearsalReceiptV1(content=content)
+
+
+def require_rehearsed_artifact(
+    receipt: RehearsalReceiptV1, *, artifact_digest: str
+) -> None:
+    """Refuse unless this receipt is about the BYTES in hand.
+
+    ## The gap this closes
+
+    :func:`verify_publication` compares the LANE 3 RUNNER revision with the
+    RELEASE revision and every item's status. It does not — and cannot — say
+    which artifact the run executed, so a publication of one candidate was
+    satisfied by a rehearsal of a different one, provided both ran at the same
+    commit. Two candidate versions rehearsed from one protected-main SHA is not
+    a hypothetical shape: the rehearsal workflow takes ``candidate_version`` as
+    a dispatch input precisely so that it can.
+
+    ## Why this is the binding that makes the THIRD revision real
+
+    The candidate source revision lives in the committed
+    ``CandidateArtifact.v1`` and never enters the receipt. That is deliberate:
+    ``RehearsalReceipt.v1`` has crossed an artifact boundary in five built
+    candidate wheels, and adding a field to it would make one schema name
+    identify two contracts — the defect this package already paid for once.
+
+    So the candidate source revision is bound TRANSITIVELY and provably rather
+    than by widening a shipped record: this digest identifies exactly one
+    ``CandidateArtifact.v1``, and that receipt names exactly one ``source_sha``.
+    Assert the digest and the source revision follows; assert nothing and the
+    source revision is a value in a file that no gate ever consults.
+
+    Separate from :func:`verify_publication` rather than a parameter on it, and
+    the difference is not cosmetic. A keyword with a default is a check the
+    caller may omit and nobody will notice; a second function the release gate
+    must CALL is a check whose absence is visible in the gate's own source.
+    """
+    wanted = str(Digest.parse(artifact_digest, where="artifact_digest"))
+    if receipt.foundation_artifact_digest != wanted:
+        raise SpecError(
+            f"the receipt records a rehearsal of "
+            f"{receipt.foundation_artifact_digest} and the artifact in hand is "
+            f"{wanted}. A rehearsal of other bytes says nothing about these "
+            "ones — and because the digest is what identifies the candidate "
+            "receipt, it is also what names the revision they were built from"
+        )
 
 
 def verify_publication(receipt: RehearsalReceiptV1, *, revision: str) -> None:

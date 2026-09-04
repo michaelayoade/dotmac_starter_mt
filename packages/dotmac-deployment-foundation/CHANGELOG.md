@@ -2,6 +2,73 @@
 
 ## 0.4.0a1 — unreleased, NEVER BUILT
 
+### Three revisions, three bindings — and one of them was bound to nothing
+
+The build/rehearse/publish sequence involves three commits and they answer three
+different questions:
+
+- the **candidate source** revision — what the artifact was built from. It lives
+  in the committed `CandidateArtifact.v1` as `source_sha`;
+- the **Lane 3 runner** revision — whose runner drove the rehearsal. The
+  rehearsal run's own head SHA, recorded as
+  `RehearsalReceipt.v1.foundation_revision`;
+- the **release/tag** revision — what publishes.
+
+Two of them were already bound: `verify_publication` refuses unless the
+receipt's revision equals the release revision. The candidate source revision
+was bound to nothing at all — `resolve-candidate` never emitted it, so no
+downstream step could refer to it, let alone compare it.
+
+`release_facility.candidate_source_revision` emits it, refusing an absent, empty
+or abbreviated value rather than passing on something that can only ever compare
+unequal. Lane 3 now receives it as `--candidate-source-revision`, separate from
+`--foundation-revision`, and records all three facts it can establish in its
+terminal evidence.
+
+### `require_rehearsed_artifact` — publication binds the receipt to the BYTES
+
+New, and additive: `RehearsalReceipt.v1` is unchanged and no document changes
+shape. `RehearsalReceiptV1.foundation_artifact_digest` exposes a field
+`build_receipt` has always written unconditionally.
+
+Nothing previously compared the receipt with the artifact, so a rehearsal of
+candidate A satisfied a publication of candidate B whenever both ran at the same
+commit — and `candidate_version` is a dispatch input on `exposure-rehearsal.yml`
+precisely so that two candidates CAN be rehearsed from one SHA.
+
+This is also what makes the candidate source revision real without widening a
+shipped record: the digest identifies exactly one `CandidateArtifact.v1`, and
+that record names exactly one `source_sha`. `RehearsalReceipt.v1` has crossed an
+artifact boundary in five built candidate wheels, so adding a field to it would
+make one schema name identify two contracts — the defect this package has
+already paid for. The revision is therefore bound transitively and provably
+rather than by amendment.
+
+It is a separate function rather than a keyword on `verify_publication`: a
+keyword with a default is a check the caller may omit and nobody notices; a
+second function the gate must CALL is a check whose absence is visible in the
+gate's own source. `require_rehearsal.py` takes `--artifact-digest` as a
+REQUIRED argument, so a lane that forgets it does not run.
+
+### Import isolation needs `-E -P`, not just a venv
+
+Lane 3 and the publication gate both install the digest-verified candidate into
+a venv and drive their scripts with that interpreter. A venv does not make the
+wheel the only importable copy: `PYTHONPATH` is honoured by every interpreter,
+so a step that exported it — or a runner image that ships it — puts the
+checkout's `packages/dotmac-deployment-foundation/src` back on the path. The
+rehearsal would exercise the SOURCE and pass identically whether or not the
+wheel is correct, which is the one outcome the whole sequence exists to prevent.
+
+Both invocations are now `-E -P`: `-E` makes `PYTHONPATH` inert, `-P` keeps the
+script's own directory off `sys.path`. `-P` costs the runner nothing because it
+re-adds that directory itself, from an absolute path derived from `__file__`.
+
+The isolation is PROVED rather than asserted: one control shows a plain
+interpreter really does import a decoy `PYTHONPATH` names, and its pair shows
+`-E -P` makes the same path unreachable. A flag string in a YAML file that
+nobody has watched work is exactly as good as no flag at all.
+
 ### A refusal after mutation has a member: `host_state_uncertified`
 
 `TerminalRefusal.PROVOCATION_UNESTABLISHED` is RENAMED and GENERALIZED to

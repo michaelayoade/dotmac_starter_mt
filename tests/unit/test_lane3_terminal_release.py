@@ -105,7 +105,12 @@ def _args(tmp_path: pathlib.Path, **overrides: object) -> argparse.Namespace:
         "target": "lane3-rehearsal-target",
         "vm_slot": "dotmacproxmox/102",
         "candidate_version": "0.3.0a5",
+        # The Lane 3 RUNNER revision and the CANDIDATE SOURCE revision,
+        # deliberately DIFFERENT here: a fixture that used one value for both
+        # would let a runner emitting one of them twice pass every assertion.
         "foundation_revision": "2288b4d68f6b93d3e391d0dafa04987fb3f750f7",
+        "candidate_source_revision": "27bee8fc43919a5ed7f4853ccdedc2f996ad8d86",
+        "foundation_artifact": "sha256:" + "17" * 32,
         "authorization_run": "authz-77",
         # The CLI hands a string; `run` parses it before it reads the descriptor.
         "controller_identity": FINGERPRINT_TEXT,
@@ -1102,6 +1107,11 @@ def _first_mutation_line(function: ast.FunctionDef) -> int:
             "whether `--controller-identity` is a key fingerprint is decidable "
             "from the argument alone",
         ),
+        (
+            "require_commit",
+            "whether `--foundation-revision` and `--candidate-source-revision` "
+            "are full commits is decidable from the arguments alone",
+        ),
         ("private_port", "a question about the descriptor"),
         ("inside_source_set", "a question about the descriptor"),
         (
@@ -1370,6 +1380,77 @@ def test_lease_in_hand_is_DERIVED_and_not_a_second_flag() -> None:
         ctx.lease_in_hand = True  # type: ignore[misc]
     ctx.lease = _lease()
     assert ctx.lease_in_hand is True
+
+
+# ── three revisions, and the runner refuses a value it cannot compare ──────
+
+
+def test_a_full_commit_is_accepted_and_normalised() -> None:
+    """The accepting control. Without it every refusal below could belong to a
+    check that refuses everything — and case is normalised because a revision
+    compared against another spelling of itself must not read as a mismatch."""
+    assert runner.require_commit("A" * 40, field="--x") == "a" * 40
+
+
+@pytest.mark.parametrize(
+    ("value", "why"),
+    [
+        ("", "an unset workflow expression resolves to this"),
+        ("abc123", "a hand-typed short ref"),
+        # THE dangerous one: it looks like an answer and compares equal to
+        # nothing, so a binding built on it can only ever report "the revisions
+        # disagree" while the actual defect is a truncated field.
+        ("a" * 12, "an abbreviated commit"),
+        ("a" * 39, "one character short"),
+        ("g" * 40, "the right length and not hexadecimal"),
+    ],
+)
+def test_a_revision_that_cannot_be_compared_refuses(value: str, why: str) -> None:
+    """Fails before the change: `require_commit` did not exist."""
+    with pytest.raises(runner.PreconditionUnfit):
+        runner.require_commit(value, field="--x")
+
+
+def test_the_two_revisions_are_read_from_two_different_arguments() -> None:
+    """The conflation, checked at the source rather than trusted.
+
+    The Lane 3 RUNNER revision and the CANDIDATE SOURCE revision answer two
+    different questions and agree on many runs — which is exactly why one
+    variable serving both is invisible until the day they differ. They are
+    validated in the same place because both are decidable from the arguments;
+    they are validated as SEPARATE arguments because they are separate facts.
+    """
+    function = _run_function()
+    asked = {
+        ast.unparse(node.args[0])
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "require_commit"
+    }
+    assert asked == {
+        "args.foundation_revision",
+        "args.candidate_source_revision",
+    }, f"`run` validates {sorted(asked)} as revisions"
+
+
+def test_the_terminal_evidence_names_all_three_facts_separately(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The record this run leaves must let a reader tell them apart.
+
+    The release revision is deliberately NOT here: it belongs to whichever
+    release run later reads the receipt, and a value this run invented for it
+    would be a claim rather than an observation.
+    """
+    args = _args(tmp_path)
+    runner.record_terminal(_context(), args, None)
+    evidence = json.loads(pathlib.Path(args.terminal_evidence_out).read_text())
+    assert evidence["runner_revision"] == args.foundation_revision
+    assert evidence["candidate_source_revision"] == args.candidate_source_revision
+    assert evidence["candidate_artifact_digest"] == args.foundation_artifact
+    # Two DIFFERENT values on the fixture, so a sidecar that emitted one twice
+    # would fail here rather than passing on a run where they happen to agree.
+    assert evidence["runner_revision"] != evidence["candidate_source_revision"]
+    assert "release_revision" not in evidence
 
 
 # ── the crash boundary, read off the source ─────────────────────────────────
