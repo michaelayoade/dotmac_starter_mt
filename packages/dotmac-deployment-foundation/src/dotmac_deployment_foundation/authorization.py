@@ -96,17 +96,48 @@ __all__ = [
 #: correct and whose SUBJECT is the wrong act — and it would read as done.
 #:
 #: This returns the vocabulary to the state `0.3.0a5`'s candidate receipt
-#: already records as deliberate: Control 0.1.0a10 declares a `recover` member
-#: this facility does not. That asymmetry is known, written down, and honest.
+#: already records as deliberate: Control declares a `recover` member this
+#: facility does not. That asymmetry is known, written down, and honest.
 #: Control can authorize an operation this facility cannot name; it could
 #: previously authorize one this facility could name and not perform, which is
 #: strictly worse.
 #:
-#: The successor is a7: authorized failed-production recovery, with its own
+#: THE ASYMMETRY WAS MEASURED ON 2026-09-04 AND IS SHARPER THAN THE PARAGRAPH
+#: ABOVE ADMITS. Read against `dotmac_deployment_control` at the peeled ``a11``
+#: tag ``98b2a257f4185ee134b54a0349ad09d76f05286b``:
+#:
+#:   * Control's vocabulary is ``{deploy, rollback, recover}``. Its own module
+#:     docstring says the set is closed so that it cannot *"freeze, sign and
+#:     dispatch an authorization the executor is structurally unable to
+#:     honour"* — and it now can. ``recover`` went in at ``a10`` on the stated
+#:     premise that this facility's ``a5`` was being built against the same
+#:     three members; the withdrawal recorded above falsified that premise, and
+#:     nothing on Control's side refuses it: `require_operation` accepts
+#:     ``recover`` and the dispatch envelope carries it through.
+#:   * There is NO recover-specific settlement contract on that side.
+#:     ``settle_attempt`` is operation-agnostic — it settles on OUTCOME and
+#:     never reads ``operation`` — so there is no recover receipt shape and no
+#:     recover verification to build against.
+#:
+#: What saves this side from a silent admit is one line, and it is worth naming
+#: because it was a deliberate repair rather than luck:
+#: `provenance.AuthorizationReceipt.__post_init__` READS this constant instead
+#: of respelling the pair, so a ``recover`` receipt raises `SpecError` at
+#: CONSTRUCTION — before a grant, before a plan, before any effect. The
+#: divergence yields an unusable authorization, not an unauthorized execution.
+#:
+#: **The successor does NOT close this by re-adding the member here.** That
+#: repair is the one this annotation exists to prevent: adding ``recover`` back
+#: to make a counterparty's vocabulary line up is the same move as adding it to
+#: satisfy the ordering rule's letter, and it would again name an act on the
+#: strength of something other than an executor for it. The vocabulary
+#: divergence is Control's to repair. What the successor owns is the CAPABILITY
+#: — authorized failed-production recovery, with its own
 #: `RecoveryExecutionPlanV1` (a deployment-shaped plan is not a recovery plan),
-#: an `ExecutionGrant`, the replay coordinate, Control settlement, a signed
-#: result, and the three bindings above. `recover` is re-added THEN, by that
-#: change, against an executor for the act it names.
+#: an authorization binding, the replay coordinate, a signed result Control's
+#: existing operation-agnostic settlement can consume, and the three bindings
+#: above. WHICH vocabulary then carries the act is an open decision, and it is
+#: made by whoever holds that decision rather than by this comment.
 #:
 #: The two are mutually non-authorizing. A deploy approval that also permitted
 #: the rollback would let one decision make a change and erase it. Each is its

@@ -122,7 +122,22 @@ def test_the_operation_vocabulary_is_closed_and_shared_with_control() -> None:
     a6 briefly widened to three once `recovery_execution.py` existed, then
     WITHDREW it — the executor performs an isolated restore REHEARSAL, and
     `recover` names recovering a failed production system, which it cannot do.
-    `authorization.OPERATIONS` carries the full reasoning and the a7 successor.
+    `authorization.OPERATIONS` carries the full reasoning.
+
+    **This test is therefore asserting a KNOWN divergence, not agreement, and
+    that is the thing not to "fix" here.** Measured 2026-09-04 against
+    `dotmac_deployment_control` at the peeled `a11` tag `98b2a257`: Control's
+    vocabulary is three members and still accepts `recover`, so it can freeze,
+    sign and dispatch an authorization this executor cannot honour — the exact
+    outcome Control's own docstring says its closed set exists to prevent. The
+    repair belongs on that side. Widening this assertion to three to make the
+    two systems agree would re-create the defect a6 withdrew, and it would do it
+    by editing a test rather than by acquiring an executor.
+
+    The divergence is survivable here for one reason worth knowing while reading
+    this file: `provenance.AuthorizationReceipt.__post_init__` reads this same
+    constant, so a `recover` receipt raises at construction rather than reaching
+    a grant. Unusable authorization, never unauthorized execution.
 
     Written out rather than derived, deliberately, and this is the file that
     does the stating: a member appearing or disappearing has to be a diff

@@ -729,9 +729,13 @@ def _execute_restore_rehearsal(
 
     That premise stops exactly where the act does. Recovering a FAILED
     PRODUCTION SYSTEM mutates something that already exists and needs the whole
-    chain — grant, replay coordinate, Control settlement, signed result. It is
-    a7's, it is not this, and `recover` is deliberately absent from
-    `authorization.OPERATIONS` until it exists.
+    chain — an authorization binding, the replay coordinate, a settleable signed
+    result. That is `0.4.0a1`'s subject and it is not this command's.
+
+    `recover` is deliberately absent from `authorization.OPERATIONS`, and it is
+    NOT scheduled to return merely because that capability lands: the vocabulary
+    divergence with Control is Control's to repair, and the reasoning is at that
+    constant rather than restated here.
     """
     from .execution_bindings import ENTRY_POINT_GROUP
     from .recovery import load_manifest

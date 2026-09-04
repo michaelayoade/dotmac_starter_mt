@@ -71,9 +71,14 @@ sends the reader here.
 What that premise does NOT cover is a recovery of a failed production system.
 That act needs a captured prestate, the failed system's own observed state and a
 desired poststate; it mutates something that already exists; and it therefore
-needs the grant, a replay coordinate, Control settlement and a signed result.
-It is a7's subject, with its own `RecoveryExecutionPlanV1`, because a
-deployment-shaped plan is not a recovery plan.
+needs an authorization binding, a replay coordinate and a signed, settleable
+result. It is `0.4.0a1`'s subject, with its own `RecoveryExecutionPlanV1`,
+because a deployment-shaped plan is not a recovery plan.
+
+Note what that sentence does NOT say, since an earlier draft did: it does not say
+`recover` returns to `authorization.OPERATIONS` when the capability lands. The
+counterparty vocabulary divergence is Control's to repair, and the constant
+carries the measurement.
 
 ## Why the source evidence is not read here
 

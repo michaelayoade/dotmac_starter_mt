@@ -3,14 +3,53 @@
 ## 0.4.0a1 — unreleased, NEVER BUILT
 
 Allocated 2026-09-04. A MINOR bump rather than a seventh alpha of the `0.3.0`
-line, and the reason is a vocabulary widening rather than a size judgement:
-`recover` re-enters `authorization.OPERATIONS` against an executor for the act
-it names — authorized recovery of a FAILED PRODUCTION SYSTEM, with its own
-`RecoveryExecutionPlanV1`, an `ExecutionGrant`, the replay coordinate, Control
-settlement, a signed result, and the three bindings a rehearsal does not take
-(a captured prestate, the failed system's own observed state, and a desired
-poststate). A consumer that reads `OPERATIONS` gets a third member it did not
-have. That is not an alpha increment of the same contract.
+line, and the reason is a new CAPABILITY rather than a size judgement:
+authorized recovery of a FAILED PRODUCTION SYSTEM — an act that mutates
+something already existing, with its own `RecoveryExecutionPlanV1` (a
+deployment-shaped plan is not a recovery plan), an authorization binding, the
+replay coordinate echoed, a signed and settleable result, and the three
+bindings a rehearsal does not take: a captured prestate, the failed system's
+own observed state, and a desired poststate.
+
+### `recover` is NOT added to `authorization.OPERATIONS` by this release
+
+An earlier draft of the paragraph above said it was. That was a commitment this
+changelog had no standing to make, and it is withdrawn before it ever reached
+`main`.
+
+Michael's withdrawal of `recover` stands. The annotation at that constant —
+*"WAS a member for one commit and is WITHDRAWN; that reversal is the record"* —
+exists precisely to stop the member being re-added in order to close a gap, and
+a version-allocation note is exactly the kind of place that repair would get
+made quietly. Which authorization vocabulary carries the recovery act is an open
+decision, not a consequence of the bump.
+
+### The counterparty divergence, measured
+
+Read 2026-09-04 against `dotmac_deployment_control` at the peeled `a11` tag
+`98b2a257f4185ee134b54a0349ad09d76f05286b`:
+
+- **Control's vocabulary is `{deploy, rollback, recover}`; this facility's is
+  two.** Control's own module docstring says its vocabulary is closed so that it
+  cannot *"freeze, sign and dispatch an authorization the executor is
+  structurally unable to honour"* — and at `a11` it can. `recover` went in at
+  `a10` on the stated premise that this facility's `a5` was being built against
+  the same three members; the Shape B ruling falsified that premise, and nothing
+  on Control's side refuses it.
+- **There is no recover-specific settlement contract to implement against.**
+  Control's `settle_attempt` is operation-agnostic: it settles on OUTCOME
+  (succeeded / failed / timed out / cancelled) and never reads `operation`.
+  There is no recover-specific receipt shape and no recover-specific
+  verification. So what `0.4.0a1` must produce is a result Control's existing
+  operation-agnostic settlement path can consume — not conformance to a shape
+  that does not exist.
+- **On this side the divergence fails LOUDLY, which is the one reassuring fact
+  in it.** `AuthorizationReceipt.__post_init__` reads `OPERATIONS` rather than
+  respelling it (the #603 repair) and raises `SpecError` on `recover` at
+  construction — before a grant exists, before a plan is rendered, before any
+  effect. A dispatched `recover` authorization is unusable here, not silently
+  admitted. That is the correct failure and it is still a failure, which is why
+  the repair belongs on Control's side rather than in a quiet widening here.
 
 **Why the allocation happened before the work rather than after it.** The rule
 this package enforces — *a tree that diverges from a built artifact allocates a

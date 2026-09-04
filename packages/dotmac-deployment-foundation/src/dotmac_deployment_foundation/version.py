@@ -150,16 +150,51 @@ from typing import Final
 #: pretending the guard sees it.
 #:
 #: ``0.4.0a1`` is the successor, allocated 2026-09-04. A MINOR bump rather than
-#: a seventh alpha of the ``0.3.0`` line, because the change it names is a
-#: widening of a closed authorization vocabulary: ``recover`` re-enters
-#: `authorization.OPERATIONS` against an executor for the act it names —
-#: authorized recovery of a FAILED PRODUCTION SYSTEM, with its own
-#: `RecoveryExecutionPlanV1`, an `ExecutionGrant`, the replay coordinate,
-#: Control settlement, a signed result, and the three bindings a rehearsal does
-#: not take (a captured prestate, the failed system's own observed state, and a
-#: desired poststate). A consumer that reads ``OPERATIONS`` gets a third member
-#: it did not have; that is not an alpha increment of the same contract. It has
-#: NOT been built, and it must not be until Lane 3 passes on the exact SHA.
+#: a seventh alpha of the ``0.3.0`` line, because the change it names is a new
+#: CAPABILITY rather than a repair: authorized recovery of a FAILED PRODUCTION
+#: SYSTEM — an act that mutates something already existing, with its own
+#: `RecoveryExecutionPlanV1` (a deployment-shaped plan is not a recovery plan),
+#: an authorization binding, the replay coordinate echoed, a signed and
+#: settleable result, and the three bindings a rehearsal does not take: a
+#: captured prestate, the failed system's own observed state, and a desired
+#: poststate. It has NOT been built, and it must not be until Lane 3 passes on
+#: the exact SHA.
+#:
+#: **WHICH AUTHORIZATION VOCABULARY CARRIES IT IS NOT DECIDED BY THIS BUMP, AND
+#: ``recover`` IS NOT ADDED TO `authorization.OPERATIONS` HERE.** An earlier
+#: draft of this paragraph said it was, and that was a commitment this file had
+#: no standing to make. Michael's withdrawal of ``recover`` stands, and the
+#: annotation at that constant — *"WAS a member for one commit and is
+#: WITHDRAWN; that reversal is the record"* — exists precisely to stop the
+#: member being re-added to close a gap. Read it before proposing otherwise.
+#:
+#: The gap is real and it is on the OTHER SIDE, measured 2026-09-04 against
+#: `dotmac_deployment_control` at the peeled ``a11`` tag
+#: ``98b2a257f4185ee134b54a0349ad09d76f05286b``:
+#:
+#:   * Control's operation vocabulary is ``{deploy, rollback, recover}``; this
+#:     facility's is two. Control's own module docstring says its vocabulary is
+#:     closed so that it cannot *"freeze, sign and dispatch an authorization the
+#:     executor is structurally unable to honour"* — and at ``a11`` it can.
+#:     ``recover`` went in at ``a10`` on the stated premise that this facility's
+#:     ``a5`` was being built against the same three members; the Shape B ruling
+#:     falsified that premise and nothing on Control's side refuses it.
+#:   * **There is no recover-specific settlement contract to implement
+#:     against.** Control's ``settle_attempt`` is operation-agnostic: it settles
+#:     on OUTCOME (succeeded / failed / timed out / cancelled) and never reads
+#:     ``operation``. So a recovery result is settled by the same path a deploy
+#:     is, and the thing 0.4.0a1 must produce is a result that path can consume
+#:     — not conformance to a recover receipt shape that does not exist.
+#:
+#: What happens TODAY if Control dispatches a ``recover`` authorization is worth
+#: stating, because it is the one reassuring fact in the paragraph: it fails
+#: LOUDLY and EARLY on this side. `AuthorizationReceipt.__post_init__` reads
+#: ``OPERATIONS`` rather than respelling it (the #603 repair) and raises
+#: `SpecError` on ``recover`` at construction — before a grant exists, before a
+#: plan is rendered, before any effect. The divergence cannot produce a silent
+#: admit; it produces an unusable authorization. That is the correct failure and
+#: it is still a failure, which is why the repair is Control's rather than a
+#: quiet widening here.
 #:
 #: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
 #: canonical descriptor document, so changing it moves
