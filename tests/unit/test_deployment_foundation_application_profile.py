@@ -5,8 +5,11 @@
 - **The type refuses.** A profile with a missing concern is unconstructable. No
   warning branch (ADR 0039 § 4).
 - **The verification is report-only.** Nothing on the boot or deploy path is
-  gated by profile completeness, because nine of the thirteen concerns have no
-  fleet owner mature enough to bind.
+  gated by profile completeness, because ADR 0039 stages the § 4 refusal per
+  concern rather than switching it on for all thirteen at once. (A count of how
+  many concerns the fleet can bind today used to stand here and was withdrawn on
+  2026-09-04 — see `application_profile.py`'s docstring for why a facility must
+  not hold a fleet-maturity fact it cannot check.)
 
 Those are not in tension — they are the two halves the ADR's own staging
 paragraph describes, and together they are exactly Michael's acceptance

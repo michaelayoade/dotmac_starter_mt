@@ -128,9 +128,14 @@ def _application_profile_digest() -> str:
     REPORT-ONLY, and the distinction matters. This does not check whether the
     profile is complete, whether its bindings resolve, or whether its concerns
     are satisfied — ADR 0039 § 4's refusal is not composed into any deployment
-    path, because nine of the thirteen concerns have no fleet owner mature
-    enough to bind and gating on completeness today would stop every assembly
-    from deploying.
+    path, because that record stages the refusal per concern rather than
+    switching it on for all thirteen at once.
+
+    This paragraph used to give a count of how many concerns the fleet could
+    bind. It was withdrawn on 2026-09-04: a maturity determination about the
+    estate is not a fact this facility owns, can re-derive, or would learn of
+    when it changed. `application_profile.py`'s own docstring carries the
+    withdrawal and the reasoning.
 
     What it DOES do is carry the digest into the plan so it travels with the
     release and can be read back and compared (§ 8). An assembly declaring no
@@ -724,9 +729,13 @@ def _execute_restore_rehearsal(
 
     That premise stops exactly where the act does. Recovering a FAILED
     PRODUCTION SYSTEM mutates something that already exists and needs the whole
-    chain — grant, replay coordinate, Control settlement, signed result. It is
-    a7's, it is not this, and `recover` is deliberately absent from
-    `authorization.OPERATIONS` until it exists.
+    chain — an authorization binding, the replay coordinate, a settleable signed
+    result. That is `0.4.0a1`'s subject and it is not this command's.
+
+    `recover` is deliberately absent from `authorization.OPERATIONS`, and it is
+    NOT scheduled to return merely because that capability lands: the vocabulary
+    divergence with Control is Control's to repair, and the reasoning is at that
+    constant rather than restated here.
     """
     from .execution_bindings import ENTRY_POINT_GROUP
     from .recovery import load_manifest

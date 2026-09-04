@@ -1,6 +1,120 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.3.0a6 — unreleased, NEVER BUILT
+## 0.4.0a1 — unreleased, NEVER BUILT
+
+Allocated 2026-09-04. A MINOR bump rather than a seventh alpha of the `0.3.0`
+line, and the reason is a new CAPABILITY rather than a size judgement:
+authorized recovery of a FAILED PRODUCTION SYSTEM — an act that mutates
+something already existing, with its own `RecoveryExecutionPlanV1` (a
+deployment-shaped plan is not a recovery plan), an authorization binding, the
+replay coordinate echoed, a signed and settleable result, and the three
+bindings a rehearsal does not take: a captured prestate, the failed system's
+own observed state, and a desired poststate.
+
+### `recover` is NOT added to `authorization.OPERATIONS` by this release
+
+An earlier draft of the paragraph above said it was. That was a commitment this
+changelog had no standing to make, and it is withdrawn before it ever reached
+`main`.
+
+Michael's withdrawal of `recover` stands. The annotation at that constant —
+*"WAS a member for one commit and is WITHDRAWN; that reversal is the record"* —
+exists precisely to stop the member being re-added in order to close a gap, and
+a version-allocation note is exactly the kind of place that repair would get
+made quietly. Which authorization vocabulary carries the recovery act is an open
+decision, not a consequence of the bump.
+
+### The counterparty divergence, measured
+
+Read 2026-09-04 against `dotmac_deployment_control` at the peeled `a11` tag
+`98b2a257f4185ee134b54a0349ad09d76f05286b`:
+
+- **Control's vocabulary is `{deploy, rollback, recover}`; this facility's is
+  two.** Control's own module docstring says its vocabulary is closed so that it
+  cannot *"freeze, sign and dispatch an authorization the executor is
+  structurally unable to honour"* — and at `a11` it can. `recover` went in at
+  `a10` on the stated premise that this facility's `a5` was being built against
+  the same three members; the Shape B ruling falsified that premise, and nothing
+  on Control's side refuses it.
+- **There is no recover-specific settlement contract to implement against.**
+  Control's `settle_attempt` is operation-agnostic: it settles on OUTCOME
+  (succeeded / failed / timed out / cancelled) and never reads `operation`.
+  There is no recover-specific receipt shape and no recover-specific
+  verification. So what `0.4.0a1` must produce is a result Control's existing
+  operation-agnostic settlement path can consume — not conformance to a shape
+  that does not exist.
+- **On this side the divergence fails LOUDLY, which is the one reassuring fact
+  in it.** `AuthorizationReceipt.__post_init__` reads `OPERATIONS` rather than
+  respelling it (the #603 repair) and raises `SpecError` on `recover` at
+  construction — before a grant exists, before a plan is rendered, before any
+  effect. A dispatched `recover` authorization is unusable here, not silently
+  admitted. That is the correct failure and it is still a failure, which is why
+  the repair belongs on Control's side rather than in a quiet widening here.
+
+**Why the allocation happened before the work rather than after it.** The rule
+this package enforces — *a tree that diverges from a built artifact allocates a
+new version* — does not apply here, because `0.3.0a6` was never built and its
+name covers no bytes. What applies instead is the precedent set by #602 and
+#597: allocate in its own change, then build the contract under the new name,
+so a reviewer sees the identity move as a diff of its own rather than buried in
+the change that motivated it.
+
+### What retiring an UNBUILT name costs, and why it is not free
+
+`0.3.0a6` is the first name in this package's ledger retired without an
+artifact, and the shape is new:
+
+- **A spent NAME without a spent artifact.** Every earlier retirement was spent
+  by bytes — a wheel existed, so a second build would have made one name mean
+  two artifacts. `0.3.0a6` has no wheel and no `CandidateArtifact.v1` receipt.
+  What it has is publication in DOCUMENTS: while it was the declared identity,
+  `main` advertised it in this file, in `docs/MODULE_CATALOG.md`, in the
+  `poetry.lock` path-package line, in
+  `docs/inventories/declared-publication-baseline.json`, and inside the
+  rendered `deploy/rendered/docker-compose.yml` labels by way of
+  `io.dotmac.deployment.configuration.digest`. Re-declaring it would recreate
+  `0.3.0a2`'s two-contracts defect **with the documents rather than the bytes**
+  — the same failure arriving through a different door.
+- **No `CandidateDisposition.v1`, and symmetry would be WRONG rather than
+  merely unnecessary.** The log dispositions built artifacts, anchored by
+  `receipt_path`, `receipt_digest` and an `artifact` block, hash-chained from
+  the receipt's own digest. There is no a6 receipt to anchor to. The proof is
+  mechanical: adding `"0.3.0a6"` to `SUPERSEDED` in
+  `tests/architecture/test_version_binding_guard.py` FAILS
+  `test_a_superseded_candidate_is_still_refused_for_a_second_build`, because
+  the guard reads records, finds none for a version never built, and has
+  nothing to refuse with. `EXPECTED_ENTRIES` stays 4; `SUPERSEDED` and
+  `BUILT_CANDIDATES` are unchanged;
+  `tests/architecture/candidate_source_binding_baseline.json` stays empty,
+  which is still the healthy state.
+- **NO MACHINE ORACLE REFUSES `0.3.0a6`.** Stated plainly so it is not read as
+  coverage. The guard has three record sets — tags, candidate receipts,
+  dispositions — and this name is in none of them. `ABANDONED_UNBUILT` in the
+  binding-guard test asserts the freshness expectation longhand, the same shape
+  `PUBLISHED` uses so a stated expectation can be wrong and get caught; it is
+  an EXPECTATION, not an enforcement. A dispatched build of `0.3.0a6` would not
+  be refused. That is an unmonitored population recorded as one, and it is not
+  repaired by pretending otherwise.
+
+### Also in this release
+
+**The facility's own maturity claim about the thirteen concerns is withdrawn.**
+`application_profile.py` and `cli.py` asserted that four of the thirteen
+concerns have mature fleet owners and nine do not. The CODE never depended on
+it — bindability comes entirely from an assembly's own declaration, and the
+absence of a hardcoded list of "the bindable ones" is a deliberate design
+recorded in that module. But the prose stated a fleet-wide maturity
+determination this facility does not own and cannot check, in a package whose
+whole discipline is that a claim names its oracle. It is replaced by what is
+true here: the verification is report-only because ADR 0039 stages it that way,
+and which concerns any assembly can bind is that assembly's declaration to
+make.
+
+No wheel for `0.4.0a1` exists. It must be built exactly once, by
+`foundation-candidate.yml`, and not before the Lane 3 exposure rehearsal passes
+on the exact SHA under release — which today produces no receipt at all.
+
+## 0.3.0a6 — unreleased, NEVER BUILT, RETIRED UNBUILT 2026-09-04
 
 Allocated 2026-09-03, the third application of *a tree that diverges from a
 built artifact allocates a new version* — and the first one caught LATE.
@@ -27,6 +141,21 @@ the entry for that change below when it lands.
 
 No wheel for `0.3.0a6` exists. It must be built exactly once, by
 `foundation-candidate.yml`, after these changes merge.
+
+> **Amended 2026-09-04.** The paragraph above was written at allocation and its
+> second sentence is now false, which is why it is amended rather than edited:
+> `0.3.0a6` was NEVER BUILT and must never be. It is superseded by `0.4.0a1`
+> without an artifact — no wheel, no `CandidateArtifact.v1` receipt, and
+> therefore no `CandidateDisposition.v1`, which is a first for this ledger and
+> is reasoned through in the `0.4.0a1` entry above. Nothing else below is
+> withdrawn: the divergence reasoning is still correct and
+> `scripts/candidate_source_binding.py` is still the guard it motivated. The
+> work the paragraph beginning "This release also withdraws" promised did land,
+> in #603 through #606 — `recover` is out of `authorization.OPERATIONS` and the
+> restore executor is reachable as `restore-rehearsal --execute` — and those
+> bytes are now `0.4.0a1`'s, because a version that was never built carries
+> nothing away with it. Read the `0.4.0a1` entry for why an unbuilt name is
+> nonetheless SPENT, and for the machine-oracle gap that retirement leaves.
 
 ## 0.3.0a5 — built once, SUPERSEDED and unpublishable (2026-09-03); heading below written at allocation
 
