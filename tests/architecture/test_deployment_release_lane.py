@@ -45,6 +45,7 @@ import ast
 import copy
 import json
 import tomllib
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,20 @@ def _load_release_facility():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _execution_plan_probe_keywords(source: str) -> set[str]:
+    """Constructor fields exercised by the installed-wheel round-trip probe."""
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "FoundationExecutionPlanV1"
+    ]
+    assert len(calls) == 1
+    return {keyword.arg for keyword in calls[0].keywords if keyword.arg is not None}
 
 
 def _references(path: Path, needle: str) -> bool:
@@ -200,6 +215,33 @@ def test_release_facility_reasserts_freshness_before_publish_and_before_verify()
         steps = workflow["jobs"][job_name]["steps"]
         blob = "\n".join(str(step.get("run", "")) for step in steps)
         assert "assert_current_main.sh" in blob, job_name
+
+
+def test_the_installed_wheel_probe_rebuilds_every_execution_plan_field() -> None:
+    """A required plan field must fail CI before it fails a candidate build."""
+    from dotmac_deployment_foundation.execution_plan import (
+        FoundationExecutionPlanV1,
+    )
+
+    facility = _load_release_facility()
+    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
+    observed = _execution_plan_probe_keywords(facility._EXECUTION_PLAN_PROBE)
+    assert observed == expected
+
+
+def test_the_execution_plan_probe_field_guard_detects_an_omission() -> None:
+    """Sensitivity proof for the omission that stopped candidate run 33917635417."""
+    from dotmac_deployment_foundation.execution_plan import (
+        FoundationExecutionPlanV1,
+    )
+
+    facility = _load_release_facility()
+    planted = facility._EXECUTION_PLAN_PROBE.replace(
+        '    application_profile_digest=document["application_profile_digest"],\n',
+        "",
+    )
+    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
+    assert _execution_plan_probe_keywords(planted) != expected
 
 
 # ── the lane consumes a candidate and cannot build one ──────────────────────
