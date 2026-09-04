@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,8 @@ from dotmac_deployment_foundation.recovery_plan import (
 )
 from dotmac_deployment_foundation.version import VERSION
 
+from tests.unit.working_tree import python_files
+
 PACKAGE = (
     Path(__file__).resolve().parents[2]
     / "packages"
@@ -84,6 +87,7 @@ PACKAGE = (
     / "src"
     / "dotmac_deployment_foundation"
 )
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 A = "sha256:" + "a" * 64
 B = "sha256:" + "b" * 64
@@ -520,11 +524,11 @@ CANONICALIZING_MODULES: dict[str, int] = {
 }
 
 
-def _canonicalizing_modules() -> dict[str, int]:
+def _canonicalizing_modules(root: Path = PACKAGE) -> dict[str, int]:
     """AST, not grep. A mention in a docstring is not a call, and this package
     has already shipped a detector that matched its own prose."""
     found: dict[str, int] = {}
-    for path in sorted(PACKAGE.rglob("*.py")):
+    for path in python_files(root):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -602,7 +606,7 @@ def test_nothing_on_a_host_path_constructs_a_recovery_plan() -> None:
     it in that change; do not delete it.
     """
     importers = []
-    for path in sorted(PACKAGE.rglob("*.py")):
+    for path in python_files(PACKAGE):
         if path.name in {"recovery_plan.py", "__init__.py"}:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -630,3 +634,105 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
     from dotmac_deployment_foundation.authorization import OPERATIONS
 
     assert set(OPERATIONS) == {"deploy", "rollback"}
+
+
+# ── the same question, one directory over ──────────────────────────────────
+
+#: `scripts/` canonicalizes too, and until now nothing watched it. That blind
+#: spot had a live instance: the Lane 3 runner and this package's `write_release`
+#: were each about to ship their own writer for a `HostLeaseRelease.v1` into the
+#: SAME store — two answers to one question, invisible to the population ratchet
+#: above because its field of view stops at the package boundary.
+#:
+#: Neither lane was wrong; the seam was never named. That is exactly the kind of
+#: duplication a reviewer cannot be expected to hold in their head across two
+#: file sets, and exactly what a two-directional population baseline is for.
+#:
+#: Recorded per module, same as the package list, and it moves in BOTH
+#: directions: `exposure_rehearsal_runner.py: 1` is the runner's own evidence
+#: document. When it grew a second canonicalizer for the release record this
+#: baseline is what said so, and when that second one is deleted in favour of
+#: calling `lease.write_store_record_once`, the count returns here rather than
+#: leaving a stale row nobody removes.
+SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
+    "audit_kernel_surface.py": 1,
+    "candidate_source_binding.py": 2,
+    "collect_github_release_artifact.py": 1,
+    "collect_private_registry_files.py": 1,
+    "credential_lifecycle_sweep.py": 1,
+    "declared_publication_sweep.py": 1,
+    "executor_retirement.py": 2,
+    "exposure_rehearsal_runner.py": 1,
+    "external_connector_sweep.py": 2,
+    "facet_navigation_baseline.py": 1,
+    "fleet_decomposition_sweep.py": 2,
+    "fleet_fact_registry.py": 2,
+    "foundation_candidate.py": 1,
+    "foundation_disposition.py": 1,
+    "kernel_release_authorization.py": 1,
+    "lane3_runner_capability.py": 1,
+    "palette_debt_baseline.py": 1,
+    "release_artifact_verification.py": 1,
+    "write_release_record.py": 1,
+}
+
+
+def test_the_TOOLING_canonicalizing_population_has_not_moved() -> None:
+    """The package's guard could never have seen this, by construction.
+
+    A sweep scoped to `packages/` will not notice `scripts/` reimplementing what
+    the package owns. The worktree fix narrowed a sweep's field of view for good
+    reasons; this is the same question in the other direction, and the answer is
+    that the narrow scope was a real blind spot rather than a deliberate one.
+
+    `write_release_record.py` is in this list and is NOT a lease release — it
+    writes a distribution publication record. A name collision, checked rather
+    than assumed, and worth stating so the next reader does not "fix" it.
+    """
+    found = _canonicalizing_modules(SCRIPTS)
+    appeared = {
+        k: v for k, v in found.items() if SCRIPT_CANONICALIZING_MODULES.get(k) != v
+    }
+    vanished = {
+        k: v for k, v in SCRIPT_CANONICALIZING_MODULES.items() if found.get(k) != v
+    }
+    assert found == SCRIPT_CANONICALIZING_MODULES, (
+        f"the tooling canonicalizing population moved. Now differing: {appeared}; "
+        f"expected but not found as recorded: {vanished}. Before recording a new "
+        "one, ask whether the package already owns that document: a script that "
+        "writes a record into a store the package owns must CALL the package's "
+        "writer, not carry its own. `lease.write_store_record_once` is the "
+        "release writer; a second one in this directory is the defect this "
+        "baseline exists to surface"
+    )
+
+
+def test_the_population_detector_bites_and_does_not_read_prose(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity, for both new baselines.
+
+    A ratchet over a tree that happens to match proves nothing about its ability
+    to fail — and this package has already shipped a detector that matched its
+    own docstring, which is why the negative half is here too.
+
+    The fixture is a real checkout because the shared enumeration REFUSES a
+    directory git cannot answer for, rather than falling back to a directory
+    walk. That refusal caught this test the moment the two sweeps converged —
+    which is the refusal doing its job, not an inconvenience to work around.
+    """
+    subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
+        ["git", "init", "-q", str(tmp_path)],  # noqa: S607 # nosec B607
+        check=True,
+    )
+    (tmp_path / "canonicalizes.py").write_text(
+        "import json\ndef f(d):\n    return json.dumps(d, sort_keys=True)\n"
+    )
+    (tmp_path / "merely_dumps.py").write_text(
+        "import json\ndef f(d):\n    return json.dumps(d)\n"
+    )
+    (tmp_path / "only_talks_about_it.py").write_text(
+        '"""Discusses json.dumps(d, sort_keys=True) at length."""\n'
+    )
+    found = _canonicalizing_modules(tmp_path)
+    assert found == {"canonicalizes.py": 1}, found

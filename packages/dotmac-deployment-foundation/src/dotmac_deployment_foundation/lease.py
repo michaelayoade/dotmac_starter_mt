@@ -35,9 +35,11 @@ failure modes and want different mechanisms.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -52,6 +54,7 @@ __all__ = [
     "HOST_LEASE_SCHEMA_V1",
     "LEASE_HISTORICAL",
     "load_lease",
+    "release_path",
     "write_lease",
 ]
 
@@ -260,9 +263,101 @@ def _required_key(content: Any, key: str, path: Any) -> str:
     return str(content[key])
 
 
+def release_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
+    """Where the terminal release lives: BESIDE the lease, in the same store.
+
+    Derived from `_lease_path` rather than composed independently, so the two
+    records cannot come to live in different places. A release written anywhere
+    else would be a SECOND LEDGER, and the destroy gate would then consult one
+    record while the lease lived in another — which is exactly how a swapped
+    lease goes unnoticed.
+
+    Public because the destroyer needs it and `_lease_path` is private; that
+    privacy was itself a finding, since a caller re-deriving the path would be a
+    second opinion about where a lease lives.
+    """
+    lease = _lease_path(target, directory=directory)
+    return lease.with_name(lease.name.removesuffix(".json") + ".release.json")
+
+
 def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
     safe = "".join(ch if ch.isalnum() or ch in ".-" else "_" for ch in str(target))
     return Path(directory) / f"{safe}.json"
+
+
+def _store_bytes(document: Mapping[str, Any]) -> str:
+    """THE answer to "how does a record in this store become bytes". One place.
+
+    Both writers below call it, and so does the runner once it stops carrying
+    its own copy. Two spellings of this literal agree only on the day they are
+    written.
+    """
+    return json.dumps(document, sort_keys=True, indent=2) + "\n"
+
+
+def write_store_record(path: Path, document: Mapping[str, Any]) -> Path:
+    """Turn a record of THIS store into bytes, and write it. One answer.
+
+    Not a canonicalization for identity — that is `canonical_plan_bytes`, which
+    both `lease_digest` and `HostLeaseReleaseV1.digest` already use with their
+    own document schema. This is the STORE form: the shape a human reads in
+    `.dotmac-leases/` and the parser round-trips. Two byte forms for two
+    questions is correct, and neither one may have two implementations.
+
+    It exists because it briefly did have two. `write_lease` and `write_release`
+    each spelled `json.dumps(..., sort_keys=True, indent=2) + "\n"` inline. They
+    agreed on the day they were written, which is the only day a duplicated
+    literal ever agrees; a later change to indentation or separators in one would
+    have left two records in ONE directory written two ways, with nothing to fail.
+    The canonicalizing-population ratchet caught the second one appearing and
+    asked which kind it was — the answer is that it is the same mechanism, so it
+    is shared rather than registered.
+    """
+    path.write_text(_store_bytes(document), encoding="utf-8")
+    return path
+
+
+def write_store_record_once(path: Path, document: Mapping[str, Any]) -> Path:
+    """The same bytes, published ATOMICALLY and exactly once.
+
+    A lease may legitimately be rewritten — it is renewed, and the current row
+    is the answer. **A release may not.** It records how a lease ENDED, and a
+    second write is either a replay or two runs each believing they finished the
+    same work; overwriting picks one silently, and a destroyer then acts on the
+    wrong terminal outcome. That is not a difference of taste between two
+    writers, so it does not get merged into one for convenience: shared
+    mechanism for the bytes, separate function for the semantics.
+
+    `os.link` is both halves in a single call — it publishes the finished bytes
+    under the final name and fails with `EEXIST` when that name is taken. Hence
+    no `path.exists()` check: check-then-write leaves a window in which two
+    runs both see no file and both write, which is exactly the case this
+    protects. The content is completed and fsynced in a temp file first, so a
+    reader can never see a half-written release, and the directory is fsynced
+    after so the name survives a crash.
+
+    Raises `FileExistsError` on a second write. The typed refusal is the
+    CALLER's — the vocabulary for what a duplicate release means belongs to the
+    module that owns releases, not to this store primitive.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.parent / f".{path.name}.{os.getpid()}.partial"
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(_store_bytes(document))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(partial, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(partial)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    return path
 
 
 def write_lease(
@@ -300,11 +395,7 @@ def write_lease(
                 "use, which is worse than no lease at all because both would "
                 "then skip the checks a shared host needs"
             )
-    path.write_text(
-        json.dumps(lease.as_document(), sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return write_store_record(path, lease.as_document())
 
 
 def load_lease(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> HostLease:

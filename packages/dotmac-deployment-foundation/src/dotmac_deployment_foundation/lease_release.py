@@ -76,17 +76,30 @@ by the time it is terminal.
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 from datetime import UTC, datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Final
 
 from .canonical_plan import canonical_plan_bytes
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
-from .lease import HOST_LEASE_SCHEMA, HostLease
+from .lease import (
+    DEFAULT_LEASE_DIR,
+    HOST_LEASE_SCHEMA,
+    HostLease,
+    load_lease,
+    release_path,
+    write_store_record_once,
+)
 
 __all__ = [
+    "require_release_for_reuse",
+    "require_release_for_destruction",
+    "load_release",
+    "write_release",
     "CLEANUP_DISPOSITIONS",
     "LEASE_RELEASE_SCHEMA",
     "RELEASE_DUPLICATE",
@@ -928,5 +941,178 @@ def require_release_before_destruction(
             "second release of one lease is either a replay or two runs each "
             "believing they finished the same work",
             code=RELEASE_DUPLICATE,
+        )
+    return release
+
+
+# ── persistence: the SAME store `load_lease` reads ─────────────────────────
+
+
+def write_release(
+    release: HostLeaseReleaseV1,
+    *,
+    target: str,
+    directory: str | Path = DEFAULT_LEASE_DIR,
+) -> Path:
+    """Persist the terminal release BESIDE its lease.
+
+    The same authoritative store, through `lease.release_path`, so the destroy
+    gate reads one place. A second ledger would let the gate consult one record
+    while the lease lived in another, which is how a swapped lease goes
+    unnoticed.
+
+    Refuses to overwrite: a second release of one lease is either a replay or two
+    runs each believing they finished the same work, and both are things a reader
+    must see rather than have resolved for them.
+
+    **The refusal is ATOMIC, not a check followed by a write.** The store is a
+    shared host whose whole premise is that agents contend for the target, and
+    the workflow that drives it does not cancel a run in progress — so two
+    dispatches against one target overlap by design. A `path.exists()` guard
+    leaves a window in which both runs see no file and both write; the second
+    then silently overwrites the record of how the first ended, and a destroyer
+    acts on the wrong terminal outcome. `os.link` makes creating the name and
+    failing on a taken name one syscall, so there is no window to lose.
+
+    **Raises `PreconditionFailed`, and that is a contract rather than an
+    accident.** Not `OSError`: the `FileExistsError` from the publish is a store
+    primitive's signal, and the meaning of a duplicate RELEASE belongs to this
+    module. A caller that catches only `OSError` will not catch this — the
+    runner's `record_terminal` promises never to raise, so it must catch this
+    type by name.
+
+    **There is deliberately no path override.** A workspace copy for artifact
+    upload is a COPY taken after a successful store write, never a second write
+    path: the store is the ledger, and a parallel write would be the
+    second-ledger defect wearing an evidence costume.
+    """
+    path = release_path(target, directory=directory)
+    try:
+        return write_store_record_once(path, release.as_document())
+    except FileExistsError as exc:
+        # The refusal is raised from the ATOMIC publish, not from a preceding
+        # `path.exists()`. Check-then-write leaves a window in which two runs
+        # both see no file and both write — the very case this refuses.
+        raise PreconditionFailed(
+            f"a terminal release already exists at {path}. A second release of "
+            "one lease is either a replay or two runs each believing they "
+            "finished the same work — neither is resolved by overwriting",
+            code=RELEASE_DUPLICATE,
+        ) from exc
+
+
+def load_release(
+    target: str, *, directory: str | Path = DEFAULT_LEASE_DIR
+) -> HostLeaseReleaseV1 | None:
+    """The terminal release for this target, or None.
+
+    **None means HELD, and is not an error.** A host with no release is the
+    ordinary state of a host being worked on, and the state a crash leaves — the
+    caller's gate decides what that means, because "no release exists" and "this
+    release does not authorize" are different facts that must not share an
+    answer.
+    """
+    path = release_path(target, directory=directory)
+    if not path.exists():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise SpecError(
+            f"the release at {path} is not valid JSON: {exc}", code=RELEASE_MALFORMED
+        ) from exc
+    if document.get("schema") != LEASE_RELEASE_SCHEMA:
+        raise SpecError(
+            f"expected {LEASE_RELEASE_SCHEMA} at {path}, got "
+            f"{document.get('schema')!r}",
+            code=RELEASE_MALFORMED,
+        )
+    outcome = document.get("outcome") or {}
+    refusal = str(outcome.get("refusal") or "")
+    return HostLeaseReleaseV1(
+        lease_digest=str(document["lease_digest"]),
+        vm_slot=str(document["vm_slot"]),
+        vm_installation_id=str(document.get("vm_installation_id", "")),
+        candidate_version=str(document["candidate_version"]),
+        source_revision=str(document["source_revision"]),
+        authorization_run_id=str(document["authorization_run_id"]),
+        rehearsal_run_id=str(document["rehearsal_run_id"]),
+        outcome=TerminalOutcome(
+            receipt_digest=str(outcome.get("receipt_digest", "")),
+            refusal=TerminalRefusal(refusal) if refusal else None,
+        ),
+        released_at=str(document["released_at"]),
+        released_by=ReleasingPrincipal(
+            kind=str(document["released_by"]["kind"]),
+            subject=str(document["released_by"]["subject"]),
+            run_binding=str(document["released_by"]["run_binding"]),
+        ),
+        host_mutation_evidence=str(document["host_mutation_evidence"]),
+        closure=HostClosure(str(document["closure"])),
+        cleanup=CleanupDisposition(str(document["cleanup"])),
+    )
+
+
+def require_release_for_destruction(
+    target: str,
+    *,
+    directory: str | Path = DEFAULT_LEASE_DIR,
+    now: datetime,
+    vm_slot: str,
+    candidate_version: str,
+    vm_installation_id: str = "",
+) -> HostLeaseReleaseV1:
+    """THE call a destroyer or reimager makes. Reads one store, gates on it.
+
+    Loads the lease and the release from the same directory and applies every
+    refusal. A caller that assembled these itself would be free to load the lease
+    from one place and the release from another, which is the shape this function
+    exists to make unavailable.
+
+    A V1 lease refuses here by refusing to LOAD: it names no workload principal,
+    so nothing it says can be bound to a releasing party.
+    """
+    lease = load_lease(target, directory=directory)
+    return require_release_before_destruction(
+        lease,
+        load_release(target, directory=directory),
+        now=now,
+        vm_slot=vm_slot,
+        candidate_version=candidate_version,
+        vm_installation_id=vm_installation_id,
+    )
+
+
+def require_release_for_reuse(
+    target: str, *, directory: str | Path = DEFAULT_LEASE_DIR, now: datetime
+) -> HostLeaseReleaseV1:
+    """The OTHER question, and it has a different answer.
+
+    "May this host be destroyed?" and "may a next lease take it as it stands?"
+    are not the same, and a host may legitimately answer yes to the first and no
+    to the second — `destroy_only` is exactly that.
+
+    So reuse has its own gate, and it is where `failed` and `outcome_unknown`
+    cleanup refuse: what the lease created is either still there or nobody can
+    say it is not, and a next lease inheriting that host as clean is the same
+    failure either way.
+    """
+    lease = load_lease(target, directory=directory)
+    release = load_release(target, directory=directory)
+    if release is None:
+        standing = host_standing(lease, None, now=now)
+        raise PreconditionFailed(
+            f"the host at {target} is {standing.value!r} and has no terminal "
+            "release, so nothing has said it may be taken by another lease",
+            code=RELEASE_MISSING,
+        )
+    if release.closure is not HostClosure.REUSABLE:
+        raise PreconditionFailed(
+            f"the release closes this host as {release.closure.value!r}, not "
+            f"{HostClosure.REUSABLE.value!r}. A next lease taking it as it "
+            "stands is exactly what that closure withholds — and with cleanup "
+            f"{release.cleanup.value!r}, what the lease created is either still "
+            "there or nobody can say it is not",
+            code=RELEASE_NOT_DESTROYABLE,
         )
     return release

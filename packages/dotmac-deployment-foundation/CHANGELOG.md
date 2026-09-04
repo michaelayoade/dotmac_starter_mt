@@ -393,6 +393,72 @@ both directions** proves the comparison is not passing on identity — and a thi
 case moves both together and requires the pair to still refuse against the
 ORIGINAL authorization, which is the half a same-direction test cannot reach.
 
+### The release is PERSISTED, in the same store the lease already lives in
+
+`HostLeaseRelease.v1` was a type nothing wrote down. It could describe a
+terminal outcome perfectly and still leave the next run with exactly the evidence
+it had before: no running process, and a timestamp going by. A record that
+exists only in memory answers no question a later reader can ask.
+
+`write_release`, `load_release`, `require_release_for_destruction` and
+`require_release_for_reuse` close that, and the choice worth naming is WHERE they
+write: **the same authoritative store `load_lease` already reads**,
+`release_path()` beside the lease, not a second ledger. A separate release store
+would create two places a host's standing could be answered from — and two
+answers that can disagree is the failure this type exists to prevent, since a
+host would then be destroyable according to one file and held according to
+another.
+
+**`require_release_for_destruction` is the whole call a destroyer makes.** It
+loads the lease AND the release from one directory and then applies every
+existing refusal. A caller assembling those pieces itself would be free to load
+the lease from one place and the release from another; this function exists to
+make that shape unavailable, not merely discouraged. A `HostLease.v1` refuses
+here by refusing to LOAD at all — it names no workload principal, so nothing it
+says can be bound to a releasing party.
+
+**The refusal that matters most is `RELEASE_MISSING`.** Absence of a release is
+not "released" — it is UNKNOWN, and a destruction gate reading it as clearance is
+precisely the shape that lets a crashed run's silence authorise wiping a host
+another lane is still using. `RELEASE_DUPLICATE` refuses a second write, because
+a terminal record that can be overwritten is not terminal.
+
+**The release is published ATOMICALLY, and the difference is not academic.**
+`write_store_record_once` uses an `O_EXCL` temp plus `os.link`, so creating the
+name and failing on a taken name are ONE syscall. The first draft refused with a
+`path.exists()` check before writing, which reads correctly and protects nothing
+under the only conditions that matter: the store is a shared host whose premise
+is that agents contend for the target, and the driving workflow does not cancel a
+run in progress, so two dispatches overlap by design. Under an interleaving, both
+runs see no file, both write, and the second silently overwrites the record of
+how the first ended.
+
+Measured rather than argued — the same harness, twenty races each: `os.link`
+gives one publish and one refusal every time; stat-then-write gives two publishes
+and no refusal every time. The rejected implementation is KEPT in the test file
+as a negative control, because sequentially the two are indistinguishable, which
+is exactly how a stat-then-write survives a suite full of create-only tests.
+
+**Two writers, one bytes mechanism.** A lease may be rewritten — it is renewed,
+and the current row is the answer. A release may not. `_store_bytes` is the
+single answer to "how does a record in this store become bytes";
+`write_store_record` overwrites and `write_store_record_once` does not. The
+semantics differ for a real reason, so they are separate functions rather than a
+convenient merge.
+
+**`write_release` raises `PreconditionFailed`, deliberately, and takes no path
+override.** Not `OSError`: the meaning of a duplicate release belongs to this
+module, so a caller must catch it by name. And a workspace copy for artifact
+upload is a copy taken AFTER a successful store write — never a second write
+path, which would be the second-ledger defect wearing an evidence costume.
+
+**Reuse and destruction are separate gates over the same record.** "May this host
+be destroyed?" and "may a next lease take it as it stands?" have different
+answers, and a host may legitimately answer yes to one and no to the other.
+`require_release_for_reuse` refuses any closure that is not `REUSABLE` with
+`RELEASE_NOT_DESTROYABLE` — which is also the member that keeps "the lease timed
+out" from reading as "the host may be wiped".
+
 ### `HostLeaseRelease.v1` — the other end of the lease contract
 
 `load_lease` refuses to BEGIN without a lease record. Nothing recorded the END,
