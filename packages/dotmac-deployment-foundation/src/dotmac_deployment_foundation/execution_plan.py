@@ -57,7 +57,8 @@ exhaustively rather than left to "whatever ``json.dumps`` did":
 1. **Bytes** are ``json.dumps(document, sort_keys=True, separators=(",", ":"),
    ensure_ascii=True).encode("utf-8")``.
 2. **ASCII only.** Every string in the document must be ASCII, and a non-ASCII
-   string is REFUSED (:func:`_refuse_non_ascii`). With ``ensure_ascii=True`` the
+   string is REFUSED (`canonical_plan.refuse_non_ascii`, which OWNS rules 2, 5
+   and 6 for every plan document). With ``ensure_ascii=True`` the
    output is ASCII by construction, so the check and the encoder can never
    disagree — and the whole Unicode-normalization question (``é`` versus
    ``e`` + U+0301, two byte strings for one name) never arises.
@@ -90,20 +91,37 @@ over the finished document as well.
 from __future__ import annotations
 
 import dataclasses
-import json
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from .authorization import OPERATIONS
+from .canonical_plan import EXECUTION_PLAN_WRONG_TYPE, canonical_plan_bytes
 from .digest import Digest
-from .engine.plan import DeploymentPlan
 from .errors import PreconditionFailed, SpecError
 from .secrets_guard import require_no_secrets
 from .spec import ProductDeploymentSpec
 from .version import VERSION
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # NOT a runtime import, and that is a REPAIR rather than a style choice.
+    #
+    # `engine/__init__` imports `engine.run`, and `engine.run` imports
+    # `FoundationExecutionPlanV1` from here — so importing `engine.plan` at
+    # module scope made this module and the engine mutually dependent. That
+    # cycle resolved only because of the order `__init__` happened to import in,
+    # which meant ANY new module importing `execution_plan` before `engine`
+    # broke the package outright. `recovery_plan` is the module that
+    # demonstrated it.
+    #
+    # `DeploymentPlan` appears exactly once here, as the annotation on
+    # `render_execution_plan`, and `from __future__ import annotations` makes
+    # annotations strings. So the runtime never needed the import at all: the
+    # cycle was load-bearing for nothing.
+    from .engine.plan import DeploymentPlan
+
 __all__ = [
     "EXECUTION_PLAN_DIGEST_SCHEMA",
     "EXECUTION_PLAN_SCHEMA",
+    "EXECUTION_PLAN_WRONG_TYPE",
     "FoundationExecutionPlanV1",
     "HostPrestateV1",
     "canonical_execution_plan_bytes",
@@ -118,6 +136,12 @@ EXECUTION_PLAN_SCHEMA: Final = "FoundationExecutionPlanV1"
 #: CP submits a digest and Control stores one; both need a word for the thing
 #: they are handling that is not the word for the document they never parse.
 EXECUTION_PLAN_DIGEST_SCHEMA: Final = "ExecutionPlanDigestV1"
+
+# `EXECUTION_PLAN_WRONG_TYPE` is imported from `canonical_plan`, which owns both
+# object-level codes and explains why they cannot live here: `engine/run.py`
+# needs one, and this module is inside an import cycle with it. Re-exported
+# below so the name stays where a reader of this module looks for it — the same
+# object, never a second definition.
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -207,51 +231,6 @@ class HostPrestateV1:
                 {"image_digest": digest, "role": role} for role, digest in self.roles
             ]
         }
-
-
-def _refuse_non_ascii(value: Any, *, path: str) -> None:
-    """Rule 2, applied to every string at every depth.
-
-    Refusing is better than normalizing. A normalizer is a second opinion about
-    what the bytes are, and this contract's whole problem was two parties each
-    holding a defensible opinion — so there is exactly one rule here and it is
-    checkable by anyone in one line.
-    """
-    if isinstance(value, str):
-        if not value.isascii():
-            raise SpecError(
-                f"{path} contains a non-ASCII character. The execution plan "
-                "digest is compared across three systems, and two byte strings "
-                "for one name (NFC versus NFD) would silently be two plans. "
-                "ASCII removes the question rather than answering it"
-            )
-        return
-    if isinstance(value, bool | int):
-        return
-    if isinstance(value, dict):
-        for key, item in value.items():
-            _refuse_non_ascii(key, path=f"{path}.{key}")
-            _refuse_non_ascii(item, path=f"{path}.{key}")
-        return
-    if isinstance(value, list | tuple):
-        for index, item in enumerate(value):
-            _refuse_non_ascii(item, path=f"{path}[{index}]")
-        return
-    if value is None:
-        raise SpecError(
-            f'{path} is null. Rule 5: absence is "", [] or false, never null — '
-            "a missing key and an explicit null are two encodings of one fact "
-            "and would produce two digests for it"
-        )
-    if isinstance(value, float):
-        raise SpecError(
-            f"{path} is a float. Rule 6: float repr is platform- and "
-            "version-sensitive, so a duration serializing as 1.1 here and "
-            "1.1000000000000001 elsewhere is a digest that disagrees with itself"
-        )
-    raise SpecError(
-        f"{path} is a {type(value).__name__}, which this document cannot carry"
-    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -361,27 +340,24 @@ class FoundationExecutionPlanV1:
 
 
 def canonical_execution_plan_bytes(document: Any) -> bytes:
-    """The exact bytes, per the ten rules in this module's docstring.
+    """The exact bytes, per the ten rules in `canonical_plan`.
 
     Public because two other repositories need to be able to produce or check
     them, and a canonicalization that only exists inside a method is one those
-    repositories will reimplement — which is how there came to be two answers
-    in the first place.
+    repositories will reimplement — which is how there came to be two answers in
+    the first place.
+
+    The rules themselves MOVED to `canonical_plan.canonical_plan_bytes` when
+    `RecoveryExecutionPlanV1` acquired the same need, and the move is the point
+    rather than a tidy-up: a parallel copy would be a second authority over one
+    question, and copies agree right up until they don't. This function's
+    behaviour is unchanged — same bytes, same refusals, same wording — which
+    `test_the_extraction_did_not_move_a_single_byte` proves against an
+    independently written encoder rather than against the function itself.
     """
-    if not isinstance(document, dict):
-        raise SpecError("an execution plan document must be a JSON object")
-    if document.get("schema") != EXECUTION_PLAN_SCHEMA:
-        raise SpecError(
-            f"this is not a {EXECUTION_PLAN_SCHEMA} document (schema "
-            f"{document.get('schema')!r}). The digest covers THIS document "
-            "alone: hashing a wrapper that merely contains one is how Control's "
-            "plan_digest and the Foundation's came to be permanently unequal "
-            "while both looked correct"
-        )
-    _refuse_non_ascii(document, path="execution_plan")
-    return json.dumps(
-        document, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
+    return canonical_plan_bytes(
+        document, schema=EXECUTION_PLAN_SCHEMA, path="execution_plan"
+    )
 
 
 def execution_plan_digest(document: Any) -> str:
@@ -469,7 +445,26 @@ def require_execution_plan_digest(
 
     Returns the digest so a caller can put it on the execution report without
     computing it a second time and risking two answers.
+
+    **The type is checked before the digest, and that ordering is the repair.**
+    Every plan kind in this package has a ``digest()``, so handing a
+    `RecoveryExecutionPlanV1` here used to compute a perfectly good recovery
+    digest, compare it with a deploy authorization, and report *"something
+    changed between authorization and execution"* — a sentence that sends the
+    operator to look for a changed descriptor when what actually happened is
+    that two different acts were confused. A refusal that misdescribes its own
+    cause is worse than none, because it is actionable in the wrong direction.
     """
+    if not isinstance(plan, FoundationExecutionPlanV1):
+        raise PreconditionFailed(
+            f"this is a {type(plan).__name__}, not a "
+            f"{FoundationExecutionPlanV1.__name__}. Every plan kind in this "
+            "package can produce a digest, so comparing one against a deploy "
+            "authorization would have reported a digest MISMATCH — which reads "
+            "as a changed descriptor and is not what happened. The two plan "
+            "kinds are not interchangeable at any acceptance point",
+            code=EXECUTION_PLAN_WRONG_TYPE,
+        )
     actual = plan.digest()
     if actual != authorized:
         raise PreconditionFailed(

@@ -44,6 +44,7 @@ from typing import Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
 from ..backup import BackupRecord
+from ..canonical_plan import EXECUTION_PLAN_WRONG_TYPE
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..evidence import (
     SignatureVerifier,
@@ -361,6 +362,37 @@ class Executor:
         # grant, which carries it from the receipt. So there is no way to
         # construct an executor bound to a plan nobody froze, and no way to
         # supply an authorized digest that did not come through attestation.
+        # TYPE-CHECKED AT CONSTRUCTION, not at first attribute access.
+        # `RecoveryExecutionPlanV1` exists and carries no `operation` field, so
+        # a swapped plan would previously have travelled all the way to
+        # `_require_execution_plan` and died on `AttributeError: 'Recovery...'
+        # object has no attribute 'operation'` — after the executor had been
+        # built and while an operator reads a traceback rather than a refusal.
+        # The two plan kinds are not interchangeable at any acceptance point,
+        # and this is one of the three.
+        #
+        # `None` is deliberately NOT refused here, and the exclusion is the
+        # opposite of a loophole. Absent-plan is an EXISTING, separately proven
+        # refusal that `_require_execution_plan` makes with its own precise
+        # sentence — "this executor has no execution plan, so nothing can be
+        # recomputed and nothing was frozen" — and
+        # `test_absent_execution_plan_produces_zero_effects` is the regression
+        # test for the branch that used to let exactly that state mutate a host.
+        # Swallowing `None` here would answer that case with "you passed a
+        # NoneType, not a FoundationExecutionPlanV1", which is true, useless,
+        # and replaces a diagnosis with a type name. Two different faults, two
+        # different sentences, and the wrong-type one must not eat the other.
+        if execution_plan is not None and not isinstance(
+            execution_plan, FoundationExecutionPlanV1
+        ):
+            raise PreconditionFailed(
+                f"Executor was given a {type(execution_plan).__name__} as its "
+                f"execution plan, not a {FoundationExecutionPlanV1.__name__}. "
+                "This executor mutates a product host under a deployment "
+                "authorization, and a plan of another kind describes another "
+                "act that nothing this class holds authorizes",
+                code=EXECUTION_PLAN_WRONG_TYPE,
+            )
         self._execution_plan = execution_plan
         self._sleep = sleep
         self._clock = clock
