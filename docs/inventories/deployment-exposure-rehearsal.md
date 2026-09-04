@@ -26,6 +26,22 @@ exist as their own statuses precisely because the old count folded them in: a
 hand-driven step proves the operator can do it, not that the controller can, and
 a check whose fixture derives nothing observed nothing.
 
+## The Foundation bytes under rehearsal
+
+Lane 3 resolves the candidate repository, Actions run, artifact ID and SHA-256
+only from the committed `CandidateArtifact.v1`. It fetches and verifies both
+recorded distribution files, installs the wheel into an isolated environment,
+and runs the controller through that interpreter. The artifact digest written
+to `RehearsalReceipt.v1` is the digest from that same receipt; no dispatch input
+can supply it. The publication oracle parses the rehearsal receipt with the
+same candidate wheel before those bytes become reachable by the publisher.
+
+This is the binding between "the code passed Lane 3" and "these are the bytes
+being published." A rehearsal that imports
+`packages/dotmac-deployment-foundation/src` from its checkout is a source
+rehearsal, even if it carries a
+candidate digest in its output, and does not satisfy the lane.
+
 ## Historical result — superseded by the generated status document
 
 | Item | Result |

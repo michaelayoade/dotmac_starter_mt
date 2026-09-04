@@ -30,9 +30,14 @@ on:
       authorization_doc_digest:
         description: "digest of the signed authorization document"
         required: true
-      foundation_artifact:
-        description: "digest of the built Foundation wheel candidate"
+      facility:
+        description: >-
+          Which allowlisted universal facility supplies the rehearsal engine.
+          The candidate receipt, not this input, supplies artifact coordinates.
         required: true
+        type: choice
+        options:
+          - dotmac-deployment-foundation
       # EXACTLY what `ssh-keygen -lf <pub>` prints as its second field:
       # `SHA256:` and 43 characters of unpadded base64. The runner parses it
       # before it opens the descriptor and refuses anything else as
@@ -109,12 +114,55 @@ jobs:
     # the one the receipt names.
     runs-on: [self-hosted, dotmac-control-runner]
     timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # The rehearsal executes the exact candidate that may later be
+      # published. Coordinates and digest come only from the committed
+      # CandidateArtifact.v1 receipt; no dispatch field may substitute one.
+      - name: Resolve the allowlisted facility
+        run: |
+          python scripts/release_facility.py resolve \
+            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}"
+
+      - name: Resolve the recorded candidate
+        id: candidate
+        run: |
+          python scripts/release_facility.py resolve-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Fetch the recorded candidate artifact
+        env:
+          GH_TOKEN: ${{ secrets.CANDIDATE_SOURCE_TOKEN || github.token }}
+          REPOSITORY: ${{ steps.candidate.outputs.candidate_repository }}
+          ARTIFACT_ID: ${{ steps.candidate.outputs.candidate_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-dist
+          gh api "/repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > candidate.zip
+          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            candidate.zip candidate-dist
+
+      - name: Refuse anything that is not the recorded candidate
+        run: |
+          python scripts/release_facility.py verify-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.candidate_version }}" \
+            --dist candidate-dist
+
+      - name: Install the verified candidate in an isolated environment
+        run: |
+          set -euo pipefail
+          python -m venv .lane3-foundation
+          .lane3-foundation/bin/python -m pip install --no-deps candidate-dist/*.whl
 
       # The external half. Collected BEFORE the controller runs so the vantage
       # is qualified against its own interfaces and routes rather than trusted,
@@ -162,9 +210,9 @@ jobs:
                  "16 need a probe that genuinely originates inside the accepted" \
                  "source set; this host is outside it by construction" >&2
             exit 1; }
-          python scripts/exposure_rehearsal_runner.py \
+          .lane3-foundation/bin/python scripts/exposure_rehearsal_runner.py \
             --foundation-revision "${GITHUB_SHA}" \
-            --foundation-artifact "${{ inputs.foundation_artifact }}" \
+            --foundation-artifact "${{ steps.candidate.outputs.candidate_sha256 }}" \
             --authorization-run "${AUTHZ}" \
             --authorization-doc-digest "${{ inputs.authorization_doc_digest }}" \
             --controller-identity "${{ inputs.controller_identity }}" \

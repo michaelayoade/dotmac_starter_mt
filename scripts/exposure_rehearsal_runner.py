@@ -37,7 +37,8 @@ this narrowing would become the hole its critics would expect.
 ## Every input is required, and the run refuses without it
 
     --foundation-revision   the exact protected-main commit under test
-    --foundation-artifact   digest of the built wheel candidate
+    --foundation-artifact   digest read from the candidate receipt after the
+                            downloaded wheel was verified
     --authorization-run     Platform CP authorization run id
     --authorization-doc     the signed authorization document
     --controller-identity   fingerprint of the dedicated controller key
@@ -118,15 +119,6 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Final
 
-sys.path.insert(
-    0,
-    str(
-        pathlib.Path(__file__).resolve().parents[1]
-        / "packages"
-        / "dotmac-deployment-foundation"
-        / "src"
-    ),
-)
 # This file's OWN directory, so `lane3_provocation` resolves however this module
 # was loaded. Running `python scripts/exposure_rehearsal_runner.py` puts
 # `scripts/` on `sys.path[0]` for free; loading it through `importlib` from a
@@ -1699,7 +1691,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     for flag, help_text in (
         ("--foundation-revision", "exact protected-main commit under test"),
-        ("--foundation-artifact", "digest of the built wheel candidate"),
+        (
+            "--foundation-artifact",
+            "digest read from the verified candidate receipt",
+        ),
         ("--authorization-run", "Platform CP authorization run id"),
         ("--authorization-doc-digest", "digest of the signed authorization document"),
         ("--controller-identity", "fingerprint of the dedicated controller key"),

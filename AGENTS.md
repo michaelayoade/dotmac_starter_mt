@@ -1180,12 +1180,27 @@ specifics) points here and must never fork these rules.
 
 44. **A bootstrap candidate is built once, preserved by digest, and published as
     the SAME BYTES — never rebuilt.** `release-facility.yml` makes a passing
-    Lane 3 rehearsal its FIRST gate, before build, which is right for a release
-    and closes a loop for a bootstrap: Lane 3 needs a live issuer → the issuer
+    Lane 3 rehearsal a pre-publication gate after it has fetched and verified
+    the already-built candidate; it never builds a replacement. That closes a
+    loop for a bootstrap: Lane 3 needs a live issuer → the issuer
     needs a proved restore → the restore proof needs the candidate wheel → the
     candidate wheel needs Lane 3. `foundation-candidate.yml` breaks it by
     building the candidate once from merged protected main and preserving it
     WITHOUT publishing or tagging.
+
+    **Lane 3 executes the candidate bytes, never the checkout beside them.**
+    The rehearsal resolves repository, run, artifact and digest only from the
+    committed `CandidateArtifact.v1`, fetches and verifies both recorded
+    distribution files, installs the wheel into an isolated environment, and
+    drives `exposure_rehearsal_runner.py` with that interpreter. The publication
+    oracle parses the resulting receipt with the same installed wheel. A
+    dispatch-provided artifact digest or a `sys.path` insertion into
+    `packages/dotmac-deployment-foundation/src` would attest checkout behaviour
+    while publishing different bytes, so both are refused. The workflow run's
+    `head_sha` remains the protected-main oracle; the receipt's artifact digest
+    binds that run through the committed candidate record to the bytes it
+    executed.
+    (`tests/architecture/test_lane3_candidate_artifact_execution.py`)
 
     **The lane is incapable of publishing, not merely not asked to.** Publish
     authority here rests on exactly two declarations: `environment:` (the

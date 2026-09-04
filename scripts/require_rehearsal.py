@@ -246,16 +246,10 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_REFUSED
 
     # The second oracle. Imported here rather than at module scope so the pure
-    # `decide` half stays importable by a test with nothing installed.
-    sys.path.insert(
-        0,
-        str(
-            pathlib.Path(__file__).resolve().parents[1]
-            / "packages"
-            / "dotmac-deployment-foundation"
-            / "src"
-        ),
-    )
+    # `decide` half stays importable by a test with nothing installed. The
+    # caller must use the isolated interpreter holding the digest-verified
+    # candidate wheel; reaching into checkout source here would let the gate
+    # validate a different contract from the bytes it later publishes.
     from dotmac_deployment_foundation.errors import SpecError
     from dotmac_deployment_foundation.rehearsal import (
         RehearsalReceiptV1,

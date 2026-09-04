@@ -310,23 +310,26 @@ newly find — and only then add the facility's authority row.
   exists is not a publication. Publication needs a `release_run` oracle (rule
   30), and no run has been dispatched, so no version of this distribution is
   published or pinnable.
-- **Lane 2 gates the first PUBLICATION, not merely production adoption, and
-  that is now ENCODED rather than written down.** This package executes
-  migrations, backup, handoff and rollback; shipping a version whose only
-  evidence is fakes would put those paths in someone's hands having never met a
-  real engine.
+- **Lane 3 gates PUBLICATION, not merely production adoption, and that is now
+  ENCODED rather than written down.** Lane 2 remains the engine/database/
+  handoff/restore rehearsal; Lane 3 is the address-family exposure proof this
+  release requires. Shipping a version whose exposure evidence is only fakes
+  would put those paths in someone's hands without ever exercising real
+  sockets, proxy processes and firewall chains.
 
-  `release-facility.yml` calls `scripts/require_rehearsal.py` as its first gate
-  after the current-main freshness check — before anything is built, and long
-  before the publish token exists. It asks the Actions API for a COMPLETED,
-  SUCCESSFUL run of `deployment-rehearsal.yml` whose `head_sha` is
+  `release-facility.yml` first fetches and verifies the already-built candidate,
+  installs its wheel into an isolated environment, then calls
+  `scripts/require_rehearsal.py` with that interpreter — before publication and
+  before any publish token exists. It asks the Actions API for a COMPLETED,
+  SUCCESSFUL run of `exposure-rehearsal.yml` whose `head_sha` is
   byte-identical to the SHA under release, and fails closed on every ambiguity:
   no runs, a run in flight, any other conclusion, any SHA mismatch, or an
   oracle that cannot be read at all. There is no `--allow-missing`.
 
-  A GitHub-hosted runner is the disposable host — real Docker daemon, destroyed
-  after the job, and the script creates and tears down everything it uses
-  (teardown is `if: always()`).
+  The separately leased Lane 3 target is the disposable execution host. The
+  rehearsal itself also resolves its candidate from the committed receipt,
+  digest-verifies it and drives the controller runner with the installed wheel;
+  checkout source is never the Foundation import surface.
 
   The requirement stayed prose for one revision of this document, which was a
   defect: prose is bypassed by anyone who does not read it, including a future

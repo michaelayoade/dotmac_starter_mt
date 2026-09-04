@@ -125,53 +125,6 @@ jobs:
       - name: Assert run is on the current protected main SHA
         run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
-      # THE REHEARSAL ORACLE. This package executes migrations, backup, the
-      # warm-candidate handoff and rollback. Every one of those is covered
-      # in-repo against a FAKE `Effects`, which cannot tell anyone whether a
-      # real Docker daemon honours `service_completed_successfully`, whether a
-      # real `pg_dump` produced restorable bytes, or whether nginx drained the
-      # old upstream.
-      #
-      # LANE 3, not Lane 2 (corrected 2026-08-30). This release is named after
-      # ADDRESS-FAMILY EXPOSURE, and Lane 2 — engine, database, handoff,
-      # restore — never watches an IPv6 socket refuse the internet. Gating it
-      # on a lane that cannot observe the property is the "green preflight
-      # reads as attested" failure with two lanes standing in for two gates.
-      #
-      # TWO oracles, because they fail differently:
-      #
-      #   * the Actions API says a run of `exposure-rehearsal.yml` completed
-      #     SUCCESSFULLY on a head_sha byte-identical to ${GITHUB_SHA}
-      #     (AGENTS.md rule 30 — an external oracle, immutable coordinates);
-      #   * the published `RehearsalReceipt.v1` says WHAT that run established.
-      #
-      # A green run whose receipt is full of `blocked` rows is exactly what
-      # this pair catches, and either oracle alone would miss it. Publication
-      # needs sixteen `executed_passed`; no partial, not_applicable,
-      # hand_measured, vacuous, incomplete or missing result can satisfy it.
-      #
-      # First gate after freshness, so it runs before anything is built and
-      # long before the publish token exists.
-      - name: Require a passing Lane 3 rehearsal on this exact SHA
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          run_id="$(gh run list --workflow exposure-rehearsal.yml \
-            --commit "${GITHUB_SHA}" --limit 1 \
-            --json databaseId -q '.[0].databaseId // empty')"
-          if [ -z "${run_id}" ]; then
-            echo "REFUSED: no Lane 3 exposure rehearsal run exists for ${GITHUB_SHA}." >&2
-            echo "Run exposure-rehearsal.yml against this exact commit first." >&2
-            exit 1
-          fi
-          mkdir -p .rehearsal
-          # Fails the step if the run published no receipt, which is the
-          # correct outcome: a run that recorded nothing established nothing.
-          gh run download "${run_id}" -n lane3-rehearsal-receipt -D .rehearsal
-          python scripts/require_rehearsal.py "${GITHUB_SHA}" \
-            --receipt .rehearsal/receipt.json
-
       # NO `setup-poetry`, and its absence is the point. This job used to build
       # the wheel it published; it now fetches the one
       # `foundation-candidate.yml` already built. Leaving the build toolchain
@@ -259,6 +212,40 @@ jobs:
           python scripts/release_facility.py verify-candidate \
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             --dist candidate-dist
+
+      # The second oracle must be interpreted by the same Foundation bytes the
+      # rehearsal executed and this lane will publish. Importing the checkout
+      # here would let a source change teach the verifier to accept a receipt
+      # emitted by an older candidate without ever exercising that candidate's
+      # verification contract.
+      - name: Install the verified candidate for receipt verification
+        run: |
+          set -euo pipefail
+          python -m venv .foundation-candidate
+          .foundation-candidate/bin/python -m pip install --no-deps candidate-dist/*.whl
+
+      # THE REHEARSAL ORACLE. This package executes migrations, backup, the
+      # warm-candidate handoff and rollback. In-repo fakes cannot prove the real
+      # socket, firewall and proxy behaviour, so publication needs two oracles:
+      # a successful Lane 3 run on this exact SHA and its sixteen-item receipt.
+      # The receipt is parsed by the digest-verified candidate installed above.
+      - name: Require a passing Lane 3 rehearsal on this exact SHA
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(gh run list --workflow exposure-rehearsal.yml \
+            --commit "${GITHUB_SHA}" --limit 1 \
+            --json databaseId -q '.[0].databaseId // empty')"
+          if [ -z "${run_id}" ]; then
+            echo "REFUSED: no Lane 3 exposure rehearsal run exists for ${GITHUB_SHA}." >&2
+            echo "Run exposure-rehearsal.yml against this exact commit first." >&2
+            exit 1
+          fi
+          mkdir -p .rehearsal
+          gh run download "${run_id}" -n lane3-rehearsal-receipt -D .rehearsal
+          .foundation-candidate/bin/python scripts/require_rehearsal.py \
+            "${GITHUB_SHA}" --receipt .rehearsal/receipt.json
 
       # Wheel-content policy: the declared surface and py.typed present, no
       # assembly/test/tooling content, NO migration lineage anywhere under the

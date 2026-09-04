@@ -694,8 +694,13 @@ and which concerns any assembly can bind is that assembly's declaration to
 make.
 
 No wheel for `0.4.0a1` exists. It must be built exactly once, by
-`foundation-candidate.yml`, and not before the Lane 3 exposure rehearsal passes
-on the exact SHA under release — which today produces no receipt at all.
+`foundation-candidate.yml`, after the source-only Lane 3 runner-capability gate
+admits the exact protected-main SHA. The later Lane 3 exposure rehearsal must
+fetch, digest-verify, install and execute those exact candidate bytes; it may
+not import the Foundation from checkout or accept an operator-supplied artifact
+digest. Publication then parses the rehearsal receipt with the same installed
+candidate wheel. This preserves the bootstrap ordering without letting a green
+rehearsal attest bytes other than the ones published.
 
 ## 0.3.0a6 — unreleased, NEVER BUILT, RETIRED UNBUILT 2026-09-04
 
