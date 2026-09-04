@@ -177,13 +177,12 @@ def test_the_command_line_offers_no_way_to_supply_a_result() -> None:
 def test_this_tree_is_not_capable_and_says_exactly_which_reasons_remain() -> None:
     """The live verdict. It gets shorter as repairs land, and that is the point.
 
-    `compose_identity_unused`, `no_induced_failure` and `far_end_sentinel` are
-    repaired and deliberately absent — each detector is proved below by planting
-    its defect BACK, because a guard whose subject has been fixed is about the
-    NEXT occurrence, not the last one.
+    Four reasons are repaired and deliberately absent — `compose_identity_unused`,
+    `no_induced_failure`, `far_end_sentinel` and `service_state_asserted`. Each
+    detector is proved below by planting its defect BACK, because a guard whose
+    subject has been fixed is about the NEXT occurrence, not the last one.
 
-    The two that remain need the probe phase to move to a moment when the stack
-    is up, and a vantage inside the accepted source set.
+    The one that remains needs a vantage inside the accepted source set.
     """
     record = capability.assess(ROOT)
     assert record["verdict"] == "not_capable"
@@ -228,14 +227,6 @@ REPAIRS: dict[capability.Reason, dict[Path, list[tuple[str, str]]]] = {
             ),
         ]
     },
-    capability.Reason.SERVICE_STATE_ASSERTED: {
-        capability.COLLECTOR: [
-            ('\\"service_running\\": true', '\\"service_running\\": %s')
-        ],
-        capability.RUNNER: [
-            ('probe.get("service_running", True)', 'probe["service_running"]')
-        ],
-    },
 }
 
 LIVE_REASONS = frozenset(REPAIRS)
@@ -255,7 +246,13 @@ def test_repairing_exactly_one_reason_clears_exactly_that_reason(
     reasons = {entry["reason"] for entry in record["reasons"]}  # type: ignore[index]
     assert repaired not in reasons, f"{repaired} survived its own repair"
     assert reasons == LIVE_REASONS - {repaired}, reasons
-    assert record["verdict"] == "not_capable"
+    # The verdict follows from what is left rather than being asserted as a
+    # constant. Four of the five reasons are now repaired, so with one live
+    # reason remaining, repairing it IS the all-clean case — and an assertion
+    # hardcoded to `not_capable` would have failed here for a reason that says
+    # nothing about the detector under test.
+    expected = "not_capable" if reasons else "capable"
+    assert record["verdict"] == expected, (record["verdict"], sorted(reasons))
 
 
 def test_a_source_with_none_of_them_is_capable(tmp_path: Path) -> None:
@@ -272,6 +269,41 @@ def test_a_source_with_none_of_them_is_capable(tmp_path: Path) -> None:
     record = capability.assess(_tree_with(tmp_path, every))
     assert record["reasons"] == [], record["reasons"]
     assert record["verdict"] == "capable"
+
+
+def test_asserting_the_service_state_again_is_refused(tmp_path: Path) -> None:
+    """REGRESSION PLANT for item 13's repair, in BOTH halves.
+
+    The collector measured a literal and the runner read an ABSENT key as a
+    running service. Either alone is enough to refuse, so either alone is
+    planted — a detector satisfied by only one of them would go quiet the first
+    time somebody repaired the other.
+    """
+    literal = _tree_with(
+        tmp_path / "collector",
+        {
+            capability.COLLECTOR: [
+                ('\\"service_running\\": %s', '\\"service_running\\": true')
+            ]
+        },
+    )
+    assert capability.Reason.SERVICE_STATE_ASSERTED in {
+        entry["reason"]
+        for entry in capability.assess(literal)["reasons"]  # type: ignore[index]
+    }
+
+    defaulted = _tree_with(
+        tmp_path / "runner",
+        {
+            capability.RUNNER: [
+                ('probe["service_running"]', 'probe.get("service_running", True)')
+            ]
+        },
+    )
+    assert capability.Reason.SERVICE_STATE_ASSERTED in {
+        entry["reason"]
+        for entry in capability.assess(defaulted)["reasons"]  # type: ignore[index]
+    }
 
 
 def test_reintroducing_a_far_end_sentinel_is_refused_again(tmp_path: Path) -> None:

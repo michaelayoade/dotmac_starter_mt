@@ -41,8 +41,28 @@
 # failure mode for a security probe.
 set -euo pipefail
 
-PROBE="${1:?usage: collect_probe_evidence.sh <probe-host> <target>}"
-TARGET="${2:?usage: collect_probe_evidence.sh <probe-host> <target>}"
+# TWO PHASES, and the split is the whole point of item 13.
+#
+#   qualify  — BEFORE the controller applies anything. Enumerates the vantage
+#              and reads the far end. Collected first so the vantage is
+#              qualified against its own interfaces and routes rather than
+#              trusted, and so nothing the controller does can contaminate it.
+#   probe    — AFTER the apply and BEFORE teardown, which is the only moment a
+#              negative means anything. A refusal against a port where nothing
+#              is listening measures an absent service, not an enforced
+#              exposure, and evidence collected before the stack was applied is
+#              an accurate measurement of the wrong instant.
+#
+# The ordering guarantee the single-phase version had is preserved rather than
+# traded away: qualification still happens before any mutation. What moved is
+# only the half that has to happen while the service is up.
+PHASE="${1:?usage: collect_probe_evidence.sh <qualify|probe> <probe-host> <target>}"
+PROBE="${2:?usage: collect_probe_evidence.sh <qualify|probe> <probe-host> <target>}"
+TARGET="${3:?usage: collect_probe_evidence.sh <qualify|probe> <probe-host> <target>}"
+case "${PHASE}" in
+  qualify|probe) ;;
+  *) echo "REFUSED: unknown phase '${PHASE}'" >&2; exit 2 ;;
+esac
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes)
 
 # The private paths the retracted NIC used to reach. Probed explicitly, because
@@ -58,13 +78,29 @@ on_probe() { ssh "${SSH_OPTS[@]}" "${PROBE}" "$@"; }
 # key would prove a credential works that was never meant to be used.
 : "${LANE3_OBSERVER_USER:?unset: the restricted target-side observation identity}"
 : "${LANE3_OBSERVER_KEY:?unset: the private key for that identity}"
-far_end="$(
-  "$(dirname "$0")/observe_far_end.sh" \
-    "${PROBE}" "${TARGET}" "${LANE3_OBSERVER_USER}" "${LANE3_OBSERVER_KEY}"
-)"
-extract() { printf '%s' "${far_end}" | sed -n "s/.*\"$1\": \"\\([^\"]*\\)\".*/\\1/p"; }
-observed_v4="$(extract observed_source_v4)"
-observed_v6="$(extract observed_source_v6)"
+observed_v4=""; observed_v6=""; listening=""
+if [ "${PHASE}" = qualify ]; then
+  far_end="$(
+    "$(dirname "$0")/observe_far_end.sh" \
+      "${PROBE}" "${TARGET}" "${LANE3_OBSERVER_USER}" "${LANE3_OBSERVER_KEY}"
+  )"
+  extract() { printf '%s' "${far_end}" | sed -n "s/.*\"$1\": \"\\([^\"]*\\)\".*/\\1/p"; }
+  observed_v4="$(extract observed_source_v4)"
+  observed_v6="$(extract observed_source_v6)"
+else
+  # MEASURED, at the moment the probes are taken. Not a literal, and not a
+  # value carried over from another phase: a service state observed once and
+  # reused for probes taken at other times is the same defect as asserting it.
+  listening="$(
+    "$(dirname "$0")/observe_service_state.sh" \
+      "${TARGET}" "${LANE3_OBSERVER_USER}" "${LANE3_OBSERVER_KEY}"
+  )"
+  test -n "${listening}" || {
+    echo "REFUSED: could not read the target's listening ports, so no negative" \
+         "probe in this phase can be distinguished from one taken against a" \
+         "stopped service" >&2
+    exit 1; }
+fi
 
 target_v6="$(on_probe "getent ahostsv6 ${TARGET} | awk 'NR==1{print \$1}'" || true)"
 : "${target_v6:=}"
@@ -73,6 +109,11 @@ on_probe "
 set -eu
 TARGET='${TARGET}'; TARGET6='${target_v6}'; FORMER='${FORMER_PRIVATE}'
 OBSERVED4='${observed_v4}'; OBSERVED6='${observed_v6}'
+PHASE='${PHASE}'; LISTENING='${listening}'
+# `service_running` for one port, MEASURED from the target's own socket
+# table. Absent from the list is FALSE, never a default: the runner refuses
+# an absent key too, so neither end can turn silence into a pass.
+running() { case \" \$LISTENING \" in *\" \$1 \"*) printf true;; *) printf false;; esac; }
 
 emit_bool() { if \"\$@\" >/dev/null 2>&1; then printf true; else printf false; fi; }
 probe4() { nc -4 -z -w 5 \"\$1\" \"\$2\"; }
@@ -80,6 +121,7 @@ probe6() { [ -n \"\$TARGET6\" ] && nc -6 -z -w 5 \"\$1\" \"\$2\"; }
 
 printf '{\n'
 
+if [ \"\$PHASE\" = qualify ]; then
 printf '  \"vantage\": {\n'
 printf '    \"address_v4\": \"%s\",\n' \"\$(ip -4 -br addr show scope global | awk 'NR==1{split(\$3,a,\"/\"); print a[1]}')\"
 printf '    \"address_v6\": \"%s\",\n' \"\$(ip -6 -br addr show scope global | awk 'NR==1{split(\$3,a,\"/\"); print a[1]}')\"
@@ -125,15 +167,19 @@ printf '    \"credential_markers\": {\"openbao_dir\": %s, \"bao_env\": %s},\n' \
 
 printf '    \"observed_source_v4\": \"%s\",\n' \"\$OBSERVED4\"
 printf '    \"observed_source_v6\": \"%s\"\n' \"\$OBSERVED6\"
-printf '  },\n'
+printf '  }\n'
+printf '}\n'
+exit 0
+fi
 
 printf '  \"probes\": {\n'
-printf '    \"positive_v6\": {\"reachable\": %s, \"positive_control_fired\": true, \"service_running\": true},\n' \"\$(emit_bool probe6 \"\$TARGET6\" 22)\"
-printf '    \"negative_v6\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": true},\n' \\
-  \"\$(emit_bool probe6 \"\$TARGET6\" 18443)\" \"\$(emit_bool probe6 \"\$TARGET6\" 22)\"
-printf '    \"v4_pair\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": true},\n' \\
-  \"\$(emit_bool probe4 \"\$TARGET\" 18443)\" \"\$(emit_bool probe4 \"\$TARGET\" 22)\"
-printf '    \"private_inside\": {\"reachable\": false, \"positive_control_fired\": true, \"service_running\": true}\n'
+printf '    \"positive_v6\": {\"reachable\": %s, \"positive_control_fired\": true, \"service_running\": %s},\n' \\
+  \"\$(emit_bool probe6 \"\$TARGET6\" 22)\" \"\$(running 22)\"
+printf '    \"negative_v6\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": %s},\n' \\
+  \"\$(emit_bool probe6 \"\$TARGET6\" 18443)\" \"\$(emit_bool probe6 \"\$TARGET6\" 22)\" \"\$(running 18443)\"
+printf '    \"v4_pair\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": %s},\n' \\
+  \"\$(emit_bool probe4 \"\$TARGET\" 18443)\" \"\$(emit_bool probe4 \"\$TARGET\" 22)\" \"\$(running 18443)\"
+printf '    \"private_inside\": {\"reachable\": false, \"positive_control_fired\": true, \"service_running\": %s}\n' \"\$(running 19001)\"
 printf '  },\n'
 
 printf '  \"closed_port_behaviour\": \"%s\",\n' \"\$(s=\$(date +%s%N); nc -4 -z -w 5 \$TARGET 18444 >/dev/null 2>&1 || true; e=\$(date +%s%N); if [ \$(( (e-s)/1000000 )) -lt 2000 ]; then printf reset; else printf drop; fi)\"

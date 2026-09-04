@@ -123,11 +123,16 @@ jobs:
                  "end, and a vantage cannot certify where it egresses from" >&2
             exit 1; }
           ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
-            "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
+            qualify "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
 
+      # The runner takes the PROBE phase itself, after the apply — see its
+      # module docstring. It therefore needs the same observation identity the
+      # qualify step used, and refuses without it.
       - name: Execute Lane 3 through the controller
         env:
           AUTHZ: ${{ inputs.authorization_run }}
+          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
+          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
         run: |
           set -euo pipefail
           python scripts/exposure_rehearsal_runner.py \
@@ -138,6 +143,7 @@ jobs:
             --controller-identity "${{ inputs.controller_identity }}" \
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \
+            --probe-host "${{ vars.LANE3_PROBE_HOST }}" \
             --probe-evidence probe-evidence.json \
             --descriptor scripts/exposure-rehearsal/product.toml \
             --receipt-out receipt.json \

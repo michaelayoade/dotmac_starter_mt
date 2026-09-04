@@ -244,6 +244,37 @@ def _probe(evidence: dict, key: str) -> dict:
     return probe
 
 
+def _collect_probe_phase(args: argparse.Namespace) -> dict:
+    """Run the collector's `probe` phase and return what it measured.
+
+    Refuses rather than degrades. An unparseable or absent probe document would
+    otherwise leave `evidence["probes"]` empty, every item would fail for a
+    reason that looks like an exposure defect, and the real cause — that the
+    collection never ran — would be invisible in the receipt.
+    """
+    script = (
+        pathlib.Path(__file__).resolve().parent
+        / "exposure-rehearsal"
+        / "collect_probe_evidence.sh"
+    )
+    argv = [str(script), "probe", args.probe_host, args.target]
+    completed = subprocess.run(
+        argv, capture_output=True, text=True, timeout=args.timeout, check=False
+    )
+    if completed.returncode != 0:
+        raise DeploymentFoundationError(
+            f"the probe phase refused ({shlex.join(argv)}): "
+            f"{completed.stderr.strip() or 'no stderr'}"
+        )
+    try:
+        return json.loads(completed.stdout)
+    except ValueError as exc:
+        raise DeploymentFoundationError(
+            f"the probe phase emitted no readable JSON ({exc}). An unmeasured "
+            "probe is not a passing one"
+        ) from exc
+
+
 def judge_proxy_recreation(
     before: Sequence[ObservedProxy], after: Sequence[ObservedProxy]
 ) -> tuple[RequirementStatus, str]:
@@ -433,6 +464,24 @@ def run(args: argparse.Namespace) -> int:
     )
 
     # ── items 13-16: the external half, measured from the qualified vantage ─
+    # ── the probe phase, taken while the stack is UP ────────────────────────
+    #
+    # The qualify phase ran before the controller touched anything, so the
+    # vantage was enumerated rather than trusted. These probes could not run
+    # then: a negative measured before the apply is an accurate measurement of
+    # the wrong instant, and item 13 requires the negative to be measured
+    # against a RUNNING service. So they are taken here — after the apply,
+    # before any teardown — and `service_running` is read from the target's own
+    # socket table at that moment rather than asserted.
+    #
+    # Shelling out to the collector is observation, not mutation, and the
+    # invariant this runner states is about mutations. See the module docstring
+    # for why that narrowing is structural rather than convenient.
+    probe_phase = _collect_probe_phase(args)
+    evidence["probes"] = probe_phase.get("probes", {})
+    if "closed_port_behaviour" in probe_phase:
+        evidence["closed_port_behaviour"] = probe_phase["closed_port_behaviour"]
+
     external = (
         ("external_positive_v6", "positive_v6", True, "tcp/22 over IPv6, THIS target"),
         (
@@ -453,7 +502,18 @@ def run(args: argparse.Namespace) -> int:
         probe = _probe(evidence, key)
         reachable = bool(probe.get("reachable"))
         control = bool(probe.get("positive_control_fired", True))
-        running = bool(probe.get("service_running", True))
+        # ABSENCE FAILS. `probe.get("service_running", True)` read an evidence
+        # file that simply omitted the key as a running service — an unmeasured
+        # negative reading as an enforced one, which is the defect item 13
+        # exists to catch arriving through the reader instead of the collector.
+        if "service_running" not in probe:
+            raise DeploymentFoundationError(
+                f"the {key!r} probe carries no `service_running`. A negative "
+                "probe against a port where nothing is listening measures an "
+                "absent service, not an enforced exposure, and an unmeasured "
+                "one must never read as a pass"
+            )
+        running = bool(probe["service_running"])
         ok = reachable == want_reachable and control and running
         results.record(
             code,
@@ -589,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
         ("--controller-identity", "fingerprint of the dedicated controller key"),
         ("--controller-key", "path to the controller private key (a POINTER)"),
         ("--target", "the leased rehearsal target"),
+        ("--probe-host", "the external vantage the probe phase runs from"),
         ("--probe-evidence", "JSON of the external vantage's measurements"),
         ("--descriptor", "the exact rehearsal fixture"),
         ("--receipt-out", "where to write RehearsalReceipt.v1"),
