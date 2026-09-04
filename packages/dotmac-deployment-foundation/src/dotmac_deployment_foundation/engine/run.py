@@ -44,6 +44,7 @@ from typing import Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
 from ..backup import BackupRecord
+from ..canonical_plan import EXECUTION_PLAN_WRONG_TYPE
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..evidence import (
     SignatureVerifier,
@@ -361,6 +362,23 @@ class Executor:
         # grant, which carries it from the receipt. So there is no way to
         # construct an executor bound to a plan nobody froze, and no way to
         # supply an authorized digest that did not come through attestation.
+        # TYPE-CHECKED AT CONSTRUCTION, not at first attribute access.
+        # `RecoveryExecutionPlanV1` exists and carries no `operation` field, so
+        # a swapped plan would previously have travelled all the way to
+        # `_require_execution_plan` and died on `AttributeError: 'Recovery...'
+        # object has no attribute 'operation'` — after the executor had been
+        # built and while an operator reads a traceback rather than a refusal.
+        # The two plan kinds are not interchangeable at any acceptance point,
+        # and this is one of the three.
+        if not isinstance(execution_plan, FoundationExecutionPlanV1):
+            raise PreconditionFailed(
+                f"Executor was given a {type(execution_plan).__name__} as its "
+                f"execution plan, not a {FoundationExecutionPlanV1.__name__}. "
+                "This executor mutates a product host under a deployment "
+                "authorization; a recovery plan describes a different act and "
+                "is not authorized by anything this class holds",
+                code=EXECUTION_PLAN_WRONG_TYPE,
+            )
         self._execution_plan = execution_plan
         self._sleep = sleep
         self._clock = clock

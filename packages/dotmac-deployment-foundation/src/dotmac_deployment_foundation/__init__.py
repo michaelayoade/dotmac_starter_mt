@@ -54,6 +54,7 @@ from .backup import (
     restore_rehearsal,
     retention_keep,
 )
+from .canonical_plan import canonical_plan_bytes
 from .conformance import check_all, check_rendered_assets_match
 from .database_drift import (
     POSTGRES_SYSTEM_EXCLUSIONS,
@@ -258,6 +259,18 @@ from .recovery_identity import (
     DatasetIdentityV1,
     ExternalExecutorV1,
 )
+from .recovery_plan import (
+    RECOVERY_PLAN_DIGEST_SCHEMA,
+    RECOVERY_PLAN_SCHEMA,
+    CapturedPrestateV1,
+    DesiredPoststateV1,
+    FailedSystemObservationV1,
+    RecoveryExecutionPlanV1,
+    canonical_recovery_plan_bytes,
+    recovery_plan_digest,
+    render_recovery_plan,
+    require_recovery_plan_digest,
+)
 from .rehearsal import (
     REHEARSAL_RECEIPT_SCHEMA,
     REQUIRED_ITEMS,
@@ -422,6 +435,17 @@ __all__ = [
     "MembershipFact",
     "NameExclusion",
     "OPERATIONS",
+    "RECOVERY_PLAN_DIGEST_SCHEMA",
+    "RECOVERY_PLAN_SCHEMA",
+    "CapturedPrestateV1",
+    "DesiredPoststateV1",
+    "FailedSystemObservationV1",
+    "RecoveryExecutionPlanV1",
+    "canonical_plan_bytes",
+    "canonical_recovery_plan_bytes",
+    "recovery_plan_digest",
+    "render_recovery_plan",
+    "require_recovery_plan_digest",
     "OWNERSHIP_PREFIX",
     "Observation",
     "ObservedDatabaseState",

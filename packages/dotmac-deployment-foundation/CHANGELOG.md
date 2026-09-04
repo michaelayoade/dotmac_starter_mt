@@ -96,6 +96,71 @@ artifact, and the shape is new:
   be refused. That is an unmonitored population recorded as one, and it is not
   repaired by pretending otherwise.
 
+### `RecoveryExecutionPlanV1` — the distinct plan type, deliberately unreachable
+
+A deployment-shaped plan is not a recovery plan. That sentence has been true in
+this package's documentation for three releases and nothing expressed it as a
+type; now something does.
+
+It carries the three bindings a rehearsal does not take — `CapturedPrestateV1`
+(what the source system was when the bundle was taken), `FailedSystemObservationV1`
+(the failed system's own observed state at recovery start) and `DesiredPoststateV1`
+(what the recovered system must present) — plus its own document schema and its
+own digest name, `RecoveryExecutionPlanDigestV1`.
+
+**Digests and NAMES, never parsed catalogue facts.** The poststate is a
+descriptor digest, a bundle-manifest digest, and the verification names that must
+report passed. It is not a catalogue assertion, for the reason that refused a
+fourteenth `BundleComponent`: `recovery.py` runs with no database precisely
+because the manifest carries digests and counts rather than facts. The names are
+READ from `spec.BackupDataset.VERIFICATIONS` rather than respelled, so the
+vocabulary widens on its own when `recovery.UNDECLARED_COMPARISONS` retires a
+member into it, and a poststate demanding an undeclarable proof is refused —
+unfalsifiable requirements get removed rather than met.
+
+**No `operation` field.** The deployment plan needs one because a single
+descriptor yields two otherwise-identical documents and the field is what tells
+them apart. A recovery plan has no sibling, so the field would carry no
+information — and a field carrying no information is one a later author finds
+something to put in.
+
+That drops a job the deployment plan's `operation` check was silently doing:
+making the document self-identifying. The schema now owns it, at five acceptance
+points, each with its own stable code, each proven by driving a REAL document or
+object of the wrong kind through it in BOTH directions. One of the five was a
+genuine hole: every plan kind has a `digest()`, so a recovery plan handed to
+`require_execution_plan_digest` used to compute a good recovery digest, compare
+it with a deploy authorization, and report *"something changed between
+authorization and execution"* — a refusal that is actionable in the wrong
+direction. `Executor` now refuses a non-deployment plan at CONSTRUCTION rather
+than dying on `AttributeError` later.
+
+**The ten canonicalization rules moved to `canonical_plan.py` and are owned
+once.** A parallel copy for the second plan kind would be a second authority over
+one question, and copies agree right up until they don't — the defect this
+package has already paid for at `AuthorizationReceipt`, at `discover_bindings`,
+and between Control's `plan_digest` and the Foundation's. The extraction is
+byte-neutral, proved against an independently written encoder rather than against
+the function itself, and an AST sweep fails the build if a third plan document
+hand-rolls a canonical `json.dumps`.
+
+**A real import cycle was removed rather than routed around.** Adding the module
+broke the package on import: `execution_plan` imported `engine.plan` at module
+scope while `engine/__init__` imported `engine.run` which imported
+`execution_plan` back, and that resolved only through the order `__init__`
+happened to use. The import was for an annotation, and
+`from __future__ import annotations` made it unnecessary at runtime — so the
+cycle was load-bearing for nothing.
+
+**Nothing constructs one of these.** `recover` is not in
+`authorization.OPERATIONS`, there is no `recover` subcommand, and no grant covers
+the act. The staging is the one `ApplicationFoundationProfile.v1` used — the type
+refuses first, reachability comes later — because a grant, a replay coordinate
+and a signed result wrapped around a plan nobody can execute is a chain whose
+every link is correct and whose subject does not exist, and it would review as
+finished. An AST test derives the unreachability from the package source, so the
+change that wires it up is told to come and read the argument first.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**
