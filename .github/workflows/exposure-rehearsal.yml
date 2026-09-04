@@ -100,22 +100,47 @@ jobs:
       # and so a probe measured after teardown can never be reused as a
       # negative — a refusal against a stopped service measures absence of a
       # service, not absence of exposure.
+      # The observation identity is SEPARATE from the controller identity, and
+      # the separation is the point: the target-side read must not carry the
+      # ability to change the target. `lane3obs` has no sudo and no docker
+      # group; the controller that applies the plan is a different account.
+      # Both are configured rather than hardcoded, and an unset one REFUSES —
+      # falling back to an agent key would prove a credential works that was
+      # never meant to be used.
       - name: Collect and qualify the external probe evidence
         env:
           PROBE_HOST: ${{ vars.LANE3_PROBE_HOST }}
           TARGET: ${{ inputs.target }}
+          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
+          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
         run: |
           set -euo pipefail
           test -n "${PROBE_HOST}" || {
             echo "REFUSED: no external probe vantage configured" >&2; exit 1; }
+          test -n "${LANE3_OBSERVER_USER}" && test -n "${LANE3_OBSERVER_KEY}" || {
+            echo "REFUSED: no target-side observation identity configured. The" \
+                 "far-end source address is the one check measured from the far" \
+                 "end, and a vantage cannot certify where it egresses from" >&2
+            exit 1; }
           ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
-            "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
+            qualify "${PROBE_HOST}" "${TARGET}" > probe-evidence.json
 
+      # The runner takes the PROBE phase itself, after the apply — see its
+      # module docstring. It therefore needs the same observation identity the
+      # qualify step used, and refuses without it.
       - name: Execute Lane 3 through the controller
         env:
           AUTHZ: ${{ inputs.authorization_run }}
+          LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
+          LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
+          LANE3_JUMP_KEY: ${{ vars.LANE3_JUMP_KEY }}
         run: |
           set -euo pipefail
+          test -n "${LANE3_JUMP_KEY}" || {
+            echo "REFUSED: no inside-vantage jump key configured. Items 12 and" \
+                 "16 need a probe that genuinely originates inside the accepted" \
+                 "source set; this host is outside it by construction" >&2
+            exit 1; }
           python scripts/exposure_rehearsal_runner.py \
             --foundation-revision "${GITHUB_SHA}" \
             --foundation-artifact "${{ inputs.foundation_artifact }}" \
@@ -124,6 +149,11 @@ jobs:
             --controller-identity "${{ inputs.controller_identity }}" \
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \
+            --probe-host "${{ vars.LANE3_PROBE_HOST }}" \
+            --inside-vantage "${{ vars.LANE3_INSIDE_VANTAGE }}" \
+            --inside-jump-key "${{ vars.LANE3_JUMP_KEY }}" \
+            --observer-user "${{ vars.LANE3_OBSERVER_USER }}" \
+            --observer-key "${{ vars.LANE3_OBSERVER_KEY }}" \
             --probe-evidence probe-evidence.json \
             --descriptor scripts/exposure-rehearsal/product.toml \
             --receipt-out receipt.json \

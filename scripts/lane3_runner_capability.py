@@ -88,6 +88,10 @@ COLLECTOR = Path("scripts/exposure-rehearsal/collect_probe_evidence.sh")
 #: states that it provokes by calling something named for it.
 PROVOCATION_SEAM = "provoke_apply_failure"
 
+#: The named seam that observes `accept_public_exposure_evidence` refusing a
+#: real probe from inside an accepted source set — item 12's whole subject.
+INSIDE_REFUSAL_SEAM = "refusal_fired_for_the_right_reason"
+
 #: The keyword through which the derived Compose project must reach the effects.
 #: `ComposeHostExposureEffects` labels every object it creates with the project
 #: it is given; a derived name that never reaches it names nothing.
@@ -253,22 +257,42 @@ def detect_service_state_asserted(
     )
 
 
-def detect_no_inside_vantage(collector: str) -> Finding | None:
+def detect_no_inside_vantage(collector: str, runner_tree: ast.AST) -> Finding | None:
     """Items 12 and 16 both need a vantage INSIDE the accepted source set.
 
-    The collecting host is outside it by construction, so both values are
-    emitted as literals rather than measured.
+    Two halves, because removing the literals is not the same as taking the
+    measurement. A collector that simply stopped emitting them would satisfy a
+    detector written only against the literals, and the items would then fail on
+    absent keys — the defect relocated rather than repaired.
+
+    So the second half looks for the MECHANISM: item 12 is a refusal, and the
+    only thing that can produce it is `accept_public_exposure_evidence` reached
+    through the declared seam. Named rather than pattern-matched, for the same
+    reason the provocation seam is.
     """
     private = _lines_matching(collector, _LITERAL_PRIVATE_INSIDE, COLLECTOR)
     privileged = _lines_matching(collector, _LITERAL_PRIVILEGED, COLLECTOR)
-    if not private and not privileged:
+    calls_seam = any(
+        (getattr(node.func, "id", None) or getattr(node.func, "attr", None))
+        == INSIDE_REFUSAL_SEAM
+        for node in ast.walk(runner_tree)
+        if isinstance(node, ast.Call)
+    )
+    if not private and not privileged and calls_seam:
         return None
+    detail = []
+    if private or privileged:
+        detail.append("the collector still emits them as literals")
+    if not calls_seam:
+        detail.append(
+            f"the runner calls no {INSIDE_REFUSAL_SEAM}(), so nothing observes "
+            "`accept_public_exposure_evidence` refusing a real probe"
+        )
     return Finding(
         Reason.NO_INSIDE_VANTAGE,
-        "no vantage inside the accepted source set takes these measurements, so "
-        "`private_inside.reachable` and `privileged_vantage_refused` are "
-        "emitted as literals and items 16 and 12 can only be `executed_failed`",
-        tuple(private) + tuple(privileged),
+        "items 12 and 16 need a vantage inside the accepted source set: "
+        + "; ".join(detail),
+        tuple(private) + tuple(privileged) + ((str(RUNNER),) if not calls_seam else ()),
     )
 
 
@@ -375,9 +399,9 @@ def assess(root: Path) -> dict[str, object]:
 
     if collector is not None:
         findings.append(detect_far_end_sentinel(collector))
-        findings.append(detect_no_inside_vantage(collector))
     if collector is not None and runner_tree is not None:
         findings.append(detect_service_state_asserted(collector, runner_tree))
+        findings.append(detect_no_inside_vantage(collector, runner_tree))
     if runner_tree is not None:
         findings.append(detect_no_induced_failure(runner_tree))
         findings.append(detect_compose_identity_unused(runner_tree))

@@ -431,6 +431,22 @@ agents are working on, and "disposable" and "shared workspace" cannot both be
 true of one machine. Any surviving `85.190.246.211` in a Role A sentence is
 stale and must not be read as authorization.
 
+**PRECONDITION — SLAAC suppression, and it is not incidental.**
+`/etc/netplan/99-lane3-no-slaac.yaml` (`accept-ra: false`) is what makes the
+target egress IPv6 from the declared `2c0f:e888:11::102`. Without it the target
+egresses from a SLAAC address, and then the far-end observation — the one that
+replaces the `__TARGET_OBSERVED_V6__` sentinel — **passes while measuring the
+wrong thing**: it reports an address nobody declared, and reports it
+confidently. That is the exact failure the sentinel repair exists to close, so
+this file is a precondition of an existing gate rather than a note about setup.
+
+**The sysctl approach looked correct and did not survive a reboot**, and the
+next person to hit this will reach for sysctl first. Netplan owns the interface,
+so a sysctl drop-in is reverted the moment netplan re-applies. The netplan file
+was proved across a second reboot with the static default route intact. A
+rehearsal that re-images the target or re-runs cloud-init must re-establish it
+before the far-end observation means anything.
+
 **HAZARD — the private address is three away from production ns1.**
 `10.120.120.51` is production ns1 and `10.120.120.54` is this target: the same
 /24. A static assignment typo or a DHCP collision lands the rehearsal on a

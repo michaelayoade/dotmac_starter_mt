@@ -7,10 +7,32 @@ consumed, and the sixteen gate items lived in a hand-maintained markdown table.
 That is not evidence, and its own header proved it: on 2026-08-29 it read
 "14 of 16 CLOSED" while the rows beneath recorded four `partial` and one `n/a`.
 
-This runner is the fix. It ORIGINATES every action through the library —
+This runner is the fix. It ORIGINATES every host MUTATION through the library —
 `ExposureTransaction` over `ComposeHostExposureEffects` — rather than shelling
 out beside it. That distinction is the whole point of the lane: a human running
 the same eight commands proves the operator can do it, not that the code can.
+
+## MUTATION, not "every action" — and the narrowing is structural
+
+The invariant said "every action" until 2026-09-04. It was narrowed because it
+could not be satisfied as written, and a rule that cannot be satisfied is not
+upheld by leaving it written.
+
+The reason a change must originate through the library is that a change to a
+host has to be authorized, recorded and rollback-able. **An observation changes
+nothing, so it needs none of those properties** — and the observation this lane
+depends on most cannot be taken through the library at all. The far-end source
+address is what the TARGET saw of a connection from the vantage, and that is
+definitionally not the near end's to make: a vantage cannot certify where it
+egresses from. It comes from a different host, structurally outside the
+transaction's reach.
+
+So: every mutation goes through the library, observation need not, and the split
+is enforceable rather than stated — the collector path does not mutate. The
+seeded foreign rules and the inert-chain provocation ARE mutations, which is
+exactly why they are named acts in `lane3_provocation` on the transaction side
+rather than something a collector does on the way past. If those two blurred,
+this narrowing would become the hole its critics would expect.
 
 ## Every input is required, and the run refuses without it
 
@@ -57,7 +79,15 @@ sys.path.insert(
         / "src"
     ),
 )
+# This file's OWN directory, so `lane3_provocation` resolves however this module
+# was loaded. Running `python scripts/exposure_rehearsal_runner.py` puts
+# `scripts/` on `sys.path[0]` for free; loading it through `importlib` from a
+# path — which `tests/unit/test_lane3_proxy_recreation_gate.py` does, to reach
+# `judge_proxy_recreation` without a host — does not, and the sibling import
+# then fails at collection time rather than at run time.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_inside_vantage as inside_vantage
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import (
@@ -66,7 +96,6 @@ from dotmac_deployment_foundation.errors import (
 from dotmac_deployment_foundation.exposure import (
     ExposureTransaction,
     ObservedProxy,
-    foreign_rules,
     ownership_comment,
     refuse_non_recreating_apply,
 )
@@ -85,6 +114,15 @@ from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 from dotmac_deployment_foundation.vantage import (
     VantageQualification,
     qualify_vantage,
+)
+from lane3_provocation import (
+    disarm_apply_failure,
+    inside_source_set,
+    observed_foreign,
+    private_port,
+    provoke_apply_failure,
+    seed_foreign_rules,
+    withdraw_foreign_rules,
 )
 
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
@@ -206,6 +244,74 @@ def _probe(evidence: dict, key: str) -> dict:
             "is not a passing one"
         )
     return probe
+
+
+def _observed_from(args: argparse.Namespace, *, jump_key: str) -> dict[str, str]:
+    """The far end's report of a vantage's source address, per family.
+
+    The same script the qualify phase uses, with the INSIDE vantage's jump key.
+    Reading it again rather than reusing the outside value is the point: these
+    are different vantages, and one of the two addresses is SLAAC-derived, so it
+    is requalified every run rather than remembered.
+    """
+    script = (
+        pathlib.Path(__file__).resolve().parent
+        / "exposure-rehearsal"
+        / "observe_far_end.sh"
+    )
+    argv = [
+        str(script),
+        args.inside_vantage,
+        args.target,
+        args.observer_user,
+        args.observer_key,
+        jump_key,
+    ]
+    completed = subprocess.run(
+        argv, capture_output=True, text=True, timeout=args.timeout, check=False
+    )
+    if completed.returncode != 0:
+        raise DeploymentFoundationError(
+            f"could not read the inside vantage's observed source addresses: "
+            f"{completed.stderr.strip() or 'no stderr'}"
+        )
+    try:
+        return {str(k): str(v) for k, v in json.loads(completed.stdout).items()}
+    except ValueError as exc:
+        raise DeploymentFoundationError(
+            f"the far-end observation emitted no readable JSON ({exc})"
+        ) from exc
+
+
+def _collect_probe_phase(args: argparse.Namespace) -> dict:
+    """Run the collector's `probe` phase and return what it measured.
+
+    Refuses rather than degrades. An unparseable or absent probe document would
+    otherwise leave `evidence["probes"]` empty, every item would fail for a
+    reason that looks like an exposure defect, and the real cause — that the
+    collection never ran — would be invisible in the receipt.
+    """
+    script = (
+        pathlib.Path(__file__).resolve().parent
+        / "exposure-rehearsal"
+        / "collect_probe_evidence.sh"
+    )
+    argv = [str(script), "probe", args.probe_host, args.target]
+    completed = subprocess.run(
+        argv, capture_output=True, text=True, timeout=args.timeout, check=False
+    )
+    if completed.returncode != 0:
+        raise DeploymentFoundationError(
+            f"the probe phase refused ({shlex.join(argv)}): "
+            f"{completed.stderr.strip() or 'no stderr'}"
+        )
+    try:
+        return json.loads(completed.stdout)
+    except ValueError as exc:
+        raise DeploymentFoundationError(
+            f"the probe phase emitted no readable JSON ({exc}). An unmeasured "
+            "probe is not a passing one"
+        ) from exc
 
 
 def judge_proxy_recreation(
@@ -331,8 +437,6 @@ def run(args: argparse.Namespace) -> int:
         "before mutation",
         "ExposureTransaction.snapshot",
     )
-    foreign_before = {r.arguments for r in foreign_rules(snapshot, owner=owner)}
-
     transaction = ExposureTransaction(
         spec=spec, effects=effects, lock_directory=args.lock_dir
     )
@@ -399,6 +503,24 @@ def run(args: argparse.Namespace) -> int:
     )
 
     # ── items 13-16: the external half, measured from the qualified vantage ─
+    # ── the probe phase, taken while the stack is UP ────────────────────────
+    #
+    # The qualify phase ran before the controller touched anything, so the
+    # vantage was enumerated rather than trusted. These probes could not run
+    # then: a negative measured before the apply is an accurate measurement of
+    # the wrong instant, and item 13 requires the negative to be measured
+    # against a RUNNING service. So they are taken here — after the apply,
+    # before any teardown — and `service_running` is read from the target's own
+    # socket table at that moment rather than asserted.
+    #
+    # Shelling out to the collector is observation, not mutation, and the
+    # invariant this runner states is about mutations. See the module docstring
+    # for why that narrowing is structural rather than convenient.
+    probe_phase = _collect_probe_phase(args)
+    evidence["probes"] = probe_phase.get("probes", {})
+    if "closed_port_behaviour" in probe_phase:
+        evidence["closed_port_behaviour"] = probe_phase["closed_port_behaviour"]
+
     external = (
         ("external_positive_v6", "positive_v6", True, "tcp/22 over IPv6, THIS target"),
         (
@@ -408,18 +530,23 @@ def run(args: argparse.Namespace) -> int:
             "the loopback-bound v6 socket, service RUNNING",
         ),
         ("external_v4", "v4_pair", False, "IPv4 negative with its tcp/22 control"),
-        (
-            "private_from_source",
-            "private_inside",
-            True,
-            "the private port from inside its source set",
-        ),
     )
     for code, key, want_reachable, note in external:
         probe = _probe(evidence, key)
         reachable = bool(probe.get("reachable"))
         control = bool(probe.get("positive_control_fired", True))
-        running = bool(probe.get("service_running", True))
+        # ABSENCE FAILS. `probe.get("service_running", True)` read an evidence
+        # file that simply omitted the key as a running service — an unmeasured
+        # negative reading as an enforced one, which is the defect item 13
+        # exists to catch arriving through the reader instead of the collector.
+        if "service_running" not in probe:
+            raise DeploymentFoundationError(
+                f"the {key!r} probe carries no `service_running`. A negative "
+                "probe against a port where nothing is listening measures an "
+                "absent service, not an enforced exposure, and an unmeasured "
+                "one must never read as a pass"
+            )
+        running = bool(probe["service_running"])
         ok = reachable == want_reachable and control and running
         results.record(
             code,
@@ -436,25 +563,140 @@ def run(args: argparse.Namespace) -> int:
         f"target closed-port behaviour recorded as {behaviour!r}",
         "workstation probe",
     )
-    privileged = evidence.get("privileged_vantage_refused")
+    # ── items 12 and 16: measured from a vantage INSIDE the source set ─────
+    #
+    # Both used to be literals emitted by a collector that is outside the set by
+    # construction. They are now taken through a restricted jump whose key runs
+    # no command on the vantage, so the TCP connection originates inside while
+    # nothing executes there.
+    inside_probe = inside_vantage.collect(
+        str(
+            pathlib.Path(__file__).resolve().parent
+            / "exposure-rehearsal"
+            / "probe_inside_vantage.sh"
+        ),
+        jump=args.inside_vantage,
+        target_v4=args.target,
+        target_v6=str((evidence.get("vantage") or {}).get("target_v6", args.target)),
+        port=private_port(spec),
+        timeout=args.timeout,
+    )
+    inside_observed = _observed_from(args, jump_key=args.inside_jump_key)
+    seen = inside_vantage.vantages(inside_probe, inside_observed)
+    control_ok = inside_vantage.control_is_meaningful(inside_probe)
+
+    # Item 16. ONE receipt row, because `build_receipt` enforces a closed set of
+    # sixteen codes and splitting one would be refused — but the SOURCE MODEL is
+    # per family, and the detail carries both. Michael's "model inside/outside
+    # IPv4 and IPv6 independently" is about which addresses are inside which
+    # set, not about the receipt's vocabulary.
+    #
+    # PASSED requires BOTH families to have reached. A pass on one would be a
+    # v4 result wearing a dual-stack claim, and this vantage is exactly the case
+    # where that goes wrong: its v4 is on the target's segment and its v6 is not.
+    both_reached = all(
+        vantage.outcome is inside_vantage.InsideOutcome.REACHED for vantage in seen
+    )
+    observed_all = all(vantage.observed_source for vantage in seen)
+    per_family = "; ".join(
+        f"{vantage.family}: outcome={vantage.outcome}, observed as "
+        f"{vantage.observed_source or 'NOTHING'} ({vantage.cidr})"
+        for vantage in seen
+    )
+    control_note = (
+        "jump-scope control prohibited as expected"
+        if control_ok
+        else "jump-scope control DID NOT FIRE — a permitopen that refused "
+        "everything would look identical to one correctly scoped"
+    )
     results.record(
-        "privileged_vantage_refused",
-        PASSED if privileged is True else FAILED,
-        "accept_public_exposure_evidence refused a real probe from inside an "
-        f"accepted source set: {privileged}",
-        "workstation probe",
+        "private_from_source",
+        PASSED if both_reached and observed_all and control_ok else FAILED,
+        f"the private port from inside its source set, per family. {per_family}. "
+        f"{control_note}",
+        *(f"inside:{vantage.family}:{vantage.cidr}" for vantage in seen),
+        "requalified-every-run",
     )
 
-    # ── item 8: provoked rollback, then EXACT restoration comparison ────────
+    # Item 12, and the branch it fires on is checked rather than assumed.
+    endpoint = f"{spec.product}:{private_port(spec)}"
+    verdicts = [
+        inside_vantage.refusal_fired_for_the_right_reason(
+            vantage,
+            endpoint_token=endpoint,
+            accepted_source_sets=(inside_source_set(spec),),
+        )
+        for vantage in seen
+    ]
+    refused_ok = all(ok for ok, _ in verdicts) and control_ok
+    results.record(
+        "privileged_vantage_refused",
+        PASSED if refused_ok else FAILED,
+        "accept_public_exposure_evidence refused a real probe from inside an "
+        "accepted source set, on the privileged-vantage branch rather than the "
+        "membership one: "
+        + "; ".join(
+            f"{v.family}={detail}"
+            for v, (_, detail) in zip(seen, verdicts, strict=False)
+        ),
+        f"accepted_source_set:{inside_source_set(spec)}",
+    )
+
+    # ── item 8: a SECOND transaction, provoked into a real rollback ─────────
+    #
+    # Two transactions, deliberately. The first one above is CLEAN and its
+    # evidence is what items 1-7 and 9-16 rest on; provoking it would have made
+    # every one of them the record of a failed run. This one exists only to
+    # execute item 8, and it is the only item that reads it.
+    #
+    # Nothing here calls `_rollback`. `ExposureTransaction.run()` re-observes,
+    # runs `verify_exposure`, and rolls back ITSELF when the report refuses —
+    # so the rollback is the system's response to a failure it met, which is
+    # the whole distinction item 8 turns on.
+    ssh = _ssh_runner(args.target, args.controller_key)
+    seeded = seed_foreign_rules(ssh)
+    provoked = ExposureTransaction(spec=spec, effects=effects)
+    armed = provoke_apply_failure(effects, port=private_port(spec))
+    provoked_snapshot = effects.observe()
+    seeded_before = observed_foreign(provoked_snapshot, owner=owner)
+    refusal = ""
+    try:
+        provoked.run()
+    except DeploymentFoundationError as encountered:
+        refusal = str(encountered)
+
     restored = effects.observe()
-    foreign_after = {r.arguments for r in foreign_rules(restored, owner=owner)}
-    lost = sorted(foreign_before - foreign_after)
+    foreign_after = observed_foreign(restored, owner=owner)
+    lost = sorted(seeded_before - foreign_after)
+
+    # Four conditions, and the third is the one that stops this passing
+    # vacuously. `foreign rules lost: none` reads identically whether five
+    # rules were preserved or none existed, so the snapshot is required to
+    # have been NON-EMPTY and the count is rendered rather than the word.
+    rolled_back = provoked.rolled_back
+    preserved = not lost
+    non_vacuous = bool(seeded_before)
+    provoked_ok = bool(rolled_back) and preserved and non_vacuous and bool(refusal)
+    met = refusal[:160] if refusal else "NONE — the run was never provoked"
     results.record(
         "provoked_rollback",
-        PASSED if transaction.rolled_back is not None and not lost else FAILED,
-        f"rollback compared against the snapshot; foreign rules lost: {lost or 'none'}",
-        "ExposureTransaction._check_preserved",
+        PASSED if provoked_ok else FAILED,
+        (
+            "induced an ip6tables DOCKER-USER rule for the descriptor's private "
+            f"port {armed.host_port} — a chain that can never fire for IPv6, so "
+            "the apply path has no authority to clear it. Met at "
+            "`verify_exposure`, which refused and rolled back on its own: "
+            f"rolled_back={rolled_back}; refusal={met}; compared against "
+            f"{len(seeded_before)} foreign rule(s) across "
+            f"{len(seeded)} seeded famil(ies); lost: {lost or 'none'}"
+        ),
+        "ExposureTransaction.run -> verify_exposure -> _rollback",
+        f"provocation:{armed.chain}/{armed.family}/{armed.host_port}",
+        *(f"seeded:{rule.family}:{rule.arguments}" for rule in seeded),
     )
+
+    disarm_apply_failure(effects)
+    withdraw_foreign_rules(ssh, seeded)
 
     # ── item 9: three terms, enforced by build_receipt ──────────────────────
     execution_report = report.descriptor_digest
@@ -510,6 +752,11 @@ def main(argv: list[str] | None = None) -> int:
         ("--controller-identity", "fingerprint of the dedicated controller key"),
         ("--controller-key", "path to the controller private key (a POINTER)"),
         ("--target", "the leased rehearsal target"),
+        ("--probe-host", "the external vantage the probe phase runs from"),
+        ("--inside-vantage", "the vantage INSIDE the accepted source set"),
+        ("--inside-jump-key", "private key for the inside vantage jump"),
+        ("--observer-user", "the restricted target-side observation user"),
+        ("--observer-key", "private key for that observation identity"),
         ("--probe-evidence", "JSON of the external vantage's measurements"),
         ("--descriptor", "the exact rehearsal fixture"),
         ("--receipt-out", "where to write RehearsalReceipt.v1"),

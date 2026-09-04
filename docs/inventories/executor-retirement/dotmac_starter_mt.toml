@@ -378,6 +378,58 @@ rehearsal creates. Checked: it names no declared production target.
 """
 
 [[entrypoint]]
+name = "script:observe_far_end.sh"
+family = "script"
+path = "scripts/exposure-rehearsal/observe_far_end.sh"
+trigger = "manual, and `script:collect_probe_evidence.sh` in its `qualify` phase"
+credential = "lane3-observation-ssh-key"
+disposition = "non_production_executor"
+targets = ["disposable-probe-host", "lane3-rehearsal-target"]
+premise = """
+Reads the target's own report of the probe vantage's source address, over a
+ProxyJump through that vantage. It OBSERVES and does not mutate: no port is
+bound, no file is written, and the identity it uses has no sudo and no docker
+group, deliberately — a target-side read must not carry the ability to change
+the target. Checked: both hosts are the disposable rehearsal pair and it names
+no declared production target.
+"""
+
+[[entrypoint]]
+name = "script:probe_inside_vantage.sh"
+family = "script"
+path = "scripts/exposure-rehearsal/probe_inside_vantage.sh"
+trigger = "manual, and `script:exposure_rehearsal_runner.py` after the apply"
+credential = "lane3-inside-jump-ssh-key"
+disposition = "non_production_executor"
+targets = ["lane3-inside-vantage", "lane3-rehearsal-target"]
+premise = """
+Opens TCP connections to the rehearsal target's private port THROUGH a
+restricted jump, so the connection originates inside the accepted source set
+while no command executes on the vantage. The jump key carries
+`command="/bin/false"` and a `permitopen` limited to the target's ssh and
+private ports. It distinguishes `refused` (reached the target, nothing
+listening) from `administratively prohibited` (the jump key refused, which is
+not an exposure result at all) and never reports them the same way. Checked: it
+names no declared production target, and it probes production ns1 only as a
+control that must be PROHIBITED.
+"""
+
+[[entrypoint]]
+name = "script:observe_service_state.sh"
+family = "script"
+path = "scripts/exposure-rehearsal/observe_service_state.sh"
+trigger = "manual, and `script:collect_probe_evidence.sh` in its `probe` phase"
+credential = "lane3-observation-ssh-key"
+disposition = "non_production_executor"
+targets = ["lane3-rehearsal-target"]
+premise = """
+Reads which TCP ports the rehearsal target is listening on, so a negative probe
+is measured against a RUNNING service rather than asserted to be. Host-level
+`ss -tln` only: it consults no container state and needs neither sudo nor the
+docker group. Checked: it names no declared production target.
+"""
+
+[[entrypoint]]
 name = "script:assert_current_main.sh"
 family = "script"
 path = "scripts/assert_current_main.sh"
