@@ -2,9 +2,10 @@
 #
 # ## Why this lane exists
 #
-# `release-facility.yml` makes "Require a passing Lane 3 rehearsal on this exact
-# SHA" its FIRST gate, before build. That is correct for a release and it closes
-# a loop for a bootstrap:
+# `release-facility.yml` fetches, digest-verifies and installs the recorded
+# candidate before requiring Lane 3, then publishes those same bytes only after
+# the rehearsal succeeds. That is correct for a release and it closes a loop
+# for a bootstrap:
 #
 #   Lane 3 needs a live issuer -> the issuer needs a proved restore -> the
 #   restore proof needs the candidate wheel -> the candidate wheel needs Lane 3.
