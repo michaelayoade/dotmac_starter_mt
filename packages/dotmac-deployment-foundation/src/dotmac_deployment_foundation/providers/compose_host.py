@@ -57,9 +57,11 @@ from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import IO
 
+from ..deployment_evidence import StepStanding
 from ..engine.run import BackupResult, CommandResult, RoleObservation
 from ..errors import PreconditionFailed, StepFailed
 from ..evidence import SignedEvidenceEnvelope
+from ..execution_plan_v2 import PostgresPrincipalCredentialBootstrapV1
 from ..recovery import refuse_identity_stripping
 from ..render.compose import render_compose
 from ..render.nginx import _ingress_roles as _nginx_ingress_roles
@@ -1470,7 +1472,9 @@ class ComposeHostEffects:
         rows.sort(key=lambda row: row[0], reverse=True)
         return [(image_id, ref) for _, image_id, ref in rows]
 
-    def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+    def bootstrap_principal_credential(
+        self, bootstrap: PostgresPrincipalCredentialBootstrapV1
+    ) -> StepStanding:
         """NOT IMPLEMENTED HERE, and the refusal is the correct answer.
 
         `ADR-0070` puts PostgreSQL mechanics in the product, not in this

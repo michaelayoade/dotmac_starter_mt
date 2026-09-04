@@ -399,17 +399,23 @@ def test_the_shared_terms_have_ONE_renderer() -> None:
 # ── unreachable, and derived rather than stated ────────────────────────────
 
 
-def test_nothing_on_a_host_path_constructs_a_v2_plan() -> None:
-    """No `StepKind` for the act, no `Effects` method to invoke it, no CLI
-    subcommand — because adding an `Effects` method widens a protocol whose
-    implementers include the probe wheel the PUBLICATION GATE installs, which
-    would make the gate's own fixture non-conforming until updated. That is held
-    pending a ruling; this module is the half that does not depend on it.
+def test_the_v2_reachability_is_CONFINED_to_the_executor() -> None:
+    """This test used to assert V2 was reachable from nothing, and it FAILED the
+    moment the invocation half landed — which is exactly what it was for.
 
-    When the invocation half lands, this test is what says so out loud. Update it
-    in that change; do not delete it.
+    Its previous docstring said: *"When the invocation half lands, this test is
+    what says so out loud. Update it in that change; do not delete it."* This is
+    that update, and the property it now holds is the one worth holding: V2 is
+    reachable, and the reachability is CONFINED.
+
+    Exactly one module on a host path imports it, and it is the executor. That is
+    a ratchet rather than a description — a second importer has to arrive as a
+    reviewed diff, because "the plan type is now reachable" is not a licence for
+    it to be reachable from anywhere. The CLI still constructs none: a caller
+    builds a V2 plan and hands it in, so the facility never invents an authorized
+    bootstrap for itself.
     """
-    importers = []
+    importers = set()
     for path in sorted(PACKAGE.rglob("*.py")):
         if path.name in {"execution_plan_v2.py", "__init__.py"}:
             continue
@@ -418,11 +424,22 @@ def test_nothing_on_a_host_path_constructs_a_v2_plan() -> None:
             if isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
                 "execution_plan_v2"
             ):
-                importers.append(path.name)
-    assert importers == [], (
-        f"{importers} import execution_plan_v2 — read this test's docstring "
-        "before changing it"
+                importers.add(path.name)
+    assert importers == {"run.py", "compose_host.py"}, (
+        f"V2's reachability moved: {sorted(importers)}. `run.py` executes an "
+        "authorized plan and `compose_host.py` refuses the effect it cannot "
+        "perform; a third importer is a widening that needs a reviewer, not a "
+        "test edit"
     )
+
+
+def test_the_cli_still_constructs_no_v2_plan() -> None:
+    """The other half of "confined": the executor may EXECUTE one, but nothing
+    in this facility BUILDS one for itself. A caller renders it and hands it in,
+    so an authorized bootstrap cannot be invented on this side."""
+    source = (PACKAGE / "cli.py").read_text(encoding="utf-8")
+    assert "render_execution_plan_v2" not in source
+    assert "FoundationExecutionPlanV2" not in source
 
 
 def test_the_operation_vocabulary_did_not_widen() -> None:
