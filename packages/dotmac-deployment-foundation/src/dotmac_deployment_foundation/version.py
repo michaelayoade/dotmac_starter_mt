@@ -99,6 +99,68 @@ from typing import Final
 #: it and is the reason a fourth application of this rule should fail CI rather
 #: than wait for an audit.
 #:
+#: ``0.3.0a6`` — DECLARED 2026-09-03, NEVER BUILT, and RETIRED UNBUILT on
+#: 2026-09-04 when the declared identity moved to ``0.4.0a1``. It is the first
+#: name in this ledger to be retired without an artifact, and the shape is new
+#: enough that the next allocator will meet it here before they meet it
+#: anywhere else.
+#:
+#: **A spent NAME without a spent artifact.** Every earlier entry above was
+#: spent by BYTES: a wheel existed, so a second build under the same name would
+#: have produced two artifacts for one identity. ``0.3.0a6`` has no wheel and
+#: no `CandidateArtifact.v1` receipt — nothing was ever built. What it does have
+#: is publication in DOCUMENTS. While it was the declared identity, ``main``
+#: advertised it in this package's `CHANGELOG.md`, in `docs/MODULE_CATALOG.md`,
+#: in the `poetry.lock` path-package line, in
+#: `docs/inventories/declared-publication-baseline.json`, and inside the
+#: rendered `deploy/rendered/docker-compose.yml` labels by way of
+#: ``io.dotmac.deployment.configuration.digest``. Re-declaring it would
+#: therefore recreate the two-contracts shape of ``0.3.0a2`` — one version name
+#: over two contracts — WITH THE DOCUMENTS RATHER THAN THE BYTES. That is the
+#: same defect arriving through a different door, and the door is the reason
+#: this paragraph exists.
+#:
+#: **It gets NO ``CandidateDisposition.v1``, and symmetry here would be wrong
+#: rather than merely unnecessary.** The log dispositions built artifacts: every
+#: entry is anchored by ``receipt_path``, ``receipt_digest`` and an ``artifact``
+#: block, and entry 1 chains to the receipt's own digest rather than to a zero
+#: genesis. There is no ``docs/inventories/foundation-candidate-0.3.0a6.json``
+#: to anchor to and no digest to chain from. The proof is mechanical rather than
+#: argued: adding ``"0.3.0a6"`` to ``SUPERSEDED`` in
+#: `tests/architecture/test_version_binding_guard.py` FAILS
+#: ``test_a_superseded_candidate_is_still_refused_for_a_second_build``, because
+#: `version_binding_guard.bindings_for` reads tags, receipts and dispositions,
+#: finds no record for a version that was never built, and returns nothing to
+#: refuse with. So ``EXPECTED_ENTRIES`` stays 4, ``SUPERSEDED`` and
+#: ``BUILT_CANDIDATES`` are unchanged, and
+#: `tests/architecture/candidate_source_binding_baseline.json` stays empty —
+#: which is still the healthy state, because the declared version again has no
+#: candidate.
+#:
+#: **The residual gap, stated so it is not mistaken for coverage: NO MACHINE
+#: ORACLE REFUSES ``0.3.0a6``.** The guard has three record sets and this name
+#: is in none of them. `ABANDONED_UNBUILT` in the binding-guard test asserts the
+#: freshness expectation longhand — the same shape ``PUBLISHED`` deliberately
+#: uses, so that a stated expectation can be wrong and get caught rather than
+#: agreeing with the guard for every input — but it is an EXPECTATION, not an
+#: enforcement. A build of ``0.3.0a6`` dispatched today would not be refused by
+#: `version_binding_guard.py`. This is an unmonitored population, recorded as
+#: one (ADR-0018 § "a guard exemption states an enforceable premise, or the
+#: region is unmonitored rather than exempt"), and it is not repaired by
+#: pretending the guard sees it.
+#:
+#: ``0.4.0a1`` is the successor, allocated 2026-09-04. A MINOR bump rather than
+#: a seventh alpha of the ``0.3.0`` line, because the change it names is a
+#: widening of a closed authorization vocabulary: ``recover`` re-enters
+#: `authorization.OPERATIONS` against an executor for the act it names —
+#: authorized recovery of a FAILED PRODUCTION SYSTEM, with its own
+#: `RecoveryExecutionPlanV1`, an `ExecutionGrant`, the replay coordinate,
+#: Control settlement, a signed result, and the three bindings a rehearsal does
+#: not take (a captured prestate, the failed system's own observed state, and a
+#: desired poststate). A consumer that reads ``OPERATIONS`` gets a third member
+#: it did not have; that is not an alpha increment of the same contract. It has
+#: NOT been built, and it must not be until Lane 3 passes on the exact SHA.
+#:
 #: This value is load-bearing beyond metadata. ``VERSION`` sits inside the
 #: canonical descriptor document, so changing it moves
 #: ``io.dotmac.deployment.configuration.digest`` and the rendered
@@ -107,6 +169,6 @@ from typing import Final
 #: `make deployment-check` is what fails if it was not. The digest recorded in
 #: a candidate receipt is a historical fact about THAT build and is not
 #: re-derived from this tree, so a re-render never invalidates one.
-VERSION: Final = "0.3.0a6"
+VERSION: Final = "0.4.0a1"
 
 __all__ = ["VERSION"]

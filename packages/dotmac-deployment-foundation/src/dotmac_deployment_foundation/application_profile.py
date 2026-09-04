@@ -14,15 +14,28 @@ typed expression in the facility that verifies it.
   path calls it. No assembly is gated by a profile it cannot yet complete.
 
 **Those are not in tension; they are the two halves ADR 0039's own staging
-paragraph describes.** Nine of the thirteen concerns have no fleet owner mature
-enough to be named as a binding, so composing the § 4 refusal into a live
-assembly today would stop that assembly from deploying. The record therefore
-stages: authored and verified in report-only form first, with the refusal turned
-on per concern as that concern acquires a real binding.
+paragraph describes.** The record stages deliberately: authored and verified in
+report-only form first, with the § 4 refusal composed into a live path per
+concern, as that concern acquires a real binding in the assembly being deployed.
 
 Say this out loud to the next reader, because the failure mode is specific:
 someone who meets the type's refusal concludes the gate is LIVE, and acts on
-that belief in a repository holding nine slots nobody can fill.
+that belief against an assembly that cannot yet fill every slot.
+
+**A COUNT OF WHICH CONCERNS THE FLEET CAN BIND TODAY USED TO STAND HERE, AND IT
+IS WITHDRAWN** (2026-09-04). This module said four of the thirteen have mature
+owners and nine do not. Two things were wrong with it, and only the second is
+about the number. First, it was a fleet-wide maturity determination made inside
+a facility that owns no part of the fleet's estate, cannot re-derive it, and
+ships on its own release cadence — so it was a claim with no oracle, in a
+package whose entire discipline is that a claim names one. Second, a number
+written into a docstring is stale from the moment an owner matures, and it
+degrades silently: nothing fails, the sentence simply becomes untrue, and the
+next reader budgets against it.
+
+What is true and checkable is narrower, and it is all this module needs: the
+verification is report-only because ADR 0039 stages it that way, and WHICH
+concerns a given assembly can bind is that assembly's own declaration to make.
 
 What must NOT happen in the interim is the thing § 6 exists to prevent —
 completing the profile by marking the unfinished concerns `inapplicable`. An
@@ -35,11 +48,12 @@ This module knows the thirteen concern NAMES and nothing about which of them any
 assembly can currently bind. Bindability comes entirely from the assembly's own
 declaration.
 
-That is not only correctness. Four concerns have mature owners today and nine do
-not, and **the four will change as owners mature** — so a facility carrying a
-list of "the bindable ones" would need a release every time the estate moved,
-and the list would be wrong between releases. The absence of that list is a
-decision, not an omission.
+That is not only correctness. **Which concerns are bindable moves as owners
+mature, and this facility is not the thing that would learn of it** — so a
+facility carrying a list of "the bindable ones" would need a release every time
+the estate moved, and the list would be wrong between releases. The absence of
+that list is a decision, not an omission — and it is the same decision as the
+withdrawal above: this module declines to hold a fleet fact it cannot check.
 
 ## The thirteen are CLOSED
 

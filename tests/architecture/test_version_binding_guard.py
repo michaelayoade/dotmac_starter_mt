@@ -89,6 +89,42 @@ PUBLISHED = ("0.1.0a1", "0.2.0a1", "0.2.0a2")
 #: candidate build restores it to two.
 BUILT_CANDIDATES = ("0.3.0a1",)
 
+#: DECLARED ON `main` AND NEVER BUILT, then retired. A fourth kind of spent
+#: name, and the first one this facility has produced.
+#:
+#: The three sets above are all spent by ARTIFACTS: `PUBLISHED` has a tag,
+#: `INVALIDATED` and `SUPERSEDED` each have a `CandidateArtifact.v1` receipt and
+#: a disposition. `0.3.0a6` has none of those. It was the declared identity from
+#: 2026-09-03 to 2026-09-04 and no wheel was ever built for it.
+#:
+#: It is spent anyway, by DOCUMENTS rather than by bytes. While it was declared,
+#: `main` advertised it in the package CHANGELOG, in `docs/MODULE_CATALOG.md`,
+#: in the `poetry.lock` path-package line, in
+#: `docs/inventories/declared-publication-baseline.json`, and inside the
+#: rendered `deploy/rendered/docker-compose.yml` labels by way of
+#: `io.dotmac.deployment.configuration.digest`. Re-declaring it would recreate
+#: `0.3.0a2`'s two-contracts defect with the documents instead of the bytes.
+#:
+#: **This constant is an EXPECTATION and NOT AN ENFORCEMENT, and the difference
+#: is the reason it is documented here rather than merely listed.** The guard
+#: has three record sets — tags, candidate receipts, dispositions — and this
+#: name is in none of them, so `bindings_for("0.3.0a6", ...)` returns EMPTY for
+#: both purposes and a dispatched build of `0.3.0a6` would not be refused. That
+#: is an unmonitored population, recorded as one rather than described as
+#: covered (ADR-0018: a guard exemption states an enforceable premise, or the
+#: region is unmonitored rather than exempt).
+#:
+#: It is deliberately NOT added to `SUPERSEDED`, and the reason is mechanical
+#: rather than stylistic: `test_a_superseded_candidate_is_still_refused_for_a_
+#: second_build` asserts `_bindings(version, purpose="candidate")` is non-empty,
+#: and for a version that was never built the guard has nothing to return. A
+#: symmetrical-looking entry there would FAIL, which is the clearest available
+#: proof that an unbuilt name is a different population and not a tidier
+#: instance of the same one. `test_an_abandoned_unbuilt_name_has_no_record_to_
+#: refuse_it` asserts that emptiness directly, so the gap is a checked fact
+#: instead of a claim in a comment.
+ABANDONED_UNBUILT = ("0.3.0a6",)
+
 
 def _module():
     """Load the guard, REGISTERING it before executing it.
@@ -135,9 +171,17 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
 
     WHICH purposes are admitted flips with the declared version's lifecycle
     stage, and the flip is part of the record rather than a loosening. The
-    declared version is now `0.3.0a6`, declared and UNBUILT, so both purposes
+    declared version is now `0.4.0a1`, declared and UNBUILT, so both purposes
     admit: nothing forbids building it once, and nothing forbids the release
     that would reuse that build.
+
+    `0.3.0a6` reached this same stage and left it without ever being built —
+    the first name in this facility's ledger to do so. It acquired no receipt
+    and no disposition, so it is absent from `SUPERSEDED` and present instead in
+    `ABANDONED_UNBUILT`, which that constant explains at length. Nothing about
+    this test changed for it, which is the point worth noticing: an unbuilt
+    predecessor leaves no trace in the guard's records, and that absence is a
+    gap rather than a clean handover.
 
     `0.3.0a5` walked the whole cycle inside a single day and is worth reading as
     the complete state machine. Declared and unbuilt: both purposes admitted.
@@ -194,7 +238,7 @@ def test_the_declared_version_has_no_candidate_artifact_yet() -> None:
     "asserting a lifecycle STAGE while claiming to assert name freshness". Do
     not re-merge them. The stage belongs here, where the name says so.
 
-    It still bites in this position: a hand-written `0.3.0a6` receipt for a
+    It still bites in this position: a hand-written `0.4.0a1` receipt for a
     build that never happened, or a guard reporting a candidate that does not
     exist, fails here.
     """
@@ -203,7 +247,8 @@ def test_the_declared_version_has_no_candidate_artifact_yet() -> None:
     assert not any(binding.kind == "candidate artifact" for binding in found), (
         f"{FACILITY} declares {declared}, which is recorded as already BUILT: "
         + "; ".join(str(binding) for binding in found)
-        + ". If the a6 candidate has now been built, this test flips back to "
+        + ". If the 0.4.0a1 candidate has now been built, this test flips "
+        "back to "
         "test_the_declared_version_is_refused_for_a_SECOND_build — see its "
         "docstring; do not delete the assertion"
     )
@@ -230,6 +275,40 @@ def test_the_declared_version_is_not_a_SPENT_name() -> None:
     assert declared not in PUBLISHED
     assert declared != INVALIDATED
     assert declared not in SUPERSEDED
+    # The fourth kind, added 2026-09-04 with `0.4.0a1`. A name can be spent by
+    # DOCUMENTS as well as by bytes, and this half of the assertion is the only
+    # thing standing between `0.3.0a6` and a re-declaration — the guard cannot
+    # see it. See the constant's own comment.
+    assert declared not in ABANDONED_UNBUILT
+
+
+def test_an_abandoned_unbuilt_name_has_no_record_to_refuse_it() -> None:
+    """The gap `ABANDONED_UNBUILT` exists to record, asserted rather than
+    described — and asserted in the direction that hurts.
+
+    This test PASSES on emptiness, which is normally the shape of a test that
+    has stopped checking. It is written that way on purpose: the fact worth
+    holding is that the guard cannot see this population at all, and a comment
+    saying so decays while an assertion does not. If someone later gives
+    `0.3.0a6` a hand-written receipt or a disposition to make the ledger look
+    symmetrical, this fails and sends them to the constant, where the reason a
+    version with no artifact gets no disposition is written out.
+
+    Its sensitivity comes from the line below it: the same call, over the same
+    repository, returns real bindings for a version that WAS built. Without
+    that, an emptiness assertion would also pass against a guard that had
+    stopped reading records.
+    """
+    for version in ABANDONED_UNBUILT:
+        for purpose in ("candidate", "release"):
+            assert not _bindings(version, purpose=purpose), (
+                f"{version} was never built and has no record, yet the guard "
+                f"reports a binding for --purpose {purpose}. If it has since "
+                "acquired one, this is not the file to silence: see "
+                "ABANDONED_UNBUILT"
+            )
+    # The control. A built version, through the identical call.
+    assert _bindings(BUILT_CANDIDATES[0], purpose="candidate")
 
 
 def test_the_admit_is_not_an_empty_record_set() -> None:
