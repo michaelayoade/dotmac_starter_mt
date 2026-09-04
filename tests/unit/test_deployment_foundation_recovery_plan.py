@@ -563,9 +563,9 @@ def test_the_two_plan_modules_do_NOT_canonicalize_for_themselves() -> None:
     assert "recovery_plan.py" not in found
     for module in ("execution_plan.py", "recovery_plan.py"):
         source = (PACKAGE / module).read_text(encoding="utf-8")
-        assert "canonical_plan_bytes" in source, (
-            f"{module} no longer routes through the core"
-        )
+        assert (
+            "canonical_plan_bytes" in source
+        ), f"{module} no longer routes through the core"
 
 
 def test_that_sweep_would_actually_find_one() -> None:
