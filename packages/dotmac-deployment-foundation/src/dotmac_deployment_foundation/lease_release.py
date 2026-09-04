@@ -84,6 +84,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from .canonical_plan import canonical_plan_bytes
+from .controller_identity import ControllerSshFingerprintV1
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
 from .lease import (
@@ -112,6 +113,7 @@ __all__ = [
     "RELEASE_STALE",
     "TERMINAL_REFUSALS",
     "CleanupDisposition",
+    "ControllerSshFingerprintV1",
     "HostClosure",
     "HostLeaseReleaseV1",
     "HostStanding",
@@ -159,12 +161,13 @@ class TerminalRefusal(str, Enum):
 
     ## THE RULE, so the next person derives it the same way
 
-    **Derive the mapping from the twelve SEMANTIC refusal paths — every raise of
-    a `DeploymentFoundationError` subclass, `ProvocationError` included — rather
-    than by counting textual `raise DeploymentFoundationError` statements.**
+    **Derive the mapping from the SEMANTIC refusal paths — every raise of a
+    `DeploymentFoundationError` subclass, `ProvocationError` included — and
+    discriminate each one by WHERE IT SITS RELATIVE TO THE FIRST MUTATION,
+    never by which file or line it is in.**
 
-    That is the rule rather than the result, and it is here because three
-    independent attempts got three different wrong answers, each from the shape
+    That is the rule rather than the result, and it is here because four
+    independent attempts got four different wrong answers, each from the shape
     of the tool rather than the shape of the question:
 
     * a text search for `raise DeploymentFoundationError` finds the base class
@@ -172,118 +175,96 @@ class TerminalRefusal(str, Enum):
     * a scan of one file misses the other two — that is how ten was reached;
     * a summary relayed without its mapping loses which member a site belongs to
       — that is how a member came to look inert when it was not, and then
-      genuinely was for a different reason.
+      genuinely was for a different reason;
+    * **an earlier revision of this table filed sites by LINE NUMBER**, and the
+      numbers went stale the moment the raises moved. Three of them were
+      recorded as "host untouched, safely releasable" while sitting AFTER the
+      compose stack had been applied and both filter chains rewritten. A release
+      carrying `precondition_unfit` from there would have told a destroyer the
+      host was untouched when it was not.
 
-    Counting `raise` statements gives thirteen. One of them is
-    ``raise SystemExit(main())``, which is process propagation and not a terminal
-    disposition. **Twelve is the mappable set.**
+    So the table below is keyed by the QUESTION each refusal answers and by its
+    position relative to first mutation. Positions are checked against the code,
+    never against a comment.
 
-    ## The twelve, mapped
+    ## The mapping
 
+    ==============================================  ========================
+    refusal                                         member
+    ==============================================  ========================
+    an item recorded twice                          `receipt_inconsistent`
+    probe evidence unreadable                       `evidence_unreadable`
+    a required result absent                        `evidence_incomplete`
+    far-end observation unreadable / not JSON       `evidence_unreadable`
+    the probe phase RAN and refused                 `probe_refused`
+    probe phase emitted no JSON                     `evidence_unreadable`
+    no `service_running` recorded                   `evidence_incomplete`
+    inside-probe harness/argument/key, PRE-contact  `precondition_unfit`
+    inside probe exited non-zero, POST-mutation     `evidence_unreadable`
+    inside probe emitted no JSON                    `evidence_unreadable`
+    descriptor declares no private port             `precondition_unfit`
+    private port names no sources                   `precondition_unfit`
+    a controller identity that is not a fingerprint `precondition_unfit`
+    the foreign rule could not be seeded            `host_state_uncertified`
+    ANY below-lane refusal, POST-mutation           `host_state_uncertified`
+    ==============================================  ========================
 
-    The first derivation found eight, by scanning `exposure_rehearsal_runner.py`
-    for `raise DeploymentFoundationError`. That was a grep's answer. Three more
-    raise `ProvocationError` in `lane3_provocation.py` — which SUBCLASSES
-    `DeploymentFoundationError`, so they are terminal refusals like any other —
-    and two more live in `lane3_inside_vantage.py`, a file neither side had
-    scanned. The writing lane's own independent count was ten and was wrong for
-    the same reason: *"my own count was made by the shape of a grep rather than
-    by the shape of the class hierarchy."*
+    ## Site 134, settled semantically rather than by line number
 
-    Thirteen, by AST over every `raise` of a `DeploymentFoundationError`
-    subclass across the three files. The mapping is recorded here because a
-    vocabulary whose derivation is not written down is a vocabulary the next
-    person re-derives differently:
+    The inside-vantage probe used to be filed under two members at once:
+    `PRECONDITION_UNFIT`'s docstring claimed it, and `EVIDENCE_UNREADABLE`'s said
+    a reader subprocess exiting non-zero is *"the same fact as malformed output"*
+    to a destroy decision. Both could not stand. The ruling splits it by
+    position, and the code now matches:
 
-    ==========================================  ============================
-    site                                        member
-    ==========================================  ============================
-    runner 154   an item recorded twice         `receipt_inconsistent`
-    runner 204   probe evidence unreadable      `evidence_unreadable`
-    runner 242   a required result absent       `evidence_incomplete`
-    runner 274   far-end observation unreadable `evidence_unreadable`
-    runner 281   far-end observation not JSON   `evidence_unreadable`
-    runner 304   the probe phase refused        `probe_refused`
-    runner 311   probe phase emitted no JSON    `evidence_unreadable`
-    runner 543   no `service_running` recorded  `evidence_incomplete`
-    vantage 134  the probe HARNESS could not run `precondition_unfit`
-    vantage 141  inside probe emitted no JSON   `evidence_unreadable`
-    provoke 150  foreign rule could not be set  `provocation_unestablished`
-    provoke 216  descriptor declares no private `precondition_unfit`
-    provoke 236  private port names no sources  `precondition_unfit`
-    ==========================================  ============================
+    * **Missing harness, argument, or jump key, detected BEFORE host contact**
+      → `PRECONDITION_UNFIT`. `probe_inside_vantage.sh` wraps its `ssh` in
+      `|| true` and its `case` falls through totally to `unknown`, so every way
+      the vantage can be unavailable is reported as DATA. It exits non-zero only
+      on its `${...:?}` guards — a missing positional argument or an unset
+      `LANE3_JUMP_KEY` — and those are facts about the INVOCATION, decidable
+      from the arguments alone. The runner asks them before it opens a single
+      connection, which is where the pole's sentence is true.
+    * **The probe subprocess exiting non-zero, AFTER mutation** →
+      `EVIDENCE_UNREADABLE`. To a destroy decision that is the same fact as
+      malformed output, and it is reached long after the apply, where
+      "the host was never touched" is false.
+    * **`PROBE_REFUSED` applies ONLY when a probe actually ran and refused.**
+      The inside-vantage site is no longer filed under it.
 
-    **TWELVE terminal refusals, not thirteen.** There are thirteen `raise`
-    statements across the three files and the thirteenth is
-    ``raise SystemExit(main())`` — an exit, not a refusal. Stated here so the
-    next reader does not go hunting for a mapping that should not exist.
+    ## The two subprocess sites still cannot discriminate
 
-    **Site 134 is not a probe refusal, and its name misled everyone including
-    the lane that wrote it.** Reading the SCRIPT rather than the raise settles
-    it: `classify()` wraps its `ssh` in ``|| true`` and its `case` falls through
-    totally to ``unknown``, so EVERY way the vantage can be unavailable is
-    reported as DATA — ``prohibited``, ``silent``, ``unknown`` — and never as a
-    failure. That was the point of the three-outcome split: a jump that refuses
-    must not be indistinguishable from a closed port. The script therefore exits
-    non-zero only on its ``${…:?}`` guards — a missing positional argument, or
-    ``LANE3_JUMP_KEY`` unset. So 134 means the probe HARNESS could not be
-    invoked: nothing measured, and in the unset-key case nothing attempted.
-    That is the precondition pole, not the probe pole.
+    Both the inside-vantage call and the probe phase run an external shell script
+    through `subprocess.run(..., check=False)` and raise on `returncode != 0`.
+    Nothing anywhere interprets these scripts' exit codes, so neither can tell
+    "the jump was unreachable" from "the script had a bad argument". A
+    `vantage_unavailable` member would therefore be one the writer **cannot
+    correctly populate** — it would have to guess by matching stderr prose, which
+    is what every `code` here exists to avoid. An inert member is a code for
+    something that cannot happen; a member populated by guesswork is a code that
+    says something false.
+
+    What would make it derivable: distinct exit codes from the probe scripts.
+    `test_the_two_subprocess_sites_still_cannot_discriminate` fails when that
+    lands, so the vocabulary is revisited by a red build rather than by somebody
+    remembering.
 
     ## The granularity is the DESTROY DECISION's, not the runner's
 
     Three different parse failures are one fact to somebody deciding whether to
     wipe a machine: the refusal was about EVIDENCE rather than about the host.
-    Site 274 exits non-zero where 281 emits bad JSON, and that difference is not
-    one anyone deciding about a machine can act on. Per-site detail belongs in
-    Lane 3's own receipt, which is where a reader diagnosing the RUN will look.
-
-    ## Site 134 and the `vantage_unavailable` question, settled from the code
-
-    The writing lane filed inside-vantage 134 as `vantage_unavailable` — *"the
-    jump could not be used at all"* — a genuinely different fact from 304, where
-    a probe ran and the target refused it. Those point at opposite
-    investigations: one says the target refused something, the other says access
-    to the vantage is broken and the target was never asked.
-
-    **The distinction is real and the code cannot currently produce it.** Read
-    rather than taken on the label: 134 and 304 are structurally identical.
-    Both run an external shell script through `subprocess.run(..., check=False)`
-    and both raise on `returncode != 0`, carrying stderr into the message. An
-    AST sweep finds three `returncode` comparisons across the two files and every
-    one of them is `!= 0`. **Nothing anywhere interprets these scripts' exit
-    codes.**
-
-    So 134 collapses "the jump was unreachable", "the probe ran and refused" and
-    "the script had a bad argument" into one raise, and so does 304 — the
-    conflation is symmetric and belongs to the scripts, not to this vocabulary.
-
-    Adding `vantage_unavailable` on that basis would be worse than leaving it
-    out. It would be a member the writer **cannot correctly populate**: it would
-    have to guess which kind of failure occurred by matching stderr prose, which
-    is the thing every `code` in this package exists to avoid. An inert member is
-    a code for something that cannot happen; a member populated by guesswork is a
-    code that says something false.
-
-    **What would make seven derivable rather than guessed:** distinct exit codes
-    from the probe scripts — a jump-unreachable status separate from a
-    probe-refused one — after which both raise sites can discriminate and
-    `vantage_unavailable` arrives WITH ITS SITE, which is the amendment path this
-    enum's last paragraph describes.
-    `test_the_two_subprocess_sites_still_cannot_discriminate` fails when that
-    lands, so the vocabulary is revisited by a red build rather than by somebody
-    remembering.
+    A site that exits non-zero and a site that emits bad JSON differ in a way
+    nobody deciding about a machine can act on. Per-site detail belongs in Lane
+    3's own receipt, which is where a reader diagnosing the RUN will look.
 
     ## SIX members, and a seventh would have been inert or wrong
 
-    An earlier draft carried `vantage_unavailable`, derived from site 274 alone.
-    Remapping 274 to `evidence_unreadable` leaves that member with no site that
-    raises it, and site 134 cannot supply one for the reason above. **A member
-    nobody raises is a code for something that cannot happen and a test that can
-    never fail**, which is the defect the release-evidence lane caught in itself
-    one level up and asked this lane to check its own half against. It is not
-    retained against a refusal that does not exist; when one does, it arrives
-    with its site.
+    An earlier draft carried `vantage_unavailable`, derived from a site that was
+    then correctly remapped — leaving a member with no site that raises it. **A
+    member nobody raises is a code for something that cannot happen and a test
+    that can never fail**, which is the defect the release-evidence lane caught
+    in itself one level up. It is not retained against a refusal that does not
+    exist; when one does, it arrives with its site.
 
     ## The mapping is an obligation
 
@@ -292,44 +273,66 @@ class TerminalRefusal(str, Enum):
     a free-text escape.
     """
 
-    #: Evidence existed and could not be read. Runner 204, 274, 281, 311;
-    #: inside-vantage 141. Includes a reader subprocess exiting non-zero: to a
-    #: destroy decision that is the same fact as malformed output.
+    #: Evidence existed and could not be read. Probe evidence that will not
+    #: parse, a far-end observation that exits non-zero or emits no JSON, a probe
+    #: phase with no JSON, and the inside-vantage probe's own two failures.
+    #: Includes a reader subprocess exiting non-zero: to a destroy decision that
+    #: is the same fact as malformed output.
     EVIDENCE_UNREADABLE = "evidence_unreadable"
-    #: Evidence was read and a required fact was absent. Runner 242, 543 — "an
-    #: unmeasured probe is not a passing one".
+    #: Evidence was read and a required fact was absent — "an unmeasured probe is
+    #: not a passing one".
     EVIDENCE_INCOMPLETE = "evidence_incomplete"
-    #: A probe refused to run. Runner 304, inside-vantage 134.
+    #: A probe RAN AND REFUSED. Only that: a harness that could not be invoked
+    #: measured nothing and is `PRECONDITION_UNFIT`, and a probe whose output
+    #: cannot be read is `EVIDENCE_UNREADABLE`.
     PROBE_REFUSED = "probe_refused"
-    #: The runner's own record contradicted itself. Runner 154 — "overwriting an
-    #: outcome is how a failure becomes a pass without anyone deciding to".
+    #: The runner's own record contradicted itself — "overwriting an outcome is
+    #: how a failure becomes a pass without anyone deciding to".
     RECEIPT_INCONSISTENT = "receipt_inconsistent"
-    #: A PRECONDITION of the rehearsal is unfit, so it could not begin.
-    #: Provocation 216 and 236 (no `private` port; a private port naming no
-    #: source set) and inside-vantage 134 (the probe harness could not be
-    #: invoked — a missing argument or an unset jump key).
+    #: A PRECONDITION of the rehearsal is unfit, so it could not begin: a
+    #: descriptor naming no `private` port, a private port naming no source set,
+    #: a controller identity that is not a key fingerprint, or an inside-probe
+    #: harness that could not be invoked (a missing argument or an unset jump
+    #: key).
     #:
     #: Named for the invariant rather than the instance. The ruling called this
-    #: `descriptor_unfit`, which fits 216 and 236 and not 134 — and the
-    #: difference between "the descriptor names no private port" and "no jump key
-    #: was configured" is not one anyone deciding whether to wipe a machine can
-    #: act on. Same granularity rule the rest of this vocabulary was derived at.
+    #: `descriptor_unfit`, which fits the descriptor cases and not the
+    #: invocation ones — and the difference between "the descriptor names no
+    #: private port" and "no jump key was configured" is not one anyone deciding
+    #: whether to wipe a machine can act on. Same granularity rule the rest of
+    #: this vocabulary was derived at.
     #:
     #: The pole is UNTOUCHED AND SAFELY RELEASABLE: nothing attempted, nothing
-    #: mutated, and re-running against the same fixture fails identically. In
-    #: 134's unset-key case not a single TCP connection is opened. The repair is
-    #: fixing an input, never inspecting a machine.
+    #: mutated, and re-running against the same fixture fails identically. The
+    #: writing lane must therefore ask every one of these BEFORE first mutation;
+    #: asked afterwards the sentence is false about the machine, and that is the
+    #: defect that put three of them behind an applied compose stack once.
     PRECONDITION_UNFIT = "precondition_unfit"
-    #: The provocation could not be established — the seeder failed to place the
-    #: foreign rule. Provocation 150.
+    #: **NOBODY HAS CERTIFIED WHAT STATE THE HOST IS IN.** The generalization of
+    #: what was `provocation_unestablished`, which named one instance of the
+    #: condition and therefore left the others with no member at all.
     #:
-    #: THE ONLY REFUSAL WHERE THE HOST WAS MUTATED AND THE MUTATION FAILED.
-    #: Partial rollback was attempted, so the machine is in a state nobody has
-    #: certified. `PRECONDITION_UNFIT` means *do not touch the machine, fix the
-    #: input*; this means *inspect the machine before re-running*. Opposite
-    #: operator actions, and one member cannot carry both — which is why this is
-    #: not `PROBE_REFUSED` by elimination: no probe ran.
-    PROVOCATION_UNESTABLISHED = "provocation_unestablished"
+    #: Two cases, and they need the same operator action:
+    #:
+    #: * a foreign-rule provocation that could not be established — the seeder
+    #:   failed part way and a partial unwind was attempted;
+    #: * **any refusal raised after mutation MAY have begun** — a `StepFailed`
+    #:   from a compose apply on the host being the case that forced the
+    #:   generalization. That refusal previously had no member anywhere in this
+    #:   vocabulary, so a failed apply left the host mutated with no record and
+    #:   no closure, on any run where the apply failed.
+    #:
+    #: **Note the modality: MAY have begun, not DID begin.** The member covers
+    #: the case where nobody can say, which is the whole reason it exists. A
+    #: writer that could prove the host untouched would be raising
+    #: `PRECONDITION_UNFIT` instead; one that cannot prove it must not borrow
+    #: that pole, because it asserts a fact about a machine.
+    #:
+    #: `PRECONDITION_UNFIT` means *do not touch the machine, fix the input*;
+    #: this means *inspect the machine before re-running*. Opposite operator
+    #: actions, and one member cannot carry both — which is also why this is not
+    #: `PROBE_REFUSED` by elimination: no probe ran.
+    HOST_STATE_UNCERTIFIED = "host_state_uncertified"
 
 
 TERMINAL_REFUSALS: Final[tuple[str, ...]] = tuple(r.value for r in TerminalRefusal)
@@ -381,19 +384,27 @@ class HostClosure(str, Enum):
 #:
 #: Two entries are ruled and the rest are deliberately unconstrained:
 #:
-#: * `PROVOCATION_UNESTABLISHED` may NEVER advertise the host as generally
-#:   reusable. It is the one refusal where the host was mutated and the mutation
-#:   failed, with a partial unwind, so the machine is in a state nobody has
-#:   certified.
+#: * `HOST_STATE_UNCERTIFIED` may NEVER advertise the host as generally
+#:   reusable. It is the refusal that says nobody has certified what state the
+#:   machine is in — a provocation that failed part way with a partial unwind, or
+#:   anything raised after mutation may have begun. `INSPECTION_REQUIRED` or
+#:   `DESTROY_ONLY`, and never `REUSABLE`.
 #: * `PRECONDITION_UNFIT` means untouched and safely releasable, and must be ABLE
 #:   to take `REUSABLE` — a constraint that can only ever say no cannot be shown
 #:   to permit anything, so the permissive pole is asserted as well.
+#:
+#: **Constraining the closure does NOT excuse the cleanup axis from answering.**
+#: `cleanup` is required on every release whatever the refusal, and reusability
+#: stays the INTERSECTION of the two constraints below. A refusal that bounds the
+#: closure to the restricted set still has to say what became of what the lease
+#: created, because "the state is uncertified" and "something the lease made is
+#: still there" are different facts a destroyer reads differently.
 #:
 #: The others are unconstrained BY RULING rather than by this module's judgement.
 #: Narrowing one is a reviewed diff here, with the reason a destroy decision
 #: would turn on.
 _PERMITTED_CLOSURES: Final[dict[TerminalRefusal, frozenset[HostClosure]]] = {
-    TerminalRefusal.PROVOCATION_UNESTABLISHED: frozenset(
+    TerminalRefusal.HOST_STATE_UNCERTIFIED: frozenset(
         {HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY}
     ),
 }
@@ -634,7 +645,15 @@ class HostLeaseReleaseV1:
     #: closed the lease, kept in its own field rather than folded into the one
     #: above. Two facts, two fields: who touched the host, and who closed it.
     #: Must equal the lease's own controller identity.
-    host_mutation_evidence: str
+    #:
+    #: **Named `controller_identity_fingerprint` on BOTH planes.** It was
+    #: `host_mutation_evidence` here while `HostLease` already carried a field of
+    #: the other name for the same fact — one thing with two names across a
+    #: boundary where the two are COMPARED, which is exactly the shape that
+    #: invites somebody to conclude they are different facts. Renamed before
+    #: `0.4.0a1` was built: `HostLeaseRelease.v1` has never crossed an artifact
+    #: boundary, so this costs nothing now and would cost a schema version later.
+    controller_identity_fingerprint: ControllerSshFingerprintV1
     #: What the host may be used for now. See `HostClosure` — a second axis from
     #: why the run ended, and constrained by it.
     closure: HostClosure
@@ -701,12 +720,17 @@ class HostLeaseReleaseV1:
                 "another run is a claim rather than a derivation",
                 code=RELEASE_FOREIGN,
             )
-        if not _DIGEST.match(str(self.host_mutation_evidence)):
+        if not isinstance(
+            self.controller_identity_fingerprint, ControllerSshFingerprintV1
+        ):
             raise SpecError(
-                f"host_mutation_evidence {self.host_mutation_evidence!r} is not "
-                "a sha256 fingerprint. The controller key that mutated the host "
-                "is retained as evidence in its own right — it is simply not the "
-                "principal that closed the lease",
+                "controller_identity_fingerprint must be a "
+                "ControllerSshFingerprintV1, got "
+                f"{type(self.controller_identity_fingerprint).__name__}. The "
+                "controller key that mutated the host is retained as evidence in "
+                "its own right — it is simply not the principal that closed the "
+                "lease — and it is ESTABLISHED by decoding rather than accepted "
+                "by shape",
                 code=RELEASE_MALFORMED,
             )
         if not isinstance(self.closure, HostClosure):
@@ -755,7 +779,9 @@ class HostLeaseReleaseV1:
             "rehearsal_run_id": self.rehearsal_run_id,
             "released_at": self.released_at,
             "closure": self.closure.value,
-            "host_mutation_evidence": str(self.host_mutation_evidence),
+            "controller_identity_fingerprint": str(
+                self.controller_identity_fingerprint
+            ),
             "released_by": self.released_by.as_document(),
             "schema": LEASE_RELEASE_SCHEMA,
             "source_revision": self.source_revision,
@@ -888,14 +914,17 @@ def require_release_before_destruction(
             "that at the other end",
             code=RELEASE_FOREIGN,
         )
-    if str(release.host_mutation_evidence) != str(
-        lease.controller_identity_fingerprint
-    ):
+    # Compared as DECODED DIGESTS, not as text. `ControllerSshFingerprintV1`
+    # equality is over the 32 bytes, so this asks whether the release names the
+    # same KEY — which is the question — rather than whether two records spell
+    # one key the same way. Parsing proves shape; this is where identity is
+    # proven, and a well-formed fingerprint of the WRONG key fails HERE.
+    if release.controller_identity_fingerprint != lease.controller_identity_fingerprint:
         raise PreconditionFailed(
             f"the release records host mutation by "
-            f"{release.host_mutation_evidence} and the lease was taken by "
-            f"{lease.controller_identity_fingerprint}. A release whose "
-            "host-mutation evidence is not this lease's controller is bound to "
+            f"{release.controller_identity_fingerprint} and the lease was taken "
+            f"by {lease.controller_identity_fingerprint}. A release whose "
+            "controller identity is not this lease's controller is bound to "
             "the wrong work",
             code=RELEASE_FOREIGN,
         )
@@ -1047,7 +1076,11 @@ def load_release(
             subject=str(document["released_by"]["subject"]),
             run_binding=str(document["released_by"]["run_binding"]),
         ),
-        host_mutation_evidence=str(document["host_mutation_evidence"]),
+        controller_identity_fingerprint=ControllerSshFingerprintV1.parse(
+            document["controller_identity_fingerprint"],
+            field=f"the release at {path}: controller_identity_fingerprint",
+            code=RELEASE_MALFORMED,
+        ),
         closure=HostClosure(str(document["closure"])),
         cleanup=CleanupDisposition(str(document["cleanup"])),
     )

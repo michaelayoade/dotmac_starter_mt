@@ -33,6 +33,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from dotmac_deployment_foundation.controller_identity import (
+    ControllerSshFingerprintV1,
+)
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.lease import (
     HostLease,
@@ -75,7 +78,12 @@ SLOT = "dotmacproxmox/102"
 RUN = "33854964978"
 REHEARSAL = "33860000001"
 PRINCIPAL = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
-FINGERPRINT = "sha256:" + "a" * 64
+#: A real OpenSSH fingerprint. It read `"sha256:" + "a" * 64` — the CONTENT
+#: DIGEST shape the release plane's old regex required, which `ssh-keygen -lf`
+#: never emits and which is therefore a value the field could not really hold.
+FINGERPRINT = ControllerSshFingerprintV1.parse(
+    "SHA256:T1kdK/6QTzzwU1EienO6nUgk8wu9UpjqB8BatKbndSE", field="controller"
+)
 LIVE = datetime(2026, 9, 4, 3, 0, tzinfo=UTC)
 AFTER = datetime(2026, 9, 4, 7, 0, tzinfo=UTC)
 
@@ -112,7 +120,7 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
             subject=lease.workload_principal,
             run_binding=REHEARSAL,
         ),
-        "host_mutation_evidence": lease.controller_identity_fingerprint,
+        "controller_identity_fingerprint": lease.controller_identity_fingerprint,
         "closure": HostClosure.REUSABLE,
         "cleanup": CleanupDisposition.PURGED,
     }
@@ -305,14 +313,15 @@ def test_an_untouched_refusal_releases_only_when_cleanup_permits(
 
 
 def test_a_partially_mutated_host_can_never_become_reusable(store: Path) -> None:
-    """Site 150's case: the seeder placed a foreign rule, failed, and partially
-    unwound, so the machine is in a state nobody has certified.
+    """The seeder placed a foreign rule, failed, and partially unwound, so the
+    machine is in a state nobody has certified — and so is every host a refusal
+    reached after mutation may have begun, which is the same member.
 
     Restricted by the REFUSAL axis whatever the cleanup says — including a
     cleanup that claims success, because a purge claimed after a failed
     provocation is a claim about a host whose state was already uncertified.
     """
-    mutated = TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED)
+    mutated = TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED)
     for cleanup in CleanupDisposition:
         with pytest.raises(SpecError):
             _release(outcome=mutated, cleanup=cleanup, closure=HostClosure.REUSABLE)

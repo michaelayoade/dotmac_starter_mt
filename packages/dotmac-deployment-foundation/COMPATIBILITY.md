@@ -48,8 +48,23 @@
   `verify_publication()`, `render_status_document()` and
   `render_pending_document()`. The sixteen item CODES are contract — a release
   gate reads them — and only `executed_passed` satisfies publication.
-- `HostLease.v1`: `HostLease`, `load_lease()`, `write_lease()`. A lease is
-  never self-granted; `authorization_run_id` is mandatory.
+- `HostLease.v2`: `HostLease`, `load_lease()`, `write_lease()`. A lease is
+  never self-granted; `authorization_run_id` is mandatory, and so is the
+  `workload_principal` that holds and releases it. `HostLease.v1` is READABLE AS
+  HISTORY through `HistoricalLeaseV1`, which has no `covers()` and no principal:
+  legibility is not authority. This bullet said `.v1` until 0.4.0a1 and was
+  stale by one schema.
+- `HostLeaseRelease.v1`: `HostLeaseReleaseV1`, `TerminalOutcome`,
+  `TerminalRefusal`, `HostClosure`, `CleanupDisposition`, `ReleasingPrincipal`,
+  `write_release()`, `load_release()`, `require_release_for_destruction()`,
+  `require_release_for_reuse()`. The refusal, closure and cleanup vocabularies
+  are CLOSED and are contract — a destroy gate branches on them. Expiry is not
+  release: a crashed run leaves `expired_held`, which does not authorize a wipe.
+- `ControllerSshFingerprintV1`. The controller key's OpenSSH SHA-256
+  fingerprint, on BOTH the lease and the release. Parsed by DECODING the
+  canonical `SHA256:<43 base64>` that `ssh-keygen -lf` emits and requiring 32
+  bytes; equality is over those bytes, so comparison answers about the KEY.
+  There is exactly one accepted spelling per key.
 - `VantageQualification` and `qualify_vantage()`. Typed observations in, a
   verdict out; this package performs no network I/O.
 - `Effects`, `Executor`, `DeploymentPlan`, `Step`, `StepKind`, `Strategy`.
