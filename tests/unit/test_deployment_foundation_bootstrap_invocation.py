@@ -28,6 +28,7 @@ cannot be persisted.
 from __future__ import annotations
 
 import ast
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -100,12 +101,74 @@ def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
 # ── every implementation, derived rather than listed ────────────────────────
 
 
+_LS_FILES = ("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+
+
+def _python_files(root: Path = REPO) -> list[Path]:
+    """Every Python file in THIS working tree — and nothing from another one.
+
+    The defect this replaces: `REPO.rglob("*.py")`. In CI that is a clean
+    checkout and harmless. In a primary checkout with ~30 sibling
+    `*_worktree/` directories it swept every one of them, so a local
+    `make test-unit` reported implementations and conformance results **from
+    other lanes' branches**. Both directions were live, and the second is the
+    dangerous one:
+
+    * a false local RED from another lane's in-progress branch, sending a lane
+      after a defect that is not in its tree;
+    * a false local GREEN, where a stale worktree happens to satisfy the sweep
+      and masks a real gap in the tree actually under test.
+
+    Same class as the probe wheel, opposite sign: a detector whose field of view
+    does not match what it claims to check. That fix made the sweep see
+    something it could not; this stops it seeing what it should not.
+
+    **Asks git, and does not skip by NAME.** A `*_worktree/` name exclusion
+    fails the moment a worktree is named differently — and this lane's own
+    sibling checkouts are not uniformly named. What actually makes a directory a
+    separate checkout is its own `.git`, and git already knows: measured,
+    `ls-files --cached --others --exclude-standard` emits a nested checkout as a
+    bare directory entry and lists NO file inside it, for both a nested `git
+    init` and a real `git worktree add` (whose `.git` is a file, not a
+    directory).
+
+    **`--others` is deliberate, not incidental.** Tracked-only (`git ls-files`)
+    would drop a file that exists in this tree but is not yet staged — which is
+    the false-green direction again, one step smaller. `--exclude-standard`
+    keeps ignored build output out.
+
+    A missing or failing git REFUSES rather than falling back to `rglob`: a
+    fallback to the wider field of view is exactly the silent revert this
+    function exists to prevent.
+
+    **Measured: in a clean checkout this changes nothing.** Both the old walk
+    and this one return the same 1710 files here, with no difference in either
+    direction — so CI's result is untouched and the only thing removed is the
+    local over-reach. That is deliberately NOT asserted as a test: the equality
+    holds only where there is no sibling checkout, and a test asserting it would
+    fail in exactly the tree this function exists to serve.
+    """
+    result = subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
+        ["git", "-C", str(root), *_LS_FILES],  # noqa: S607 # nosec B607
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:  # pragma: no cover - refuses, never degrades
+        raise RuntimeError(
+            f"git ls-files failed in {root}: {result.stderr.decode(errors='replace')}. "
+            "This sweep refuses rather than falling back to a directory walk, "
+            "which would silently restore the sibling-worktree over-reach"
+        )
+    names = result.stdout.decode("utf-8", errors="replace").split("\0")
+    return sorted(root / name for name in names if name.endswith(".py"))
+
+
 def _effects_implementations() -> set[str]:
     """Any class defining `prune_images` implements this protocol. AST, so a
     mention in a docstring is not an implementation."""
     found: set[str] = set()
-    for path in sorted(REPO.rglob("*.py")):
-        if ".git" in path.parts or "engine/run.py" in path.as_posix():
+    for path in _python_files():
+        if "engine/run.py" in path.as_posix():
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -137,9 +200,7 @@ def test_every_effects_implementation_conforms_to_the_WIDENED_protocol() -> None
     implementations = _effects_implementations()
     assert implementations, "the sweep found no implementation at all"
     missing: list[str] = []
-    for path in sorted(REPO.rglob("*.py")):
-        if ".git" in path.parts:
-            continue
+    for path in _python_files():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
@@ -409,3 +470,132 @@ def test_the_executor_accepts_v2_and_still_refuses_a_recovery_plan() -> None:
             sleep=lambda _: None,
         )
     assert exc.value.code == EXECUTION_PLAN_WRONG_TYPE
+
+
+# ── the sweep's field of view ───────────────────────────────────────────────
+
+
+def _nonconforming_source(name: str) -> str:
+    """A class the conformance test WOULD flag: `prune_images`, no bootstrap."""
+    return f"class {name}:\n    def prune_images(self):\n        return None\n"
+
+
+def _plant_checkout(root: Path) -> None:
+    subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
+        ["git", "init", "-q", str(root)],  # noqa: S607 # nosec B607
+        check=True,
+    )
+
+
+def test_the_sweep_does_not_reach_into_a_SIBLING_CHECKOUT(tmp_path: Path) -> None:
+    """The sensitivity proof, in the shape this lane has been using.
+
+    Plant a non-conforming implementation inside a sibling-checkout-shaped path
+    and prove the sweep does not report it — otherwise the exclusion can quietly
+    become a no-op and nobody finds out until a lane chases a defect that is not
+    in its tree.
+
+    The nested directory is deliberately NOT named `*_worktree`. A name-based
+    skip would pass a test that used that name and fail in reality the moment
+    someone named a checkout differently; this proves the exclusion is
+    structural.
+    """
+    outer = tmp_path / "outer"
+    (outer / "sibling_lane").mkdir(parents=True)
+    _plant_checkout(outer)
+    _plant_checkout(outer / "sibling_lane")
+
+    (outer / "tracked.py").write_text("class Conforming:\n    pass\n")
+    subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
+        ["git", "-C", str(outer), "add", "tracked.py"],  # noqa: S607 # nosec B607
+        check=True,
+    )
+    (outer / "untracked.py").write_text("class AlsoConforming:\n    pass\n")
+    (outer / "sibling_lane" / "other_lane.py").write_text(
+        _nonconforming_source("FromAnotherBranch")
+    )
+
+    swept = {path.name for path in _python_files(outer)}
+
+    # The fix.
+    assert "other_lane.py" not in swept, (
+        "the sweep reached into a sibling checkout — a local run would report "
+        "another lane's branch as this tree's result"
+    )
+    # Positive control: it still sees this tree, or the assertion above would
+    # hold for a sweep that had simply stopped working.
+    assert "tracked.py" in swept
+    # And it did NOT degrade to tracked-only, which would hide a file that
+    # exists here but is not staged yet — the false-green direction again.
+    assert "untracked.py" in swept
+
+
+def test_the_planted_implementation_WOULD_have_been_reported(tmp_path: Path) -> None:
+    """Non-vacuity for the test above.
+
+    "The sweep did not report it" is also true of a file containing nothing
+    interesting. Parse the same planted source with the same detector and show it
+    yields exactly the non-conforming class the conformance test flags — so the
+    previous assertion is about the sweep's field of view and not about an inert
+    fixture.
+    """
+    planted = tmp_path / "other_lane.py"
+    planted.write_text(_nonconforming_source("FromAnotherBranch"))
+    tree = ast.parse(planted.read_text())
+    flagged = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and {b.name for b in node.body if isinstance(b, ast.FunctionDef)}
+        == {"prune_images"}
+    ]
+    assert flagged == ["FromAnotherBranch"]
+
+
+def test_the_sweep_refuses_rather_than_falling_back(tmp_path: Path) -> None:
+    """A fallback to `rglob` would silently restore the over-reach.
+
+    A directory that is not a checkout at all is the reachable form of "git
+    could not answer here". It must raise, not quietly widen.
+    """
+    with pytest.raises(RuntimeError, match="refuses"):
+        _python_files(tmp_path / "not-a-checkout")
+
+
+def test_the_PROTOCOL_ITSELF_is_deliberately_not_counted() -> None:
+    """Whether this sweep reports 5 or 6 depends entirely on this one exclusion.
+
+    Two lanes counting the same tree reported 6 and 5 and each had a coherent
+    story. The whole difference was `engine/run.py:Effects` — the protocol
+    DEFINITION, excluded here by `_effects_implementations`'s explicit skip — and
+    the discrepancy arrived in the same change that narrowed the sweep's field of
+    view, which made a benign counting convention look exactly like a dropped
+    implementation.
+
+    A count cannot distinguish those two. A name can. So the convention is
+    pinned here by name instead of living in a skip expression that a reader has
+    to notice, and the second assertion is the control: the definition really
+    does define `prune_images`, so its absence from the set is a DELIBERATE
+    exclusion rather than the sweep failing to reach it — which is the reading
+    that would have been true if the fix had dropped something.
+    """
+    assert "run.py:Effects" not in _effects_implementations()
+
+    run_py = Path(Effects.__module__.replace(".", "/"))
+    source = (REPO / "packages/dotmac-deployment-foundation/src" / run_py).with_suffix(
+        ".py"
+    )
+    defines = [
+        node.name
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ClassDef)
+        and any(
+            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
+            for b in node.body
+        )
+    ]
+    assert defines == ["Effects"], (
+        "the protocol definition no longer matches what the sweep looks for, so "
+        "the exclusion above is now excluding nothing and the count it explains "
+        "means something different"
+    )

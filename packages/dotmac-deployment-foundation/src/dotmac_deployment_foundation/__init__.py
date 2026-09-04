@@ -38,10 +38,12 @@ from .ancestry import (
     refuse_backwards_deploy,
 )
 from .application_profile import (
+    INTEGRATION_SURFACE_FAMILIES,
     ApplicationFoundationProfile,
     ConcernBinding,
     FoundationConcern,
     InapplicableConcern,
+    IntegrationSurfaceAbsenceProofV1,
     WriterClaim,
 )
 from .authorization import OPERATIONS, ExecutionGrant, authorize
@@ -447,10 +449,12 @@ __all__ = [
     "EffectivePrivilegeFact",
     "EffectivePrivilegeKey",
     "Effects",
+    "INTEGRATION_SURFACE_FAMILIES",
     "ApplicationFoundationProfile",
     "ConcernBinding",
     "FoundationConcern",
     "InapplicableConcern",
+    "IntegrationSurfaceAbsenceProofV1",
     "WriterClaim",
     "ExecutionGrant",
     "Executor",
