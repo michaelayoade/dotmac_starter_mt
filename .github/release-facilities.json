@@ -88,6 +88,13 @@
         "                       __init__.py both import it, and because the record",
         "                       is what the publication gate below reads: a wheel",
         "                       without it cannot import, let alone deploy.",
+        "  execution_plan_v2.py -- FoundationExecutionPlanV2 and the typed",
+        "                       PostgresPrincipalCredentialBootstrapV1. Required",
+        "                       because __init__.py exports it; NOT on a host path",
+        "                       yet -- there is no StepKind for the act and no",
+        "                       Effects method to invoke it, deliberately, because",
+        "                       widening that protocol makes the probe wheel THIS",
+        "                       LANE installs non-conforming.",
         "  canonical_plan.py -- the ten canonicalization rules EVERY plan",
         "                       document is hashed under, owned once. Imported by",
         "                       execution_plan.py and by engine/run.py, so a wheel",
@@ -172,7 +179,8 @@
           "dotmac_deployment_foundation/render/nginx.py",
           "dotmac_deployment_foundation/canonical_plan.py",
           "dotmac_deployment_foundation/recovery_plan.py",
-          "dotmac_deployment_foundation/deployment_evidence.py"
+          "dotmac_deployment_foundation/deployment_evidence.py",
+          "dotmac_deployment_foundation/execution_plan_v2.py"
         ],
         "forbidden_prefixes": [
           "app/",

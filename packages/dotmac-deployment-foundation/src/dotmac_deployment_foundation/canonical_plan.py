@@ -119,11 +119,15 @@ PLAN_VALUE_REFUSED: Final = "canonical_plan.value_refused"
 #: runtime), and these constants sit in a leaf so the same class of breakage
 #: cannot come back through them.
 #:
-#: TWO codes rather than one shared "wrong plan kind", deliberately. The
-#: interchangeability proof drives a real document of each kind into the other's
-#: acceptance points, and a single code could not tell "the deploy path refused a
-#: recovery plan" from "the recovery path refused a deploy plan" — which is one
-#: direction proven twice and the other not at all.
+#: ONE CODE PER PLAN KIND, deliberately — not one shared "wrong plan kind".
+#: The interchangeability proof drives a real document of each kind into every
+#: other kind's acceptance points, and a single code could not tell "the deploy
+#: path refused a recovery plan" from "the recovery path refused a deploy plan"
+#: — one direction proven twice and the other not at all. With
+#: `FoundationExecutionPlanV2` the matrix is 3x3 rather than 2x2, which is
+#: exactly when a shared code would start hiding an unproven direction.
+#: `execution_plan_v2` owns its own code, in that module, for the same reason
+#: these two are here: it is not in any import cycle.
 EXECUTION_PLAN_WRONG_TYPE: Final = "execution_plan.wrong_type"
 RECOVERY_PLAN_WRONG_TYPE: Final = "recovery_plan.wrong_type"
 

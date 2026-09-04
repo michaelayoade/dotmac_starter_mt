@@ -219,6 +219,49 @@ What is deliberately NOT narrowed: the four fields the publication gate reads
 (`execution_sequence`, `attempt_no`). Narrowing the document to a single step's
 four fields would have broken the gate that publishes this facility and Control's
 settlement at the same time.
+### `FoundationExecutionPlanV2` — the plan that can express a principal bootstrap
+
+**V1 is not touched.** Two other repositories compute or compare its digest, and
+a version that grows a field is a version whose digest moves for documents nobody
+edited. V2 is a new document; the two are told apart by `schema` at every
+acceptance point.
+
+**Not `Step.command`, and that is the load-bearing constraint.** The cheap way to
+express "bootstrap this principal's credential" is a step whose command is an
+`ALTER ROLE` string — which puts SQL inside a reviewed, signed plan, after which
+`require_no_secrets` is the only thing between a plan and a credential, and it is
+a shape detector that cannot tell an `ALTER ROLE ... PASSWORD` from any other
+sentence. A typed member cannot carry a command by construction.
+
+`PostgresPrincipalCredentialBootstrapV1` holds a service identity, a principal,
+an OpenBao path and field, an expected version, and the declared transition.
+There is no field for a password, a DSN, SQL or a command — not "those are
+rejected", but *there is nowhere to put them*.
+
+**`expected_version = 1` is what makes it a transition rather than a write.**
+With `absent_to_present` it is a compare-and-set against "no record exists", so a
+second run against a store that already holds the record refuses rather than
+rotating a credential other systems now hold. `True` is refused explicitly,
+because `bool` is an `int` in Python and would sail through as the version 1.
+
+**The digest keeps the V1 NAME.** A V2 document produces an
+`ExecutionPlanDigestV1`. The value schema and the document schema are separate
+names on purpose: Control freezes the value and never parses the document, so a
+second document version does not make a second value type and Control needs no
+change. The reason is in the module, not only here, because the edit it guards
+against looks like a tidy-up.
+
+**The substitution matrix is now 3x3.** Nine ordered pairs across three plan
+kinds; three admit, six refuse, each with the refusing side's own code. One
+shared "wrong plan kind" code would let a direction be proven twice while another
+was never proven at all — likelier the bigger the matrix gets.
+
+**Half a change, deliberately.** There is no `StepKind` for the act and no
+`Effects` method to invoke it. Widening that protocol makes
+`_PROBE_BINDINGS_SOURCE` in `scripts/release_facility.py` — the probe wheel the
+publication gate installs — non-conforming until updated, so it is held pending a
+ruling. Same staging as `RecoveryExecutionPlanV1`: the type refuses first,
+reachability later, so a half-built chain cannot read as done.
 
 ### Also in this release
 
