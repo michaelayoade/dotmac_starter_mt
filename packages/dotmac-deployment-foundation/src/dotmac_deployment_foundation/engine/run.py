@@ -45,6 +45,12 @@ from typing import Protocol, runtime_checkable
 from ..authorization import ExecutionGrant
 from ..backup import BackupRecord
 from ..canonical_plan import EXECUTION_PLAN_WRONG_TYPE
+from ..deployment_evidence import (
+    DeploymentEvidenceV1,
+    RunStanding,
+    StepEvidenceV1,
+    StepStanding,
+)
 from ..errors import DeploymentError, PreconditionFailed, StepFailed
 from ..evidence import (
     SignatureVerifier,
@@ -215,11 +221,21 @@ class Effects(Protocol):
 
 @dataclass(slots=True)
 class StepRecord:
+    """One step, in memory.
+
+    ``detail`` is OPERATOR OUTPUT and is deliberately not the same thing as
+    ``standing``. The sentence is what a human reads on the terminal; the
+    standing is what the evidence document records. Keeping both is what lets
+    the persisted record be closed without making the CLI less useful — see
+    `deployment_evidence`, which has no field this string could be written to.
+    """
+
     kind: StepKind
     target: str
     ok: bool
     detail: str
     duration_seconds: float
+    standing: StepStanding = StepStanding.OK
 
 
 @dataclass(slots=True)
@@ -253,39 +269,52 @@ class DeploymentOutcome:
     execution_sequence: int = 0
     attempt_no: int = 0
     operation: str = ""
+    #: The run's outcome as ONE CLOSED WORD, replacing the free-text `failure`
+    #: field in the persisted record. `failure` still exists here, still holds
+    #: `str(exc)`, and is still what the CLI prints — it simply no longer
+    #: travels. See `deployment_evidence` for why that split is the whole point.
+    standing: RunStanding = RunStanding.FAILED
 
     def as_evidence(self) -> dict[str, object]:
-        return {
-            "product": self.plan.product,
-            "image": self.plan.image,
-            "image_digest": self.plan.image_digest,
-            "source_revision": self.plan.source_revision,
-            "manifest_digest": self.plan.manifest_digest,
-            "execution_plan_digest": self.execution_plan_digest,
-            "descriptor_digest": self.descriptor_digest,
-            "control_plan_digest": self.control_plan_digest,
-            "execution_sequence": int(self.execution_sequence),
-            "attempt_no": int(self.attempt_no),
-            "operation": self.operation,
-            "strategy": self.plan.strategy.value,
-            "succeeded": self.succeeded,
-            "mutated": self.mutated,
-            "failed_step": self.failed_step.value if self.failed_step else None,
-            "failure": self.failure,
-            "rollback_permitted": self.plan.rollback_permitted,
-            "rollback_reason": self.plan.rollback_reason,
-            "steps": [
-                {
-                    "kind": record.kind.value,
-                    "target": record.target,
-                    "ok": record.ok,
-                    "detail": record.detail,
-                    "duration_seconds": round(record.duration_seconds, 3),
-                }
+        """The persisted record, through the CLOSED type.
+
+        This used to build a free-form mapping with three open text channels —
+        ``failure`` (assigned from ``str(exc)``), ``steps[].detail`` (prose,
+        twelve handlers building it with an f-string over live values) and
+        ``notes`` (including ``f"evidence could not be written: {exc}"``). Raw
+        exception text reached all three, and a guard placed before each write
+        would not have caught it: `require_no_secrets` is a SHAPE detector and
+        stderr is not secret-shaped.
+
+        `DeploymentEvidenceV1` has no field any of them could be written to.
+        """
+        return DeploymentEvidenceV1(
+            product=self.plan.product,
+            image_reference=self.plan.image,
+            image_digest=self.plan.image_digest,
+            source_revision=self.plan.source_revision,
+            manifest_digest=self.plan.manifest_digest,
+            execution_plan_digest=self.execution_plan_digest,
+            descriptor_digest=self.descriptor_digest,
+            control_plan_digest=self.control_plan_digest,
+            execution_sequence=int(self.execution_sequence),
+            attempt_no=int(self.attempt_no),
+            operation=self.operation,
+            strategy=self.plan.strategy.value,
+            standing=self.standing,
+            succeeded=self.succeeded,
+            mutated=self.mutated,
+            failed_step=self.failed_step.value if self.failed_step else "",
+            steps=tuple(
+                StepEvidenceV1(
+                    kind=record.kind.value,
+                    target=record.target,
+                    standing=record.standing,
+                    duration_seconds=record.duration_seconds,
+                )
                 for record in self.records
-            ],
-            "notes": list(self.notes),
-        }
+            ),
+        ).as_document()
 
 
 class Executor:
@@ -402,6 +431,12 @@ class Executor:
         # second one fixed it needs them apart.
         self._deployment_id = deployment_id or "unset"
         self._notes_sink: list[str] = []
+        # A step that succeeded by a DELIBERATE fail-open records `non_fatal`
+        # rather than `ok`. "It worked" and "it did not work and we decided that
+        # was acceptable" are different facts, and the free-text `detail` was the
+        # only thing carrying the difference before the record was closed. Image
+        # retention is the live case and currently the only one.
+        self._non_fatal: dict[StepKind, StepStanding] = {}
         # The real BackupResult per dataset, kept as a value rather than
         # reconstructed from a formatted note. See `_do_verify_backup`.
         self._backups: dict[str, BackupResult] = {}
@@ -448,6 +483,7 @@ class Executor:
         try:
             self._run_steps(plan.steps, plan, outcome)
             outcome.succeeded = True
+            outcome.standing = RunStanding.SUCCEEDED
         except DeploymentError:
             # The failure is RETURNED on the outcome, not raised. A caller needs
             # the whole record — which steps ran, what mutated, where the gate
@@ -458,7 +494,12 @@ class Executor:
             self._annotate(
                 "deployment.success" if outcome.succeeded else "deployment.failure",
                 plan,
-                detail=outcome.failure,
+                # The STANDING, never `outcome.failure`. That field is
+                # `str(exc)`, and sending it here put raw exception text — a DSN
+                # from a connection error, a fragment of SQL, whatever a driver
+                # wrote — on the wire to the observability platform, on the
+                # failure path, which is the one least exercised.
+                detail=outcome.standing.value,
             )
             outcome.notes.extend(self._notes_sink)
             self._notes_sink.clear()
@@ -557,18 +598,39 @@ class Executor:
             try:
                 detail = self._dispatch(step, plan, outcome)
             except DeploymentError as exc:
+                # REFUSED and FAILED are different facts and the exception type
+                # already knows which: `PreconditionFailed` is a gate refusing
+                # before anything was mutated — the caller may fix the stated
+                # cause and re-run the identical command — while `StepFailed`
+                # means a step ran and state may have changed. Collapsing them
+                # into "not ok" throws away the one distinction an operator
+                # needs before deciding whether to re-run.
+                refused = isinstance(exc, PreconditionFailed)
                 outcome.records.append(
                     StepRecord(
-                        step.kind, step.target, False, str(exc), self._clock() - started
+                        step.kind,
+                        step.target,
+                        False,
+                        str(exc),
+                        self._clock() - started,
+                        StepStanding.REFUSED if refused else StepStanding.FAILED,
                     )
                 )
                 outcome.failed_step = step.kind
                 outcome.failure = str(exc)
                 outcome.succeeded = False
+                outcome.standing = (
+                    RunStanding.REFUSED if refused else RunStanding.FAILED
+                )
                 raise
             outcome.records.append(
                 StepRecord(
-                    step.kind, step.target, True, detail, self._clock() - started
+                    step.kind,
+                    step.target,
+                    True,
+                    detail,
+                    self._clock() - started,
+                    self._non_fatal.pop(step.kind, StepStanding.OK),
                 )
             )
 
@@ -637,10 +699,14 @@ class Executor:
             self._persist_evidence(outcome)
             raise PreconditionFailed(f"rollback refused: {plan.rollback_reason}")
         self._rolling_back = True
-        self._annotate("deployment.rollback", plan, detail=plan.rollback_reason)
+        # `plan.rollback_reason` is descriptor-derived prose, not an exception
+        # — but it is still free text crossing the same seam, and the type now
+        # refuses it. The event name already says a rollback started.
+        self._annotate("deployment.rollback", plan)
         try:
             self._run_steps(steps, plan, outcome)
             outcome.succeeded = True
+            outcome.standing = RunStanding.SUCCEEDED
         except DeploymentError:
             pass
         finally:
@@ -1243,14 +1309,18 @@ class Executor:
                 "failed to persist must not be declared successful. "
                 f"{'; '.join(outcome.notes[-1:]) or ''}",
             )
-        document = json.loads(
-            json.dumps(outcome.as_evidence(), sort_keys=True, default=str)
-        )
+        # `default=str` is GONE from both sides. It is a stringify-anything
+        # escape hatch, and it defeats a closed document by turning an
+        # unexpected object into text rather than refusing it — the exact
+        # mechanism by which an exception instance becomes an exception message
+        # inside a persisted record. With the closed type upstream there is
+        # nothing left that legitimately needs it, so an unserialisable value
+        # here is a defect and must raise.
+        document = json.loads(json.dumps(outcome.as_evidence(), sort_keys=True))
         read_back = json.loads(
             json.dumps(
                 dict(self._effects.read_evidence(outcome.evidence_path)),
                 sort_keys=True,
-                default=str,
             )
         )
         if read_back != document:
@@ -1272,6 +1342,7 @@ class Executor:
             # is housekeeping; failing a verified-healthy deployment over a disk
             # permission is worse than the debt it leaves behind.
             outcome.notes.append(f"image retention failed and was not fatal: {exc}")
+            self._non_fatal[step.kind] = StepStanding.NON_FATAL
             return "retention failed (non-fatal, recorded)"
         return f"retained {self._spec.rollback_images_retained} rollback image(s)"
 

@@ -101,6 +101,13 @@ from .database_structure import (
     StructureFactDirection,
     accept_database_structure_comparison,
 )
+from .deployment_evidence import (
+    DEPLOYMENT_EVIDENCE_SCHEMA,
+    DeploymentEvidenceV1,
+    RunStanding,
+    StepEvidenceV1,
+    StepStanding,
+)
 from .digest import ALGORITHMS, CANONICAL_ALGORITHM, Digest, require_same_digest
 from .document import (
     DESCRIPTOR_DOCUMENT_SCHEMA,
@@ -435,6 +442,11 @@ __all__ = [
     "MembershipFact",
     "NameExclusion",
     "OPERATIONS",
+    "DEPLOYMENT_EVIDENCE_SCHEMA",
+    "DeploymentEvidenceV1",
+    "RunStanding",
+    "StepEvidenceV1",
+    "StepStanding",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
     "RECOVERY_PLAN_SCHEMA",
     "CapturedPrestateV1",
