@@ -97,6 +97,19 @@ class _PublishedStageTwo:
             )
         self.target, self.incumbent = target, checked
 
+    def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+        """Conforms by REFUSING, which is the truthful answer for this double.
+
+        It exists to exercise stage two and installs no credentials. A signature
+        satisfied with a plausible return — `StepStanding.INSTALLED`, say — would
+        make it look capable of an act it cannot perform, which is the same
+        defect as a fixture shaped the way its caller wishes.
+        """
+        raise PreconditionFailed(
+            "this stage-two double installs no credentials",
+            code="test.double_refuses",
+        )
+
     def prune_images(self, *, retain: int) -> None: ...
 
 
@@ -229,6 +242,19 @@ def test_a_raw_mapping_is_not_a_plan() -> None:
 
 def test_a_provider_without_the_seam_is_refused_by_name() -> None:
     class NoStageTwo:
+        """No stage two, and NOT a provider that does everything else happily.
+
+        It refuses the bootstrap for the same reason it lacks
+        `bind_authorized_execution`: it is the absent case. A fixture that
+        conformed by returning a convenient answer would turn this negative test
+        into a passing one that proves nothing.
+        """
+
+        def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+            raise PreconditionFailed(
+                "this double installs no credentials", code="test.double_refuses"
+            )
+
         def prune_images(self, *, retain: int) -> None: ...
 
     with pytest.raises(PreconditionFailed) as exc:

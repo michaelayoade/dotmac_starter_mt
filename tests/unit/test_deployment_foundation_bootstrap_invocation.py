@@ -162,11 +162,69 @@ def test_every_effects_implementation_conforms_to_the_WIDENED_protocol() -> None
 
 
 def test_the_probe_wheel_specifically_carries_it() -> None:
-    """Named on its own, because it is a string of Python inside a script and
-    every generic sweep over `.py` files misses it."""
+    """The compensating check, and it PARSES rather than greps.
+
+    The probe wheel's `ProbeEffects` is a real `Effects` implementation living
+    inside a STRING CONSTANT, so `ast.walk` over `release_facility.py` sees a
+    `Constant` and never a `ClassDef`. The sweep above is structurally unable to
+    reach it — measured, not assumed — and that is worse than a fixture the sweep
+    fails on, because an unreachable one is silently absent from the count.
+
+    So this parses the probe's own source and asks the same question the sweep
+    asks. A substring check would pass on the method name appearing in a comment,
+    which is the shape of a detector that answers without being able to refuse.
+    """
+    import re
+
     source = (REPO / "scripts" / "release_facility.py").read_text(encoding="utf-8")
-    probe = source.split("_PROBE_BINDINGS_SOURCE", 1)[1]
-    assert "bootstrap_principal_credential" in probe
+    match = re.search(
+        r'_PROBE_BINDINGS_SOURCE: Final = """\\\n(.*?)\n"""', source, re.S
+    )
+    assert match, "the probe source could not be located"
+    body = match.group(1).replace('\\"\\"\\"', '"""').replace("\\\\", "\\")
+    tree = ast.parse(body)
+    effects = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and any(
+            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
+            for b in node.body
+        )
+    ]
+    assert effects, "the probe wheel defines no Effects implementation"
+    for cls in effects:
+        methods = {b.name for b in cls.body if isinstance(b, ast.FunctionDef)}
+        assert "bootstrap_principal_credential" in methods, (
+            f"the probe wheel's {cls.name} does not implement the widened "
+            "protocol. It is the wheel the PUBLICATION GATE installs, and the "
+            "AST sweep cannot see it because it lives in a string constant"
+        )
+
+
+def test_the_sweep_genuinely_cannot_see_the_probe() -> None:
+    """The premise the test above rests on, asserted rather than believed.
+
+    If the sweep could see `ProbeEffects`, the compensating check would be
+    redundant and the reader should know. It cannot: the class is inside a string
+    constant, so the file's own AST holds no `ClassDef` for it.
+    """
+    tree = ast.parse(
+        (REPO / "scripts" / "release_facility.py").read_text(encoding="utf-8")
+    )
+    visible = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        and any(
+            isinstance(b, ast.FunctionDef) and b.name == "prune_images"
+            for b in node.body
+        )
+    ]
+    assert visible == [], (
+        f"{visible} are now visible to the sweep, so the probe-wheel check above "
+        "may be redundant — or a second implementation has appeared"
+    )
 
 
 @pytest.mark.parametrize(
