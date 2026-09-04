@@ -649,11 +649,12 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: file sets, and exactly what a two-directional population baseline is for.
 #:
 #: Recorded per module, same as the package list, and it moves in BOTH
-#: directions: `exposure_rehearsal_runner.py: 1` is the runner's own evidence
-#: document. When it grew a second canonicalizer for the release record this
-#: baseline is what said so, and when that second one is deleted in favour of
-#: calling `lease.write_store_record_once`, the count returns here rather than
-#: leaving a stale row nobody removes.
+#: directions. `exposure_rehearsal_runner.py: 2` is the rehearsal RECEIPT (which
+#: predates the terminal-release work) and the terminal EVIDENCE sidecar the
+#: `if: always()` artifact step uploads — two documents, neither of them a store
+#: record. It read 3 while the runner also canonicalized the release itself; the
+#: baseline is what said so, and deleting that third one in favour of calling
+#: `lease.write_store_record_once` returns it to 2, not to 1.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
     "candidate_source_binding.py": 2,
@@ -662,7 +663,7 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "credential_lifecycle_sweep.py": 1,
     "declared_publication_sweep.py": 1,
     "executor_retirement.py": 2,
-    "exposure_rehearsal_runner.py": 1,
+    "exposure_rehearsal_runner.py": 2,
     "external_connector_sweep.py": 2,
     "facet_navigation_baseline.py": 1,
     "fleet_decomposition_sweep.py": 2,
