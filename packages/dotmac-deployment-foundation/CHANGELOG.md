@@ -393,6 +393,46 @@ both directions** proves the comparison is not passing on identity — and a thi
 case moves both together and requires the pair to still refuse against the
 ORIGINAL authorization, which is the half a same-direction test cannot reach.
 
+### `HostLeaseRelease.v1` — the other end of the lease contract
+
+`load_lease` refuses to BEGIN without a lease record. Nothing recorded the END,
+so the only evidence a shared host was finished with was the absence of a running
+process and a timestamp going by. Both are inferences.
+
+**Expiry and release are separate members, not two readings of one field.** An
+expired lease means *this run may not continue*; only a release means *the host
+may be destroyed*. Collapsing them is what lets a crashed run's timeout authorise
+a wipe: a run that dies at 03:00 leaves no release, its lease expires at 06:00,
+and a destroyer reading "is the lease live?" finds "no" and takes it as
+permission. `HostStanding.EXPIRED_HELD` is that third case, and the destroy gate
+refuses on it by name. **A crash before release leaves the VM held** — the repair
+is a human releasing deliberately, which leaves a record.
+
+**A refused run is terminal and may release.** A schema accepting only receipts
+would hold a host forever after any legitimate refusal, and somebody would then
+release it by hand — the mechanism this record exists to remove.
+
+**The refusal vocabulary is closed and owned here**, DERIVED from the eight
+terminal refusals the runner actually raises rather than invented: a schema
+validating a code against a set the writer invents is not a validation. The
+granularity is the destroy decision's — three parse failures are one fact to
+somebody deciding whether to wipe a machine. Every terminal refusal maps to
+exactly one member, and an unmapped one is an amendment rather than a free-text
+escape.
+
+**VM identity is the SLOT, not the address.** The addresses are exactly what a
+destroy-and-restore can change, so an address would bind by coincidence and could
+name a different machine afterwards. `vm_slot` is `node/vmid`;
+`vm_installation_id` is the machine-id and may be `""` as a STATED value — the
+same rule `application_profile_digest` follows — because a field only some paths
+can produce pushes a writer toward the broad handler that produces it. When
+present it catches the one case the slot alone cannot: a slot re-provisioned
+between release and destroy.
+
+**No change to `load_lease` was needed.** The digest is a pure function of the
+PARSED lease through the shared ten-rule core, so the runner digests the lease it
+already loaded and there is no second opinion about where a lease lives.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**
