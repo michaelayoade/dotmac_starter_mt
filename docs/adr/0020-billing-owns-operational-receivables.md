@@ -9,6 +9,10 @@ coverage rule, and ADR-0017's adoption sequence
 **Amended by its own 2026-08-14 amendment** under ADR-0023 (dual-plane module
 persistence), ADR-0024 (apps compose by synchronizing data; the Integrator owns
 provider transport), and ADR-0022 (`dotmac-files` owns stored bytes)
+**Amended 2026-09-04 (historical): revision 1 was tenant-plane only** — see
+*Historical amendment, 2026-09-04* below. Recording the evolution here, rather
+than as a new ADR, is Michael's ruling: a second record would give one decision
+two authorities.
 **Evidence:** `docs/inventories/billing-sources.md`
 **Implementation plan:**
 `docs/superpowers/plans/2026-08-11-billing-subscriptions-collections.md`
@@ -238,6 +242,85 @@ It does not lift ADR-0017's moratorium, does not claim P11, does not create a
 package, namespace, lineage, or dossier, and does not grant these modules the
 owner-directed exception `dotmac-approvals` received under ADR-0026. § 6
 remains the gate.
+
+## Historical amendment, 2026-09-04: revision 1 was tenant-plane only
+
+**This is a historical amendment. It changes no authority, no scope and no
+gate.** It records how this decision's persistence shape evolved, and where the
+evolution was decided, so that a reader who meets an older copy of it can tell
+which revision they are holding. Everything above and below stands.
+
+### What revision 1 said, and did not say
+
+Revision 1 of this ADR landed on 2026-08-12 (`a7d9a3e0`, PR #121). It was
+**tenant-plane only** — not by choosing a plane, but because there was only one
+plane to choose. The document contains no persistence-plane vocabulary at all:
+the word "plane" appears in it exactly twice, both times naming the vendor
+control plane as an *assembly*, never as a place a table can live. Hard rule 11
+— `tenant_id NOT NULL`, composite uniques, RLS in the creating migration — was
+the only shape a stateful module's tables could take, and `platform_tables` did
+not yet exist on `ModuleManifest`.
+
+### What changed it, verified
+
+**ADR-0023, *A dual-plane module has one behaviour and two declared persistence
+planes*, accepted 2026-08-13** — the day after revision 1. Verification, rather
+than inference from a title: ADR-0023's document and the `platform_tables` field
+on the kernel's `ModuleManifest` arrive in the **same commit**, `042532d2`
+(PR #146, *"dual-plane module persistence, three modules, and the connector
+freeze"*), which is the first appearance of that field anywhere in the kernel.
+The record and the mechanism it decides land together; nothing earlier could
+have made this change, because before it there was no second plane to declare.
+
+Two neighbours were checked and are **not** the record that made this change.
+ADR-0027 (*a plane declares its own prerequisites*) was superseded before
+publication. ADR-0028 (*an assembly declares each installed module plane*,
+2026-08-14, `16f11a9e`, PR #170) came later and decided something else: which
+planes an **assembly** installs, which is why `dotmac-collections`'s manifest on
+`main` carries `supported_plane_sets` naming tenant, platform and both. Plane
+*selection* is ADR-0028's; the *existence of two planes* is ADR-0023's.
+
+This record adopted that decision two days later, in its own **A2** above
+(2026-08-14, `96dd4cba`, PR #163), and the shipped package has been dual-plane
+since it landed on 2026-08-23 (PR #381).
+
+### Why this is an amendment and not a new ADR
+
+Michael's ruling, 2026-09-04:
+
+> Do not create another ADR. ADR-0032 and main ADR-0020 are semantically the
+> same decision. The later dual-plane form is an **evolution, not another
+> owner**. A new ADR would create **two authoritative records for one
+> decision**.
+
+The context is an unmerged branch document,
+`docs/adr/0032-collections-assesses-identity-and-requests-actions.md` (blob
+`a3f91270`, carried on eighteen dead refs), which spells a number `main` gave to
+a different decision. Reading it against what `main` ships showed the same
+decision, contract by contract: its section 1 is `dotmac_collections/
+contracts.py` field for field, its section 2 is `ReceivablesReader` and its
+fake, its section 3 is `CollectionActionRequestedV1` with no
+`ConsequenceRequestV1` alias — and the module's own `EXTRACTION.toml` cites this
+ADR by filename.
+
+Its **one divergence is the plane**, and it is exactly the evolution above read
+from the other side: its section 5, *"The initial package is tenant-plane
+only"*, declares `platform_tables=()` for the first released revision and
+applies hard rule 27's two-real-adopters argument, amending this record's
+statement that all three modules declare both planes from revision 1. `main`
+went the other way and ships both.
+
+That divergence is a revision of one decision under one owner, so it is recorded
+here. Writing it as its own ADR would have produced a second authoritative
+record for the same ownership boundary — the failure this repository's ADR
+number register exists to catch, arriving through the front door. **No number is
+allocated by this amendment**, and none is renumbered.
+
+The branch is not merged and must not be: it is disposed
+`historical_equivalent`, `represented_by = 20`, in `docs/adr/reservations.toml`,
+which is also where its argument stays readable. If the tenant-plane-only first
+release is ever to be reconsidered on hard rule 27's grounds, that too is an
+amendment to **this** record, not a new one.
 
 ## Context
 

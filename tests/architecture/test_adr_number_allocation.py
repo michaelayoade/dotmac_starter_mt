@@ -43,12 +43,27 @@ that feeds it depends on a base revision being fetchable.
 
 What is ENFORCED about a declared collision, unconditionally, off one worktree:
 
-* every ``[[branch_collision]]`` row is CLASSIFIED into one of five buckets and
+* every ``[[branch_collision]]`` row is DISPOSED into one of six buckets and
   carries the ``evidence`` that put it there (Michael's ruling, 2026-09-04:
   classify every claimant rather than mechanically renumbering 1,273 refs), and
-  a ``represented-on-main`` row names an AUTHORED number that carries the same
+  a ``historical_equivalent`` row names an AUTHORED number that carries the same
   decision — not the colliding number, and not a row with the same slug, which
   would make it history rather than a claim;
+* every NON-ACTIVE row records its SUCCESSOR OR ITS EXPLICIT RESUMPTION RULE,
+  and a row that omits it is REFUSED (Michael's ruling, 2026-09-04: "There are
+  no active collision repairs to perform. What remains is preventing abandoned
+  history from accidentally becoming authority").  A branch classified as
+  not-active with nothing saying where its decision went, or on what terms it
+  could come back, is that abandoned history: the only thing a later reader can
+  do is open the branch and believe it;
+* a disposition may not contradict the evidence beside it — ``active`` over a
+  pull request that was closed unmerged, or ``closed_unmerged`` with no closed
+  pull request, is a row whose two halves disagree, and the bucket is the half
+  a reader acts on;
+* a row that records Michael's authorization to DELETE a remote branch carries
+  the coordinates that survive the deletion — the full tip, a rescue ref and a
+  rescue tag.  Nothing here deletes anything; the register records, the human
+  deletes;
 * the thirty-one EXCLUDED historical pairs stay excluded and stay checkable.
   ``docs/adr/historical-renumberings.toml`` holds them with their equivalence
   evidence, and ``historical_findings`` re-derives that evidence from the
@@ -126,36 +141,79 @@ KNOWN_COLLISION_FIELDS = frozenset(
         "where",
         "disposition",
         "evidence",
+        "successor_or_resumption",
         "represented_by",
+        "tip",
+        "document",
+        "pr",
+        "pr_state",
+        "pr_closed_at",
+        "rescue_ref",
+        "rescue_tag",
+        "remote_deletion_authorized",
     }
 )
 KNOWN_HISTORICAL_FIELDS = frozenset({"number", "slug", "landed_at", "refs"})
 
-# Michael's ruling, 2026-09-04: do not mechanically renumber 1,273 refs —
-# CLASSIFY every claimant first, and only then let one earn a new number.  The
-# vocabulary is CLOSED, and `evidence` is required beside it, because a
-# disposition asserted with no reading of the ref is a guess about a branch
-# name, which is what the ruling forbade.
+# Michael's ruling, 2026-09-04 (branch disposition), REPLACING the first
+# classification vocabulary of the same day:
+#
+#   "There are no active collision repairs to perform.  What remains is
+#    preventing abandoned history from accidentally becoming authority."
+#
+# The vocabulary is CLOSED and has six values, and `evidence` is required beside
+# it, because a disposition asserted with no reading of the ref is a guess about
+# a branch NAME — and a branch name such as `archive/*` is evidence of STORAGE
+# LOCATION, NOT INTENT.  That is why the previous `rescue-only` value is gone:
+# it named where a commit lives rather than what is to be done with it, and the
+# one archive ref below now carries two different dispositions on two rows.
 DISPOSITIONS = frozenset(
     {
         # intended for promotion: reserve a NEW number on `main` first, rebase,
         # rename, update citations one at a time BY MEANING, re-run the semantic
         # citation verification, confirm unrelated same-number refs unchanged.
         "active",
-        # on `origin` with an OPEN pull request: highest urgency, because it can
-        # escape local coordination and be merged by someone who never read this.
-        "pushed-open",
-        # never-merge.  Withdrawn, relocated or replaced; no number is spent.
+        # a CANDIDATE, not a corpse: the problem may still be real and the lane
+        # is simply not being worked.  The only non-active value with a future,
+        # so its resumption rule states the terms on which it may be picked up.
+        "dormant",
+        # a later decision replaced it.  The successor is named; never merged.
         "superseded",
-        # a preserved branch (a rescued stash, an archival tip).  Keep the
-        # record; spend NO number until the lane is actually resumed.
-        "rescue-only",
+        # its pull request was closed without merging, and that closure IS the
+        # disposition.  Requires `pr`, `pr_state` and `pr_closed_at`.
+        "closed_unmerged",
+        # ruled unmergeable whatever the pull-request state says — stronger than
+        # `closed_unmerged`, because a closed PR can be reopened by anyone with
+        # the button and a branch on `origin` can be merged with no PR at all.
+        "never_merge",
         # the SAME decision is already on `main`; `represented_by` names the
         # number carrying it, confirmed by reading BOTH documents.  Retire the
         # duplicate branch — this is not a renumbering.
-        "represented-on-main",
+        "historical_equivalent",
     }
 )
+
+# The one value that needs no successor: work still headed for `main` has no
+# "where did it go" to answer.  Every other row must answer it.
+ACTIVE_DISPOSITION = "active"
+
+# Pull-request state is EVIDENCE, not a bucket.  The retired `pushed-open`
+# conflated the two: whether a branch is pushed and whether its PR is open are
+# facts about the world, while the disposition states intent.  A pushed, open
+# claimant is `active` if it is meant to land and `never_merge` if it is not.
+PR_STATES = frozenset({"open", "closed_unmerged", "merged", "none"})
+
+# A full commit id, so a coordinate recorded before a branch is deleted is one
+# that can still be resolved afterwards.  An abbreviation is not a coordinate:
+# it is only unique in a repository that still holds the object.
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+# The path an ADR takes on the branch.  Its number must be the number the row
+# says is contested, or the row is describing a different document.
+BRANCH_DOCUMENT = re.compile(r"^docs/adr/(\d{4})-[a-z0-9-]+\.md$")
+
+# UTC, to the second.  A closure time that cannot be compared is not evidence.
+PR_CLOSED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 # Numbers that `main` has authored and an unmerged branch spells with a
 # DIFFERENT decision.  Keyed by (number, branch slug) because one number can be
@@ -368,11 +426,16 @@ def findings(register: dict, filenames: set[str]) -> list[str]:
 def _collision_classification_findings(
     entry: dict, authored: dict[int, str]
 ) -> list[str]:
-    """Every declared collision is CLASSIFIED, with evidence.
+    """Every declared collision is DISPOSED, with evidence and a way forward.
 
-    Michael's ruling: a claimant is put in exactly one bucket before anything is
-    renumbered.  `authored` is `{number: slug}` for the AUTHORED rows only —
-    "already represented on `main`" has to name a decision that is actually on
+    Michael's ruling, 2026-09-04: a claimant is put in exactly one bucket before
+    anything is renumbered, and — the half this function exists for now — every
+    NON-ACTIVE row records its successor or its explicit resumption rule.  "There
+    are no active collision repairs to perform.  What remains is preventing
+    abandoned history from accidentally becoming authority."
+
+    `authored` is `{number: slug}` for the AUTHORED rows only — a
+    `historical_equivalent` row has to name a decision that is actually on
     `main`, so a `reserved` or `withdrawn` number cannot answer for it.
     """
     out: list[str] = []
@@ -396,13 +459,18 @@ def _collision_classification_findings(
             f"it is on `origin`, pull-request state, what `main` carries."
         )
 
+    out.extend(_successor_findings(entry, disposition, number, branch_slug))
+    out.extend(_evidence_agreement_findings(entry, disposition, number, branch_slug))
+
     represented_by = entry.get("represented_by")
-    if disposition == "represented-on-main":
+    if disposition == "historical_equivalent":
         if represented_by is None:
             out.append(
-                f"branch_collision ADR-{number!r} {branch_slug!r} claims the "
-                f"decision is already on `main` but names no `represented_by`. "
-                f"Name the number that carries it."
+                f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+                f"`historical_equivalent` — the decision is already on `main` — "
+                f"but names no `represented_by`. Name the number that carries "
+                f"it: without it the claim is unfalsifiable and the branch stays "
+                f"the only readable copy of its own decision."
             )
         elif represented_by not in authored:
             out.append(
@@ -429,8 +497,142 @@ def _collision_classification_findings(
         out.append(
             f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
             f"{disposition!r} but names `represented_by`. Only "
-            f"`represented-on-main` may."
+            f"`historical_equivalent` may."
         )
+    return out
+
+
+def _successor_findings(
+    entry: dict, disposition: str, number: object, branch_slug: object
+) -> list[str]:
+    """Michael's ruling: every non-active row names where the decision went.
+
+    This is the defect the ruling exists to prevent, so it is refused rather
+    than warned about.  A row that says only "not active" leaves a later reader
+    one move: open the branch and believe it.  `active` is exempt because work
+    still headed for `main` has no "where did it go" to answer.
+    """
+    if disposition == ACTIVE_DISPOSITION:
+        return []
+    if str(entry.get("successor_or_resumption", "")).strip():
+        return []
+    return [
+        f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+        f"{disposition!r} with no `successor_or_resumption`. Every non-active "
+        f"row records its SUCCESSOR or its explicit RESUMPTION RULE. A "
+        f"disposition alone says the work stopped; it does not say where the "
+        f"decision went or on what terms it may come back, and abandoned "
+        f"history with no forwarding address is what later gets read as "
+        f"authority."
+    ]
+
+
+def _evidence_agreement_findings(
+    entry: dict, disposition: str, number: object, branch_slug: object
+) -> list[str]:
+    """The bucket and the facts beside it must agree.
+
+    A disposition is what a reader ACTS on; the evidence is what they would
+    check if they doubted it.  A row where the two disagree is worse than an
+    unclassified one, because it reads as settled.  These are structural
+    comparisons against declared fields, not prose matching — a claim read out
+    of a sentence is a guess about a sentence.
+    """
+    out: list[str] = []
+
+    pr_state = entry.get("pr_state")
+    if pr_state is not None and pr_state not in PR_STATES:
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} has pr_state "
+            f"{pr_state!r}, not one of {sorted(PR_STATES)}."
+        )
+    if pr_state in {"open", "closed_unmerged", "merged"} and entry.get("pr") is None:
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} records pr_state "
+            f"{pr_state!r} but no `pr` number, so the state cannot be checked."
+        )
+    if pr_state == "closed_unmerged":
+        closed_at = str(entry.get("pr_closed_at", ""))
+        if not PR_CLOSED_AT.fullmatch(closed_at):
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} was closed "
+                f"unmerged but `pr_closed_at` is {closed_at!r}, not an "
+                f"ISO-8601 UTC instant (YYYY-MM-DDTHH:MM:SSZ)."
+            )
+        if disposition == ACTIVE_DISPOSITION:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+                f"`active` — intended for promotion — over a pull request that "
+                f"was CLOSED UNMERGED. The disposition contradicts its own "
+                f"evidence. One of the two is wrong, and the disposition is the "
+                f"half a reader acts on."
+            )
+    elif pr_state == "merged" and disposition == ACTIVE_DISPOSITION:
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+            f"`active` over a MERGED pull request. A landed decision is not a "
+            f"claimant; if the number really collides it is history — see "
+            f"docs/adr/historical-renumberings.toml."
+        )
+
+    if disposition == "closed_unmerged" and pr_state != "closed_unmerged":
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+            f"`closed_unmerged` but records pr_state {pr_state!r}. The closure "
+            f"IS that disposition; without it the bucket asserts a pull-request "
+            f"state nothing recorded."
+        )
+
+    tip = entry.get("tip")
+    if tip is not None and not FULL_SHA.fullmatch(str(tip)):
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} has tip {tip!r}, "
+            f"not a full forty-character commit id. An abbreviation resolves "
+            f"only in a repository that still holds the object, which is the "
+            f"one case these coordinates exist for."
+        )
+
+    document = entry.get("document")
+    if document is not None:
+        match = BRANCH_DOCUMENT.fullmatch(str(document))
+        if match is None:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} has document "
+                f"{document!r}, which is not a docs/adr/NNNN-slug.md path."
+            )
+        elif int(match.group(1)) != number:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} names document "
+                f"{document!r}, whose number is not {number!r}. The row would be "
+                f"describing a different document from the one that collides."
+            )
+
+    if entry.get("remote_deletion_authorized"):
+        missing = [
+            field
+            for field in ("tip", "rescue_ref", "rescue_tag")
+            if not str(entry.get(field, "")).strip()
+        ]
+        if missing:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} records "
+                f"authorization to DELETE the remote branch but is missing "
+                f"{missing}. Deleting a ref whose coordinates were never written "
+                f"down is how history stops being reachable; record the tip and "
+                f"the rescue ref and tag FIRST."
+            )
+        if disposition == ACTIVE_DISPOSITION:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+                f"`active` and also authorizes deleting its remote branch."
+            )
+    elif bool(entry.get("rescue_ref")) != bool(entry.get("rescue_tag")):
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} names a rescue ref "
+            f"without its tag or a tag without its ref. Both, or neither: a "
+            f"branch-shaped ref can be deleted as easily as the branch was."
+        )
+
     return out
 
 
@@ -921,9 +1123,18 @@ def test_no_adr_was_authored_without_a_reservation_on_the_merge_base() -> None:
 
 
 def test_every_declared_collision_is_classified_with_evidence() -> None:
-    """Michael's ruling: classify every claimant before renumbering anything."""
+    """Michael's ruling: dispose of every claimant before renumbering anything.
+
+    AUTHORED rows only, matching `findings`: "already on `main`" has to name a
+    decision that is actually on `main`, and a merely `reserved` number is a
+    claim rather than a document.
+    """
     register = load_register(REGISTER.read_text(encoding="utf-8"))
-    authored = {row["number"]: row["slug"] for row in register["reservation"]}
+    authored = {
+        row["number"]: row["slug"]
+        for row in register["reservation"]
+        if row.get("status") == "authored"
+    }
     problems: list[str] = []
     for entry in register.get("branch_collision", []):
         problems.extend(_collision_classification_findings(entry, authored))
@@ -1247,9 +1458,12 @@ def test_a_branch_carrying_an_older_numbering_is_not_called_a_collision() -> Non
 
 
 # --------------------------------------------------------------------------
-# Classification proofs (ADR-0018).  The five buckets are a closed vocabulary
-# and `evidence` is mandatory, so each way of skipping the classification is
-# planted and named — against the clean control below, which must stay clean.
+# Disposition proofs (ADR-0018).  The six buckets are a closed vocabulary,
+# `evidence` is mandatory beside them, and — Michael's ruling, 2026-09-04 —
+# every NON-ACTIVE row names its successor or its resumption rule.  Each way of
+# skipping a disposition, and each way of asserting one the evidence contradicts,
+# is planted and named against the clean control below, which must stay clean.
+# A detector that flagged everything would "catch" all of these.
 # --------------------------------------------------------------------------
 
 CLEAN_COLLISION = {
@@ -1257,8 +1471,12 @@ CLEAN_COLLISION = {
     "main_slug": "alpha",
     "branch_slug": "a-different-decision",
     "where": "feat/something",
-    "disposition": "rescue-only",
+    "disposition": "dormant",
     "evidence": "tip abc1234, 2026-09-01, local only, main carries nothing.",
+    "successor_or_resumption": (
+        "No successor; nothing on `main` decides this. Resumption: revalidate "
+        "the problem, choose the owner, reserve a fresh number from next_free."
+    ),
 }
 CLEAN_AUTHORED = {1: "alpha", 2: "beta"}
 
@@ -1274,9 +1492,24 @@ def test_a_planted_unclassified_collision_is_named() -> None:
 
 
 def test_a_planted_invented_disposition_is_named() -> None:
+    """The vocabulary is CLOSED at six; a seventh is not a bucket."""
     planted = {**CLEAN_COLLISION, "disposition": "probably-fine"}
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
     assert any("'probably-fine'" in p for p in problems), problems
+    assert any("'historical_equivalent'" in p for p in problems), problems
+
+
+def test_a_planted_retired_disposition_is_named() -> None:
+    """The vocabulary REPLACED an earlier one; the old values must not pass.
+
+    `rescue-only` named where a commit was stored, which Michael's ruling makes
+    exactly the wrong classifier: a branch name is evidence of storage location,
+    not intent.
+    """
+    for retired in ("rescue-only", "pushed-open", "represented-on-main"):
+        planted = {**CLEAN_COLLISION, "disposition": retired}
+        problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+        assert any(repr(retired) in p for p in problems), (retired, problems)
 
 
 def test_a_planted_classification_without_evidence_is_named() -> None:
@@ -1286,8 +1519,153 @@ def test_a_planted_classification_without_evidence_is_named() -> None:
     assert any("no `evidence`" in p for p in problems), problems
 
 
-def test_a_planted_represented_on_main_without_a_number_is_named() -> None:
-    planted = {**CLEAN_COLLISION, "disposition": "represented-on-main"}
+def test_a_planted_non_active_row_without_a_successor_or_resumption_rule_is_named() -> (
+    None
+):
+    """THE defect this ruling exists to prevent.
+
+    "There are no active collision repairs to perform.  What remains is
+    preventing abandoned history from accidentally becoming authority."  A row
+    that says only "not active" gives a later reader exactly one move: open the
+    branch and believe it.  Planted on every non-active value, because a check
+    that bit on only one of them would leave four ways through.
+    """
+    for disposition in sorted(DISPOSITIONS - {ACTIVE_DISPOSITION}):
+        planted = {
+            k: v for k, v in CLEAN_COLLISION.items() if k != "successor_or_resumption"
+        }
+        planted["disposition"] = disposition
+        if disposition == "historical_equivalent":
+            planted["represented_by"] = 2
+        if disposition == "closed_unmerged":
+            planted |= {
+                "pr": 7,
+                "pr_state": "closed_unmerged",
+                "pr_closed_at": "2026-09-01T10:00:00Z",
+            }
+        problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+        assert any("no `successor_or_resumption`" in p for p in problems), (
+            disposition,
+            problems,
+        )
+
+
+def test_an_active_row_needs_no_successor() -> None:
+    """The one exemption, and it is not the absence of a check.
+
+    Work still headed for `main` has no "where did it go" to answer.  Proven
+    beside the plant above so the rule cannot be satisfied by refusing every row.
+    """
+    planted = {
+        k: v for k, v in CLEAN_COLLISION.items() if k != "successor_or_resumption"
+    }
+    planted["disposition"] = "active"
+    assert _collision_classification_findings(planted, CLEAN_AUTHORED) == []
+
+
+def test_a_planted_disposition_that_contradicts_its_evidence_is_named() -> None:
+    """`active` over a pull request that was CLOSED UNMERGED.
+
+    The two halves of the row disagree, and the disposition is the half a reader
+    acts on — this reads as "being promoted" while the evidence says the door
+    was shut.
+    """
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "active",
+        "pr": 500,
+        "pr_state": "closed_unmerged",
+        "pr_closed_at": "2026-08-29T19:10:16Z",
+    }
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("contradicts its own" in p for p in problems), problems
+
+
+def test_a_planted_active_row_over_a_merged_pull_request_is_named() -> None:
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "active",
+        "pr": 504,
+        "pr_state": "merged",
+    }
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("MERGED pull request" in p for p in problems), problems
+
+
+def test_a_row_whose_disposition_agrees_with_a_closed_pull_request_is_clean() -> None:
+    """The same evidence under the honest bucket must pass.
+
+    This is ADR-0071's real shape: closed unmerged, and ruled never-merge
+    because a closed pull request can be reopened by anyone with the button.
+    """
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "never_merge",
+        "pr": 500,
+        "pr_state": "closed_unmerged",
+        "pr_closed_at": "2026-08-29T19:10:16Z",
+    }
+    assert _collision_classification_findings(planted, CLEAN_AUTHORED) == []
+
+
+def test_a_planted_closed_unmerged_bucket_with_no_closed_pull_request_is_named() -> (
+    None
+):
+    planted = {**CLEAN_COLLISION, "disposition": "closed_unmerged"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("but records pr_state" in p for p in problems), problems
+
+
+def test_a_planted_invented_pull_request_state_is_named() -> None:
+    planted = {**CLEAN_COLLISION, "pr": 1, "pr_state": "kind-of-open"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("has pr_state 'kind-of-open'" in p for p in problems), problems
+
+
+def test_a_planted_remote_deletion_without_rescue_coordinates_is_named() -> None:
+    """Michael authorized deleting a remote branch ONLY once it is durable here.
+
+    The authorization and the coordinates that survive it are one act, so the
+    row cannot carry the first without the second.
+    """
+    planted = {**CLEAN_COLLISION, "remote_deletion_authorized": True}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("stops being reachable" in p for p in problems), problems
+    assert any("'tip'" in p and "'rescue_tag'" in p for p in problems), problems
+
+
+def test_a_remote_deletion_with_full_coordinates_is_clean() -> None:
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "never_merge",
+        "tip": "3b409faf6555615e7ab580146f0288d9abd35926",
+        "rescue_ref": "refs/rescue/example",
+        "rescue_tag": "rescue-example-20260904",
+        "remote_deletion_authorized": True,
+    }
+    assert _collision_classification_findings(planted, CLEAN_AUTHORED) == []
+
+
+def test_a_planted_abbreviated_tip_is_named() -> None:
+    """An abbreviation resolves only where the object still exists."""
+    planted = {**CLEAN_COLLISION, "tip": "3b409faf"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("not a full forty-character" in p for p in problems), problems
+
+
+def test_a_planted_document_from_a_different_number_is_named() -> None:
+    planted = {**CLEAN_COLLISION, "document": "docs/adr/0071-something-else.md"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("whose number is not" in p for p in problems), problems
+
+
+def test_a_planted_historical_equivalent_without_a_number_is_named() -> None:
+    """A `historical_equivalent` row with no `represented_by`.
+
+    The whole claim is "the same decision is already on `main`"; unnamed, it is
+    unfalsifiable, and the branch stays the only readable copy of its decision.
+    """
+    planted = {**CLEAN_COLLISION, "disposition": "historical_equivalent"}
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
     assert any("names no `represented_by`" in p for p in problems), problems
 
@@ -1295,7 +1673,7 @@ def test_a_planted_represented_on_main_without_a_number_is_named() -> None:
 def test_a_planted_representation_by_an_unregistered_number_is_named() -> None:
     planted = {
         **CLEAN_COLLISION,
-        "disposition": "represented-on-main",
+        "disposition": "historical_equivalent",
         "represented_by": 9,
     }
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
@@ -1306,7 +1684,7 @@ def test_a_planted_representation_by_the_colliding_number_itself_is_named() -> N
     """ADR-0032 cannot be "already represented" by ADR-0032 — that IS the clash."""
     planted = {
         **CLEAN_COLLISION,
-        "disposition": "represented-on-main",
+        "disposition": "historical_equivalent",
         "represented_by": 1,
     }
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
@@ -1317,7 +1695,7 @@ def test_a_planted_same_slug_representation_is_sent_to_the_historical_file() -> 
     planted = {
         **CLEAN_COLLISION,
         "branch_slug": "beta",
-        "disposition": "represented-on-main",
+        "disposition": "historical_equivalent",
         "represented_by": 2,
     }
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
@@ -1327,7 +1705,7 @@ def test_a_planted_same_slug_representation_is_sent_to_the_historical_file() -> 
 def test_a_planted_stray_represented_by_is_named() -> None:
     planted = {**CLEAN_COLLISION, "represented_by": 2}
     problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
-    assert any("Only `represented-on-main` may" in p for p in problems), problems
+    assert any("Only `historical_equivalent` may" in p for p in problems), problems
 
 
 # --------------------------------------------------------------------------

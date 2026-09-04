@@ -1036,17 +1036,13 @@ specifics) points here and must never fork these rules.
     DECLARED in the register, not detected — a checker reading one worktree
     cannot see another — and the register says so rather than claiming coverage.
 
-    **Amended 2026-09-04 (classification).** A pre-existing collision is
-    CLASSIFIED before anything is renumbered; renumbering 1,273 refs
-    mechanically was refused. Every `[[branch_collision]]` row carries a
-    `disposition` from a closed vocabulary — `active`, `pushed-open`,
-    `superseded`, `rescue-only`, `represented-on-main` — and the `evidence`
-    that put it there: ref tip and date, whether it is on `origin`,
-    pull-request state, and what `main` does or does not carry. A bucket read
-    off a branch NAME is a guess. `represented-on-main` additionally names
-    `represented_by` and requires SEMANTIC IDENTITY confirmed by reading BOTH
-    documents — the same decision, not merely the same topic — and retires the
-    duplicate branch rather than renumbering it. Only an `active` claimant
+    **Amended 2026-09-04 (classification), and again the same day — see
+    disposition below.** A pre-existing collision is CLASSIFIED before anything
+    is renumbered; renumbering 1,273 refs mechanically was refused. Every
+    `[[branch_collision]]` row carries a `disposition` from a closed vocabulary
+    and the `evidence` that put it there: ref tip and date, whether it is on
+    `origin`, pull-request state, and what `main` does or does not carry. A
+    bucket read off a branch NAME is a guess. Only an `active` claimant
     spends a number, and then in this order: reserve the new number on `main`
     FIRST, rebase the claimant, rename the ADR, update citations one at a time
     BY MEANING, re-run the semantic citation verification, and confirm that
@@ -1057,6 +1053,38 @@ specifics) points here and must never fork these rules.
     evidence in `docs/adr/historical-renumberings.toml`, because a queue of
     thirty-eight entries with thirty-one already reconciled buries the seven a
     human must act on.
+
+    **Amended 2026-09-04 (branch disposition).** Michael's ruling: *"There are
+    no active collision repairs to perform. What remains is preventing
+    abandoned history from accidentally becoming authority."* The disposition
+    vocabulary is REPLACED by a closed six-value set — `active`, `dormant`,
+    `superseded`, `closed_unmerged`, `never_merge`, `historical_equivalent` —
+    and **every non-active row records its SUCCESSOR or its explicit RESUMPTION
+    RULE** in `successor_or_resumption`. A row that omits it is REFUSED: that
+    omission is the defect the ruling exists to prevent, because a branch
+    marked not-active with nothing saying where its decision went, or on what
+    terms it may come back, leaves a later reader one move — open the branch
+    and believe it. **A branch name such as `archive/*` is evidence of STORAGE
+    LOCATION, NOT INTENT**, which is why `rescue-only` is gone: it classified by
+    where a commit was parked. `pushed-open` is gone for the same reason at one
+    remove — whether a branch is pushed and whether its pull request is open are
+    EVIDENCE, recorded structurally in `pr`/`pr_state`/`pr_closed_at`, while the
+    disposition states intent; a pushed, open claimant is `active` if it is meant
+    to land and `never_merge` if it is not. `represented-on-main` is renamed
+    `historical_equivalent`, unchanged, and still names `represented_by` with
+    semantic identity confirmed by reading BOTH documents. `never_merge` is
+    deliberately stronger than `closed_unmerged`, because a closed pull request
+    can be reopened by anyone with the button and a branch on `origin` can be
+    merged with no pull request at all. **A disposition may not contradict its
+    own evidence** (`active` over a pull request closed unmerged is refused),
+    and **a row recording authorization to DELETE a remote branch carries the
+    coordinates that survive the deletion** — full tip, rescue ref, rescue tag —
+    so history cannot be made unreachable by the tidy-up that was meant to
+    protect it. ADR-0071 `build-once-and-bind-the-environment-late` is the worked
+    example and is now `never_merge` with its PR #500 closure, its Governance
+    successor, its Starter adoption in PR #504, and its rescue ref and tag all
+    recorded. Nothing in this rule deletes a ref: the register records, the human
+    deletes.
 
     **The merge-base reservation gate is the AUTHORITY; the all-ref scan is a
     supplementary audit.** CI often sees one branch and a shallow ref set, so a
