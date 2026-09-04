@@ -39,8 +39,9 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
     StepFailed,
 )
-from dotmac_deployment_foundation.lease import HostLease
+from dotmac_deployment_foundation.lease import HostLease, release_path
 from dotmac_deployment_foundation.lease_release import (
+    RELEASE_DUPLICATE,
     CleanupDisposition,
     HostClosure,
     HostLeaseReleaseV1,
@@ -48,6 +49,7 @@ from dotmac_deployment_foundation.lease_release import (
     TerminalOutcome,
     TerminalRefusal,
     lease_digest,
+    write_release,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -429,25 +431,154 @@ def test_no_lease_in_hand_means_no_release(
         )
 
 
-# ── one write, once ─────────────────────────────────────────────────────────
+# ── one write, once — through the store's owner ─────────────────────────────
+#
+# This runner no longer publishes. `lease.py` owns the store, so create-only is
+# re-derived HERE through the path the runner actually takes rather than assumed
+# to have survived the move — the guarantee is the reason the record exists, and
+# a swap that quietly traded it for a checked one would look identical in a diff.
+#
+# READ THIS BEFORE TRUSTING THE TESTS BELOW. They are SEQUENTIAL. A sequential
+# proof establishes that a second write is refused when the first has already
+# finished; it says NOTHING about two runs racing, which is the case the store
+# exists for — a shared host, agents contending for one target, and a workflow
+# that does not cancel a run in progress. A `path.exists()` guard passes every
+# test in this section and still loses the race. The race proof lives with the
+# publish primitive in `test_deployment_foundation_lease_persistence.py`, where
+# both implementations are run under one barrier and the rejected one is kept as
+# a negative control. What these tests establish is that the runner reaches that
+# primitive at all.
 
 
 def test_a_second_release_refuses_and_leaves_the_first_intact(
-    tmp_path: pathlib.Path,
+    tmp_path: pathlib.Path, proven: None
 ) -> None:
-    path = tmp_path / "releases" / "target.json"
-    runner.write_create_only(path, {"schema": "first"})
-    with pytest.raises(runner.ReleaseNotWritable):
-        runner.write_create_only(path, {"schema": "second"})
-    assert json.loads(path.read_text())["schema"] == "first"
-    assert not list(path.parent.glob(".*partial"))
+    args = _args(tmp_path)
+    first = runner.build_release(
+        _context(), args, TerminalOutcome(receipt_digest="sha256:" + "11" * 32)
+    )
+    second = runner.build_release(
+        _context(), args, TerminalOutcome(receipt_digest="sha256:" + "22" * 32)
+    )
+    stored = write_release(first, target=args.target, directory=args.lease_dir)
+    with pytest.raises(PreconditionFailed) as exc:
+        write_release(second, target=args.target, directory=args.lease_dir)
+    assert exc.value.code == RELEASE_DUPLICATE
+    document = json.loads(stored.read_text())
+    assert document["outcome"]["receipt_digest"] == "sha256:" + "11" * 32
+    assert not list(stored.parent.glob(".*partial"))
 
 
-def test_the_second_write_refusal_is_not_vacuous(tmp_path: pathlib.Path) -> None:
-    """The near-miss: a DIFFERENT lease's release still writes."""
-    runner.write_create_only(tmp_path / "a.json", {"schema": "a"})
-    runner.write_create_only(tmp_path / "b.json", {"schema": "b"})
-    assert json.loads((tmp_path / "b.json").read_text())["schema"] == "b"
+def test_that_refusal_is_not_vacuous(tmp_path: pathlib.Path, proven: None) -> None:
+    """The near-miss: a DIFFERENT target's release still writes."""
+    args = _args(tmp_path)
+    release = runner.build_release(
+        _context(), args, TerminalOutcome(receipt_digest="sha256:" + "33" * 32)
+    )
+    write_release(release, target="host-a", directory=args.lease_dir)
+    stored = write_release(release, target="host-b", directory=args.lease_dir)
+    assert stored.exists()
+
+
+def test_the_runner_carries_no_publisher_of_its_own() -> None:
+    """The defect that reached two branches at once: two writers for one store.
+
+    Each lane built one correctly for a seam nobody had named. The package's own
+    sweep watches both file sets now; this is the same question asked from the
+    side that got it wrong, so the runner fails here first rather than in another
+    lane's suite.
+    """
+    tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    publishes = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "link"
+        and getattr(getattr(node.func, "value", None), "id", None) == "os"
+    ]
+    assert publishes == [], (
+        f"the runner publishes with os.link at {publishes}. "
+        "`lease.write_store_record_once` is the release writer; a second one "
+        "here is two answers to one question and the store has one owner"
+    )
+    assert "write_release(" in RUNNER.read_text(encoding="utf-8"), (
+        "the runner no longer calls the package's writer either, so the record "
+        "reaches the store by no route at all"
+    )
+
+
+def test_that_publisher_check_bites(tmp_path: pathlib.Path) -> None:
+    """Sensitivity: the assertion above passes over a clean tree today."""
+    planted = tmp_path / "runner.py"
+    planted.write_text(
+        "import os\ndef write_create_only(p, d):\n    os.link(p.with_suffix('.t'), p)\n"
+    )
+    tree = ast.parse(planted.read_text())
+    hits = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "link"
+        and getattr(getattr(node.func, "value", None), "id", None) == "os"
+    ]
+    assert len(hits) == 1
+
+
+def test_a_duplicate_release_does_not_escape_record_terminal(
+    tmp_path: pathlib.Path, proven: None
+) -> None:
+    """`write_release` refuses with `PreconditionFailed`, which is a contract.
+
+    It is a `DeploymentFoundationError`, so a handler that caught only `OSError`
+    would let it escape a function that promises never to raise — and on the
+    receipt path it would unwind into `main`, classify as unnameable, and report
+    a fully green rehearsal as a refusal with no release.
+    """
+    args = _args(tmp_path)
+    outcome = TerminalOutcome(receipt_digest="sha256:" + "44" * 32)
+    write_release(
+        runner.build_release(_context(), args, outcome),
+        target=args.target,
+        directory=args.lease_dir,
+    )
+    digest = runner.record_terminal(_context(), args, outcome)
+    assert digest == ""
+    evidence = json.loads(pathlib.Path(args.terminal_evidence_out).read_text())
+    assert any("already exists" in note for note in evidence["notes"])
+
+
+def test_the_workspace_copy_is_only_taken_after_the_store_write_succeeds(
+    tmp_path: pathlib.Path, proven: None
+) -> None:
+    """The store is the ledger; the copy is evidence of what it holds.
+
+    If the store refused, there is nothing to copy — and that absence is the
+    correct outcome rather than a gap to paper over with a parallel write.
+    """
+    args = _args(tmp_path)
+    outcome = TerminalOutcome(receipt_digest="sha256:" + "55" * 32)
+    write_release(
+        runner.build_release(_context(), args, outcome),
+        target=args.target,
+        directory=args.lease_dir,
+    )
+    runner.record_terminal(_context(), args, outcome)
+    assert not pathlib.Path(args.release_out).exists()
+
+
+def test_the_copy_IS_taken_when_the_store_write_succeeds(
+    tmp_path: pathlib.Path, proven: None
+) -> None:
+    """The near-miss for the test above: a writer that never copied would pass it."""
+    args = _args(tmp_path)
+    digest = runner.record_terminal(
+        _context(), args, TerminalOutcome(receipt_digest="sha256:" + "66" * 32)
+    )
+    assert digest
+    stored = release_path(args.target, directory=args.lease_dir)
+    assert json.loads(pathlib.Path(args.release_out).read_text()) == json.loads(
+        stored.read_text()
+    )
 
 
 # ── absence means held ──────────────────────────────────────────────────────
@@ -646,13 +777,22 @@ def test_the_run_is_bound_to_a_slot_and_a_candidate() -> None:
     assert "--candidate-version" in body
 
 
-def test_the_release_is_not_written_into_the_workspace_by_accident(
-    tmp_path: pathlib.Path,
+def test_the_release_lands_beside_its_lease_and_nowhere_else(
+    tmp_path: pathlib.Path, proven: None
 ) -> None:
-    """The documented default is beside the lease it discharges."""
+    """The runner derives no path of its own. A second location is a second ledger.
+
+    With no copy destination configured the record still reaches the store, so
+    the store is not contingent on an artifact convenience.
+    """
     args = _args(tmp_path, release_out="")
-    assert runner.release_path(args) == (
-        pathlib.Path(args.lease_dir) / "releases" / "lane3-rehearsal-target.json"
+    assert runner.record_terminal(
+        _context(), args, TerminalOutcome(receipt_digest="sha256:" + "77" * 32)
+    )
+    assert release_path(args.target, directory=args.lease_dir).exists()
+    assert not hasattr(runner, "release_path"), (
+        "the runner derives the store path again; `lease.release_path` is the "
+        "one answer to where a release lives"
     )
 
 

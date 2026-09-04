@@ -81,9 +81,13 @@ wiped on an inference:
   controller key fingerprint, which is separate host-mutation evidence in its
   own field. If it cannot be proven, nothing is written and the lease stays
   held.
-* **create-only, atomically.** A second release of one lease is a replay or two
-  runs each believing they finished the same work, and neither overwrites the
-  first.
+* **create-only, atomically — and owned by the package.** A second release of
+  one lease is a replay or two runs each believing they finished the same work,
+  and neither overwrites the first. This runner does NOT publish: `lease.py`
+  owns the store, so the record goes in through `lease_release.write_release`,
+  whose `os.link` publish makes creating the name and failing on a taken name
+  one syscall. A writer here would be a second answer to one question, and the
+  destroy gate would read whichever one happened to run.
 """
 
 from __future__ import annotations
@@ -98,6 +102,7 @@ import json
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 import urllib.parse
@@ -128,6 +133,7 @@ from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import (
     DeploymentFoundationError,
+    PreconditionFailed,
     SpecError,
 )
 from dotmac_deployment_foundation.exposure import (
@@ -145,6 +151,7 @@ from dotmac_deployment_foundation.lease_release import (
     TerminalOutcome,
     TerminalRefusal,
     lease_digest,
+    write_release,
 )
 from dotmac_deployment_foundation.policy import build_firewall_plan
 from dotmac_deployment_foundation.providers.exposure_host import (
@@ -919,47 +926,6 @@ def build_release(
     )
 
 
-def write_create_only(path: pathlib.Path, document: dict[str, object]) -> None:
-    """Atomically, and once.
-
-    `os.link` is both halves in one call: it publishes the finished bytes under
-    the final name in a single step, and it fails with `EEXIST` when that name
-    is taken. A second release of one lease is either a replay or two runs each
-    believing they finished the same work, and neither may overwrite the first.
-    """
-    payload = json.dumps(document, sort_keys=True, indent=2) + "\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.parent / f".{path.name}.{os.getpid()}.partial"
-    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.link(partial, path)
-        except FileExistsError as exc:
-            raise ReleaseNotWritable(
-                f"a release already exists at {path}. A second write would "
-                "overwrite the record of how this lease ended, so it refuses"
-            ) from exc
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(partial)
-    directory = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
-
-
-def release_path(args: argparse.Namespace) -> pathlib.Path:
-    if args.release_out:
-        return pathlib.Path(args.release_out)
-    safe = "".join(ch if ch.isalnum() or ch in ".-" else "_" for ch in str(args.target))
-    return pathlib.Path(args.lease_dir) / "releases" / f"{safe}.json"
-
-
 def record_terminal(
     ctx: TerminalContext,
     args: argparse.Namespace,
@@ -987,14 +953,43 @@ def record_terminal(
     except (ReleaseNotWritable, PrincipalUnprovable) as exc:
         ctx.notes.append(f"NO RELEASE WRITTEN: {exc}")
     else:
-        path = release_path(args)
         try:
-            write_create_only(path, release.as_document())
-        except (ReleaseNotWritable, OSError) as exc:
+            # `lease.py` owns this store — it owns `load_lease` and derives the
+            # release path beside it — so the record goes in through the
+            # package's writer rather than one of this runner's own. A second
+            # publisher would be two answers to "how does a release reach the
+            # store", and the destroy gate would then be reading whichever
+            # answer happened to run.
+            #
+            # `PreconditionFailed` is caught BY NAME because `write_release`
+            # documents it as its contract: the `FileExistsError` from the
+            # atomic publish is a store primitive's signal, and the meaning of a
+            # duplicate release belongs to the module that owns releases. A
+            # handler that caught only `OSError` would let it escape a function
+            # that promises never to raise — and on the receipt path it would
+            # unwind into `main`, be classified as unnameable, and report a
+            # green rehearsal as a refusal.
+            stored = write_release(
+                release, target=args.target, directory=args.lease_dir
+            )
+        except (PreconditionFailed, ReleaseNotWritable, OSError) as exc:
             ctx.notes.append(f"NO RELEASE WRITTEN: {exc}")
         else:
-            digest, written = release.digest(), str(path)
+            digest, written = release.digest(), str(stored)
             ctx.notes.append(f"released {written} ({digest})")
+            # The store is the ledger; this is a COPY of what it holds, taken
+            # after the write succeeded, so the `if: always()` artifact step has
+            # something to upload from a workspace it can reach. Never a
+            # parallel write path: if the store refused, there is nothing to
+            # copy, and that absence is the correct outcome rather than a gap to
+            # paper over.
+            if args.release_out:
+                try:
+                    shutil.copyfile(stored, pathlib.Path(args.release_out))
+                except OSError as exc:
+                    ctx.notes.append(
+                        f"the stored release could not be copied for upload: {exc}"
+                    )
 
     evidence = {
         "document": "lane3-terminal-evidence",
@@ -1642,10 +1637,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lease-dir", default=None)
     parser.add_argument("--lock-dir", default="/var/lock/dotmac")
     parser.add_argument("--timeout", type=int, default=120)
-    # Where the terminal record lands. Empty means "beside the lease it
-    # discharges" — `<lease-dir>/releases/<target>.json` — which is the one place
-    # a reader already knows to look. A knob with a documented default, like
-    # every other env-specific value.
+    # NOT where the release lives. `lease.release_path` derives that from the
+    # lease, and `write_release` takes no override, because the store is the
+    # ledger and a second location would be a second ledger. This is where a
+    # COPY of the stored record is placed for artifact upload, and it is only
+    # ever written after the store write has succeeded.
     parser.add_argument("--release-out", default="")
     parser.add_argument(
         "--terminal-evidence-out", default="lane3-terminal-evidence.json"
