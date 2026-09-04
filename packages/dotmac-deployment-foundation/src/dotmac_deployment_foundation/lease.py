@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+from .controller_identity import ControllerSshFingerprintV1
 from .errors import PreconditionFailed, SpecError
 
 __all__ = [
@@ -111,7 +112,14 @@ class HostLease:
     #: the lease — and not a separate DOCUMENT: it is inside the canonical bytes,
     #: so a lease that swapped credentials while keeping its principal digests
     #: differently.
-    controller_identity_fingerprint: str
+    #:
+    #: TYPED, not a string. It used to be a bare `str` checked only for being
+    #: non-empty, so "the credential that mutated the host" was satisfied by any
+    #: word at all. `ControllerSshFingerprintV1` establishes the value is a
+    #: SHA-256 digest by DECODING it, and equality is then over those 32 bytes —
+    #: which is what the destroy gate's comparison against the release's copy
+    #: has to be an answer about.
+    controller_identity_fingerprint: ControllerSshFingerprintV1
     #: The authenticated runner/controller that HOLDS and RELEASES this lease.
     #:
     #: Distinct from `holder`, which is the authorized ROLE and is a fixed token.
@@ -122,12 +130,22 @@ class HostLease:
     workload_principal: str
 
     def __post_init__(self) -> None:
+        if not isinstance(
+            self.controller_identity_fingerprint, ControllerSshFingerprintV1
+        ):
+            raise SpecError(
+                "HostLease.controller_identity_fingerprint must be a "
+                "ControllerSshFingerprintV1, got "
+                f"{type(self.controller_identity_fingerprint).__name__}. A "
+                "non-empty string is satisfied by any word; the field names the "
+                "credential that mutated the host, so it is established by "
+                "decoding rather than accepted by shape"
+            )
         for field in (
             "target",
             "holder",
             "authorization_run_id",
             "compose_project_prefix",
-            "controller_identity_fingerprint",
             "workload_principal",
         ):
             if not str(getattr(self, field)).strip():
@@ -191,7 +209,9 @@ class HostLease:
             "starts_at": self.starts_at,
             "expires_at": self.expires_at,
             "compose_project_prefix": self.compose_project_prefix,
-            "controller_identity_fingerprint": self.controller_identity_fingerprint,
+            "controller_identity_fingerprint": str(
+                self.controller_identity_fingerprint
+            ),
             "workload_principal": self.workload_principal,
         }
 
@@ -208,6 +228,15 @@ class HistoricalLeaseV1:
     admit a run — not "it would be rejected", but there is no method to call and
     no principal to bind. That is the difference between a migration and a
     boundary: V1 records stay legible, and legibility is not authority.
+
+    **`controller_identity_fingerprint` stays a bare `str` here, deliberately.**
+    `HostLease` types it as `ControllerSshFingerprintV1`; this class does not,
+    and the asymmetry is the point. V1 records were written by five shipped
+    candidate wheels under a validator that only required the field to be
+    non-empty, so a shipped record may legitimately hold a value the typed
+    parser refuses. Parsing strictly here would make a real historical record
+    unreadable, which is the opposite of what this class is for. It reports what
+    the record SAYS; it grants nothing on the strength of it.
     """
 
     target: str
@@ -432,7 +461,8 @@ def load_lease(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Hos
         starts_at=str(content.get("starts_at", "")),
         expires_at=str(content.get("expires_at", "")),
         compose_project_prefix=str(content.get("compose_project_prefix", "")),
-        controller_identity_fingerprint=str(
-            content.get("controller_identity_fingerprint", "")
+        controller_identity_fingerprint=ControllerSshFingerprintV1.parse(
+            content.get("controller_identity_fingerprint", ""),
+            field=f"the lease at {path}: controller_identity_fingerprint",
         ),
     )

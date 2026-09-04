@@ -27,6 +27,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from dotmac_deployment_foundation.controller_identity import (
+    ControllerSshFingerprintV1,
+)
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.lease import HostLease
 from dotmac_deployment_foundation.lease_release import (
@@ -53,6 +56,16 @@ from dotmac_deployment_foundation.lease_release import (
 
 SLOT = "dotmacproxmox/102"
 PRINCIPAL_SUBJECT = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
+#: Two REAL OpenSSH fingerprints — `SHA256:` and 43 characters of unpadded
+#: base64, as `ssh-keygen -lf` emits. These fixtures used to carry
+#: `"sha256:" + "a" * 64`, the CONTENT DIGEST shape the old regex required and
+#: the one shape a key fingerprint is never written in.
+CONTROLLER = ControllerSshFingerprintV1.parse(
+    "SHA256:T1kdK/6QTzzwU1EienO6nUgk8wu9UpjqB8BatKbndSE", field="controller"
+)
+OTHER_CONTROLLER = ControllerSshFingerprintV1.parse(
+    "SHA256:cegy+e5RS5FWNVo7WNxR7JxpNiODBabD/g0PttX3mzA", field="controller"
+)
 LIVE = datetime(2026, 9, 4, 3, 0, tzinfo=UTC)
 AFTER = datetime(2026, 9, 4, 7, 0, tzinfo=UTC)
 
@@ -65,7 +78,7 @@ def _lease(**over) -> HostLease:
         "starts_at": "2026-09-04T00:00:00Z",
         "expires_at": "2026-09-04T06:00:00Z",
         "compose_project_prefix": "rehearsal-",
-        "controller_identity_fingerprint": "sha256:" + "a" * 64,
+        "controller_identity_fingerprint": CONTROLLER,
         "workload_principal": PRINCIPAL_SUBJECT,
     }
     kwargs.update(over)
@@ -89,7 +102,7 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
             subject=PRINCIPAL_SUBJECT,
             run_binding="33860000001",
         ),
-        "host_mutation_evidence": "sha256:" + "a" * 64,
+        "controller_identity_fingerprint": CONTROLLER,
         "closure": HostClosure.REUSABLE,
         "cleanup": CleanupDisposition.PURGED,
     }
@@ -195,7 +208,11 @@ def test_the_refusal_vocabulary_is_closed_and_owned_here() -> None:
         "probe_refused",
         "receipt_inconsistent",
         "precondition_unfit",
-        "provocation_unestablished",
+        # Was `provocation_unestablished`, which named ONE instance of the
+        # condition and left every other instance — a `StepFailed` from a failed
+        # compose apply above all — with no member at all. Renamed and
+        # generalized, not added to: still six.
+        "host_state_uncertified",
     }
     assert len(set(TERMINAL_REFUSALS)) == 6
 
@@ -221,13 +238,10 @@ def test_no_member_is_inert() -> None:
 
 
 def test_the_two_host_state_refusals_are_opposite_operator_actions() -> None:
-    """`descriptor_unfit` means do not touch the machine, fix the input.
-    `provocation_unestablished` means inspect the machine before re-running —
-    it is the only refusal where the host was mutated and the mutation failed.
-    One member cannot carry both."""
-    assert (
-        TerminalRefusal.PRECONDITION_UNFIT != TerminalRefusal.PROVOCATION_UNESTABLISHED
-    )
+    """`precondition_unfit` means do not touch the machine, fix the input.
+    `host_state_uncertified` means inspect the machine before re-running — nobody
+    can say what state it is in. One member cannot carry both."""
+    assert TerminalRefusal.PRECONDITION_UNFIT != TerminalRefusal.HOST_STATE_UNCERTIFIED
     # CONSTRUCTIBILITY, not destroyability. The two are different claims and this
     # test is about the first: `inspection_required` is a legitimate closure that
     # deliberately does NOT authorize a wipe, which is
@@ -238,7 +252,7 @@ def test_the_two_host_state_refusals_are_opposite_operator_actions() -> None:
         closure=HostClosure.REUSABLE,
     )
     assert _release(
-        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        outcome=TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
         cleanup=CleanupDisposition.NOT_ATTEMPTED,
         closure=HostClosure.INSPECTION_REQUIRED,
     )
@@ -377,9 +391,10 @@ def test_the_document_names_its_schema() -> None:
 def test_the_two_subprocess_sites_still_cannot_discriminate() -> None:
     """The amendment trigger for `vantage_unavailable`, as a red build.
 
-    The writing lane filed inside-vantage 134 as "the jump could not be used at
-    all" — a real fact, different from 304's "the probe ran and the target
-    refused it", and pointing at the opposite investigation.
+    The writing lane filed the inside-vantage probe's non-zero exit as "the jump
+    could not be used at all" — a real fact, different from the probe phase's
+    "the probe ran and the target refused it", and pointing at the opposite
+    investigation.
 
     But both sites run a shell script through `subprocess.run(check=False)` and
     raise on `returncode != 0`, carrying stderr into the message. NOTHING
@@ -413,16 +428,16 @@ def test_the_two_subprocess_sites_still_cannot_discriminate() -> None:
 # ── the closure axis: the refusal BOUNDS what the host may be used for ─────
 
 
-def test_provocation_unestablished_may_NEVER_be_generally_reusable() -> None:
+def test_host_state_uncertified_may_NEVER_be_generally_reusable() -> None:
     """The constraint enforced by the type, not by the writer's discipline.
 
     The failure it prevents is concrete: a run that seeded a foreign rule,
-    failed, and partially unwound, releasing a host the NEXT lease treats as
-    clean.
+    failed, and partially unwound — or one whose compose apply failed on the
+    host — releasing a host the NEXT lease treats as clean.
     """
     with pytest.raises(SpecError) as exc:
         _release(
-            outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+            outcome=TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
             closure=HostClosure.REUSABLE,
         )
     assert exc.value.code == RELEASE_MALFORMED
@@ -431,19 +446,55 @@ def test_provocation_unestablished_may_NEVER_be_generally_reusable() -> None:
 @pytest.mark.parametrize(
     "closure", [HostClosure.INSPECTION_REQUIRED, HostClosure.DESTROY_ONLY]
 )
-def test_provocation_unestablished_may_close_into_the_two_it_is_allowed(
+def test_host_state_uncertified_may_close_into_the_two_it_is_allowed(
     closure: HostClosure,
 ) -> None:
     assert _release(
-        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        outcome=TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
         closure=closure,
     )
+
+
+def test_the_cleanup_axis_still_ANSWERS_when_the_refusal_bounds_the_closure() -> None:
+    """A refusal that constrains the closure does not excuse the cleanup axis.
+
+    `cleanup` has no default on `HostLeaseReleaseV1`, so it cannot be omitted —
+    and reusability stays the INTERSECTION of the two constraints rather than
+    whichever one happened to fire. "The state is uncertified" and "something the
+    lease created is still there" are different facts, and a destroyer reads them
+    differently.
+    """
+    import dataclasses
+
+    field = HostLeaseReleaseV1.__dataclass_fields__["cleanup"]
+    assert field.default is dataclasses.MISSING
+    assert field.default_factory is dataclasses.MISSING
+
+    uncertified = TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED)
+    # Bounded by the REFUSAL while the cleanup axis is unconstrained...
+    assert (
+        _release(
+            outcome=uncertified,
+            cleanup=CleanupDisposition.PURGED,
+            closure=HostClosure.INSPECTION_REQUIRED,
+        ).cleanup
+        is CleanupDisposition.PURGED
+    )
+    # ...and bounded by the CLEANUP where the refusal is not, so neither axis is
+    # doing the other's work.
+    with pytest.raises(SpecError):
+        _release(
+            outcome=TerminalOutcome(receipt_digest="sha256:" + "b" * 64),
+            cleanup=CleanupDisposition.FAILED,
+            closure=HostClosure.REUSABLE,
+        )
 
 
 def test_precondition_unfit_CAN_take_the_releasable_pole() -> None:
     """Both directions, or the constraint only ever says no and cannot be shown
     to permit anything. Untouched and safely releasable is the whole point of
-    this pole — in site 134's unset-key case not one TCP connection is opened."""
+    this pole — with `LANE3_JUMP_KEY` unset the runner refuses before it opens a
+    single TCP connection, which is where that sentence is true."""
     assert _release(
         outcome=TerminalOutcome(refusal=TerminalRefusal.PRECONDITION_UNFIT),
         closure=HostClosure.REUSABLE,
@@ -492,14 +543,17 @@ def test_a_principal_from_ANOTHER_run_is_refused() -> None:
 def test_the_controller_fingerprint_is_NOT_the_releasing_principal() -> None:
     """Two facts, two fields: who touched the host, and who closed the lease."""
     document = _release().as_document()
-    assert document["host_mutation_evidence"].startswith("sha256:")
+    assert document["controller_identity_fingerprint"].startswith("SHA256:")
     assert document["released_by"]["kind"] == "github_actions_workload"
-    assert "sha256:" not in document["released_by"]["subject"]
+    assert "SHA256:" not in document["released_by"]["subject"]
 
 
-def test_host_mutation_evidence_must_be_this_leases_controller() -> None:
+def test_the_release_controller_must_be_this_leases_controller() -> None:
+    """A well-formed fingerprint of the WRONG key. It parses; it is not this
+    lease's controller, and the gate compares DECODED DIGESTS rather than
+    text."""
     with pytest.raises(PreconditionFailed) as exc:
-        _destroy(_release(host_mutation_evidence="sha256:" + "c" * 64))
+        _destroy(_release(controller_identity_fingerprint=OTHER_CONTROLLER))
     assert exc.value.code == RELEASE_FOREIGN
 
 
@@ -535,7 +589,7 @@ def test_all_three_identity_fields_are_in_the_canonical_bytes() -> None:
     for field, value in (
         ("holder", "deployment-foundation-rehearsal"),
         ("workload_principal", "repo:michaelayoade/other:ref:refs/heads/main"),
-        ("controller_identity_fingerprint", "sha256:" + "b" * 64),
+        ("controller_identity_fingerprint", OTHER_CONTROLLER),
     ):
         if field == "holder":
             continue  # a fixed token; the other two are the movable ones
@@ -641,7 +695,7 @@ def test_inspection_required_does_NOT_authorize_destruction() -> None:
     axis back into the refusal axis — which is the whole reason they are separate.
     """
     release = _release(
-        outcome=TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        outcome=TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
         cleanup=CleanupDisposition.FAILED,
         closure=HostClosure.INSPECTION_REQUIRED,
     )

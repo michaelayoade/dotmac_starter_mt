@@ -104,6 +104,14 @@
         "                       and because the destroy gate reads it: an expired",
         "                       lease means the run may not continue, and ONLY a",
         "                       release means the host may be destroyed.",
+        "  controller_identity.py -- ControllerSshFingerprintV1, the controller",
+        "                       key on BOTH lease planes. Required because lease.py",
+        "                       and lease_release.py both import it and __init__.py",
+        "                       imports them, so a wheel without it cannot import",
+        "                       the package at all -- and because the destroy",
+        "                       gate's comparison is over the DECODED digest, so a",
+        "                       wheel lacking the type has no way to answer whether",
+        "                       a release names the key that took the lease.",
         "  canonical_plan.py -- the ten canonicalization rules EVERY plan",
         "                       document is hashed under, owned once. Imported by",
         "                       execution_plan.py and by engine/run.py, so a wheel",
@@ -190,7 +198,8 @@
           "dotmac_deployment_foundation/recovery_plan.py",
           "dotmac_deployment_foundation/deployment_evidence.py",
           "dotmac_deployment_foundation/execution_plan_v2.py",
-          "dotmac_deployment_foundation/lease_release.py"
+          "dotmac_deployment_foundation/lease_release.py",
+          "dotmac_deployment_foundation/controller_identity.py"
         ],
         "forbidden_prefixes": [
           "app/",

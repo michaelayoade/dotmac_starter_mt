@@ -66,7 +66,7 @@ being gone and a timestamp having passed — two inferences, neither a record.
 This runner writes `HostLeaseRelease.v1` on every terminal outcome it can name:
 a receipt, or one of the closed vocabulary's refusal members.
 
-Four rules shape that write, and each of them is a way a host could otherwise be
+Five rules shape that write, and each of them is a way a host could otherwise be
 wiped on an inference:
 
 * **absence means HELD.** The write happens on a typed terminal outcome and
@@ -78,9 +78,16 @@ wiped on an inference:
   each act's outcome reaches `cleanup` and the host's closure instead.
 * **`released_by` is the authenticated workload**, read from the identity token
   the Actions runtime mints — never the CLI, never a person, never the
-  controller key fingerprint, which is separate host-mutation evidence in its
-  own field. If it cannot be proven, nothing is written and the lease stays
-  held.
+  controller key fingerprint, which is a separate fact in its own field —
+  `controller_identity_fingerprint`, the same name and the same type the lease
+  already uses for it. If it cannot be proven, nothing is written and the lease
+  stays held.
+* **a refusal after mutation is named, not dropped.** A `StepFailed` from a
+  compose apply on the host used to have no member in the closed vocabulary at
+  all, so a failed apply left the host mutated with no record and no closure —
+  reachable on any run where the apply fails. `classify_refusal` now answers
+  positionally past first mutation, and `host_state_uncertified` says what is
+  true: nobody has certified what state the machine is in.
 * **create-only, atomically — and owned by the package.** A second release of
   one lease is a replay or two runs each believing they finished the same work,
   and neither overwrites the first. This runner does NOT publish: `lease.py`
@@ -129,6 +136,9 @@ sys.path.insert(
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lane3_inside_vantage as inside_vantage
+from dotmac_deployment_foundation.controller_identity import (
+    ControllerSshFingerprintV1,
+)
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import (
@@ -186,7 +196,7 @@ FAILED = RequirementStatus.EXECUTED_FAILED
 BLOCKED = RequirementStatus.BLOCKED
 
 
-# ── the twelve terminal refusals, as TYPES rather than as line numbers ──────
+# ── the terminal refusals, as TYPES and POSITIONS rather than line numbers ──
 #
 # `HostLeaseRelease.v1` needs to know WHICH refusal ended a run, and the
 # vocabulary that answers it (`TerminalRefusal`) is closed and owned by
@@ -201,12 +211,20 @@ BLOCKED = RequirementStatus.BLOCKED
 # now say which member of the closed vocabulary the refusal belongs to instead
 # of matching prose.
 #
-# Two of the twelve are raised by `lane3_provocation` and one region by
+# Two of them are raised by `lane3_provocation` and one region by
 # `lane3_inside_vantage`, files this change does not touch. They are translated
 # at their CALL SITE below, which discriminates them exactly where the type
 # cannot: `ProvocationError` covers both "the descriptor declares no private
 # port" (a precondition) and "the foreign rule could not be seeded" (a mutation
 # that failed), and those two demand opposite operator actions.
+#
+# The type is not the WHOLE answer, and it cannot be. A refusal raised below this
+# lane carries none of these classes, and its own type does not discriminate it:
+# `PreconditionFailed` is documented as "nothing has changed" and is raised by
+# `ExposureTransaction.run` after the apply, and `SpecError` is raised both by
+# `ProductDeploymentSpec.load` before host contact and by `build_receipt` after
+# the whole transaction. `classify_refusal` therefore answers by type first and
+# by POSITION relative to first mutation second.
 
 
 class ResultRecordedTwice(DeploymentFoundationError):
@@ -233,16 +251,20 @@ class PreconditionUnfit(DeploymentFoundationError):
     """
 
 
-class ProvocationUnestablished(DeploymentFoundationError):
-    """The seeder failed to place the foreign rule. -> `provocation_unestablished`.
+class HostStateUncertified(DeploymentFoundationError):
+    """Nobody has certified what state the host is in. -> `host_state_uncertified`.
 
-    The ONE refusal where the host was mutated and the mutation failed.
+    Raised by name where this lane knows it: the seeder failed to place the
+    foreign rule, having already changed the chain part way.
+
+    It is ALSO the member `classify_refusal` reaches positionally, for any
+    refusal raised below this lane once mutation may have begun — see there.
     """
 
 
-#: Refusal class -> the closed vocabulary member. A `DeploymentFoundationError`
-#: that is not one of these has NO member, and a run that ends on one writes no
-#: release at all — see `classify_refusal`.
+#: Refusal class -> the closed vocabulary member. This table answers by TYPE and
+#: it is not the whole answer: a `DeploymentFoundationError` raised below this
+#: lane has no class here, and `classify_refusal` then answers POSITIONALLY.
 _REFUSAL_BY_TYPE: Final[
     tuple[tuple[type[DeploymentFoundationError], TerminalRefusal], ...]
 ] = (
@@ -251,26 +273,59 @@ _REFUSAL_BY_TYPE: Final[
     (EvidenceIncomplete, TerminalRefusal.EVIDENCE_INCOMPLETE),
     (ProbeRefused, TerminalRefusal.PROBE_REFUSED),
     (PreconditionUnfit, TerminalRefusal.PRECONDITION_UNFIT),
-    (ProvocationUnestablished, TerminalRefusal.PROVOCATION_UNESTABLISHED),
+    (HostStateUncertified, TerminalRefusal.HOST_STATE_UNCERTIFIED),
 )
 
 
-def classify_refusal(exc: BaseException) -> TerminalRefusal | None:
-    """The vocabulary member for this refusal, or `None` if it has none.
+def classify_refusal(
+    exc: BaseException, *, host_mutated: bool
+) -> TerminalRefusal | None:
+    """The vocabulary member for this refusal. TYPE first, then POSITION.
 
-    `None` is not a fallback. It is the answer for every
-    `DeploymentFoundationError` raised BELOW this lane — a `StepFailed` from the
-    effects, a `LockUnavailableError` from the deployment lock, a `SpecError`
-    from `ProductDeploymentSpec.load`, a `PreconditionFailed` from `load_lease`
-    — none of which appear in the twelve-site derivation `TerminalRefusal` was
-    built from, and none of which have a member. A run that ends on one of them
-    writes NO release and the host stays held, which is the safe half of a gap
-    rather than a repair of it.
+    ## Why position, and why it is not optional
+
+    A refusal raised BELOW this lane carries no class of ours, and its own type
+    cannot discriminate it. `PreconditionFailed` is the proof: `errors.py` says
+    it means *"a gate refused before anything was mutated ... nothing has
+    changed"*, and `ExposureTransaction.run` raises it AFTER applying the compose
+    stack, rewriting both filter chains and rolling back. `SpecError` is the same
+    in the other direction — `ProductDeploymentSpec.load` raises it before any
+    host contact and `build_receipt` raises it after the whole transaction. One
+    type, opposite operator actions.
+
+    So the discriminator is `host_mutated`: whether a mutation had been ATTEMPTED
+    when the refusal arrived. Past that point the host state is uncertified, and
+    `host_state_uncertified` is what says so.
+
+    ## What each answer means
+
+    * a class in `_REFUSAL_BY_TYPE` -> its member. Unchanged, and checked first
+      so a refusal this lane names keeps its own name.
+    * anything else, WITH mutation attempted -> `HOST_STATE_UNCERTIFIED`. That is
+      the repair: a `StepFailed` from a failed compose apply previously had no
+      member at all, so a failed apply left the host mutated with no record and
+      no closure, reachable on any run where the apply fails on the host.
+    * anything else, mutation NOT attempted -> `None`. No release is written and
+      the host stays held. These are precondition failures — a descriptor that
+      will not parse, a lease that is missing or expired — and they must NOT
+      borrow `host_state_uncertified`, which asserts something about a machine.
+      Whether they should instead carry `precondition_unfit` is NOT decided here:
+      the ruling covered the mutated side, and a member that asserts "untouched
+      and safely releasable" is not one to extend by inference.
+
+    ## The modality is deliberately conservative
+
+    `host_mutated` is set by `run` immediately before `transaction.run()`, so a
+    `LockUnavailableError` from the lock that transaction takes BEFORE its first
+    effect is classified here as uncertified even though nothing was touched.
+    That is the member's own modality — *may* have begun, not *did* — and the
+    error is in the direction that asks for an inspection nobody needed rather
+    than the one that advertises an unexamined host as clean.
     """
     for kind, member in _REFUSAL_BY_TYPE:
         if isinstance(exc, kind):
             return member
-    return None
+    return TerminalRefusal.HOST_STATE_UNCERTIFIED if host_mutated else None
 
 
 @contextlib.contextmanager
@@ -582,7 +637,7 @@ class PrincipalUnprovable(Exception):
     """The authenticated workload could not be proven, so nothing is released.
 
     Deliberately NOT a `DeploymentFoundationError`: it must never be mistaken
-    for one of the twelve refusals and classified as one.
+    for one of this lane's own refusals and classified as one.
     """
 
 
@@ -746,8 +801,16 @@ class TerminalContext:
     """
 
     lease: HostLease | None = None
+    #: The controller key, PARSED. Held here rather than re-read off `args` at
+    #: the end, for the same reason the lease is: the release names what this run
+    #: actually mutated the host with, and a value that could not be established
+    #: as a fingerprint never gets that far — `run` parses it before it reads the
+    #: descriptor, so every later refusal already has it.
+    controller_identity: ControllerSshFingerprintV1 | None = None
     #: A mutation was ATTEMPTED. Not "succeeded" — the attempt is what makes
-    #: `precondition_unfit`'s "the host was never touched" false.
+    #: `precondition_unfit`'s "the host was never touched" false, and what makes
+    #: `classify_refusal` answer `host_state_uncertified` for a refusal raised
+    #: below this lane.
     host_mutated: bool = False
     #: The inert rule was offered to the chain, so a disarm has something to do
     #: even if the arming call itself failed part way.
@@ -885,10 +948,19 @@ def build_release(
             "anyway would make the host read as RELEASED while the destroy gate "
             "refuses it as foreign — the worst of both answers"
         )
-    if str(args.controller_identity) != str(lease.controller_identity_fingerprint):
+    controller_identity = ctx.controller_identity
+    if controller_identity is None:
         raise ReleaseNotWritable(
-            f"the host was mutated with {args.controller_identity!r} and the "
-            f"lease names {lease.controller_identity_fingerprint!r}. Same "
+            "the controller identity was never established as a key "
+            "fingerprint, so nothing can record what mutated the host"
+        )
+    # Compared as DECODED DIGESTS. A well-formed fingerprint of the WRONG key is
+    # refused HERE as well as at the destroy gate: parsing proves shape, and
+    # this is where identity is proven on the writing side.
+    if controller_identity != lease.controller_identity_fingerprint:
+        raise ReleaseNotWritable(
+            f"the host was mutated with {controller_identity} and the "
+            f"lease names {lease.controller_identity_fingerprint}. Same "
             "reason: a record the destroy gate refuses as foreign would still "
             "flip this host's standing to RELEASED"
         )
@@ -904,7 +976,7 @@ def build_release(
         "outcome": outcome,
         "released_at": datetime.now(UTC).isoformat(),
         "released_by": principal,
-        "host_mutation_evidence": args.controller_identity,
+        "controller_identity_fingerprint": controller_identity,
         "cleanup": cleanup,
     }
     # Every field EXCEPT the closure, checked once against the pole every
@@ -1164,6 +1236,19 @@ def run_cleanup(
 def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     started = datetime.now(UTC).isoformat()
     results = Results()
+
+    # FIRST, before the descriptor is even opened. `--controller-identity` is an
+    # OpenSSH fingerprint — `SHA256:` and 43 characters of base64, as
+    # `ssh-keygen -lf` emits — and whether the value IS one is decidable from the
+    # argument alone. Asking here means a malformed identity refuses as
+    # `precondition_unfit` with the host genuinely untouched, and means every
+    # later refusal already holds the parsed value, so a run that ends between
+    # here and the first mutation can still write a truthful release.
+    with refusal_of(PreconditionUnfit):
+        controller_identity = ControllerSshFingerprintV1.parse(
+            args.controller_identity, field="--controller-identity"
+        )
+    ctx.controller_identity = controller_identity
 
     descriptor = pathlib.Path(args.descriptor)
     fixture_bytes = descriptor.read_bytes()
@@ -1499,9 +1584,9 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     try:
         with controller.watching() as seeding:
             try:
-                with refusal_of(ProvocationUnestablished):
+                with refusal_of(HostStateUncertified):
                     seeded = seed_foreign_rules(controller)
-            except ProvocationUnestablished:
+            except HostStateUncertified:
                 ctx.record_cleanup(
                     disposition_of(
                         "foreign_seed_unwind",
@@ -1579,7 +1664,7 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         descriptor_digest=descriptor_digest,
         execution_report_digest=execution_report,
         fixture_digest=str(Digest.of(fixture_bytes)),
-        controller_identity=args.controller_identity,
+        controller_identity=str(controller_identity),
         target=args.target,
         lease_id=lease.authorization_run_id,
         probe_identity=str(evidence.get("vantage", {}).get("address_v4", "")),
@@ -1664,12 +1749,14 @@ def main(argv: list[str] | None = None) -> int:
         # collapsing "we refused for a reason we can name" into "the process
         # stopped" is how a killed run comes to authorise a destroy.
         print(f"REFUSED: {exc}", file=sys.stderr)
-        member = classify_refusal(exc)
+        member = classify_refusal(exc, host_mutated=ctx.host_mutated)
         if member is None:
             ctx.notes.append(
                 f"NO RELEASE WRITTEN: {type(exc).__name__} is a refusal raised "
-                "below this lane and has no member in the closed terminal "
-                "vocabulary, so this run cannot say truthfully why it ended"
+                "below this lane BEFORE any mutation was attempted, and has no "
+                "member in the closed terminal vocabulary. It is a precondition "
+                "failure and must not borrow `host_state_uncertified`, which "
+                "asserts something about a machine"
             )
         record_terminal(
             ctx, args, None if member is None else TerminalOutcome(refusal=member)

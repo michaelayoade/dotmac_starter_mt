@@ -23,6 +23,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from dotmac_deployment_foundation.controller_identity import (
+    ControllerSshFingerprintV1,
+)
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.lease import HostLease, load_lease, write_lease
 from dotmac_deployment_foundation.vantage import (
@@ -33,6 +36,13 @@ from dotmac_deployment_foundation.vantage import (
 RUN = "pcp-run-9182"
 PRINCIPAL = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+#: A real OpenSSH fingerprint — `SHA256:` and 43 characters of unpadded base64,
+#: which is what `ssh-keygen -lf` emits. This fixture read `"SHA256:abc"` while
+#: `HostLease` only checked the field was non-empty; the field is now a
+#: `ControllerSshFingerprintV1` and that value is refused by decoding.
+CONTROLLER = ControllerSshFingerprintV1.parse(
+    "SHA256:T1kdK/6QTzzwU1EienO6nUgk8wu9UpjqB8BatKbndSE", field="controller"
+)
 
 
 def _lease(**overrides: str) -> HostLease:
@@ -43,7 +53,7 @@ def _lease(**overrides: str) -> HostLease:
         "starts_at": "2026-08-30T11:00:00+00:00",
         "expires_at": "2026-08-30T15:00:00+00:00",
         "compose_project_prefix": "lane3-",
-        "controller_identity_fingerprint": "SHA256:abc",
+        "controller_identity_fingerprint": CONTROLLER,
         # REQUIRED on HostLease.v2 and deliberately not defaulted: a lease
         # names the authenticated workload that holds it, and a fixture
         # omitting it would be a lease this facility cannot issue.

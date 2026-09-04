@@ -2,6 +2,80 @@
 
 ## 0.4.0a1 — unreleased, NEVER BUILT
 
+### A refusal after mutation has a member: `host_state_uncertified`
+
+`TerminalRefusal.PROVOCATION_UNESTABLISHED` is RENAMED and GENERALIZED to
+`HOST_STATE_UNCERTIFIED` (value `host_state_uncertified`). The member count is
+unchanged at six; nothing was added.
+
+The old member named ONE instance of a condition — a foreign-rule provocation
+that could not be established — and therefore left every other instance of the
+same condition with no member at all. The live one: a `StepFailed` from a
+compose apply on the host had no vocabulary member anywhere, so a failed apply
+left the host MUTATED with no release record and no closure, on any run where
+the apply fails. The generalized member covers both, because both need the same
+operator action: `inspection_required` or `destroy_only`, and never `reusable`.
+
+Note the modality — mutation **may** have begun, not did. The member exists for
+the case where nobody can say. Constraining the closure does not excuse the
+cleanup axis: `cleanup` is still required and reusability is still the
+intersection of the two constraints.
+
+`exposure_rehearsal_runner.classify_refusal` now answers by TYPE first and by
+POSITION relative to first mutation second. Position is not a nicety: `errors.py`
+documents `PreconditionFailed` as "a gate refused before anything was mutated"
+and `ExposureTransaction.run` raises it after applying the stack and rewriting
+both filter chains, while `SpecError` is raised both by
+`ProductDeploymentSpec.load` before host contact and by `build_receipt` after the
+whole transaction. One type, opposite operator actions. A below-lane refusal
+raised BEFORE any mutation still writes no release and leaves the host held; it
+must not borrow a member that asserts something about a machine.
+
+### The `TerminalRefusal` mapping table is keyed semantically, not by line
+
+It filed sites by line number and the numbers went stale: three
+`precondition_unfit` sites were recorded as "host untouched, safely releasable"
+while sitting after the compose stack had been applied. The table is now keyed by
+the question each refusal answers and by its position relative to first mutation,
+and the position is checked against the code by
+`tests/unit/test_lane3_terminal_release.py`.
+
+The inside-vantage probe no longer appears under two members at once:
+
+- a missing harness, argument or jump key, detected BEFORE host contact, is
+  `precondition_unfit`;
+- the probe subprocess exiting non-zero, AFTER mutation, is `evidence_unreadable`;
+- `probe_refused` applies only where a probe actually ran and refused.
+
+### `ControllerSshFingerprintV1`, on both planes, and a rename before the build
+
+The controller key fingerprint was a bare string on `HostLease` (checked only for
+being non-empty) and on the release plane was validated against
+`^sha256:[0-9a-f]{64}$` — the shape of a CONTENT DIGEST, not of an OpenSSH
+fingerprint. `ssh-keygen -lf` emits `SHA256:` followed by 43 characters of
+unpadded base64, so the documented way of producing the value could not produce
+an accepted one, and the accepted shape was not a key fingerprint at all.
+
+`ControllerSshFingerprintV1` establishes the value by DECODING it — the exact
+`SHA256:` label, strict standard base64, exactly 32 bytes, and the canonical
+spelling — rather than by widening a pattern, because a wider pattern accepts
+more strings without establishing what any of them is. Equality is over the
+decoded digest, so the destroy gate's comparison answers about the KEY: a
+well-formed fingerprint of the wrong key is refused where it is compared.
+
+`HostLeaseReleaseV1.host_mutation_evidence` is RENAMED to
+`controller_identity_fingerprint`, the name `HostLease` already used for the same
+fact. One thing with two names across a boundary where the two are compared
+invites a reader to conclude they are different facts. Done now because
+`HostLeaseRelease.v1` has never crossed an artifact boundary — 0.4.0a1 has not
+been built — and a schema that has would have had to carry both.
+
+`HistoricalLeaseV1` keeps a bare `str`, deliberately: it reads `HostLease.v1`
+records written by five shipped candidate wheels under a validator that required
+only non-emptiness, and parsing them strictly would make a real historical record
+unreadable. It reports what a record says; it grants nothing on the strength of
+it.
+
 Allocated 2026-09-04. A MINOR bump rather than a seventh alpha of the `0.3.0`
 line, and the reason is a new CAPABILITY rather than a size judgement:
 authorized recovery of a FAILED PRODUCTION SYSTEM — an act that mutates

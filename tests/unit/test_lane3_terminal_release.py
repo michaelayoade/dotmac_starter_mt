@@ -29,12 +29,17 @@ import importlib.util
 import json
 import pathlib
 import sys
+import textwrap
 
 import pytest
 import yaml
+from dotmac_deployment_foundation.controller_identity import (
+    ControllerSshFingerprintV1,
+)
 from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import (
     DeploymentFoundationError,
+    LockUnavailableError,
     PreconditionFailed,
     SpecError,
     StepFailed,
@@ -71,8 +76,11 @@ def _load():  # type: ignore[no-untyped-def]
 
 runner = _load()
 
-#: A sha256 shape, which is what `host_mutation_evidence` is validated against.
-FINGERPRINT = "sha256:" + "ab" * 32
+#: A REAL OpenSSH fingerprint — `SHA256:` and 43 characters of unpadded base64,
+#: as `ssh-keygen -lf` emits. It read `"sha256:" + "ab" * 32`, the content-digest
+#: shape the old regex required and the one shape a key fingerprint never has.
+FINGERPRINT_TEXT = "SHA256:T1kdK/6QTzzwU1EienO6nUgk8wu9UpjqB8BatKbndSE"
+FINGERPRINT = ControllerSshFingerprintV1.parse(FINGERPRINT_TEXT, field="controller")
 SUBJECT = "repo:michaelayoade/dotmac_starter_mt:ref:refs/heads/main"
 RUN_BINDING = "github-actions:michaelayoade/dotmac_starter_mt:9001:1"
 
@@ -97,7 +105,8 @@ def _args(tmp_path: pathlib.Path, **overrides: object) -> argparse.Namespace:
         "candidate_version": "0.3.0a5",
         "foundation_revision": "2288b4d68f6b93d3e391d0dafa04987fb3f750f7",
         "authorization_run": "authz-77",
-        "controller_identity": FINGERPRINT,
+        # The CLI hands a string; `run` parses it before it reads the descriptor.
+        "controller_identity": FINGERPRINT_TEXT,
         "lease_dir": str(tmp_path / "leases"),
         "release_out": str(tmp_path / "release.json"),
         "terminal_evidence_out": str(tmp_path / "evidence.json"),
@@ -111,6 +120,11 @@ def _args(tmp_path: pathlib.Path, **overrides: object) -> argparse.Namespace:
 def _context(**overrides: object) -> object:
     ctx = runner.TerminalContext()
     ctx.lease = _lease()
+    # `run` parses `--controller-identity` before it opens the descriptor, so by
+    # the time any terminal record is built the parsed value is in hand. A
+    # fixture that left it unset would exercise a state the runner cannot be in
+    # once it holds a lease.
+    ctx.controller_identity = FINGERPRINT
     for name, value in overrides.items():
         setattr(ctx, name, value)
     return ctx
@@ -210,11 +224,13 @@ def test_the_refusal_axis_alone_would_have_allowed_that(
 def test_the_cleanup_axis_alone_would_have_allowed_the_other_direction(
     tmp_path: pathlib.Path, proven: None
 ) -> None:
-    """The symmetric half: a clean cleanup does not launder a failed provocation.
+    """The symmetric half: a clean cleanup does not launder an uncertified host.
 
-    `provocation_unestablished` is the one refusal where the host was mutated
-    and the mutation failed. A purged cleanup is unrestricted on its own axis,
-    so a writer consulting only the cleanup would answer `reusable` here.
+    `host_state_uncertified` says nobody can say what state the machine is in. A
+    purged cleanup is unrestricted on its own axis, so a writer consulting only
+    the cleanup would answer `reusable` here — and the cleanup axis is still
+    ASKED and still recorded, because "the state is uncertified" and "something
+    the lease created is still there" are different facts.
     """
     ctx = _context(host_mutated=True)
     ctx.record_cleanup(
@@ -223,9 +239,12 @@ def test_the_cleanup_axis_alone_would_have_allowed_the_other_direction(
     release = runner.build_release(
         ctx,
         _args(tmp_path),
-        TerminalOutcome(refusal=TerminalRefusal.PROVOCATION_UNESTABLISHED),
+        TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
     )
     assert release.closure is HostClosure.INSPECTION_REQUIRED
+    # The refusal constrained the CLOSURE; it did not excuse the cleanup axis
+    # from answering. Reusability stays the intersection of the two.
+    assert release.cleanup is CleanupDisposition.PURGED
 
 
 # ── the four cleanup dispositions, each with the answer it must not borrow ──
@@ -584,18 +603,85 @@ def test_the_copy_IS_taken_when_the_store_write_succeeds(
 # ── absence means held ──────────────────────────────────────────────────────
 
 
-def test_a_refusal_raised_below_this_lane_has_no_member() -> None:
-    """The gap named honestly rather than filled.
+def test_a_refusal_below_this_lane_BEFORE_mutation_still_has_no_member() -> None:
+    """The precondition half, unchanged and deliberately so.
 
-    `StepFailed` from the effects and `PreconditionFailed` from `load_lease`
-    end a run and are not in the twelve-site derivation `TerminalRefusal` was
-    built from. There is no member for them, so no release is written and the
-    host stays HELD — which is the safe half of the gap, not a repair of it.
+    A `SpecError` from `ProductDeploymentSpec.load` and a `PreconditionFailed`
+    from `load_lease` are raised before the runner has contacted the host at all.
+    They must NOT borrow `host_state_uncertified`, which asserts something about
+    a machine, so they keep answering `None`: no release, and the host stays
+    HELD. Whether they should instead carry `precondition_unfit` is an open
+    question the ruling did not settle, and answering it by inference is how a
+    member that promises "untouched and safely releasable" gets attached to a
+    run nobody characterised.
     """
-    assert runner.classify_refusal(StepFailed("exposure", "boom")) is None
-    assert runner.classify_refusal(PreconditionFailed("no lease")) is None
-    assert runner.classify_refusal(SpecError("bad descriptor")) is None
-    assert runner.classify_refusal(DeploymentFoundationError("bare")) is None
+    assert (
+        runner.classify_refusal(StepFailed("exposure", "boom"), host_mutated=False)
+        is None
+    )
+    assert (
+        runner.classify_refusal(PreconditionFailed("no lease"), host_mutated=False)
+        is None
+    )
+    assert (
+        runner.classify_refusal(SpecError("bad descriptor"), host_mutated=False) is None
+    )
+    assert (
+        runner.classify_refusal(DeploymentFoundationError("bare"), host_mutated=False)
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        # THE case Michael ruled on: the compose apply failed ON THE HOST.
+        StepFailed("apply_compose", "docker compose up exited 1"),
+        # `errors.py` documents this as "a gate refused before anything was
+        # mutated", and `ExposureTransaction.run` raises it AFTER applying the
+        # stack, rewriting both filter chains and rolling back. The type cannot
+        # discriminate; the position can.
+        PreconditionFailed("the applied exposure did not verify"),
+        # `build_receipt` raises this after the whole transaction.
+        SpecError("a receipt is missing an item"),
+        LockUnavailableError("another deployment holds the lock"),
+        DeploymentFoundationError("bare"),
+    ],
+)
+def test_a_refusal_below_this_lane_AFTER_mutation_is_host_state_uncertified(
+    exc: DeploymentFoundationError,
+) -> None:
+    """The gap closed rather than named.
+
+    A `StepFailed` from a failed compose apply had NO member in the closed
+    vocabulary, so a failed apply left the host mutated with no record and no
+    closure — reachable on any run where the apply fails on the host. Every
+    refusal here is raised at a point where mutation may have begun, and every
+    one of them now says the true thing: nobody has certified what state the
+    machine is in.
+    """
+    assert (
+        runner.classify_refusal(exc, host_mutated=True)
+        is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    )
+
+
+def test_this_lanes_own_refusals_keep_their_own_member_after_mutation() -> None:
+    """The near-miss for the test above.
+
+    A positional rule that swallowed every refusal past the first mutation would
+    turn `evidence_unreadable` and `probe_refused` — both of which are raised
+    after the apply by design — into `host_state_uncertified`, and the
+    vocabulary would collapse to two members. The type is consulted FIRST.
+    """
+    assert (
+        runner.classify_refusal(runner.EvidenceUnreadable("x"), host_mutated=True)
+        is TerminalRefusal.EVIDENCE_UNREADABLE
+    )
+    assert (
+        runner.classify_refusal(runner.ProbeRefused("x"), host_mutated=True)
+        is TerminalRefusal.PROBE_REFUSED
+    )
 
 
 @pytest.mark.parametrize(
@@ -607,16 +693,18 @@ def test_a_refusal_raised_below_this_lane_has_no_member() -> None:
         (runner.ProbeRefused, TerminalRefusal.PROBE_REFUSED),
         (runner.PreconditionUnfit, TerminalRefusal.PRECONDITION_UNFIT),
         (
-            runner.ProvocationUnestablished,
-            TerminalRefusal.PROVOCATION_UNESTABLISHED,
+            runner.HostStateUncertified,
+            TerminalRefusal.HOST_STATE_UNCERTIFIED,
         ),
     ],
 )
 def test_every_refusal_this_lane_raises_is_mapped(
     kind: type[DeploymentFoundationError], member: TerminalRefusal
 ) -> None:
-    """The near-miss for the test above: these are named, and none of them is None."""
-    assert runner.classify_refusal(kind("x")) is member
+    """The near-miss for the test above: these are named, and none of them is
+    None — including with no mutation attempted, where the positional rule
+    answers `None` and would otherwise mask a missing type mapping."""
+    assert runner.classify_refusal(kind("x"), host_mutated=False) is member
 
 
 def test_the_mapping_is_derived_from_the_class_hierarchy_not_a_line_list() -> None:
@@ -659,7 +747,259 @@ def test_that_obligation_would_notice_a_new_class(
         and value.__module__ == runner.__name__
     }
     assert Unmapped in defined - {kind for kind, _ in runner._REFUSAL_BY_TYPE}
-    assert runner.classify_refusal(Unmapped("x")) is None
+    # Asked with no mutation attempted, so the positional rule cannot answer for
+    # it: an unmapped class of THIS lane's own must still show up as unmapped.
+    assert runner.classify_refusal(Unmapped("x"), host_mutated=False) is None
+
+
+def test_a_failed_apply_releases_the_host_as_needing_inspection(
+    tmp_path: pathlib.Path, proven: None
+) -> None:
+    """THE shape the ruling exists for, end to end through the writer.
+
+    A `StepFailed` from `apply_compose` unwinds out of `run` with the host
+    mutated. Before this change it had no member, `record_terminal` wrote no
+    release, and the host stayed HELD with nothing saying why. Now it is
+    `host_state_uncertified`, the closure lands on `inspection_required` — never
+    `reusable` — and the cleanup axis still ANSWERS: `not_attempted`, which is
+    true, because the apply failed long before `run_cleanup` is reached.
+    """
+    member = runner.classify_refusal(
+        StepFailed("apply_compose", "docker compose up exited 1"), host_mutated=True
+    )
+    assert member is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    ctx = _context(host_mutated=True)
+    release = runner.build_release(
+        ctx, _args(tmp_path), TerminalOutcome(refusal=member)
+    )
+    assert release.closure is HostClosure.INSPECTION_REQUIRED
+    assert release.cleanup is CleanupDisposition.NOT_ATTEMPTED
+    assert release.outcome.refusal is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    # And the record names the key that touched the host, by the same type the
+    # lease carries, so the destroy gate compares digests rather than text.
+    assert release.controller_identity_fingerprint == FINGERPRINT
+
+
+# ── site 134, settled by POSITION rather than by line number ───────────────
+#
+# `TerminalRefusal` used to file the inside-vantage probe under two members at
+# once: `PRECONDITION_UNFIT`'s docstring claimed it, and `EVIDENCE_UNREADABLE`'s
+# said a reader subprocess exiting non-zero is the same fact as malformed output.
+# Both could not stand.
+#
+# The ruling splits it by POSITION — a missing harness, argument or jump key
+# detected before host contact is `precondition_unfit`; the probe subprocess
+# failing after mutation is `evidence_unreadable`; `probe_refused` applies only
+# when a probe actually ran and refused. That is a claim about the CODE, so it is
+# checked against the code.
+
+
+def _run_function() -> ast.FunctionDef:
+    tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    return next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "run"
+    )
+
+
+def _first_call_line(function: ast.FunctionDef, name: str) -> int:
+    lines = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == name
+    ]
+    assert lines, f"{name} is not called in `run` at all"
+    return min(lines)
+
+
+def _first_mutation_line(function: ast.FunctionDef) -> int:
+    """Where `run` declares the host may have been mutated from here on.
+
+    A single assignment, asserted to be single: two of them would mean two
+    answers to "has anything been touched", and the earlier one would be the one
+    a reader trusted while the later one was the one that ran.
+    """
+    lines = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "ctx.host_mutated" for target in node.targets)
+        and ast.unparse(node.value) == "True"
+    ]
+    assert len(lines) == 1, f"expected one `ctx.host_mutated = True`, found {lines}"
+    return lines[0]
+
+
+@pytest.mark.parametrize(
+    ("call", "why"),
+    [
+        (
+            "ControllerSshFingerprintV1.parse",
+            "whether `--controller-identity` is a key fingerprint is decidable "
+            "from the argument alone",
+        ),
+        ("private_port", "a question about the descriptor"),
+        ("inside_source_set", "a question about the descriptor"),
+        (
+            "require_inside_probe_harness",
+            "a missing harness, argument or jump key is a fact about the " "INVOCATION",
+        ),
+    ],
+)
+def test_every_precondition_unfit_site_is_asked_BEFORE_first_mutation(
+    call: str, why: str
+) -> None:
+    """`precondition_unfit` asserts the host was never touched. Asked after the
+    apply that sentence is FALSE about the machine, and a release carrying it
+    would tell a destroyer the host was untouched when it was not.
+
+    Three of these were once reached only after the compose stack had been
+    applied and both filter chains rewritten. This is the check that says so.
+    """
+    function = _run_function()
+    assert _first_call_line(function, call) < _first_mutation_line(function), (
+        f"`{call}` is reached after `ctx.host_mutated = True`, and it refuses "
+        f"with `precondition_unfit` — {why}, so it belongs before the host is "
+        "touched or the member it raises says something false"
+    )
+
+
+@pytest.mark.parametrize(
+    ("call", "member"),
+    [
+        ("inside_vantage.collect", "evidence_unreadable"),
+        ("build_receipt", "host_state_uncertified, positionally"),
+        ("transaction.run", "host_state_uncertified, positionally"),
+    ],
+)
+def test_the_after_mutation_sites_really_are_after_it(call: str, member: str) -> None:
+    """The other half, and the reason it is not enough to check one direction.
+
+    A test that only proved the precondition sites come first would pass over a
+    `run` that had moved everything before the mutation — including the probe
+    that must be taken while the stack is UP. `inside_vantage.collect` refuses
+    with `evidence_unreadable` precisely BECAUSE it is reached long after the
+    apply, where "the host was never touched" cannot be claimed.
+    """
+    function = _run_function()
+    assert _first_call_line(function, call) > _first_mutation_line(function), (
+        f"`{call}` now runs before the first mutation, so it no longer maps to "
+        f"{member} — revisit TerminalRefusal rather than the assertion"
+    )
+
+
+def test_the_inside_vantage_region_is_translated_to_evidence_unreadable() -> None:
+    """`probe_refused` applies ONLY when a probe actually ran and refused.
+
+    `lane3_inside_vantage.collect` raises a bare `DeploymentFoundationError` from
+    two sites and nothing outside it can tell them apart, so the whole region is
+    translated at the call — and to `EvidenceUnreadable`, never `ProbeRefused`.
+    """
+    function = _run_function()
+    # Containment, not a line window: the call must be INSIDE the translating
+    # `with` block, and a window would answer the same for a call that merely
+    # sits near one.
+    enclosing = [
+        ast.unparse(node.items[0].context_expr)
+        for node in ast.walk(function)
+        if isinstance(node, ast.With)
+        and node.items
+        and ast.unparse(node.items[0].context_expr).startswith("refusal_of(")
+        and any(
+            isinstance(inner, ast.Call)
+            and ast.unparse(inner.func) == "inside_vantage.collect"
+            for statement in node.body
+            for inner in ast.walk(statement)
+        )
+    ]
+    assert enclosing == ["refusal_of(EvidenceUnreadable)"], (
+        f"the inside-vantage probe is translated as {enclosing}. It is reached "
+        "after the apply, so `PreconditionUnfit` would claim an untouched host "
+        "that was touched, and `ProbeRefused` would claim a probe ran when the "
+        "harness may never have been invoked"
+    )
+
+
+def _synthetic_run(body: str) -> ast.FunctionDef:
+    source = "def run(args, ctx):\n" + textwrap.indent(textwrap.dedent(body), "    ")
+    tree = ast.parse(source)
+    return next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "run"
+    )
+
+
+def test_the_position_guard_would_see_a_precondition_moved_after_the_mutation() -> None:
+    """Sensitivity. The assertions above pass over a tree that is already
+    correct, so they prove nothing about their own ability to fail — and the
+    defect they target is the one that actually shipped: three
+    `precondition_unfit` sites reached only after the compose stack was applied.
+    """
+    planted = _synthetic_run(
+        """
+        ctx.host_mutated = True
+        report = transaction.run()
+        require_inside_probe_harness(args, target_v6="::1", port=1)
+        """
+    )
+    assert _first_call_line(planted, "require_inside_probe_harness") > (
+        _first_mutation_line(planted)
+    )
+
+    near_miss = _synthetic_run(
+        """
+        require_inside_probe_harness(args, target_v6="::1", port=1)
+        ctx.host_mutated = True
+        report = transaction.run()
+        """
+    )
+    assert _first_call_line(near_miss, "require_inside_probe_harness") < (
+        _first_mutation_line(near_miss)
+    )
+
+
+def test_the_translation_guard_reads_CONTAINMENT_not_proximity() -> None:
+    """Sensitivity for the translation check, in both directions.
+
+    The planted defect: the probe wrapped in `refusal_of(PreconditionUnfit)`,
+    which would claim an untouched host after the apply. The near miss: an
+    `EvidenceUnreadable` block that merely PRECEDES the call — a proximity check
+    would credit it, and containment does not.
+    """
+
+    def _enclosing(function: ast.FunctionDef) -> list[str]:
+        return [
+            ast.unparse(node.items[0].context_expr)
+            for node in ast.walk(function)
+            if isinstance(node, ast.With)
+            and node.items
+            and ast.unparse(node.items[0].context_expr).startswith("refusal_of(")
+            and any(
+                isinstance(inner, ast.Call)
+                and ast.unparse(inner.func) == "inside_vantage.collect"
+                for statement in node.body
+                for inner in ast.walk(statement)
+            )
+        ]
+
+    planted = _synthetic_run(
+        """
+        with refusal_of(PreconditionUnfit):
+            probe = inside_vantage.collect(harness)
+        """
+    )
+    assert _enclosing(planted) == ["refusal_of(PreconditionUnfit)"]
+
+    near_miss = _synthetic_run(
+        """
+        with refusal_of(EvidenceUnreadable):
+            something_else()
+        probe = inside_vantage.collect(harness)
+        """
+    )
+    assert _enclosing(near_miss) == []
 
 
 # ── the crash boundary, read off the source ─────────────────────────────────

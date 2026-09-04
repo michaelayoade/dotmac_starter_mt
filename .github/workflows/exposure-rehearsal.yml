@@ -33,8 +33,13 @@ on:
       foundation_artifact:
         description: "digest of the built Foundation wheel candidate"
         required: true
+      # EXACTLY what `ssh-keygen -lf <pub>` prints as its second field:
+      # `SHA256:` and 43 characters of unpadded base64. The runner parses it
+      # before it opens the descriptor and refuses anything else as
+      # `precondition_unfit`, with the host untouched — a hexadecimal digest is
+      # a different kind of value and is not accepted here.
       controller_identity:
-        description: "SHA256 fingerprint of the dedicated controller key"
+        description: "controller key fingerprint, as `ssh-keygen -lf` prints it"
         required: true
       target:
         description: "the leased rehearsal target"
