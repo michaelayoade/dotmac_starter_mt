@@ -730,3 +730,48 @@ def test_deployment_adopter_is_not_yet_wired_into_required_checks() -> None:
     assert triggers == {"workflow_dispatch": {}} or triggers == {
         "workflow_dispatch": None
     }
+
+
+# ── the required wheel-contents list names real modules ─────────────────────
+
+
+def test_every_required_wheel_module_exists_in_the_package_source() -> None:
+    """The list is checked against a BUILT WHEEL by `release_facility.py`, and
+    only in the release lane. So a typo — or a module renamed without updating
+    the list — surfaces as a FAILED RELEASE rather than as a failed test, which
+    is the most expensive place in the sequence to learn it.
+
+    This is the cheap source-side half: every path the list requires resolves to
+    a file that exists. It cannot replace the wheel check (a file present in the
+    tree can still be excluded from the built artifact, which is the property
+    that list actually guards) and it is not trying to — it catches the class of
+    error the wheel check catches too late.
+    """
+    facilities = _load_json(FACILITY_ALLOWLIST)["facilities"]
+    checked = 0
+    for name, entry in sorted(facilities.items()):
+        package = PROJECT_ROOT / str(entry["package_dir"]) / "src"
+        for required in entry["wheel_contents"]["required"]:
+            checked += 1
+            assert (package / required).is_file(), (
+                f"{name} requires {required!r} in its wheel and "
+                f"{package / required} does not exist. The release lane would "
+                "refuse this, but only after building — fix the list or the "
+                "module name"
+            )
+    assert checked, "no facility declared any required wheel contents"
+
+
+def test_the_cli_entry_points_own_module_is_required() -> None:
+    """Non-vacuity with a property rather than a count: whatever else the list
+    holds, the module behind the console script must be in it. A list that
+    omitted the entry point would be watching everything except the thing the
+    release proof is about."""
+    facilities = _load_json(FACILITY_ALLOWLIST)["facilities"]
+    for name, entry in sorted(facilities.items()):
+        required = set(entry["wheel_contents"]["required"])
+        import_name = str(entry["import_name"])
+        assert f"{import_name}/cli.py" in required, (
+            f"{name} declares the console script {entry['entry_point']!r} and "
+            "does not require its module"
+        )
