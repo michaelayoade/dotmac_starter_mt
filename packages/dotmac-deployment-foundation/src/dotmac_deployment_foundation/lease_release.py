@@ -206,8 +206,41 @@ class TerminalRefusal(str, Enum):
     private port names no sources                   `precondition_unfit`
     a controller identity that is not a fingerprint `precondition_unfit`
     the foreign rule could not be seeded            `host_state_uncertified`
-    ANY below-lane refusal, POST-mutation           `host_state_uncertified`
+    ANY below-lane refusal, LEASE IN HAND           `host_state_uncertified`
     ==============================================  ========================
+
+    ## A member is only ever RECORDED when an exact lease was in hand
+
+    The table above maps a refusal to a member. It does NOT say a release
+    carrying that member gets written, and the difference became load-bearing on
+    2026-09-04.
+
+    A release discharges a lease. With no exact ``HostLease.v2`` in hand — a
+    descriptor that would not parse, a record that is missing, expired, or
+    issued for another authorization run — there is nothing to discharge and no
+    lease digest to name a release by, so the writing lane writes NOTHING and the
+    host keeps the standing it had. An expired lease stays
+    :attr:`HostStanding.EXPIRED_HELD`, which is this module's whole reason for
+    having that member: a holder nobody can ask anything of is the case where
+    destroying a host is least safe, and a terminal record must not quietly
+    convert it into something else.
+
+    Two consequences worth stating rather than leaving to be rediscovered:
+
+    * ``ANY below-lane refusal`` above is discriminated by the LEASE, not by
+      position past first mutation. A generic failure under the lease is
+      ``host_state_uncertified`` even when nothing was mutated: the run owned the
+      host and could not establish its state, and *"nothing was attempted"* is a
+      different claim from *"nobody can say"*. Only the second is defensible from
+      a refusal the lane cannot name, and ``_PERMITTED_CLOSURES`` already keeps
+      that member away from ``REUSABLE``.
+    * ``a controller identity that is not a fingerprint`` is mapped to
+      ``precondition_unfit`` and today the writing lane parses that argument
+      BEFORE it loads the lease, so no release can carry it from that site. The
+      mapping is still correct about the refusal. Whether the parse should move
+      behind ``load_lease`` so the case becomes recordable is OPEN and is not
+      decided here: it changes what the writing lane establishes and in which
+      order, and that is the lane's ruling to make, not this schema's.
 
     ## Site 134, settled semantically rather than by line number
 
@@ -307,6 +340,15 @@ class TerminalRefusal(str, Enum):
     #: writing lane must therefore ask every one of these BEFORE first mutation;
     #: asked afterwards the sentence is false about the machine, and that is the
     #: defect that put three of them behind an applied compose stack once.
+    #:
+    #: Because that is an arrangement of lines and lines move, the pole is also
+    #: CHECKED rather than trusted: the writing lane degrades a refusal of this
+    #: kind to `HOST_STATE_UNCERTIFIED` when a mutation had already been
+    #: attempted, so a check that drifts behind the apply produces an inspection
+    #: nobody needed instead of a release advertising an unexamined host as
+    #: clean. This member is the only one in the vocabulary whose meaning is a
+    #: claim about the machine, which is why it is the only one a mutation can
+    #: falsify.
     PRECONDITION_UNFIT = "precondition_unfit"
     #: **NOBODY HAS CERTIFIED WHAT STATE THE HOST IS IN.** The generalization of
     #: what was `provocation_unestablished`, which named one instance of the
@@ -316,17 +358,26 @@ class TerminalRefusal(str, Enum):
     #:
     #: * a foreign-rule provocation that could not be established — the seeder
     #:   failed part way and a partial unwind was attempted;
-    #: * **any refusal raised after mutation MAY have begun** — a `StepFailed`
-    #:   from a compose apply on the host being the case that forced the
-    #:   generalization. That refusal previously had no member anywhere in this
-    #:   vocabulary, so a failed apply left the host mutated with no record and
-    #:   no closure, on any run where the apply failed.
+    #: * **any refusal the writing lane cannot name, raised while it held an
+    #:   exact lease on the host** — a `StepFailed` from a compose apply being
+    #:   the case that forced the generalization. That refusal previously had no
+    #:   member anywhere in this vocabulary, so a failed apply left the host
+    #:   mutated with no record and no closure, on any run where the apply
+    #:   failed.
+    #:
+    #: **The second case does NOT require a mutation to have been attempted**,
+    #: and that is the half that reads wrong and is right. Holding the lease
+    #: means the run owned the host; a refusal it cannot name means it could not
+    #: establish what state that host is in. "Nothing was attempted" and "nobody
+    #: can say" are different claims, and a run that can only defend the second
+    #: must not report the first.
     #:
     #: **Note the modality: MAY have begun, not DID begin.** The member covers
     #: the case where nobody can say, which is the whole reason it exists. A
-    #: writer that could prove the host untouched would be raising
-    #: `PRECONDITION_UNFIT` instead; one that cannot prove it must not borrow
-    #: that pole, because it asserts a fact about a machine.
+    #: writer that PROVED the host untouched raises `PRECONDITION_UNFIT`; one
+    #: that merely did not touch it, and cannot account for the failure, must not
+    #: borrow that pole, because it asserts a fact about a machine rather than
+    #: about this process.
     #:
     #: `PRECONDITION_UNFIT` means *do not touch the machine, fix the input*;
     #: this means *inspect the machine before re-running*. Opposite operator

@@ -83,12 +83,17 @@ wiped on an inference:
   `controller_identity_fingerprint`, the same name and the same type the lease
   already uses for it. If it cannot be proven, nothing is written and the lease
   stays held.
-* **a refusal after mutation is named, not dropped.** A `StepFailed` from a
+* **a refusal under the lease is named, not dropped.** A `StepFailed` from a
   compose apply on the host used to have no member in the closed vocabulary at
   all, so a failed apply left the host mutated with no record and no closure —
-  reachable on any run where the apply fails. `classify_refusal` now answers
-  positionally past first mutation, and `host_state_uncertified` says what is
-  true: nobody has certified what state the machine is in.
+  reachable on any run where the apply fails. `classify_refusal` answers on TWO
+  facts, because there are three cases and one boolean has two values: with no
+  exact lease in hand nothing is written and an expired lease stays
+  `expired_held`; with the lease in hand a refusal this lane proved before host
+  contact is `precondition_unfit`; and with the lease in hand any other refusal
+  is `host_state_uncertified` EVEN IF nothing was mutated, because owning the
+  host and being unable to say what state it is in is not the same claim as
+  having attempted nothing.
 * **create-only, atomically — and owned by the package.** A second release of
   one lease is a replay or two runs each believing they finished the same work,
   and neither overwrites the first. This runner does NOT publish: `lease.py`
@@ -215,8 +220,10 @@ BLOCKED = RequirementStatus.BLOCKED
 # `PreconditionFailed` is documented as "nothing has changed" and is raised by
 # `ExposureTransaction.run` after the apply, and `SpecError` is raised both by
 # `ProductDeploymentSpec.load` before host contact and by `build_receipt` after
-# the whole transaction. `classify_refusal` therefore answers by type first and
-# by POSITION relative to first mutation second.
+# the whole transaction. `classify_refusal` therefore answers by TYPE first, and
+# then by whether an exact lease was in hand at all — a refusal below this lane
+# is `host_state_uncertified` whenever the run owned the host, mutated or not,
+# and no member at all when it did not.
 
 
 class ResultRecordedTwice(DeploymentFoundationError):
@@ -249,8 +256,10 @@ class HostStateUncertified(DeploymentFoundationError):
     Raised by name where this lane knows it: the seeder failed to place the
     foreign rule, having already changed the chain part way.
 
-    It is ALSO the member `classify_refusal` reaches positionally, for any
-    refusal raised below this lane once mutation may have begun — see there.
+    It is ALSO the member `classify_refusal` reaches for any refusal raised
+    below this lane while an exact lease was in hand — whether or not a mutation
+    was attempted, because owning the host and being unable to characterise it is
+    the condition this member names. See there.
     """
 
 
@@ -270,54 +279,91 @@ _REFUSAL_BY_TYPE: Final[
 
 
 def classify_refusal(
-    exc: BaseException, *, host_mutated: bool
+    exc: BaseException, *, lease_in_hand: bool, host_mutated: bool
 ) -> TerminalRefusal | None:
-    """The vocabulary member for this refusal. TYPE first, then POSITION.
+    """The vocabulary member for this refusal — or none, and then no release.
 
-    ## Why position, and why it is not optional
+    ## THREE cases, so TWO facts. One boolean could not carry them.
 
-    A refusal raised BELOW this lane carries no class of ours, and its own type
-    cannot discriminate it. `PreconditionFailed` is the proof: `errors.py` says
-    it means *"a gate refused before anything was mutated ... nothing has
-    changed"*, and `ExposureTransaction.run` raises it AFTER applying the compose
-    stack, rewriting both filter chains and rolling back. `SpecError` is the same
-    in the other direction — `ProductDeploymentSpec.load` raises it before any
-    host contact and `build_receipt` raises it after the whole transaction. One
-    type, opposite operator actions.
+    This answered on `host_mutated` alone until 2026-09-04, and a single boolean
+    has two values. The third case therefore had to borrow one of the other two's
+    answers, and the one it borrowed was the answer that matters most: a generic
+    failure that left nobody able to say what state the host is in, arriving
+    before anything had been mutated, came back as `None` — no release, and a
+    silence indistinguishable from a run that never started.
 
-    So the discriminator is `host_mutated`: whether a mutation had been ATTEMPTED
-    when the refusal arrived. Past that point the host state is uncertified, and
-    `host_state_uncertified` is what says so.
+    The ruling names three cases and each takes a different answer:
 
-    ## What each answer means
+    * **no exact `HostLease.v2` in hand** — a descriptor that will not parse, a
+      lease that is missing, expired, or issued for another authorization run.
+      `None`, and **no release is written at all**. The host keeps the standing
+      it already had: an expired lease stays `EXPIRED_HELD`, which is
+      `HostStanding`'s answer for a holder nobody can ask anything of, and it is
+      not this function's to overwrite. Checked FIRST and without consulting the
+      exception, because with no lease there is nothing to discharge and no
+      digest to name a release by — `build_release` refuses on exactly that
+      sentence, and answering a member here would only route it there.
+    * **the lease in hand, and an invocation defect this lane PROVED before host
+      contact or mutation** -> `PRECONDITION_UNFIT`. Proved, not assumed: the
+      refusal carries one of this module's own classes from `_REFUSAL_BY_TYPE`,
+      raised by a check `run` asks ahead of its first mutation.
+    * **the lease in hand, and a generic failure that prevented host state from
+      being established** -> `HOST_STATE_UNCERTIFIED`, **even with
+      `host_mutated=False`.** This is the answer that reads wrong and is right.
+      Holding the lease means this run OWNED the host; a refusal it cannot name
+      means it could not establish what state that host is in. *"Nothing was
+      attempted"* and *"nobody can say"* are different claims, and only the
+      second is one this run can defend — so the closure is bounded to
+      inspection or destruction by `lease_release._PERMITTED_CLOSURES` rather
+      than advertising a machine nobody characterised as generally reusable.
 
-    * a class in `_REFUSAL_BY_TYPE` -> its member. Unchanged, and checked first
-      so a refusal this lane names keeps its own name.
-    * anything else, WITH mutation attempted -> `HOST_STATE_UNCERTIFIED`. That is
-      the repair: a `StepFailed` from a failed compose apply previously had no
-      member at all, so a failed apply left the host mutated with no record and
-      no closure, reachable on any run where the apply fails on the host.
-    * anything else, mutation NOT attempted -> `None`. No release is written and
-      the host stays held. These are precondition failures — a descriptor that
-      will not parse, a lease that is missing or expired — and they must NOT
-      borrow `host_state_uncertified`, which asserts something about a machine.
-      Whether they should instead carry `precondition_unfit` is NOT decided here:
-      the ruling covered the mutated side, and a member that asserts "untouched
-      and safely releasable" is not one to extend by inference.
+    ## What `host_mutated` decides now that it is no longer the discriminator
 
-    ## The modality is deliberately conservative
+    It is the CHECK on the second case's premise. `PRECONDITION_UNFIT`'s pole is
+    *untouched and safely releasable*. Every check that raises `PreconditionUnfit`
+    sits ahead of the first mutation in `run` today — and that is an arrangement
+    of lines, which is precisely the thing a later commit moves. Three of these
+    checks once drifted behind an applied compose stack and two rewritten filter
+    chains, and a release written from there would have told a destroyer the host
+    was untouched when it was not.
+
+    So a `PreconditionUnfit` that arrives with mutation attempted does not keep
+    its member: it degrades to `HOST_STATE_UNCERTIFIED`. The error is then in the
+    direction that asks for an inspection nobody needed, never the one that
+    advertises an unexamined host as clean.
+
+    The other named members are deliberately unaffected. `EVIDENCE_UNREADABLE`
+    and `PROBE_REFUSED` are raised after the apply BY DESIGN, and their poles
+    assert nothing about the host being untouched. `PRECONDITION_UNFIT` is the
+    only member in the closed vocabulary whose meaning is a claim about the
+    machine, so it is the only one a mutation can falsify.
+
+    ## The modality stays conservative
 
     `host_mutated` is set by `run` immediately before `transaction.run()`, so a
     `LockUnavailableError` from the lock that transaction takes BEFORE its first
-    effect is classified here as uncertified even though nothing was touched.
-    That is the member's own modality — *may* have begun, not *did* — and the
-    error is in the direction that asks for an inspection nobody needed rather
-    than the one that advertises an unexamined host as clean.
+    effect degrades a precondition too. That is the member's own modality — *may*
+    have begun, not *did*.
+
+    ## One consequence, stated rather than left to be discovered
+
+    `run` parses `--controller-identity` before it loads the lease, so a
+    malformed fingerprint refuses with `PreconditionUnfit` while no lease is in
+    hand and therefore records NO member. `TerminalRefusal`'s table still maps
+    that refusal to `PRECONDITION_UNFIT` and the mapping is right; what changed
+    is that no release can carry it from that site. Moving the parse behind
+    `load_lease` would make it recordable and is NOT done here — it is a change
+    to what `run` establishes and in which order, and it is named in
+    `TerminalRefusal`'s docstring as open rather than decided in passing.
     """
+    if not lease_in_hand:
+        return None
     for kind, member in _REFUSAL_BY_TYPE:
         if isinstance(exc, kind):
+            if member is TerminalRefusal.PRECONDITION_UNFIT and host_mutated:
+                return TerminalRefusal.HOST_STATE_UNCERTIFIED
             return member
-    return TerminalRefusal.HOST_STATE_UNCERTIFIED if host_mutated else None
+    return TerminalRefusal.HOST_STATE_UNCERTIFIED
 
 
 @contextlib.contextmanager
@@ -800,9 +846,10 @@ class TerminalContext:
     #: descriptor, so every later refusal already has it.
     controller_identity: ControllerSshFingerprintV1 | None = None
     #: A mutation was ATTEMPTED. Not "succeeded" — the attempt is what makes
-    #: `precondition_unfit`'s "the host was never touched" false, and what makes
-    #: `classify_refusal` answer `host_state_uncertified` for a refusal raised
-    #: below this lane.
+    #: `precondition_unfit`'s "the host was never touched" false, which is the
+    #: one thing `classify_refusal` still consults it for: a precondition refusal
+    #: arriving past this point degrades to `host_state_uncertified` rather than
+    #: keeping a member that asserts an untouched machine.
     host_mutated: bool = False
     #: The inert rule was offered to the chain, so a disarm has something to do
     #: even if the arming call itself failed part way.
@@ -811,6 +858,24 @@ class TerminalContext:
     receipt_digest: str = ""
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
+
+    @property
+    def lease_in_hand(self) -> bool:
+        """An EXACT, live `HostLease.v2` covering THIS authorization run was taken.
+
+        Derived from `lease` rather than tracked as its own flag, and the
+        derivation is only sound because of where `run` assigns it: `load_lease`
+        refuses a missing record, a non-V2 record and an unparseable one, and
+        `covers` refuses an expired window or a foreign authorization run —
+        BOTH before `ctx.lease` is set. So this is false for every case the
+        ruling groups under "no exact V2 lease acquired", and there is no state
+        in which a rejected lease is held here.
+
+        Without it there is nothing to discharge, so `classify_refusal` names no
+        member and no release is written. A separate boolean set beside the
+        assignment would be a second answer to the same question, free to drift.
+        """
+        return self.lease is not None
 
     def record_cleanup(self, act: CleanupAct) -> None:
         self.acts.append(act)
@@ -1065,6 +1130,12 @@ def record_terminal(
             if outcome is not None
             else {"receipt_digest": "", "refusal": ""}
         ),
+        # BOTH facts the classifier answers on, so a reader of this sidecar can
+        # tell the three terminal cases apart without re-deriving them from the
+        # notes. An absent refusal with `lease_in_hand: false` is "no exact V2
+        # lease was ever taken"; with `lease_in_hand: true` it is a release that
+        # could be named and could not be written, and the notes say why.
+        "lease_in_hand": ctx.lease_in_hand,
         "host_mutation_attempted": ctx.host_mutated,
         "cleanup": ctx.cleanup_disposition().value,
         "cleanup_acts": [act.as_document() for act in ctx.acts],
@@ -1744,14 +1815,18 @@ def main(argv: list[str] | None = None) -> int:
         # collapsing "we refused for a reason we can name" into "the process
         # stopped" is how a killed run comes to authorise a destroy.
         print(f"REFUSED: {exc}", file=sys.stderr)
-        member = classify_refusal(exc, host_mutated=ctx.host_mutated)
+        member = classify_refusal(
+            exc, lease_in_hand=ctx.lease_in_hand, host_mutated=ctx.host_mutated
+        )
         if member is None:
             ctx.notes.append(
-                f"NO RELEASE WRITTEN: {type(exc).__name__} is a refusal raised "
-                "below this lane BEFORE any mutation was attempted, and has no "
-                "member in the closed terminal vocabulary. It is a precondition "
-                "failure and must not borrow `host_state_uncertified`, which "
-                "asserts something about a machine"
+                f"NO RELEASE WRITTEN: {type(exc).__name__} was raised with no "
+                "exact HostLease.v2 in hand — missing, expired, foreign to this "
+                "authorization run, or refused before the lease was reached. "
+                "There is nothing to discharge and no lease digest to name a "
+                "release by, so none is written and the host keeps the standing "
+                "it already had. An expired lease stays EXPIRED_HELD, which is "
+                "the answer for a holder nobody can ask anything of"
             )
         record_terminal(
             ctx, args, None if member is None else TerminalOutcome(refusal=member)
