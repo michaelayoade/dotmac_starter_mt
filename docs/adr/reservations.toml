@@ -1,0 +1,628 @@
+# The Starter ADR number register — the allocator, not a summary of one.
+#
+# Starter allocated ADR numbers by reading `docs/adr/` and taking the next free
+# one. That is a read-then-write with no lock, performed on branches that
+# cannot see each other. On 2026-09-04 it produced the race it looks like:
+# THREE decisions were authored against 0074 within eighty minutes — the Tax
+# ownership record (`0f8b0746`, 09:39:14) and the two Foundation records
+# (`92f3b977`, 09:40:58) — by two authors who each did the correct thing under
+# the old rule and neither of whom could see the other. This file replaces that
+# rule with a serialized allocator.
+#
+# Ported from `dotmac_erp` at `5b2a035f` under ADR-0006's product-first
+# extraction rule; the dossier is `docs/adr/EXTRACTION.toml`. It stays
+# repository-local because each repository owns its own ADR namespace, and the
+# 0001-0009 band here shares its spelling with ERP's own decisions.
+#
+# HOW TO CLAIM A NUMBER
+#
+#   1. Take `next_free`. That is your number. Do NOT look at `docs/adr/` and
+#      take the next gap — see WHY THE DIRECTORY IS NOT THE ALLOCATOR below.
+#   2. Append a `[[reservation]]` row with `status = "reserved"`, and raise
+#      `next_free` by one.
+#   3. Commit THAT ALONE, and land it on `main` before you write the ADR.
+#   4. Cut the authoring branch from a `main` that already carries your row.
+#      Write the ADR and flip your row to `status = "authored"` in that change.
+#
+# WHY IT SERIALIZES
+#
+# `next_free` is one scalar on one line. Two branches that both allocate must
+# both rewrite it, so git cannot silently auto-merge them — it raises a
+# conflict, and a conflict is the lock being contended rather than a duplicate
+# being created. Appended rows alone would not be enough: git will often merge
+# two appends at the end of a file without complaint, and that is precisely how
+# 0074 came to name three decisions.
+#
+# WHY THE DIRECTORY IS NOT THE ALLOCATOR
+#
+# `docs/adr/` on a feature branch shows what has merged plus what that branch
+# wrote. It cannot show what a sibling branch wrote, and it cannot show what
+# landed on `main` after the branch was cut. Every one of the three 0074
+# authors read the directory, found 0073 the highest, took 0074, and was right
+# about everything they could see. A procedure that is correct from every
+# vantage point and still produces a collision is not a procedure anyone can
+# follow more carefully; it is the wrong procedure. The register is the only
+# allocator, and step 3 is what makes a claim visible to the next author.
+#
+# Step 3 is also the load-bearing one for the gate. A number claimed in the
+# same change that authors the ADR was claimed on a branch, and a claim on a
+# branch is not a claim — `unreserved_authorings` in the checker refuses an ADR
+# whose number was not already reserved at the branch's MERGE BASE.
+#
+# PERMANENCE
+#
+# A number, once in this file, is never removed, reused, or reassigned to a
+# different decision. An abandoned ADR takes `status = "withdrawn"` and keeps
+# its number forever. Reuse is not a tidy-up: the number appears in commit
+# messages, review threads, other repositories' pins, `docs/inventories/`
+# snapshots and cross-repository ADR citations, and none of those are updated
+# by deleting a row. A withdrawn record may be re-authored under a NEW number,
+# declaring `replaces = <old number>` so the trail survives.
+#
+# STATUS VALUES
+#
+#   reserved   number claimed, no document on `main`. A branch that authors it
+#              flips the row to `authored` in the same change.
+#   authored   `NNNN-<slug>.md` exists in this directory.
+#   withdrawn  abandoned. The number is spent forever. No file may exist.
+#   contested  PRE-EXISTING DEBT ONLY. More than one unmerged decision claims
+#              this number and none is on `main`. Empty today, and the checker
+#              refuses a new one — the register exists to prevent one.
+
+next_free = 77
+
+# ---------------------------------------------------------------------------
+# Authored — on `main`. `claimed` is the date the file first landed there.
+# ---------------------------------------------------------------------------
+
+[[reservation]]
+number = 1
+slug = "multi-tenant-architecture"
+status = "authored"
+claimed = "2026-05-04"
+
+[[reservation]]
+number = 2
+slug = "starter-consolidation"
+status = "authored"
+claimed = "2026-07-17"
+
+[[reservation]]
+number = 3
+slug = "unified-deployment-profiles"
+status = "authored"
+claimed = "2026-07-19"
+
+[[reservation]]
+number = 4
+slug = "platform-control-plane"
+status = "authored"
+claimed = "2026-07-30"
+
+[[reservation]]
+number = 5
+slug = "forgejo-private-registry"
+status = "authored"
+claimed = "2026-07-30"
+
+[[reservation]]
+number = 6
+slug = "white-label-product-foundation"
+status = "authored"
+claimed = "2026-08-06"
+
+[[reservation]]
+number = 7
+slug = "deployment-authenticated-applied-state"
+status = "authored"
+claimed = "2026-08-04"
+
+[[reservation]]
+number = 8
+slug = "manifest-declaration-registries"
+status = "authored"
+claimed = "2026-08-08"
+
+[[reservation]]
+number = 9
+slug = "secrets-are-held-not-dereferenced"
+status = "authored"
+claimed = "2026-08-08"
+
+[[reservation]]
+number = 10
+slug = "adapters-are-thin"
+status = "authored"
+claimed = "2026-08-08"
+
+[[reservation]]
+number = 11
+slug = "settings-resolution-reads-rows-and-defaults"
+status = "authored"
+claimed = "2026-08-08"
+
+[[reservation]]
+number = 12
+slug = "a-setting-declares-whether-it-inherits"
+status = "authored"
+claimed = "2026-08-09"
+
+[[reservation]]
+number = 13
+slug = "the-platform-declares-deployment-facts"
+status = "authored"
+claimed = "2026-08-09"
+
+[[reservation]]
+number = 14
+slug = "at-most-once-execution-has-one-owner"
+status = "authored"
+claimed = "2026-08-10"
+
+[[reservation]]
+number = 15
+slug = "academy-is-an-assembly-or-it-is-not"
+status = "authored"
+claimed = "2026-08-11"
+
+[[reservation]]
+number = 16
+slug = "payment-coverage-is-derived-not-a-status"
+status = "authored"
+claimed = "2026-08-11"
+
+[[reservation]]
+number = 17
+slug = "adoption-is-the-scarce-resource"
+status = "authored"
+claimed = "2026-08-11"
+
+[[reservation]]
+number = 18
+slug = "an-exemption-must-be-enforceable"
+status = "authored"
+claimed = "2026-08-11"
+
+[[reservation]]
+number = 19
+slug = "party-identity-follows-the-archetype"
+status = "authored"
+claimed = "2026-08-12"
+
+[[reservation]]
+number = 20
+slug = "billing-owns-operational-receivables"
+status = "authored"
+claimed = "2026-08-12"
+
+[[reservation]]
+number = 21
+slug = "the-tenant-workspace-is-a-third-plane"
+status = "authored"
+claimed = "2026-08-12"
+
+[[reservation]]
+number = 22
+slug = "files-own-stored-bytes-not-domain-meaning"
+status = "authored"
+claimed = "2026-08-13"
+
+[[reservation]]
+number = 23
+slug = "dual-plane-modules-declare-both-persistence-planes"
+status = "authored"
+claimed = "2026-08-13"
+
+[[reservation]]
+number = 24
+slug = "apps-compose-by-synchronizing-data"
+status = "authored"
+claimed = "2026-08-13"
+
+[[reservation]]
+number = 25
+slug = "imports-own-the-run-not-what-a-row-means"
+status = "authored"
+claimed = "2026-08-13"
+
+[[reservation]]
+number = 26
+slug = "approvals-decide-approval-never-the-transition"
+status = "authored"
+claimed = "2026-08-14"
+
+[[reservation]]
+number = 27
+slug = "a-plane-declares-its-own-prerequisites"
+status = "authored"
+claimed = "2026-08-14"
+
+[[reservation]]
+number = 28
+slug = "an-assembly-declares-each-module-plane"
+status = "authored"
+claimed = "2026-08-14"
+
+[[reservation]]
+number = 29
+slug = "access-is-requested-approved-and-issued-by-three-owners"
+status = "authored"
+claimed = "2026-08-15"
+
+[[reservation]]
+number = 30
+slug = "cloud-commerce-is-composed-from-complete-domain-owners"
+status = "authored"
+claimed = "2026-08-15"
+
+[[reservation]]
+number = 31
+slug = "an-authority-cutover-is-sealed-by-its-own-evidence"
+status = "authored"
+claimed = "2026-08-15"
+
+[[reservation]]
+number = 32
+slug = "unobserved-is-unknown-never-absent"
+status = "authored"
+claimed = "2026-08-22"
+
+[[reservation]]
+number = 33
+slug = "sales-authority-stops-at-an-accepted-quote"
+status = "authored"
+claimed = "2026-08-22"
+
+[[reservation]]
+number = 34
+slug = "media-observations-own-provider-reports-not-attribution"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 35
+slug = "sites-own-local-revisions-not-hosting"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 36
+slug = "inventory-owns-stock-ledger-traceability-and-valuation"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 37
+slug = "assets-own-durable-units-not-finance-or-product-extensions"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 38
+slug = "network-capabilities-decompose-sub-first"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 39
+slug = "positioning-owns-location-evidence-not-business-consequences"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 40
+slug = "sub-vnext-parity-capabilities-have-narrow-independent-owners"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 41
+slug = "accounting-owns-posting-and-ledger-evidence"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 42
+slug = "payables-owns-supplier-liabilities-not-payment-execution"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 43
+slug = "analytics-owns-projections-not-domain-facts"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 44
+slug = "banking-owns-observations-matching-and-reconciliation"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 45
+slug = "tax-policy-is-data-and-returns-are-evidence"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 46
+slug = "payroll-owns-calculations-and-liabilities"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 47
+slug = "expenses-own-spend-evidence-not-payment"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 48
+slug = "finance-owns-asset-books-and-accounting-consequences"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 49
+slug = "documents-own-controlled-versions-records-own-declared-evidence"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 50
+slug = "procurement-owns-sourcing-and-purchasing-decisions"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 51
+slug = "projects-own-work-structure-not-product-consequences"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 52
+slug = "conversations-own-threads-not-transport-or-workforce-policy"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 53
+slug = "surveys-own-feedback-evidence-not-subject-consequences"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 54
+slug = "work-orders-own-physical-execution"
+status = "authored"
+claimed = "2026-08-20"
+
+[[reservation]]
+number = 55
+slug = "web-analytics-owns-first-party-observations"
+status = "authored"
+claimed = "2026-08-21"
+
+[[reservation]]
+number = 56
+slug = "campaigns-own-outbound-progression"
+status = "authored"
+claimed = "2026-08-23"
+
+[[reservation]]
+number = 57
+slug = "the-vendor-control-plane-composes-existing-owners"
+status = "authored"
+claimed = "2026-08-23"
+
+[[reservation]]
+number = 58
+slug = "isp-essential-domains-have-ten-independent-owners"
+status = "authored"
+claimed = "2026-08-23"
+
+[[reservation]]
+number = 59
+slug = "availability-is-chosen-and-ownership-moves-are-distinct"
+status = "authored"
+claimed = "2026-08-24"
+
+[[reservation]]
+number = 60
+slug = "the-response-clock-is-a-shared-owner"
+status = "authored"
+claimed = "2026-08-24"
+
+[[reservation]]
+number = 61
+slug = "a-payout-is-erps-decision-and-its-provider-is-a-binding"
+status = "authored"
+claimed = "2026-08-24"
+
+[[reservation]]
+number = 62
+slug = "modules-own-metric-definitions-assemblies-own-exporters"
+status = "authored"
+claimed = "2026-08-24"
+
+[[reservation]]
+number = 63
+slug = "treasury-owns-the-payment-instruction-not-the-batch"
+status = "authored"
+claimed = "2026-08-24"
+
+[[reservation]]
+number = 64
+slug = "semantic-content-identity-is-not-a-row-counter"
+status = "authored"
+claimed = "2026-08-25"
+
+[[reservation]]
+number = 65
+slug = "mobile-clients-are-composed-applications"
+status = "authored"
+claimed = "2026-08-26"
+
+[[reservation]]
+number = 66
+slug = "the-database-runtime-is-instantiated-not-shared"
+status = "authored"
+claimed = "2026-08-26"
+
+[[reservation]]
+number = 67
+slug = "a-credential-holding-client-tears-down-atomically"
+status = "authored"
+claimed = "2026-08-26"
+
+[[reservation]]
+number = 68
+slug = "the-kernel-owns-the-capability-artifact-grammar"
+status = "authored"
+claimed = "2026-08-26"
+
+[[reservation]]
+number = 69
+slug = "mobile-authentication-federates-to-the-existing-identity-provider"
+status = "authored"
+claimed = "2026-08-26"
+
+[[reservation]]
+number = 70
+slug = "deployment-is-a-stateless-versioned-foundation"
+status = "authored"
+claimed = "2026-08-27"
+
+[[reservation]]
+number = 71
+slug = "a-recovery-bundle-carries-the-role-closure"
+status = "authored"
+claimed = "2026-08-30"
+
+[[reservation]]
+number = 72
+slug = "a-displaced-executor-retires-on-proved-evidence"
+status = "authored"
+claimed = "2026-08-31"
+
+# ---------------------------------------------------------------------------
+# Claimed off `main`. These are the numbers a new allocation must not take.
+# Each carries the branch that holds it, so the next author can see a claim
+# that `docs/adr/` cannot show them. The branch names are DECLARED — see
+# `[[branch_collision]]` below for why they cannot be detected.
+# ---------------------------------------------------------------------------
+
+[[reservation]]
+number = 73
+slug = "a-tax-snapshot-carries-the-components-tax-computed"
+status = "reserved"
+claimed = "2026-09-03"
+where = "docs/tax-billing-evidence-path, and the two branches stacked on it"
+note = """Uncontested. One decision on three stacked local branches \
+(`docs/tax-billing-evidence-path`, `docs/shadow-evidence-and-release-state-rules`, \
+`docs/claude-md-index-rules-43-52`), which is one claim carried forward, not \
+three claimants."""
+
+[[reservation]]
+number = 74
+slug = "tax-owns-determination-billing-renders-it"
+status = "reserved"
+claimed = "2026-09-04"
+where = "docs/tax-ownership-decision"
+note = """Michael's ruling, 2026-09-04: Tax keeps 0074 because its commit was \
+created first — `0f8b0746` at 09:39:14 against the Foundation pair's \
+`92f3b977` at 09:40:58. That is a fact about the two commits rather than a \
+priority rule invented after the collision, and the extra renaming it forces \
+is preferable to inventing one. AGENTS.md rule 40's tie-break ("the first \
+decision to reach `main` keeps it") gave no answer here, because neither \
+claimant had reached `main`."""
+
+[[reservation]]
+number = 75
+slug = "recover-is-its-own-authorized-operation"
+status = "reserved"
+claimed = "2026-09-04"
+where = "docs/foundation-recover-adrs"
+note = """Renumbered from 0074 by the same ruling. Six lines changed by \
+meaning, not by text replacement: this record and 0076 cite each other, and \
+the files also cite ADR-0018, 0023, 0070 and 0071, which a regex would have \
+corrupted."""
+
+[[reservation]]
+number = 76
+slug = "the-six-performed-comparisons-become-declarable-names"
+status = "reserved"
+claimed = "2026-09-04"
+where = "docs/foundation-recover-adrs"
+note = "Renumbered from 0075 by the same ruling."
+
+# ---------------------------------------------------------------------------
+# Pre-existing branch collisions, DECLARED. A number already `authored` on
+# `main` that an unmerged branch also spells with a DIFFERENT decision. These
+# are not `contested` rows — `main` holds the number and the decision on it is
+# settled; what is unsettled is the branch, which must renumber before it can
+# merge.
+#
+# This block is DECLARED, NOT DETECTED. A checker reading one worktree cannot
+# see another branch, and calling this coverage would be a claim the mechanism
+# cannot honour. `branch_claim_findings` in the checker WILL compare this block
+# against a real ref scan, but only where the refs are actually present; it
+# reports that it did not run rather than passing silently. What is enforced
+# unconditionally is the merge gate: the moment such a branch lands its file,
+# `docs/adr/` holds two documents on one number and
+# `test_adr_numbering.py::test_every_adr_number_is_unique` fails.
+#
+# Two-directional per ADR-0018: this block may not grow, and it may only shrink
+# in the change that reconciles the entry it removes.
+#
+# Not listed here, deliberately: thirty-one cases where a branch spells a
+# number that `main` later gave to the SAME decision — `campaigns-own-outbound-
+# progression` sitting at 0032 on 303 refs while `main` has it at 0056, and so
+# on. Those are the old rule's renumber-before-merge working as designed on
+# decisions that have since landed. They are history, not claims, and putting
+# them here would bury the seven entries that are.
+# ---------------------------------------------------------------------------
+
+[[branch_collision]]
+number = 19
+main_slug = "party-identity-follows-the-archetype"
+branch_slug = "a-decision-must-be-askable"
+where = "rescue/stash-19-askable-licence-wip-20260902"
+
+[[branch_collision]]
+number = 32
+main_slug = "unobserved-is-unknown-never-absent"
+branch_slug = "collections-assesses-identity-and-requests-actions"
+where = "feat/orders-eligibility-sales-handoff and 11 further local branches"
+
+[[branch_collision]]
+number = 32
+main_slug = "unobserved-is-unknown-never-absent"
+branch_slug = "integrator-executes-approved-provisioning-commands"
+where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+
+[[branch_collision]]
+number = 33
+main_slug = "sales-authority-stops-at-an-accepted-quote"
+branch_slug = "digital-media-owns-reusable-assets-rights-and-renditions"
+where = "archive/worktrees/2026-08-25/digital-media"
+
+[[branch_collision]]
+number = 33
+main_slug = "sales-authority-stops-at-an-accepted-quote"
+branch_slug = "exact-managed-service-connectors-are-authorized"
+where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+
+[[branch_collision]]
+number = 34
+main_slug = "media-observations-own-provider-reports-not-attribution"
+branch_slug = "managed-capability-contracts-are-separate-product-artifacts"
+where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+
+[[branch_collision]]
+number = 71
+main_slug = "a-recovery-bundle-carries-the-role-closure"
+branch_slug = "build-once-and-bind-the-environment-late"
+where = "docs/adr-0071-build-once-bind-late (pushed)"

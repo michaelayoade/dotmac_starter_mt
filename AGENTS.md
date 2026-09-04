@@ -1008,16 +1008,36 @@ specifics) points here and must never fork these rules.
     (ADR-0018 amendment 2026-08-26; enforcement: **none yet** in this repository —
     the pipeline this governs lives in `dotmac_sub`)
 
-40. **An ADR number is one claim in the merged catalogue.** A number written on
-    a branch is not a reservation: the first decision to reach `main` keeps it,
-    and a later decision renumbers before merge regardless of when its source
-    commit was authored. Every `docs/adr/<number>-*.md` filename has a unique
-    four-digit number. Renumbering updates citations by meaning, never with a
-    catalogue-wide text replacement, because one ambiguous number can already
-    have inbound references to both decisions. The gate is rerun against the
-    current merge result after the base moves; a green stale branch cannot see a
-    sibling claim that landed later.
-    (`tests/architecture/test_adr_numbering.py`)
+40. **An ADR number comes from the register, never from the directory.**
+    `docs/adr/reservations.toml` is the sole allocator. Take `next_free`, append
+    a `[[reservation]]` row, and land THAT CHANGE ALONE on `main`; cut the
+    authoring branch from a `main` that already carries your row and flip it to
+    `authored` in the change that writes the document. Never read `docs/adr/`
+    and take the next gap: a feature branch's directory shows what has merged
+    plus what that branch wrote, and nothing a sibling wrote — on 2026-09-04
+    three decisions took 0074 within eighty minutes, each author correct about
+    everything they could see. `next_free` is one scalar on one line, so two
+    concurrent allocations conflict in git instead of auto-merging two appends.
+    A number is never reused, including after withdrawal; a withdrawn record is
+    re-authored under a NEW number declaring `replaces`. Every
+    `docs/adr/<number>-*.md` filename still has a unique four-digit number, and
+    renumbering still updates citations by meaning, never with a catalogue-wide
+    text replacement — one ambiguous number can already have inbound references
+    to both decisions, and this repository's 0001-0009 band shares its spelling
+    with ERP's own ADR numbers. **Amended 2026-09-04.** The rule this replaces
+    said "the first decision to reach `main` keeps it, and a later decision
+    renumbers before merge". That is a tie-break applied after a collision
+    rather than a mechanism that prevents one, and on 2026-09-04 it gave no
+    answer at all, because neither 0074 claimant had reached `main`; Michael
+    broke the tie on commit creation time and ruled that the extra renaming was
+    preferable to inventing a subjective priority rule after the fact. Ported
+    from `dotmac_erp` at `5b2a035f` under rule 24; dossier
+    `docs/adr/EXTRACTION.toml`. Which BRANCH holds a contested number is
+    DECLARED in the register, not detected — a checker reading one worktree
+    cannot see another — and the register says so rather than claiming coverage.
+    (`tests/architecture/test_adr_number_allocation.py` for allocation order and
+    register integrity; `tests/architecture/test_adr_numbering.py` for the
+    merged catalogue's uniqueness)
 
 41. **Deployment is a stateless versioned FACILITY, and a product declares one
     descriptor.** `dotmac-deployment-foundation` is classified

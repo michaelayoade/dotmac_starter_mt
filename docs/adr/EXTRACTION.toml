@@ -1,0 +1,99 @@
+# Product-first extraction dossier for the ADR number register.
+#
+# NOT a package dossier. It lives here, beside what it governs, rather than
+# under `packages/`, because the mechanism is not a distribution: it is one
+# TOML file and one architecture test, and Michael's ruling is that it stays
+# REPOSITORY-LOCAL because each repository owns its own ADR namespace. There is
+# nothing to publish, nothing to pin and nothing to install.
+#
+# It follows the `EXTRACTION.toml` grammar anyway, because ADR-0006's amended
+# rule 24 governs the ACT of copying a working implementation out of another
+# Dotmac repository regardless of what the result is packaged as, and a port
+# with no dossier is indistinguishable from a fork.
+#
+# `tests/architecture/test_product_first_extraction.py` iterates `packages/*`
+# and does not read this file. That is deliberate and is the honest state: this
+# record is review evidence, not a gated claim.
+
+schema_version = 1
+dossier_kind = "repository-local-mechanism"
+unit = "adr-number-allocation"
+classification = "repository-local-governance"
+status = "adopted"
+source_mode = "product-first"
+
+owner = "Which ADR number belongs to which decision in dotmac_starter_mt, and the order in which a number and its document may be claimed"
+
+contract = "docs/adr/reservations.toml is the sole allocator of ADR numbers in this repository. An author takes `next_free`, appends a `[[reservation]]` row and lands that change ALONE on `main`; the ADR itself is written in a later change cut from a `main` that already carries the row. `next_free` is one scalar on one line, so two concurrent allocations conflict in git rather than auto-merging. A number is never reused, including after withdrawal. tests/architecture/test_adr_number_allocation.py refuses an ADR document whose number was not reserved at the branch's MERGE BASE, refuses a register that has gaps, a stale `next_free`, a duplicate number or slug, a document on a retired number, an unregistered document, a row carrying a field nothing reads, and a new entry in the branch-collision backlog."
+
+source_repositories = ["dotmac_erp"]
+
+source_revisions = [
+  "dotmac_erp:5b2a035f3fdc5afe92b6da3a73ea9db7fe8c5fe6",
+]
+
+source_paths = [
+  "dotmac_erp:docs/adr/reservations.toml",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py",
+  "dotmac_erp:docs/adr/README.md",
+  "dotmac_erp:AGENTS.md",
+]
+
+# PARITY tests carried from the qualifying source. Each exists here because
+# ERP's version of it proves a property the Starter needs identically; the
+# renames are noted where the Starter's vocabulary differs.
+preserved_tests = [
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_the_register_is_internally_consistent_and_matches_the_directory",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_the_negative_control_is_clean",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_duplicate_number_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_reuse_after_withdrawal_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_document_on_a_withdrawn_number_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_unregistered_adr_file_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_silent_deletion_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_stale_next_free_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_withdrawal_without_a_reason_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_planted_same_change_authoring_is_named",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_a_reservation_that_lands_before_its_document_is_not_flagged",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_no_adr_was_authored_in_the_change_that_claimed_its_number",
+  "dotmac_erp:tests/architecture/test_adr_number_allocation.py::test_the_collision_backlog_does_not_grow_and_only_shrinks_deliberately",
+]
+
+# Tests written HERE, for this repository's contract and its two new rules.
+# Requirements 3 and 6 have no counterpart in the source: ERP compares against
+# `origin/main`'s tip and has no rule about the directory at all.
+conformance_tests = [
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_no_adr_was_authored_without_a_reservation_on_the_merge_base",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_unreserved_authoring_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_number_inferred_from_the_next_filename_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_allocate_cannot_see_the_directory",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_unread_field_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_the_register_agrees_with_the_branches_that_hold_numbers",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_undeclared_branch_claim_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_unregistered_branch_claim_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_planted_stale_branch_collision_declaration_is_named",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_a_declared_branch_collision_is_not_flagged",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_the_branch_collision_backlog_does_not_grow_and_only_shrinks_deliberately",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_no_number_is_contested_and_none_may_become_so",
+  "dotmac_starter_mt:tests/architecture/test_adr_number_allocation.py::test_the_backlog_pins_are_not_vacuously_satisfied",
+]
+
+source_mode_note = "CARRIED, essentially verbatim: the `findings` function and every rule inside it, the register's TOML shape and status vocabulary, the permanence argument, the `next_free`-as-one-scalar serialization argument, and nine of ERP's planted proofs. ADAPTED: ERP's `authored_without_prior_reservation` compared HEAD against `origin/main`'s TIP and returned a bare set of numbers; the Starter's `unreserved_authorings` compares against the MERGE BASE and returns a message per number, because the tip moves under a branch and because the message is what teaches the next author. ERP's single `contested` bucket became two — `contested` for a number no branch has landed, and `[[branch_collision]]` for a number `main` already holds that a branch spells differently — because ERP's four collisions were all off-`main` while every one of the Starter's seven is against an authored `main` record. NOT CARRIED: `readme_index_numbers`, `test_the_readme_index_lists_exactly_the_authored_rows` and `test_the_readme_parser_reads_a_real_row`. ERP's `docs/adr/README.md` carries an index table; the Starter's `docs/adr/` has no README at all, so the rule would be a check over a file that does not exist — which passes for the wrong reason. AUTHORED HERE: requirement 6's rules (`allocate` takes no directory argument; `directory_next_free` exists only to name the mistake in a refusal) and requirement 5's branch half (`branch_claim_findings`), neither of which the source has."
+
+contract_consumers = []
+candidate_consumers = []
+composition_boundary = "Repository-local by ruling. Each Dotmac repository owns its own ADR namespace, and the Starter's 0001-0009 band shares its spelling with ERP's own decisions, so a shared register would make one number name two decisions by construction. ERP keeps its own `docs/adr/reservations.toml`; the two files are independent and neither imports, reads or pins the other. What is shared is the MECHANISM, ported once and recorded here, not the data."
+
+inventory_evidence = [
+  "dotmac_erp:docs/adr/reservations.toml",
+  "docs/adr/reservations.toml",
+  "docs/adr/0018-an-exemption-must-be-enforceable.md",
+  "docs/adr/0006-white-label-product-foundation.md",
+]
+
+first_cutover = "This repository, 2026-09-04, in the change that seeds the register with all 76 numbers claimed on `main` and on unmerged branches. The cutover is complete on landing: `AGENTS.md` rule 40's directory-reading procedure is replaced in the same change, so there is no window in which both allocators are live."
+
+shadow_and_drift = "None, and none is possible. A number register has no shadow mode: running the old procedure alongside it would mean allocating from `docs/adr/` again, which is the defect. Drift between the register and the directory IS the failure the checker reports, in both directions — an authored row with no file, and a file with no row."
+
+local_copy_retirement = "The old procedure was not code and leaves nothing to delete. What retires is the SENTENCE: `AGENTS.md` rule 40's 'a number written on a branch is not a reservation; the first decision to reach `main` keeps it' is replaced, because it is a tie-break applied after a collision rather than a mechanism that prevents one — and on 2026-09-04 it gave no answer at all, since neither 0074 claimant had reached `main`."
+
+next_action = "Nothing outstanding for the mechanism. Two things remain outstanding for the DATA it records: the seven `[[branch_collision]]` entries need their branches renumbered or abandoned before those branches can merge, and `AGENTS.md`'s own rule numbering has the same defect one level up — rule 48 names 'a version name binds to ONE source and ONE artifact' on `main` and 'a contract catalogue is what it HOLDS' on `feat/agents-rule-43-catalogue-enforcement` @ ee07bf04. Whether AGENTS.md rule numbers get a register of their own is Michael's call and is not decided here."
