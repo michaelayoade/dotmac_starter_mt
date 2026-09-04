@@ -687,6 +687,14 @@ def test_an_expired_lease_is_still_EXPIRED_HELD_after_a_refused_run(
     the store stays empty. `host_standing` then still answers `EXPIRED_HELD` --
     the standing that says a holder crashed or timed out and nobody can be asked
     what happened, which is when destroying a host is least safe.
+
+    The sentence naming the LEASE is `main`'s, not `record_terminal`'s, and the
+    seam is worth being exact about: `main` classifies and explains, and
+    `record_terminal` is handed the result. So what is asserted here is what
+    `record_terminal` itself writes -- an unnameable outcome, no store record,
+    and `lease_in_hand: false` in the sidecar, which is the fact a reader needs
+    to tell "no lease was ever taken" from "a release could be named and could
+    not be written".
     """
     args = _args(tmp_path)
     ctx = runner.TerminalContext()
@@ -708,7 +716,8 @@ def test_an_expired_lease_is_still_EXPIRED_HELD_after_a_refused_run(
     )
     evidence = json.loads(pathlib.Path(args.terminal_evidence_out).read_text())
     assert evidence["lease_in_hand"] is False
-    assert any("no exact HostLease.v2 in hand" in note for note in evidence["notes"])
+    assert evidence["outcome"] == {"receipt_digest": "", "refusal": ""}
+    assert any("NO RELEASE WRITTEN" in note for note in evidence["notes"])
 
 
 @pytest.mark.parametrize(
