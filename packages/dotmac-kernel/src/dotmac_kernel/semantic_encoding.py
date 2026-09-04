@@ -40,15 +40,32 @@ and content identities; changing a frame tag, a length, a scalar rendering or
 the domain prefix would silently re-key every stored fingerprint. A change to
 the encoding is a NEW algorithm name, never an edit to this one.
 
-**Product-first extraction, not a design.** The `cv1` encoder was written in the
-Orders incubation slice, whose `_fingerprint` had previously delegated to
-`fingerprint_of` and could not distinguish the cases above. The Refund Warrants
-slice then needed exactly the same encoding and — unable to import across local
-incubation branches — carried a copy whose bodies were byte-identical once
-docstrings were stripped. Two copies of one byte-exact contract, each free to
-drift with no digest ever disagreeing, is the shape that says the facility has
-no home; this module is that home. Orders is the qualifying source and the code
-below is its implementation ported unchanged, not a rewrite.
+**Greenfield after inventory, informed by convergent implementations.** Seven
+repositories were audited at immutable revisions for an encoder with these four
+properties — length-prefixed framing, a TYPED absence sentinel, exact money at
+currency scale, a domain-separated digest — and none has all four. Not one
+audited implementation has the typed sentinel at all; the most careful of them,
+`dotmac_sub`'s `migration_source/canonical.py`, rejects the idea in its own
+docstring and forbids absence instead. So there was no qualifying product-first
+source to port, and this facility is greenfield: see
+`docs/inventories/semantic-encoder-sources.md` for what was searched, where,
+and every near-miss with the exact property it fails on.
+
+What the inventory DID find is convergence. Two implementations arrived at this
+encoding INDEPENDENTLY, from their own problems: ERP's tax adapter
+(`_content_source_version`, production and merged) and the Orders incubation
+slice. The Refund Warrants slice carries Orders' copy, which its byte-identical
+AST says outright — a copy, not a third independent arrival, and recorded that
+way so the convergence is not overcounted. `AGENTS.md` rule 35 and ADR-0064 § 2
+had already stated all six requirements fleet-wide with nothing implementing
+them reusably, which is the same finding from the other direction.
+
+That convergence is evidence the DESIGN below is right rather than invented. It
+is NOT a qualifying source: the two slices are local incubation branches that
+nothing composes and nothing runs, and rule 24 requires a production
+implementation. The code below is the Orders slice's implementation carried
+over unchanged rather than rewritten, because rewriting bytes two callers
+already depend on would be a change disguised as a port.
 
 Stateless by construction: no models, no lineage, no session, no I/O. It imports
 `dotmac_kernel.money` (pure value objects) and the standard library, nothing
