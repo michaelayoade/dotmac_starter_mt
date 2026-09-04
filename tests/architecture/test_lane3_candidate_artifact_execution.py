@@ -397,15 +397,37 @@ def _decoy(tmp_path: Path) -> Path:
     root = tmp_path / "checkout-src"
     (root / "dotmac_deployment_foundation").mkdir(parents=True)
     (root / "dotmac_deployment_foundation" / "__init__.py").write_text(
-        "ORIGIN = 'the checkout, not the wheel'\n", encoding="utf-8"
+        f"ORIGIN = {DECOY_ORIGIN!r}\n", encoding="utf-8"
     )
     return root
 
 
+#: What the decoy says about itself, and the ONLY string either test below
+#: reasons about. Both ask one question — did the decoy win? — because that is
+#: the question `-E` exists to answer, and it is answerable in an environment
+#: where the real package is installed and in one where it is not.
+DECOY_ORIGIN = "the checkout, not the wheel"
+
+
 def _import_origin(tmp_path: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    """Import the package name under a PYTHONPATH that points at the decoy.
+
+    The probe uses `getattr(..., default)` rather than a bare attribute so that
+    "the installed package answered" is an ORDINARY RESULT rather than a
+    traceback. That distinction is what makes this pair environment-independent:
+    under `-E -P` the decoy loses either by the module being absent entirely or
+    by the installed one winning, and those are two spellings of one fact.
+
+    An earlier revision asserted `ModuleNotFoundError`, which is true only where
+    the package is NOT installed. CI installs it as a path dependency, so the
+    check failed there while passing locally — a test that was really asserting
+    a property of the developer's environment.
+    """
     script = tmp_path / "probe.py"
     script.write_text(
-        "import dotmac_deployment_foundation as m\nprint(m.ORIGIN)\n", encoding="utf-8"
+        "import dotmac_deployment_foundation as m\n"
+        "print(getattr(m, 'ORIGIN', 'not-the-decoy'))\n",
+        encoding="utf-8",
     )
     env = dict(os.environ)
     env["PYTHONPATH"] = str(_decoy(tmp_path))
@@ -427,15 +449,28 @@ def test_PYTHONPATH_alone_really_does_reach_the_checkout(tmp_path: Path) -> None
     """
     result = _import_origin(tmp_path)
     assert result.returncode == 0, result.stderr
-    assert "the checkout, not the wheel" in result.stdout
+    assert DECOY_ORIGIN in result.stdout, (
+        "PYTHONPATH did not reach the decoy, so `-E` would be guarding against "
+        "nothing and every isolation assertion in this file would be decorative"
+    )
 
 
 def test_dash_E_dash_P_makes_the_checkout_unreachable(tmp_path: Path) -> None:
-    """And the half the workflows rely on: with the flags, that same path is
-    not importable at all, so the only copy left is the installed one."""
+    """And the half the workflows rely on: with the flags, that same path does
+    not win, so the only copy that can answer is the installed one.
+
+    Deliberately NOT asserted as a particular failure. Where the package is
+    installed the import succeeds from site-packages; where it is not, it fails
+    outright. Both are the decoy losing, and pinning either one would make this
+    a test about which environment it happens to run in — which is exactly the
+    mistake this assertion replaced.
+    """
     result = _import_origin(tmp_path, "-E", "-P")
-    assert result.returncode != 0
-    assert "ModuleNotFoundError" in result.stderr
+    assert DECOY_ORIGIN not in result.stdout, (
+        "`-E -P` still imported the module PYTHONPATH named. The rehearsal "
+        "would exercise the checkout and pass identically whether or not the "
+        "candidate wheel is correct"
+    )
 
 
 def test_the_runner_re_adds_its_OWN_directory_so_dash_P_costs_nothing() -> None:
