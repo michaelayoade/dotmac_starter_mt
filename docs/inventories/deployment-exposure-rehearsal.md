@@ -77,7 +77,18 @@ No `eth1`. No tunnel, wireguard, tun, tap, gre, vti or ipip device. Policy
 routing is the stock three rules (local/main/default) with no extra table. No
 Docker. No `/opt/openbao` and zero `BAO`/`VAULT` environment variables.
 
-Both paths to Role A leave via `eth0`, checked per family:
+Both paths to Role A leave via `eth0`, checked per family.
+
+> **SUPERSEDED 2026-09-04 — these measurements name the retired target.** They
+> were taken against `85.190.246.211`, which is no longer Role A. They are kept
+> as the RECORD OF WHAT WAS DONE and must not be read as current: the new
+> target's public IPv4 is `160.119.127.202` and its IPv6 is
+> `2c0f:e888:11::102`, and neither has been routed from this vantage. The
+> replacement numbers are deliberately absent rather than transcribed from the
+> new addresses — a routing result is a measurement, and writing one that
+> nobody took is the failure this whole document exists against. Re-run both
+> queries from the outside vantage and replace this block with what they
+> return.
 
 ```
 ip route get 85.190.246.211          -> via 94.72.96.1 dev eth0 src 94.72.99.155
@@ -399,10 +410,36 @@ This is not bureaucracy. Both failures happened on this fleet on 2026-08-29.
 has not been enumerated against the target's rule set cannot conclude anything,
 and the verifier refuses rather than assuming it is outside.
 
-### Role A — disposable execution target — **AUTHORIZED: `85.190.246.211`**
+### Role A — disposable execution target — **AUTHORIZED: `lane3-rehearsal-target`**
 
-**Status: authorized by Michael, 2026-08-29.** Everything in the Role A column
-of the gate table below may run against it.
+**Status: retargeted by Michael, 2026-09-04.** VM 102 was rebuilt as a
+genuinely disposable target, with a verified safety backup taken beforehand:
+
+| | |
+|---|---|
+| name | `lane3-rehearsal-target` |
+| size | 4 GiB memory, 40 GiB disk |
+| private IPv4 | `10.120.120.54` |
+| public IPv4 | `160.119.127.202` |
+| IPv6 | `2c0f:e888:11::102` |
+
+**The previous authorization named `85.190.246.211` and is withdrawn.** That
+address is the shared dedicated test server — `CONTRIBUTING.md` and `AGENTS.md`
+both name it in that role, and they are correct to. A lane that induces a
+genuine apply-path failure and an automatic rollback cannot run on a host other
+agents are working on, and "disposable" and "shared workspace" cannot both be
+true of one machine. Any surviving `85.190.246.211` in a Role A sentence is
+stale and must not be read as authorization.
+
+**HAZARD — the private address is three away from production ns1.**
+`10.120.120.51` is production ns1 and `10.120.120.54` is this target: the same
+/24. A static assignment typo or a DHCP collision lands the rehearsal on a
+production nameserver, and this lane rewrites firewall chains. The rebuilt VM
+must never boot with `10.120.120.51`. Measured 2026-09-04: no file in this
+repository contains `10.120.120.51`, or any `10.120.120.0/24` address at all,
+and nothing here can supply one — `--target` is `required=True` with no default
+and the Lane 3 descriptor deliberately holds no address. So the repository is
+not a source of that mistake; the machine build is where it has to be prevented.
 
 **What is still missing is an ACCESS PATH, not an authorization.** This
 repository carries no SSH configuration entry and no reference to that address,
@@ -441,7 +478,12 @@ satisfy.
 **Standing rule until that NIC is detached: probe from this host only where
 `ip route get <target>` shows the path leaving via `eth0`.**
 
-For Role A that is established, measured rather than assumed:
+For Role A that was established, measured rather than assumed — **against the
+retired target, and therefore superseded on 2026-09-04.** The queries below
+name `85.190.246.211`; the new Role A is `160.119.127.202` /
+`2c0f:e888:11::102` and has not been routed from this vantage. Re-run and
+replace rather than editing the addresses in place, because the arrow's
+right-hand side is a result and not a restatement of its left.
 
 ```
 ip route get 85.190.246.211        -> via 94.72.96.1 dev eth0 src 94.72.99.155
@@ -449,8 +491,12 @@ ip -6 route get 2a02:c204:2353:7655::1 -> dev eth0 src 2a02:c204:2353:7605::1
 ip route get 10.0.0.2              -> dev eth1 src 10.0.0.4
 ```
 
-Role A is not in `10.0.0.0/22`, so the private NIC was not in the path and
-contaminated nothing measured against it. The third line is the control: it
+The retired Role A was not in `10.0.0.0/22`, so the private NIC was not in the
+path and contaminated nothing measured against it. **The new target needs that
+re-established and the question is not identical:** it carries a private
+address of its own, `10.120.120.54`, which the retired one did not. That is
+outside `10.0.0.0/22` so the same conclusion is likely, but likely is not
+measured. The third line is the control: it
 shows the routing query discriminates rather than always answering `eth0`.
 
 #### The verification step this was missing
@@ -481,7 +527,7 @@ into a one-role one that looks complete, which is worse than not running it.
 | **outside every Dotmac allowlist** | OpenBao `8200`, ERP `9001`, ERP `6391` all **refused** |
 | **the refusals mean something** | **ERP `443` is OPEN from the same vantage** |
 | holds no fleet credentials | no `/opt/openbao`, zero `BAO`/`VAULT` environment variables |
-| can reach Role A | `85.190.246.211:22` reachable |
+| can reach Role A | ~~`85.190.246.211:22` reachable~~ — **retired target; unmeasured against `160.119.127.202`** |
 
 **The fourth row is why the third can be believed.** Three refusals on their own
 are equally consistent with a vantage that cannot reach anything — a broken
