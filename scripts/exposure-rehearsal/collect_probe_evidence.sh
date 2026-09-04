@@ -16,8 +16,14 @@
 #      exposure. Every negative here carries `service_running`, and the runner
 #      refuses the item if it is false.
 #
-# TWO fields here are deliberately NOT measurable from this vantage, and are
-# emitted as fail-closed placeholders rather than omitted:
+# The far-end source addresses are MEASURED as of 2026-09-04 and are no longer
+# sentinels. `observe_far_end.sh` reads them from the target itself over a
+# ProxyJump through this vantage — see that file for why a listener would have
+# been a mutation dressed as a read, and why only field ONE of
+# `SSH_CONNECTION` is comparable across families.
+#
+# TWO fields here are still NOT measurable from this vantage, and are emitted as
+# fail-closed placeholders rather than omitted:
 #
 #   * `probes.private_inside` — item 16 asks whether the private port is
 #     reachable from INSIDE its declared source set. This host is outside it by
@@ -45,12 +51,28 @@ FORMER_PRIVATE="${LANE3_FORMER_PRIVATE_PATHS:-10.0.0.2 10.0.0.3}"
 
 on_probe() { ssh "${SSH_OPTS[@]}" "${PROBE}" "$@"; }
 
+# The far end's own report of this vantage's source address, per family. Read
+# BEFORE the remote block so a failure to obtain it surfaces here rather than as
+# an empty field somebody has to trace. Every value is configured, never
+# hardcoded: an unset identity is a refusal, because falling back to an agent
+# key would prove a credential works that was never meant to be used.
+: "${LANE3_OBSERVER_USER:?unset: the restricted target-side observation identity}"
+: "${LANE3_OBSERVER_KEY:?unset: the private key for that identity}"
+far_end="$(
+  "$(dirname "$0")/observe_far_end.sh" \
+    "${PROBE}" "${TARGET}" "${LANE3_OBSERVER_USER}" "${LANE3_OBSERVER_KEY}"
+)"
+extract() { printf '%s' "${far_end}" | sed -n "s/.*\"$1\": \"\\([^\"]*\\)\".*/\\1/p"; }
+observed_v4="$(extract observed_source_v4)"
+observed_v6="$(extract observed_source_v6)"
+
 target_v6="$(on_probe "getent ahostsv6 ${TARGET} | awk 'NR==1{print \$1}'" || true)"
 : "${target_v6:=}"
 
 on_probe "
 set -eu
 TARGET='${TARGET}'; TARGET6='${target_v6}'; FORMER='${FORMER_PRIVATE}'
+OBSERVED4='${observed_v4}'; OBSERVED6='${observed_v6}'
 
 emit_bool() { if \"\$@\" >/dev/null 2>&1; then printf true; else printf false; fi; }
 probe4() { nc -4 -z -w 5 \"\$1\" \"\$2\"; }
@@ -101,8 +123,8 @@ printf '    \"credential_markers\": {\"openbao_dir\": %s, \"bao_env\": %s},\n' \
   \"\$(if [ -d /opt/openbao ]; then printf true; else printf false; fi)\" \\
   \"\$(if env | grep -qE '^(BAO|VAULT)'; then printf true; else printf false; fi)\"
 
-printf '    \"observed_source_v4\": \"__TARGET_OBSERVED_V4__\",\n'
-printf '    \"observed_source_v6\": \"__TARGET_OBSERVED_V6__\"\n'
+printf '    \"observed_source_v4\": \"%s\",\n' \"\$OBSERVED4\"
+printf '    \"observed_source_v6\": \"%s\"\n' \"\$OBSERVED6\"
 printf '  },\n'
 
 printf '  \"probes\": {\n'

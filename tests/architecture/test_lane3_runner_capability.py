@@ -177,13 +177,13 @@ def test_the_command_line_offers_no_way_to_supply_a_result() -> None:
 def test_this_tree_is_not_capable_and_says_exactly_which_reasons_remain() -> None:
     """The live verdict. It gets shorter as repairs land, and that is the point.
 
-    `compose_identity_unused` and `no_induced_failure` are both repaired and
-    deliberately absent — each detector is proved below by planting its defect
-    BACK, because a guard whose subject has been fixed is about the NEXT
-    occurrence, not the last one.
+    `compose_identity_unused`, `no_induced_failure` and `far_end_sentinel` are
+    repaired and deliberately absent — each detector is proved below by planting
+    its defect BACK, because a guard whose subject has been fixed is about the
+    NEXT occurrence, not the last one.
 
-    The three that remain all live in the collector and need the restricted
-    observation identity on the target.
+    The two that remain need the probe phase to move to a moment when the stack
+    is up, and a vantage inside the accepted source set.
     """
     record = capability.assess(ROOT)
     assert record["verdict"] == "not_capable"
@@ -216,12 +216,6 @@ def _tree_with(tmp_path: Path, repairs: dict[Path, list[tuple[str, str]]]) -> Pa
 #: code cannot be an accident of a broad rewrite. These are shapes, not the real
 #: fixes: the real ones need a host, and none has been contacted.
 REPAIRS: dict[capability.Reason, dict[Path, list[tuple[str, str]]]] = {
-    capability.Reason.FAR_END_SENTINEL: {
-        capability.COLLECTOR: [
-            ("__TARGET_OBSERVED_V4__", "${TARGET_SAW_V4}"),
-            ("__TARGET_OBSERVED_V6__", "${TARGET_SAW_V6}"),
-        ]
-    },
     capability.Reason.NO_INSIDE_VANTAGE: {
         capability.COLLECTOR: [
             (
@@ -278,6 +272,32 @@ def test_a_source_with_none_of_them_is_capable(tmp_path: Path) -> None:
     record = capability.assess(_tree_with(tmp_path, every))
     assert record["reasons"] == [], record["reasons"]
     assert record["verdict"] == "capable"
+
+
+def test_reintroducing_a_far_end_sentinel_is_refused_again(tmp_path: Path) -> None:
+    """REGRESSION PLANT for the sentinel repair.
+
+    The collector now reads the target's own report of this vantage's source
+    address. Putting a fabricated value back must bring the reason with it —
+    and the fabricated value is the one that matters, because a sentinel is
+    NON-EMPTY, so `qualify_vantage` refuses through the MISMATCH branch and the
+    run dies before recording a single item.
+    """
+    root = _tree_with(tmp_path, {})
+    collector = root / capability.COLLECTOR
+    text = collector.read_text(encoding="utf-8")
+    collector.write_text(
+        text.replace(
+            '\\"%s\\",\\n\' \\"\\$OBSERVED4\\"', '\\"__TARGET_OBSERVED_V4__\\",\\n\''
+        ),
+        encoding="utf-8",
+    )
+    assert collector.read_text(encoding="utf-8") != text, "the plant anchor moved"
+    reasons = {
+        entry["reason"]
+        for entry in capability.assess(root)["reasons"]  # type: ignore[index]
+    }
+    assert capability.Reason.FAR_END_SENTINEL in reasons
 
 
 def test_removing_the_provocation_seam_is_refused_again(tmp_path: Path) -> None:

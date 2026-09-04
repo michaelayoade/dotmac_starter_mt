@@ -79,6 +79,13 @@ sys.path.insert(
         / "src"
     ),
 )
+# This file's OWN directory, so `lane3_provocation` resolves however this module
+# was loaded. Running `python scripts/exposure_rehearsal_runner.py` puts
+# `scripts/` on `sys.path[0]` for free; loading it through `importlib` from a
+# path — which `tests/unit/test_lane3_proxy_recreation_gate.py` does, to reach
+# `judge_proxy_recreation` without a host — does not, and the sibling import
+# then fails at collection time rather than at run time.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.engine.run import CommandResult
