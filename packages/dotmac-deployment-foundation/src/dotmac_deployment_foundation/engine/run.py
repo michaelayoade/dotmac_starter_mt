@@ -40,7 +40,7 @@ import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
 from ..backup import BackupRecord
@@ -346,6 +346,92 @@ class DeploymentOutcome:
                 for record in self.records
             ),
         ).as_document()
+
+
+#: Refused: the provider cannot be moved into stage two.
+STAGE_TWO_ABSENT: Final = "execution_plan.stage_two_absent"
+
+#: Refused: the provider rejected the authorized facts.
+STAGE_TWO_REFUSED: Final = "execution_plan.stage_two_refused"
+
+
+def bind_authorized_effects(
+    effects: Effects,
+    plan: FoundationExecutionPlanV1 | FoundationExecutionPlanV2,
+) -> None:
+    """Move effects into stage two, from the AUTHORIZED plan. Foundation owns this.
+
+    Call it after `render_execution_plan` and before `Executor`. That is the only
+    window in which the two facts exist: the plan carries them and the plan
+    cannot exist until the effects do, because rendering it reads
+    ``observe_roles()`` on those same effects.
+
+    ## Why this is a second call and not four constructor arguments
+
+    The circularity is real. An assembly's provider needs the target identity and
+    the frozen prestate; both live on the plan; the plan is rendered from the
+    provider. Nothing can break that by ordering alone, so the seam is two
+    stages: `build_effects(spec, deploy_dir)` satisfies the published binding
+    contract, and this supplies what only the authorized plan knows.
+
+    ## THE PROHIBITIONS ARE STRUCTURAL, NOT REMEMBERED
+
+    * **No re-observation after authorization.** There is no `observe_roles()`
+      call in this function. That is not a rule to keep — it is an absent call,
+      and `test_the_stage_two_caller_never_reobserves` derives it from the AST
+      rather than trusting the reading. A prestate read here would be a second
+      authority over a fact the plan already fixed.
+    * **No caller-supplied attempt number.** This function has no such
+      parameter, so nothing here can assert what the envelope should carry. The
+      coordinate reaches the report from the receipt, through the grant.
+    * **No raw mapping.** The plan is type-checked before anything is read off
+      it, so a mapping with the right keys cannot stand in for the document that
+      was frozen.
+
+    ## Unbound is not empty, and the projection is the identity
+
+    `HostPrestateV1.roles` is already sorted ``(role_code, image_digest)`` pairs
+    with each role named once, and the provider's own validator applies the same
+    rules and REFUSES an unsorted sequence rather than repairing it. So this
+    passes the frozen tuple through unchanged: there is no sort, no rebuild and
+    no mapping step, because any of those would be a second opinion about a fact
+    the plan froze.
+
+    An EMPTY prestate is a positive claim — "no role containers, a first
+    deployment" — and `plan.host_prestate` is a required field with no default,
+    so this can never pass ``None``. The provider keeps unbound as its own type
+    for the same reason: collapsing them would label the previous release's own
+    bytes a first deployment, and that is visible only during a restore.
+    """
+    if not isinstance(plan, FoundationExecutionPlanV1 | FoundationExecutionPlanV2):
+        raise PreconditionFailed(
+            f"stage two takes the typed execution plan, not a "
+            f"{type(plan).__name__}. A mapping with the right keys is not the "
+            "document that was frozen",
+            code=EXECUTION_PLAN_WRONG_TYPE,
+        )
+    bind = getattr(effects, "bind_authorized_execution", None)
+    if not callable(bind):
+        raise PreconditionFailed(
+            f"{type(effects).__name__} cannot be moved into stage two: it "
+            "declares no `bind_authorized_execution(target=, incumbent_roles=)`. "
+            "A provider that needs the authorized target and the frozen prestate "
+            "must accept them through this seam — building them into the factory "
+            "is impossible, because the plan that carries them is rendered from "
+            "the provider itself",
+            code=STAGE_TWO_ABSENT,
+        )
+    try:
+        bind(target=plan.target, incumbent_roles=plan.host_prestate.roles)
+    except (ValueError, TypeError) as exc:
+        raise PreconditionFailed(
+            f"the provider refused the authorized execution facts: {exc}. "
+            "Stage two passes what the plan FROZE — a refusal here means the "
+            "provider was already bound to different facts, which is the drift "
+            "the frozen prestate exists to catch, arriving from inside the "
+            "process rather than from the host",
+            code=STAGE_TWO_REFUSED,
+        ) from exc
 
 
 class Executor:

@@ -452,6 +452,37 @@ between release and destroy.
 PARSED lease through the shared ten-rule core, so the runner digests the lease it
 already loaded and there is no second opinion about where a lease lives.
 
+### The stage-two effects caller — Foundation owns the transition
+
+`build_platform_cp_effects` could not be reached through the published binding
+contract at all. Foundation's contract is `build_effects(spec, deploy_dir)` — two
+positionals — and the factory required `target` and `incumbent_roles` as
+keyword-only, so every real invocation raised `TypeError` before any deployment
+logic ran. There was **no production caller anywhere**: only tests, each calling
+the factory the way the factory wanted to be called, never the way this facility
+calls it.
+
+The circularity is genuine. Effects are built from `(spec, deploy_dir)`; the plan
+is rendered by reading `observe_roles()` on those effects; the plan carries the
+target and frozen prestate the provider needs. Neither can be known at
+construction, so the seam is two stages and Foundation owns the transition —
+`bind_authorized_effects(effects, plan)`, called after `render_execution_plan`
+and before `Executor`.
+
+**The three prohibitions are structural rather than remembered.** There is no
+`observe_roles()` call in the function, derived from the AST rather than trusted
+— a prestate read there would be a second authority over a fact the plan already
+fixed. There is no `attempt_no` parameter, so nothing can assert what the
+envelope should carry. And the plan is type-checked before anything is read off
+it, so a mapping with the right keys cannot stand in for the frozen document.
+
+**The projection is the identity.** `HostPrestateV1.roles` is already sorted
+`(role, digest)` pairs and the provider applies the same rules, refusing an
+unsorted sequence rather than repairing it — so the frozen tuple passes through
+unchanged. A sort or a rebuild here would be a second opinion about a fact the
+plan froze. An empty prestate stays the positive "first deployment" claim, and
+`host_prestate` is required with no default, so `None` has no path.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**
