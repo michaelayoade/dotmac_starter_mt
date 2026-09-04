@@ -49,6 +49,7 @@ from tests.unit.test_deployment_foundation_execution_binding import (
     _plan_and_digest,
     evidence_policy,
 )
+from tests.unit.working_tree import python_files as _python_files
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -99,68 +100,6 @@ def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
 
 
 # ── every implementation, derived rather than listed ────────────────────────
-
-
-_LS_FILES = ("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-
-
-def _python_files(root: Path = REPO) -> list[Path]:
-    """Every Python file in THIS working tree — and nothing from another one.
-
-    The defect this replaces: `REPO.rglob("*.py")`. In CI that is a clean
-    checkout and harmless. In a primary checkout with ~30 sibling
-    `*_worktree/` directories it swept every one of them, so a local
-    `make test-unit` reported implementations and conformance results **from
-    other lanes' branches**. Both directions were live, and the second is the
-    dangerous one:
-
-    * a false local RED from another lane's in-progress branch, sending a lane
-      after a defect that is not in its tree;
-    * a false local GREEN, where a stale worktree happens to satisfy the sweep
-      and masks a real gap in the tree actually under test.
-
-    Same class as the probe wheel, opposite sign: a detector whose field of view
-    does not match what it claims to check. That fix made the sweep see
-    something it could not; this stops it seeing what it should not.
-
-    **Asks git, and does not skip by NAME.** A `*_worktree/` name exclusion
-    fails the moment a worktree is named differently — and this lane's own
-    sibling checkouts are not uniformly named. What actually makes a directory a
-    separate checkout is its own `.git`, and git already knows: measured,
-    `ls-files --cached --others --exclude-standard` emits a nested checkout as a
-    bare directory entry and lists NO file inside it, for both a nested `git
-    init` and a real `git worktree add` (whose `.git` is a file, not a
-    directory).
-
-    **`--others` is deliberate, not incidental.** Tracked-only (`git ls-files`)
-    would drop a file that exists in this tree but is not yet staged — which is
-    the false-green direction again, one step smaller. `--exclude-standard`
-    keeps ignored build output out.
-
-    A missing or failing git REFUSES rather than falling back to `rglob`: a
-    fallback to the wider field of view is exactly the silent revert this
-    function exists to prevent.
-
-    **Measured: in a clean checkout this changes nothing.** Both the old walk
-    and this one return the same 1710 files here, with no difference in either
-    direction — so CI's result is untouched and the only thing removed is the
-    local over-reach. That is deliberately NOT asserted as a test: the equality
-    holds only where there is no sibling checkout, and a test asserting it would
-    fail in exactly the tree this function exists to serve.
-    """
-    result = subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
-        ["git", "-C", str(root), *_LS_FILES],  # noqa: S607 # nosec B607
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:  # pragma: no cover - refuses, never degrades
-        raise RuntimeError(
-            f"git ls-files failed in {root}: {result.stderr.decode(errors='replace')}. "
-            "This sweep refuses rather than falling back to a directory walk, "
-            "which would silently restore the sibling-worktree over-reach"
-        )
-    names = result.stdout.decode("utf-8", errors="replace").split("\0")
-    return sorted(root / name for name in names if name.endswith(".py"))
 
 
 def _effects_implementations() -> set[str]:

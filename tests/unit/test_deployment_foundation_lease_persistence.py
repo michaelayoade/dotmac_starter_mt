@@ -59,6 +59,8 @@ from dotmac_deployment_foundation.lease_release import (
     write_release,
 )
 
+from tests.unit.working_tree import python_files
+
 PACKAGE = (
     Path(__file__).resolve().parents[2]
     / "packages"
@@ -477,7 +479,7 @@ def _publish_sites() -> set[str]:
     """
     found: set[str] = set()
     for root in (PACKAGE, SCRIPTS):
-        for path in sorted(root.rglob("*.py")):
+        for path in python_files(root):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if (

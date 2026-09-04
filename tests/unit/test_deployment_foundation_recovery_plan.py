@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,8 @@ from dotmac_deployment_foundation.recovery_plan import (
     require_recovery_plan_digest,
 )
 from dotmac_deployment_foundation.version import VERSION
+
+from tests.unit.working_tree import python_files
 
 PACKAGE = (
     Path(__file__).resolve().parents[2]
@@ -525,7 +528,7 @@ def _canonicalizing_modules(root: Path = PACKAGE) -> dict[str, int]:
     """AST, not grep. A mention in a docstring is not a call, and this package
     has already shipped a detector that matched its own prose."""
     found: dict[str, int] = {}
-    for path in sorted(root.rglob("*.py")):
+    for path in python_files(root):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -603,7 +606,7 @@ def test_nothing_on_a_host_path_constructs_a_recovery_plan() -> None:
     it in that change; do not delete it.
     """
     importers = []
-    for path in sorted(PACKAGE.rglob("*.py")):
+    for path in python_files(PACKAGE):
         if path.name in {"recovery_plan.py", "__init__.py"}:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -712,7 +715,16 @@ def test_the_population_detector_bites_and_does_not_read_prose(
     A ratchet over a tree that happens to match proves nothing about its ability
     to fail — and this package has already shipped a detector that matched its
     own docstring, which is why the negative half is here too.
+
+    The fixture is a real checkout because the shared enumeration REFUSES a
+    directory git cannot answer for, rather than falling back to a directory
+    walk. That refusal caught this test the moment the two sweeps converged —
+    which is the refusal doing its job, not an inconvenience to work around.
     """
+    subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell
+        ["git", "init", "-q", str(tmp_path)],  # noqa: S607 # nosec B607
+        check=True,
+    )
     (tmp_path / "canonicalizes.py").write_text(
         "import json\ndef f(d):\n    return json.dumps(d, sort_keys=True)\n"
     )
