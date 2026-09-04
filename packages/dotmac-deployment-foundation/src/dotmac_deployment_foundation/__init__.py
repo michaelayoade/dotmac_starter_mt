@@ -157,6 +157,15 @@ from .execution_plan import (
     render_execution_plan,
     require_execution_plan_digest,
 )
+from .execution_plan_v2 import (
+    EXECUTION_PLAN_V2_SCHEMA,
+    FoundationExecutionPlanV2,
+    PostgresPrincipalCredentialBootstrapV1,
+    canonical_execution_plan_v2_bytes,
+    execution_plan_v2_digest,
+    render_execution_plan_v2,
+    require_execution_plan_v2_digest,
+)
 from .exposure import (
     OWNERSHIP_PREFIX,
     ExposureEffects,
@@ -447,6 +456,13 @@ __all__ = [
     "RunStanding",
     "StepEvidenceV1",
     "StepStanding",
+    "EXECUTION_PLAN_V2_SCHEMA",
+    "FoundationExecutionPlanV2",
+    "PostgresPrincipalCredentialBootstrapV1",
+    "canonical_execution_plan_v2_bytes",
+    "execution_plan_v2_digest",
+    "render_execution_plan_v2",
+    "require_execution_plan_v2_digest",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
     "RECOVERY_PLAN_SCHEMA",
     "CapturedPrestateV1",
