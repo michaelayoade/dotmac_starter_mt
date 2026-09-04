@@ -140,7 +140,29 @@ class TerminalRefusal(str, Enum):
     whoever decides whether a host may be destroyed, so the vocabulary it
     branches on belongs with the record, not with the runner's internals.
 
-    ## DERIVED from all thirteen terminal refusals, found by CLASS not by grep
+    ## THE RULE, so the next person derives it the same way
+
+    **Derive the mapping from the twelve SEMANTIC refusal paths — every raise of
+    a `DeploymentFoundationError` subclass, `ProvocationError` included — rather
+    than by counting textual `raise DeploymentFoundationError` statements.**
+
+    That is the rule rather than the result, and it is here because three
+    independent attempts got three different wrong answers, each from the shape
+    of the tool rather than the shape of the question:
+
+    * a text search for `raise DeploymentFoundationError` finds the base class
+      name and misses every subclass — that is how eight was reached;
+    * a scan of one file misses the other two — that is how ten was reached;
+    * a summary relayed without its mapping loses which member a site belongs to
+      — that is how a member came to look inert when it was not, and then
+      genuinely was for a different reason.
+
+    Counting `raise` statements gives thirteen. One of them is
+    ``raise SystemExit(main())``, which is process propagation and not a terminal
+    disposition. **Twelve is the mappable set.**
+
+    ## The twelve, mapped
+
 
     The first derivation found eight, by scanning `exposure_rehearsal_runner.py`
     for `raise DeploymentFoundationError`. That was a grep's answer. Three more
