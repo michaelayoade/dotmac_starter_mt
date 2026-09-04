@@ -1196,6 +1196,87 @@ def _installed_admit_smoke(
     )
 
 
+#: The prestate-digest canary, run against the INSTALLED wheel.
+#:
+#: `FailedSystemObservationDigestV1` is a cross-repository binding whose ONLY
+#: producer is this facility — Control stores and signs the value and computes
+#: nothing. So the bytes that matter are the ones a consumer installs, not the
+#: ones in a checkout, and a digest proven only in the source tree is proven for
+#: a thing nobody runs.
+#:
+#: The expectation is FROZEN. Recomputing it here from the same installed code
+#: would compare the wheel with itself and pass for any encoding, including a
+#: changed one — which is exactly the failure a canary exists to catch.
+_PRESTATE_DIGEST_PROBE: Final = """\
+import sys
+
+from dotmac_deployment_foundation import (
+    PRESTATE_DIGEST_SCHEMA,
+    PRESTATE_DISCRIMINATOR,
+    PRESTATE_SCHEMA,
+)
+from dotmac_deployment_foundation.execution_plan import HostPrestateV1
+from dotmac_deployment_foundation.recovery_plan import FailedSystemObservationV1
+
+FROZEN = "sha256:bb81b4a47e5c8f3deff5fe9a94db5a910353381dacb7068d30ae47bb43387068"
+
+problems = []
+
+observation = FailedSystemObservationV1(
+    target="installed-artifact-probe",
+    roles=HostPrestateV1(roles=(("app", "sha256:" + "c" * 64),)),
+    observed_descriptor_digest="sha256:" + "a" * 64,
+)
+
+if observation.digest() != FROZEN:
+    problems.append(
+        "the installed wheel produces %s for the frozen observation, not %s. "
+        "This value is signed by another repository and computed only here"
+        % (observation.digest(), FROZEN)
+    )
+if PRESTATE_SCHEMA != "FailedSystemObservationV1":
+    problems.append("the document schema moved: %s" % PRESTATE_SCHEMA)
+if PRESTATE_DIGEST_SCHEMA != "FailedSystemObservationDigestV1":
+    problems.append("the value schema moved: %s" % PRESTATE_DIGEST_SCHEMA)
+if PRESTATE_DISCRIMINATOR != (
+    "dotmac.deployment_foundation.failed_system_observation.v1"
+):
+    problems.append("the discriminator moved: %s" % PRESTATE_DISCRIMINATOR)
+
+namespace = {}
+exec("from dotmac_deployment_foundation import *", namespace)
+for name in (
+    "PRESTATE_SCHEMA",
+    "PRESTATE_DIGEST_SCHEMA",
+    "PRESTATE_DISCRIMINATOR",
+    "canonical_prestate_bytes",
+    "failed_system_observation_digest",
+):
+    if name not in namespace:
+        problems.append("%s is not on the installed public surface" % name)
+
+if problems:
+    print(chr(10).join(problems), file=sys.stderr)
+    sys.exit(1)
+print("installed prestate digest canary: %s" % FROZEN)
+"""
+
+
+def _prestate_digest_smoke(venv_python: Path, workdir: Path) -> None:
+    """Run the prestate canary with the INSTALLED interpreter."""
+    probe = workdir / "prestate_digest_probe.py"
+    probe.write_text(_PRESTATE_DIGEST_PROBE, encoding="utf-8")
+    checked = subprocess.run(
+        [str(venv_python), str(probe)], check=False, capture_output=True, text=True
+    )
+    if checked.returncode != 0:
+        raise ReleaseRefused(
+            "the installed bytes do not produce the frozen prestate digest, or "
+            "do not publish its identity:\n  - "
+            + "\n  - ".join(checked.stderr.strip().splitlines())
+        )
+
+
 def _execution_binding_smoke(venv_python: Path, workdir: Path) -> None:
     """Run the binding probe with the INSTALLED interpreter."""
     probe = workdir / "execution_binding_probe.py"
@@ -1322,6 +1403,7 @@ def _cli_smoke(venv_python: Path, entry_point: str, descriptor: Path) -> None:
         # and then executes without one is exactly the state this release
         # repairs, and only the artifact can say whether it still does.
         _execution_binding_smoke(venv_python, Path(tmp))
+        _prestate_digest_smoke(venv_python, Path(tmp))
         # And the whole journey: install a real bindings wheel, ADMIT end to
         # end through the console script, uninstall it, watch the identical
         # command refuse. Item 11 of the a5 audit.

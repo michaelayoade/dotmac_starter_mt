@@ -38,9 +38,9 @@ from dotmac_deployment_foundation.execution_plan import (
     HostPrestateV1,
 )
 from dotmac_deployment_foundation.recovery_plan import (
-    INCUMBENT_PRESTATE_DIGEST_SCHEMA,
-    INCUMBENT_PRESTATE_DISCRIMINATOR,
     KNOWN_PRESTATE_DISCRIMINATORS,
+    PRESTATE_DIGEST_SCHEMA,
+    PRESTATE_DISCRIMINATOR,
     PRESTATE_MISMATCH,
     PRESTATE_SCHEMA,
     PRESTATE_UNDISCRIMINATED,
@@ -48,8 +48,8 @@ from dotmac_deployment_foundation.recovery_plan import (
     RECOVERY_PLAN_SCHEMA,
     FailedSystemObservationV1,
     canonical_prestate_bytes,
-    incumbent_prestate_digest,
-    require_incumbent_prestate_digest,
+    failed_system_observation_digest,
+    require_failed_system_observation_digest,
 )
 
 A = "sha256:" + "a" * 64
@@ -109,8 +109,8 @@ def test_the_matching_pair_is_admitted() -> None:
     function that refuses everything."""
     one = _observation()
     assert (
-        require_incumbent_prestate_digest(
-            one, authorized=one.digest(), discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+        require_failed_system_observation_digest(
+            one, authorized=one.digest(), discriminator=PRESTATE_DISCRIMINATOR
         )
         == one.digest()
     )
@@ -122,10 +122,10 @@ def test_document_A_against_digest_B_refuses() -> None:
     is exactly the `x == x` failure this clause exists to detect."""
     other = _observation(target="prod-abuja-02")
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
+        require_failed_system_observation_digest(
             _observation(),
             authorized=other.digest(),
-            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+            discriminator=PRESTATE_DISCRIMINATOR,
         )
     assert exc.value.code == PRESTATE_MISMATCH
 
@@ -136,10 +136,10 @@ def test_document_B_against_digest_A_refuses() -> None:
     one = _observation()
     other = _observation(target="prod-abuja-02")
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
+        require_failed_system_observation_digest(
             other,
             authorized=one.digest(),
-            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+            discriminator=PRESTATE_DISCRIMINATOR,
         )
     assert exc.value.code == PRESTATE_MISMATCH
 
@@ -151,12 +151,12 @@ def test_moving_BOTH_together_is_not_a_pass_against_the_original() -> None:
     """
     original = _observation().digest()
     moved = _observation(target="prod-abuja-02")
-    assert require_incumbent_prestate_digest(
-        moved, authorized=moved.digest(), discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+    assert require_failed_system_observation_digest(
+        moved, authorized=moved.digest(), discriminator=PRESTATE_DISCRIMINATOR
     )
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
-            moved, authorized=original, discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR
+        require_failed_system_observation_digest(
+            moved, authorized=original, discriminator=PRESTATE_DISCRIMINATOR
         )
     assert exc.value.code == PRESTATE_MISMATCH
 
@@ -187,9 +187,9 @@ def test_the_value_schema_is_not_the_document_schema() -> None:
     """Two names for two things — whoever handles the digest needs a word for it
     that is not the word for a document they never parse. Control is exactly
     that party: it stores and signs the value and has no canonicalizer."""
-    assert INCUMBENT_PRESTATE_DIGEST_SCHEMA == "IncumbentPrestateDigestV1"
+    assert PRESTATE_DIGEST_SCHEMA == "FailedSystemObservationDigestV1"
     assert PRESTATE_SCHEMA == "FailedSystemObservationV1"
-    assert INCUMBENT_PRESTATE_DIGEST_SCHEMA != PRESTATE_SCHEMA
+    assert PRESTATE_DIGEST_SCHEMA != PRESTATE_SCHEMA
 
 
 def test_the_digest_is_a_pure_function_of_the_observation() -> None:
@@ -197,7 +197,7 @@ def test_the_digest_is_a_pure_function_of_the_observation() -> None:
     parties reaching different values for one observation is the divergence this
     binding exists to prevent."""
     assert _observation().digest() == _observation().digest()
-    assert incumbent_prestate_digest(_observation().as_document()) == (
+    assert failed_system_observation_digest(_observation().as_document()) == (
         _observation().digest()
     )
 
@@ -224,7 +224,7 @@ def test_an_undiscriminated_row_is_historical_and_unexecutable() -> None:
     """
     one = _observation()
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
+        require_failed_system_observation_digest(
             one, authorized=one.digest(), discriminator=""
         )
     assert exc.value.code == PRESTATE_UNDISCRIMINATED
@@ -235,7 +235,7 @@ def test_an_unknown_discriminator_refuses() -> None:
     facility does not have is not comparing."""
     one = _observation()
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
+        require_failed_system_observation_digest(
             one,
             authorized=one.digest(),
             discriminator="dotmac.deployment_foundation.incumbent_prestate.v9",
@@ -248,10 +248,10 @@ def test_the_correct_discriminator_with_a_wrong_digest_still_refuses() -> None:
     and carrying the wrong digest is still the wrong incumbent."""
     one = _observation()
     with pytest.raises(PreconditionFailed) as exc:
-        require_incumbent_prestate_digest(
+        require_failed_system_observation_digest(
             one,
             authorized="sha256:" + "9" * 64,
-            discriminator=INCUMBENT_PRESTATE_DISCRIMINATOR,
+            discriminator=PRESTATE_DISCRIMINATOR,
         )
     assert exc.value.code == PRESTATE_MISMATCH
 
@@ -275,7 +275,7 @@ def test_the_discriminator_names_the_schema_and_is_closed() -> None:
     """It names the observation schema AND the rules that turned it into bytes.
     A consumer accepting any string would trust a producer it has never met to
     have used rules it cannot check."""
-    assert INCUMBENT_PRESTATE_DISCRIMINATOR == (
-        "dotmac.deployment_foundation.incumbent_prestate.v1"
+    assert PRESTATE_DISCRIMINATOR == (
+        "dotmac.deployment_foundation.failed_system_observation.v1"
     )
-    assert KNOWN_PRESTATE_DISCRIMINATORS == {INCUMBENT_PRESTATE_DISCRIMINATOR}
+    assert KNOWN_PRESTATE_DISCRIMINATORS == {PRESTATE_DISCRIMINATOR}

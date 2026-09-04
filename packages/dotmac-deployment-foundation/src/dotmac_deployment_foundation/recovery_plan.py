@@ -114,12 +114,12 @@ __all__ = [
     "PRESTATE_UNKNOWN_DISCRIMINATOR",
     "PRESTATE_UNDISCRIMINATED",
     "KNOWN_PRESTATE_DISCRIMINATORS",
-    "INCUMBENT_PRESTATE_DISCRIMINATOR",
-    "require_incumbent_prestate_digest",
-    "incumbent_prestate_digest",
+    "PRESTATE_DISCRIMINATOR",
+    "require_failed_system_observation_digest",
+    "failed_system_observation_digest",
     "canonical_prestate_bytes",
     "PRESTATE_MISMATCH",
-    "INCUMBENT_PRESTATE_DIGEST_SCHEMA",
+    "PRESTATE_DIGEST_SCHEMA",
     "PRESTATE_SCHEMA",
     "RECOVERY_PLAN_DIGEST_MISMATCH",
     "RECOVERY_PLAN_DIGEST_SCHEMA",
@@ -154,6 +154,12 @@ PRESTATE_SCHEMA: Final = "FailedSystemObservationV1"
 #: The VALUE schema — the name of the digest, kept apart from the name of the
 #: document, the same split `ExecutionPlanDigestV1` draws.
 #:
+#: Named after the DOCUMENT it digests rather than after Control's field.
+#: Control stores it as ``incumbent_prestate_digest``, which describes the
+#: role the value plays THERE; this names what the value IS. A digest named
+#: for a consumer's field would have to be renamed when a second consumer
+#: stored it under another name, and the bytes would not have changed.
+#:
 #: **This is a third cross-repository binding and it has an owner.** Control's
 #: `RecoveryGrantStatementV1` carries `incumbent_prestate_digest` as a signed
 #: term and its `RecoverySubject` requires a caller to state one — and Control
@@ -171,7 +177,7 @@ PRESTATE_SCHEMA: Final = "FailedSystemObservationV1"
 #: INSTALLED ADAPTER computes it, so the producer is the artifact rather than a
 #: source tree; Control stores, signs and compares, and implements no second
 #: canonicalizer.
-INCUMBENT_PRESTATE_DIGEST_SCHEMA: Final = "IncumbentPrestateDigestV1"
+PRESTATE_DIGEST_SCHEMA: Final = "FailedSystemObservationDigestV1"
 
 #: Refused: the prestate in hand is not the one that was authorized.
 PRESTATE_MISMATCH: Final = "recovery_plan.prestate_mismatch"
@@ -187,15 +193,15 @@ PRESTATE_MISMATCH: Final = "recovery_plan.prestate_mismatch"
 #: neither its migration nor a `RecoveryGrantV1` version may redefine the
 #: encoding — that would be the second canonicalizer this whole binding exists
 #: to prevent, arriving as a schema change rather than as code.
-INCUMBENT_PRESTATE_DISCRIMINATOR: Final = (
-    "dotmac.deployment_foundation.incumbent_prestate.v1"
+PRESTATE_DISCRIMINATOR: Final = (
+    "dotmac.deployment_foundation.failed_system_observation.v1"
 )
 
 #: Every discriminator THIS version can honour. Closed, and it is what makes an
 #: unknown one refusable: a consumer that accepted any string would be trusting
 #: a producer it has never met to have used rules it cannot check.
 KNOWN_PRESTATE_DISCRIMINATORS: Final[frozenset[str]] = frozenset(
-    {INCUMBENT_PRESTATE_DISCRIMINATOR}
+    {PRESTATE_DISCRIMINATOR}
 )
 
 #: Refused: the stored row carries no discriminator.
@@ -377,12 +383,12 @@ class FailedSystemObservationV1:
         return canonical_prestate_bytes(self.as_document())
 
     def digest(self) -> str:
-        """``IncumbentPrestateDigestV1`` for this observation.
+        """``FailedSystemObservationDigestV1`` for this observation.
 
         The one authority. Control stores, signs and compares this value and
         computes nothing; Platform's installed adapter calls this function.
         """
-        return incumbent_prestate_digest(self.as_document())
+        return failed_system_observation_digest(self.as_document())
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -568,8 +574,8 @@ def canonical_prestate_bytes(document: Any) -> bytes:
     return canonical_plan_bytes(document, schema=PRESTATE_SCHEMA, path="prestate")
 
 
-def incumbent_prestate_digest(document: Any) -> str:
-    """``IncumbentPrestateDigestV1 = sha256(canonical FailedSystemObservationV1)``.
+def failed_system_observation_digest(document: Any) -> str:
+    """``FailedSystemObservationDigestV1``: sha256 over the canonical bytes.
 
     Not the recovery plan digest, not the bundle manifest digest, not the
     descriptor digest. Control carries all four as separate signed terms and
@@ -578,7 +584,7 @@ def incumbent_prestate_digest(document: Any) -> str:
     return str(Digest.of(canonical_prestate_bytes(document)))
 
 
-def require_incumbent_prestate_digest(
+def require_failed_system_observation_digest(
     observation: FailedSystemObservationV1,
     *,
     authorized: str,
@@ -605,7 +611,7 @@ def require_incumbent_prestate_digest(
             "the stored digest cannot say which encoding produced it. An "
             "undiscriminated row is HISTORICAL AND UNEXECUTABLE and is never "
             "backfilled as "
-            f"{INCUMBENT_PRESTATE_DISCRIMINATOR!r} by assumption: that would "
+            f"{PRESTATE_DISCRIMINATOR!r} by assumption: that would "
             "manufacture provenance for a value whose provenance is exactly what "
             "is missing",
             code=PRESTATE_UNDISCRIMINATED,
