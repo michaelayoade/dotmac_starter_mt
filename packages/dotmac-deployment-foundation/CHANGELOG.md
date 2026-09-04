@@ -21,15 +21,51 @@ the case where nobody can say. Constraining the closure does not excuse the
 cleanup axis: `cleanup` is still required and reusability is still the
 intersection of the two constraints.
 
-`exposure_rehearsal_runner.classify_refusal` now answers by TYPE first and by
-POSITION relative to first mutation second. Position is not a nicety: `errors.py`
+`exposure_rehearsal_runner.classify_refusal` answers by TYPE first and then by
+whether an exact lease was in hand. Type alone is not enough: `errors.py`
 documents `PreconditionFailed` as "a gate refused before anything was mutated"
 and `ExposureTransaction.run` raises it after applying the stack and rewriting
 both filter chains, while `SpecError` is raised both by
 `ProductDeploymentSpec.load` before host contact and by `build_receipt` after the
-whole transaction. One type, opposite operator actions. A below-lane refusal
-raised BEFORE any mutation still writes no release and leaves the host held; it
-must not borrow a member that asserts something about a machine.
+whole transaction. One type, opposite operator actions.
+
+### Three terminal cases, so the classifier answers on TWO facts
+
+`classify_refusal` took `host_mutated` alone, and a single boolean has two values
+for three cases — so the third case borrowed one of the others' answers. It takes
+`lease_in_hand` as well:
+
+- **no exact `HostLease.v2` in hand** — a descriptor that will not parse, a lease
+  that is missing, expired, or issued for another authorization run: NO member
+  and no release. A release discharges a lease, and there is none. An expired
+  lease stays `EXPIRED_HELD`, which is `HostStanding`'s answer for a holder
+  nobody can ask anything of;
+- **the lease in hand, and an invocation defect the lane PROVED before host
+  contact or mutation** — `precondition_unfit`;
+- **the lease in hand, and a generic failure that prevented host state from being
+  established** — `host_state_uncertified`, EVEN WITH
+  `host_mutation_attempted=false`. Holding the lease means the run owned the
+  host; a refusal it cannot name means it could not establish what state that
+  host is in. "Nothing was attempted" and "nobody can say" are different claims.
+  `_PERMITTED_CLOSURES` already bounds the member to `inspection_required` or
+  `destroy_only`.
+
+`host_mutated` is no longer the discriminator; it is the CHECK on the second
+case's premise. `precondition_unfit` is the only member whose meaning is a claim
+about the machine, so a refusal of that kind arriving past first mutation
+degrades to `host_state_uncertified` rather than asserting an untouched host —
+the site-134 drift, caught by the classifier instead of only by a position test
+over an arrangement of lines.
+
+The terminal-evidence sidecar records `lease_in_hand` beside
+`host_mutation_attempted`, so a reader can tell the three cases apart without
+re-deriving them from the notes.
+
+One consequence, stated rather than left to be found: `run` parses
+`--controller-identity` before it loads the lease, so a malformed fingerprint
+records no member. `TerminalRefusal`'s table still maps that refusal to
+`precondition_unfit` and the mapping is right; whether the parse should move
+behind `load_lease` so the case becomes recordable is OPEN.
 
 ### The `TerminalRefusal` mapping table is keyed semantically, not by line
 

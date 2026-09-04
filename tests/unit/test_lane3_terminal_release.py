@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import importlib.util
 import json
 import pathlib
 import sys
 import textwrap
+from datetime import UTC, datetime
 
 import pytest
 import yaml
@@ -603,33 +605,119 @@ def test_the_copy_IS_taken_when_the_store_write_succeeds(
 # ── absence means held ──────────────────────────────────────────────────────
 
 
-def test_a_refusal_below_this_lane_BEFORE_mutation_still_has_no_member() -> None:
-    """The precondition half, unchanged and deliberately so.
+# ── PATH 1: no exact V2 lease in hand -> no member, and therefore no release ─
 
-    A `SpecError` from `ProductDeploymentSpec.load` and a `PreconditionFailed`
-    from `load_lease` are raised before the runner has contacted the host at all.
-    They must NOT borrow `host_state_uncertified`, which asserts something about
-    a machine, so they keep answering `None`: no release, and the host stays
-    HELD. Whether they should instead carry `precondition_unfit` is an open
-    question the ruling did not settle, and answering it by inference is how a
-    member that promises "untouched and safely releasable" gets attached to a
-    run nobody characterised.
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        # `ProductDeploymentSpec.load`, before the lease is even looked for.
+        SpecError("bad descriptor"),
+        # `load_lease` on a missing record, and on a `HostLease.v1` record --
+        # readable as history and unable to authorize anything.
+        PreconditionFailed("no lease record for this target"),
+        SpecError("expected HostLease.v2, got 'HostLease.v1'"),
+        # `covers()`: expired, and issued for a different authorization run.
+        PreconditionFailed("the lease on this target expired at ..."),
+        PreconditionFailed("the lease references authorization run 'authz-1'"),
+        # A generic below-lane refusal, to show the LEASE is the discriminator
+        # here rather than the shape of the failure.
+        StepFailed("exposure", "boom"),
+        DeploymentFoundationError("bare"),
+    ],
+)
+def test_no_exact_lease_in_hand_names_no_member_at_all(
+    exc: DeploymentFoundationError,
+) -> None:
+    """A release DISCHARGES a lease. Without one there is nothing to discharge.
+
+    Michael's first case: a malformed descriptor, or a lease that is missing,
+    expired, or foreign to this authorization run, writes NO release. The host
+    keeps the standing it already had -- an expired lease stays `EXPIRED_HELD`,
+    which is `HostStanding`'s answer for a holder nobody can ask anything of.
+
+    Fails before the change because `classify_refusal` took no `lease_in_hand`
+    argument at all: it answered on `host_mutated` alone, so this call raises
+    `TypeError` at the keyword.
     """
+    assert runner.classify_refusal(exc, lease_in_hand=False, host_mutated=False) is None
+
+
+def test_the_lease_less_path_does_not_answer_by_TYPE_either() -> None:
+    """The near-miss for the control above: substitute the NEIGHBOUR's rule.
+
+    Path 2 answers by type -- `PreconditionUnfit` -> `precondition_unfit`. If
+    that rule were reached before the lease was consulted, every one of this
+    lane's own named refusals raised ahead of `load_lease` would come back with
+    a member, `record_terminal` would try to build a release from it, and the
+    only thing standing between that and a written record would be
+    `build_release`'s own lease check. One guard, where the ruling asks for two.
+
+    `--controller-identity` is the live instance: `run` parses it BEFORE the
+    lease, and a malformed fingerprint raises `PreconditionUnfit` there.
+    """
+    for kind, _ in runner._REFUSAL_BY_TYPE:
+        assert (
+            runner.classify_refusal(kind("x"), lease_in_hand=False, host_mutated=False)
+            is None
+        ), f"{kind.__name__} answered with a member while no lease was in hand"
+
+
+def test_the_lease_less_path_holds_even_past_first_mutation() -> None:
+    """`run` cannot reach a mutation without a lease, so this state is not one
+    the runner can be in -- which is exactly why the rule is stated rather than
+    left to the ordering of two lines. The lease is consulted FIRST and without
+    reference to `host_mutated`, so a future reordering cannot produce a release
+    that names no lease."""
     assert (
-        runner.classify_refusal(StepFailed("exposure", "boom"), host_mutated=False)
+        runner.classify_refusal(
+            StepFailed("apply_compose", "boom"), lease_in_hand=False, host_mutated=True
+        )
         is None
     )
-    assert (
-        runner.classify_refusal(PreconditionFailed("no lease"), host_mutated=False)
-        is None
+
+
+def test_an_expired_lease_is_still_EXPIRED_HELD_after_a_refused_run(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The consequence the first case exists to protect, asserted end to end.
+
+    `covers()` refuses an expired lease before `ctx.lease` is ever set, so the
+    run ends with nothing in hand, `record_terminal` is handed no outcome, and
+    the store stays empty. `host_standing` then still answers `EXPIRED_HELD` --
+    the standing that says a holder crashed or timed out and nobody can be asked
+    what happened, which is when destroying a host is least safe.
+
+    The sentence naming the LEASE is `main`'s, not `record_terminal`'s, and the
+    seam is worth being exact about: `main` classifies and explains, and
+    `record_terminal` is handed the result. So what is asserted here is what
+    `record_terminal` itself writes -- an unnameable outcome, no store record,
+    and `lease_in_hand: false` in the sidecar, which is the fact a reader needs
+    to tell "no lease was ever taken" from "a release could be named and could
+    not be written".
+    """
+    args = _args(tmp_path)
+    ctx = runner.TerminalContext()
+    ctx.controller_identity = FINGERPRINT
+    assert ctx.lease_in_hand is False
+    member = runner.classify_refusal(
+        PreconditionFailed("the lease expired"),
+        lease_in_hand=ctx.lease_in_hand,
+        host_mutated=ctx.host_mutated,
     )
+    assert member is None
+    assert runner.record_terminal(ctx, args, None) == ""
+    assert not release_path(args.target, directory=args.lease_dir).exists()
+    from dotmac_deployment_foundation.lease_release import HostStanding, host_standing
+
     assert (
-        runner.classify_refusal(SpecError("bad descriptor"), host_mutated=False) is None
+        host_standing(_lease(), None, now=datetime(2026, 9, 5, tzinfo=UTC))
+        is HostStanding.EXPIRED_HELD
     )
-    assert (
-        runner.classify_refusal(DeploymentFoundationError("bare"), host_mutated=False)
-        is None
-    )
+    evidence = json.loads(pathlib.Path(args.terminal_evidence_out).read_text())
+    assert evidence["lease_in_hand"] is False
+    assert evidence["outcome"] == {"receipt_digest": "", "refusal": ""}
+    assert any("NO RELEASE WRITTEN" in note for note in evidence["notes"])
 
 
 @pytest.mark.parametrize(
@@ -661,9 +749,84 @@ def test_a_refusal_below_this_lane_AFTER_mutation_is_host_state_uncertified(
     machine is in.
     """
     assert (
-        runner.classify_refusal(exc, host_mutated=True)
+        runner.classify_refusal(exc, lease_in_hand=True, host_mutated=True)
         is TerminalRefusal.HOST_STATE_UNCERTIFIED
     )
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        StepFailed("apply_compose", "docker compose up exited 1"),
+        PreconditionFailed("the applied exposure did not verify"),
+        SpecError("a receipt is missing an item"),
+        # THE instance: `ExposureTransaction.run` takes the deployment lock
+        # BEFORE its first effect, so this arrives with the lease in hand and
+        # nothing touched.
+        LockUnavailableError("another deployment holds the lock"),
+        DeploymentFoundationError("bare"),
+    ],
+)
+def test_a_generic_failure_UNDER_THE_LEASE_is_uncertified_even_unmutated(
+    exc: DeploymentFoundationError,
+) -> None:
+    """Michael's third case, and the one that reads wrong and is right.
+
+    Holding the lease means this run OWNED the host. A refusal it cannot name
+    means it could not establish what state that host is in — and "nothing was
+    attempted" is a DIFFERENT claim from "nobody can say". Only the second is one
+    the run can defend, so `host_state_uncertified` is the honest answer with
+    `host_mutation_attempted=false`.
+
+    Fails before the change twice over: `classify_refusal` took no
+    `lease_in_hand` keyword, and its positional rule answered `None` here —
+    silence indistinguishable from a run that never started.
+    """
+    assert (
+        runner.classify_refusal(exc, lease_in_hand=True, host_mutated=False)
+        is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    )
+
+
+def test_that_generic_failure_does_NOT_collapse_into_precondition_unfit() -> None:
+    """The near-miss for the control above: substitute path 2's rule.
+
+    The tempting reading is "nothing was mutated, so the host is untouched and
+    safely releasable" — which is `precondition_unfit`'s pole, and it is a claim
+    about a MACHINE. A run that cannot account for its own failure has not
+    established that, and a release carrying that member would tell a destroyer
+    the host is fine on the strength of an inference nobody made.
+
+    Both wrong answers are named, because they fail in opposite directions:
+    `precondition_unfit` over-claims, `None` writes nothing at all and leaves a
+    host held with no record of why.
+    """
+    member = runner.classify_refusal(
+        StepFailed("apply_compose", "boom"), lease_in_hand=True, host_mutated=False
+    )
+    assert member is not TerminalRefusal.PRECONDITION_UNFIT
+    assert member is not None
+    assert member is TerminalRefusal.HOST_STATE_UNCERTIFIED
+
+
+def test_the_unmutated_uncertified_closure_is_restricted_to_inspection_or_destroy(
+    tmp_path: pathlib.Path, proven: None
+) -> None:
+    """The ruling's second sentence about case three: restrict the closure.
+
+    `_PERMITTED_CLOSURES` bounds `host_state_uncertified` away from `REUSABLE`,
+    and the constraint is on the REFUSAL rather than on whether a mutation was
+    attempted — which is what makes it hold here, where nothing was touched and
+    the naive answer would be "reusable, obviously".
+    """
+    ctx = _context(host_mutated=False)
+    release = runner.build_release(
+        ctx,
+        _args(tmp_path),
+        TerminalOutcome(refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED),
+    )
+    assert release.closure is HostClosure.INSPECTION_REQUIRED
+    assert release.closure is not HostClosure.REUSABLE
 
 
 def test_this_lanes_own_refusals_keep_their_own_member_after_mutation() -> None:
@@ -675,13 +838,101 @@ def test_this_lanes_own_refusals_keep_their_own_member_after_mutation() -> None:
     vocabulary would collapse to two members. The type is consulted FIRST.
     """
     assert (
-        runner.classify_refusal(runner.EvidenceUnreadable("x"), host_mutated=True)
+        runner.classify_refusal(
+            runner.EvidenceUnreadable("x"), lease_in_hand=True, host_mutated=True
+        )
         is TerminalRefusal.EVIDENCE_UNREADABLE
     )
     assert (
-        runner.classify_refusal(runner.ProbeRefused("x"), host_mutated=True)
+        runner.classify_refusal(
+            runner.ProbeRefused("x"), lease_in_hand=True, host_mutated=True
+        )
         is TerminalRefusal.PROBE_REFUSED
     )
+
+
+# ── PATH 2: a PROVEN invocation defect, under the lease, before contact ─────
+
+
+def test_a_proven_invocation_defect_under_the_lease_is_precondition_unfit() -> None:
+    """Michael's second case. PROVEN, not assumed: the refusal carries one of
+    this lane's own classes, raised by a check `run` asks ahead of its first
+    mutation, so "untouched and safely releasable" is a sentence this run can
+    defend about the machine."""
+    assert (
+        runner.classify_refusal(
+            runner.PreconditionUnfit("no private port"),
+            lease_in_hand=True,
+            host_mutated=False,
+        )
+        is TerminalRefusal.PRECONDITION_UNFIT
+    )
+
+
+def test_a_proven_invocation_defect_does_NOT_become_uncertified() -> None:
+    """The near-miss for the control above: substitute path 3's rule.
+
+    A classifier that answered `host_state_uncertified` for everything it holds a
+    lease for would collapse two members that demand OPPOSITE operator actions —
+    fix the input and do not touch the machine, versus inspect the machine before
+    re-running — and every unfit descriptor would send somebody to a host that
+    was never contacted.
+    """
+    member = runner.classify_refusal(
+        runner.PreconditionUnfit("no private port"),
+        lease_in_hand=True,
+        host_mutated=False,
+    )
+    assert member is not TerminalRefusal.HOST_STATE_UNCERTIFIED
+    assert member is TerminalRefusal.PRECONDITION_UNFIT
+
+
+def test_a_precondition_refusal_PAST_first_mutation_degrades() -> None:
+    """The premise is CHECKED, not trusted — this is site 134's ratchet.
+
+    Every check that raises `PreconditionUnfit` sits ahead of the first mutation
+    in `run` today, and that is an arrangement of lines. Three of them once
+    drifted behind an applied compose stack and two rewritten filter chains, and
+    a release written from there would have said the host was untouched when it
+    was not. So the second boolean is what stops the premise being a comment: a
+    precondition refusal arriving past first mutation loses its member.
+
+    The error lands in the direction that asks for an inspection nobody needed,
+    never the one that advertises an unexamined host as clean.
+    """
+    assert (
+        runner.classify_refusal(
+            runner.PreconditionUnfit("no private port"),
+            lease_in_hand=True,
+            host_mutated=True,
+        )
+        is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    )
+
+
+def test_only_PRECONDITION_UNFIT_degrades_past_first_mutation() -> None:
+    """The near-miss for the degradation: it must not swallow the vocabulary.
+
+    `evidence_unreadable` and `probe_refused` are raised AFTER the apply by
+    design and their poles assert nothing about the host being untouched.
+    `precondition_unfit` is the only member whose meaning is a claim about the
+    machine, so it is the only one a mutation can falsify — a blanket
+    "past mutation, everything is uncertified" rule would leave two members.
+    """
+    survivors = {
+        member
+        for kind, member in runner._REFUSAL_BY_TYPE
+        if runner.classify_refusal(kind("x"), lease_in_hand=True, host_mutated=True)
+        is member
+    }
+    assert TerminalRefusal.PRECONDITION_UNFIT not in survivors
+    assert survivors == {
+        TerminalRefusal.RECEIPT_INCONSISTENT,
+        TerminalRefusal.EVIDENCE_UNREADABLE,
+        TerminalRefusal.EVIDENCE_INCOMPLETE,
+        TerminalRefusal.PROBE_REFUSED,
+        TerminalRefusal.HOST_STATE_UNCERTIFIED,
+    }
 
 
 @pytest.mark.parametrize(
@@ -701,10 +952,13 @@ def test_this_lanes_own_refusals_keep_their_own_member_after_mutation() -> None:
 def test_every_refusal_this_lane_raises_is_mapped(
     kind: type[DeploymentFoundationError], member: TerminalRefusal
 ) -> None:
-    """The near-miss for the test above: these are named, and none of them is
-    None — including with no mutation attempted, where the positional rule
-    answers `None` and would otherwise mask a missing type mapping."""
-    assert runner.classify_refusal(kind("x"), host_mutated=False) is member
+    """The near-miss for the test above: under the lease and before first
+    mutation — the position where every one of these is actually raised — each
+    class answers with its OWN member and none of them is `None`."""
+    assert (
+        runner.classify_refusal(kind("x"), lease_in_hand=True, host_mutated=False)
+        is member
+    )
 
 
 def test_the_mapping_is_derived_from_the_class_hierarchy_not_a_line_list() -> None:
@@ -747,9 +1001,16 @@ def test_that_obligation_would_notice_a_new_class(
         and value.__module__ == runner.__name__
     }
     assert Unmapped in defined - {kind for kind, _ in runner._REFUSAL_BY_TYPE}
-    # Asked with no mutation attempted, so the positional rule cannot answer for
-    # it: an unmapped class of THIS lane's own must still show up as unmapped.
-    assert runner.classify_refusal(Unmapped("x"), host_mutated=False) is None
+    # And the classifier can no longer be the backstop for this, which is worth
+    # stating rather than leaving as a silent consequence: with the lease in hand
+    # every unnamed refusal is `host_state_uncertified`, so an unmapped class of
+    # this lane's own is ABSORBED rather than surfaced. The set comparison above
+    # is now the only detector, and it is the structural one — it reads the class
+    # hierarchy rather than depending on a call happening to be made.
+    assert (
+        runner.classify_refusal(Unmapped("x"), lease_in_hand=True, host_mutated=False)
+        is TerminalRefusal.HOST_STATE_UNCERTIFIED
+    )
 
 
 def test_a_failed_apply_releases_the_host_as_needing_inspection(
@@ -765,7 +1026,9 @@ def test_a_failed_apply_releases_the_host_as_needing_inspection(
     true, because the apply failed long before `run_cleanup` is reached.
     """
     member = runner.classify_refusal(
-        StepFailed("apply_compose", "docker compose up exited 1"), host_mutated=True
+        StepFailed("apply_compose", "docker compose up exited 1"),
+        lease_in_hand=True,
+        host_mutated=True,
     )
     assert member is TerminalRefusal.HOST_STATE_UNCERTIFIED
     ctx = _context(host_mutated=True)
@@ -869,8 +1132,11 @@ def test_every_precondition_unfit_site_is_asked_BEFORE_first_mutation(
     ("call", "member"),
     [
         ("inside_vantage.collect", "evidence_unreadable"),
-        ("build_receipt", "host_state_uncertified, positionally"),
-        ("transaction.run", "host_state_uncertified, positionally"),
+        ("build_receipt", "host_state_uncertified, as an unnamed below-lane refusal"),
+        (
+            "transaction.run",
+            "host_state_uncertified, as an unnamed below-lane refusal",
+        ),
     ],
 )
 def test_the_after_mutation_sites_really_are_after_it(call: str, member: str) -> None:
@@ -1000,6 +1266,110 @@ def test_the_translation_guard_reads_CONTAINMENT_not_proximity() -> None:
         """
     )
     assert _enclosing(near_miss) == []
+
+
+# ── the two facts, read off the source rather than trusted ─────────────────
+#
+# `classify_refusal` answers on `lease_in_hand` and `host_mutated`. Both are
+# claims about WHERE the run got to, so both are only as good as the place the
+# runner establishes them — and a place in a file is what a later commit moves.
+# The position guards above already hold `host_mutated`'s line to its meaning;
+# these do the same for the other fact, and for the call that consumes them.
+
+
+def _lease_assignment_line(function: ast.FunctionDef) -> int:
+    """Where `run` declares it holds a lease. Asserted single, same reason
+    `_first_mutation_line` is: two would be two answers to one question."""
+    lines = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "ctx.lease" for target in node.targets)
+    ]
+    assert len(lines) == 1, f"expected one `ctx.lease = ...`, found {lines}"
+    return lines[0]
+
+
+def test_the_lease_is_held_only_after_it_is_proven_to_COVER_this_run() -> None:
+    """`lease_in_hand` means an EXACT lease, and this is what makes that true.
+
+    `load_lease` refuses a missing, non-V2 or unparseable record, and `covers()`
+    refuses an expired window or a foreign authorization run. `ctx.lease` is
+    assigned after BOTH, so a rejected lease is never held — which is the whole
+    reason `TerminalContext.lease_in_hand` can be derived from `lease` rather
+    than tracked as its own flag.
+
+    Move the assignment ahead of `covers()` and the derivation silently starts
+    meaning "a lease file parsed", so an EXPIRED lease would name a member,
+    `build_release` would find a lease to discharge, and a run that was never
+    entitled to the host would release it. That is the defect this guard names.
+    """
+    function = _run_function()
+    assert _first_call_line(function, "load_lease") < _lease_assignment_line(function)
+    assert _first_call_line(function, "lease.covers") < _lease_assignment_line(function)
+
+
+def test_that_lease_position_guard_bites_and_has_a_near_miss() -> None:
+    """Sensitivity, both directions. The assertion above passes over a `run`
+    that is already correct, which proves nothing about its ability to fail."""
+    planted = _synthetic_run(
+        """
+        lease = load_lease(args.target, directory=args.lease_dir)
+        ctx.lease = lease
+        lease.covers(now=now, authorization_run_id=args.authorization_run)
+        """
+    )
+    assert _first_call_line(planted, "lease.covers") > _lease_assignment_line(planted)
+
+    near_miss = _synthetic_run(
+        """
+        lease = load_lease(args.target, directory=args.lease_dir)
+        lease.covers(now=now, authorization_run_id=args.authorization_run)
+        ctx.lease = lease
+        """
+    )
+    assert _first_call_line(near_miss, "lease.covers") < (
+        _lease_assignment_line(near_miss)
+    )
+
+
+def test_the_classifier_is_called_with_BOTH_facts_from_the_context() -> None:
+    """Three cases need two facts, and a hardcoded one is a case that vanished.
+
+    `lease_in_hand=True` written as a literal would make the lease-less path
+    unreachable and every pre-lease refusal name a member; `host_mutated=False`
+    written as a literal would restore the site-134 defect the degradation rule
+    exists to catch. Both keywords must be READ FROM `ctx`, and the check is over
+    the argument expressions rather than their presence.
+    """
+    tree = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "classify_refusal"
+    ]
+    assert len(calls) == 1, f"expected one classifier call, found {len(calls)}"
+    passed = {kw.arg: ast.unparse(kw.value) for kw in calls[0].keywords}
+    assert passed == {
+        "lease_in_hand": "ctx.lease_in_hand",
+        "host_mutated": "ctx.host_mutated",
+    }, f"the classifier is called with {passed}"
+
+
+def test_lease_in_hand_is_DERIVED_and_not_a_second_flag() -> None:
+    """A tracked boolean beside `ctx.lease` would be free to disagree with it.
+
+    The property has no setter, so nothing can assert a lease it does not hold,
+    and it is not a dataclass field — a second answer to "is a lease in hand"
+    is precisely the shape this repository has paid for elsewhere.
+    """
+    ctx = runner.TerminalContext()
+    assert ctx.lease_in_hand is False
+    assert "lease_in_hand" not in {f.name for f in dataclasses.fields(ctx)}
+    with pytest.raises(AttributeError):
+        ctx.lease_in_hand = True  # type: ignore[misc]
+    ctx.lease = _lease()
+    assert ctx.lease_in_hand is True
 
 
 # ── the crash boundary, read off the source ─────────────────────────────────
