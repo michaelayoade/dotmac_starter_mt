@@ -45,14 +45,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 from dotmac_kernel.namespaces import (
     MigrationOwner,
     migration_owner_ledger_digest,
     module_schema,
 )
 
-from scripts.check_allocation_serialized import GateError, run_gate
+from scripts.check_allocation_serialized import run_gate
 
 LEDGER = "packages/dotmac-kernel/src/dotmac_kernel/namespaces.py"
 
@@ -195,9 +194,9 @@ def test_the_digest_turns_that_clean_merge_into_a_conflict(tmp_path: Path) -> No
 
     result = _merge_tree(repository)
 
-    assert (
-        result.returncode != 0
-    ), "two sibling allocations still merge clean with the digest present"
+    assert result.returncode != 0, (
+        "two sibling allocations still merge clean with the digest present"
+    )
     assert "CONFLICT" in result.stdout
 
 
@@ -286,17 +285,33 @@ def test_a_restamped_allocation_passes_the_gate(tmp_path: Path) -> None:
     assert run_gate("main", "alloc/media-exchange", repo=str(repository)) == []
 
 
-def test_a_ledger_with_no_digest_at_all_is_indeterminate_not_a_pass(
+def test_a_ledger_with_no_digest_at_all_is_refused_not_a_pass(
     tmp_path: Path,
 ) -> None:
     """Deleting the literal must not read as "nothing to check".
 
     A gate whose check disappears with the thing it checks is the fail-open
     shape that let the first version of the allocation gate report every
-    package as unallocated. Removing the digest raises `GateError` (exit 2).
+    package as unallocated.
+
+    RENAMED and its verdict CHANGED, deliberately and not to make anything
+    green: this asserted `GateError` (exit 2, indeterminate). A ledger the gate
+    successfully read and found to carry no digest is not a question it could
+    not answer — it answered, and the answer was no. Indeterminate is reserved
+    for what it genuinely cannot read, such as a digest that is a computed
+    expression rather than a literal. So this is now a violation (exit 1), with
+    a diagnostic that additionally says WHICH of the two absences it is: a
+    branch removing a digest its merge base had, or a bootstrap that failed to
+    introduce one. Both are refusals; they have different repairs.
     """
     repository = _two_sibling_allocations(tmp_path, with_digest=False)
     _git(repository, "checkout", "-q", "alloc/managed-email")
 
-    with pytest.raises(GateError, match="declares no MIGRATION_OWNER_LEDGER_DIGEST"):
-        run_gate("main", "HEAD", repo=str(repository))
+    violations = run_gate("main", "HEAD", repo=str(repository))
+
+    assert violations, "a ledger with no digest must not pass"
+    assert "head declares no MIGRATION_OWNER_LEDGER_DIGEST" in violations[0]
+    assert "must INTRODUCE it" in violations[0], (
+        "neither side has a digest, so this is the bootstrap case and the "
+        "diagnostic must say so rather than accusing the branch of a removal"
+    )

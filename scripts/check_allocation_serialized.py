@@ -74,8 +74,19 @@ for the tree it sits in is a different question, answered in-tree by
 `verify_migration_owner_ledger_digest()` — a gate that cannot see a sibling
 branch and an in-tree check that cannot see git, each doing only what it can.
 
+## The one-time transition
+
+The digest cannot always have existed. Exactly one branch has a merge base with
+no digest to compare against — the one that introduces it — and that branch is
+checked DIFFERENTLY rather than not at all: it must introduce a well-formed
+digest over an UNCHANGED row set. An allocation smuggled into that step is
+refused, because its row would be the only row in the ledger's history that no
+digest ever serialized, and no later gate could tell it apart from a row that
+had always been there. Land the digest alone first, then allocations on top.
+
 Exit status is 0 when serialized, 1 on a violation, 2 when the gate could not
-establish an answer — an indeterminate gate must never read as a pass.
+establish an answer — an indeterminate gate must never read as a pass, and a
+gate that read the ledger and rejected it must not read as indeterminate.
 """
 
 from __future__ import annotations
@@ -226,8 +237,16 @@ def ledger_row_signatures(source: str) -> dict[str, str]:
     return signatures
 
 
-def committed_digest(source: str, label: str) -> str:
-    """The `MIGRATION_OWNER_LEDGER_DIGEST` string literal at a ledger revision."""
+def find_digest(source: str, label: str) -> str | None:
+    """The `MIGRATION_OWNER_LEDGER_DIGEST` string literal, or None if absent.
+
+    Absence is returned rather than raised. It has two different meanings the
+    caller must tell apart — at the merge base it is the one-time transition
+    into a digested ledger, at head it is a removal — and only one of them is
+    legitimate. A non-literal value is still a GateError: the gate compares
+    revisions without executing either, so a computed digest is genuinely
+    indeterminate rather than wrong.
+    """
     for node in ast.walk(ast.parse(source)):
         target = None
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -244,24 +263,79 @@ def committed_digest(source: str, label: str) -> str:
                 "compared across revisions without executing the ledger"
             )
         return value.value
-    raise GateError(
-        f"{label}: {LEDGER_PATH} declares no {DIGEST_NAME}. The digest is the "
-        "only thing that makes two sibling allocation branches conflict; a "
-        "ledger without one is not gated, not exempt."
-    )
+    return None
 
 
 def digest_violations(base_ledger: str, head_ledger: str) -> list[str]:
-    """The ledger's content moved, so its committed digest must have moved too."""
-    if ledger_row_signatures(base_ledger) == ledger_row_signatures(head_ledger):
-        return []  # no row added, removed or repointed: nothing to serialize
-    base = committed_digest(base_ledger, "merge base")
-    head = committed_digest(head_ledger, "head")
+    """The ledger's content moved, so its committed digest must have moved too.
+
+    ## The one-time transition
+
+    The digest cannot always have existed, so there is exactly one branch whose
+    merge base has no digest to compare against: the bootstrap. It was tempting
+    to treat that as "nothing to check", and the first version did — it returned
+    early whenever the row set was unchanged, before reading either digest. That
+    made the legitimate bootstrap indistinguishable from a head carrying a
+    MALFORMED digest, or no digest at all: all three exited 0, and the gate
+    printed that every row change had moved the digest, which it had not
+    checked. A transition is not the absence of a check; it is a DIFFERENT
+    check, and it is allowed to do exactly one thing — introduce a well-formed
+    digest over an unchanged ledger. A row change smuggled into it is refused,
+    because that row would be the one row in the ledger's history that no digest
+    ever serialized.
+
+    Verdicts are violations (exit 1), never `GateError` (exit 2). Indeterminate
+    is reserved for what the gate genuinely cannot read; every case here is one
+    it read and rejected.
+    """
+    base = find_digest(base_ledger, "merge base")
+    head = find_digest(head_ledger, "head")
+    rows_moved = ledger_row_signatures(base_ledger) != ledger_row_signatures(
+        head_ledger
+    )
+
+    # A head with no digest is refused whether the base had one or not. If the
+    # base had one this is a REMOVAL, and a check that disappears along with the
+    # thing it checks is the fail-open shape this gate has been bitten by twice.
+    # If the base had none this is a bootstrap that did not bootstrap.
+    if head is None:
+        return [
+            f"head declares no {DIGEST_NAME}. "
+            + (
+                "The merge base declares one, so this branch REMOVES it; the "
+                "digest is the only thing that makes two sibling allocation "
+                "branches conflict, and a ledger without one is not gated, not "
+                "exempt."
+                if base is not None
+                else "The merge base declares none either, so this branch is "
+                "the one-time transition into a digested ledger and must "
+                "INTRODUCE it — `migration_owner_ledger_digest()`."
+            )
+        ]
     if not DIGEST_PATTERN.fullmatch(head):
         return [
             f"{DIGEST_NAME} at head is malformed: {head!r} is not "
-            "cv1:<64 lowercase hex digits>"
+            "cv1:<64 lowercase hex digits>. A digest that cannot be compared "
+            "serializes nothing, so it is refused rather than trusted."
         ]
+
+    if base is None:
+        # THE ONE-TIME TRANSITION. There is no base digest to compare against,
+        # so what is checked is the transition itself.
+        if rows_moved:
+            return [
+                f"this branch introduces {DIGEST_NAME} AND changes "
+                "MIGRATION_OWNER_LEDGER in the same step. The transition into a "
+                "digested ledger must carry the digest alone, over an unchanged "
+                "row set: a row added here is the one row no digest ever "
+                "serialized, and no later gate can tell it apart from a row that "
+                "was always there. Land the digest over today's ledger first, "
+                "then the allocation on top of it."
+            ]
+        return []  # the valid bootstrap: a well-formed digest, rows untouched
+
+    if not rows_moved:
+        return []  # no row added, removed or repointed: nothing to serialize
     if head == base:
         return [
             f"this branch changes MIGRATION_OWNER_LEDGER but leaves "
@@ -442,7 +516,8 @@ def main() -> int:
         return 1
     print(
         "allocation gate: every changed module was allocated at the merge base, "
-        f"and every ledger row change moved {DIGEST_NAME}"
+        f"and the ledger's {DIGEST_NAME} is well-formed at head and consistent "
+        "with whether the row set moved"
     )
     return 0
 
