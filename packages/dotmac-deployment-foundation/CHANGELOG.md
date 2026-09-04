@@ -141,8 +141,19 @@ one question, and copies agree right up until they don't — the defect this
 package has already paid for at `AuthorizationReceipt`, at `discover_bindings`,
 and between Control's `plan_digest` and the Foundation's. The extraction is
 byte-neutral, proved against an independently written encoder rather than against
-the function itself, and an AST sweep fails the build if a third plan document
-hand-rolls a canonical `json.dumps`.
+the function itself.
+
+The guard over it was NARROWED after CI showed the first version was wrong, and
+the correction is worth reading. It asserted that no module outside the core
+canonicalized with `json.dumps(sort_keys=...)` — and found sixteen sites, every
+one of them correct. Canonical JSON is not a plan concept: `evidence.py`
+canonicalizes a signed envelope, `lease.py` a host lease, `recovery.py` a bundle
+manifest, `document.py` the descriptor. A detector whose extent is "anything that
+looks like the thing I care about" reports every neighbour, and the honest repair
+is to narrow the CLAIM rather than the scan. It is now a two-directional
+population ratchet — the set of canonicalizing modules is known and cannot move
+silently, in either direction — plus a direct assertion of the property that
+actually matters: neither plan module canonicalizes for itself.
 
 **A real import cycle was removed rather than routed around.** Adding the module
 broke the package on import: `execution_plan` imported `engine.plan` at module

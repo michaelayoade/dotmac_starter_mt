@@ -470,40 +470,109 @@ def test_the_digest_covers_the_recovery_document_alone() -> None:
     assert exc.value.code == PLAN_NOT_THIS_DOCUMENT
 
 
-def test_every_plan_canonicalizer_goes_through_the_one_core() -> None:
-    """DERIVED extent, AST rather than grep — a mention in a docstring is not a
-    call, and this package has already shipped a detector that matched its own
-    prose.
+#: Every module that canonicalizes a document with `json.dumps(sort_keys=...)`,
+#: and how many times. FROZEN, ratcheted in BOTH directions.
+#:
+#: The first version of this test asserted that NO module outside the core did
+#: this at all, and it was wrong in a way worth recording rather than quietly
+#: fixing: it found sixteen sites and every one of them was correct. Canonical
+#: JSON is not a plan concept. `evidence.py` canonicalizes a signed envelope,
+#: `lease.py` a host lease, `recovery.py` a bundle manifest, `document.py` the
+#: descriptor, `telemetry.py` resource attributes — none of them is a plan
+#: document and none of them belongs behind `canonical_plan`. A detector whose
+#: extent is "anything that looks like the thing I care about" reports every
+#: neighbour, and the honest repair is to narrow the CLAIM rather than the scan.
+#:
+#: So this asserts what can actually be derived: the population of canonicalizing
+#: modules is KNOWN and does not move silently. A new one fails here and gets a
+#: reviewer, who decides the only question an AST cannot — is this a plan
+#: document, and therefore `canonical_plan`'s, or is it its own kind? A removed
+#: one fails too, because a debt list that can shrink silently stops describing
+#: anything (ADR-0018).
+#:
+#: Keyed by MODULE and COUNT, never by line number: a line-keyed baseline fails
+#: on every unrelated edit above it, and a baseline that cries wolf is one people
+#: regenerate without reading.
+CANONICALIZING_MODULES: dict[str, int] = {
+    # The plan core itself, and the two documents that go through it.
+    "canonical_plan.py": 1,
+    # Not plan documents. Each owns a different canonical form, and each is
+    # correct to: the descriptor, a bundle manifest, a signed evidence envelope,
+    # a host lease, a rehearsal receipt, an external recovery receipt, an
+    # authorization provenance record, resource attributes, a promotion record,
+    # a descriptor transition, database structure facts, an application profile,
+    # and the CLI's and provider's own record writing.
+    "application_profile.py": 1,
+    "cli.py": 1,
+    "compose_host.py": 2,
+    "database_structure.py": 2,
+    "document.py": 1,
+    "evidence.py": 1,
+    "external_recovery.py": 1,
+    "lease.py": 1,
+    "observability_promotion.py": 1,
+    "provenance.py": 1,
+    "recovery.py": 2,
+    "rehearsal.py": 1,
+    "run.py": 2,
+    "telemetry.py": 1,
+    "transition.py": 1,
+}
 
-    A third plan document that hand-rolls `json.dumps` fails HERE, which is what
-    makes the extraction a ratchet rather than an intention.
-    """
-    offenders: list[str] = []
+
+def _canonicalizing_modules() -> dict[str, int]:
+    """AST, not grep. A mention in a docstring is not a call, and this package
+    has already shipped a detector that matched its own prose."""
+    found: dict[str, int] = {}
     for path in sorted(PACKAGE.rglob("*.py")):
-        if path.name in {"canonical_plan.py", "document.py", "recovery.py"}:
-            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            func = node.func
-            name = getattr(func, "attr", None) or getattr(func, "id", None)
-            if name != "dumps":
-                continue
-            if any(kw.arg == "sort_keys" for kw in node.keywords):
-                offenders.append(f"{path.name}:{node.lineno}")
-    assert offenders == [], (
-        "a canonical-looking json.dumps outside the core: "
-        f"{offenders}. Plan documents canonicalize through "
-        "canonical_plan.canonical_plan_bytes, or there are two answers to one "
-        "question again"
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if name == "dumps" and any(kw.arg == "sort_keys" for kw in node.keywords):
+                found[path.name] = found.get(path.name, 0) + 1
+    return found
+
+
+def test_the_canonicalizing_population_has_not_moved() -> None:
+    """Two directions, and the message says which way it went — a reviewer
+    arriving at a red build should not have to diff two dicts to find out
+    whether something appeared or disappeared."""
+    found = _canonicalizing_modules()
+    appeared = {k: v for k, v in found.items() if CANONICALIZING_MODULES.get(k) != v}
+    vanished = {k: v for k, v in CANONICALIZING_MODULES.items() if found.get(k) != v}
+    assert found == CANONICALIZING_MODULES, (
+        f"the canonicalizing population moved. Now differing: {appeared}; "
+        f"expected but not found as recorded: {vanished}. If a PLAN document "
+        "grew a canonicalizer, it belongs behind "
+        "canonical_plan.canonical_plan_bytes — two answers to one question is "
+        "the defect this package has paid for three times. If it is a document "
+        "of another kind, add it here with a reason"
     )
 
 
+def test_the_two_plan_modules_do_NOT_canonicalize_for_themselves() -> None:
+    """The property the population ratchet cannot state, asserted directly.
+
+    This is the one that would actually catch the regression: a plan module that
+    stopped calling the core and hand-rolled the rules again.
+    """
+    found = _canonicalizing_modules()
+    assert "execution_plan.py" not in found
+    assert "recovery_plan.py" not in found
+    for module in ("execution_plan.py", "recovery_plan.py"):
+        source = (PACKAGE / module).read_text(encoding="utf-8")
+        assert "canonical_plan_bytes" in source, (
+            f"{module} no longer routes through the core"
+        )
+
+
 def test_that_sweep_would_actually_find_one() -> None:
-    """Sensitivity. An AST walk that matched nothing would make the test above
-    pass over an empty set — which is how a scanner over a clean tree passes for
-    the wrong reason."""
+    """Sensitivity for the scan itself. An AST walk that matched nothing would
+    make both tests above pass over an empty set — which is how a scanner over a
+    clean tree passes for the wrong reason."""
+    assert _canonicalizing_modules(), "the AST sweep found no canonicalizer at all"
     tree = ast.parse('json.dumps(d, sort_keys=True, separators=(",", ":"))')
     found = [
         node

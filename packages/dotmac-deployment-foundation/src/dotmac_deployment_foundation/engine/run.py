@@ -370,13 +370,27 @@ class Executor:
         # built and while an operator reads a traceback rather than a refusal.
         # The two plan kinds are not interchangeable at any acceptance point,
         # and this is one of the three.
-        if not isinstance(execution_plan, FoundationExecutionPlanV1):
+        #
+        # `None` is deliberately NOT refused here, and the exclusion is the
+        # opposite of a loophole. Absent-plan is an EXISTING, separately proven
+        # refusal that `_require_execution_plan` makes with its own precise
+        # sentence — "this executor has no execution plan, so nothing can be
+        # recomputed and nothing was frozen" — and
+        # `test_absent_execution_plan_produces_zero_effects` is the regression
+        # test for the branch that used to let exactly that state mutate a host.
+        # Swallowing `None` here would answer that case with "you passed a
+        # NoneType, not a FoundationExecutionPlanV1", which is true, useless,
+        # and replaces a diagnosis with a type name. Two different faults, two
+        # different sentences, and the wrong-type one must not eat the other.
+        if execution_plan is not None and not isinstance(
+            execution_plan, FoundationExecutionPlanV1
+        ):
             raise PreconditionFailed(
                 f"Executor was given a {type(execution_plan).__name__} as its "
                 f"execution plan, not a {FoundationExecutionPlanV1.__name__}. "
                 "This executor mutates a product host under a deployment "
-                "authorization; a recovery plan describes a different act and "
-                "is not authorized by anything this class holds",
+                "authorization, and a plan of another kind describes another "
+                "act that nothing this class holds authorizes",
                 code=EXECUTION_PLAN_WRONG_TYPE,
             )
         self._execution_plan = execution_plan
