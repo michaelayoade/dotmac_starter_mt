@@ -38,6 +38,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -283,6 +284,30 @@ def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Pa
     return Path(directory) / f"{safe}.json"
 
 
+def write_store_record(path: Path, document: Mapping[str, Any]) -> Path:
+    """Turn a record of THIS store into bytes, and write it. One answer.
+
+    Not a canonicalization for identity — that is `canonical_plan_bytes`, which
+    both `lease_digest` and `HostLeaseReleaseV1.digest` already use with their
+    own document schema. This is the STORE form: the shape a human reads in
+    `.dotmac-leases/` and the parser round-trips. Two byte forms for two
+    questions is correct, and neither one may have two implementations.
+
+    It exists because it briefly did have two. `write_lease` and `write_release`
+    each spelled `json.dumps(..., sort_keys=True, indent=2) + "\n"` inline. They
+    agreed on the day they were written, which is the only day a duplicated
+    literal ever agrees; a later change to indentation or separators in one would
+    have left two records in ONE directory written two ways, with nothing to fail.
+    The canonicalizing-population ratchet caught the second one appearing and
+    asked which kind it was — the answer is that it is the same mechanism, so it
+    is shared rather than registered.
+    """
+    path.write_text(
+        json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def write_lease(
     lease: HostLease,
     *,
@@ -318,11 +343,7 @@ def write_lease(
                 "use, which is worse than no lease at all because both would "
                 "then skip the checks a shared host needs"
             )
-    path.write_text(
-        json.dumps(lease.as_document(), sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return write_store_record(path, lease.as_document())
 
 
 def load_lease(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> HostLease:

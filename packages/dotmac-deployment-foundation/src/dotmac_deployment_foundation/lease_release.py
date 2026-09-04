@@ -92,6 +92,7 @@ from .lease import (
     HostLease,
     load_lease,
     release_path,
+    write_store_record,
 )
 
 __all__ = [
@@ -973,11 +974,7 @@ def write_release(
             "finished the same work — neither is resolved by overwriting",
             code=RELEASE_DUPLICATE,
         )
-    path.write_text(
-        json.dumps(release.as_document(), sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return path
+    return write_store_record(path, release.as_document())
 
 
 def load_release(
