@@ -11,7 +11,63 @@ here.
 This heading records the repair that the next separately authorized kernel
 release will bind. It does not allocate, publish or tag `0.1.0a101`.
 
+### Added
+
+- `dotmac_kernel.semantic_encoding` (also on the package-root public surface) —
+  `encode`, `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`,
+  `ABSENT`, `CANONICAL_ALGORITHM`. One encoder for values that get digested:
+  every value goes into a length-prefixed, self-describing frame, so no two
+  adjacent field values can reassociate into a different field split; `ABSENT`
+  is a TYPED sentinel, so a missing value cannot collide with `""` or the text
+  `"None"`; and `digest_of` domain-separates, so one document's digest can never
+  coincide with another's. GREENFIELD AFTER INVENTORY, not a product-first
+  extraction — `docs/inventories/semantic-encoder-sources.md` audits seven
+  repositories at immutable revisions and finds no encoder with all four
+  qualifying properties. It sits BESIDE `fingerprint_of`, not instead of it.
+
+- `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER_DIGEST` and its verifier —
+  `migration_owner_ledger_digest`, `verify_migration_owner_ledger_digest`,
+  `encode_migration_owner`, `encode_migration_owner_ledger`,
+  `MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN`, `LedgerDigestError`. A committed
+  content digest of the whole allocation ledger, and the thing that makes two
+  sibling allocation branches CONFLICT instead of merging into a duplicate.
+
+  The measured defect: two branches off one base, one appending a row at the
+  tail and one inserting a row mid-list with the SAME `prefix`, merge under
+  `git merge-tree` with exit 0 and produce a ledger holding two rows on one
+  prefix. Nothing caught it. The ledger offered nothing to conflict on — an
+  order-insensitive tuple, a list `__all__`, a set literal, an unordered table.
+  A counter would not fix it: two branches can both change 90 to 91 on identical
+  text. The value has to be a function of the ledger's CONTENT, so it is a
+  `cv1:` digest over every field of every `MigrationOwner`, rows SORTED BY OWNER
+  — sorting is load-bearing, or a branch dodges the conflict by inserting its
+  row somewhere else in the tuple.
+
+  Reordering keywords or reflowing the literal is NOT a row change: the gate
+  normalises through `ast.unparse` and sorted keywords, because a gate that
+  demands a bump for formatting teaches reviewers to bump reflexively. The
+  digest forces a human to RESOLVE; it decides nothing about the resolution, so
+  `test_the_shipped_ledger_itself_composes` stays and is asserted by name.
+
+  Ledger unchanged: 84 rows. This introduces the digest over TODAY'S ledger and
+  allocates nothing — the one-time transition below is why it lands alone.
+
 ### Fixed
+
+- `scripts/check_allocation_serialized.py` checks the ONE-TIME TRANSITION into
+  a digested ledger instead of skipping it. It returned early whenever the row
+  set was unchanged, before reading either digest — so the legitimate bootstrap,
+  a head carrying a MALFORMED digest, and a head carrying NO digest all exited
+  0, by the same unvalidated path; and a branch that allocated during the
+  transition exited 2, INDETERMINATE, the code a reviewer reads as "the gate is
+  broken" rather than "you did the forbidden thing". The transition is now its
+  own check and may do exactly one thing: introduce a well-formed digest over an
+  unchanged row set. `committed_digest` becomes the nullable `find_digest`,
+  because absence means the transition at the merge base and a REMOVAL at head —
+  both refused, with distinct diagnostics. Exit 2 is kept for what the gate
+  genuinely cannot read, such as a digest built by an expression.
+  `tests/architecture/test_allocation_gate_cli.py` asserts exit status and
+  diagnostic through the real subprocess, with its own non-vacuity note.
 
 - Keep `dotmac_kernel.app_factory.create_app` importable from both its direct
   module and the package-root public surface before a product installs its
