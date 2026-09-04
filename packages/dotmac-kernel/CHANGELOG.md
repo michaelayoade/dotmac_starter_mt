@@ -11,6 +11,58 @@ here.
 This heading records the repair that the next separately authorized kernel
 release will bind. It does not allocate, publish or tag `0.1.0a101`.
 
+### Added
+
+- `dotmac_kernel.request_evidence` — one owner for the per-request evidence
+  context: who a request appears to be, from where it arrived, and under what
+  correlation it is logged. Extracted product-first from `dotmac_erp`'s
+  `app/net.py` and `app/observability.py` at commit
+  `e286636baea382e3978e779acd3155cea27e82b8`, with ERP's own parity suites
+  recorded in `EXTRACTION.toml` and carried across.
+
+  Ported behaviour, including both ERP repairs that are part of it. A bare
+  proxy entry derives its prefix from the ADDRESS FAMILY — neither `32` nor
+  `128` appears in the parser, because ERP appended `/32` regardless of family
+  and a bare `::1` parsed cleanly into `::/32`, silently trusting 7.9e28
+  addresses. An explicit prefix survives as written, so `2001:db8::/32` is
+  honoured and a "refuse every IPv6 entry" fix is refused as a near miss. An
+  entry that carries characters and does not parse REFUSES at construction:
+  dropping it fails closed for forwarded-header trust but silently for
+  deployment correctness, and it destroys client provenance for every consumer
+  that reads the client address.
+
+  Two ERP behaviours are deliberately NOT ported. The trusted set is TYPED
+  CONFIGURATION a product constructs and hands in, never an import-time
+  `os.getenv` read — an architecture test asserts by AST that the module never
+  reaches the environment. And the actor arrives through a product-supplied
+  resolver or `bind_actor`, never a JWT decoded inside the middleware, because
+  the kernel has one authentication seam and does not grow a second.
+
+  Every field is written on every request, anonymity included and explicit;
+  every `set()` token is reset in `finally`. ERP's creator wrote the actor only
+  `if actor_id:` and reset nothing, so an anonymous request inherited whoever
+  was authenticated on that worker before it — a live cross-request identity
+  leak. `RequestActor` carries kind, id and scopes as three independent facts:
+  the kind is declared, never recovered by splitting an identifier, and scopes
+  are evidence that this module gives no authorization meaning.
+
+  Pure ASGI, and that is correctness rather than style: `BaseHTTPMiddleware`
+  runs each request in its own task and hands a concurrency proof an isolation
+  it did not earn. The same is true of `asyncio` tasks generally, so the test
+  suite asserts that its own task-based concurrency proof passes against a
+  planted broken creator, and carries two proofs that CAN fail — a sequential
+  anonymous-after-authenticated leak and a nested overlap inside one context.
+
+  NOT DECLARED, deliberately: no `request_evidence_context` profile binding, no
+  provider entry point, and nothing in `SUPPORTED_MODULES`. A binding whose only
+  consumer is a test is absent. Nothing composes this today.
+
+  ONE OPEN SEAM, recorded rather than closed:
+  `dotmac_kernel.middleware.observability.ObservabilityMiddleware` also writes
+  `dotmac_kernel.logging.request_id_var`, which this facility bridges to so log
+  lines keep a correlation id. The two are ALTERNATIVES, not layers; an assembly
+  must install one. No guard catches installing both, and none is claimed.
+
 ### Fixed
 
 - Keep `dotmac_kernel.app_factory.create_app` importable from both its direct
