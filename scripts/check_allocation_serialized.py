@@ -51,6 +51,29 @@ deliberately never reclaimed, so a retired prefix can never be handed to a
 different owner and collide with rows still live in a deployed database. A
 rename is a deletion plus an addition, and the added side is checked normally.
 
+## The second half: allocation against allocation
+
+The merge-base rule above serializes SOURCE behind ALLOCATION. It cannot
+serialize one allocation behind another, because both sides only add rows and
+adding a row never conflicts with adding a different row. Two sibling branches
+off one base — one appending at the tail, one inserting mid-list with a
+DUPLICATE prefix — merge under `git merge-tree` with exit 0, and the resulting
+ledger holds two rows claiming the same prefix.
+
+That merges clean because the ledger offers nothing to conflict on: an
+order-insensitive tuple, a list `__all__`, a set literal of pinned owners, an
+unordered markdown table. A counter would not fix it — two branches can both
+change 90 to 91 on identical text and merge just as cleanly. So the ledger
+carries `MIGRATION_OWNER_LEDGER_DIGEST`, a digest of its CONTENT, and this gate
+requires every commit that changes a row to move it. Two different additions
+then necessarily write two different strings on one line, which git refuses.
+
+This half is textual and AST-only: it compares the row set and the literal at
+two revisions, and never executes either blob. Whether the literal is CORRECT
+for the tree it sits in is a different question, answered in-tree by
+`verify_migration_owner_ledger_digest()` — a gate that cannot see a sibling
+branch and an in-tree check that cannot see git, each doing only what it can.
+
 Exit status is 0 when serialized, 1 on a violation, 2 when the gate could not
 establish an answer — an indeterminate gate must never read as a pass.
 """
@@ -59,11 +82,27 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import subprocess
 import sys
 import tomllib
 
 LEDGER_PATH = "packages/dotmac-kernel/src/dotmac_kernel/namespaces.py"
+DIGEST_NAME = "MIGRATION_OWNER_LEDGER_DIGEST"
+# `cv1:` + 64 lowercase hex. Kept as a pattern, not a length check, so a
+# truncated or hand-typed literal is refused as MALFORMED rather than compared.
+DIGEST_PATTERN = re.compile(r"\Acv1:[0-9a-f]{64}\Z")
+
+# `MigrationOwner`'s fields in declaration order, so a positional row is read
+# the same way a keyword row is.
+OWNER_FIELDS = (
+    "owner",
+    "prefix",
+    "branch_label",
+    "db_schema",
+    "legacy_revision_pattern",
+    "provides",
+)
 
 # Classifications that own a database namespace and must be allocated first.
 GATED_CLASSIFICATIONS = frozenset({"optional-module"})
@@ -141,6 +180,99 @@ def allocated_owners(source: str) -> dict[str, str]:
     return owners
 
 
+def ledger_row_signatures(source: str) -> dict[str, str]:
+    """`{owner: normalized-field-text}` for every `MigrationOwner` in a ledger blob.
+
+    Every field is captured, not just `owner`/`branch_label`: repointing an
+    existing row's schema or prefix changes the ledger's content and must move
+    the digest exactly as adding a row does.
+
+    Fields are read by name, keywords are SORTED, and each value is re-rendered
+    through `ast.unparse`. That means reflowing the literal, reordering the
+    keyword arguments, or changing the quoting does not read as a content
+    change — the gate should demand a new digest when the digest would actually
+    move, and no more often, or reviewers learn to bump it reflexively.
+
+    Over-approximates in one direction on purpose: every `MigrationOwner(...)`
+    call in the file counts, whether or not it is reachable from
+    `MIGRATION_OWNER_LEDGER`. A row constructed and not composed is not a shape
+    this ledger has, and guessing wrong here should cost a spurious digest bump
+    rather than a missed collision.
+    """
+    signatures: dict[str, str] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        if (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) != (
+            "MigrationOwner"
+        ):
+            continue
+        fields: dict[str, str] = {}
+        for index, argument in enumerate(node.args):
+            if index < len(OWNER_FIELDS):
+                fields[OWNER_FIELDS[index]] = ast.unparse(argument)
+        for keyword in node.keywords:
+            if keyword.arg is not None:
+                fields[keyword.arg] = ast.unparse(keyword.value)
+        owner = fields.get("owner")
+        if owner is None:
+            continue
+        signatures[owner.strip("\"'")] = repr(sorted(fields.items()))
+    if not signatures:
+        raise GateError(
+            "parsed no MigrationOwner rows from a ledger revision — refusing to "
+            "report the ledger as unchanged"
+        )
+    return signatures
+
+
+def committed_digest(source: str, label: str) -> str:
+    """The `MIGRATION_OWNER_LEDGER_DIGEST` string literal at a ledger revision."""
+    for node in ast.walk(ast.parse(source)):
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target, value = node.target.id, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            first = node.targets[0]
+            if isinstance(first, ast.Name):
+                target, value = first.id, node.value
+        if target != DIGEST_NAME:
+            continue
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            raise GateError(
+                f"{label}: {DIGEST_NAME} must be a string literal so it can be "
+                "compared across revisions without executing the ledger"
+            )
+        return value.value
+    raise GateError(
+        f"{label}: {LEDGER_PATH} declares no {DIGEST_NAME}. The digest is the "
+        "only thing that makes two sibling allocation branches conflict; a "
+        "ledger without one is not gated, not exempt."
+    )
+
+
+def digest_violations(base_ledger: str, head_ledger: str) -> list[str]:
+    """The ledger's content moved, so its committed digest must have moved too."""
+    if ledger_row_signatures(base_ledger) == ledger_row_signatures(head_ledger):
+        return []  # no row added, removed or repointed: nothing to serialize
+    base = committed_digest(base_ledger, "merge base")
+    head = committed_digest(head_ledger, "head")
+    if not DIGEST_PATTERN.fullmatch(head):
+        return [
+            f"{DIGEST_NAME} at head is malformed: {head!r} is not "
+            "cv1:<64 lowercase hex digits>"
+        ]
+    if head == base:
+        return [
+            f"this branch changes MIGRATION_OWNER_LEDGER but leaves "
+            f"{DIGEST_NAME} at {head}. Recompute it — "
+            "`migration_owner_ledger_digest()` — and commit the new value in "
+            "the same commit as the row. An unchanged digest is exactly the "
+            "shape that lets a sibling allocation merge clean into a duplicate."
+        ]
+    return []
+
+
 def declared_allocation(source: str, label: str) -> dict[str, str | None]:
     """What a manifest DECLARES, parsed fail-closed. Raises on anything unclear."""
     try:
@@ -202,6 +334,14 @@ def run_gate(base: str, head: str = "HEAD", *, repo: str | None = None) -> list[
     if not merge_base:
         raise GateError(f"no merge base between {base} and {head}")
 
+    ledger_at_base = read_blob(merge_base, LEDGER_PATH, repo=repo)
+    if ledger_at_base is None:
+        raise GateError(f"no {LEDGER_PATH} at merge base {merge_base}")
+    ledger_at_head = read_blob(head, LEDGER_PATH, repo=repo)
+    if ledger_at_head is None:
+        raise GateError(f"no {LEDGER_PATH} at head {head}")
+    violations: list[str] = digest_violations(ledger_at_base, ledger_at_head)
+
     touched: dict[str, str] = {}
     for path in git("diff", "--name-only", f"{merge_base}..{head}", repo=repo).split(
         "\n"
@@ -212,15 +352,14 @@ def run_gate(base: str, head: str = "HEAD", *, repo: str | None = None) -> list[
         if len(parts) >= 4 and parts[0] == "packages" and parts[2] == "src":
             touched.setdefault(parts[1], path)
     if not touched:
-        return []
+        # An allocation-only branch changes no module source and passes the
+        # merge-base half vacuously — but it is precisely the branch the digest
+        # half exists for, so return ITS verdict rather than a bare pass.
+        return violations
 
-    ledger_source = read_blob(merge_base, LEDGER_PATH, repo=repo)
-    if ledger_source is None:
-        raise GateError(f"no {LEDGER_PATH} at merge base {merge_base}")
-    owners = allocated_owners(ledger_source)
+    owners = allocated_owners(ledger_at_base)
     labels = set(owners.values())
 
-    violations: list[str] = []
     for package, example in sorted(touched.items()):
         classification = classify(head, package, repo=repo)
         if classification is None:
@@ -292,13 +431,19 @@ def main() -> int:
         for violation in violations:
             print(f"  - {violation}", file=sys.stderr)
         print(
-            "\nMerge an allocation-only change to the ledger first, then the "
-            "module source. Uniqueness is decided in the canonical ledger; a "
-            "branch cannot see a sibling branch's claim on the same prefix.",
+            "\nUniqueness is decided in the canonical ledger; a branch cannot "
+            "see a sibling branch's claim on the same prefix. So merge an "
+            "allocation-only change to the ledger first, then the module "
+            f"source — and make every row change move {DIGEST_NAME}, which is "
+            "what turns two sibling allocations into a conflict instead of a "
+            "clean merge into a duplicate.",
             file=sys.stderr,
         )
         return 1
-    print("allocation gate: every changed module was allocated at the merge base")
+    print(
+        "allocation gate: every changed module was allocated at the merge base, "
+        f"and every ledger row change moved {DIGEST_NAME}"
+    )
     return 0
 
 
