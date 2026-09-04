@@ -347,11 +347,25 @@ def test_both_annotation_serialisers_are_guarded() -> None:
 
 
 def _refused_run():  # type: ignore[no-untyped-def]
-    """A real Executor driven to a real refusal: the plan in hand is not the one
-    the grant froze. Nothing is mutated, which is the point of a refusal."""
+    """A real Executor driven to a real refusal INSIDE the step loop.
+
+    The refusal has to happen in `_run_steps`, not before it. An unauthorized
+    plan digest refuses in `run()` ahead of the try block — the outcome does not
+    exist yet, so there is nothing to record and the exception propagates. A
+    GATE step refusing is the case that produces evidence, and it is also the
+    case an operator actually meets: the image named by the descriptor is not on
+    the host, `_do_verify_image` raises `PreconditionFailed`, `_run_steps`
+    records the step and re-raises, and `run()` returns the outcome.
+
+    This distinction is worth keeping in the fixture rather than the prose: the
+    first version of this helper used a digest mismatch and every test built on
+    it errored instead of asserting, which reads in CI like the evidence type
+    being broken rather than the fixture.
+    """
     spec, plan, effects = _fixture()
-    execution_plan, _ = _plan_and_digest(spec, plan, effects=effects)
-    grant = _grant(spec, execution_plan_digest="sha256:" + "9" * 64)
+    effects.present = False  # the image is not on the host
+    execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
+    grant = _grant(spec, execution_plan_digest=digest)
     executor = Executor(
         spec,
         effects,
@@ -360,7 +374,9 @@ def _refused_run():  # type: ignore[no-untyped-def]
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
     )
-    return executor.run(plan)
+    outcome = executor.run(plan)
+    assert not outcome.succeeded, "the fixture stopped refusing; it proves nothing"
+    return outcome
 
 
 def test_a_refused_run_records_a_standing_and_no_exception_text() -> None:
