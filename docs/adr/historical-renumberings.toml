@@ -1,0 +1,231 @@
+# Historical renumberings — NOT the live collision queue.
+#
+# Thirty-one cases where an unmerged branch spells a number that `main` later
+# gave to the SAME decision under a DIFFERENT number. These are the pre-register
+# rule ("the first decision to reach `main` keeps it; a later decision renumbers
+# before merge") working exactly as designed, on decisions that have since
+# landed. They are history, not claims.
+#
+# WHY THEY ARE HERE AND NOT IN `reservations.toml`
+#
+# Michael's ruling, 2026-09-04: "The 31 excluded historical pairs should remain
+# excluded, with their equivalence evidence preserved. Mixing them into the live
+# collision queue would make the register less useful." A register whose
+# collision block held thirty-eight entries, thirty-one of them already
+# reconciled, would bury the seven that a human still has to act on — one of
+# these pairs alone (`campaigns-own-outbound-progression` at 0032) appears on
+# 303 refs. So the exclusion is deliberate, and the evidence for it is preserved
+# in its own file with its own pin rather than deleted or left as a claim in a
+# commit message.
+#
+# THE EQUIVALENCE EVIDENCE, AND WHY IT IS CHECKABLE OFFLINE
+#
+# Each row's claim is: the slug on the branch HAS ITS OWN AUTHORED ROW in
+# `reservations.toml`, at `landed_at`, which differs from the `number` the
+# branch spells. That is what makes it a stale copy of an older numbering rather
+# than a competing claim — the decision landed, and the register knows where.
+# The checker re-derives exactly that from the register alone, so this file
+# cannot drift into a set of assertions nobody verifies, and it needs no network
+# and no ref scan to be verified.
+#
+# `refs` is the ref count observed by the all-ref audit scan on 2026-09-04 over
+# 1,278 local and remote refs. It is CONTEXT, not a checked assertion: refs come
+# and go, and the audit scan is supplementary rather than authoritative (see
+# `reservations.toml`, "THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE").
+#
+# THE LIMIT THIS ACCEPTS, stated rather than hidden: a branch that deliberately
+# re-spells a LANDED decision under a wrong number reads exactly like one of
+# these. That case is caught where it matters, at merge, by
+# `test_adr_numbering.py::test_every_adr_number_is_unique`.
+#
+# Two-directional per ADR-0018: the count is pinned. A row is added only when a
+# branch is genuinely found carrying an older numbering of a landed decision,
+# and removed only in the change that retires the ref carrying it.
+
+count = 31
+
+[[historical]]
+number = 28
+slug = "access-is-requested-approved-and-issued-by-three-owners"
+landed_at = 29
+refs = 5
+
+[[historical]]
+number = 31
+slug = "work-orders-own-physical-execution"
+landed_at = 54
+refs = 3
+
+[[historical]]
+number = 32
+slug = "campaigns-own-outbound-progression"
+landed_at = 56
+refs = 303
+
+[[historical]]
+number = 32
+slug = "positioning-owns-location-evidence-not-business-consequences"
+landed_at = 39
+refs = 3
+
+[[historical]]
+number = 32
+slug = "web-analytics-owns-first-party-observations"
+landed_at = 55
+refs = 2
+
+[[historical]]
+number = 33
+slug = "documents-own-controlled-versions-records-own-declared-evidence"
+landed_at = 49
+refs = 2
+
+[[historical]]
+number = 33
+slug = "media-observations-own-provider-reports-not-attribution"
+landed_at = 34
+refs = 6
+
+[[historical]]
+number = 33
+slug = "projects-own-work-structure-not-product-consequences"
+landed_at = 51
+refs = 1
+
+[[historical]]
+number = 33
+slug = "the-vendor-control-plane-composes-existing-owners"
+landed_at = 57
+refs = 227
+
+[[historical]]
+number = 34
+slug = "conversations-own-threads-not-transport-or-workforce-policy"
+landed_at = 52
+refs = 17
+
+[[historical]]
+number = 34
+slug = "sites-own-local-revisions-not-hosting"
+landed_at = 35
+refs = 2
+
+[[historical]]
+number = 34
+slug = "sub-vnext-parity-capabilities-have-narrow-independent-owners"
+landed_at = 40
+refs = 1
+
+[[historical]]
+number = 35
+slug = "surveys-own-feedback-evidence-not-subject-consequences"
+landed_at = 53
+refs = 17
+
+[[historical]]
+number = 35
+slug = "web-analytics-owns-first-party-observations"
+landed_at = 55
+refs = 2
+
+[[historical]]
+number = 36
+slug = "analytics-owns-projections-not-domain-facts"
+landed_at = 43
+refs = 2
+
+[[historical]]
+number = 36
+slug = "positioning-owns-location-evidence-not-business-consequences"
+landed_at = 39
+refs = 15
+
+[[historical]]
+number = 37
+slug = "projects-own-work-structure-not-product-consequences"
+landed_at = 51
+refs = 15
+
+[[historical]]
+number = 38
+slug = "finance-owns-asset-books-and-accounting-consequences"
+landed_at = 48
+refs = 2
+
+[[historical]]
+number = 38
+slug = "procurement-owns-sourcing-and-purchasing-decisions"
+landed_at = 50
+refs = 2
+
+[[historical]]
+number = 38
+slug = "work-orders-own-physical-execution"
+landed_at = 54
+refs = 15
+
+[[historical]]
+number = 39
+slug = "web-analytics-owns-first-party-observations"
+landed_at = 55
+refs = 15
+
+[[historical]]
+number = 40
+slug = "analytics-owns-projections-not-domain-facts"
+landed_at = 43
+refs = 15
+
+[[historical]]
+number = 40
+slug = "expenses-own-spend-evidence-not-payment"
+landed_at = 47
+refs = 2
+
+[[historical]]
+number = 41
+slug = "banking-owns-observations-matching-and-reconciliation"
+landed_at = 44
+refs = 2
+
+[[historical]]
+number = 41
+slug = "inventory-owns-stock-ledger-traceability-and-valuation"
+landed_at = 36
+refs = 2
+
+[[historical]]
+number = 42
+slug = "assets-own-durable-units-not-finance-or-product-extensions"
+landed_at = 37
+refs = 2
+
+[[historical]]
+number = 42
+slug = "tax-policy-is-data-and-returns-are-evidence"
+landed_at = 45
+refs = 2
+
+[[historical]]
+number = 43
+slug = "network-capabilities-decompose-sub-first"
+landed_at = 38
+refs = 2
+
+[[historical]]
+number = 43
+slug = "payroll-owns-calculations-and-liabilities"
+landed_at = 46
+refs = 2
+
+[[historical]]
+number = 55
+slug = "isp-essential-domains-have-ten-independent-owners"
+landed_at = 58
+refs = 62
+
+[[historical]]
+number = 66
+slug = "mobile-authentication-federates-to-the-existing-identity-provider"
+landed_at = 69
+refs = 20

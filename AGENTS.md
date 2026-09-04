@@ -1035,9 +1035,40 @@ specifics) points here and must never fork these rules.
     `docs/adr/EXTRACTION.toml`. Which BRANCH holds a contested number is
     DECLARED in the register, not detected — a checker reading one worktree
     cannot see another — and the register says so rather than claiming coverage.
-    (`tests/architecture/test_adr_number_allocation.py` for allocation order and
-    register integrity; `tests/architecture/test_adr_numbering.py` for the
-    merged catalogue's uniqueness)
+
+    **Amended 2026-09-04 (classification).** A pre-existing collision is
+    CLASSIFIED before anything is renumbered; renumbering 1,273 refs
+    mechanically was refused. Every `[[branch_collision]]` row carries a
+    `disposition` from a closed vocabulary — `active`, `pushed-open`,
+    `superseded`, `rescue-only`, `represented-on-main` — and the `evidence`
+    that put it there: ref tip and date, whether it is on `origin`,
+    pull-request state, and what `main` does or does not carry. A bucket read
+    off a branch NAME is a guess. `represented-on-main` additionally names
+    `represented_by` and requires SEMANTIC IDENTITY confirmed by reading BOTH
+    documents — the same decision, not merely the same topic — and retires the
+    duplicate branch rather than renumbering it. Only an `active` claimant
+    spends a number, and then in this order: reserve the new number on `main`
+    FIRST, rebase the claimant, rename the ADR, update citations one at a time
+    BY MEANING, re-run the semantic citation verification, and confirm that
+    unrelated references to the same number are unchanged. `main`'s existing
+    ADR always keeps the number. A branch carrying an older numbering of a
+    decision that has since LANDED is not a claimant at all; those thirty-one
+    pairs stay out of the live queue and are preserved with their equivalence
+    evidence in `docs/adr/historical-renumberings.toml`, because a queue of
+    thirty-eight entries with thirty-one already reconciled buries the seven a
+    human must act on.
+
+    **The merge-base reservation gate is the AUTHORITY; the all-ref scan is a
+    supplementary audit.** CI often sees one branch and a shallow ref set, so a
+    scan there is a sample, never a proof. The scan reports its own coverage —
+    refs visible, shallow or not, whether remote refs were fetched — and
+    declares NON-EXECUTION when the coverage is inadequate, so "zero collisions
+    found" can never be read as "only one branch was visible". Non-execution
+    and the positive control are both planted per rule 25.
+    (`tests/architecture/test_adr_number_allocation.py` for allocation order,
+    register integrity, collision classification and scan coverage;
+    `tests/architecture/test_adr_numbering.py` for the merged catalogue's
+    uniqueness)
 
 41. **Deployment is a stateless versioned FACILITY, and a product declares one
     descriptor.** `dotmac-deployment-foundation` is classified

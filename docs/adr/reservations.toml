@@ -568,11 +568,18 @@ note = "Renumbered from 0075 by the same ruling."
 # This block is DECLARED, NOT DETECTED. A checker reading one worktree cannot
 # see another branch, and calling this coverage would be a claim the mechanism
 # cannot honour. `branch_claim_findings` in the checker WILL compare this block
-# against a real ref scan, but only where the refs are actually present; it
-# reports that it did not run rather than passing silently. What is enforced
-# unconditionally is the merge gate: the moment such a branch lands its file,
-# `docs/adr/` holds two documents on one number and
-# `test_adr_numbering.py::test_every_adr_number_is_unique` fails.
+# against a real ref scan, but only where the refs are actually present, and it
+# reports the coverage it had rather than passing silently over an empty one.
+#
+# THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE, NOT THE REF SCAN.
+# `unreserved_authorings` runs against the branch's merge base on every CI run
+# of every branch, and the merge gate
+# `test_adr_numbering.py::test_every_adr_number_is_unique` fails the moment a
+# colliding document actually lands. The all-ref scan is a SUPPLEMENTARY AUDIT:
+# CI usually sees one branch and a shallow ref set, so a scan there can only
+# ever be a sample. It is wired to state its own coverage and to declare
+# NON-EXECUTION when the coverage is inadequate, so that "zero collisions
+# found" can never be read as "only one branch was visible".
 #
 # Two-directional per ADR-0018: this block may not grow, and it may only shrink
 # in the change that reconciles the entry it removes.
@@ -582,7 +589,46 @@ note = "Renumbered from 0075 by the same ruling."
 # progression` sitting at 0032 on 303 refs while `main` has it at 0056, and so
 # on. Those are the old rule's renumber-before-merge working as designed on
 # decisions that have since landed. They are history, not claims, and putting
-# them here would bury the seven entries that are.
+# them here would bury the seven entries that are. They are preserved WITH
+# their equivalence evidence in `docs/adr/historical-renumberings.toml`,
+# deliberately a separate file and a separate pin, so that the live queue stays
+# seven entries long and stays useful.
+#
+# CLASSIFICATION (Michael's ruling, 2026-09-04). Renumbering all 1,273 refs
+# mechanically was refused. Every claimant is classified first, and only then
+# does a claimant earn a new number. `disposition` is a CLOSED vocabulary and
+# the checker reads it:
+#
+#   active               intended for promotion. Reserve a new number on `main`
+#                        FIRST, rebase the claimant, rename the ADR, update its
+#                        citations one at a time BY MEANING, re-run the
+#                        semantic citation verification, and confirm that
+#                        unrelated references to the same number are unchanged.
+#   pushed-open          on `origin` with an OPEN pull request. Highest
+#                        urgency: it can escape local coordination and be
+#                        merged by a reviewer who never saw this file.
+#   superseded           never-merge. The decision was withdrawn, relocated or
+#                        replaced. No number is spent and nothing is renumbered.
+#   rescue-only          a preserved branch (a rescued stash, or an archival
+#                        `chore(archive): preserve …` tip). The collision
+#                        record is kept; NO new number is spent until the lane
+#                        is actually resumed, at which point the resumed work
+#                        allocates from `next_free` like any other author.
+#   represented-on-main  the SAME decision already lives on `main`, under
+#                        another number or as the shipped contract it decided.
+#                        `represented_by` names the number that carries it, and
+#                        semantic identity was confirmed by reading BOTH
+#                        documents — not by matching topics. The duplicate
+#                        branch is retired, not renumbered.
+#
+# `evidence` is required on every row and states what was actually read: ref
+# tips and dates, whether the ref is on `origin`, pull-request state, and what
+# `main` does or does not carry. A disposition asserted without it is a guess
+# about a branch name, which is exactly what the ruling forbade.
+#
+# As classified on 2026-09-04, NONE of the seven is `active` and none is
+# `pushed-open`. Both values are nevertheless live vocabulary, exercised by the
+# planted proofs in the checker, because the next collision may well be one.
 # ---------------------------------------------------------------------------
 
 [[branch_collision]]
@@ -590,39 +636,131 @@ number = 19
 main_slug = "party-identity-follows-the-archetype"
 branch_slug = "a-decision-must-be-askable"
 where = "rescue/stash-19-askable-licence-wip-20260902"
+disposition = "rescue-only"
+evidence = """LOCAL ONLY — `git rev-parse origin/rescue/stash-19-askable-\
+licence-wip-20260902` fails; one ref carries the file. Tip `b7631cef`, \
+2026-09-02, subject `rescue(stash): preserve stash@{19} (askable-licence-wip)` \
+— a preserved stash, not a lane. Its merge base with `main` is `c8237bd9` \
+(2026-08-11), three weeks behind. The decision has NOT landed: `main` carries \
+no ADR spelling the askable rule, no `tests/architecture/test_askable_\
+decisions.py`, and `app/features/licensing/service.py` on `main` exposes no \
+side-effect-free predicate. Preserve the record; spend no number until the \
+stash is resumed."""
 
 [[branch_collision]]
 number = 32
 main_slug = "unobserved-is-unknown-never-absent"
 branch_slug = "collections-assesses-identity-and-requests-actions"
-where = "feat/orders-eligibility-sales-handoff and 11 further local branches"
+where = "feat/orders-eligibility-sales-handoff and 17 further refs"
+disposition = "represented-on-main"
+represented_by = 20
+evidence = """Eighteen refs carry it in two blob revisions \
+(`a3f91270` on fifteen, `fd3a2f52` on three); tips run 2026-08-18 to \
+2026-09-02 and every lane is dead — the only pull request among them, #273 on \
+`agent/network-suite-reconciled`, is CLOSED unmerged, and the rest are \
+`salvage/`, `archive/` and rescued-stash refs. SEMANTIC IDENTITY CONFIRMED by \
+reading the branch document against what `main` ships. Branch section 1 \
+(`AssessCollectionExposureV1` carries identity, scope and trigger provenance \
+and never money) is `packages/dotmac-collections/src/dotmac_collections/\
+contracts.py` on `main`, field for field, docstring `Identity and provenance \
+only; current money is always reread`. Section 2 (`ReceivablesReader` \
+protocol, in-memory fake, reread at every decision point) is \
+`receivables.py`'s `ReceivablesReader` and `FakeReceivablesReader`. Section 3 \
+(`CollectionActionRequestedV1` is the one outbound name, typed receipt, no \
+`ConsequenceRequestV1` alias) is `actions.py`. The module's own \
+`EXTRACTION.toml` states that contract and cites `docs/adr/0020-billing-owns-\
+operational-receivables.md`, which is the ADR on `main` that carries the \
+decision. ONE DIVERGENCE, an evolution rather than a different decision: \
+branch section 5 made revision 1 tenant-plane only, and `main` ships both \
+planes independently selectable under ADR-0023. Retire the duplicate; it is \
+not a renumbering. If Michael wants the branch's prose ON `main` as its own \
+record, that is a NEW reservation from `next_free`, not this branch's number."""
 
 [[branch_collision]]
 number = 32
 main_slug = "unobserved-is-unknown-never-absent"
 branch_slug = "integrator-executes-approved-provisioning-commands"
 where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+disposition = "rescue-only"
+evidence = """One ref, an ARCHIVE ref whose tip `5dbc80e4` (2026-08-26) is \
+literally `chore(archive): preserve starter-managed-services-working state`. \
+Not landed and not superseded: `ConnectorMode.PROVISION` and \
+`ProvisionPlugin` appear nowhere in `main`'s `packages/dotmac-integration`, \
+and `main` has no ADR for provisioning as a connector mode. `main`'s ADR-0068 \
+has already ruled on this exact branch — "The archive branch minted its own \
+numbers; they are not reservations" — so the number is not a claim and the \
+ref will not merge as it stands. Preserve the record; if the managed-services \
+lane is resumed, the resumed work allocates from `next_free`."""
 
 [[branch_collision]]
 number = 33
 main_slug = "sales-authority-stops-at-an-accepted-quote"
 branch_slug = "digital-media-owns-reusable-assets-rights-and-renditions"
-where = "archive/worktrees/2026-08-25/digital-media"
+where = "archive/worktrees/2026-08-25/digital-media (local and origin)"
+disposition = "rescue-only"
+evidence = """Two refs, local and `origin`, one tip `b4403ac5` (2026-08-25) \
+whose subject is `chore(archive): preserve digital-media worktree state`. Not \
+landed: `main` has no `packages/dotmac-digital-media` and no DAM ADR — \
+`dotmac-content` and `dotmac-media-observations` are different owners, which \
+the branch document itself says in its own Context. Preserve the record; \
+spend no number until the lane is resumed."""
 
 [[branch_collision]]
 number = 33
 main_slug = "sales-authority-stops-at-an-accepted-quote"
 branch_slug = "exact-managed-service-connectors-are-authorized"
 where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+disposition = "rescue-only"
+evidence = """Same archive ref and same archival tip as ADR-0032 \
+`integrator-executes-approved-provisioning-commands` above; the trio was \
+authored together on 2026-08-17 and cites itself across the three numbers. \
+Not landed: none of the seven distributions it authorizes \
+(`dotmac-connector-contabo`, `-keycloak-admin`, `-mailcow`, `-nextcloud`, \
+`-dotmac-erp`, `-dotmac-academy`, `-dotmac-host-agent`) exists on `main`, and \
+`docs/inventories/managed-service-connector-sources.md` is not there either. \
+Covered by ADR-0068's ruling that this branch's numbers are not \
+reservations."""
 
 [[branch_collision]]
 number = 34
 main_slug = "media-observations-own-provider-reports-not-attribution"
 branch_slug = "managed-capability-contracts-are-separate-product-artifacts"
 where = "origin/archive/worktrees/2026-08-25/starter-managed-services-working"
+disposition = "represented-on-main"
+represented_by = 68
+evidence = """SEMANTIC IDENTITY CONFIRMED, and already adjudicated on `main`. \
+`docs/adr/0068-the-kernel-owns-the-capability-artifact-grammar.md` names this \
+exact document in its own front matter: "Supersedes the numbering of: the \
+archived ADR-0034 on `archive/worktrees/2026-08-25/starter-managed-services-\
+working`, whose number is held on `main` by ADR-0034 (media observations). \
+The archive branch minted its own numbers; they are not reservations." \
+Reading both documents: ADR-0068's Context is the branch document's Context \
+verbatim — the same Mailcow/Nextcloud/Keycloak `upstream_third_party` framing, \
+the same two-artifacts-answer-different-questions conclusion, and the same \
+refusal to relabel them into one artifact to simplify a join. Same decision, \
+not merely the same topic. Retire the duplicate; nothing is renumbered."""
 
 [[branch_collision]]
 number = 71
 main_slug = "a-recovery-bundle-carries-the-role-closure"
 branch_slug = "build-once-and-bind-the-environment-late"
-where = "docs/adr-0071-build-once-bind-late (pushed)"
+where = "docs/adr-0071-build-once-bind-late (local and origin, tip `3b409faf`)"
+disposition = "superseded"
+evidence = """THE ONE PUSHED CLAIMANT, and the reason it is not `pushed-open`: \
+its pull request #500 is CLOSED UNMERGED (2026-08-29T19:10:16Z), closed by \
+Michael's own ruling that the ADR was in the wrong repository — "a fleet-wide \
+standard cannot live inside one of the products it governs". It was replaced \
+by two changes: the canonical build-once/bind-late ADR plus an enforcing \
+action in `dotmac_governance`, and Starter-side ADOPTION ONLY, which landed \
+as PR #504 (merged 2026-08-29T21:51:55Z) pinning the exact Governance \
+revision in `.dotmac/standards-profile.json` and \
+`.github/workflows/engineering-standards.yml`. Verified on `main`: the \
+standards profile pins `governance_model.revision = \
+4f80bd164137d34ff41f1866d7e748f2e664dee3`, and `main` carries no build-once \
+ADR of its own — correctly, because the decision is not this repository's to \
+hold. Never-merge; no number is spent and no citation is renumbered. WHAT \
+REMAINS IS COORDINATION, NOT REPAIR: the branch is still on `origin`, so a \
+reviewer can reopen #500 or merge `origin/docs/adr-0071-build-once-bind-late` \
+without ever seeing this file, and `docs/adr/` would then hold two ADR-0071 \
+documents. Deleting the remote branch is Michael's to authorize; until then \
+this row is the record that it must not merge."""

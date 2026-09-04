@@ -41,16 +41,44 @@ The detector is a pure function over two registers and two directory listings,
 proven by planted inputs on every run in both directions; only the git wiring
 that feeds it depends on a base revision being fetchable.
 
+What is ENFORCED about a declared collision, unconditionally, off one worktree:
+
+* every ``[[branch_collision]]`` row is CLASSIFIED into one of five buckets and
+  carries the ``evidence`` that put it there (Michael's ruling, 2026-09-04:
+  classify every claimant rather than mechanically renumbering 1,273 refs), and
+  a ``represented-on-main`` row names an AUTHORED number that carries the same
+  decision — not the colliding number, and not a row with the same slug, which
+  would make it history rather than a claim;
+* the thirty-one EXCLUDED historical pairs stay excluded and stay checkable.
+  ``docs/adr/historical-renumberings.toml`` holds them with their equivalence
+  evidence, and ``historical_findings`` re-derives that evidence from the
+  register alone: the slug the branch spells has its own authored row, at a
+  different number.  The two files must stay disjoint — a pair that is both a
+  live claim and history is hidden in the quiet file.
+
 What is DECLARED AND NOT DETECTED, and is not called coverage: which branch
 claims a number.  A checker reading one worktree cannot see another branch.
 ``branch_claim_findings`` below is a real comparison, but it needs a ref scan
 supplied to it, and the scan runs only when ``ADR_REGISTER_SCAN_REFS`` is set
 (off by default: it is O(refs) ``git ls-tree`` calls, and a CI checkout usually
-holds only the branch under test).  When it does not run, the test says so
-rather than passing quietly.  The gate that does bite unconditionally is
-indirect and sufficient — a colliding branch cannot merge, because the moment
-its ADR file lands ``test_adr_numbering.py::test_every_adr_number_is_unique``
-sees two documents on one number.
+holds only the branch under test).
+
+THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE, not that scan.  Michael's
+ruling, 2026-09-04: "The global-ref scan is an audit tool, not a dependable CI
+gate.  CI often sees only one branch or a shallow ref set.  The merge-base
+reservation gate is therefore the authority."  ``unreserved_authorings`` runs on
+every branch against its own merge base, and the merge gate
+``test_adr_numbering.py::test_every_adr_number_is_unique`` fails the moment a
+colliding document actually lands.  Both bite unconditionally.
+
+The scan is a SUPPLEMENTARY AUDIT, and it reports its own coverage: how many
+refs were visible, whether the checkout was shallow, whether remote refs were
+fetched, and how many refs actually carried an ADR.  When that coverage is
+inadequate it declares NON-EXECUTION and skips, so "zero collisions found" can
+never be read as "only one branch was visible".  Both halves are planted and
+proven — a one-ref scan, a shallow checkout, an unfetched remote and an
+unrequested scan each report non-execution, and adequate coverage over a planted
+collision finds it, so the hardened path cannot be one that only ever declines.
 """
 
 from __future__ import annotations
@@ -60,11 +88,15 @@ import re
 import shutil
 import subprocess
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ADR_DIR = REPO_ROOT / "docs" / "adr"
 REGISTER = ADR_DIR / "reservations.toml"
+HISTORICAL = ADR_DIR / "historical-renumberings.toml"
 
 VALID_STATUSES = frozenset({"reserved", "authored", "withdrawn", "contested"})
 
@@ -86,7 +118,44 @@ KNOWN_ROW_FIELDS = frozenset(
         "replaces",
     }
 )
-KNOWN_COLLISION_FIELDS = frozenset({"number", "main_slug", "branch_slug", "where"})
+KNOWN_COLLISION_FIELDS = frozenset(
+    {
+        "number",
+        "main_slug",
+        "branch_slug",
+        "where",
+        "disposition",
+        "evidence",
+        "represented_by",
+    }
+)
+KNOWN_HISTORICAL_FIELDS = frozenset({"number", "slug", "landed_at", "refs"})
+
+# Michael's ruling, 2026-09-04: do not mechanically renumber 1,273 refs —
+# CLASSIFY every claimant first, and only then let one earn a new number.  The
+# vocabulary is CLOSED, and `evidence` is required beside it, because a
+# disposition asserted with no reading of the ref is a guess about a branch
+# name, which is what the ruling forbade.
+DISPOSITIONS = frozenset(
+    {
+        # intended for promotion: reserve a NEW number on `main` first, rebase,
+        # rename, update citations one at a time BY MEANING, re-run the semantic
+        # citation verification, confirm unrelated same-number refs unchanged.
+        "active",
+        # on `origin` with an OPEN pull request: highest urgency, because it can
+        # escape local coordination and be merged by someone who never read this.
+        "pushed-open",
+        # never-merge.  Withdrawn, relocated or replaced; no number is spent.
+        "superseded",
+        # a preserved branch (a rescued stash, an archival tip).  Keep the
+        # record; spend NO number until the lane is actually resumed.
+        "rescue-only",
+        # the SAME decision is already on `main`; `represented_by` names the
+        # number carrying it, confirmed by reading BOTH documents.  Retire the
+        # duplicate branch — this is not a renumbering.
+        "represented-on-main",
+    }
+)
 
 # Numbers that `main` has authored and an unmerged branch spells with a
 # DIFFERENT decision.  Keyed by (number, branch slug) because one number can be
@@ -111,6 +180,13 @@ BRANCH_COLLISION_BACKLOG = frozenset(
 # hold.  There are none: the 0074 collision was reconciled by renumbering the
 # Foundation pair to 0075/0076 rather than by parking it here.
 CONTESTED_BACKLOG: frozenset[int] = frozenset()
+
+# The excluded historical pairs: a branch spelling a number that `main` later
+# gave to the SAME decision.  Preserved with their equivalence evidence in
+# `docs/adr/historical-renumberings.toml`, deliberately OUTSIDE the live
+# collision queue — thirty-eight entries, thirty-one of them already reconciled,
+# would bury the seven a human still has to act on.
+HISTORICAL_RENUMBERING_COUNT = 31
 
 SCAN_REFS_ENV = "ADR_REGISTER_SCAN_REFS"
 BASE_REF_ENV = "ADR_REGISTER_BASE_REF"
@@ -272,6 +348,11 @@ def findings(register: dict, filenames: set[str]) -> list[str]:
                 f"number in its own change before writing the document."
             )
 
+    authored_slugs = {
+        row["number"]: row["slug"]
+        for row in rows
+        if row.get("status") == "authored" and isinstance(row.get("number"), int)
+    }
     for entry in register.get("branch_collision", []):
         unknown = sorted(set(entry) - KNOWN_COLLISION_FIELDS)
         if unknown:
@@ -279,7 +360,170 @@ def findings(register: dict, filenames: set[str]) -> list[str]:
                 f"branch_collision {entry.get('number')!r} carries unread fields "
                 f"{unknown}."
             )
+        out.extend(_collision_classification_findings(entry, authored_slugs))
 
+    return out
+
+
+def _collision_classification_findings(
+    entry: dict, authored: dict[int, str]
+) -> list[str]:
+    """Every declared collision is CLASSIFIED, with evidence.
+
+    Michael's ruling: a claimant is put in exactly one bucket before anything is
+    renumbered.  `authored` is `{number: slug}` for the AUTHORED rows only —
+    "already represented on `main`" has to name a decision that is actually on
+    `main`, so a `reserved` or `withdrawn` number cannot answer for it.
+    """
+    out: list[str] = []
+    number = entry.get("number")
+    branch_slug = entry.get("branch_slug")
+    disposition = entry.get("disposition")
+
+    if disposition not in DISPOSITIONS:
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} has disposition "
+            f"{disposition!r}, not one of {sorted(DISPOSITIONS)}. Classify the "
+            f"claimant before renumbering anything."
+        )
+        return out
+
+    if not str(entry.get("evidence", "")).strip():
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+            f"{disposition!r} with no `evidence`. A bucket read off a branch "
+            f"NAME is a guess; state what was read — ref tip and date, whether "
+            f"it is on `origin`, pull-request state, what `main` carries."
+        )
+
+    represented_by = entry.get("represented_by")
+    if disposition == "represented-on-main":
+        if represented_by is None:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} claims the "
+                f"decision is already on `main` but names no `represented_by`. "
+                f"Name the number that carries it."
+            )
+        elif represented_by not in authored:
+            out.append(
+                f"branch_collision ADR-{number!r} {branch_slug!r} is represented "
+                f"by ADR-{represented_by!r}, which is not an AUTHORED decision in "
+                f"this register. A number that is merely reserved is not on "
+                f"`main`, so it cannot already carry the branch's decision."
+            )
+        elif represented_by == number:
+            out.append(
+                f"branch_collision ADR-{number:04d} {branch_slug!r} cannot be "
+                f"represented by ADR-{number:04d}: that number holds a DIFFERENT "
+                f"decision on `main`, which is why this is a collision."
+            )
+        elif authored[represented_by] == branch_slug:
+            out.append(
+                f"branch_collision ADR-{number:04d} {branch_slug!r} names a row "
+                f"with the SAME slug at ADR-{represented_by:04d}. That is a "
+                f"branch carrying an older numbering of a landed decision, not a "
+                f"competing claim — it belongs in "
+                f"docs/adr/historical-renumberings.toml."
+            )
+    elif represented_by is not None:
+        out.append(
+            f"branch_collision ADR-{number!r} {branch_slug!r} is classified "
+            f"{disposition!r} but names `represented_by`. Only "
+            f"`represented-on-main` may."
+        )
+    return out
+
+
+def historical_findings(register: dict, historical: dict) -> list[str]:
+    """The 31 excluded pairs, and the evidence that they really are excluded.
+
+    Michael's ruling: the historical pairs stay OUT of the live collision queue,
+    "with their equivalence evidence preserved".  Preserved has to mean
+    checkable, or the file is a set of assertions nobody verifies.
+
+    The claim each row makes is exactly one thing, and it is derivable from the
+    register alone — no network, no ref scan: the slug the branch spells at
+    `number` HAS ITS OWN authored row, at `landed_at`, and `landed_at` is a
+    different number.  That is what makes the pair a stale copy of an older
+    numbering rather than a competing claim.  The two files must also stay
+    disjoint: a pair cannot be both history and a live claim.
+    """
+    out: list[str] = []
+    rows = {row["number"]: row for row in register.get("reservation", [])}
+    by_slug = {row["slug"]: row for row in register.get("reservation", [])}
+    live = {
+        (entry["number"], entry["branch_slug"])
+        for entry in register.get("branch_collision", [])
+    }
+
+    entries = historical.get("historical", [])
+    declared_count = historical.get("count")
+    if declared_count != len(entries):
+        out.append(
+            f"`count` is {declared_count!r} but the file holds {len(entries)} "
+            f"rows. The count is the ADR-0018 pin; move it in the same change "
+            f"that moves a row."
+        )
+
+    seen: set[tuple[int, str]] = set()
+    for entry in entries:
+        unknown = sorted(set(entry) - KNOWN_HISTORICAL_FIELDS)
+        if unknown:
+            out.append(f"historical row {entry!r} carries unread fields {unknown}.")
+        number = entry.get("number")
+        slug = entry.get("slug")
+        landed_at = entry.get("landed_at")
+        if not isinstance(number, int) or not slug or not isinstance(landed_at, int):
+            out.append(f"historical row {entry!r} is not a (number, slug, landed_at)")
+            continue
+        if (number, slug) in seen:
+            out.append(f"historical pair ADR-{number:04d} {slug!r} is listed twice.")
+        seen.add((number, slug))
+
+        if (number, slug) in live:
+            out.append(
+                f"ADR-{number:04d} {slug!r} is BOTH a declared branch collision "
+                f"and a historical renumbering. A pair is one or the other: a "
+                f"live claim needs a disposition, history needs a landed number."
+            )
+        if number not in rows:
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} spells a number with no "
+                f"row in the register at all."
+            )
+        row = by_slug.get(slug)
+        if row is None:
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} claims the decision landed "
+                f"under another number, but no row in the register carries that "
+                f"slug. Then it is not history — it is an undeclared claim."
+            )
+            continue
+        if row["number"] != landed_at:
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} says it landed at "
+                f"ADR-{landed_at:04d}; the register carries that slug at "
+                f"ADR-{row['number']:04d}."
+            )
+        if row.get("status") != "authored":
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} points at "
+                f"ADR-{landed_at:04d}, which is {row.get('status')!r} rather than "
+                f"authored. A decision that has not landed cannot be the reason "
+                f"an older numbering is history."
+            )
+        if landed_at == number:
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} landed at its own number, "
+                f"so nothing was renumbered and the row says nothing."
+            )
+        refs = entry.get("refs")
+        if not isinstance(refs, int) or refs < 1:
+            out.append(
+                f"historical ADR-{number:04d} {slug!r} records refs={refs!r}; the "
+                f"observed ref count is context, but a pair seen on no ref was "
+                f"never observed."
+            )
     return out
 
 
@@ -436,37 +680,159 @@ def _base_register_and_files(base_ref: str) -> tuple[dict, set[str]] | None:
     return load_register(register_text), names
 
 
-def _scan_refs() -> dict[str, dict[int, str]] | None:
+# --------------------------------------------------------------------------
+# The all-ref audit scan, and its coverage.
+#
+# THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE.  `unreserved_authorings`
+# runs on every branch's own CI against that branch's merge base, and the merge
+# gate `test_adr_numbering.py::test_every_adr_number_is_unique` fails the moment
+# a colliding document actually lands.  Those two bite unconditionally.
+#
+# This scan is a SUPPLEMENTARY AUDIT and nothing more.  Michael's ruling,
+# 2026-09-04: "The global-ref scan is an audit tool, not a dependable CI gate.
+# CI often sees only one branch or a shallow ref set.  The merge-base
+# reservation gate is therefore the authority."  So the scan reports its own
+# coverage — how many refs were visible, whether the checkout was shallow,
+# whether remote refs were fetched — and declares NON-EXECUTION when the
+# coverage is inadequate.  That is the whole point: it must be impossible to
+# read "zero collisions found" as a proof when what actually happened is "only
+# one branch was visible".
+# --------------------------------------------------------------------------
+
+# One visible ref proves nothing: it is the branch under test, and it agrees
+# with itself.  Two is the smallest number at which the scan has compared
+# anything at all.
+MIN_REFS_WITH_ADRS = 2
+
+
+@dataclass(frozen=True)
+class ScanCoverage:
+    """What the audit scan could actually see, reported whether or not it ran."""
+
+    requested: bool
+    git_available: bool
+    shallow: bool
+    remotes_configured: bool
+    refs_visible: int
+    remote_refs_visible: int
+    refs_with_adrs: int
+    reason: str | None
+
+    @property
+    def adequate(self) -> bool:
+        return self.reason is None
+
+    def describe(self) -> str:
+        state = "RAN" if self.adequate else "DID NOT RUN"
+        return (
+            f"ADR all-ref audit scan {state}. "
+            f"requested={self.requested} git={self.git_available} "
+            f"shallow={self.shallow} remotes_configured={self.remotes_configured} "
+            f"refs_visible={self.refs_visible} "
+            f"remote_refs_visible={self.remote_refs_visible} "
+            f"refs_carrying_adrs={self.refs_with_adrs}."
+            + ("" if self.adequate else f" NON-EXECUTION: {self.reason}")
+            + " The authority is the merge-base reservation gate"
+            " (test_no_adr_was_authored_without_a_reservation_on_the_merge_base)"
+            " and the merge gate test_adr_numbering.py; this scan is a"
+            " supplementary audit."
+        )
+
+
+def scan_coverage(
+    *,
+    requested: bool,
+    git_available: bool,
+    shallow: bool,
+    remotes_configured: bool,
+    refs: list[str],
+    refs_with_adrs: int,
+) -> ScanCoverage:
+    """Decide whether a scan over these refs is worth believing.
+
+    Pure, so the non-execution paths below are PLANTED and proven rather than
+    asserted in a docstring (ADR-0018).  Each clause names a way a clean result
+    could be clean for the wrong reason.
+    """
+    remote_refs = [ref for ref in refs if ref.startswith("refs/remotes/")]
+    reason: str | None = None
+    if not requested:
+        reason = (
+            f"the scan was not requested — set {SCAN_REFS_ENV}=1 to run it. It is "
+            f"off by default because it is one `git ls-tree` per ref."
+        )
+    elif not git_available:
+        reason = "git is not on PATH, so no ref could be read."
+    elif shallow:
+        reason = (
+            "the checkout is SHALLOW (`git rev-parse --is-shallow-repository` is "
+            "true). A shallow clone can hold refs whose trees are absent, so an "
+            "absent ADR file is indistinguishable from an unfetched one."
+        )
+    elif remotes_configured and not remote_refs:
+        reason = (
+            "a remote is configured but NO remote-tracking refs are present: "
+            "`git fetch` was not run, so every branch that lives only on `origin` "
+            "was invisible to this scan."
+        )
+    elif refs_with_adrs < MIN_REFS_WITH_ADRS:
+        reason = (
+            f"only {refs_with_adrs} ref carried any docs/adr/*.md, below the "
+            f"minimum of {MIN_REFS_WITH_ADRS}. A scan over one ref compares the "
+            f"branch under test with itself and reports clean having looked at "
+            f"nothing."
+        )
+    return ScanCoverage(
+        requested=requested,
+        git_available=git_available,
+        shallow=shallow,
+        remotes_configured=remotes_configured,
+        refs_visible=len(refs),
+        remote_refs_visible=len(remote_refs),
+        refs_with_adrs=refs_with_adrs,
+        reason=reason,
+    )
+
+
+def _scan_refs() -> tuple[dict[str, dict[int, str]], ScanCoverage]:
     """ADR numbers on every local and remote ref except the base branch.
 
-    Opt-in through `ADR_REGISTER_SCAN_REFS`, because it is one `git ls-tree` per
-    ref and a CI checkout normally holds only the branch under test — a scan
-    over one ref would report a clean result while having looked at nothing.
+    Returns the scan AND its coverage, always.  The coverage is what the caller
+    reports; an empty scan is never a clean result.
     """
-    if os.environ.get(SCAN_REFS_ENV, "").lower() not in {"1", "true", "yes"}:
-        return None
+    requested = os.environ.get(SCAN_REFS_ENV, "").lower() in {"1", "true", "yes"}
     git = _git()
-    if git is None:
-        return None
+    if git is None or not requested:
+        return {}, scan_coverage(
+            requested=requested,
+            git_available=git is not None,
+            shallow=False,
+            remotes_configured=False,
+            refs=[],
+            refs_with_adrs=0,
+        )
+
+    def run(*args: str) -> str:
+        return subprocess.run(  # noqa: S603 - absolute git, literal args
+            [git, *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    shallow = run("rev-parse", "--is-shallow-repository").strip() == "true"
+    remotes_configured = bool(run("remote").split())
     base = os.environ.get(BASE_REF_ENV, DEFAULT_BASE_REF)
-    refs = subprocess.run(  # noqa: S603
-        [git, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
+    refs = run(
+        "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"
+    ).split()
+
     skip = {f"refs/remotes/{base}", "refs/heads/main", f"refs/heads/{base}"}
     scan: dict[str, dict[int, str]] = {}
     for ref in refs:
         if ref in skip:
             continue
-        listing = subprocess.run(  # noqa: S603
-            [git, "ls-tree", "--name-only", ref, "docs/adr/"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        ).stdout
+        listing = run("ls-tree", "--name-only", ref, "docs/adr/")
         names = {
             line.rsplit("/", 1)[-1]
             for line in listing.splitlines()
@@ -474,7 +840,16 @@ def _scan_refs() -> dict[str, dict[int, str]] | None:
         }
         if names:
             scan[ref] = numbers_in(names)
-    return scan
+
+    coverage = scan_coverage(
+        requested=True,
+        git_available=True,
+        shallow=shallow,
+        remotes_configured=remotes_configured,
+        refs=refs,
+        refs_with_adrs=len(scan),
+    )
+    return scan, coverage
 
 
 # --------------------------------------------------------------------------
@@ -545,16 +920,55 @@ def test_no_adr_was_authored_without_a_reservation_on_the_merge_base() -> None:
     assert offenders == {}, "; ".join(offenders[number] for number in sorted(offenders))
 
 
+def test_every_declared_collision_is_classified_with_evidence() -> None:
+    """Michael's ruling: classify every claimant before renumbering anything."""
+    register = load_register(REGISTER.read_text(encoding="utf-8"))
+    authored = {row["number"]: row["slug"] for row in register["reservation"]}
+    problems: list[str] = []
+    for entry in register.get("branch_collision", []):
+        problems.extend(_collision_classification_findings(entry, authored))
+    assert problems == [], "docs/adr/reservations.toml: " + "; ".join(problems)
+
+
+def test_the_historical_renumberings_are_preserved_and_stay_out_of_the_queue() -> None:
+    """The 31 excluded pairs, their equivalence evidence, and the separation.
+
+    Michael's ruling: they "should remain excluded, with their equivalence
+    evidence preserved. Mixing them into the live collision queue would make the
+    register less useful."
+    """
+    register = load_register(REGISTER.read_text(encoding="utf-8"))
+    historical = load_register(HISTORICAL.read_text(encoding="utf-8"))
+    problems = historical_findings(register, historical)
+    assert problems == [], "docs/adr/historical-renumberings.toml: " + "; ".join(
+        problems
+    )
+
+
+def test_the_historical_pin_is_not_vacuous() -> None:
+    """A file that emptied itself would satisfy every check above."""
+    historical = load_register(HISTORICAL.read_text(encoding="utf-8"))
+    assert historical["count"] == HISTORICAL_RENUMBERING_COUNT, (
+        f"the historical-renumbering pin moved: file says "
+        f"{historical['count']}, this module pins {HISTORICAL_RENUMBERING_COUNT}. "
+        f"Two-directional per ADR-0018 — it may not grow silently, and it may "
+        f"only shrink in the change that retires the refs it names."
+    )
+
+
 def test_the_register_agrees_with_the_branches_that_hold_numbers() -> None:
-    """Requirement 5's branch half. DECLARED unless the scan is switched on."""
-    scan = _scan_refs()
-    if scan is None:
-        # Not a pass. The branch half of requirement 5 is declared, not
-        # detected, in this run; `branch_claim_findings` is still proven below.
-        return
+    """Requirement 5's branch half — a SUPPLEMENTARY AUDIT, not the authority.
+
+    The authority is the merge-base reservation gate above and the merge gate in
+    `test_adr_numbering.py`.  This scan reports its coverage and declines to run
+    rather than reporting a clean result over refs it could not see.
+    """
+    scan, coverage = _scan_refs()
+    if not coverage.adequate:
+        pytest.skip(coverage.describe())
     register = load_register(REGISTER.read_text(encoding="utf-8"))
     problems = branch_claim_findings(register, scan)
-    assert problems == [], "; ".join(problems)
+    assert problems == [], f"{coverage.describe()} Findings: " + "; ".join(problems)
 
 
 # --------------------------------------------------------------------------
@@ -830,3 +1244,274 @@ def test_a_branch_carrying_an_older_numbering_is_not_called_a_collision() -> Non
     register = {"next_free": 3, "reservation": CLEAN["reservation"]}
     scan = {"refs/heads/archive/old": {1: "beta"}}
     assert branch_claim_findings(register, scan) == []
+
+
+# --------------------------------------------------------------------------
+# Classification proofs (ADR-0018).  The five buckets are a closed vocabulary
+# and `evidence` is mandatory, so each way of skipping the classification is
+# planted and named — against the clean control below, which must stay clean.
+# --------------------------------------------------------------------------
+
+CLEAN_COLLISION = {
+    "number": 1,
+    "main_slug": "alpha",
+    "branch_slug": "a-different-decision",
+    "where": "feat/something",
+    "disposition": "rescue-only",
+    "evidence": "tip abc1234, 2026-09-01, local only, main carries nothing.",
+}
+CLEAN_AUTHORED = {1: "alpha", 2: "beta"}
+
+
+def test_the_classification_negative_control_is_clean() -> None:
+    assert _collision_classification_findings(CLEAN_COLLISION, CLEAN_AUTHORED) == []
+
+
+def test_a_planted_unclassified_collision_is_named() -> None:
+    planted = {k: v for k, v in CLEAN_COLLISION.items() if k != "disposition"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("has disposition None" in p for p in problems), problems
+
+
+def test_a_planted_invented_disposition_is_named() -> None:
+    planted = {**CLEAN_COLLISION, "disposition": "probably-fine"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("'probably-fine'" in p for p in problems), problems
+
+
+def test_a_planted_classification_without_evidence_is_named() -> None:
+    """A bucket guessed from a branch NAME is what the ruling forbade."""
+    planted = {**CLEAN_COLLISION, "evidence": "   "}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("no `evidence`" in p for p in problems), problems
+
+
+def test_a_planted_represented_on_main_without_a_number_is_named() -> None:
+    planted = {**CLEAN_COLLISION, "disposition": "represented-on-main"}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("names no `represented_by`" in p for p in problems), problems
+
+
+def test_a_planted_representation_by_an_unregistered_number_is_named() -> None:
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "represented-on-main",
+        "represented_by": 9,
+    }
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("not an AUTHORED decision" in p for p in problems), problems
+
+
+def test_a_planted_representation_by_the_colliding_number_itself_is_named() -> None:
+    """ADR-0032 cannot be "already represented" by ADR-0032 — that IS the clash."""
+    planted = {
+        **CLEAN_COLLISION,
+        "disposition": "represented-on-main",
+        "represented_by": 1,
+    }
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("holds a DIFFERENT decision on `main`" in p for p in problems), problems
+
+
+def test_a_planted_same_slug_representation_is_sent_to_the_historical_file() -> None:
+    planted = {
+        **CLEAN_COLLISION,
+        "branch_slug": "beta",
+        "disposition": "represented-on-main",
+        "represented_by": 2,
+    }
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("historical-renumberings.toml" in p for p in problems), problems
+
+
+def test_a_planted_stray_represented_by_is_named() -> None:
+    planted = {**CLEAN_COLLISION, "represented_by": 2}
+    problems = _collision_classification_findings(planted, CLEAN_AUTHORED)
+    assert any("Only `represented-on-main` may" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------
+# The historical file's equivalence evidence, proven in both directions.
+# --------------------------------------------------------------------------
+
+HIST_REGISTER = {
+    "next_free": 4,
+    "reservation": [
+        {"number": 1, "slug": "alpha", "status": "authored", "claimed": "2026-01-01"},
+        {"number": 2, "slug": "beta", "status": "authored", "claimed": "2026-01-02"},
+        {"number": 3, "slug": "gamma", "status": "reserved", "claimed": "2026-01-03"},
+    ],
+    "branch_collision": [
+        {
+            "number": 1,
+            "main_slug": "alpha",
+            "branch_slug": "a-live-claim",
+            "where": "feat/live",
+            "disposition": "active",
+            "evidence": "read it",
+        }
+    ],
+}
+CLEAN_HISTORICAL = {
+    "count": 1,
+    "historical": [{"number": 1, "slug": "beta", "landed_at": 2, "refs": 7}],
+}
+
+
+def test_the_historical_negative_control_is_clean() -> None:
+    assert historical_findings(HIST_REGISTER, CLEAN_HISTORICAL) == []
+
+
+def test_a_planted_historical_count_drift_is_named() -> None:
+    planted = {**CLEAN_HISTORICAL, "count": 2}
+    problems = historical_findings(HIST_REGISTER, planted)
+    assert any("`count` is 2" in p for p in problems), problems
+
+
+def test_a_planted_historical_pair_with_no_landed_decision_is_named() -> None:
+    """Without a row carrying the slug, it is not history — it is a live claim."""
+    planted = {
+        "count": 1,
+        "historical": [
+            {"number": 1, "slug": "never-landed", "landed_at": 2, "refs": 1}
+        ],
+    }
+    problems = historical_findings(HIST_REGISTER, planted)
+    assert any("no row in the register carries that slug" in p for p in problems)
+
+
+def test_a_planted_historical_pair_pointing_at_the_wrong_number_is_named() -> None:
+    planted = {
+        "count": 1,
+        "historical": [{"number": 1, "slug": "beta", "landed_at": 3, "refs": 1}],
+    }
+    problems = historical_findings(HIST_REGISTER, planted)
+    assert any("the register carries that slug at ADR-0002" in p for p in problems)
+
+
+def test_a_planted_historical_pair_on_an_unlanded_decision_is_named() -> None:
+    planted = {
+        "count": 1,
+        "historical": [{"number": 1, "slug": "gamma", "landed_at": 3, "refs": 1}],
+    }
+    problems = historical_findings(HIST_REGISTER, planted)
+    assert any("rather than authored" in p for p in problems), problems
+
+
+def test_a_planted_pair_in_both_files_is_named() -> None:
+    """A pair is history or a live claim. Being both hides it in the quiet file."""
+    planted = {
+        "count": 1,
+        "historical": [
+            {"number": 1, "slug": "a-live-claim", "landed_at": 2, "refs": 1}
+        ],
+    }
+    problems = historical_findings(HIST_REGISTER, planted)
+    assert any("BOTH a declared branch collision" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------
+# Scan-coverage proofs (ADR-0018).  Michael's requirement in one sentence:
+# "zero collisions found" must never be readable as "only one branch was
+# visible".  So every way the scan can be blind is planted, and the positive
+# control proves the adequate path is not clean by construction.
+# --------------------------------------------------------------------------
+
+ADEQUATE = {
+    "requested": True,
+    "git_available": True,
+    "shallow": False,
+    "remotes_configured": True,
+    "refs": [
+        "refs/heads/main",
+        "refs/heads/feat/one",
+        "refs/remotes/origin/feat/two",
+    ],
+    "refs_with_adrs": 3,
+}
+
+
+def test_adequate_coverage_is_reported_as_having_run() -> None:
+    """The control. A gate that never runs would 'pass' every plant below."""
+    coverage = scan_coverage(**ADEQUATE)
+    assert coverage.adequate, coverage.describe()
+    assert "RAN" in coverage.describe()
+    assert coverage.refs_visible == 3
+    assert coverage.remote_refs_visible == 1
+    assert "merge-base reservation gate" in coverage.describe()
+
+
+def test_a_one_ref_scan_reports_non_execution_not_clean() -> None:
+    """The exact CI shape: the base plus one branch, agreeing with itself.
+
+    `refs/remotes/origin/main` is present, so the unfetched-remote clause below
+    is satisfied and this test really does exercise the ref-count clause rather
+    than passing for the neighbouring reason.
+    """
+    coverage = scan_coverage(
+        **{
+            **ADEQUATE,
+            "refs": ["refs/heads/feat/one", "refs/remotes/origin/main"],
+            "refs_with_adrs": 1,
+        }
+    )
+    assert not coverage.adequate
+    assert "only 1 ref carried" in coverage.reason
+    assert "DID NOT RUN" in coverage.describe()
+    assert "NON-EXECUTION" in coverage.describe()
+
+
+def test_a_shallow_checkout_reports_non_execution_not_clean() -> None:
+    coverage = scan_coverage(**{**ADEQUATE, "shallow": True})
+    assert not coverage.adequate
+    assert "SHALLOW" in coverage.reason
+    assert "NON-EXECUTION" in coverage.describe()
+
+
+def test_unfetched_remote_refs_report_non_execution_not_clean() -> None:
+    """A remote exists and nothing was fetched: every origin-only branch is dark."""
+    coverage = scan_coverage(
+        **{
+            **ADEQUATE,
+            "refs": ["refs/heads/main", "refs/heads/feat/one"],
+            "refs_with_adrs": 2,
+        }
+    )
+    assert not coverage.adequate
+    assert "`git fetch` was not run" in coverage.reason
+
+
+def test_an_unrequested_scan_reports_non_execution_not_clean() -> None:
+    coverage = scan_coverage(**{**ADEQUATE, "requested": False})
+    assert not coverage.adequate
+    assert SCAN_REFS_ENV in coverage.reason
+
+
+def test_a_missing_git_reports_non_execution_not_clean() -> None:
+    coverage = scan_coverage(**{**ADEQUATE, "git_available": False})
+    assert not coverage.adequate
+    assert "git is not on PATH" in coverage.reason
+
+
+def test_adequate_coverage_finds_a_planted_collision() -> None:
+    """The positive control: the adequate path is not clean by construction.
+
+    A non-execution report and a clean report must be reachable from DIFFERENT
+    inputs, or the hardening above would have turned the scan into a gate that
+    can only ever decline.
+    """
+    coverage = scan_coverage(**ADEQUATE)
+    assert coverage.adequate
+    register = {"next_free": 3, "reservation": CLEAN["reservation"]}
+    scan = {"refs/remotes/origin/feat/two": {1: "an-undeclared-second-decision"}}
+    problems = branch_claim_findings(register, scan)
+    assert any("an-undeclared-second-decision" in p for p in problems), problems
+
+
+def test_the_scan_is_supplementary_and_says_so_where_a_reader_will_look() -> None:
+    """The ruling is recorded in the code, not only in a commit message."""
+    body = Path(__file__).read_text(encoding="utf-8")
+    assert "THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE" in body
+    assert "SUPPLEMENTARY AUDIT" in body
+    register_text = REGISTER.read_text(encoding="utf-8")
+    assert "THE AUTHORITY IS THE MERGE-BASE RESERVATION GATE" in register_text
