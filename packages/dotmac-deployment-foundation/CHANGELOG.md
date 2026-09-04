@@ -412,13 +412,32 @@ is a human releasing deliberately, which leaves a record.
 would hold a host forever after any legitimate refusal, and somebody would then
 release it by hand — the mechanism this record exists to remove.
 
-**The refusal vocabulary is closed and owned here**, DERIVED from the eight
-terminal refusals the runner actually raises rather than invented: a schema
-validating a code against a set the writer invents is not a validation. The
-granularity is the destroy decision's — three parse failures are one fact to
-somebody deciding whether to wipe a machine. Every terminal refusal maps to
-exactly one member, and an unmapped one is an amendment rather than a free-text
-escape.
+**The refusal vocabulary is closed and owned here**, DERIVED from all THIRTEEN
+terminal refusals rather than invented: a schema validating a code against a set
+the writer invents is not a validation.
+
+Thirteen, and the count is the lesson. The first derivation found eight by
+scanning one file for `raise DeploymentFoundationError` — a grep's answer. Three
+more raise `ProvocationError`, which SUBCLASSES it, and two live in a file
+neither side had scanned. The writing lane's independent count was ten and was
+wrong the same way, in its own words: *"my own count was made by the shape of a
+grep rather than by the shape of the class hierarchy."* The final scan is by AST
+over every raise of a `DeploymentFoundationError` subclass across three files,
+and the site-to-member table is in the enum's docstring, because a vocabulary
+whose derivation is not written down is one the next person re-derives
+differently.
+
+SIX members, not seven. `descriptor_unfit` and `provocation_unestablished` are
+genuine additions with opposite operator actions — the first means *do not touch
+the machine, fix the input*; the second is the only refusal where the host was
+MUTATED and the mutation FAILED, so it means *inspect the machine before
+re-running*. And `vantage_unavailable` is gone: it was derived from one site that
+was then correctly remapped, leaving a member nobody raises — a code for
+something that cannot happen and a test that can never fail. It is not retained
+against a refusal that does not exist.
+
+Every terminal refusal maps to exactly one member, and an unmapped one is an
+amendment rather than a free-text escape.
 
 **VM identity is the SLOT, not the address.** The addresses are exactly what a
 destroy-and-restore can change, so an address would bind by coincidence and could
