@@ -591,6 +591,7 @@ rebuilt = FoundationExecutionPlanV1(
     manifest_digest=document["manifest_digest"],
     descriptor_digest=document["descriptor_digest"],
     host_prestate=HostPrestateV1.from_document(document["host_prestate"]),
+    application_profile_digest=document["application_profile_digest"],
     strategy=document["strategy"],
     environment_inventory=tuple(document["environment_inventory"]),
     steps=tuple(
