@@ -52,6 +52,7 @@ __all__ = [
     "HOST_LEASE_SCHEMA_V1",
     "LEASE_HISTORICAL",
     "load_lease",
+    "release_path",
     "write_lease",
 ]
 
@@ -258,6 +259,23 @@ def _required_key(content: Any, key: str, path: Any) -> str:
             code=LEASE_HISTORICAL,
         )
     return str(content[key])
+
+
+def release_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
+    """Where the terminal release lives: BESIDE the lease, in the same store.
+
+    Derived from `_lease_path` rather than composed independently, so the two
+    records cannot come to live in different places. A release written anywhere
+    else would be a SECOND LEDGER, and the destroy gate would then consult one
+    record while the lease lived in another — which is exactly how a swapped
+    lease goes unnoticed.
+
+    Public because the destroyer needs it and `_lease_path` is private; that
+    privacy was itself a finding, since a caller re-deriving the path would be a
+    second opinion about where a lease lives.
+    """
+    lease = _lease_path(target, directory=directory)
+    return lease.with_name(lease.name.removesuffix(".json") + ".release.json")
 
 
 def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
