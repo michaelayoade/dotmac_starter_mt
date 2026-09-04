@@ -811,7 +811,7 @@ branch_slug = "digital-media-owns-reusable-assets-rights-and-renditions"
 where = "archive/worktrees/2026-08-25/digital-media (local and origin)"
 tip = "b4403ac502581ba3f68e599e8f10549569f45d0f"
 document = "docs/adr/0033-digital-media-owns-reusable-assets-rights-and-renditions.md"
-disposition = "dormant"
+disposition = "superseded"
 evidence = """Two refs, local and `origin`, one tip `b4403ac5` (2026-08-25) \
 whose subject is `chore(archive): preserve digital-media worktree state` — \
 again storage, not intent. Not landed: `main` has no \
@@ -824,21 +824,163 @@ says in its own Context. A CURRENT lane exists: DM1, \
 of what it read from this archived package (13 files, read with `git show`, \
 never restored) and what it REFUSED. That file is a refusal list, not the \
 comparison below: it says what DM1 declines to own, not whether DM1 preserves \
-every unique property this branch had."""
-successor_or_resumption = """DORMANT PENDING COMPARISON (Michael's ruling, \
-2026-09-04). Not superseded yet, because nobody has shown DM1 keeps \
-everything unique here. RUN THE COMPARISON against DM1 across exactly these \
-seven properties: (1) ASSET IDENTITY — what makes two assets the same asset; \
-(2) SOURCE REVISION — how a revision of an asset is identified and ordered; \
-(3) BYTE CUSTODY — who holds the bytes and who may hand them out; \
-(4) RENDITION PROVENANCE — how a derived rendition names what it was derived \
-from and by what recipe; (5) CONSUMER OWNERSHIP — which consumer owns which \
-part of the result; (6) RETENTION BOUNDARY — what may be deleted, by whom, \
-and what survives; (7) SENSITIVITY TESTS — the proofs that each of the above \
-actually bites. THEN: if DM1 preserves EVERY unique property, change this row \
-to `superseded`/never merge and name DM1 as the successor. If UNIQUE \
-BEHAVIOUR REMAINS, extract ONLY that behaviour onto the current Digital Media \
-lane — never revive the archived branch wholesale, and never merge this ref."""
+every unique property this branch had.
+
+COMPARISON RUN 2026-09-04, read-only through `git show`, judged on behaviour \
+and contract shape rather than filenames, shared class names or ancestry. \
+Archive: `packages/dotmac-digital-media`, 13 files, `contracts.py` 344 lines, \
+`models.py` 816, `service.py` 1906, 15 tenant tables, one lineage \
+`dm_0001_digital_media.py`. DM1: `incubation/digital-media/src/\
+dmi_digital_media` — five modules, no model, no migration, no schema, \
+in-memory repositories behind Protocols — plus six test modules.
+
+(1) ASSET IDENTITY. Archive MINTS it (`models.py:105` `uuid_pk`), and an \
+asset cannot exist outside a `MediaLibrary` (`models.py:107`, FK \
+`models.py:60-68`); the current-revision pointer is held to a revision of the \
+same tenant AND asset by a composite FK (`models.py:69-79`). DM1 takes a \
+CALLER-supplied id, refuses reuse with `AssetIdentityConflict` \
+(`authority.py:171`), keeps the module generator-free, and holds description \
+apart from identity (`authority.py:200`, `contracts.py:252`). Both guarantee \
+allocate-once, never re-point. VERDICT: EQUAL on the property, divergent on \
+who mints; DM1 additionally proves no `uuid4`/clock anywhere \
+(`tests/test_architecture.py:171`) and that two tenants may hold one asset id \
+independently (`test_asset_identity_and_revision.py:311`). The library \
+container is refused organisation, not lost identity.
+
+(2) SOURCE REVISION. Archive identifies a revision by surrogate `uuid_pk` \
+ordered by `revision_number = max+1` (`service.py:275-297`); resubmitting \
+identical bytes silently creates a SECOND revision row — `add_revision` \
+dedupes nothing — and sealing bytes also reset an `available` asset to \
+`ingesting` (`service.py:301-306`), a product policy inside an identity \
+operation. Immutability is enforced in the CATALOG by a `BEFORE UPDATE OR \
+DELETE` trigger (`dm_0001_digital_media.py:896-938`). DM1 identifies a \
+revision by its byte evidence: `dmrev1:` over file ref, checksum, byte length \
+and media type (`identity.py:73`), so identical evidence REPLAYS \
+(`authority.py:224`) and the same evidence under different context is an \
+`EvidenceConflict` rather than a silent rewrite; immutability is structural — \
+frozen slotted types, append-only store, no operation able to name a revision \
+for edit (`contracts.py:281`, `repositories.py:46-55`, \
+`test_asset_identity_and_revision.py:92,122`). VERDICT: SUPERSET in Python, \
+GAP in the catalog — see (7).
+
+(3) BYTE CUSTODY. Both hold that Files owns bytes. Archive stores an opaque \
+file UUID plus a supplied checksum (`models.py:178-179`) and forbids \
+`file_path`/`object_key`/`bucket` columns \
+(`tests/architecture/test_digital_media_module.py:56`), but the checksum \
+carries NO algorithm and its VALUE is lowercased (`service.py:268`) — an \
+encoding assumption by a module that enumerates no algorithm. DM1 makes \
+`FileObjectReference` a single identifier field (`contracts.py:183`), pairs \
+every checksum with its algorithm (`contracts.py:198`), case-folds the \
+algorithm NAME only (`authority.py:101`), and returns NOT_COMPARABLE rather \
+than DIFFERS across algorithms (`authority.py:118`). VERDICT: SUPERSET, and \
+enforced harder — an exact stdlib import allowlist, no annotation mentioning \
+`bytes`, nothing that opens/reads/streams \
+(`tests/test_architecture.py:106,210,230`).
+
+(4) RENDITION PROVENANCE. Archive binds one exact source revision id AND its \
+checksum (`service.py:950-952`) and dedupes by a `request_fingerprint` that \
+is `sha256(json.dumps(..., default=str))` in a `String(64)` column \
+(`models.py:526`) — algorithm invisible at the boundary, encoding not \
+length-prefixed, no typed absence. It also carries a closed 11-member \
+`RenditionKind` (`contracts.py:62`), a job lifecycle, and a \
+`rendition_is_stale` rule that compares recipe/engine VERSION while ignoring \
+recipe/engine CODE (`service.py:1206`), so switching engines outright left a \
+rendition fresh. DM1 DERIVES the identity from asset plus complete provenance \
+(`identity.py:106`) over a length-prefixed, typed-absence, sorted canonical \
+encoding (`canonical.py:45,64,78`), refuses provenance whose checksum does \
+not equal the sealed revision's (`authority.py:609`), and always carries a \
+repair plan (`contracts.py:373`, `authority.py:334`). VERDICT: SUPERSET — the \
+archive's "repairable, never replaces source" claim is preserved and \
+strengthened; the closed kind, the job states and the staleness policy are \
+refused delivery/transformation behaviour.
+
+(5) CONSUMER OWNERSHIP. Archive DECIDES: `may_access` with grants, effects \
+and hardcoded nearest-scope ranks (`service.py:1559-1616`), and \
+`evaluate_usage` returning `allowed: bool` over territory/channel/purpose/\
+window/embargo/commercial/modification and a `release_evidence_valid` boolean \
+it stored NOT NULL (`service.py:778-844`, `contracts.py:166-213`) — one \
+function answering both "is this licensed" and "is this publishable". DM1 \
+records only WHICH licence applies (`contracts.py:425`, `authority.py:476`), \
+several may apply and none wins, and no operation accepts a proposed use or \
+returns a permission — proved structurally with a planted-defect sensitivity \
+proof (`test_rights_are_references.py:109,125,137,153`). VERDICT: DIVERGENCE \
+SETTLED BY RULING, not a live disagreement: DM1's \
+`incubation/digital-media/BOUNDARY-RULING.md` is Michael's ACCEPTED ruling of \
+2026-09-03, point 3, that the consuming product decides permitted use. The \
+archive's evaluator is refused, not lost.
+
+(6) RETENTION BOUNDARY. The two lanes AGREE in position: ADR-0033:67-72 on \
+this branch already says an exact revision becomes a record only through \
+explicit declaration and that Records is then sole writer, which is exactly \
+`BOUNDARY-RULING.md` point 4. They differ in surface: the archive still \
+reached a media-side verdict, `evaluate_disposition` answering \
+`archive_allowed`/`dispose_allowed` from `active_usage`, `current_revision` \
+and a supplied `records_allows_disposition` (`service.py:1850-1871`), while \
+DM1 has NO retention, hold or disposition surface at all and proves the \
+vocabulary cannot accrete, with a bite-and-non-bite proof \
+(`test_records_boundary.py:45-61`). DM1's only deletion is \
+`discard_projection` (`authority.py:465`), safe because the projection is \
+re-derivable. VERDICT: EQUAL in position, DM1 NARROWER in surface; the \
+positive half — that a declaration names one exact immutable revision — is \
+PROSE on both sides in DM1's lane, because DM1 exposes no declaration seam to \
+enforce.
+
+(7) SENSITIVITY TESTS. DM1 is strictly ahead on detector discipline and \
+strictly behind on the catalog. Archive guards: a hand-maintained denylist of \
+provider roots, forbidden columns and string canaries \
+(`test_digital_media_module.py:56,95`) — the AGENTS.md rule 25 extent defect, \
+silent on the next provider — with NO planted-defect proof anywhere, plus \
+`test_services_do_not_own_transactions` (:134) and unit tests that ran on \
+SQLite with `schema_translate_map`, where the immutability they named could \
+not be exercised. DM1 replaces the denylist with an exact allowlist and adds \
+four explicit bite proofs \
+(`test_architecture.py:195,411`, `test_rights_are_references.py:153`, \
+`test_records_boundary.py:49`). BUT the archive holds two enforcements DM1 \
+has none of: forced-RLS and cross-tenant read/write canaries on a real \
+migrated Postgres (`tests/test_digital_media_isolation.py:122,142`) and a \
+revision UPDATE/DELETE refusal proved against the live trigger (:186-237). \
+DM1's own `INCUBATION-NOTE.md:174-182` states both as known limits, and \
+`PROMOTION.md` items 5 and 6 already carry them as binding promotion \
+conditions. VERDICT: GAP AT THE ENFORCEMENT LAYER, not at the behaviour \
+layer, and not transplantable into a lane whose charter forbids models, \
+migrations and `mod_*` schema."""
+successor_or_resumption = """SUPERSEDED / NEVER MERGE (Michael's ruling, \
+2026-09-04, applied after the comparison he ordered was run). SUCCESSOR: DM1, \
+`incubate/digital-media/slice-1` @ `b3646fab`, preserved at \
+`refs/rescue/digital-media-slice-1-20260904` and tag \
+`rescue-digital-media-slice-1-20260904`. REASON: across the seven recorded \
+properties DM1 is a superset on asset identity, source revision, byte custody \
+and rendition provenance; equal-and-narrower on the retention boundary; and \
+ahead on consumer ownership by an ACCEPTED ruling \
+(`incubation/digital-media/BOUNDARY-RULING.md`, 2026-09-03) that removes \
+rights evaluation and access decisions from Digital Media altogether. The \
+three other outcomes were rejected explicitly: the archive is not merely \
+dormant, because the comparison has now been run; there is no SEMANTIC \
+DISAGREEMENT needing a ruling, because the one place the lanes make opposite \
+claims — who decides whether a use is permitted — is already adjudicated \
+against the archive; and no transplant is owed onto DM1 today, because the \
+one thing the archive enforces and DM1 does not is a persistence-layer \
+guarantee the incubation charter forbids building. RESUMPTION RULE: none — do \
+not resume, merge, cherry-pick or check out this branch. TRANSPLANT DEBT, to \
+be discharged at DM1's promotion and nowhere earlier, matching `PROMOTION.md` \
+items 5 and 6: (a) the append-only evidence guard — one schema-local \
+`BEFORE UPDATE OR DELETE ... FOR EACH ROW` trigger function raising on the \
+sealed-revision table, REVOKEd from PUBLIC, mirroring \
+`dm_0001_digital_media.py:896-938`; and (b) its two real-Postgres canaries — \
+per-table ENABLE plus FORCE row level security with a cross-tenant \
+read/write canary, and an UPDATE/DELETE refusal exercised against the live \
+trigger, mirroring `tests/test_digital_media_isolation.py:122,142,186`. \
+Take the SHAPE, never the archive's schema: its 15 tables carry the refused \
+rights, access, collection, annotation, saved-selection and usage-context \
+models, and `ARCHIVE-REFUSALS.md` must survive the port intact. Also unique \
+to this ref and NOT carried by DM1 as a file: \
+`docs/inventories/digital-media-sources.md` (175 lines) and the \
+`EXTRACTION.toml` eleven-repository audit with pinned source revisions and \
+`contract_consumers = []` (:55). That is evidence, not behaviour; ADR-0006 \
+rule 22 requires the dossier to be RE-DERIVED at current revisions at \
+promotion, so it is read from this ref and never copied forward. No number is \
+spent: ADR-0033 on `main` is `sales-authority-stops-at-an-accepted-quote`, \
+and this branch document keeps no reservation."""
 
 [[branch_collision]]
 number = 33
