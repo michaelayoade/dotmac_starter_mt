@@ -98,6 +98,12 @@
         "                       a THIRD cross-repository binding: Control signs and",
         "                       compares that value and computes nothing, so this is",
         "                       its only producer.",
+        "  lease_release.py  -- HostLeaseRelease.v1, the terminal end of the lease",
+        "                       contract. Foundation defines it; the Lane 3 runner",
+        "                       writes it. Required because __init__.py exports it",
+        "                       and because the destroy gate reads it: an expired",
+        "                       lease means the run may not continue, and ONLY a",
+        "                       release means the host may be destroyed.",
         "  canonical_plan.py -- the ten canonicalization rules EVERY plan",
         "                       document is hashed under, owned once. Imported by",
         "                       execution_plan.py and by engine/run.py, so a wheel",
@@ -183,7 +189,8 @@
           "dotmac_deployment_foundation/canonical_plan.py",
           "dotmac_deployment_foundation/recovery_plan.py",
           "dotmac_deployment_foundation/deployment_evidence.py",
-          "dotmac_deployment_foundation/execution_plan_v2.py"
+          "dotmac_deployment_foundation/execution_plan_v2.py",
+          "dotmac_deployment_foundation/lease_release.py"
         ],
         "forbidden_prefixes": [
           "app/",

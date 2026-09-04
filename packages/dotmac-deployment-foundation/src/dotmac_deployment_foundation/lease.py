@@ -47,12 +47,26 @@ from .errors import PreconditionFailed, SpecError
 __all__ = [
     "HOST_LEASE_SCHEMA",
     "DEFAULT_LEASE_DIR",
+    "HistoricalLeaseV1",
     "HostLease",
+    "HOST_LEASE_SCHEMA_V1",
+    "LEASE_HISTORICAL",
     "load_lease",
     "write_lease",
 ]
 
-HOST_LEASE_SCHEMA: Final = "HostLease.v1"
+#: The schema this version WRITES. V2, because V1's reader and writer shipped in
+#: five built candidate wheels — `0.3.0a1` through `0.3.0a5`, including
+#: `0.3.0a3`, which is Platform CP's bootstrap input. A contract that has crossed
+#: an artifact boundary cannot be widened: a wheel already in circulation would
+#: write documents the new reader refuses, under the same schema name. That is
+#: `0.3.0a2`'s one-name-two-contracts defect, chosen deliberately.
+HOST_LEASE_SCHEMA: Final = "HostLease.v2"
+
+#: The shipped predecessor. READABLE AS HISTORY and unable to authorize anything
+#: — see `HistoricalLeaseV1`, which deliberately has no `covers()` and no
+#: workload principal. A V1 lease does not acquire a principal by being read.
+HOST_LEASE_SCHEMA_V1: Final = "HostLease.v1"
 
 #: Root-owned, under the Deployment Control state directory. Overridable
 #: because "everything by config" applies to paths too, but the default is the
@@ -90,7 +104,19 @@ class HostLease:
     #: post-rehearsal deletion set is scoped by construction rather than by a
     #: human remembering which projects were theirs.
     compose_project_prefix: str
+    #: The credential USED TO MUTATE THE HOST. A separate FACT from who holds
+    #: the lease — and not a separate DOCUMENT: it is inside the canonical bytes,
+    #: so a lease that swapped credentials while keeping its principal digests
+    #: differently.
     controller_identity_fingerprint: str
+    #: The authenticated runner/controller that HOLDS and RELEASES this lease.
+    #:
+    #: Distinct from `holder`, which is the authorized ROLE and is a fixed token.
+    #: Three fields, three facts: what role was authorized, who held it, and what
+    #: credential touched the machine. `released_by` must equal THIS value, so a
+    #: changed workload principal requires a newly issued lease rather than a
+    #: quietly re-used one.
+    workload_principal: str
 
     def __post_init__(self) -> None:
         for field in (
@@ -99,6 +125,7 @@ class HostLease:
             "authorization_run_id",
             "compose_project_prefix",
             "controller_identity_fingerprint",
+            "workload_principal",
         ):
             if not str(getattr(self, field)).strip():
                 raise SpecError(
@@ -162,7 +189,75 @@ class HostLease:
             "expires_at": self.expires_at,
             "compose_project_prefix": self.compose_project_prefix,
             "controller_identity_fingerprint": self.controller_identity_fingerprint,
+            "workload_principal": self.workload_principal,
         }
+
+
+#: Refused: a V1 lease was offered where authority is required.
+LEASE_HISTORICAL: Final = "lease.historical"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HistoricalLeaseV1:
+    """A shipped V1 lease, readable and unable to authorize anything.
+
+    It has no `covers()` and no workload principal, so a caller cannot use one to
+    admit a run — not "it would be rejected", but there is no method to call and
+    no principal to bind. That is the difference between a migration and a
+    boundary: V1 records stay legible, and legibility is not authority.
+    """
+
+    target: str
+    holder: str
+    authorization_run_id: str
+    starts_at: str
+    expires_at: str
+    compose_project_prefix: str
+    controller_identity_fingerprint: str
+
+    @classmethod
+    def from_document(cls, document: Any) -> HistoricalLeaseV1:
+        if document.get("schema") != HOST_LEASE_SCHEMA_V1:
+            raise SpecError(
+                f"this is not a {HOST_LEASE_SCHEMA_V1} record "
+                f"(schema {document.get('schema')!r})",
+                code=LEASE_HISTORICAL,
+            )
+        return cls(
+            target=str(document.get("target", "")),
+            holder=str(document.get("holder", "")),
+            authorization_run_id=str(document.get("authorization_run_id", "")),
+            starts_at=str(document.get("starts_at", "")),
+            expires_at=str(document.get("expires_at", "")),
+            compose_project_prefix=str(document.get("compose_project_prefix", "")),
+            controller_identity_fingerprint=str(
+                document.get("controller_identity_fingerprint", "")
+            ),
+        )
+
+
+def _required_key(content: Any, key: str, path: Any) -> str:
+    """Read a key that must be PRESENT, never defaulted.
+
+    ``content.get(key, "")`` would turn an absent field into an empty one, and
+    the empty one is then refused at construction — which looks like the same
+    outcome and is not. A defaulted read means the DOCUMENT was accepted as
+    carrying a value it does not carry, and every later reader sees a lease that
+    claims an empty principal rather than a lease that names none.
+
+    Same rule as the prestate discriminator: **a record does not acquire a fact
+    by being read.** This is the second place it is enforced, and the first place
+    it was violated — by the author who wrote the rule.
+    """
+    if key not in content:
+        raise SpecError(
+            f"the lease at {path} carries no {key!r}. A {HOST_LEASE_SCHEMA} "
+            "record names its workload principal; a missing field is NOT an "
+            "empty one, and defaulting it would let a document be read as "
+            "carrying a value it does not carry",
+            code=LEASE_HISTORICAL,
+        )
+    return str(content[key])
 
 
 def _lease_path(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Path:
@@ -225,11 +320,21 @@ def load_lease(target: str, *, directory: str | Path = DEFAULT_LEASE_DIR) -> Hos
         content = json.loads(path.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise SpecError(f"the lease at {path} is not valid JSON: {exc}") from exc
-    if content.get("schema") != HOST_LEASE_SCHEMA:
+    found = content.get("schema")
+    if found == HOST_LEASE_SCHEMA_V1:
         raise SpecError(
-            f"expected {HOST_LEASE_SCHEMA} at {path}, got {content.get('schema')!r}"
+            f"the lease at {path} is a {HOST_LEASE_SCHEMA_V1} record. It is "
+            "READABLE AS HISTORY through `HistoricalLeaseV1` and cannot "
+            "authorize a new run or a target transfer: it names no workload "
+            "principal, and one is NEVER inferred or defaulted. A record does "
+            "not acquire a fact by being read. Issue a "
+            f"{HOST_LEASE_SCHEMA} lease",
+            code=LEASE_HISTORICAL,
         )
+    if found != HOST_LEASE_SCHEMA:
+        raise SpecError(f"expected {HOST_LEASE_SCHEMA} at {path}, got {found!r}")
     return HostLease(
+        workload_principal=_required_key(content, "workload_principal", path),
         target=str(content.get("target", "")),
         holder=str(content.get("holder", "")),
         authorization_run_id=str(content.get("authorization_run_id", "")),
