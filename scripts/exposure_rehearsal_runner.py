@@ -272,15 +272,28 @@ def run(args: argparse.Namespace) -> int:
     lease = load_lease(args.target, directory=args.lease_dir)
     lease.covers(now=datetime.now(UTC), authorization_run_id=args.authorization_run)
 
-    # The Compose project is derived from the authorization run, so every object
-    # Docker creates is labelled `com.docker.compose.project=<prefix><run>` and
-    # the post-rehearsal deletion set is scoped by construction rather than by
-    # anyone remembering which objects were theirs.
-    project = f"{lease.compose_project_prefix}{args.authorization_run}"
-    if not lease.owns_project(project):  # pragma: no cover - derived from prefix
-        raise DeploymentFoundationError(
-            f"derived project {project!r} is outside the lease's prefix"
-        )
+    # This block used to derive a Compose project from the authorization run and
+    # check the lease owned it. Both halves were inert and the comment above them
+    # was false, so all three are gone.
+    #
+    # `owns_project(p)` is `p.startswith(self.compose_project_prefix)` and the
+    # name was built by concatenating that prefix, so the check was true by
+    # construction and could never fire — its own `pragma: no cover` said so.
+    # Worse, the derived name never reached the effects:
+    # `ComposeHostExposureEffects.apply_compose` passes `--project-name
+    # self._spec.product`, so Docker labels every object
+    # `com.docker.compose.project=lane3_exposure`. The comment claimed a deletion
+    # set "scoped by construction"; that property did not hold, and the derived
+    # name's only other use was as item 1's evidence pointer — a checkable,
+    # wrong pointer inside a PASSING item, which is worse than an absent one for
+    # the same reason `RequirementResult` refuses an empty detail.
+    #
+    # The real question the dead check was gesturing at is still open and is NOT
+    # answered here: does the lease's prefix cover `spec.product`, the name
+    # Docker actually uses? That cannot be decided from this source — the prefix
+    # lives in the lease record, which Platform CP owns — so replacing the dead
+    # check with `lease.owns_project(spec.product)` would introduce a refusal
+    # that might reject every run, untested. Named rather than guessed.
 
     # ── the external vantage, qualified BEFORE its refusals are believed ────
     evidence = _load_probe_evidence(pathlib.Path(args.probe_evidence))
@@ -328,7 +341,10 @@ def run(args: argparse.Namespace) -> int:
         "apply_under_lock",
         PASSED if report.ok else FAILED,
         f"applied and verified under the {spec.product} deployment lock",
-        f"project={project}",
+        # The project Docker was actually given, read from the same attribute
+        # `apply_compose` passes to `--project-name`. It used to name a derived
+        # value the effects never saw.
+        f"project={spec.product}",
     )
 
     observed = effects.observe()
