@@ -39,6 +39,7 @@ can express the defect.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -163,6 +164,13 @@ def resource_attributes(
     )
 
 
+#: A stable identifier for the refusal above. Assert this; read the prose.
+ANNOTATION_DETAIL_NOT_A_TOKEN: Final = "telemetry.annotation_detail_not_a_token"
+
+#: Same shape rule `deployment_evidence` uses for a step kind.
+ANNOTATION_DETAIL: Final = re.compile(r"^[a-z][a-z0-9_.]{2,63}$")
+
+
 @dataclass(frozen=True, slots=True)
 class Annotation:
     """One deployment event, as it reaches the observability platform.
@@ -179,6 +187,19 @@ class Annotation:
     image_digest: str
     git_sha: str
     strategy: str
+    #: A machine TOKEN or empty — never a sentence, and never an exception.
+    #:
+    #: This was free text, and `Executor` filled it on the failure path with
+    #: `outcome.failure`, which is `str(exc)`. So raw exception text — a DSN in
+    #: a connection error, a fragment of SQL, whatever a driver put in the
+    #: message — was leaving the host for the observability platform, on the one
+    #: path least exercised and most likely to contain it.
+    #:
+    #: Refused at construction rather than filtered before the send: an
+    #: annotation is emitted from several places and a filter is only ever as
+    #: good as the caller who remembered it. `ANNOTATION_DETAIL` is the same
+    #: shape rule `deployment_evidence` applies to a step kind, for the same
+    #: reason — prose does not match, and an exception message never matches.
     detail: str = ""
 
     def as_mapping(self) -> dict[str, str]:
@@ -191,6 +212,7 @@ class Annotation:
         """
         if self.event not in ANNOTATION_EVENTS:
             raise SpecError(f"unknown annotation event {self.event!r}")
+        self._require_token_detail()
         return {
             "event": self.event,
             "product": self.product,
@@ -202,9 +224,21 @@ class Annotation:
             "detail": self.detail,
         }
 
+    def _require_token_detail(self) -> None:
+        """`detail` is a standing, not a story. See the field's own comment."""
+        if self.detail and not ANNOTATION_DETAIL.match(str(self.detail)):
+            raise SpecError(
+                f"annotation detail {self.detail!r} is not a machine token. An "
+                "annotation crosses a provider seam and lands in a log line, a "
+                "label set or an HTTP field; free text here is how an exception "
+                "message leaves the host. Send a standing",
+                code=ANNOTATION_DETAIL_NOT_A_TOKEN,
+            )
+
     def as_json(self) -> str:
         if self.event not in ANNOTATION_EVENTS:
             raise SpecError(f"unknown annotation event {self.event!r}")
+        self._require_token_detail()
         return json.dumps(
             {
                 "event": self.event,

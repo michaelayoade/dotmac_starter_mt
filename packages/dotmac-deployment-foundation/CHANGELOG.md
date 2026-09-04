@@ -172,6 +172,54 @@ every link is correct and whose subject does not exist, and it would review as
 finished. An AST test derives the unreachability from the package source, so the
 change that wires it up is told to come and read the argument first.
 
+### `DeploymentEvidence.v1` — the record is closed by structure
+
+**This is a behaviour change to shipped deploy-path evidence**, authorized
+deliberately. A reader comparing an old and a new record will find three fields
+gone; this entry is where that is announced rather than inferred.
+
+The previous record was a free-form mapping with three open text channels, and
+raw exception text reached all three: `failure` (assigned from `str(exc)`),
+`steps[].detail` (prose — twelve of the seventeen handlers built it with an
+f-string over live values), and `notes` (including, literally,
+`f"evidence could not be written: {exc}"`). A fourth channel left the host
+entirely: `Executor` filled `Annotation.detail` with `outcome.failure` on the
+failure path, sending exception text to the observability platform.
+
+**A filter over a free-form dict is a convention; a closed type is a structure.**
+The property is that there is no key the forbidden value could be written under
+— not that a guard rejects it afterwards. `require_no_secrets` could never have
+been the whole answer: it is a SHAPE detector, and stderr is not secret-shaped,
+a DSN inside an exception message is not secret-shaped, and neither is a
+fragment of SQL. It is retained as the belt, for a permitted field carrying an
+impermissible value.
+
+`failure` and `detail` become a CLOSED standing vocabulary; `notes` is gone from
+the document. `installed` and `reconciled_after_commit` are separate members and
+must stay so: same end state, different histories, and the crash path is exactly
+when someone needs to tell them apart. `refused` and `failed` are likewise
+separate, derived from the exception type, because "nothing was mutated, re-run
+the identical command" and "state may have changed" decide different next
+actions.
+
+**Diagnostics did not disappear; they stopped being persisted.** `StepRecord`
+still carries `detail`, the outcome still carries `failure` and `notes`, and the
+CLI still prints all three. Evidence is a durable record that travels and is read
+back; a diagnostic is ephemeral operator output. Putting the second inside the
+first is how stderr comes to live in a signed record.
+
+**`default=str` is removed** from the success-path read-back comparison. A
+stringify-anything escape hatch defeats a closed type by turning an unexpected
+object into text rather than refusing it — the precise mechanism by which an
+exception instance becomes an exception message inside a record.
+
+What is deliberately NOT narrowed: the four fields the publication gate reads
+(`succeeded`, `execution_plan_digest`, `descriptor_digest`,
+`control_plan_digest`) and Control's replay coordinate
+(`execution_sequence`, `attempt_no`). Narrowing the document to a single step's
+four fields would have broken the gate that publishes this facility and Control's
+settlement at the same time.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**

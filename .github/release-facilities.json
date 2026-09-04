@@ -83,6 +83,11 @@
         "                       made that candidate unpublishable. A wheel missing",
         "                       them passes every import check and cannot deploy",
         "                       anything.",
+        "  deployment_evidence.py -- DeploymentEvidence.v1, the CLOSED record a run",
+        "                       leaves. Required because engine/run.py and",
+        "                       __init__.py both import it, and because the record",
+        "                       is what the publication gate below reads: a wheel",
+        "                       without it cannot import, let alone deploy.",
         "  canonical_plan.py -- the ten canonicalization rules EVERY plan",
         "                       document is hashed under, owned once. Imported by",
         "                       execution_plan.py and by engine/run.py, so a wheel",
@@ -166,7 +171,8 @@
           "dotmac_deployment_foundation/render/compose.py",
           "dotmac_deployment_foundation/render/nginx.py",
           "dotmac_deployment_foundation/canonical_plan.py",
-          "dotmac_deployment_foundation/recovery_plan.py"
+          "dotmac_deployment_foundation/recovery_plan.py",
+          "dotmac_deployment_foundation/deployment_evidence.py"
         ],
         "forbidden_prefixes": [
           "app/",
