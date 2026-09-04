@@ -110,6 +110,34 @@ RELEASE_EVIDENCE_IDENTITY_SCHEMA: Final = "PlatformCpPublicVerificationIdentity.
 #: deciding what to do about a wrong-purpose key must be able to branch on the
 #: refusal; a caller that has to match on a sentence is coupled to the wording,
 #: and the wording is the thing most likely to be improved.
+#:
+#: ## Several things in this estate now spell `PURPOSE_MISMATCH`. That is settled.
+#:
+#: Measured rather than assumed, because identical names for different things is
+#: how a caller writes one branch and handles half the cases:
+#:
+#:   * `dotmac-deployment-control` 0.1.0a12 has FOUR members named
+#:     `PURPOSE_MISMATCH`, with four distinct values —
+#:     ``authorization_purpose_mismatch``, ``dispatch_purpose_mismatch``,
+#:     ``execution_observation_purpose_mismatch`` and
+#:     ``recovery_grant_purpose_mismatch``;
+#:   * Platform CP has two — `EvidenceRefusal` and `SignerRefusal` — and its
+#:     `signers.py` states the intent: *"`PURPOSE_MISMATCH` deliberately reuses
+#:     the name Control gives the same condition, so the two sides read as one
+#:     vocabulary."*
+#:
+#: So the estate's convention, already established four times before this
+#: constant existed, is: **the NAME is shared vocabulary and the VALUE is scoped
+#: to the surface that raises it.** A human reading across owners recognises the
+#: name; a caller branching within one owner's surface uses that owner's value
+#: and cannot accidentally catch another's.
+#:
+#: This value follows it. It is NOT the same code as Platform's producing-side
+#: refusal seen from the other end — that one refuses PRODUCING evidence with a
+#: wrong-purpose signer, this refuses CONSTRUCTING an identity entitled to
+#: verify. Different acts, different processes, different callers; no caller
+#: branches on both. `test_the_purpose_mismatch_codes_do_not_collide` pins the
+#: values apart so a later unification is a reviewed diff rather than a merge.
 PURPOSE_MISMATCH: Final = "release_evidence.purpose_mismatch"
 IDENTITY_MALFORMED: Final = "release_evidence.identity_malformed"
 IDENTITY_KEY_MISMATCH: Final = "release_evidence.identity_key_mismatch"
