@@ -43,10 +43,15 @@
 # never carries the ability to change the target.
 set -euo pipefail
 
-VANTAGE="${1:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key>}"
-TARGET="${2:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key>}"
-OBS_USER="${3:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key>}"
-OBS_KEY="${4:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key>}"
+VANTAGE="${1:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key> [jump-key]}"
+TARGET="${2:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key> [jump-key]}"
+OBS_USER="${3:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key> [jump-key]}"
+OBS_KEY="${4:?usage: observe_far_end.sh <vantage> <target> <obs-user> <obs-key> [jump-key]}"
+# Optional. The OUTSIDE vantage is reached with ordinary access, but the INSIDE
+# one is a restricted jump whose key differs from the target-side observation
+# key — so the hop and the destination need different identities and `-J` alone
+# cannot express that.
+JUMP_KEY="${5:-}"
 
 # `IdentitiesOnly=yes` is not tidiness. Without it ssh offers every agent key,
 # and a run that succeeded on an operator's forwarded credential would prove the
@@ -59,10 +64,20 @@ SSH_OPTS=(
   -i "${OBS_KEY}"
 )
 
+# `[%h]:%p` MUST be quoted inside the ProxyCommand. Unquoted, zsh globs the
+# brackets and the command dies with `no matches found`, which reads like a
+# connectivity failure and is not one.
+if [ -n "${JUMP_KEY}" ]; then
+  HOP=(-o "ProxyCommand=ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ${JUMP_KEY} -W '[%h]:%p' ${VANTAGE}")
+else
+  HOP=(-J "${VANTAGE}")
+fi
+
 peer() {
   local family="$1"
-  # `-J` on the vantage; the family flag applies to the hop the TARGET sees.
-  ssh "${family}" "${SSH_OPTS[@]}" -J "${VANTAGE}" "${OBS_USER}@${TARGET}" \
+  # The hop makes the connection ORIGINATE at the vantage; the family flag
+  # applies to the leg the TARGET sees.
+  ssh "${family}" "${SSH_OPTS[@]}" "${HOP[@]}" "${OBS_USER}@${TARGET}" \
     'printf %s "${SSH_CONNECTION}"' 2>/dev/null | awk '{print $1}'
 }
 

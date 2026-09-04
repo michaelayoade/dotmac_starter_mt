@@ -87,6 +87,7 @@ sys.path.insert(
 # then fails at collection time rather than at run time.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_inside_vantage as inside_vantage
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import (
@@ -116,6 +117,7 @@ from dotmac_deployment_foundation.vantage import (
 )
 from lane3_provocation import (
     disarm_apply_failure,
+    inside_source_set,
     observed_foreign,
     private_port,
     provoke_apply_failure,
@@ -242,6 +244,43 @@ def _probe(evidence: dict, key: str) -> dict:
             "is not a passing one"
         )
     return probe
+
+
+def _observed_from(args: argparse.Namespace, *, jump_key: str) -> dict[str, str]:
+    """The far end's report of a vantage's source address, per family.
+
+    The same script the qualify phase uses, with the INSIDE vantage's jump key.
+    Reading it again rather than reusing the outside value is the point: these
+    are different vantages, and one of the two addresses is SLAAC-derived, so it
+    is requalified every run rather than remembered.
+    """
+    script = (
+        pathlib.Path(__file__).resolve().parent
+        / "exposure-rehearsal"
+        / "observe_far_end.sh"
+    )
+    argv = [
+        str(script),
+        args.inside_vantage,
+        args.target,
+        args.observer_user,
+        args.observer_key,
+        jump_key,
+    ]
+    completed = subprocess.run(
+        argv, capture_output=True, text=True, timeout=args.timeout, check=False
+    )
+    if completed.returncode != 0:
+        raise DeploymentFoundationError(
+            f"could not read the inside vantage's observed source addresses: "
+            f"{completed.stderr.strip() or 'no stderr'}"
+        )
+    try:
+        return {str(k): str(v) for k, v in json.loads(completed.stdout).items()}
+    except ValueError as exc:
+        raise DeploymentFoundationError(
+            f"the far-end observation emitted no readable JSON ({exc})"
+        ) from exc
 
 
 def _collect_probe_phase(args: argparse.Namespace) -> dict:
@@ -491,12 +530,6 @@ def run(args: argparse.Namespace) -> int:
             "the loopback-bound v6 socket, service RUNNING",
         ),
         ("external_v4", "v4_pair", False, "IPv4 negative with its tcp/22 control"),
-        (
-            "private_from_source",
-            "private_inside",
-            True,
-            "the private port from inside its source set",
-        ),
     )
     for code, key, want_reachable, note in external:
         probe = _probe(evidence, key)
@@ -530,13 +563,83 @@ def run(args: argparse.Namespace) -> int:
         f"target closed-port behaviour recorded as {behaviour!r}",
         "workstation probe",
     )
-    privileged = evidence.get("privileged_vantage_refused")
+    # ── items 12 and 16: measured from a vantage INSIDE the source set ─────
+    #
+    # Both used to be literals emitted by a collector that is outside the set by
+    # construction. They are now taken through a restricted jump whose key runs
+    # no command on the vantage, so the TCP connection originates inside while
+    # nothing executes there.
+    inside_probe = inside_vantage.collect(
+        str(
+            pathlib.Path(__file__).resolve().parent
+            / "exposure-rehearsal"
+            / "probe_inside_vantage.sh"
+        ),
+        jump=args.inside_vantage,
+        target_v4=args.target,
+        target_v6=str((evidence.get("vantage") or {}).get("target_v6", args.target)),
+        port=private_port(spec),
+        timeout=args.timeout,
+    )
+    inside_observed = _observed_from(args, jump_key=args.inside_jump_key)
+    seen = inside_vantage.vantages(inside_probe, inside_observed)
+    control_ok = inside_vantage.control_is_meaningful(inside_probe)
+
+    # Item 16. ONE receipt row, because `build_receipt` enforces a closed set of
+    # sixteen codes and splitting one would be refused — but the SOURCE MODEL is
+    # per family, and the detail carries both. Michael's "model inside/outside
+    # IPv4 and IPv6 independently" is about which addresses are inside which
+    # set, not about the receipt's vocabulary.
+    #
+    # PASSED requires BOTH families to have reached. A pass on one would be a
+    # v4 result wearing a dual-stack claim, and this vantage is exactly the case
+    # where that goes wrong: its v4 is on the target's segment and its v6 is not.
+    both_reached = all(
+        vantage.outcome is inside_vantage.InsideOutcome.REACHED for vantage in seen
+    )
+    observed_all = all(vantage.observed_source for vantage in seen)
+    per_family = "; ".join(
+        f"{vantage.family}: outcome={vantage.outcome}, observed as "
+        f"{vantage.observed_source or 'NOTHING'} ({vantage.cidr})"
+        for vantage in seen
+    )
+    control_note = (
+        "jump-scope control prohibited as expected"
+        if control_ok
+        else "jump-scope control DID NOT FIRE — a permitopen that refused "
+        "everything would look identical to one correctly scoped"
+    )
+    results.record(
+        "private_from_source",
+        PASSED if both_reached and observed_all and control_ok else FAILED,
+        f"the private port from inside its source set, per family. {per_family}. "
+        f"{control_note}",
+        *(f"inside:{vantage.family}:{vantage.cidr}" for vantage in seen),
+        "requalified-every-run",
+    )
+
+    # Item 12, and the branch it fires on is checked rather than assumed.
+    endpoint = f"{spec.product}:{private_port(spec)}"
+    verdicts = [
+        inside_vantage.refusal_fired_for_the_right_reason(
+            vantage,
+            endpoint_token=endpoint,
+            accepted_source_sets=(inside_source_set(spec),),
+        )
+        for vantage in seen
+    ]
+    refused_ok = all(ok for ok, _ in verdicts) and control_ok
     results.record(
         "privileged_vantage_refused",
-        PASSED if privileged is True else FAILED,
+        PASSED if refused_ok else FAILED,
         "accept_public_exposure_evidence refused a real probe from inside an "
-        f"accepted source set: {privileged}",
-        "workstation probe",
+        "accepted source set, on the privileged-vantage branch rather than the "
+        "membership one: "
+        + "; ".join(
+            f"{v.family}={detail}"
+            for v, (_, detail) in zip(seen, verdicts, strict=False)
+        ),
+        f"accepted_source_set:{inside_source_set(spec)}",
     )
 
     # ── item 8: a SECOND transaction, provoked into a real rollback ─────────
@@ -650,6 +753,10 @@ def main(argv: list[str] | None = None) -> int:
         ("--controller-key", "path to the controller private key (a POINTER)"),
         ("--target", "the leased rehearsal target"),
         ("--probe-host", "the external vantage the probe phase runs from"),
+        ("--inside-vantage", "the vantage INSIDE the accepted source set"),
+        ("--inside-jump-key", "private key for the inside vantage jump"),
+        ("--observer-user", "the restricted target-side observation user"),
+        ("--observer-key", "private key for that observation identity"),
         ("--probe-evidence", "JSON of the external vantage's measurements"),
         ("--descriptor", "the exact rehearsal fixture"),
         ("--receipt-out", "where to write RehearsalReceipt.v1"),

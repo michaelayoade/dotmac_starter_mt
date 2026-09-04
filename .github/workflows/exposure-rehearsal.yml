@@ -133,8 +133,14 @@ jobs:
           AUTHZ: ${{ inputs.authorization_run }}
           LANE3_OBSERVER_USER: ${{ vars.LANE3_OBSERVER_USER }}
           LANE3_OBSERVER_KEY: ${{ vars.LANE3_OBSERVER_KEY }}
+          LANE3_JUMP_KEY: ${{ vars.LANE3_JUMP_KEY }}
         run: |
           set -euo pipefail
+          test -n "${LANE3_JUMP_KEY}" || {
+            echo "REFUSED: no inside-vantage jump key configured. Items 12 and" \
+                 "16 need a probe that genuinely originates inside the accepted" \
+                 "source set; this host is outside it by construction" >&2
+            exit 1; }
           python scripts/exposure_rehearsal_runner.py \
             --foundation-revision "${GITHUB_SHA}" \
             --foundation-artifact "${{ inputs.foundation_artifact }}" \
@@ -144,6 +150,10 @@ jobs:
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \
             --probe-host "${{ vars.LANE3_PROBE_HOST }}" \
+            --inside-vantage "${{ vars.LANE3_INSIDE_VANTAGE }}" \
+            --inside-jump-key "${{ vars.LANE3_JUMP_KEY }}" \
+            --observer-user "${{ vars.LANE3_OBSERVER_USER }}" \
+            --observer-key "${{ vars.LANE3_OBSERVER_KEY }}" \
             --probe-evidence probe-evidence.json \
             --descriptor scripts/exposure-rehearsal/product.toml \
             --receipt-out receipt.json \

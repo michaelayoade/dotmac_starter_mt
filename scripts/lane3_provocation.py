@@ -220,6 +220,25 @@ def private_port(spec) -> int:
     )
 
 
+def inside_source_set(spec) -> str:
+    """The source-set NAME the descriptor's private port accepts.
+
+    A name, never members: this package resolves nothing, and item 12's refusal
+    compares names. Reading it from the descriptor rather than restating it is
+    what keeps the accepted set and the probed set the same thing.
+    """
+    for role in spec.roles:
+        for port in role.ports:
+            if port.exposure == "private":
+                declared = str(getattr(port, "source_set", "") or "")
+                if declared:
+                    return declared
+    raise ProvocationError(
+        "the descriptor's private port names no source set, so there is no "
+        "accepted set for a privileged-vantage refusal to be about"
+    )
+
+
 def observed_foreign(observation, *, owner: str) -> set[str]:
     """The foreign rule set, as the transaction's own comparison sees it."""
     return {rule.arguments for rule in foreign_rules(observation, owner=owner)}
@@ -232,6 +251,7 @@ __all__ = [
     "SeededRule",
     "disarm_apply_failure",
     "inert_rule",
+    "inside_source_set",
     "observed_foreign",
     "private_port",
     "provoke_apply_failure",

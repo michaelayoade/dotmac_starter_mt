@@ -174,24 +174,20 @@ def test_the_command_line_offers_no_way_to_supply_a_result() -> None:
 # ── behavioural: today's main, and every reason planted ─────────────────────
 
 
-def test_this_tree_is_not_capable_and_says_exactly_which_reasons_remain() -> None:
-    """The live verdict. It gets shorter as repairs land, and that is the point.
+def test_this_tree_is_capable_and_that_is_the_gate_on_the_build() -> None:
+    """The verdict `foundation-candidate.yml` refuses to build without.
 
-    Four reasons are repaired and deliberately absent — `compose_identity_unused`,
-    `no_induced_failure`, `far_end_sentinel` and `service_state_asserted`. Each
-    detector is proved below by planting its defect BACK, because a guard whose
-    subject has been fixed is about the NEXT occurrence, not the last one.
+    All five reasons are repaired, so no live reason remains for a detector to
+    demonstrate itself against. That is the good outcome and also the dangerous
+    one: from here EVERY detector's only proof is its regression plant, because
+    a scanner that had quietly stopped looking would produce this same verdict.
 
-    The one that remains needs a vantage inside the accepted source set.
+    So the plants below are not belt-and-braces any more — they are the whole
+    evidence that this `capable` means anything.
     """
     record = capability.assess(ROOT)
-    assert record["verdict"] == "not_capable"
-    assert {entry["reason"] for entry in record["reasons"]} == LIVE_REASONS  # type: ignore[index]
-    # Every reason carries a location a reader can check it against. A reason
-    # without one is a status, and a status a reader cannot check is a number.
-    for entry in record["reasons"]:  # type: ignore[union-attr]
-        assert entry["detail"].strip()
-        assert entry["evidence"]
+    assert record["verdict"] == "capable", record["reasons"]
+    assert record["reasons"] == []
 
 
 def _tree_with(tmp_path: Path, repairs: dict[Path, list[tuple[str, str]]]) -> Path:
@@ -211,64 +207,65 @@ def _tree_with(tmp_path: Path, repairs: dict[Path, list[tuple[str, str]]]) -> Pa
     return root
 
 
-#: One repair per LIVE reason — the smallest edit that removes it, so a flipped
-#: code cannot be an accident of a broad rewrite. These are shapes, not the real
-#: fixes: the real ones need a host, and none has been contacted.
-REPAIRS: dict[capability.Reason, dict[Path, list[tuple[str, str]]]] = {
-    capability.Reason.NO_INSIDE_VANTAGE: {
-        capability.COLLECTOR: [
-            (
-                '\\"private_inside\\": {\\"reachable\\": false',
-                '\\"private_inside\\": {\\"reachable\\": %s',
-            ),
-            (
-                '\\"privileged_vantage_refused\\": null',
-                '\\"privileged_vantage_refused\\": %s',
-            ),
-        ]
-    },
-}
-
-LIVE_REASONS = frozenset(REPAIRS)
+def _reasons(root: Path) -> set[str]:
+    return {
+        entry["reason"]
+        for entry in capability.assess(root)["reasons"]  # type: ignore[index]
+    }
 
 
-@pytest.mark.parametrize("repaired", list(REPAIRS))
-def test_repairing_exactly_one_reason_clears_exactly_that_reason(
-    repaired: capability.Reason, tmp_path: Path
-) -> None:
-    """PER-CODE ISOLATION. Independent detectors, independent subjects.
+def test_every_reason_is_planted_somewhere() -> None:
+    """NON-VACUITY over the SET rather than one reason at a time.
 
-    A detector firing on some shared condition would clear several reasons at
-    once here, which is the shape an aggregate wears when dressed as a set of
-    codes.
+    A reason added later with no plant would sit in the vocabulary looking like
+    coverage while never having been observed to fire once.
     """
-    record = capability.assess(_tree_with(tmp_path, REPAIRS[repaired]))
-    reasons = {entry["reason"] for entry in record["reasons"]}  # type: ignore[index]
-    assert repaired not in reasons, f"{repaired} survived its own repair"
-    assert reasons == LIVE_REASONS - {repaired}, reasons
-    # The verdict follows from what is left rather than being asserted as a
-    # constant. Four of the five reasons are now repaired, so with one live
-    # reason remaining, repairing it IS the all-clean case — and an assertion
-    # hardcoded to `not_capable` would have failed here for a reason that says
-    # nothing about the detector under test.
-    expected = "not_capable" if reasons else "capable"
-    assert record["verdict"] == expected, (record["verdict"], sorted(reasons))
+    assert set(capability.Reason) == {
+        capability.Reason.FAR_END_SENTINEL,
+        capability.Reason.SERVICE_STATE_ASSERTED,
+        capability.Reason.NO_INSIDE_VANTAGE,
+        capability.Reason.NO_INDUCED_FAILURE,
+        capability.Reason.COMPOSE_IDENTITY_UNUSED,
+        capability.Reason.SOURCE_UNREADABLE,
+    }
 
 
-def test_a_source_with_none_of_them_is_capable(tmp_path: Path) -> None:
-    """THE OTHER DIRECTION, and the one that would be skipped.
+def test_losing_the_inside_vantage_is_refused_again(tmp_path: Path) -> None:
+    """REGRESSION PLANT for items 12 and 16, in BOTH halves.
 
-    Without it, every assertion above is consistent with a function that returns
-    `not_capable` unconditionally — the gate would have been observed only at the
-    value it was written to return.
+    Removing the literals is not the same as taking the measurement, so the
+    detector checks for the MECHANISM too. Both halves are planted: a collector
+    that emits the old literal, and a runner that no longer observes the
+    refusal. A detector satisfied by only one would go quiet the first time
+    somebody repaired the other and left the items failing on absent keys — the
+    defect relocated rather than repaired.
     """
-    every: dict[Path, list[tuple[str, str]]] = {}
-    for repairs in REPAIRS.values():
-        for relative, edits in repairs.items():
-            every.setdefault(relative, []).extend(edits)
-    record = capability.assess(_tree_with(tmp_path, every))
-    assert record["reasons"] == [], record["reasons"]
-    assert record["verdict"] == "capable"
+    literal = _tree_with(
+        tmp_path / "collector",
+        {
+            capability.COLLECTOR: [
+                (
+                    "printf '  },\\n'",
+                    'printf \'    \\"private_inside\\": '
+                    "{\\\"reachable\\\": false}\\n'\nprintf '  },\\n'",
+                )
+            ]
+        },
+    )
+    assert capability.Reason.NO_INSIDE_VANTAGE in _reasons(literal)
+
+    unobserved = _tree_with(
+        tmp_path / "runner",
+        {
+            capability.RUNNER: [
+                (
+                    f"inside_vantage.{capability.INSIDE_REFUSAL_SEAM}(",
+                    "inside_vantage._not_observed(",
+                )
+            ]
+        },
+    )
+    assert capability.Reason.NO_INSIDE_VANTAGE in _reasons(unobserved)
 
 
 def test_asserting_the_service_state_again_is_refused(tmp_path: Path) -> None:

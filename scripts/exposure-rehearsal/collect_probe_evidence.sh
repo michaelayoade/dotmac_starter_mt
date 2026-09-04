@@ -25,16 +25,13 @@
 # TWO fields here are still NOT measurable from this vantage, and are emitted as
 # fail-closed placeholders rather than omitted:
 #
-#   * `probes.private_inside` — item 16 asks whether the private port is
-#     reachable from INSIDE its declared source set. This host is outside it by
-#     construction, so it emits `reachable: false` and the runner marks item 16
-#     FAILED until an authorized-source vantage supplies the real measurement.
-#   * `privileged_vantage_refused` — item 12 asks that the refusal fires on a
-#     real probe from a vantage INSIDE an accepted source set. Emitted `null`,
-#     which the runner treats as FAILED.
-#
-# Both fail closed on purpose. An absent measurement must never read as a pass,
-# and emitting the key with a failing value is louder than omitting it.
+# The two fields this vantage could never measure — `private_inside` and
+# `privileged_vantage_refused` — are gone from here as of 2026-09-04 rather than
+# emitted as fail-closed literals. Both are now MEASURED, by
+# `probe_inside_vantage.sh` through a vantage that genuinely sits inside the
+# accepted source set. A literal that fails closed is honest and is still not a
+# measurement; this host is outside the set by construction and no value it
+# writes about the inside can be one.
 #
 # `nc` throughout, never bash /dev/tcp: that builtin is absent in this shell and
 # reads EVERY port closed, which is a silent all-green — the worst possible
@@ -177,12 +174,10 @@ printf '    \"positive_v6\": {\"reachable\": %s, \"positive_control_fired\": tru
   \"\$(emit_bool probe6 \"\$TARGET6\" 22)\" \"\$(running 22)\"
 printf '    \"negative_v6\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": %s},\n' \\
   \"\$(emit_bool probe6 \"\$TARGET6\" 18443)\" \"\$(emit_bool probe6 \"\$TARGET6\" 22)\" \"\$(running 18443)\"
-printf '    \"v4_pair\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": %s},\n' \\
+printf '    \"v4_pair\": {\"reachable\": %s, \"positive_control_fired\": %s, \"service_running\": %s}\n' \\
   \"\$(emit_bool probe4 \"\$TARGET\" 18443)\" \"\$(emit_bool probe4 \"\$TARGET\" 22)\" \"\$(running 18443)\"
-printf '    \"private_inside\": {\"reachable\": false, \"positive_control_fired\": true, \"service_running\": %s}\n' \"\$(running 19001)\"
 printf '  },\n'
 
-printf '  \"closed_port_behaviour\": \"%s\",\n' \"\$(s=\$(date +%s%N); nc -4 -z -w 5 \$TARGET 18444 >/dev/null 2>&1 || true; e=\$(date +%s%N); if [ \$(( (e-s)/1000000 )) -lt 2000 ]; then printf reset; else printf drop; fi)\"
-printf '  \"privileged_vantage_refused\": null\n'
+printf '  \"closed_port_behaviour\": \"%s\"\n' \"\$(s=\$(date +%s%N); nc -4 -z -w 5 \$TARGET 18444 >/dev/null 2>&1 || true; e=\$(date +%s%N); if [ \$(( (e-s)/1000000 )) -lt 2000 ]; then printf reset; else printf drop; fi)\"
 printf '}\n'
 "

@@ -395,6 +395,26 @@ no declared production target.
 """
 
 [[entrypoint]]
+name = "script:probe_inside_vantage.sh"
+family = "script"
+path = "scripts/exposure-rehearsal/probe_inside_vantage.sh"
+trigger = "manual, and `script:exposure_rehearsal_runner.py` after the apply"
+credential = "lane3-inside-jump-ssh-key"
+disposition = "non_production_executor"
+targets = ["lane3-inside-vantage", "lane3-rehearsal-target"]
+premise = """
+Opens TCP connections to the rehearsal target's private port THROUGH a
+restricted jump, so the connection originates inside the accepted source set
+while no command executes on the vantage. The jump key carries
+`command="/bin/false"` and a `permitopen` limited to the target's ssh and
+private ports. It distinguishes `refused` (reached the target, nothing
+listening) from `administratively prohibited` (the jump key refused, which is
+not an exposure result at all) and never reports them the same way. Checked: it
+names no declared production target, and it probes production ns1 only as a
+control that must be PROHIBITED.
+"""
+
+[[entrypoint]]
 name = "script:observe_service_state.sh"
 family = "script"
 path = "scripts/exposure-rehearsal/observe_service_state.sh"
