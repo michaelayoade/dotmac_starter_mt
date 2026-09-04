@@ -24,7 +24,11 @@ where `failed` and `outcome_unknown` cleanup refuse.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
+import textwrap
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,6 +38,8 @@ from dotmac_deployment_foundation.lease import (
     HostLease,
     release_path,
     write_lease,
+    write_store_record,
+    write_store_record_once,
 )
 from dotmac_deployment_foundation.lease_release import (
     RELEASE_DUPLICATE,
@@ -52,6 +58,15 @@ from dotmac_deployment_foundation.lease_release import (
     require_release_for_reuse,
     write_release,
 )
+
+PACKAGE = (
+    Path(__file__).resolve().parents[2]
+    / "packages"
+    / "dotmac-deployment-foundation"
+    / "src"
+    / "dotmac_deployment_foundation"
+)
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 TARGET = "10.120.120.54"
 SLOT = "dotmacproxmox/102"
@@ -306,3 +321,203 @@ def test_a_partially_mutated_host_can_never_become_reusable(store: Path) -> None
         cleanup=CleanupDisposition.PURGED,
         closure=HostClosure.DESTROY_ONLY,
     )
+
+
+# ── create-only: the race, not a sequential rehearsal of it ────────────────
+#
+# A lease may legitimately be rewritten — it is renewed, and the current row is
+# the answer. A RELEASE may not: it records how a lease ended, and a second
+# write is either a replay or two runs each believing they finished the same
+# work. Overwriting picks one silently, and a destroyer then acts on the wrong
+# terminal outcome.
+#
+# The store is a shared host whose whole premise is that agents contend for the
+# target, and the workflow's concurrency group does not cancel in progress — so
+# two dispatches at different revisions against one target overlap BY DESIGN.
+# This is not a theoretical race.
+
+
+def _stat_then_write(path: Path, document: dict[str, object], barrier) -> None:
+    """The REJECTED implementation, kept as a negative control.
+
+    Not dead code: it is what makes the proof below non-vacuous. A test that
+    only ran the real writer would go green against this one too, because
+    sequentially the two are indistinguishable — which is exactly how a
+    stat-then-write survives a create-only test suite.
+    """
+    exists = path.exists()
+    barrier.wait(timeout=5)  # both racers now past their own check
+    if exists:
+        raise FileExistsError(path)
+    path.write_text(json.dumps(document, sort_keys=True, indent=2) + "\n", "utf-8")
+
+
+def _race(publish, path: Path) -> tuple[int, int, str]:
+    """Two threads publishing different content, interleaved at a barrier."""
+    barrier = threading.Barrier(2)
+    wins: list[str] = []
+    refusals: list[BaseException] = []
+
+    def attempt(which: str) -> None:
+        try:
+            publish(path, {"which": which}, barrier)
+            wins.append(which)
+        except (FileExistsError, PreconditionFailed) as exc:
+            refusals.append(exc)
+
+    threads = [threading.Thread(target=attempt, args=(w,)) for w in ("A", "B")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    stored = (
+        json.loads(path.read_text(encoding="utf-8"))["which"] if path.exists() else ""
+    )
+    return len(wins), len(refusals), stored
+
+
+def test_TWO_CONCURRENT_PUBLISHES_leave_exactly_one_release(tmp_path: Path) -> None:
+    """The property, proven under an interleaving rather than in sequence.
+
+    Both racers are released from the barrier at the point where a
+    stat-then-write has already made its decision. `os.link` cannot be beaten
+    there: creating the name and failing on a taken name are ONE syscall, so
+    whichever thread links second gets EEXIST no matter how the two interleave.
+    """
+
+    def publish(path: Path, document: dict[str, object], barrier) -> None:
+        barrier.wait(timeout=5)
+        write_store_record_once(path, document)
+
+    wins, refusals, stored = _race(publish, tmp_path / "release.json")
+    assert (wins, refusals) == (1, 1), f"{wins} publishes succeeded, {refusals} refused"
+    assert stored in {"A", "B"}
+    assert [p.name for p in tmp_path.iterdir() if ".partial" in p.name] == []
+
+
+def test_the_RACE_HARNESS_can_actually_see_the_loss(tmp_path: Path) -> None:
+    """Sensitivity. Without this, the test above is a green that proves nothing.
+
+    The same interleaving against the implementation this replaced: both racers
+    observe `exists() == False`, both write, and the second silently overwrites
+    the record of the first. Two successes is the regression, in the harness
+    that reported one.
+    """
+    wins, refusals, _ = _race(_stat_then_write, tmp_path / "release.json")
+    assert (wins, refusals) == (2, 0), (
+        "the harness did not reproduce the stat-then-write loss, so the test "
+        "above is not evidence about atomicity"
+    )
+
+
+def test_sequentially_BOTH_implementations_look_correct(tmp_path: Path) -> None:
+    """Stated explicitly so no one mistakes a sequential green for the proof.
+
+    This is a CONTROL, not the race test. Run one after the other, the rejected
+    implementation refuses too — which is precisely why a unit suite full of
+    sequential create-only tests would have shipped the regression.
+    """
+    barrier = threading.Barrier(1)
+    for publish in (_stat_then_write, lambda p, d, _b: write_store_record_once(p, d)):
+        path = tmp_path / f"{publish.__class__.__name__}{id(publish)}.json"
+        publish(path, {"which": "first"}, barrier)
+        with pytest.raises(FileExistsError):
+            publish(path, {"which": "second"}, barrier)
+        assert json.loads(path.read_text(encoding="utf-8"))["which"] == "first"
+
+
+def test_write_release_does_not_CHECK_before_writing() -> None:
+    """Structural, because the race above cannot be run through `write_release`
+    without a seam that does not exist. The premise is enforceable: the refusal
+    must be sourced from the atomic publish, so the body contains no existence
+    check for a later reader to reintroduce.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(write_release)))
+    checks = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "exists"
+    ]
+    assert checks == [], (
+        "write_release checks for existence before writing; the refusal must "
+        "come from the atomic publish or it does not hold when two runs race"
+    )
+
+
+def test_the_LEASE_writer_deliberately_overwrites(tmp_path: Path) -> None:
+    """The asymmetry, asserted rather than described. Two writers over one
+    shared bytes function, because the difference is real."""
+    lease_file = tmp_path / "lease.json"
+    write_store_record(lease_file, {"generation": 1})
+    write_store_record(lease_file, {"generation": 2})
+    assert json.loads(lease_file.read_text(encoding="utf-8")) == {"generation": 2}
+
+
+def test_both_writers_produce_THE_SAME_bytes(tmp_path: Path) -> None:
+    """Different semantics, one mechanism. If these diverge, two records in one
+    directory are written two ways and nothing else would fail."""
+    document = {"b": 2, "a": {"z": 1, "y": [3, 1]}}
+    assert write_store_record(tmp_path / "a.json", document).read_text(
+        encoding="utf-8"
+    ) == write_store_record_once(tmp_path / "b.json", document).read_text(
+        encoding="utf-8"
+    )
+
+
+# ── one publisher, across BOTH file sets ───────────────────────────────────
+
+
+def _publish_sites() -> set[str]:
+    """Every `os.link` publish in the package AND in `scripts/`.
+
+    This suite's field of view was the package, so a runner reimplementing what
+    the package owns stayed invisible — before the merge and after it. That is
+    the blind spot that let two release writers for one store reach two branches
+    at once, each lane correctly building a writer nobody had told it existed.
+    """
+    found: set[str] = set()
+    for root in (PACKAGE, SCRIPTS):
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and getattr(node.func, "attr", None) == "link"
+                    and getattr(getattr(node.func, "value", None), "id", None) == "os"
+                ):
+                    found.add(path.name)
+    return found
+
+
+def test_only_the_PACKAGE_publishes_into_this_store() -> None:
+    """`lease.py` owns the store — it owns `load_lease` and derives
+    `release_path`. A script that writes a record into it must CALL the
+    package's writer, not carry its own.
+
+    Independent of the canonicalization ratchet on purpose: that one watches the
+    BYTES, this one watches the PUBLISH. A second writer that shared the bytes
+    helper and hand-rolled only the atomic create would slip past the first and
+    fail here.
+    """
+    assert _publish_sites() == {"lease.py"}, (
+        f"{sorted(_publish_sites())} publish with os.link. "
+        "`lease.write_store_record_once` is the release writer; a second one is "
+        "two answers to one question, and the store has one owner"
+    )
+
+
+def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
+    """Sensitivity: the assertion above passes over a clean tree, so prove it
+    can fail. Its value is entirely in the case that is not present."""
+    (tmp_path / "runner.py").write_text(
+        "import os\ndef write_create_only(p, d):\n    os.link(p.with_suffix('.t'), p)\n"
+    )
+    tree = ast.parse((tmp_path / "runner.py").read_text())
+    hits = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", None) == "link"
+        and getattr(getattr(node.func, "value", None), "id", None) == "os"
+    ]
+    assert len(hits) == 1

@@ -92,7 +92,7 @@ from .lease import (
     HostLease,
     load_lease,
     release_path,
-    write_store_record,
+    write_store_record_once,
 )
 
 __all__ = [
@@ -964,17 +964,41 @@ def write_release(
     Refuses to overwrite: a second release of one lease is either a replay or two
     runs each believing they finished the same work, and both are things a reader
     must see rather than have resolved for them.
+
+    **The refusal is ATOMIC, not a check followed by a write.** The store is a
+    shared host whose whole premise is that agents contend for the target, and
+    the workflow that drives it does not cancel a run in progress — so two
+    dispatches against one target overlap by design. A `path.exists()` guard
+    leaves a window in which both runs see no file and both write; the second
+    then silently overwrites the record of how the first ended, and a destroyer
+    acts on the wrong terminal outcome. `os.link` makes creating the name and
+    failing on a taken name one syscall, so there is no window to lose.
+
+    **Raises `PreconditionFailed`, and that is a contract rather than an
+    accident.** Not `OSError`: the `FileExistsError` from the publish is a store
+    primitive's signal, and the meaning of a duplicate RELEASE belongs to this
+    module. A caller that catches only `OSError` will not catch this — the
+    runner's `record_terminal` promises never to raise, so it must catch this
+    type by name.
+
+    **There is deliberately no path override.** A workspace copy for artifact
+    upload is a COPY taken after a successful store write, never a second write
+    path: the store is the ledger, and a parallel write would be the
+    second-ledger defect wearing an evidence costume.
     """
     path = release_path(target, directory=directory)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
+    try:
+        return write_store_record_once(path, release.as_document())
+    except FileExistsError as exc:
+        # The refusal is raised from the ATOMIC publish, not from a preceding
+        # `path.exists()`. Check-then-write leaves a window in which two runs
+        # both see no file and both write — the very case this refuses.
         raise PreconditionFailed(
             f"a terminal release already exists at {path}. A second release of "
             "one lease is either a replay or two runs each believing they "
             "finished the same work — neither is resolved by overwriting",
             code=RELEASE_DUPLICATE,
-        )
-    return write_store_record(path, release.as_document())
+        ) from exc
 
 
 def load_release(

@@ -423,6 +423,35 @@ precisely the shape that lets a crashed run's silence authorise wiping a host
 another lane is still using. `RELEASE_DUPLICATE` refuses a second write, because
 a terminal record that can be overwritten is not terminal.
 
+**The release is published ATOMICALLY, and the difference is not academic.**
+`write_store_record_once` uses an `O_EXCL` temp plus `os.link`, so creating the
+name and failing on a taken name are ONE syscall. The first draft refused with a
+`path.exists()` check before writing, which reads correctly and protects nothing
+under the only conditions that matter: the store is a shared host whose premise
+is that agents contend for the target, and the driving workflow does not cancel a
+run in progress, so two dispatches overlap by design. Under an interleaving, both
+runs see no file, both write, and the second silently overwrites the record of
+how the first ended.
+
+Measured rather than argued — the same harness, twenty races each: `os.link`
+gives one publish and one refusal every time; stat-then-write gives two publishes
+and no refusal every time. The rejected implementation is KEPT in the test file
+as a negative control, because sequentially the two are indistinguishable, which
+is exactly how a stat-then-write survives a suite full of create-only tests.
+
+**Two writers, one bytes mechanism.** A lease may be rewritten — it is renewed,
+and the current row is the answer. A release may not. `_store_bytes` is the
+single answer to "how does a record in this store become bytes";
+`write_store_record` overwrites and `write_store_record_once` does not. The
+semantics differ for a real reason, so they are separate functions rather than a
+convenient merge.
+
+**`write_release` raises `PreconditionFailed`, deliberately, and takes no path
+override.** Not `OSError`: the meaning of a duplicate release belongs to this
+module, so a caller must catch it by name. And a workspace copy for artifact
+upload is a copy taken AFTER a successful store write — never a second write
+path, which would be the second-ledger defect wearing an evidence costume.
+
 **Reuse and destruction are separate gates over the same record.** "May this host
 be destroyed?" and "may a next lease take it as it stands?" have different
 answers, and a host may legitimately answer yes to one and no to the other.
