@@ -7,10 +7,32 @@ consumed, and the sixteen gate items lived in a hand-maintained markdown table.
 That is not evidence, and its own header proved it: on 2026-08-29 it read
 "14 of 16 CLOSED" while the rows beneath recorded four `partial` and one `n/a`.
 
-This runner is the fix. It ORIGINATES every action through the library —
+This runner is the fix. It ORIGINATES every host MUTATION through the library —
 `ExposureTransaction` over `ComposeHostExposureEffects` — rather than shelling
 out beside it. That distinction is the whole point of the lane: a human running
 the same eight commands proves the operator can do it, not that the code can.
+
+## MUTATION, not "every action" — and the narrowing is structural
+
+The invariant said "every action" until 2026-09-04. It was narrowed because it
+could not be satisfied as written, and a rule that cannot be satisfied is not
+upheld by leaving it written.
+
+The reason a change must originate through the library is that a change to a
+host has to be authorized, recorded and rollback-able. **An observation changes
+nothing, so it needs none of those properties** — and the observation this lane
+depends on most cannot be taken through the library at all. The far-end source
+address is what the TARGET saw of a connection from the vantage, and that is
+definitionally not the near end's to make: a vantage cannot certify where it
+egresses from. It comes from a different host, structurally outside the
+transaction's reach.
+
+So: every mutation goes through the library, observation need not, and the split
+is enforceable rather than stated — the collector path does not mutate. The
+seeded foreign rules and the inert-chain provocation ARE mutations, which is
+exactly why they are named acts in `lane3_provocation` on the transaction side
+rather than something a collector does on the way past. If those two blurred,
+this narrowing would become the hole its critics would expect.
 
 ## Every input is required, and the run refuses without it
 
@@ -66,7 +88,6 @@ from dotmac_deployment_foundation.errors import (
 from dotmac_deployment_foundation.exposure import (
     ExposureTransaction,
     ObservedProxy,
-    foreign_rules,
     ownership_comment,
     refuse_non_recreating_apply,
 )
@@ -85,6 +106,14 @@ from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 from dotmac_deployment_foundation.vantage import (
     VantageQualification,
     qualify_vantage,
+)
+from lane3_provocation import (
+    disarm_apply_failure,
+    observed_foreign,
+    private_port,
+    provoke_apply_failure,
+    seed_foreign_rules,
+    withdraw_foreign_rules,
 )
 
 EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
@@ -331,8 +360,6 @@ def run(args: argparse.Namespace) -> int:
         "before mutation",
         "ExposureTransaction.snapshot",
     )
-    foreign_before = {r.arguments for r in foreign_rules(snapshot, owner=owner)}
-
     transaction = ExposureTransaction(
         spec=spec, effects=effects, lock_directory=args.lock_dir
     )
@@ -445,16 +472,61 @@ def run(args: argparse.Namespace) -> int:
         "workstation probe",
     )
 
-    # ── item 8: provoked rollback, then EXACT restoration comparison ────────
+    # ── item 8: a SECOND transaction, provoked into a real rollback ─────────
+    #
+    # Two transactions, deliberately. The first one above is CLEAN and its
+    # evidence is what items 1-7 and 9-16 rest on; provoking it would have made
+    # every one of them the record of a failed run. This one exists only to
+    # execute item 8, and it is the only item that reads it.
+    #
+    # Nothing here calls `_rollback`. `ExposureTransaction.run()` re-observes,
+    # runs `verify_exposure`, and rolls back ITSELF when the report refuses —
+    # so the rollback is the system's response to a failure it met, which is
+    # the whole distinction item 8 turns on.
+    ssh = _ssh_runner(args.target, args.controller_key)
+    seeded = seed_foreign_rules(ssh)
+    provoked = ExposureTransaction(spec=spec, effects=effects)
+    armed = provoke_apply_failure(effects, port=private_port(spec))
+    provoked_snapshot = effects.observe()
+    seeded_before = observed_foreign(provoked_snapshot, owner=owner)
+    refusal = ""
+    try:
+        provoked.run()
+    except DeploymentFoundationError as encountered:
+        refusal = str(encountered)
+
     restored = effects.observe()
-    foreign_after = {r.arguments for r in foreign_rules(restored, owner=owner)}
-    lost = sorted(foreign_before - foreign_after)
+    foreign_after = observed_foreign(restored, owner=owner)
+    lost = sorted(seeded_before - foreign_after)
+
+    # Four conditions, and the third is the one that stops this passing
+    # vacuously. `foreign rules lost: none` reads identically whether five
+    # rules were preserved or none existed, so the snapshot is required to
+    # have been NON-EMPTY and the count is rendered rather than the word.
+    rolled_back = provoked.rolled_back
+    preserved = not lost
+    non_vacuous = bool(seeded_before)
+    provoked_ok = bool(rolled_back) and preserved and non_vacuous and bool(refusal)
+    met = refusal[:160] if refusal else "NONE — the run was never provoked"
     results.record(
         "provoked_rollback",
-        PASSED if transaction.rolled_back is not None and not lost else FAILED,
-        f"rollback compared against the snapshot; foreign rules lost: {lost or 'none'}",
-        "ExposureTransaction._check_preserved",
+        PASSED if provoked_ok else FAILED,
+        (
+            "induced an ip6tables DOCKER-USER rule for the descriptor's private "
+            f"port {armed.host_port} — a chain that can never fire for IPv6, so "
+            "the apply path has no authority to clear it. Met at "
+            "`verify_exposure`, which refused and rolled back on its own: "
+            f"rolled_back={rolled_back}; refusal={met}; compared against "
+            f"{len(seeded_before)} foreign rule(s) across "
+            f"{len(seeded)} seeded famil(ies); lost: {lost or 'none'}"
+        ),
+        "ExposureTransaction.run -> verify_exposure -> _rollback",
+        f"provocation:{armed.chain}/{armed.family}/{armed.host_port}",
+        *(f"seeded:{rule.family}:{rule.arguments}" for rule in seeded),
     )
+
+    disarm_apply_failure(effects)
+    withdraw_foreign_rules(ssh, seeded)
 
     # ── item 9: three terms, enforced by build_receipt ──────────────────────
     execution_report = report.descriptor_digest

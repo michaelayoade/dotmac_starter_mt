@@ -177,13 +177,13 @@ def test_the_command_line_offers_no_way_to_supply_a_result() -> None:
 def test_this_tree_is_not_capable_and_says_exactly_which_reasons_remain() -> None:
     """The live verdict. It gets shorter as repairs land, and that is the point.
 
-    `compose_identity_unused` was repaired in this change and is deliberately
-    absent — its detector is proved below by planting the defect BACK, because a
-    guard whose subject has been fixed is about the NEXT occurrence, not the
-    last one.
+    `compose_identity_unused` and `no_induced_failure` are both repaired and
+    deliberately absent — each detector is proved below by planting its defect
+    BACK, because a guard whose subject has been fixed is about the NEXT
+    occurrence, not the last one.
 
-    The four that remain all need a host or the collector rework, and no host
-    may be contacted until Michael answers on the disposable target.
+    The three that remain all live in the collector and need the restricted
+    observation identity on the target.
     """
     record = capability.assess(ROOT)
     assert record["verdict"] == "not_capable"
@@ -242,14 +242,6 @@ REPAIRS: dict[capability.Reason, dict[Path, list[tuple[str, str]]]] = {
             ('probe.get("service_running", True)', 'probe["service_running"]')
         ],
     },
-    capability.Reason.NO_INDUCED_FAILURE: {
-        capability.RUNNER: [
-            (
-                "    restored = effects.observe()",
-                "    provoke_apply_failure(effects)\n    restored = effects.observe()",
-            )
-        ]
-    },
 }
 
 LIVE_REASONS = frozenset(REPAIRS)
@@ -286,6 +278,31 @@ def test_a_source_with_none_of_them_is_capable(tmp_path: Path) -> None:
     record = capability.assess(_tree_with(tmp_path, every))
     assert record["reasons"] == [], record["reasons"]
     assert record["verdict"] == "capable"
+
+
+def test_removing_the_provocation_seam_is_refused_again(tmp_path: Path) -> None:
+    """REGRESSION PLANT for item 8's repair.
+
+    The detector looks for a call to the DECLARED provocation seam rather than
+    pattern-matching arbitrary code, so removing the call must bring the reason
+    back. A detector that accepted any `raise` would be satisfied by every error
+    path the runner already has, none of which the apply path meets.
+    """
+    root = _tree_with(tmp_path, {})
+    runner = root / capability.RUNNER
+    text = runner.read_text(encoding="utf-8")
+    assert f"{capability.PROVOCATION_SEAM}(" in text
+    runner.write_text(
+        text.replace(
+            f"{capability.PROVOCATION_SEAM}(effects", "_no_provocation(effects"
+        ),
+        encoding="utf-8",
+    )
+    reasons = {
+        entry["reason"]
+        for entry in capability.assess(root)["reasons"]  # type: ignore[index]
+    }
+    assert capability.Reason.NO_INDUCED_FAILURE in reasons
 
 
 def test_re_deriving_an_unused_compose_project_is_refused_again(
