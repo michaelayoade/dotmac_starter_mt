@@ -115,6 +115,18 @@ class StepKind(str, Enum):
     VERIFY_ROLES = "verify_roles"
     STABILISE = "stabilise"
     PRODUCT_POSTFLIGHT = "product_postflight"
+    #: The one-time install of a database principal's credential, driven from
+    #: `FoundationExecutionPlanV2.principal_bootstraps` rather than from a
+    #: descriptor.
+    #:
+    #: DELIBERATELY NOT EMITTED BY `build_plan`. A step added to the built plan
+    #: appears in `FoundationExecutionPlanV1.steps`, which is inside the V1
+    #: digest — so emitting it unconditionally would move every existing V1
+    #: digest, including ones Control has already frozen, for deployments that
+    #: perform no bootstrap at all. The member exists here so the ACT HAS A NAME
+    #: the evidence record can carry; the executor drives it from the authorized
+    #: V2 plan.
+    BOOTSTRAP_PRINCIPALS = "bootstrap_principals"
     RECORD_EVIDENCE = "record_evidence"
     PRUNE_IMAGES = "prune_images"
     RELEASE_LOCK = "release_lock"

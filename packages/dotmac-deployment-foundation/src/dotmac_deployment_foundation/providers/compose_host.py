@@ -1470,6 +1470,32 @@ class ComposeHostEffects:
         rows.sort(key=lambda row: row[0], reverse=True)
         return [(image_id, ref) for _, image_id, ref in rows]
 
+    def bootstrap_principal_credential(self, bootstrap):  # type: ignore[no-untyped-def]
+        """NOT IMPLEMENTED HERE, and the refusal is the correct answer.
+
+        `ADR-0070` puts PostgreSQL mechanics in the product, not in this
+        facility: the Foundation plans, invokes and judges, and the assembly
+        implements the effect. This provider renders and drives Compose on a
+        host — it holds no database driver, resolves no OpenBao reference, and
+        must not learn to.
+
+        So the in-package provider conforms to the protocol by REFUSING, which
+        is different from not having the method at all. A missing method makes
+        this class non-conforming and the failure arrives as an
+        `AttributeError` mid-deployment; a present one that refuses arrives as a
+        `PreconditionFailed` before any effect, naming what the operator has to
+        install. An assembly supplies a provider that can do this through its
+        execution bindings.
+        """
+        raise PreconditionFailed(
+            "the compose-host provider cannot bootstrap a database principal's "
+            f"credential ({bootstrap.principal!r} on {bootstrap.service!r}). "
+            "PostgreSQL mechanics belong to the product (ADR-0070): this "
+            "facility plans, invokes and judges, and holds no database driver "
+            "and no secret-store client. Supply an assembly provider through "
+            "the execution-bindings entry point"
+        )
+
     def prune_images(self, *, retain: int) -> None:
         """Keeps the `retain` most recent UNUSED images; in-use ones are
         always kept regardless of age or count — ported from

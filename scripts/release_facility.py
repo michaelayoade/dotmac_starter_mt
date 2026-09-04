@@ -930,6 +930,16 @@ class ProbeEffects:
     def read_evidence(self, path):
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
+    def bootstrap_principal_credential(self, bootstrap):
+        # The probe wheel must conform to the WIDENED protocol or the installed
+        # ADMIT below stops proving anything: a non-conforming implementation
+        # fails at the seam rather than at the gate it is meant to exercise.
+        # It reports `installed`, which is what a real provider reports for an
+        # absent-to-present transition.
+        from dotmac_deployment_foundation.deployment_evidence import StepStanding
+
+        return StepStanding.INSTALLED
+
     def prune_images(self, *, retain):
         return None
 
