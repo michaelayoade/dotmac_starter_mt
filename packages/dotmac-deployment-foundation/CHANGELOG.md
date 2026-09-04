@@ -483,6 +483,62 @@ unchanged. A sort or a rebuild here would be a second opinion about a fact the
 plan froze. An empty prestate stays the positive "first deployment" claim, and
 `host_prestate` is required with no default, so `None` has no path.
 
+### `IntegrationSurfaceAbsenceProofV1` — a proven absence SATISFIES a concern
+
+Michael's decision, and the reason it is forced rather than preferred. A
+candidate build requires all thirteen concerns bound. If a proven absence could
+NOT satisfy a concern, then a product with genuinely no integration surface
+could never reach 13/13 — and a gate nobody can meet is a gate that gets waived,
+not a gate that gets met. The bar that stays load-bearing is a different one:
+
+**It satisfies only when ESTABLISHED, never when merely well-formed.**
+
+That is stated in the type rather than in this note. `__post_init__` answers
+"is this well-formed"; `satisfies(concern, *, image_digest, inventory_digest)`
+answers "did this establish anything about THIS artifact", and it answers by
+COMPARING the proof's recorded inventory digest against one the caller computed
+independently. A caller can write any string into `observed_inventory_digest`;
+it cannot make that string equal a digest another party derived from the image
+without having examined the image. Constructing the type grants nothing, which
+is the whole difference between a proof and a placeholder wearing a type.
+
+**Four states stay distinct**, and none of them is the absence of the others:
+`bound` (a provider answers), not-yet-implemented (owed and missing),
+`inapplicable` (refused by ruling, the existing `InapplicableConcern`), and
+`absent_proven` (this type). The document NAMES its state, so a reader never
+infers "proven absent" from a missing binding — that inference is exactly how
+not-yet-implemented gets laundered into satisfied.
+
+**The inventory is closed and enumerated FIRST.** Five families written
+longhand — `outbound_connector`, `inbound_webhook`, `scheduled_sync`,
+`message_consumer`, `external_api_client` — enumerated before any proof runs and
+never derived from a proof's own findings. Three refusals follow from that:
+a family never looked at refuses (`ABSENCE_INVENTORY_INCOMPLETE`) rather than
+reporting a subset as "none"; a surface outside the inventory refuses
+(`ABSENCE_UNREGISTERED_SURFACE`) rather than silently not counting, which is the
+failure absence proofs actually have; and one surface FOUND refuses
+(`ABSENCE_NOT_ABSENT`) because a live connector makes the concern UNBOUND — a
+state that needs a provider, not a proof.
+
+ADR-0033 § 3 is carried whole: no positive control, no proof
+(`ABSENCE_UNESTABLISHED`), because a prover that never finds anything and an
+artifact that has nothing are otherwise the same colour. Provenance —
+`source_revision`, `method`, `established_at`, `established_by` — is required by
+the same code, and the concern must be a `FoundationConcern` rather than a
+string (`ABSENCE_WRONG_CONCERN`), so one proof can never certify thirteen.
+
+**The scope is exactly `integration`.** It is not widened to
+`request_evidence_context` or `data_governance`; those are owed, and a type
+built to prove emptiness must not become the way an owed concern is closed.
+
+**No release/pin sequencing applies here, and that is worth stating.** Platform's
+`profile_readback.py` imports no Foundation type — it is stdlib-only and reads
+the profile as a DOCUMENT, already refusing a proof whose `source_revision` does
+not match the artifact under readback. So this type does not have to be
+released, pinned and then consumed before Platform can verify it; the seam
+between the two sides is the emitted document, and `as_document()` carries the
+two fields Platform's existing check reads.
+
 ### Also in this release
 
 **The facility's own maturity claim about the thirteen concerns is withdrawn.**

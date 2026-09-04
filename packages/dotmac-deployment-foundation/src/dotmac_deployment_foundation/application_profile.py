@@ -107,6 +107,14 @@ from typing import Any, Final
 from .errors import PreconditionFailed, SpecError
 
 __all__ = [
+    "IntegrationSurfaceAbsenceProofV1",
+    "INTEGRATION_SURFACE_FAMILIES",
+    "INTEGRATION_ABSENCE_SCHEMA",
+    "ABSENCE_WRONG_CONCERN",
+    "ABSENCE_UNREGISTERED_SURFACE",
+    "ABSENCE_UNESTABLISHED",
+    "ABSENCE_NOT_ABSENT",
+    "ABSENCE_INVENTORY_INCOMPLETE",
     "APPLICATION_PROFILE_SCHEMA",
     "BINDING_FIELDS",
     "CONCERN_LABELS",
@@ -406,6 +414,216 @@ class AbsenceProof:
                 "never finds anything and an assembly that has nothing are the "
                 "same colour, and this proof cannot tell you which one it is"
             )
+
+
+#: The integration surfaces an application could carry. CLOSED, enumerated
+#: BEFORE any proof runs and never from a proof's own results.
+#:
+#: ADR 0033's first requirement, and the one an absence proof cannot supply for
+#: itself: "none present" is a statement about a KNOWN UNIVERSE. An open
+#: inventory makes absence unfalsifiable, because a surface nobody enumerated
+#: silently satisfies "none found" — which is the failure mode absence proofs
+#: actually have, as distinct from the one people guard against.
+INTEGRATION_SURFACE_FAMILIES: Final[tuple[str, ...]] = (
+    "outbound_connector",
+    "inbound_webhook",
+    "scheduled_sync",
+    "message_consumer",
+    "external_api_client",
+)
+
+#: Refusals. Assert these; read the prose. Every one of them is RAISED below —
+#: a declared code with no raiser is false coverage, and
+#: `test_every_declared_absence_code_is_actually_raised` fails when one appears.
+#: A foreign artifact is deliberately NOT among them: `satisfies` ANSWERS that
+#: question with False rather than refusing, and the readback that must refuse
+#: it is the consuming platform's, which owns its own code for it.
+ABSENCE_WRONG_CONCERN: Final = "absence_proof.wrong_concern"
+ABSENCE_INVENTORY_INCOMPLETE: Final = "absence_proof.inventory_incomplete"
+ABSENCE_UNREGISTERED_SURFACE: Final = "absence_proof.unregistered_surface"
+ABSENCE_NOT_ABSENT: Final = "absence_proof.not_absent"
+ABSENCE_UNESTABLISHED: Final = "absence_proof.unestablished"
+
+INTEGRATION_ABSENCE_SCHEMA: Final = "IntegrationSurfaceAbsenceProofV1"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class IntegrationSurfaceAbsenceProofV1:
+    """A concern's subject is genuinely absent, as a POSITIVE proven claim.
+
+    ## Four states, and none of them is the absence of the others
+
+    A profile concern is in exactly one of:
+
+    * **bound** — a provider exists and answers (`ConcernBinding`);
+    * **not yet implemented** — owed and missing, which is the default and is
+      NOT a state anything constructs;
+    * **inapplicable** — refused by a standing ruling, and never reintroduced
+      under a new name;
+    * **absent-proven** — this type.
+
+    Collapsing any pair is the two-values-for-three-cases shape, and here it is
+    four. An absence proof is a positive statement carrying provenance — who
+    established it, against what, and when — not a null a reader interprets
+    charitably.
+
+    ## It SATISFIES the concern, and the reason is forced rather than chosen
+
+    13/13 is required before a candidate is built. If a proven absence could not
+    satisfy a concern, a product with genuinely no integration surface could
+    never reach 13/13 — and an unmeetable gate gets weakened or waived rather
+    than met. Making absence count is what keeps the threshold real.
+
+    **But it satisfies only when ESTABLISHED, never when merely well-formed.**
+    That is the load-bearing half: a proof a caller can construct without
+    establishing anything is a placeholder wearing a type, and it would turn
+    "the gate is reachable" into "the gate is bypassable". Hence
+    :meth:`satisfies`, which takes the image's own inventory and compares —
+    construction alone proves nothing and grants nothing.
+
+    ## Why the evidence cannot be manufactured
+
+    ``observed_inventory_digest`` is a digest over the INSTALLED ARTIFACT's own
+    distribution inventory. A caller can write any string there; it cannot make
+    that string EQUAL the digest a verifier computes independently from the image
+    without actually having examined that image. Parse and compare, never
+    construct and trust — the same shape the fleet's received-digest types use.
+
+    ``source_revision`` and ``image_digest`` bind it to one artifact, so a
+    perfectly well-formed proof produced for a different build says nothing about
+    this one. Platform's readback already refuses that case by name.
+
+    ## ADR 0033's five requirements, each checked
+
+    1. a closed authoritative inventory — :data:`INTEGRATION_SURFACE_FAMILIES`,
+       enumerated before the proof and never from its own results;
+    2. exact refs — the image digest, not "the build";
+    3. complete enumeration — every family visited, each outcome individually
+       known, so a family never looked at is distinguishable from one looked at
+       and found empty;
+    4. a local, parser-aware scan — recorded as ``method``; never a remote index
+       and never a substring search;
+    5. an explicit refusal when enumeration is incomplete — a family that cannot
+       be reached makes the proof REFUSE rather than report a subset.
+    """
+
+    #: WHICH concern this proves absent. Discriminated, so one proof cannot
+    #: certify a different concern's emptiness — the same failure as a single
+    #: `AbsenceProof` for all thirteen, one level up.
+    concern: FoundationConcern
+    source_revision: str
+    image_digest: str
+    #: A digest over the installed artifact's own distribution inventory. The
+    #: unmanufacturable half: see the class docstring.
+    observed_inventory_digest: str
+    #: Every family in the closed inventory, mapped to what was found. An empty
+    #: tuple means "visited and found nothing", which is a different fact from a
+    #: family that is absent from this mapping entirely.
+    families: Mapping[str, tuple[str, ...]]
+    #: How the scan was performed — a local, parser-aware method.
+    method: str
+    #: The instrument shown finding something it is known to find, with the same
+    #: scan and scope. ADR 0033 § 3: an absence prover that never finds anything
+    #: and an artifact that has nothing are the same colour without this.
+    positive_control: tuple[str, ...]
+    established_at: str
+    established_by: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.concern, FoundationConcern):
+            raise SpecError(
+                f"concern must be a FoundationConcern, got "
+                f"{type(self.concern).__name__}. An absence proof that cannot "
+                "say WHICH concern it proves absent could certify any of them",
+                code=ABSENCE_WRONG_CONCERN,
+            )
+        for field in ("source_revision", "method", "established_at", "established_by"):
+            if not str(getattr(self, field)).strip():
+                raise SpecError(
+                    f"IntegrationSurfaceAbsenceProofV1.{field} is empty. A proof "
+                    "carries provenance — who established it, against what, and "
+                    "when — or it is a null with a type around it",
+                    code=ABSENCE_UNESTABLISHED,
+                )
+        _require_coordinate(self.image_digest, where="absence proof image_digest")
+        _require_coordinate(
+            self.observed_inventory_digest, where="absence proof inventory digest"
+        )
+        visited = set(self.families)
+        expected = set(INTEGRATION_SURFACE_FAMILIES)
+        unregistered = sorted(visited - expected)
+        if unregistered:
+            raise SpecError(
+                f"the proof reports families {unregistered}, which are not in "
+                f"the closed inventory {list(INTEGRATION_SURFACE_FAMILIES)}. A "
+                "surface nobody registered must REFUSE rather than disappear: an "
+                "unregistered family silently satisfies 'none present', which is "
+                "the failure mode absence proofs actually have",
+                code=ABSENCE_UNREGISTERED_SURFACE,
+            )
+        missing = sorted(expected - visited)
+        if missing:
+            raise SpecError(
+                f"the proof did not visit {missing}. Complete enumeration is "
+                "ADR 0033's third requirement: a family that was never looked at "
+                "is not a family that was found empty, and reporting a subset is "
+                "the shape this refusal exists to prevent",
+                code=ABSENCE_INVENTORY_INCOMPLETE,
+            )
+        occupied = {name: found for name, found in self.families.items() if found}
+        if occupied:
+            raise SpecError(
+                f"the scan found integration surfaces: {occupied}. The concern "
+                "is not absent; it is UNBOUND, which is a different state and "
+                "needs a provider rather than a proof",
+                code=ABSENCE_NOT_ABSENT,
+            )
+        if not self.positive_control:
+            raise SpecError(
+                "the proof carries no positive control. ADR 0033 § 3: the "
+                "instrument must first be shown finding something known to "
+                "exist, using the same scan and scope. Without it, a prover that "
+                "never finds anything and an artifact that has nothing are the "
+                "same colour, and this proof cannot say which it is",
+                code=ABSENCE_UNESTABLISHED,
+            )
+
+    def satisfies(
+        self, concern: FoundationConcern, *, image_digest: str, inventory_digest: str
+    ) -> bool:
+        """Does this proof ESTABLISH that concern's absence for THIS artifact?
+
+        Not "is it well-formed" — that was settled at construction. This is the
+        half that makes absence count without making the gate bypassable: the
+        caller supplies the image digest and the inventory digest it computed
+        ITSELF, and both must equal what the proof claims.
+
+        A caller can write any string into the proof. It cannot make that string
+        equal one an independent party derived from the image without having
+        examined that image, which is why this compares rather than trusts.
+        """
+        return (
+            self.concern is concern
+            and str(self.image_digest) == str(image_digest)
+            and str(self.observed_inventory_digest) == str(inventory_digest)
+        )
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "concern": self.concern.value,
+            "established_at": self.established_at,
+            "established_by": self.established_by,
+            "families": {
+                name: sorted(found) for name, found in sorted(self.families.items())
+            },
+            "image_digest": self.image_digest,
+            "method": self.method,
+            "observed_inventory_digest": self.observed_inventory_digest,
+            "positive_control": sorted(self.positive_control),
+            "schema": INTEGRATION_ABSENCE_SCHEMA,
+            "source_revision": self.source_revision,
+            "state": "absent_proven",
+        }
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
