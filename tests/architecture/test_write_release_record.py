@@ -797,6 +797,19 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
     monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
+    # These two tests are about consuming the authorization and refreshing the
+    # census, not about lineage. Until `--package-dir` became required they
+    # reached that path through the SILENT SKIP -- the same omission that left
+    # `main` red after a101 and again after a102, here in a test rather than a
+    # release. Declaring a real path would not keep them on their subject: it
+    # pulls `published_release_history` and `add_released_tag` -- real git, real
+    # map parsing, the tag oracle -- into tests that touched none of it, which
+    # widens what "fully reconciled" means in the rerun case. So the collaborator
+    # is stubbed, exactly as `tag_commit` and `require_kernel_evidence` are; the
+    # refusals themselves are proven in test_recorder_lineage_refusal.py.
+    monkeypatch.setattr(
+        writer, "resolve_lineage_inputs", lambda **_arguments: (None, None, {})
+    )
     monkeypatch.setattr(
         writer,
         "_local_script",
@@ -865,6 +878,19 @@ def test_kernel_record_rerun_accepts_only_the_fully_reconciled_state(
     monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
+    # These two tests are about consuming the authorization and refreshing the
+    # census, not about lineage. Until `--package-dir` became required they
+    # reached that path through the SILENT SKIP -- the same omission that left
+    # `main` red after a101 and again after a102, here in a test rather than a
+    # release. Declaring a real path would not keep them on their subject: it
+    # pulls `published_release_history` and `add_released_tag` -- real git, real
+    # map parsing, the tag oracle -- into tests that touched none of it, which
+    # widens what "fully reconciled" means in the rerun case. So the collaborator
+    # is stubbed, exactly as `tag_commit` and `require_kernel_evidence` are; the
+    # refusals themselves are proven in test_recorder_lineage_refusal.py.
+    monkeypatch.setattr(
+        writer, "resolve_lineage_inputs", lambda **_arguments: (None, None, {})
+    )
     monkeypatch.setattr(
         writer,
         "_local_script",
