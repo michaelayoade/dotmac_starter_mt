@@ -3,6 +3,7 @@ package = "dotmac-kernel"
 classification = "universal-facility"
 status = "historical-pre-rule"
 source_mode = "historical-mixed"
+source_mode_note = "Two things a reader needs, and one field says both. The PACKAGE-LEVEL mode is `historical-mixed` and stays that way: the machine-credentials, credential-lifecycle and settings lanes genuinely are product-first, and relabelling the dossier to suit one lane would make a false claim about the others. SEMANTIC ENCODING (2026-09-02) is the lane that is not mixed and not product-first: it is greenfield after inventory, licensed by the negative inventory in docs/inventories/semantic-encoder-sources.md, which audits seven repositories at immutable origin/main revisions and finds no encoder anywhere with all four qualifying properties. CORRECTED on the day the lane landed: it had been recorded as a product-first extraction with Orders as the qualifying source. That was wrong. Orders and Refund Warrants are LOCAL INCUBATION SLICES, and rule 24 requires a qualifying product-first source to be a PRODUCTION implementation, so neither can be one. The two convergent implementations are evidence the DESIGN is right; they are not a source it was ported from, and neither is recorded as one. A lane whose mode differs from the package's is explained HERE and nowhere else: `source_mode_note` is the single narrative field for a source-mode choice, and a per-lane key would be a second vocabulary for one job."
 owner = "Dotmac platform foundation"
 contract = "Universal assembly facilities and versioned cross-product contracts"
 source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
@@ -191,6 +192,12 @@ preserved_tests = [
   "dotmac_erp:tests/test_net_trusted_proxy.py",
   "dotmac_erp:tests/test_observability_request_context.py",
   "dotmac_starter_mt:tests/unit/test_request_evidence.py",
+  # Semantic encoding (2026-09-02). The Orders and Refund Warrants slice
+  # suites are the parity set, but they live on unpushed incubation
+  # branches and are therefore not addressable from this tree — see the
+  # SEMANTIC ENCODING note in shadow_and_drift. This is the facility's own
+  # test, and it pins the cv1 bytes as literals.
+  "dotmac_starter_mt:tests/unit/test_semantic_encoding.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -205,6 +212,11 @@ candidate_consumers = [
   "dotmac_academy_app",
 ]
 inventory_evidence = [
+  # Semantic encoding (2026-09-02). The negative inventory licensing the
+  # greenfield classification: seven repositories at immutable origin/main
+  # revisions, no qualifying encoder in any of them, every near-miss
+  # recorded with the exact property it fails on.
+  "docs/inventories/semantic-encoder-sources.md",
   "docs/inventories/machine-credential-sources.md",
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/branding-settings.md",

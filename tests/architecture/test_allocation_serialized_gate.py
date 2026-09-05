@@ -20,12 +20,45 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from dotmac_kernel.namespaces import (
+    MigrationOwner,
+    migration_owner_ledger_digest,
+    module_schema,
+)
 
 from scripts.check_allocation_serialized import GateError, run_gate
 
 LEDGER = "packages/dotmac-kernel/src/dotmac_kernel/namespaces.py"
 
-BASE_LEDGER = """\
+#: These fixtures exercise the SOURCE half of the gate — a module's allocation
+#: must be merged before its source. They still have to carry a
+#: `MIGRATION_OWNER_LEDGER_DIGEST`, because the gate now refuses a head that
+#: declares none: after the digest reaches `main`, a ledger without one cannot
+#: occur, and a fixture modelling an impossible state would be testing nothing.
+#: The value is COMPUTED by the shipped function rather than hand-written, so
+#: the two ledgers below necessarily differ once one of them gains a row, which
+#: is the property the digest exists for. Whether the digest is CORRECT for a
+#: real ledger is a different question, answered in
+#: `test_ledger_digest_serialization.py` and `test_allocation_gate_cli.py`.
+APPROVALS_ROW = ("approvals", "ap")
+SALES_ROW = ("sales", "sa")
+
+
+def _digest(*rows: tuple[str, str]) -> str:
+    return migration_owner_ledger_digest(
+        [
+            MigrationOwner(
+                owner=owner,
+                prefix=prefix,
+                branch_label=owner,
+                db_schema=module_schema(owner),
+            )
+            for owner, prefix in rows
+        ]
+    )
+
+
+_BASE_LEDGER_ROWS = """\
 from dotmac_kernel.namespaces import MigrationOwner, module_schema
 
 APPROVALS_MIGRATION_OWNER = MigrationOwner(
@@ -37,6 +70,11 @@ APPROVALS_MIGRATION_OWNER = MigrationOwner(
 
 MIGRATION_OWNER_LEDGER = (APPROVALS_MIGRATION_OWNER,)
 """
+
+BASE_LEDGER = (
+    _BASE_LEDGER_ROWS
+    + f'\nMIGRATION_OWNER_LEDGER_DIGEST = "{_digest(APPROVALS_ROW)}"\n'
+)
 
 # `main` plus a merged `sales` allocation. Built by substitution rather than
 # written out three times, so the three scenarios that need it cannot drift
@@ -53,7 +91,7 @@ LEDGER_WITH_SALES = BASE_LEDGER.replace(
     "    APPROVALS_MIGRATION_OWNER,\n"
     "    SALES_MIGRATION_OWNER,\n"
     ")",
-)
+).replace(_digest(APPROVALS_ROW), _digest(APPROVALS_ROW, SALES_ROW))
 
 MANIFEST = """\
 from dotmac_kernel.modules import ModuleManifest
