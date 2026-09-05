@@ -1,9 +1,23 @@
 # The Foundation concern-contribution contract — DESIGN FOR REVIEW
 
-**Status: CONTRACT DESIGN ONLY — revision 4.**
+**Status: CONTRACT DESIGN ONLY — revision 5.**
 Not accepted, not implemented, and nothing depends on it. This is **not** profile
 admission and **not** cutover readiness; governance ADR 0039 remains Proposed and
 unenforced.
+
+**Revision 5 changes** (third review): the F2 ruling **reaches § 4.3, § 12A and
+§ 3.1** — the verification record is rebuilt in the ruled vocabulary, the receipt
+is specified once rather than twice, and § 3.1 is marked SUPERSEDED instead of
+standing as normative text asserting the design § 3.3b defeats (§ 13.1 is the
+rule adopted against this recurring class); the seed commitment **gains an
+opener** (§ 4.3b) — a commitment nobody re-derives was this document's own inert
+shape, one surface over; the expected relation must be **semantic**, with
+`shape-discriminator` as an eighth mutant (F3); clause 6 is bounded as a claim
+about the published record, not process isolation; "unrepresentable" now **names
+the type** — an admission outcome is a SUM TYPE; N25's refusal column is `—`
+because the broken verifier is what would emit a code; the mutants are
+**required, not built**; and § 3B's swallowed bullet, a stray rule pair and the
+matrix ordering are repaired.
 
 **Revision 4 changes**: **F2 is RULED** — the Foundation-owned challenge space,
 with the seed drawn AFTER the candidate bytes are fixed and the provider
@@ -220,7 +234,22 @@ was load-bearing and unfunded.
 This section is the repair. It is recorded rather than replaced silently,
 because the defeated design is the reason the new one has the shape it has.
 
-### 3.1 Foundation owns a VERSIONED SCENARIO BATTERY, and judges the answers
+### 3.1 SUPERSEDED by § 3.3b — the versioned scenario battery
+
+> **This section is superseded and is retained as history, not as normative
+> text.** § 3.3b's challenge space replaces it. Revision 4 ruled that and left
+> this section asserting the defeated design as current — including *"no
+> constant satisfies both"*, which is true and insufficient, and a
+> `battery_version` in the join key that § 1.1 and § 4.2b do not carry. **Two
+> statements of one key is the defect this document is built to refuse**, and it
+> had one.
+>
+> What survives into § 3.3b: Foundation owns the questions and judges the
+> answers; the two halves are both required; the batteries are per concern
+> contract and never per product. What does not: fixed inputs, `scenario_id`,
+> `expected` in any record, and the claim that the pairing closes the inert
+> class.
+
 
 > *"A provider-supplied boolean or nonce proves only reachability; Foundation's
 > versioned battery must independently judge positive and negative scenarios."*
@@ -350,6 +379,48 @@ without publishing the material that would let the next candidate be built
 against it. Publishing the raw seed would reintroduce clause 1's hole for every
 subsequent build.
 
+#### The expected relation must be SEMANTIC (F3)
+
+Clause 1 makes the challenge VALUES unpredictable and says nothing about their
+TYPES. That leaves a shape fresh seeds do not touch:
+
+```python
+def answer(self, challenge):
+    if isinstance(challenge, WellFormedFoo):
+        return some_output
+    return REFUSE
+```
+
+It passes both halves, is not a lookup table, and clause 1 is irrelevant to it —
+the provider is discriminating on the challenge's *shape*, which Foundation
+handed it, rather than on anything the contract means.
+
+**The obligation, on the battery author:** a challenge's expected relation MUST
+be **semantic** — determinable only by applying the contract's own logic to the
+challenge's CONTENT. It may never be determinable from the challenge's type,
+class, structure or any other property visible without applying that logic.
+
+Concretely: positive and negative challenges must be **type-indistinguishable**.
+If every accepted challenge is a `WellFormedFoo` and every refused one is not,
+the battery has told the provider the answer in the argument.
+
+The bound is honest: this needs a badly constructed battery, and *"Foundation
+writes the batteries"* already puts it in the right hands. But the contract gave
+the first battery author **no rule to violate**, and a rule that exists only as
+the author's good judgement is not a rule. `shape-discriminator` (§ 3.4b) is the
+mutant that must be refused.
+
+#### What clause 6 does and does not claim
+
+Clause 6 is a claim about the **published record** — the raw seed is not in the
+receipt — and **not** a claim of process isolation. The provider runs in-process
+with the verifier and could read the seed if it tried. That is the Python plugin
+trust boundary this repository already accepts by standing rule: plugins are
+trusted in-process code, installed and verified by the supply chain.
+
+Stated so nobody over-reads clause 6 later. It closes the *published* path, which
+is the one that would let the NEXT candidate be built against these challenges.
+
 #### Consequences for § 4.3
 
 `ConcernVerification` changes shape: no `expected` beside `observed` in anything
@@ -381,13 +452,19 @@ neither of which is the battery's own design: whether the inputs could have been
 known in advance (clause 1) and whether Foundation has an independent oracle for
 the concern at all.
 
-### 3.4b The SEVEN required mutants
+### 3.4b The EIGHT required mutants
 
 A refusal nobody has watched fire is a refusal nobody should trust, and a design
 that names refusals without naming the artefacts that provoke them leaves the
-proving to whoever implements it. All seven are built; each must be **refused**,
-and refused **for its own reason** rather than by whichever check happens to
-trip first.
+proving to whoever implements it.
+
+**All eight are REQUIRED and none is built** — nothing in this repository builds
+a mutant, and nothing in this PR implements the contract. Revision 4 said "all
+seven are built", which was a present-tense claim about an artefact that does not
+exist. They are owed by the implementation step.
+
+Each must be **refused**, and refused **for its own reason** rather than by
+whichever check happens to trip first.
 
 | mutant | what it is | must be caught by |
 | --- | --- | --- |
@@ -397,10 +474,11 @@ trip first.
 | `missing-injection` | provider installed, never wired | `uninjected` |
 | `swapped-binding` | a binding joined to another assembly's verification | `wrong_assembly` |
 | `stale-provider` | a binding naming a provider artifact the assembly no longer carries | `contract_mismatch` |
+| `shape-discriminator` | answers on the challenge's TYPE, never its content | the semantic-relation rule: positive and negative challenges are type-indistinguishable |
 | `broken-shut-verifier` | **the VERIFIER refuses everything** | see below |
 
 **`broken-shut-verifier` is the one nobody asked for, and it is the reason this
-list is seven rather than six.** Every other mutant is a defective *provider*,
+list is not six.** Every other mutant is a defective *provider*,
 and every check in this document points at providers. A verifier that refuses
 everything makes **every** provider look inert — the whole fleet fails admission,
 each failure individually plausible, and nothing in the matrix would say the
@@ -505,6 +583,11 @@ Two immediate consequences:
   supplying `displaces` with its retirement rows was refused for carrying none,
   a message false about its own input. V1 now refuses at the parse (point 7's
   "until V2 supports this");
+* **no number was allocated when this section was written.** Naming the successor
+  is part of accepting the design, not part of proposing it — and § 3B.1 below is
+  that acceptance, recorded after Michael ruled the names. The bullet is restored
+  because it carries the transition: revision 4's § 3A.1 insertion swallowed it,
+  leaving "two immediate consequences" followed by one.
 ### 3A.1 The ENVELOPE — what Platform's row map found missing
 
 Platform's merged row map (`74dab8a8`, `docs/inventories/platform-parity-row-map.json`)
@@ -647,17 +730,67 @@ others. It is the join itself, written down.
 
 ### 4.3 `ConcernVerification` — owned by the GENERIC TOOL
 
+**Rebuilt in § 3.3b's ruled vocabulary.** Revision 4 ruled the challenge space
+and left this table carrying the defeated battery's fields — `scenario_id` and
+`expected` beside `observed`, and none of clause 5's six. An implementer building
+from § 4 would have built the shape § 3.3b defeats. That is the third
+consecutive recurrence of the same class, and § 13.1 is the rule adopted against
+it.
+
 | field | owner | notes |
 | --- | --- | --- |
 | `schema` | Foundation | fixed literal |
 | join key (**five** identities) | tool, **copied from what it observed** | not from either declaration |
-| `battery_id` / `battery_version` | Foundation | which questions were asked |
-| `scenarios` | Foundation defines, tool records | each: `scenario_id`, `expected` (`accept`/`refuse`), `observed` (`accept`/`refuse`/`no_answer`) |
+| `challenge_space_version` | Foundation | clause 5 |
+| `seed_commitment` | verifier | clause 5 — the commitment, **never the seed** |
+| `challenge_set_digest` | Foundation | clause 5 |
+| `case_count` | Foundation | clause 5 — a bounded count |
+| `verifier_artifact_digest` | verifier | clause 5 |
+| `outcome` | **Foundation judges** | a closed verdict over the whole run |
 | `observed_at` / `observed_by` | tool | provenance |
 
-**There is no `detail`, no `nonce_echo` and no free text** (point 5). `observed`
-is a closed three-value vocabulary and Foundation compares it with `expected`;
-the provider never reports its own verdict.
+**`expected` appears nowhere in this document, and no per-scenario record
+reaches the provider.** The provider returns typed OUTPUTS (clause 4); Foundation
+applies the expected relation and records only the judged `outcome`. A record
+that carried `expected` beside `observed` would put the answer in the same
+structure as the question — the cheap attack revision 4 closed — and a
+`scenario_id` would hand the provider a scenario identity to key on.
+
+There is no `detail`, no `nonce_echo`, no exception text and no free text (§ 4.4).
+
+**The raw seed and the challenge set are NOT here.** They live in restricted
+verifier evidence (clause 6, § 4.3b).
+
+### 4.3b Restricted verifier evidence, and the OPENER
+
+Clause 5 records a commitment and clause 6 keeps the raw seed restricted.
+Revision 4 stopped there, and that was a hole: it never said what the commitment
+**is**, **who opens it**, **when**, **against what**, or **that opening is ever
+required**. § 12A then says publication and authorization do not re-derive
+anything — so **no party would ever check that the committed seed is the seed
+that was used.** A verifier that fabricated the entire challenge set could write
+any commitment and every consumer would accept it.
+
+**A commitment with no opener is a value nobody re-derives** — this document's
+own definition of the inert shape, one surface over. It would have shipped an
+inertness contract with an inert field in it.
+
+| | |
+| --- | --- |
+| **commitment construction** | `sha256` over the canonical bytes of `(challenge_space_version, seed)`, per § 8 |
+| **restricted evidence holds** | the raw seed **and the challenge set** |
+| **opener** | an auditor, or any party holding the restricted evidence — never the verifier that produced it |
+| **when** | on audit, and on any dispute about an admission. **Not per release.** |
+| **the check** | re-derive the commitment from the raw seed; regenerate the challenge set from `(space_version, seed)`; re-derive `challenge_set_digest` and compare with the receipt |
+
+This is an **audit path, not a per-release step**, so build-once is undisturbed:
+publication still consumes the receipt without re-deriving it (§ 12A). What
+changes is that the receipt is now **openable** — the commitment can be shown to
+be about the seed that was actually used, by someone who is not the party that
+wrote it.
+
+The verifier may not be its own opener, for § 1.2's reason exactly: a party
+verifying its own claim is not an independent witness of it.
 
 ### 4.4 Every document is closed on ENCODING and DECODING
 
@@ -795,9 +928,6 @@ Three properties carry over unchanged and one is added:
    built against another concern's families. The misfiling refusal landed
    2026-09-05 catches a proof filed under the wrong key; this catches one
    *built* against the wrong inventory, which is the earlier and quieter defect.
-
----
-
 
 ---
 
@@ -1068,14 +1198,6 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N11d | unknown key on **decode** | `unknown_key` | a closed document decodes |
 | N11e | a V1 document carrying `retirement` | refusal at the parse | a document without it parses |
 | N11f | a wrapper CONTAINING an accepted schema | refused by the canonicalizer | each accepted schema canonicalises (§ 8.0) |
-| N20 | the artifact carries **no profile at all** | `envelope_absent` | an artifact carrying one proceeds |
-| N21 | bytes not UTF-8 / not JSON / not an object | the matching `envelope_*` | well-formed bytes proceed |
-| N22 | `schema` outside the accepted set | `envelope_contract_unknown` | an accepted schema proceeds |
-| N23 | declared self-digest does not cover the content | `envelope_digest_stale` | a covering digest proceeds |
-| N24 | an envelope refusal emitted **alongside** per-concern refusals | must be unrepresentable | an envelope refusal terminates admission |
-| N25 | the **verifier** refuses everything | `broken-shut-verifier` mutant | the verifier admits a known-good provider in the same run |
-| N26 | a provider that memorises the challenge set | defeated by clause 1 | the seed is drawn AFTER candidate bytes are fixed |
-| N27 | the expected relation reachable by the provider | must be unrepresentable | the provider returns typed outputs only |
 | N12 | absence proof, no observed inventory | finding | supplied inventory verifies |
 | N13 | absence proof for another artifact | finding | matching artifact verifies |
 | N14 | absence proof misfiled under another concern | `absence_proof.wrong_concern` | correctly filed admits |
@@ -1084,6 +1206,16 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N17 | a refusal carrying no lifecycle stage | must be unrepresentable | every refusal names the highest stage ACTUALLY attained |
 | N18 | a summary verdict disagreeing with its refusals | must be unrepresentable | the summary is derived, never stored beside them |
 | N19 | the generic path reproduces 53 and produces no new refusal | acceptance failure | `uninjected`, `unexercised` and `broken_shut` each shown firing |
+| N20 | the artifact carries **no profile at all** | `envelope_absent` | an artifact carrying one proceeds |
+| N21 | bytes not UTF-8 / not JSON / not an object | the matching `envelope_*` | well-formed bytes proceed |
+| N22 | `schema` outside the accepted set | `envelope_contract_unknown` | an accepted schema proceeds |
+| N23 | declared self-digest does not cover the content | `envelope_digest_stale` | a covering digest proceeds |
+| N24 | an envelope refusal emitted **alongside** per-concern refusals | **unrepresentable — the admission outcome is a SUM TYPE** (see below) | an envelope refusal terminates admission |
+| N25 | the **verifier** refuses everything | — (see below) | the verifier admits a known-good provider in the same run |
+| N26 | a provider that memorises the challenge set | defeated by clause 1 | the seed is drawn AFTER candidate bytes are fixed |
+| N27 | the expected relation reachable by the provider | **unrepresentable — no `expected` field exists in any record** (§ 4.3) | the provider returns typed outputs only |
+| N28 | a provider discriminating on the challenge's TYPE | `shape-discriminator` mutant, refused by the semantic-relation rule | positive and negative challenges are type-indistinguishable |
+| N29 | a seed commitment nobody can open | must be openable | restricted evidence holds the raw seed AND the challenge set; the digest re-derives (§ 4.3b) |
 
 **N16 is the one that must not be skipped.** A verifier that has never refused
 anything and a composition that is correct are the same colour. Rows N1–N15 each
@@ -1094,15 +1226,35 @@ is removed.
 (`test_deployment_foundation_application_profile.py`). The rest are owed by the
 implementation step.
 
+**"Unrepresentable" now names the type that makes it so, everywhere it is
+claimed.** The word was asserted four times without one, and an invariant is not
+a type: *a record with an optional envelope refusal plus a rule that the concern
+list must then be empty is a checked rule wearing the stronger word, and it will
+drift.*
+
+> **An admission outcome is a SUM TYPE: either an `EnvelopeRefusal`, or a set of
+> concern outcomes. Never a record with fields for both.**
+
+The structure already pointed at it — `ContributionRefusal` carries a `concern`
+and envelope refusals are profile-scoped, so an envelope refusal **cannot be
+one**. N27 is the same one-line fix: there is no `expected` field in any record,
+so "reachable by the provider" has nothing to reach.
+
 **N20–N24 are the envelope stage** (§ 3A.1), and N20 is the only verdict this
 programme has ever observed against a real image — it had no code until
 revision 4. **N24 is the one that keeps the stage honest**: an envelope refusal
 must terminate admission, or a reader gets an envelope failure and thirteen
 concern failures describing a document nobody read.
 
-**N25–N27 come from the F2 ruling.** N25 turns `broken_shut` on the tool itself:
+**N25–N28 come from the F2 ruling.** N25 turns `broken_shut` on the tool itself:
 a verifier that refuses everything makes every provider look inert, and nothing
 else in the matrix would say the instrument was the broken part.
+
+**N25's refusal column is `—`, as N16's is, and that is not an omission.** There
+can be no code: the broken verifier is the thing that would emit one. It is
+caught by its non-vacuity partner — the same-run admission of a known-good
+provider — and printing a code there would send a reader hunting for something
+that must not exist.
 
 **N5d, N7d and N11f are revision 3's rows.** N5d is the F1 repair made
 falsifiable: the previous revision's claim that every fact carries every identity
@@ -1295,7 +1447,9 @@ Admission is not a build-time side activity whose result is recomputed later.
 * the generic tool runs admission against the **retained artifact** — the exact
   bytes already built and verified, never a rebuild;
 * admission emits an **immutable receipt** carrying the five identities, the
-  composition digest, the battery version and the scenario outcomes;
+  composition digest and clause 5's six fields (§ 4.3) — **specified once, in
+  § 4.3, and referenced here.** Revision 4 restated it in the defeated battery's
+  vocabulary, which is two specifications of one record;
 * **publication and authorization consume that receipt.** They do not re-derive
   it, re-run the battery, or rebuild anything.
 
@@ -1309,6 +1463,32 @@ parser acquires a production caller because the release path calls it, so the
 enforcement premise stops being a claim about code nothing runs.
 
 **This section is design. The wiring is implementation** and is not in this PR.
+
+---
+
+## 13.1 THE RULE adopted against this document's own recurring defect
+
+Three consecutive review passes found the same class: **a ruling landed in the
+narrative and did not reach the schema table or the negative matrix.**
+
+* revision 2 → 3: the five-identity repair reached § 1.1 and not § 4.1 / § 4.2;
+* revision 3 → 4: —
+* revision 4 → 5: the challenge-space ruling reached § 3.3b and not § 4.3,
+  § 12A or § 3.1, which still asserted the design it defeats.
+
+Each time the prose was right and **an implementer building from § 4 would have
+built the defeated shape.** That is worse than an unmade decision, because the
+document reads as though the decision was made.
+
+> **When a ruling lands, the schema table and the negative matrix are edited in
+> the SAME change as the narrative — and any superseded section is marked
+> superseded, not left standing.**
+
+The failure mode has a name in this document already: two statements of one
+thing, agreeing until one is improved. § 3.1 carried a `battery_version` in the
+join key that § 1.1 and § 4.2b did not, which is exactly that.
+
+**A design document is not exempt from the rule it is written to impose.**
 
 ---
 
