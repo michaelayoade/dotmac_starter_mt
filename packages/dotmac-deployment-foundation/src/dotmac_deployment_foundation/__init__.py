@@ -20,12 +20,15 @@ descriptor.
 tenant. A facility that decides how a deployment is built cannot be a table
 inside one of the deployments it builds.
 
-**Nothing here runs anything.** The plan is data and the executor talks to an
-injected `Effects` provider. That is what makes the failure-injection matrix —
-wrong digest, failed backup, candidate never ready, maintenance-required
-release attempted online — ordinary unit tests instead of disposable-VM
-exercises, and a gate that has never been shown to fire is a gate nobody should
-trust.
+**No implicit runtime.** The plan is data and the executor talks to an injected
+`Effects` provider. The public CLI and Lane 3 rehearsal can nevertheless invoke
+`ExposureTransaction` directly against an explicitly supplied host provider;
+today those paths sit outside `Executor`'s grant and execution-plan checks.
+That separation is an as-built composition gap, not a second authority to copy.
+The injected seam is what makes the failure-injection matrix — wrong digest,
+failed backup, candidate never ready, maintenance-required release attempted
+online — ordinary unit tests instead of disposable-VM exercises, and a gate
+that has never been shown to fire is a gate nobody should trust.
 """
 
 from __future__ import annotations

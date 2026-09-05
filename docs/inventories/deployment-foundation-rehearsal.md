@@ -273,8 +273,9 @@ It is deliberately **not** in these branches, for two reasons that are worth
 recording rather than assumed.
 
 **Order.** The authority row should reference a RELEASED facility. Adding it
-before publication would name a distribution nobody can install, which is the
-same defect as the placeholder digests.
+before publication would name a distribution with no verified published
+coordinate a consumer can pin, which is the same defect as the placeholder
+digests.
 
 **Risk, measured rather than guessed.** `dotmac_starter_mt` pins Governance
 `e0f636c3f5adea77da136f75f49c2349fbf9eeaa`; `dotmac_erp`, `dotmac_sub` and

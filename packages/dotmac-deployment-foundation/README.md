@@ -20,12 +20,14 @@ build runner rendering a Compose file has no database and no web framework, and
 must not acquire them in order to validate a descriptor. Two import-linter
 contracts hold the boundary in both directions.
 
-Nothing here runs anything. The deployment plan is DATA and the executor talks
-to an injected `Effects` provider — which is what makes twenty failure cases
-(wrong digest, failed backup, corrupt backup, candidate never ready, a
-maintenance-required release attempted online) ordinary unit tests instead of
-disposable-VM exercises. A gate that has never been shown to fire is a gate
-nobody should trust.
+The plan is DATA and the executor talks to an injected `Effects` provider.
+The library has no implicit runtime, but its CLI and rehearsal entry points can
+invoke the public exposure transaction directly against an explicitly supplied
+host provider, outside `Executor`'s `ExecutionGrant` and execution-plan-digest
+checks. That separation makes twenty failure cases (wrong digest, failed
+backup, corrupt backup, candidate never ready, a maintenance-required release
+attempted online) ordinary unit tests instead of disposable-VM exercises. A
+gate that has never been shown to fire is a gate nobody should trust.
 
 ## Quick start
 

@@ -1,6 +1,22 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.4.0a1 — unreleased, NEVER BUILT
+## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
+
+### Candidate-state correction — 2026-09-05
+
+Run `33920058598` built `0.4.0a1` once from protected-main source
+`753a004e7f8dbab034d5d6ca565c680d931a5309` as artifact `9954731961`.
+Its `CandidateArtifact.v1` receipt remained in the workflow artifact and never
+entered this repository. Commits `#628` and `#631` then changed the facility's
+importable source under the unchanged version. The build oracle records both
+facts as `unrecorded` and `drifted` in
+`tests/architecture/candidate_window_baseline.json`.
+
+Consequently these bytes are not an admissible rehearsal or publication
+coordinate, and `0.4.0a1` must not be rebuilt or published. The latest
+published Foundation remains `0.2.0a2`. Closing the candidate window and
+allocating any successor are separate authorized lifecycle acts; this
+changelog does neither.
 
 ### An absence proof can only prove the concern its inventory belongs to
 
@@ -47,8 +63,10 @@ commit has been chosen to publish. Any value would be a guess, a default, or a
 copy of one of the other two, and each reads to a destroyer as an established
 fact. A field its only producer cannot fill truthfully must not exist.
 
-Free to do now: `lease_release.py` is in no built candidate wheel — checked
-against `0.3.0a1` and `0.3.0a5` rather than assumed.
+That statement was true only against the two candidates checked at authoring
+time (`0.3.0a1` and `0.3.0a5`). The file later crossed the `0.4.0a1` candidate
+boundary before this change; the change is therefore part of a1's recorded
+source drift and cannot be published under that identity.
 
 ### `IntegrationSurfaceAbsenceProofV1.image_digest` → `artifact_digest`
 
@@ -65,7 +83,9 @@ image digest gets a `TypeError` rather than a proof that quietly never
 satisfies. Every other `image_digest` in this package is a real OCI image digest
 and keeps its name.
 
-Free now, expensive later: the type is in no built candidate wheel.
+The earlier shape of this type also crossed the `0.4.0a1` candidate boundary.
+The rename is part of a1's recorded source drift and cannot be published under
+that identity.
 
 ### Ruling 4 — the three revisions stand in a stated RELATIONSHIP
 
@@ -267,9 +287,10 @@ well-formed fingerprint of the wrong key is refused where it is compared.
 `HostLeaseReleaseV1.host_mutation_evidence` is RENAMED to
 `controller_identity_fingerprint`, the name `HostLease` already used for the same
 fact. One thing with two names across a boundary where the two are compared
-invites a reader to conclude they are different facts. Done now because
-`HostLeaseRelease.v1` has never crossed an artifact boundary — 0.4.0a1 has not
-been built — and a schema that has would have had to carry both.
+invites a reader to conclude they are different facts. The rename is present
+in the `0.4.0a1` candidate bytes, but those bytes are
+unrecorded, drifted and inadmissible. No published Foundation artifact has
+carried `HostLeaseRelease.v1`; a published schema would have had to carry both.
 
 `HistoricalLeaseV1` keeps a bare `str`, deliberately: it reads `HostLease.v1`
 records written by five shipped candidate wheels under a validator that required
@@ -894,14 +915,15 @@ true here: the verification is report-only because ADR 0039 stages it that way,
 and which concerns any assembly can bind is that assembly's declaration to
 make.
 
-No wheel for `0.4.0a1` exists. It must be built exactly once, by
-`foundation-candidate.yml`, after the source-only Lane 3 runner-capability gate
-admits the exact protected-main SHA. The later Lane 3 exposure rehearsal must
-fetch, digest-verify, install and execute those exact candidate bytes; it may
-not import the Foundation from checkout or accept an operator-supplied artifact
-digest. Publication then parses the rehearsal receipt with the same installed
-candidate wheel. This preserves the bootstrap ordering without letting a green
-rehearsal attest bytes other than the ones published.
+A wheel for `0.4.0a1` was built exactly once by `foundation-candidate.yml` in
+run `33920058598`, but its receipt was not committed and the importable source
+later drifted. It is therefore not the candidate the later Lane 3 exposure
+rehearsal may use and must never be rebuilt or published. A successor, if
+authorized after the composition changes, must be built once from its own exact
+protected-main SHA; Lane 3 must fetch, digest-verify, install and execute those
+recorded bytes rather than importing Foundation from checkout or accepting an
+operator-supplied artifact digest. Publication must parse the rehearsal receipt
+with that same installed candidate wheel.
 
 ## 0.3.0a6 — unreleased, NEVER BUILT, RETIRED UNBUILT 2026-09-04
 
