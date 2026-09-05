@@ -123,7 +123,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a101+dev",
+      "declared": "0.1.0a102",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a101 IS published and tagged (dotmac-kernel-v0.1.0a101, peeled 037ef065376c0ad4597cc59f86f4ef3eb7d5322b), and main's packages/dotmac-kernel/src was byte-identical to that tag until now. Adding dotmac_kernel.request_evidence -- the request-evidence-context facility extracted product-first from ERP -- changes importable kernel source, so continuing to declare a bare 0.1.0a101 would make one released version name two different byte sets, which is exactly the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it ALLOCATES NO SUCCESSOR, cannot be published, and needs no release authorization; Michael authorizes release versions, and nothing authorizes main to claim a version it is not. This row is removed only by a separately authorized release transition -- a fresh authorization-only commit and its allocation child own the next public version. Never edit the marker off to quiet a gate.",
       "state": "declared-unpublished"
     },
