@@ -506,7 +506,17 @@ def test_a_row_describing_a_different_version_is_refused(
     the tool meant to maintain it."""
     writer = _writer()
     ledger = json.loads(_ledger_text(writer))["unpublished"]
-    distribution, row = next(iter(sorted(ledger.items())))
+    # A distribution with NO migration lineage, so `--no-lineage` is the honest
+    # declaration and the ledger refusal below is the one under test. Picking
+    # the alphabetically-first row regardless would make this test fail the day
+    # that row becomes a lineage-bearing distribution, and it would fail with a
+    # lineage message that has nothing to do with what it is checking.
+    anchored = writer.anchored_distributions(
+        writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    )
+    distribution, row = next(
+        (name, value) for name, value in sorted(ledger.items()) if name not in anchored
+    )
     wrong_version = row["declared"] + "-not-this-one"
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     with pytest.raises(writer.ReleaseRecordError) as refusal:
@@ -516,8 +526,12 @@ def test_a_row_describing_a_different_version_is_refused(
             tag=f"{distribution}-v{wrong_version}",
             package_dir=None,
             import_name=None,
+            no_lineage=True,
         )
-    assert "describes a different" in str(refusal.value)
+    assert "describes a different" in str(refusal.value), (
+        "the ledger refusal is shadowed; lineage validation runs first and must "
+        "not mask a state refusal the caller has already satisfied"
+    )
 
 
 def test_a_first_enrolment_records_history_and_every_migration_guard_map() -> None:
