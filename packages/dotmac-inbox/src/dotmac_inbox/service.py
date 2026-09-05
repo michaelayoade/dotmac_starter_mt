@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dotmac_inbox.channels import channel_spec
+from dotmac_inbox.channels import TransportMessageIdScope, channel_spec
 from dotmac_inbox.lifecycle import (
     Direction,
     SnoozeUntilReply,
@@ -17,8 +17,14 @@ from dotmac_inbox.lifecycle import (
     validate_reason,
     validate_transition,
 )
-from dotmac_inbox.models import Conversation, ConversationReadState, Message
+from dotmac_inbox.models import (
+    Conversation,
+    ConversationReadState,
+    Message,
+    MessageTransportRef,
+)
 from dotmac_inbox.threading import InboundIdentity, dedup_key, thread_key
+from dotmac_inbox.transport import TransportMessageIdentity
 
 
 class ConversationNotFound(LookupError):
@@ -333,6 +339,129 @@ def bind_message_observation_ref(
             "message transport observation reference is already bound"
         )
     db.flush()
+    return row
+
+
+def bind_message_transport_ref(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    message_id: UUID,
+    transport_identity: TransportMessageIdentity,
+) -> MessageTransportRef:
+    """Bind one provider reference, allowing many aliases per message."""
+    scope = transport_identity.scope
+    if scope is None:
+        raise ConversationConflict("transport identity scope is missing")
+    key = transport_identity.key
+    message = _message(db, tenant_id, message_id)
+    if message.channel != transport_identity.channel:
+        raise ConversationConflict("transport reference channel differs from message")
+    conversation = db.scalar(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.id == message.conversation_id,
+        )
+    )
+    if scope is TransportMessageIdScope.ACCOUNT and (
+        conversation is None
+        or conversation.account_scope != transport_identity.account_scope
+    ):
+        raise ConversationConflict(
+            "transport reference account differs from conversation"
+        )
+    existing = db.scalar(
+        select(MessageTransportRef).where(
+            MessageTransportRef.tenant_id == tenant_id,
+            MessageTransportRef.transport_key == key,
+        )
+    )
+    if existing is not None:
+        if (
+            existing.message_id != message.id
+            or existing.raw_ref != transport_identity.raw_ref
+            or existing.scope != scope.value
+            or existing.channel != transport_identity.channel
+            or existing.account_scope != transport_identity.account_scope
+        ):
+            raise ConversationConflict("transport reference is already bound")
+        return existing
+
+    row = MessageTransportRef(
+        tenant_id=tenant_id,
+        message_id=message.id,
+        raw_ref=transport_identity.raw_ref,
+        scope=scope.value,
+        channel=transport_identity.channel,
+        account_scope=transport_identity.account_scope,
+        transport_key=key,
+    )
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            db.add(row)
+            db.flush()
+    except IntegrityError as exc:
+        winner = db.scalar(
+            select(MessageTransportRef).where(
+                MessageTransportRef.tenant_id == tenant_id,
+                MessageTransportRef.transport_key == key,
+            )
+        )
+        if winner is None:
+            raise ConversationConflict("transport reference conflict") from exc
+        if (
+            winner.message_id != message.id
+            or winner.raw_ref != transport_identity.raw_ref
+            or winner.scope != scope.value
+            or winner.channel != transport_identity.channel
+            or winner.account_scope != transport_identity.account_scope
+        ):
+            raise ConversationConflict("transport reference is already bound") from exc
+        return winner
+    return row
+
+
+def find_message_by_transport_ref(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    transport_identity: TransportMessageIdentity,
+) -> Message | None:
+    """Return the one message owning a transport reference, if present."""
+    scope = transport_identity.scope
+    if scope is None:
+        raise ConversationConflict("transport identity scope is missing")
+    key = transport_identity.key
+    row = db.scalar(
+        select(Message)
+        .join(
+            MessageTransportRef,
+            (MessageTransportRef.tenant_id == Message.tenant_id)
+            & (MessageTransportRef.message_id == Message.id),
+        )
+        .where(
+            Message.tenant_id == tenant_id,
+            MessageTransportRef.tenant_id == tenant_id,
+            MessageTransportRef.transport_key == key,
+        )
+    )
+    if row is None:
+        return None
+    ref = db.scalar(
+        select(MessageTransportRef).where(
+            MessageTransportRef.tenant_id == tenant_id,
+            MessageTransportRef.transport_key == key,
+        )
+    )
+    if ref is None or (
+        ref.raw_ref != transport_identity.raw_ref
+        or ref.scope != scope.value
+        or ref.channel != transport_identity.channel
+        or ref.account_scope != transport_identity.account_scope
+    ):
+        raise ConversationConflict("transport reference material does not match key")
     return row
 
 

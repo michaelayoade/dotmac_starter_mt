@@ -19,19 +19,25 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dotmac_inbox.channels import channel_spec
+from dotmac_inbox.channels import TransportMessageIdScope, channel_spec
 from dotmac_inbox.lifecycle import (
     Direction,
     SnoozeUntilReply,
     Status,
     validate_reason,
 )
-from dotmac_inbox.models import Conversation, ConversationReadState, Message
+from dotmac_inbox.models import (
+    Conversation,
+    ConversationReadState,
+    Message,
+    MessageTransportRef,
+)
 from dotmac_inbox.service import (
     ConversationConflict,
     ConversationNotFound,
 )
 from dotmac_inbox.threading import InboundIdentity, dedup_key, thread_key
+from dotmac_inbox.transport import TransportMessageIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +80,140 @@ class ImportReadState:
     updated_at: datetime
 
 
-_Row = TypeVar("_Row", Conversation, Message, ConversationReadState)
+@dataclass(frozen=True, slots=True)
+class ImportMessageTransportRef:
+    id: UUID
+    message_id: UUID
+    identity: TransportMessageIdentity
+    created_at: datetime
+    updated_at: datetime
+
+
+def import_message_transport_ref(
+    db: Session, *, tenant_id: UUID, command: ImportMessageTransportRef
+) -> MessageTransportRef:
+    """Import one existing correlation without changing message activity."""
+    scope = command.identity.scope
+    if scope is None:
+        raise ConversationConflict("transport identity scope is missing")
+    created_at, updated_at = _history_timestamps(command.created_at, command.updated_at)
+    message = db.scalar(
+        select(Message).where(
+            Message.tenant_id == tenant_id, Message.id == command.message_id
+        )
+    )
+    if message is None:
+        raise ConversationNotFound("historical transport ref message not found")
+    conversation = db.scalar(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.id == message.conversation_id,
+        )
+    )
+    if (
+        message.channel != command.identity.channel
+        or conversation is None
+        or (
+            scope is TransportMessageIdScope.ACCOUNT
+            and conversation.account_scope != command.identity.account_scope
+        )
+    ):
+        raise ConversationConflict("historical transport ref does not match message")
+    key = command.identity.key
+    row = MessageTransportRef(
+        id=command.id,
+        tenant_id=tenant_id,
+        message_id=command.message_id,
+        raw_ref=command.identity.raw_ref,
+        scope=scope.value,
+        channel=command.identity.channel,
+        account_scope=command.identity.account_scope,
+        transport_key=key,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    by_id = db.scalar(
+        select(MessageTransportRef).where(
+            MessageTransportRef.tenant_id == tenant_id,
+            MessageTransportRef.id == command.id,
+        )
+    )
+    if by_id is not None:
+        if any(
+            not _equal(getattr(by_id, field), getattr(row, field))
+            for field in (
+                "id",
+                "message_id",
+                "raw_ref",
+                "scope",
+                "channel",
+                "account_scope",
+                "transport_key",
+                "created_at",
+                "updated_at",
+            )
+        ):
+            raise ConversationConflict(
+                "historical transport ref id was reused differently"
+            )
+        return by_id
+    existing = db.scalar(
+        select(MessageTransportRef).where(
+            MessageTransportRef.tenant_id == tenant_id,
+            MessageTransportRef.transport_key == key,
+        )
+    )
+    if existing is not None:
+        if any(
+            getattr(existing, field) != getattr(row, field)
+            for field in (
+                "id",
+                "message_id",
+                "raw_ref",
+                "scope",
+                "channel",
+                "account_scope",
+                "transport_key",
+                "created_at",
+                "updated_at",
+            )
+        ):
+            raise ConversationConflict(
+                "historical transport ref was reused differently"
+            )
+        return existing
+    from dotmac_kernel.db import conflict_savepoint
+
+    try:
+        with conflict_savepoint(db):
+            db.add(row)
+            db.flush()
+    except IntegrityError as exc:
+        winner = db.scalar(
+            select(MessageTransportRef).where(
+                MessageTransportRef.tenant_id == tenant_id,
+                MessageTransportRef.transport_key == key,
+            )
+        )
+        if winner is None:
+            raise ConversationConflict("historical transport ref conflicts") from exc
+        if any(
+            not _equal(getattr(winner, field), getattr(row, field))
+            for field in (
+                "id",
+                "message_id",
+                "raw_ref",
+                "scope",
+                "channel",
+                "account_scope",
+                "transport_key",
+                "created_at",
+                "updated_at",
+            )
+        ):
+            raise ConversationConflict("historical transport ref conflicts") from exc
+        return winner
+    return row
 
 
 def _aware(value: datetime, field: str) -> datetime:
@@ -104,6 +243,9 @@ def _equal(current: Any, expected: Any) -> bool:
     if isinstance(current, datetime) and isinstance(expected, datetime):
         return _instant(current) == _instant(expected)
     return bool(current == expected)
+
+
+_Row = TypeVar("_Row", Conversation, Message, ConversationReadState)
 
 
 def _require_same(row: _Row, *, identity: str, expected: dict[str, Any]) -> _Row:
@@ -388,8 +530,10 @@ def import_read_state(
 __all__ = [
     "ImportConversation",
     "ImportMessage",
+    "ImportMessageTransportRef",
     "ImportReadState",
     "import_conversation",
     "import_message",
+    "import_message_transport_ref",
     "import_read_state",
 ]

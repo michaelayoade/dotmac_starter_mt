@@ -201,3 +201,19 @@ Conversation ordering keeps NULL activity timestamps after non-NULL timestamps,
 and timeline ordering is ascending by occurrence time. Cursor timestamps are
 validated as timezone-aware. Search, unread counts, assignment, operations,
 and workforce policy remain outside this owner.
+
+## Amendment — 2026-09-05: multiple transport references per message
+
+One domain message may correspond to more than one provider message reference.
+`MessageTransportRef` is the append-only correlation owner for those aliases.
+Its global/account scope is explicitly declared independently of admission
+`MessageIdScope`; the canonical key is versioned and length-prefixed, while
+the raw reference remains exact. A channel trait may declare transport scope
+`none`, but that means no correlation row or correlation key may exist.
+Admission `transport_message_ref` and observation `transport_observation_ref`
+remain distinct facts and existing message identity bytes are unchanged.
+
+Correlation rows are permanent evidence. Their parent-message and tenant
+foreign keys are `RESTRICT`, rather than cascade paths that appear to erase
+evidence; a parent aggregate or tenant with correlation rows cannot be deleted.
+The append-only trigger independently refuses direct update or delete.

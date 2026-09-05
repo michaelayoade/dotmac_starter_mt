@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import io
+import tokenize
 import tomllib
 from pathlib import Path
 
@@ -194,6 +196,7 @@ def test_the_manifest_declares_exactly_the_tables_the_module_creates() -> None:
         "conversations",
         "messages",
         "conversation_read_states",
+        "message_transport_refs",
     }
     assert module.platform_tables == ()
 
@@ -205,20 +208,32 @@ def test_every_model_is_bound_to_the_module_schema() -> None:
         assert model.__table__.schema == "mod_inbox", model.__name__
 
 
-def test_the_lineage_is_a_rooted_two_revision_chain() -> None:
+def test_the_lineage_is_a_rooted_unbranched_chain() -> None:
+    """One root, then every later revision chained to exactly its predecessor.
+
+    Named for the property, not for a count: this asserted three revisions
+    under a `two_revision` name, so the name stopped describing what it
+    checked the moment a third arrived. The chain is derived from the file
+    list rather than spelled out twice, so adding a revision cannot leave a
+    stale expectation passing.
+    """
     revisions = sorted(MIGRATIONS.glob("ib_*.py"))
     assert [p.name for p in revisions] == [
         "ib_0001_conversations.py",
         "ib_0002_supplied_identity.py",
+        "ib_0003_transport_refs.py",
     ]
-    root = revisions[0].read_text(encoding="utf-8")
-    supplied = revisions[1].read_text(encoding="utf-8")
+    sources = [p.read_text(encoding="utf-8") for p in revisions]
+    root, *later = sources
     assert 'revision = "ib_0001_conversations"' in root
     assert "down_revision = None" in root
     assert 'branch_labels = ("inbox",)' in root
-    assert 'revision = "ib_0002_supplied_identity"' in supplied
-    assert 'down_revision = "ib_0001_conversations"' in supplied
-    assert "branch_labels = None" in supplied
+    for path, source, parent in zip(revisions[1:], later, revisions[:-1], strict=True):
+        assert f'revision = "{path.stem}"' in source
+        assert f'down_revision = "{parent.stem}"' in source
+        # Only the root carries the lineage label; a second label would make
+        # this one lineage look like two to Alembic.
+        assert "branch_labels = None" in source
     # Cross-lineage ordering is `depends_on`, never `down_revision` — the latter
     # would splice two independently released lineages into one chain.
     assert "depends_on = resolve_depends_on(REQUIRES)" in root
@@ -262,7 +277,11 @@ def test_every_table_is_tenant_scoped_with_forced_rls(table: str) -> None:
     FORCE matters: without it the table owner, which migrations run as, bypasses
     its own policy.
     """
-    raw = (MIGRATIONS / "ib_0001_conversations.py").read_text(encoding="utf-8")
+    raw = (
+        (MIGRATIONS / "ib_0003_transport_refs.py").read_text(encoding="utf-8")
+        if table == "message_transport_refs"
+        else (MIGRATIONS / "ib_0001_conversations.py").read_text(encoding="utf-8")
+    )
     # Collapse Python's string-literal wrapping before matching: a GRANT split
     # across two source lines to satisfy the line-length limit is the same SQL,
     # and asserting on the unwrapped form would make formatting a test failure.
@@ -271,10 +290,15 @@ def test_every_table_is_tenant_scoped_with_forced_rls(table: str) -> None:
     assert f"ALTER TABLE mod_inbox.{table} ENABLE ROW LEVEL SECURITY;" in source
     assert f"ALTER TABLE mod_inbox.{table} FORCE ROW LEVEL SECURITY;" in source
     assert f"{table}_tenant_isolation" in source
-    assert (
-        f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_inbox.{table} TO app_user;"
-        in source
+    if table == "message_transport_refs":
+        assert "public.app_current_tenant_id()" in source
+        assert "current_setting('app.current_tenant')" not in source
+    grant = (
+        "GRANT SELECT, INSERT ON mod_inbox.message_transport_refs TO app_user;"
+        if table == "message_transport_refs"
+        else f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_inbox.{table} TO app_user;"
     )
+    assert grant in source
 
     model = next(item for item in models.TENANT_MODELS if item.__tablename__ == table)
     assert model.__table__.c.tenant_id.nullable is False
@@ -283,7 +307,11 @@ def test_every_table_is_tenant_scoped_with_forced_rls(table: str) -> None:
 def test_child_tables_reference_their_parent_by_composite_key() -> None:
     """A bare `conversation_id` would let one tenant's message attach to another
     tenant's conversation the moment an id leaked."""
-    for model in (models.Message, models.ConversationReadState):
+    for model in (
+        models.Message,
+        models.ConversationReadState,
+        models.MessageTransportRef,
+    ):
         composite = [
             fk
             for fk in model.__table__.foreign_key_constraints
@@ -293,6 +321,16 @@ def test_child_tables_reference_their_parent_by_composite_key() -> None:
             f"{model.__name__} must reference its parent through "
             "(tenant_id, <id>), not a bare id"
         )
+
+
+def test_transport_correlation_evidence_cannot_cascade_away() -> None:
+    """Append-only correlation rows block parent deletion instead of pretending
+    that a cascade is a valid retention policy."""
+    foreign_keys = models.MessageTransportRef.__table__.foreign_key_constraints
+    assert {fk.ondelete for fk in foreign_keys} == {"RESTRICT"}
+    source = (MIGRATIONS / "ib_0003_transport_refs.py").read_text(encoding="utf-8")
+    assert source.count('ondelete="RESTRICT"') == 2
+    assert 'ondelete="CASCADE"' not in source
 
 
 # ── The narrowing: what must NOT appear ──────────────────────────────────────
@@ -434,3 +472,143 @@ def test_the_dossier_records_product_first_candidate_status() -> None:
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
     assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp"]
+
+
+# ── The supported-floor gate ─────────────────────────────────────────────────
+#
+# `pyproject.toml` declares `python = ">=3.11,<3.14"`, but CI runs 3.12 only.
+# Nothing therefore executes the declared floor, so 3.12-only SYNTAX reaches a
+# package that claims to support 3.11 and fails at import for anyone who
+# believes the declaration. This has now happened twice in one day across two
+# lanes: a PEP 695 `def f[T](...)` here, and a PEP 701 multi-line f-string
+# elsewhere — neither caught by ruff, mypy, or the test suite.
+
+
+def _declared_floor() -> tuple[int, int]:
+    """The floor is READ from the package's own metadata, never hardcoded.
+
+    A guard that hardcodes `(3, 11)` keeps asserting 3.11 long after the
+    package stops claiming it — it would then be testing a premise nobody
+    holds. Raising the floor in `pyproject.toml` must move this gate with it.
+    """
+    spec = tomllib.loads(
+        (MODULE_ROOT.parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    constraint = spec["tool"]["poetry"]["dependencies"]["python"]
+    lower = next(
+        part for part in constraint.split(",") if part.strip().startswith(">=")
+    )
+    major, minor = lower.strip().removeprefix(">=").strip().split(".")[:2]
+    return int(major), int(minor)
+
+
+def _shipped_sources() -> list[Path]:
+    """Every `.py` the wheel installs — migrations INCLUDED.
+
+    `_package_sources()` deliberately skips migrations as frozen artifacts, but
+    `pyproject.toml`'s `include` ships them and Alembic imports them, so a
+    3.12-only construct in a revision file breaks the floor exactly as badly.
+    """
+    return sorted(MODULE_ROOT.rglob("*.py"))
+
+
+def _pep701_offences(source: str) -> list[str]:
+    """Replacement fields 3.11 rejects: newline, backslash, or quote reuse.
+
+    `ast.parse(feature_version=...)` does NOT catch PEP 701 — verified, not
+    assumed; see `test_the_supported_floor_gate_still_bites`, which plants a
+    multi-line f-string and shows `feature_version` passing it. 3.12 tokenizes
+    an f-string into FSTRING_START/MIDDLE/END with the replacement expressions
+    tokenized between them, which preserves the source extent the AST discards.
+    """
+    offences: list[str] = []
+    stack: list[tuple[str, bool]] = []
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.FSTRING_START:
+            raw = tok.string
+            quote = (
+                '"""'
+                if raw.endswith('"""')
+                else "'''"
+                if raw.endswith("'''")
+                else raw[-1]
+            )
+            stack.append((quote, len(quote) == 3))
+        elif tok.type == tokenize.FSTRING_END:
+            if stack:
+                stack.pop()
+        elif stack and tok.type != tokenize.FSTRING_MIDDLE:
+            quote, triple = stack[-1]
+            if tok.type in (tokenize.NL, tokenize.NEWLINE) and not triple:
+                offences.append(f"line {tok.start[0]}: newline in a replacement field")
+            if "\\" in tok.string:
+                offences.append(
+                    f"line {tok.start[0]}: backslash in a replacement field"
+                )
+            if tok.type == tokenize.STRING and not triple and quote in tok.string:
+                offences.append(f"line {tok.start[0]}: enclosing quote reused inside")
+    return offences
+
+
+def test_every_shipped_source_parses_on_the_declared_python_floor() -> None:
+    floor = _declared_floor()
+    assert floor == (3, 11), (
+        "the declared floor moved; this gate follows pyproject rather than "
+        "asserting a constant, but the surrounding comments name 3.11"
+    )
+    for path in _shipped_sources():
+        source = path.read_text(encoding="utf-8")
+        try:
+            ast.parse(source, feature_version=floor)
+        except SyntaxError as exc:  # pragma: no cover - the failure IS the point
+            pytest.fail(
+                f"{path.name}:{exc.lineno} uses syntax newer than the declared "
+                f"floor {floor[0]}.{floor[1]}: {exc.msg}"
+            )
+        offences = _pep701_offences(source)
+        assert not offences, (
+            f"{path.name} uses PEP 701 f-string syntax (3.12+) but the package "
+            f"declares >={floor[0]}.{floor[1]}: {offences}"
+        )
+
+
+def test_the_supported_floor_gate_still_bites() -> None:
+    """A gate that only ever passes over a clean tree proves nothing about
+    itself. Plant each defect and a near-miss for it."""
+    floor = _declared_floor()
+
+    def parses(source: str) -> bool:
+        try:
+            ast.parse(source, feature_version=floor)
+        except SyntaxError:
+            return False
+        return True
+
+    # PEP 695 — the defect that reached this package. `feature_version` sees it.
+    assert not parses("def f[T](x: T) -> T: return x")
+    assert parses("def f(x: int | None) -> None: pass")  # near-miss: 3.10 syntax
+
+    # PEP 701 — `feature_version` is BLIND to it, which is why the token
+    # detector exists. This assertion documents the blindness; if a future
+    # CPython teaches `feature_version` about PEP 701 it will fail loudly and
+    # the detector can then be retired deliberately rather than by accident.
+    multiline_fstring = 'x = f"{\n    1 + 2\n}"'
+    assert parses(
+        multiline_fstring
+    ), "feature_version now rejects PEP 701; retire _pep701_offences on purpose"
+    assert _pep701_offences(multiline_fstring)
+
+    # ...and each of the other two constructs 3.11 forbids in a replacement field.
+    assert _pep701_offences('x = f"{d["k"]}"')
+    assert _pep701_offences("x = f\"{'\\n'.join(v)}\"")
+
+    # Near-misses the detector must stay quiet on — all legal on 3.11.
+    for legal in (
+        'x = f"{a} and {b}"',
+        '(\n    f"{a} "\n    f"{b}"\n)',  # implicit concatenation across lines
+        "x = f\"{d['k']}\"",  # a DIFFERENT quote inside
+        'x = f"""\nhi {a}\nbye\n"""',  # triple-quoted, text spans lines
+        'x = f"{a:>{w}}"',  # nested format spec
+        'x = "{not an fstring}"',
+    ):
+        assert not _pep701_offences(legal), legal

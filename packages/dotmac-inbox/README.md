@@ -11,6 +11,14 @@ transport observation reference by local message UUID; it locks the tenant
 message, is idempotent for the exact value, and never changes message identity
 or conversation activity.
 
+`TransportMessageIdentity` and `MessageTransportRef` separately correlate
+multiple provider message references to one message. Correlation scope is
+explicitly declared as global or account. A channel may declare transport scope
+`none`, but no correlation key or `MessageTransportRef` row may then exist;
+admission identity and observation evidence remain distinct. Correlation rows
+are append-only evidence, so their parent message and tenant cannot be deleted
+while a correlation exists.
+
 The read surface is exposed by `get_conversation`, `list_conversations`, and
 `list_messages`. It returns frozen value DTOs, always requires a tenant id,
 and uses bounded opaque keyset cursors. Conversation lists support only the
