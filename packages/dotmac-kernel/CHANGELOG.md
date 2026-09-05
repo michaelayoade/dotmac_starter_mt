@@ -6,12 +6,18 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a102 — Unreleased
+## 0.1.0a103 — Unreleased
 
-This heading records the facility that the next separately authorized kernel
-release will bind. It does not allocate, publish or tag `0.1.0a102`: the
-numeric successor of the immutable a101 tag becomes an allocated version only
-through `KernelReleaseAuthorization.v1`.
+This heading records what the next separately authorized kernel release will
+bind. It does not allocate, publish or tag `0.1.0a103`.
+
+`main` declares `0.1.0a102+dev` while these entries sit here, and that is the
+point: they add importable kernel source, and a bare `0.1.0a102` would make one
+published version name two different byte sets. **A103 IS NOW OWED.** Nothing
+can consume `dotmac_kernel.semantic_encoding` FROM AN ARTIFACT until it is
+released — the source is complete and the wheel does not exist, which is the
+exact trap a102 was cut to escape. The difference this time is that a guard
+catches it rather than a person noticing.
 
 ### Added
 
@@ -53,6 +59,38 @@ through `KernelReleaseAuthorization.v1`.
   extraction — `docs/inventories/semantic-encoder-sources.md` audits seven
   repositories at immutable revisions and finds no encoder with all four
   qualifying properties. It sits BESIDE `fingerprint_of`, not instead of it.
+
+### Fixed
+
+- `scripts/check_allocation_serialized.py` checks the ONE-TIME TRANSITION into
+  a digested ledger instead of skipping it. It returned early whenever the row
+  set was unchanged, before reading either digest — so the legitimate bootstrap,
+  a head carrying a MALFORMED digest, and a head carrying NO digest all exited
+  0, by the same unvalidated path; and a branch that allocated during the
+  transition exited 2, INDETERMINATE, the code a reviewer reads as "the gate is
+  broken" rather than "you did the forbidden thing". The transition is now its
+  own check and may do exactly one thing: introduce a well-formed digest over an
+  unchanged row set. `committed_digest` becomes the nullable `find_digest`,
+  because absence means the transition at the merge base and a REMOVAL at head —
+  both refused, with distinct diagnostics. Exit 2 is kept for what the gate
+  genuinely cannot read, such as a digest built by an expression.
+  `tests/architecture/test_allocation_gate_cli.py` asserts exit status and
+  diagnostic through the real subprocess, with its own non-vacuity note.
+
+## 0.1.0a102 — 2026-09-05
+
+Published and tagged `dotmac-kernel-v0.1.0a102`, peeled to
+`7a3c128b06eaba09784a9d8409d036169b3caa68`. Registry bytes were verified equal
+to the retained build bytes for both the wheel and the sdist, and the permanent
+record is `docs/inventories/kernel-release-verifications/0.1.0a102.json`.
+
+This section lists ONLY what that tag carries. The ledger-digest entries above
+were written against this heading while it still read `Unreleased`, and moving
+them was not optional: `tests/architecture/test_kernel_changelog_release_claims.py`
+refuses a tagged heading that names a module its tag does not hold, and it
+named `semantic_encoding` here.
+
+### Added
 
 - `dotmac_kernel.request_evidence` — one owner for the per-request evidence
   context: who a request appears to be, from where it arrived, and under what
@@ -103,24 +141,6 @@ through `KernelReleaseAuthorization.v1`.
   `dotmac_kernel.logging.request_id_var`, which this facility bridges to so log
   lines keep a correlation id. The two are ALTERNATIVES, not layers; an assembly
   must install one. No guard catches installing both, and none is claimed.
-
-### Fixed
-
-- `scripts/check_allocation_serialized.py` checks the ONE-TIME TRANSITION into
-  a digested ledger instead of skipping it. It returned early whenever the row
-  set was unchanged, before reading either digest — so the legitimate bootstrap,
-  a head carrying a MALFORMED digest, and a head carrying NO digest all exited
-  0, by the same unvalidated path; and a branch that allocated during the
-  transition exited 2, INDETERMINATE, the code a reviewer reads as "the gate is
-  broken" rather than "you did the forbidden thing". The transition is now its
-  own check and may do exactly one thing: introduce a well-formed digest over an
-  unchanged row set. `committed_digest` becomes the nullable `find_digest`,
-  because absence means the transition at the merge base and a REMOVAL at head —
-  both refused, with distinct diagnostics. Exit 2 is kept for what the gate
-  genuinely cannot read, such as a digest built by an expression.
-  `tests/architecture/test_allocation_gate_cli.py` asserts exit status and
-  diagnostic through the real subprocess, with its own non-vacuity note.
-
 
 ## 0.1.0a101 — 2026-09-03
 
@@ -1889,7 +1909,6 @@ A ledger row adds no behaviour — it is the checked-in allocation record that
 makes "globally unique" enforceable across repositories, and nothing consumes it
 but the module it names.
 
-
 ## 0.1.0a57 — 2026-08-14
 
 Corrects the live-catalog gate for a PLATFORM-ONLY module schema (ADR-0023).
@@ -1922,7 +1941,6 @@ as before.
 
 Failure messages now name the role AND the plane, so a violation says which
 half of the contract was missed.
-
 
 ## 0.1.0a56 — 2026-08-13
 
