@@ -24,7 +24,7 @@
   verification are enumerated in code (`PRECONDITIONS`) and cited by name in
   every refusal, with the two nothing local can decide marked stated rather than
   enforced. Lane 3 is now explicitly blocked instead of unmonitored; no
-  verification chain was built and none could be. `AGENTS.md` rule 50.
+  verification chain was built and none could be. `AGENTS.md` rule 51.
 
 ### Added
 

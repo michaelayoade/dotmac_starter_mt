@@ -599,7 +599,20 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `AGENTS.md` rule **45** (amended 2026-08-31 twice, 2026-09-01); ADR-0072;
     `docs/inventories/executor-retirement.md`.
 
-33. Caller-supplied text is never authorization, and a gate that cannot check
+33. The window between a candidate BUILD and its PUBLICATION is guarded, and a
+    build the tree does not record IS the defect. A LIVE CANDIDATE is a
+    successful candidate-lane run for the declared version that produced the
+    `<facility>-candidate` artifact — not "a receipt in the tree", because
+    presupposing the record is what let `0.4.0a1` drift through four green
+    guards. "Was it built?" is a claim about the build system, so the oracle is
+    the Actions API (rule 30's immutable coordinates: run id, artifact id). It
+    compares TREE OBJECTS, runs in `ci.yml`'s `candidate-window` job on every PR
+    and push, exits 0/1/2 with an unavailable oracle as 2, and REFUSES without
+    ever choosing the successor version. —
+    `AGENTS.md` rule **50**; `scripts/candidate_source_binding.py --window`;
+    `tests/architecture/candidate_window_baseline.json`.
+
+34. Caller-supplied text is never authorization, and a gate that cannot check
     it says so rather than passing. The unverified case is made
     UNREPRESENTABLE — dispatch inputs are not parameters of the establishing
     call — and the only route to an `ExecutionGrant` is an injected
@@ -611,7 +624,7 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     preconditions IN CODE, cite them by name in the refusal, and mark the ones
     nothing local can decide as stated rather than enforced — prose alone does
     not hold, since this prerequisite was written down on 2026-08-30 and the
-    runner shipped accepting the text anyway. — `AGENTS.md` rule **50**;
+    runner shipped accepting the text anyway. — `AGENTS.md` rule **51**;
     `scripts/lane3_authorization.py`;
     `docs/inventories/deployment-exposure-rehearsal.md` § "Prerequisite 2".
 
