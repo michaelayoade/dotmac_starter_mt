@@ -655,9 +655,26 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: record. It read 3 while the runner also canonicalized the release itself; the
 #: baseline is what said so, and deleting that third one in favour of calling
 #: `lease.write_store_record_once` returns it to 2, not to 1.
+#:
+#: `candidate_source_binding.py: 4` (moved from 2, the guard the window between
+#: a candidate build and its publication): the file already carried one
+#: writer/comparator pair for the DRIFT baseline (`render_baseline` and the
+#: `--check` comparison in `main()`) — that pair is the original 2. `--window`
+#: mode adds a SECOND, distinct document kind, `WindowFinding` rows, which are
+#: not the same schema as a `Drift` row (a live candidate's build/publication
+#: window vs. a facility whose declared version already names moved bytes) and
+#: so are not a case for routing through one shared canonicalizer — the same
+#: reasoning `executor_retirement.py`, `exposure_rehearsal_runner.py`,
+#: `external_connector_sweep.py`, `fleet_decomposition_sweep.py` and
+#: `fleet_fact_registry.py` already record at 2 for their own second document.
+#: It gets its own writer/comparator pair the same shape as the first:
+#: `render_window_baseline` and the `--window --check` comparison in
+#: `_run_window()`. 4 is therefore two legitimate pairs, not duplication of
+#: one; the pairing to watch for is a THIRD call encoding either document,
+#: which is what would signal a hand-rolled second writer for the same rows.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
-    "candidate_source_binding.py": 2,
+    "candidate_source_binding.py": 4,
     "collect_github_release_artifact.py": 1,
     "collect_private_registry_files.py": 1,
     "credential_lifecycle_sweep.py": 1,

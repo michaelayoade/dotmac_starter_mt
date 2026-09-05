@@ -731,13 +731,14 @@ def window_findings(
         if entry is None:
             continue
         package_dir = _package_dir(build.facility, entry)
-        # LIVENESS, decided here rather than only in the oracle. A candidate
-        # built under a name this revision no longer declares is not live: its
-        # identity has been moved off, which IS the repair, and the window
-        # closes for the same reason it opened. Deciding it in the guard rather
-        # than only in the query is what makes the repair provable offline.
-        if build.version != declared_version_at(revision, package_dir):
-            continue
+        # The directory check comes BEFORE the liveness check below on purpose.
+        # `declared_version_at` reads `{package_dir}/pyproject.toml` through
+        # `git show`, which fails with a generic "git show ... failed" message
+        # for a facility whose package_dir does not exist — masking the real
+        # defect (a misconfigured facility) behind an unrelated git error.
+        # Checking the source directory first means a missing facility always
+        # refuses with the same, specific message, regardless of whether its
+        # version can be resolved.
         src_path = f"{package_dir}/src"
         if not (REPO_ROOT / src_path).is_dir():
             raise CannotAnswer(
@@ -745,6 +746,13 @@ def window_findings(
                 "directory. Refusing to answer rather than skipping a facility, "
                 "which would silently shrink the extent this guard covers"
             )
+        # LIVENESS, decided here rather than only in the oracle. A candidate
+        # built under a name this revision no longer declares is not live: its
+        # identity has been moved off, which IS the repair, and the window
+        # closes for the same reason it opened. Deciding it in the guard rather
+        # than only in the query is what makes the repair provable offline.
+        if build.version != declared_version_at(revision, package_dir):
+            continue
         if revision == "HEAD":
             _require_clean(src_path)
         declared_tree = _tree(revision, src_path)

@@ -331,8 +331,12 @@ def test_the_refusal_names_the_binding_and_allocates_nothing() -> None:
     assert "Allocate a NEW version" in rendered
     assert "does not choose" in rendered
     # No successor is named. The declared version appears (it is the binding);
-    # nothing that looks like a NEXT one does.
-    for successor in ("0.4.0a2", "0.4.0a3", "0.4.0", "0.5.0"):
+    # nothing that looks like a NEXT one does. "0.4.0" is deliberately absent
+    # from this list: it is a PREFIX of the declared version itself
+    # (`0.4.0a1`), which the refusal legitimately names as the binding, so
+    # forbidding it as a substring would fail on the correct behaviour rather
+    # than on a proposed successor.
+    for successor in ("0.4.0a2", "0.4.0a3", "0.5.0"):
         assert successor not in rendered, (
             f"the refusal proposes {successor}. A check that issues a release "
             "identity has decided one"
@@ -371,13 +375,36 @@ def test_the_candidate_lane_is_the_workflow_the_oracle_reads() -> None:
     """The oracle names one workflow. If that lane is renamed and this constant
     is not, the gate reports 'no candidate has ever been built' — the exact
     silence it exists to end — so the name is checked against the file and
-    against the artifact it uploads."""
+    against the artifact it uploads.
+
+    The upload step names its artifact from the ``inputs.facility`` dispatch
+    input rather than a literal facility name (the same workflow builds a
+    candidate of any allowlisted facility), so ``f"{name}-candidate"`` never
+    appears in the file verbatim — checking for that substring would fail on
+    the correct, generic workflow. What must hold instead, and does fail if
+    either half drifts: the facility is still an offered dispatch choice, and
+    the upload step's artifact name is still built from that same input in
+    the ``{facility}-candidate`` shape `_artifact_id_for_run` queries for.
+    """
     lane = REPO_ROOT / ".github/workflows" / GUARD.CANDIDATE_WORKFLOW
     assert lane.is_file(), f"{GUARD.CANDIDATE_WORKFLOW} does not exist"
     name, _entry, _ = _facility()
-    assert f"{name}-candidate" in lane.read_text(encoding="utf-8"), (
+    document = yaml.safe_load(lane.read_text(encoding="utf-8"))
+    # `on:` is a YAML 1.1 boolean key under PyYAML's safe_load.
+    facility_input = document[True]["workflow_dispatch"]["inputs"]["facility"]
+    assert name in facility_input.get("options", []), (
+        f"{GUARD.CANDIDATE_WORKFLOW} no longer offers {name} as a candidate "
+        "facility, which is how a run is attributed to it"
+    )
+    upload = next(
+        step
+        for step in document["jobs"]["candidate"]["steps"]
+        if step.get("name") == "Upload the candidate"
+    )
+    assert upload["with"]["name"] == "${{ inputs.facility }}-candidate", (
         f"{GUARD.CANDIDATE_WORKFLOW} no longer uploads an artifact named "
-        f"{name}-candidate, which is how a run is attributed to a facility"
+        "'${{ inputs.facility }}-candidate', which is how the oracle "
+        "attributes a run's artifact to a facility"
     )
 
 
