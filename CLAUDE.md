@@ -612,6 +612,22 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `AGENTS.md` rule **50**; `scripts/candidate_source_binding.py --window`;
     `tests/architecture/candidate_window_baseline.json`.
 
+34. Caller-supplied text is never authorization, and a gate that cannot check
+    it says so rather than passing. The unverified case is made
+    UNREPRESENTABLE — dispatch inputs are not parameters of the establishing
+    call — and the only route to an `ExecutionGrant` is an injected
+    `AuthorizationVerifier` attesting a signed document. An input that names
+    proof and supplies none is REMOVED, at the dispatch as well as the parser.
+    Three statuses that never borrow each other's meaning: 0 attested, 1
+    violation (the environment could answer and answered no), 2 indeterminate
+    (no verifier installed). Where the chain cannot be built, enumerate the
+    preconditions IN CODE, cite them by name in the refusal, and mark the ones
+    nothing local can decide as stated rather than enforced — prose alone does
+    not hold, since this prerequisite was written down on 2026-08-30 and the
+    runner shipped accepting the text anyway. — `AGENTS.md` rule **51**;
+    `scripts/lane3_authorization.py`;
+    `docs/inventories/deployment-exposure-rehearsal.md` § "Prerequisite 2".
+
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
 

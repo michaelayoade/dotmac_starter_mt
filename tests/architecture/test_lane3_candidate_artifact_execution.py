@@ -85,7 +85,11 @@ def _lane3_findings(document: dict[str, Any]) -> list[str]:
         findings.append("the dispatch can supply a candidate digest")
     expected_inputs = {
         "authorization_run",
-        "authorization_doc_digest",
+        # `authorization_doc_digest` was REMOVED on 2026-09-05 and must not come
+        # back. A digest typed into a dispatch field is a claim about a document
+        # rather than the document, and nothing could attest it — the runner
+        # takes `--authorization-document` and refuses unless an installed
+        # verifier vouches for the bytes (`scripts/lane3_authorization.py`).
         "facility",
         "controller_identity",
         "target",

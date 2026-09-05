@@ -186,6 +186,61 @@ Foundation must not close this by generating its own receipt. Per ADR-0070 the
 authorization state belongs to Control, and a facility that manufactures the
 approval it then checks has verified nothing.
 
+#### 2026-09-05 — the prose above was true and the CODE contradicted it
+
+This prerequisite has read "nothing can issue the authorization" since
+2026-08-30. `scripts/exposure_rehearsal_runner.py` shipped anyway with
+`--authorization-run` and `--authorization-doc-digest` as `workflow_dispatch`
+TEXT, and executed on them. The only comparison ever made was
+`lease.covers(authorization_run_id=...)` — a string equality against a lease
+record the same operator writes. The digest was compared to nothing at all until
+`build_receipt` asserted it equalled the descriptor digest, which is a value any
+caller computes locally from a file in this repository. Nothing imported
+`provenance.py` or `authorization.py`; no `VerifiedAuthorization` and no
+`ExecutionGrant` were ever constructed.
+
+So the two matching strings LOOKED like a binding while no authorization existed
+anywhere, and the lane could be driven green on a fabricated run id. A document
+that says "blocked" beside code that says "green" is worse than either, because
+the reader who checks the run believes the code.
+
+`scripts/lane3_authorization.py` is now the single owner of the question, asked
+before the lease is taken and before the host is contacted, with the same three
+statuses the repository's other gates use: **0 attested / 1 refused / 2 the
+question could not be answered.** It answers 2 today, and the workflow refuses on
+it. The lane is now EXPLICITLY BLOCKED rather than unmonitored, which is the
+whole of what this change claims — no verification chain was built and none
+could be.
+
+`--authorization-doc-digest` is gone from the runner and from the dispatch
+inputs rather than deprecated: an argument that names proof and supplies none is
+the defect itself. The signed DOCUMENT replaces it (`--authorization-document`),
+resolved on the control runner beside the controller key so no dispatcher hands
+the lane its own proof.
+
+**The preconditions for real verification, enumerated.** The list lives in code
+as `PRECONDITIONS` in that module — a refusal is built from it, so an entry
+cannot rot into decoration — and each was measured rather than assumed:
+
+| # | Precondition | Owner | Measured 2026-09-05 |
+|---|---|---|---|
+| 1 | An implementation of `provenance.AuthorizationVerifier` (`attest(material) -> Mapping`) carrying Platform CP's trust roots. The Foundation ships none by design (zero runtime dependencies, ADR-0070); a weak substitute would read as coverage | the assembly — the only party legitimately depending on both Control and the Foundation | none exists in any repository under `management/` |
+| 2 | It is declared as ONE `dotmac_deployment_foundation.execution_bindings` entry point, installed into the candidate venv the runner executes in | the assembly's bindings distribution | zero declarations of that group fleet-wide |
+| 3 | The signed authorization DOCUMENT reaches the runner, not only a digest of it — a verifier attests BYTES, and a digest of bytes nobody holds can only be compared against a digest the same caller chose | Platform CP, and the workflow that carries it | the dispatch supplied a digest as free text; the document never reached the runner |
+| 4 | A translator between the issuer type and the verifier type. Control issues `AuthorizationStatementV2` (schema `dotmac.deployment-authorization` v2); `AuthorizationReceipt.from_document` requires 14 named keys and REFUSES unknown ones | the assembly; neither side may normalize the other's document | against `dotmac-deployment-control` at the peeled `a11` tag: ~18 keys the receipt rejects as unknown, 5 required keys the statement does not carry, and `control_plan_digest` has no producer on either side |
+| 5 | A published Foundation carrying the verifying code — `verify_authorization`, `authorize`, `discover_bindings` — inside the wheel Lane 3 installs, not in the checkout beside it | the Foundation's release pipeline | that code lives in `0.4.0a1`, which has never been built and is unpublished |
+| 6 | Gate item 9's middle term is `ExecutionPlanDigestV1` (`AGENTS.md` rule 49), explicitly NOT the descriptor digest and NOT the authorization-envelope digest | the Foundation's `rehearsal.py` with this lane's runner — **not repaired here** | `build_receipt(require_same_digest)` forces all three terms equal, so the middle term can only ever be the descriptor digest — the degenerate two-term shape its own docstring warns about |
+
+Entries 1, 2, 3 and 5 are observable from the runner's own environment and a
+refusal cites them by code. Entries 4 and 6 are STATED and not enforced, and the
+list says so: a stated requirement is not an enforced one, and conflating the two
+is the checklist-as-coverage failure ADR-0018 names.
+
+Item 9 is therefore still not closable, and the reason has changed shape rather
+than gone away. The authorized-plan term now comes out of an attested receipt
+instead of off the command line — provenance, not a new fact — and it is still
+not the middle term rule 49 defines. Precondition 6 is where that is recorded.
+
 ### Prerequisite 3 — the controller identity is a credential act on a shared host
 
 Attribution today is impossible and measurably so: `/root/.ssh/authorized_keys`
