@@ -1,16 +1,18 @@
-"""A declared version nobody can install is detected, not discovered later.
+"""A declared version with no verified publication is detected, not discovered later.
 
 `test_module_version_sync.py` proves a module's three version surfaces AGREE.
-It cannot prove the agreed version EXISTS — three surfaces reading `0.1.0a2` in
-unison say nothing about whether `0.1.0a2` was ever built, uploaded and
-verified. Internal consistency and publication are different questions, and
-only the first one had a guard.
+It cannot prove the agreed version was PUBLISHED — three surfaces reading
+`0.1.0a2` in unison say nothing about whether it was uploaded, installed back
+and tagged. Internal consistency, candidate construction and verified
+publication are different questions; this detector owns only the last.
 
 The live example is why this file exists. `dotmac-integration` declares
 `0.1.0a2` everywhere and the newest tag is `dotmac-integration-v0.1.0a1`, so a
 consumer reading the repository, the changelog or `docs/MODULE_CATALOG.md` and
-pinning `==0.1.0a2` gets a resolver error. `dotmac-imports` is sharper still: it
-is release-allowlisted, declares `0.1.0a2`, and has NO tag in any version.
+pinning `==0.1.0a2` has no verified tag to resolve against. `dotmac-imports` is
+sharper still: it is release-allowlisted, declares `0.1.0a2`, and has NO tag in
+any version; that
+absence does not establish whether it was ever built or uploaded.
 
 **This is a detector, not a fixer.** The repair is a release run or a recorded
 decision to leave the version unreleased — never a quiet edit of the declared
@@ -128,10 +130,10 @@ def test_each_ledger_state_matches_what_the_sweep_computes() -> None:
     answer.
 
     The distinction is the whole point of having two labels. `never-published`
-    means nobody has ever been able to install this distribution — the state of
-    a package built but withheld. `declared-unpublished` means it ships, and
-    this particular version has not gone out yet. Reading the first where the
-    second is true understates what consumers already depend on.
+    is the sweep's shorthand for having no verified publication tag for the
+    declared version; it does not establish that nobody ever built or installed
+    the distribution. `declared-unpublished` means another version is tagged,
+    while this particular version has no verified publication yet.
     """
     sweep, survey = _survey()
     computed = {
@@ -245,7 +247,7 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
         for distribution, finding in survey["distributions"].items()
         if finding["state"] == sweep.NEVER_PUBLISHED
     }
-    assert never, "the sweep found no never-published distribution at all"
+    assert never, "the sweep found no distribution without a verified publication tag"
     for distribution in never & set(allowlist):
         assert distribution in _ledger(), distribution
 
@@ -372,7 +374,8 @@ def test_the_guard_fires_when_a_bump_outruns_its_ledger_entry() -> None:
 def test_the_state_comparison_fires_on_a_hand_written_label() -> None:
     """SENSITIVITY for the live state check (ADR-0018: a detector carries a
     proof that it bites). The exact defect it was written for — a row calling a
-    long-published distribution `never-published` — and the specificity case
+    long-published distribution with the `never-published` label — and the
+    specificity case
     that an agreeing row is left alone."""
     sweep = _sweep()
     wrong = _state_mismatches(

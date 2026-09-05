@@ -58,7 +58,7 @@ released migration bytes, applied to the contract rather than the DDL.
     was EDITED, or the historical manifest was DROPPED. Rising.
   * a version the tree names that is neither recorded-published nor the single
     currently-declared version — a historical manifest invented for a version
-    that never shipped. Falling.
+    with no verified publication. Falling.
   * a published tag with no ledger row (`--verify-tags`) — a release recorded
     nowhere.
   * a ledger row whose tag does not exist or peels elsewhere
@@ -274,8 +274,9 @@ def reconcile(
                 f"{distribution}: carries a manifest for {version}, which is "
                 f"neither a recorded publication nor the declared version "
                 f"({declared}). A historical manifest is the record of something "
-                "that SHIPPED; inventing one for a version nobody can install "
-                "offers an adoption window onto a contract that never existed."
+                "that has a verified publication; inventing one for a version "
+                "with no verified publication offers an adoption window onto a "
+                "contract whose build or publication status is unknown."
             )
 
     return problems

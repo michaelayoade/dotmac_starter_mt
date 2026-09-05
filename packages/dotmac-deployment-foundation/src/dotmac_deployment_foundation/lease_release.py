@@ -1,4 +1,7 @@
-"""``HostLeaseRelease.v1`` — the other end of the lease contract, never built.
+"""``HostLeaseRelease.v1`` — the other end of the lease contract, not published.
+
+The type reached the one unrecorded, drifted `0.4.0a1` candidate, but no
+admissible or published artifact carries it and no Lane 3 run has exercised it.
 
 `load_lease` already refuses to BEGIN without a lease record. Nothing recorded
 the END, so the only evidence a shared host was finished with was the absence of
@@ -721,9 +724,10 @@ class HostLeaseReleaseV1:
     #: `host_mutation_evidence` here while `HostLease` already carried a field of
     #: the other name for the same fact — one thing with two names across a
     #: boundary where the two are COMPARED, which is exactly the shape that
-    #: invites somebody to conclude they are different facts. Renamed before
-    #: `0.4.0a1` was built: `HostLeaseRelease.v1` has never crossed an artifact
-    #: boundary, so this costs nothing now and would cost a schema version later.
+    #: invites somebody to conclude they are different facts. The rename is in
+    #: the one `0.4.0a1` candidate, but that candidate is unrecorded, drifted and
+    #: inadmissible; no published artifact has carried `HostLeaseRelease.v1`.
+    #: A published schema would instead require a new version.
     controller_identity_fingerprint: ControllerSshFingerprintV1
     #: What the host may be used for now. See `HostClosure` — a second axis from
     #: why the run ended, and constrained by it.

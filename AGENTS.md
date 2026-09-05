@@ -1651,7 +1651,8 @@ specifics) points here and must never fork these rules.
     the ledger and false of the artifact. **Allocating a successor is the repair
     that keeps being applied and keeps not preventing recurrence** — the missing
     thing was a gate in the window, so Michael held the release (2026-09-05) to
-    build one.
+    build one. That hold authorizes neither committing the old receipt nor
+    allocating a successor; those remain separate lifecycle decisions.
 
     **A LIVE CANDIDATE is a build that happened and has not been consumed** — a
     successful candidate-lane run, at a commit whose declared version for that
@@ -1683,7 +1684,8 @@ specifics) points here and must never fork these rules.
     effect, and the identity would then exist because a script printed it. The
     refusal names the run, the artifact, both tree objects and the repair —
     commit the receipt for `unrecorded`, allocate a NEW version and append a
-    `CandidateDisposition.v1` for `drifted` — and stops.
+    `CandidateDisposition.v1` for `drifted` — and stops. Those are the state
+    transitions that would close the findings, not authority to perform them.
 
     **Exit 0 clean / 1 violation / 2 indeterminate**, and an unreachable oracle,
     an unresolvable build commit or a shallow clone is 2, never a pass. Open

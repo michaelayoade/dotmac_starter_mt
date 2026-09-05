@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,9 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts/candidate_source_binding.py"
 CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
+DECLARED_BASELINE = REPO_ROOT / "docs/inventories/declared-publication-baseline.json"
+REHEARSAL_PLAN = REPO_ROOT / "docs/inventories/deployment-exposure-rehearsal.md"
+CHANGELOG = REPO_ROOT / "packages/dotmac-deployment-foundation/CHANGELOG.md"
 
 #: The candidate build that is still live on `main`, by its immutable
 #: coordinates. Read from the Actions API on 2026-09-05 and pinned here so the
@@ -369,6 +373,56 @@ def test_the_pinned_build_is_the_one_the_baseline_froze() -> None:
     assert rows[0]["artifact_id"] == LIVE_ARTIFACT_ID
     assert rows[0]["source_sha"] == LIVE_SOURCE_SHA
     assert rows[0]["reasons"] == ["unrecorded", "drifted"]
+
+
+def test_present_tense_candidate_documents_bind_the_live_build() -> None:
+    """Present-tense candidate records must distinguish built from recorded.
+
+    The section/row boundaries are structured claims; searching the whole
+    documents would incorrectly treat historical rationale as current state.
+    Keeping all three immutable build coordinates here also proves the guard
+    is not satisfied by a version-only or missing-receipt assertion.
+    """
+    baseline = json.loads(DECLARED_BASELINE.read_text(encoding="utf-8"))
+    row = baseline["unpublished"]["dotmac-deployment-foundation"]
+    expected = (
+        "0.4.0a1",
+        LIVE_RUN_ID,
+        LIVE_ARTIFACT_ID,
+        LIVE_SOURCE_SHA,
+    )
+    assert row["declared"] == expected[0]
+    assert all(value in row["reason"] for value in expected[1:])
+    assert row["reason"].startswith("BUILT ONCE;")
+    assert "NEVER BUILT" not in row["reason"].upper()
+
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    heading = re.search(
+        r"(?m)^## 0\.4\.0a1\b[^\n]*\n(?P<body>.*?)(?=^## |\Z)",
+        changelog,
+        re.DOTALL,
+    )
+    assert heading is not None, "the live candidate needs a current changelog section"
+    current = re.search(
+        r"(?m)^### Candidate-state correction — 2026-09-05\n"
+        r"(?P<body>.*?)(?=^### |\Z)",
+        heading.group("body"),
+        re.DOTALL,
+    )
+    assert current is not None, "the live candidate needs a current-state subsection"
+    current_state = current.group("body")
+    assert all(value in current_state for value in expected)
+    assert "NEVER BUILT" not in current.group(0).upper()
+
+    rehearsal_rows = [
+        line
+        for line in REHEARSAL_PLAN.read_text(encoding="utf-8").splitlines()
+        if re.match(r"^\|\s*5\s*\|", line)
+        and "A published Foundation carrying the verifying code" in line
+    ]
+    assert len(rehearsal_rows) == 1, "rehearsal prerequisite 5 must stay unique"
+    assert all(value in rehearsal_rows[0] for value in expected)
+    assert "NEVER BUILT" not in rehearsal_rows[0].upper()
 
 
 def test_the_candidate_lane_is_the_workflow_the_oracle_reads() -> None:
