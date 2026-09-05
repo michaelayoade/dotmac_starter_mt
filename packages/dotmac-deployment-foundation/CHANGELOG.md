@@ -2,6 +2,30 @@
 
 ## 0.4.0a1 — unreleased, NEVER BUILT
 
+### An absence proof can only prove the concern its inventory belongs to
+
+`IntegrationSurfaceAbsenceProofV1` validated `families` against
+`INTEGRATION_SURFACE_FAMILIES` while its `concern` field accepted **any of the
+thirteen**. A proof with `concern=WORKER_EXECUTION` carrying integration
+families therefore constructed cleanly — and then **passed the profile's
+misfiling guard**, because that guard compares the slot key with this same
+`concern` field. The two things that agree were the two things checked; the
+inventory, the only thing that would have disagreed, was never consulted.
+
+The misfiling guard is not vacuous — it catches a correctly built proof filed
+under the wrong key. It cannot catch a proof **built against the wrong
+inventory**, which is the earlier and quieter defect.
+
+Construction now refuses a concern other than `INTEGRATION`, under a **new**
+code `absence_proof.unsupported_concern`. Deliberately not
+`ABSENCE_WRONG_CONCERN`, which already means two things — "not a
+`FoundationConcern`" at construction and "wrong slot key" at the profile level.
+A third meaning would make three different repairs indistinguishable in a log.
+
+Both halves are exercised: the refusal fires for three non-integration concerns,
+and `INTEGRATION` still constructs — a guard that refused everything would
+satisfy the first test completely while making the type unusable.
+
 ### `HostLeaseRelease.v1` says which ARTIFACT ran, and separately which RUNNER
 
 `source_revision`'s own docstring said *"WHICH artifact ran — a release from

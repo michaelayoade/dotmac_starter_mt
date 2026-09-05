@@ -31,6 +31,7 @@ from dotmac_deployment_foundation.application_profile import (
     ABSENCE_NOT_ABSENT,
     ABSENCE_UNESTABLISHED,
     ABSENCE_UNREGISTERED_SURFACE,
+    ABSENCE_UNSUPPORTED_CONCERN,
     ABSENCE_WRONG_CONCERN,
     INTEGRATION_ABSENCE_SCHEMA,
     INTEGRATION_SURFACE_FAMILIES,
@@ -290,6 +291,82 @@ def test_no_image_digest_survives_anywhere_in_this_TYPE() -> None:
         and "other ``image_digest``" not in line
     ]
     assert offenders == [], offenders
+
+
+# ── the proof can only prove ITS OWN inventory's concern ───────────────────
+
+
+def test_a_proof_for_a_concern_this_type_has_no_inventory_FOR_is_refused() -> None:
+    """The live defect, closed.
+
+    `families` was validated against `INTEGRATION_SURFACE_FAMILIES` while
+    `concern` accepted any of the thirteen. So a proof with
+    `concern=WORKER_EXECUTION` carrying INTEGRATION families constructed
+    cleanly — and then PASSED the profile's misfiling guard, because that guard
+    compares the slot key with this same `concern` field. **The two things that
+    agree were the two things checked**, and the inventory, the only thing that
+    would have disagreed, was never consulted.
+
+    Fails before the change: every construction below succeeded.
+    """
+    for concern in (
+        FoundationConcern.WORKER_EXECUTION,
+        FoundationConcern.DEPLOYMENT_RECOVERY,
+        FoundationConcern.IDENTITY_SESSION,
+    ):
+        with pytest.raises(SpecError) as caught:
+            _proof(concern=concern)
+        assert caught.value.code == ABSENCE_UNSUPPORTED_CONCERN
+        assert concern.value in str(caught.value)
+
+
+def test_INTEGRATION_still_constructs_so_the_guard_is_not_always_refuse() -> None:
+    """The positive half, and it is not optional.
+
+    A guard that refuses every concern would satisfy the test above completely
+    while making the type unusable — the always-refuse shape, which this package
+    treats as a defect in its own right wherever it appears.
+    """
+    assert _proof().concern is FoundationConcern.INTEGRATION
+    assert _proof(concern=FoundationConcern.INTEGRATION).families
+
+
+def test_the_new_code_is_DISTINCT_from_the_wrong_concern_code() -> None:
+    """`ABSENCE_WRONG_CONCERN` already carries two meanings: "not a
+    `FoundationConcern` at all" at construction, and "filed under the wrong slot
+    key" at the profile level.
+
+    A third meaning would make three different repairs indistinguishable in a
+    log — fix the type, fix the slot key, or build a proof for a concern this
+    type cannot serve. That is the discrimination argument this package makes
+    everywhere else, applied to its own vocabulary.
+    """
+    assert ABSENCE_UNSUPPORTED_CONCERN != ABSENCE_WRONG_CONCERN
+    with pytest.raises(SpecError) as unsupported:
+        _proof(concern=FoundationConcern.WORKER_EXECUTION)
+    with pytest.raises(SpecError) as not_a_concern:
+        _proof(concern="integration")  # type: ignore[arg-type]
+    assert unsupported.value.code == ABSENCE_UNSUPPORTED_CONCERN
+    assert not_a_concern.value.code == ABSENCE_WRONG_CONCERN
+
+
+def test_the_profiles_misfiling_guard_could_not_have_caught_this() -> None:
+    """Why the repair belongs at CONSTRUCTION and not at the profile.
+
+    The misfiling guard compares the slot key with the proof's `concern`. A
+    proof built against the wrong inventory carries a `concern` that agrees with
+    wherever it is filed, so the guard passes — it catches a correctly built
+    proof filed under the wrong key, which is a different and later defect.
+
+    Asserted by construction: the proof this test would need cannot be built any
+    more, which is the point. The guard's own case still works.
+    """
+    assert ABSENCE_WRONG_CONCERN == "absence_proof.wrong_concern"
+    # The misfiling guard remains live for the defect it DOES catch — a correctly
+    # built integration proof filed under another concern's key. That case lives
+    # in `test_deployment_foundation_application_profile.py`; here we only assert
+    # the two codes have not been merged into one.
+    assert ABSENCE_UNSUPPORTED_CONCERN.startswith("absence_proof.")
 
 
 # ── no inert refusal codes ─────────────────────────────────────────────────
