@@ -1,0 +1,93 @@
+{
+  "$comment": [
+    "TWO-DIRECTIONAL PARITY MAP for removing Platform CP's local profile dialect.",
+    "Design evidence for",
+    "docs/superpowers/specs/2026-09-05-foundation-concern-contribution-contract.md",
+    "section 11, gate point 8. DESIGN ONLY -- nothing consumes this yet.",
+    "",
+    "## Two directions, and why both",
+    "",
+    "The generic path must reproduce every legacy case (none may be lost) AND",
+    "must add the cases the dialect could not express (or it has reproduced the",
+    "dialect rather than replaced it). A one-directional map would let either",
+    "half slip: a shrinking count reads as cleanup, a growing one as progress.",
+    "",
+    "## The 53 are a COUNT here, not a list, and that is a stated gap",
+    "",
+    "Platform's inventory (d7b8ca6a) holds the rows: 33 verifier, 14 builder,",
+    "6 type-boundary. They live in Platform's repository and are NOT restated",
+    "here -- a copy would be a second authority that drifts. `legacy_total` is",
+    "the number this map is accountable to; the Platform lane owns the",
+    "row-by-row mapping and must supply it before the parity gate can pass.",
+    "",
+    "## Why the legacy count cannot simply be matched",
+    "",
+    "The dialect collapses provider, binding and verification into ONE",
+    "declaration plus an import probe. Shapes it cannot STATE it cannot TEST,",
+    "so nine cases below have no legacy counterpart by construction. Passing 53",
+    "and adding none of them would mean the generic path reproduced the dialect.",
+    "",
+    "## The ratchet",
+    "",
+    "`legacy_total` and the length of `added` are both fixed. A change in",
+    "either direction requires an explicit row change in this file, so a case",
+    "cannot appear or vanish as a side effect."
+  ],
+  "added": [
+    {
+      "absent_from_dialect_because": "Platform's dialect collapses provider/binding/verification into one declaration, so an unwired provider is not expressible",
+      "case": "uninjected",
+      "requires": "provider resolves, no consumer binding joins it"
+    },
+    {
+      "absent_from_dialect_because": "the dialect has no injection site to disagree with",
+      "case": "wrong_site",
+      "requires": "an object is present at a site other than the declared typed injection site"
+    },
+    {
+      "absent_from_dialect_because": "the defeated five-line stub; the dialect's import probe admits it and so did this document's first revision",
+      "case": "nonce_only",
+      "requires": "a provider that echoes and answers positively while implementing nothing"
+    },
+    {
+      "absent_from_dialect_because": "an import probe cannot observe outcomes at all",
+      "case": "all_negative",
+      "requires": "the battery runs and EVERY outcome is negative (broken-shut)"
+    },
+    {
+      "absent_from_dialect_because": "the dual of all-negative; needs Foundation-defined negative scenarios, which the dialect has none of",
+      "case": "answers_everything",
+      "requires": "positive scenarios pass AND negative scenarios also 'pass'"
+    },
+    {
+      "absent_from_dialect_because": "the dialect's identities are module-scoped, so the case cannot arise in it",
+      "case": "wrong_assembly",
+      "requires": "a verification joins a binding from a different assembly"
+    },
+    {
+      "absent_from_dialect_because": "the dialect accepts a locally computed digest, so this is the shape it institutionalises",
+      "case": "foreign_inventory",
+      "requires": "an inventory digest supplied by the caller rather than computed by Foundation over typed entries"
+    },
+    {
+      "absent_from_dialect_because": "the dialect closes encoding only",
+      "case": "unknown_key",
+      "requires": "any document carries a key outside the closed set, on DECODE"
+    },
+    {
+      "absent_from_dialect_because": "V1 cannot bind retirement at all and now refuses it; the dialect discards it",
+      "case": "retirement_round_trip",
+      "requires": "displacement and terminal retirement survive encode->digest->decode and bind back to the replacing assembly and provider"
+    }
+  ],
+  "added_total": 9,
+  "legacy_breakdown": {
+    "builder": 14,
+    "type_boundary": 6,
+    "verifier": 33
+  },
+  "legacy_rows_owned_by": "platform-cp inventory d7b8ca6a",
+  "legacy_rows_supplied_here": false,
+  "legacy_total": 53,
+  "status": "design-only"
+}
