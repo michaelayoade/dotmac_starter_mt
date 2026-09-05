@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import io
+import tokenize
 import tomllib
 from pathlib import Path
 
@@ -470,3 +472,143 @@ def test_the_dossier_records_product_first_candidate_status() -> None:
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
     assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp"]
+
+
+# ── The supported-floor gate ─────────────────────────────────────────────────
+#
+# `pyproject.toml` declares `python = ">=3.11,<3.14"`, but CI runs 3.12 only.
+# Nothing therefore executes the declared floor, so 3.12-only SYNTAX reaches a
+# package that claims to support 3.11 and fails at import for anyone who
+# believes the declaration. This has now happened twice in one day across two
+# lanes: a PEP 695 `def f[T](...)` here, and a PEP 701 multi-line f-string
+# elsewhere — neither caught by ruff, mypy, or the test suite.
+
+
+def _declared_floor() -> tuple[int, int]:
+    """The floor is READ from the package's own metadata, never hardcoded.
+
+    A guard that hardcodes `(3, 11)` keeps asserting 3.11 long after the
+    package stops claiming it — it would then be testing a premise nobody
+    holds. Raising the floor in `pyproject.toml` must move this gate with it.
+    """
+    spec = tomllib.loads(
+        (MODULE_ROOT.parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    constraint = spec["tool"]["poetry"]["dependencies"]["python"]
+    lower = next(
+        part for part in constraint.split(",") if part.strip().startswith(">=")
+    )
+    major, minor = lower.strip().removeprefix(">=").strip().split(".")[:2]
+    return int(major), int(minor)
+
+
+def _shipped_sources() -> list[Path]:
+    """Every `.py` the wheel installs — migrations INCLUDED.
+
+    `_package_sources()` deliberately skips migrations as frozen artifacts, but
+    `pyproject.toml`'s `include` ships them and Alembic imports them, so a
+    3.12-only construct in a revision file breaks the floor exactly as badly.
+    """
+    return sorted(MODULE_ROOT.rglob("*.py"))
+
+
+def _pep701_offences(source: str) -> list[str]:
+    """Replacement fields 3.11 rejects: newline, backslash, or quote reuse.
+
+    `ast.parse(feature_version=...)` does NOT catch PEP 701 — verified, not
+    assumed; see `test_the_supported_floor_gate_still_bites`, which plants a
+    multi-line f-string and shows `feature_version` passing it. 3.12 tokenizes
+    an f-string into FSTRING_START/MIDDLE/END with the replacement expressions
+    tokenized between them, which preserves the source extent the AST discards.
+    """
+    offences: list[str] = []
+    stack: list[tuple[str, bool]] = []
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.FSTRING_START:
+            raw = tok.string
+            quote = (
+                '"""'
+                if raw.endswith('"""')
+                else "'''"
+                if raw.endswith("'''")
+                else raw[-1]
+            )
+            stack.append((quote, len(quote) == 3))
+        elif tok.type == tokenize.FSTRING_END:
+            if stack:
+                stack.pop()
+        elif stack and tok.type != tokenize.FSTRING_MIDDLE:
+            quote, triple = stack[-1]
+            if tok.type in (tokenize.NL, tokenize.NEWLINE) and not triple:
+                offences.append(f"line {tok.start[0]}: newline in a replacement field")
+            if "\\" in tok.string:
+                offences.append(
+                    f"line {tok.start[0]}: backslash in a replacement field"
+                )
+            if tok.type == tokenize.STRING and not triple and quote in tok.string:
+                offences.append(f"line {tok.start[0]}: enclosing quote reused inside")
+    return offences
+
+
+def test_every_shipped_source_parses_on_the_declared_python_floor() -> None:
+    floor = _declared_floor()
+    assert floor == (3, 11), (
+        "the declared floor moved; this gate follows pyproject rather than "
+        "asserting a constant, but the surrounding comments name 3.11"
+    )
+    for path in _shipped_sources():
+        source = path.read_text(encoding="utf-8")
+        try:
+            ast.parse(source, feature_version=floor)
+        except SyntaxError as exc:  # pragma: no cover - the failure IS the point
+            pytest.fail(
+                f"{path.name}:{exc.lineno} uses syntax newer than the declared "
+                f"floor {floor[0]}.{floor[1]}: {exc.msg}"
+            )
+        offences = _pep701_offences(source)
+        assert not offences, (
+            f"{path.name} uses PEP 701 f-string syntax (3.12+) but the package "
+            f"declares >={floor[0]}.{floor[1]}: {offences}"
+        )
+
+
+def test_the_supported_floor_gate_still_bites() -> None:
+    """A gate that only ever passes over a clean tree proves nothing about
+    itself. Plant each defect and a near-miss for it."""
+    floor = _declared_floor()
+
+    def parses(source: str) -> bool:
+        try:
+            ast.parse(source, feature_version=floor)
+        except SyntaxError:
+            return False
+        return True
+
+    # PEP 695 — the defect that reached this package. `feature_version` sees it.
+    assert not parses("def f[T](x: T) -> T: return x")
+    assert parses("def f(x: int | None) -> None: pass")  # near-miss: 3.10 syntax
+
+    # PEP 701 — `feature_version` is BLIND to it, which is why the token
+    # detector exists. This assertion documents the blindness; if a future
+    # CPython teaches `feature_version` about PEP 701 it will fail loudly and
+    # the detector can then be retired deliberately rather than by accident.
+    multiline_fstring = 'x = f"{\n    1 + 2\n}"'
+    assert parses(
+        multiline_fstring
+    ), "feature_version now rejects PEP 701; retire _pep701_offences on purpose"
+    assert _pep701_offences(multiline_fstring)
+
+    # ...and each of the other two constructs 3.11 forbids in a replacement field.
+    assert _pep701_offences('x = f"{d["k"]}"')
+    assert _pep701_offences("x = f\"{'\\n'.join(v)}\"")
+
+    # Near-misses the detector must stay quiet on — all legal on 3.11.
+    for legal in (
+        'x = f"{a} and {b}"',
+        '(\n    f"{a} "\n    f"{b}"\n)',  # implicit concatenation across lines
+        "x = f\"{d['k']}\"",  # a DIFFERENT quote inside
+        'x = f"""\nhi {a}\nbye\n"""',  # triple-quoted, text spans lines
+        'x = f"{a:>{w}}"',  # nested format spec
+        'x = "{not an fstring}"',
+    ):
+        assert not _pep701_offences(legal), legal
