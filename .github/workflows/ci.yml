@@ -126,6 +126,58 @@ jobs:
           BASE_SHA: ${{ inputs.allocation_base_sha }}
         run: python scripts/check_allocation_serialized.py --base "$BASE_SHA"
 
+  # AGENTS.md rule 50. The window between a candidate BUILD and its PUBLICATION
+  # is the only place four recurrences of one defect have ever been catchable,
+  # and nothing was standing in it.
+  #
+  # `dotmac-deployment-foundation 0.4.0a1` is the fourth: run 33920058598 built
+  # it from 753a004e on 2026-09-04, the receipt stayed in the run's artifacts,
+  # and #628 and #631 then moved the facility's importable source under the
+  # unchanged name. Every guard was green and every guard was right about the
+  # records — the repository simply held no fact about the build.
+  #
+  # Not in the `quality` matrix, for the reasons `allocation-gate` is not either
+  # and one more: that list must equal `make check`'s prerequisites exactly
+  # (`test_ci_runs_canonical_check.py`) and `check` must stay runnable offline,
+  # while this needs full history AND the Actions API. "Was a candidate built?"
+  # is a claim about the build system, so per rule 30 it takes an external oracle
+  # carrying immutable coordinates — the run id and the artifact id.
+  #
+  # Runs on push and pull_request alike. A pull request is where the source
+  # actually moves and where a refusal is cheap; a push keeps `main` from being
+  # the one branch nobody asks.
+  candidate-window:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # REQUIRED, not tidiness: the runs and artifacts endpoints are what the
+      # oracle is. Without it `gh api` gets 403, the guard exits 2, and this job
+      # fails as indeterminate rather than passing — which is the intended
+      # behaviour, because a guard that cannot see builds must not report none.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The comparison is between the src TREE OBJECT at a past candidate's
+          # build commit and the one here. A shallow checkout does not have the
+          # first, and the guard exits 2 rather than reporting a clean window it
+          # cannot justify — so this line is what makes the job meaningful.
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # No Poetry install: the guard reads git, TOML, JSON and the Actions API.
+      #
+      # `--builds-json` is deliberately absent. It exists so the sensitivity
+      # proof can replay a past state offline, and passing it here would let the
+      # gate be satisfied by a file in the repository instead of by the build
+      # system. `test_candidate_window_binding.py` asserts this line does not
+      # carry it.
+      - name: Refuse a tree that has left a live candidate's bytes behind
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/candidate_source_binding.py --window --check
+
   unit:
     runs-on: ubuntu-latest
     steps:
