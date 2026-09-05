@@ -46,8 +46,12 @@ this narrowing would become the hole its critics would expect.
                             argument, however often the two happen to agree
     --foundation-artifact   digest read from the candidate receipt after the
                             downloaded wheel was verified
-    --authorization-run     Platform CP authorization run id
-    --authorization-doc     the signed authorization document
+    --authorization-run     Platform CP authorization run id. RECORDED and
+                            compared against the lease; never believed as proof
+    --authorization-document
+                            the SIGNED authorization document, which an
+                            installed `AuthorizationVerifier` must attest before
+                            anything else in this list is read
     --controller-identity   fingerprint of the dedicated controller key
     --target                the leased host
     --probe-evidence        the external vantage's measurements
@@ -65,6 +69,27 @@ that — `provenance` and `rehearsal` both refuse), and it cannot mark an item
 `executed_passed` that it did not execute: every status is set from a measured
 outcome in the phase that produced it, and `build_receipt` refuses a receipt
 missing any of the sixteen.
+
+## It cannot treat DISPATCH TEXT as authorization, and until 2026-09-05 it did
+
+`--authorization-run` and `--authorization-doc-digest` arrived as
+`workflow_dispatch` strings, and the only comparison ever made was
+`lease.covers(authorization_run_id=...)` — a string equality against a lease
+record the same operator writes. Nothing here imported `provenance.py` or
+`authorization.py`; no `VerifiedAuthorization` and no `ExecutionGrant` ever
+existed. Two matching strings LOOKED like a binding while no authorization
+existed anywhere, so a fabricated run id and a locally computed digest drove the
+lane green — the exact failure "Foundation cannot self-authorize" names.
+
+`scripts/lane3_authorization.py` is now the single owner of that question, asked
+before the lease is taken and before the host is contacted. It refuses today,
+and the refusal is the honest state rather than a regression: no
+`AuthorizationVerifier` exists fleet-wide, so `establish_authorization` reports
+`unanswerable` and this runner exits `EXIT_INDETERMINATE` naming every
+precondition that would have to exist first. `--authorization-doc-digest` is
+GONE rather than deprecated: an argument that names proof and supplies none is
+the defect itself, and the receipt's middle term now comes out of an attested
+receipt instead of off the command line.
 
 ## It CLOSES the lease, and that is the other half of the contract
 
@@ -182,6 +207,10 @@ from dotmac_deployment_foundation.vantage import (
     VantageQualification,
     qualify_vantage,
 )
+from lane3_authorization import (
+    AuthorizationUnverifiable,
+    establish_authorization,
+)
 from lane3_provocation import (
     SeededRule,
     disarm_apply_failure,
@@ -193,7 +222,13 @@ from lane3_provocation import (
     withdraw_foreign_rules,
 )
 
-EXIT_OK, EXIT_REFUSED, EXIT_USAGE = 0, 1, 2
+# 0 ran / 1 refused / 2 the question could not be answered — the same three the
+# repository's other gates use (`scripts/check_allocation_serialized.py`), and
+# the same rule: an indeterminate outcome must never read as a pass, and a
+# refusal must never read as indeterminate. `EXIT_INDETERMINATE` was `EXIT_USAGE`
+# and was referenced nowhere; argparse still exits 2 on a malformed command line,
+# which is itself a question this runner could not answer.
+EXIT_OK, EXIT_REFUSED, EXIT_INDETERMINATE = 0, 1, 2
 
 PASSED = RequirementStatus.EXECUTED_PASSED
 FAILED = RequirementStatus.EXECUTED_FAILED
@@ -1381,6 +1416,28 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
     spec = ProductDeploymentSpec.load(str(descriptor))
     descriptor_digest = spec.to_canonical_document().sha256_digest()
 
+    # ── the authorization, which cannot be self-attested ────────────────────
+    #
+    # BEFORE the lease and before any host contact, so a refusal here is
+    # `precondition_unfit` with the machine genuinely untouched — and, since no
+    # lease is in hand yet, no release is written and the host keeps whatever
+    # standing it already had.
+    #
+    # This is deliberately not `if args.authorization_doc_digest == something`.
+    # The dispatch inputs are not parameters of `establish_authorization` at
+    # all, so there is no path through it that promotes caller-supplied text
+    # into permission by forgetting a comparison. Either an installed
+    # `AuthorizationVerifier` attested a signed document and `authorize()`
+    # bound its terms to THIS descriptor, THIS target and the deploy operation,
+    # or there is no grant and no rehearsal. The refusal names what is missing;
+    # `PRECONDITIONS` in `lane3_authorization.py` names what would have to exist.
+    grant = establish_authorization(
+        descriptor_digest=descriptor_digest,
+        target=args.target,
+        authorization_document=args.authorization_document,
+        now=datetime.now(UTC),
+    )
+
     # ── the lease, which cannot be self-granted ─────────────────────────────
     lease = load_lease(args.target, directory=args.lease_dir)
     lease.covers(now=datetime.now(UTC), authorization_run_id=args.authorization_run)
@@ -1786,7 +1843,17 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         foundation_revision=args.foundation_revision,
         foundation_artifact_digest=args.foundation_artifact,
         authorization_run_id=args.authorization_run,
-        authorization_document_digest=args.authorization_doc_digest,
+        # OUT OF THE ATTESTED RECEIPT, never off the command line. `authorize()`
+        # already proved this equals `descriptor_digest`, so item 9 does not get
+        # a new fact from it — what it gets is provenance: the term came from a
+        # document a verifier vouched for, rather than from a dispatch field.
+        #
+        # It is still NOT the middle term `AGENTS.md` rule 49 defines. That is
+        # `ExecutionPlanDigestV1` (`grant.execution_plan_digest`), and
+        # `build_receipt` cannot carry it while `require_same_digest` forces all
+        # three terms equal. Enumerated as the `middle_term_is_the_execution_
+        # plan_digest` precondition rather than quietly substituted here.
+        authorization_document_digest=grant.receipt.descriptor_digest_normalized,
         descriptor_digest=descriptor_digest,
         execution_report_digest=execution_report,
         fixture_digest=str(Digest.of(fixture_bytes)),
@@ -1837,7 +1904,6 @@ def main(argv: list[str] | None = None) -> int:
             "digest read from the verified candidate receipt",
         ),
         ("--authorization-run", "Platform CP authorization run id"),
-        ("--authorization-doc-digest", "digest of the signed authorization document"),
         ("--controller-identity", "fingerprint of the dedicated controller key"),
         ("--controller-key", "path to the controller private key (a POINTER)"),
         ("--target", "the leased rehearsal target"),
@@ -1853,6 +1919,21 @@ def main(argv: list[str] | None = None) -> int:
         ("--receipt-out", "where to write RehearsalReceipt.v1"),
     ):
         parser.add_argument(flag, required=True, help=help_text)
+    # NOT in the required block above, and the difference is the whole finding.
+    #
+    # Required inputs are things a rehearsal cannot proceed without and that a
+    # dispatcher can supply today. Nothing can issue this document — no Control
+    # instance is deployed and no verifier is installed to judge one — so making
+    # it `required=True` would produce an argparse usage error, which is a
+    # complaint about a command line rather than a report about an authorization
+    # chain. It is optional at the parser and MANDATORY at the gate: absent with
+    # a verifier installed is a refusal (exit 1), and absent with none installed
+    # is indeterminate (exit 2), each saying which it is.
+    parser.add_argument(
+        "--authorization-document",
+        default="",
+        help="the signed Platform CP authorization document (a path)",
+    )
     parser.add_argument("--status-out", default="", help="generated status document")
     parser.add_argument("--deploy-dir", default="/srv/lane3")
     parser.add_argument("--lease-dir", default=None)
@@ -1877,7 +1958,14 @@ def main(argv: list[str] | None = None) -> int:
     ctx = TerminalContext()
     try:
         return run(args, ctx)
-    except DeploymentFoundationError as exc:
+    # `AuthorizationUnverifiable` is caught ALONGSIDE this lane's own refusals
+    # rather than translated into one, because translating it would discard the
+    # single fact it exists to carry: whether the environment could answer the
+    # question at all. `classify_refusal` still decides the terminal record —
+    # with no lease in hand it answers `None`, which is correct, and if the check
+    # ever moves behind `load_lease` it answers `host_state_uncertified` without
+    # this handler having to be taught anything.
+    except (AuthorizationUnverifiable, DeploymentFoundationError) as exc:
         # A TYPED terminal outcome, and only that. There is deliberately no
         # `except Exception` here: an unexpected exception has no member in the
         # closed vocabulary, so it writes no release and the lease stays HELD —
@@ -1901,7 +1989,14 @@ def main(argv: list[str] | None = None) -> int:
         record_terminal(
             ctx, args, None if member is None else TerminalOutcome(refusal=member)
         )
-        return EXIT_REFUSED
+        # A refusal is 1 and an unanswerable question is 2, and neither borrows
+        # the other's status. `Standing.exit_status` owns the mapping so there is
+        # one answer to it; everything else this lane refuses for is a refusal.
+        return (
+            exc.exit_status
+            if isinstance(exc, AuthorizationUnverifiable)
+            else EXIT_REFUSED
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

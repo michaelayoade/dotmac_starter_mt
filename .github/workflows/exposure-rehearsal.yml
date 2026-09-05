@@ -27,9 +27,21 @@ on:
       authorization_run:
         description: "Platform CP authorization run id (the lease references it)"
         required: true
-      authorization_doc_digest:
-        description: "digest of the signed authorization document"
-        required: true
+      # `authorization_doc_digest` WAS an input here and is deliberately gone.
+      #
+      # It was free text that nothing could check: the runner never imported
+      # `provenance.py` or `authorization.py`, built no `ExecutionGrant`, and
+      # `build_receipt` only asserted the digest equalled the descriptor digest —
+      # a value any caller computes locally from a file in this repository. So a
+      # fabricated run id and a computed digest drove this lane green with no
+      # authorization in existence, which is exactly what "Foundation cannot
+      # self-authorize" forbids.
+      #
+      # The signed DOCUMENT replaces it, and it is not a dispatch field either:
+      # it is resolved on the control runner beside the controller key, the same
+      # way `--controller-key` already is, so no dispatcher can hand the lane its
+      # own proof. Nothing can issue one yet — the runner reports `unanswerable`
+      # and exits 2 naming every precondition (`scripts/lane3_authorization.py`).
       facility:
         description: >-
           Which allowlisted universal facility supplies the rehearsal engine.
@@ -180,6 +192,24 @@ jobs:
           python -m venv .lane3-foundation
           .lane3-foundation/bin/python -m pip install --no-deps candidate-dist/*.whl
 
+      # BEFORE the probe host and the target are touched, and in the SAME
+      # interpreter the runner will use — whether an `AuthorizationVerifier` is
+      # installed is a property of the candidate venv, so asking on the hosted
+      # `preflight` job would answer about the wrong environment and asking from
+      # the checkout would answer about the wrong Foundation.
+      #
+      # 0 attested / 1 refused / 2 the question could not be answered. Today it
+      # is 2, and that failure is the point: this lane is now EXPLICITLY blocked
+      # with its preconditions enumerated, where before it went green on text.
+      - name: Refuse unless Lane 3's authorization can be verified here
+        env:
+          AUTHZ: ${{ inputs.authorization_run }}
+        run: |
+          .lane3-foundation/bin/python -E -P scripts/lane3_authorization.py \
+            --descriptor scripts/exposure-rehearsal/product.toml \
+            --target "${{ inputs.target }}" \
+            --authorization-document "${HOME}/.dotmac/authorization-${AUTHZ}.json"
+
       # The external half. Collected BEFORE the controller runs so the vantage
       # is qualified against its own interfaces and routes rather than trusted,
       # and so a probe measured after teardown can never be reused as a
@@ -232,7 +262,7 @@ jobs:
               "${{ steps.candidate.outputs.candidate_source_sha }}" \
             --foundation-artifact "${{ steps.candidate.outputs.candidate_sha256 }}" \
             --authorization-run "${AUTHZ}" \
-            --authorization-doc-digest "${{ inputs.authorization_doc_digest }}" \
+            --authorization-document "${HOME}/.dotmac/authorization-${AUTHZ}.json" \
             --controller-identity "${{ inputs.controller_identity }}" \
             --controller-key "${HOME}/.dotmac/controller-${AUTHZ}" \
             --target "${{ inputs.target }}" \

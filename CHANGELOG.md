@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Security
+
+- Lane 3 can no longer be driven green on a fabricated authorization.
+  `scripts/exposure_rehearsal_runner.py` accepted `--authorization-run` and
+  `--authorization-doc-digest` as `workflow_dispatch` text and executed on them:
+  the only comparison was a string equality against a lease record the same
+  operator writes, and the digest reached `build_receipt`, which asserted it
+  equalled the descriptor digest — a value any caller computes locally. Nothing
+  imported `provenance.py` or `authorization.py` and no `ExecutionGrant` ever
+  existed. `scripts/lane3_authorization.py` now owns the question, asked before
+  the lease is taken and before the host is contacted, and the caller-supplied
+  values are not parameters of it at all. `--authorization-doc-digest` is
+  removed from the runner and from the dispatch inputs;
+  `--authorization-document` (the signed document, resolved beside the
+  controller key) replaces it, and the receipt's authorized-plan term now comes
+  off an attested receipt rather than the command line.
+- The gate answers with the repository's three statuses — 0 attested / 1
+  violation / 2 indeterminate — and answers 2 today, because no
+  `AuthorizationVerifier` exists fleet-wide. Six preconditions for real
+  verification are enumerated in code (`PRECONDITIONS`) and cited by name in
+  every refusal, with the two nothing local can decide marked stated rather than
+  enforced. Lane 3 is now explicitly blocked instead of unmonitored; no
+  verification chain was built and none could be. `AGENTS.md` rule 50.
+
 ### Added
 
 - A pure, storage-neutral permission provisioning contract separates

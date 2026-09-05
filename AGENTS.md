@@ -1610,6 +1610,50 @@ specifics) points here and must never fork these rules.
     `test_the_digest_covers_the_document_alone` plants the six-sibling-keys
     wrapper and observes both a different digest and an outright refusal)
 
+50. **Caller-supplied text is never authorization, and a gate that cannot check
+    it says so rather than passing.** Lane 3 took `--authorization-run` and
+    `--authorization-doc-digest` as `workflow_dispatch` strings and executed on
+    them: the only comparison was `lease.covers(authorization_run_id=...)`, a
+    string equality against a lease record the same operator writes, and the
+    digest reached `build_receipt`, which asserted it equalled the descriptor
+    digest — a value any caller computes locally from a file in this repository.
+    Nothing imported `provenance.py` or `authorization.py`; no
+    `VerifiedAuthorization` and no `ExecutionGrant` were ever constructed. Two
+    matching strings LOOKED like a binding while no authorization existed
+    anywhere, which is precisely what "the Foundation cannot self-authorize"
+    forbids.
+
+    **The unverified case is made UNREPRESENTABLE, not guarded.** The dispatch
+    inputs are not parameters of `establish_authorization`, so no path through it
+    can promote them into proof by forgetting a comparison; the only route to an
+    `ExecutionGrant` is an injected `AuthorizationVerifier` attesting a signed
+    document, `verify_authorization` producing the verified terms, and
+    `authorize` binding them to this descriptor, this target and this operation.
+    An input that names proof and supplies none is REMOVED rather than
+    deprecated, at the dispatch as well as at the parser.
+
+    **Three statuses, and neither borrows the other's.** 0 attested, 1 a
+    violation — the environment could answer and the answer is no, 2
+    indeterminate — no verifier is installed, so the question has no answer here.
+    A refusal must never read as indeterminate and an indeterminate gate must
+    never read as a pass; the ordering enforces it, because the verifier is
+    looked for before the material is read.
+
+    **A chain that cannot be built is BLOCKED, not faked.** Where the
+    verification chain does not exist, enumerate the preconditions IN CODE, cite
+    them by name in the refusal, and mark the ones nothing local can decide as
+    stated rather than enforced. A weak in-house verifier would be worse than the
+    gap because it reads as coverage; a checklist that claims to observe what it
+    cannot is the same failure one layer up (ADR-0018). Prose alone does not
+    hold: this prerequisite was written down on 2026-08-30 and the runner shipped
+    accepting the text anyway
+    (`scripts/lane3_authorization.py`,
+    `docs/inventories/deployment-exposure-rehearsal.md` § "Prerequisite 2";
+    `tests/architecture/test_lane3_authorization.py`, which plants the
+    fabricated authorization, plants each near miss separately, and proves the
+    admit is reachable with an injected verifier so the refusal is not refusing
+    everything)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
