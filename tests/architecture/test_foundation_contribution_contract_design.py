@@ -221,17 +221,96 @@ def test_the_two_halves_of_the_parity_map_RECONCILE_arithmetically() -> None:
 
 
 def test_the_added_list_does_not_OVERSTATE_what_the_successor_gains() -> None:
-    """`foreign_inventory` and `unknown_key` have legacy counterparts. They are
-    still obligations — a case with a counterpart still has to be reproduced —
-    but counting them as gains would overstate the successor.
+    """Three relations, not a boolean — and the third is why.
+
+    Platform classifies `uninjected` as `approximated`: it carries a legacy row,
+    because Platform asserted the requirement at construction and could not
+    OBSERVE it, so the runtime refusal is new and the intent is not. A boolean
+    could not say that, and this map called it simply new. The honest count of
+    genuine additions is 7, not 8.
 
     Two numbers, deliberately: `added_total` is the obligation and
-    `added_new_total` is the honest gain.
+    `added_new_total` is the gain.
     """
     parity = _parity()
-    not_new = {r["case"] for r in parity["added"] if not r["new_to_the_successor"]}
-    assert not_new == {"foreign_inventory", "unknown_key"}
-    assert parity["added_new_total"] == parity["added_total"] - len(not_new) == 8
+    relations = {r["case"]: r["legacy_relation"] for r in parity["added"]}
+    assert set(relations.values()) <= {
+        "has_counterpart",
+        "approximated",
+        "no_counterpart",
+    }
+    assert relations["foreign_inventory"] == "has_counterpart"
+    assert relations["unknown_key"] == "has_counterpart"
+    assert relations["uninjected"] == "approximated"
+    assert (
+        parity["added_new_total"]
+        == sum(1 for v in relations.values() if v == "no_counterpart")
+        == 7
+    )
+    # The coarse boolean must not come back: it is what lost Platform's third
+    # state in the first place.
+    assert all("new_to_the_successor" not in r for r in parity["added"])
+
+
+def test_the_join_is_ANCHORED_to_counterpart_BYTES_not_a_citation() -> None:
+    """A pinned commit says WHICH artifact; a digest says the bytes compared were
+    the bytes pinned. Without the digest this is a citation, and a citation is
+    what "independently green suites are insufficient" rules out.
+    """
+    rows = _parity()["platform_row_map"]
+    assert rows["repository"] == "michaelayoade/dotmac_platform_control_plane"
+    assert len(rows["counterpart_sha256"]) == 64
+    assert rows["verified_at_pin"] is True
+    assert rows["commit"] == "74dab8a8ec97bd8492d4eec5bde4edab74d4c957"
+
+
+def test_every_row_that_BLOCKS_DELETION_has_a_successor_code() -> None:
+    """The gate, joined by Platform ROW ID rather than by counting to five.
+
+    Counting would pass if five envelope codes existed and covered four of
+    Platform's rows plus one of our own invention.
+    """
+    parity = _parity()
+    join = parity["envelope_join"]
+    assert join["unmapped_rows_closed"] == join["unmapped_rows_total"]
+    assert (
+        join["unmapped_rows_total"] == parity["platform_row_map"]["states"]["unmapped"]
+    )
+    ids = {row["row_id"] for row in join["rows"]}
+    assert ids == {"PCP-V-01", "PCP-V-02", "PCP-V-03", "PCP-V-04", "PCP-V-11"}
+    for row in join["rows"]:
+        assert row["foundation_code"].startswith("envelope_")
+        assert row["platform_case"]
+
+
+def test_VERSION_SKEW_is_distinguished_from_disagreement() -> None:
+    """A join that could not tell them apart would report progress as a defect.
+
+    Platform measured against revision 2; this is revision 5. `nonce_only` is
+    only in Platform's list because revision 3 removed the nonce; two cases are
+    only in ours because revisions 4 and 5 added them.
+    """
+    parity = _parity()
+    join = parity["case_join"]
+    skew = {row["case"] for row in join["version_skew"]}
+    assert skew == {"nonce_only", "foreign_provenance", "wrong_composition"}
+    for row in join["version_skew"]:
+        assert row["only_in"] in {"platform", "foundation"}
+        assert row["why"].strip()
+    # The one real disagreement is recorded WITH its resolution, not smoothed.
+    assert [row["case"] for row in join["disagree"]] == ["uninjected"]
+    assert parity["platform_row_map"]["measured_against_foundation_revision"] == 2
+
+
+def test_the_gate_names_what_would_let_it_FLIP() -> None:
+    """A gate whose conditions are not written down is a gate somebody flips
+    because the branch is green."""
+    parity = _parity()
+    assert parity["parity_gate_passed"] is False
+    requires = parity["parity_gate_requires"]
+    assert len(requires) >= 5
+    joined = " ".join(requires)
+    assert "sha256" in joined and "unmapped" in joined and "sum to" in joined
 
 
 def test_the_map_does_not_RESTATE_platforms_rows() -> None:
