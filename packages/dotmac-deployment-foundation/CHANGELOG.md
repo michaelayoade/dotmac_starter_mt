@@ -25,6 +25,32 @@ A third meaning would make three different repairs indistinguishable in a log.
 Both halves are exercised: the refusal fires for three non-integration concerns,
 and `INTEGRATION` still constructs — a guard that refused everything would
 satisfy the first test completely while making the type unusable.
+### `ApplicationFoundationProfile.v1` REJECTS `retirement` rather than discarding it
+
+`retirement` sits in `BINDING_FIELDS`, `_binding_from_document` never read it,
+and `ConcernBinding.as_document` never emitted it. Three consequences, and the
+third is why this is a refusal rather than a backlog entry:
+
+- **the profile digest does not cover displacement evidence.** A value the digest
+  does not cover is a value nobody is bound to, however carefully it was written;
+- a document supplying `displaces` *with* its `retirement` rows was refused by
+  `ConcernBinding.__post_init__` for carrying **no** typed retirement evidence —
+  a message **false about its own input**, sending an operator to add what was
+  already there;
+- so the accepting path dropped the evidence and the refusing path lied about
+  why.
+
+V1 now refuses at the parse, with a message true about the document it was
+handed. `retirement` stays in `BINDING_FIELDS`, deliberately: removing it would
+produce "unknown binding field", which is false — it IS a field of
+`ConcernBinding` and carries real rules. The two refusals stay distinct and both
+are exercised.
+
+Displacement and retirement are represented canonically in the successor
+admission contract (design under review). A test asserts the PREMISE — that the
+document omits `retirement` — so if `as_document` ever begins emitting it, the
+rejection is revisited in the same change rather than outliving its reason.
+
 ### A proven absence is a SLOT VALUE, and satisfies only when established
 
 `IntegrationSurfaceAbsenceProofV1`'s own docstring described absent-proven as

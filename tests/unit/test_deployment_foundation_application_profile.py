@@ -259,6 +259,105 @@ def test_a_conforming_binding_document_parses() -> None:
     assert parsed.version == "1.0.0"
 
 
+def test_V1_REJECTS_retirement_rather_than_accepting_and_discarding_it() -> None:
+    """`retirement` is in `BINDING_FIELDS`, was never read by the parser, and is
+    never emitted by `as_document`.
+
+    So the PROFILE DIGEST DOES NOT COVER DISPLACEMENT EVIDENCE — a value the
+    digest does not cover is a value nobody is bound to, however carefully it was
+    written. Worse, a document supplying `displaces` WITH its retirement rows was
+    refused by `ConcernBinding.__post_init__` for carrying NO typed retirement
+    evidence: a message false about its own input, sending an operator to add
+    what was already there.
+
+    The accepting path dropped the evidence and the refusing path lied about why.
+    V1 now says the true thing at the parse. Fails before the change: the
+    document below parsed, silently losing `retirement`.
+    """
+    from dotmac_deployment_foundation.application_profile import (
+        _binding_from_document,
+    )
+
+    with pytest.raises(SpecError) as caught:
+        _binding_from_document(
+            {
+                "implementation": "acme-foundation",
+                "version": "1.0.0",
+                "coordinates": COORD,
+                "displaces": ["dotmac_sub.legacy_writer"],
+                "retirement": [{"product": "dotmac_sub", "outstanding": False}],
+            },
+            where="planted",
+        )
+    message = str(caught.value)
+    assert "retirement" in message
+    # The refusal must be ABOUT retirement, not the generic unknown-key message
+    # — `retirement` is a known field of the binding, just not one V1 can bind.
+    assert "unknown binding field" not in message
+
+
+def test_that_rejection_is_not_the_unknown_key_check_wearing_another_name() -> None:
+    """The near miss. `retirement` stays in `BINDING_FIELDS`, so the closed-field
+    check admits it and the specific refusal is what fires. Removing it from the
+    set instead would produce 'unknown binding field', which is false: it IS a
+    field of `ConcernBinding`, carrying real rules in `__post_init__`."""
+    from dotmac_deployment_foundation.application_profile import (
+        BINDING_FIELDS,
+        _binding_from_document,
+    )
+
+    assert "retirement" in BINDING_FIELDS
+    # And an actually-unknown key still gets the generic message, so the two
+    # refusals have not collapsed into one.
+    with pytest.raises(SpecError) as caught:
+        _binding_from_document(
+            {
+                "implementation": "acme-foundation",
+                "version": "1.0.0",
+                "coordinates": COORD,
+                "rate_limit_per_minute": 600,
+            },
+            where="planted",
+        )
+    assert "unknown binding field" in str(caught.value)
+
+
+def test_a_binding_document_WITHOUT_retirement_still_parses() -> None:
+    """Non-vacuity: the rejection must not turn every document into a refusal."""
+    from dotmac_deployment_foundation.application_profile import (
+        _binding_from_document,
+    )
+
+    parsed = _binding_from_document(
+        {
+            "implementation": "acme-foundation",
+            "version": "1.0.0",
+            "coordinates": COORD,
+            "displaces": [],
+        },
+        where="control",
+    )
+    assert parsed.retirement == ()
+
+
+def test_the_profile_digest_does_not_cover_retirement_which_is_WHY_V1_rejects() -> None:
+    """The premise of the rejection, asserted rather than described.
+
+    If `as_document` ever begins emitting `retirement`, this test fails and the
+    rejection above should be revisited in the same change — the reason for it
+    will have gone.
+    """
+    document = _binding().as_document()
+    assert "retirement" not in document
+    assert set(document) == {
+        "coordinates",
+        "displaces",
+        "implementation",
+        "state",
+        "version",
+    }
+
+
 # ── § 9: retirement evidence is typed, and silence is UNKNOWN ───────────────
 
 

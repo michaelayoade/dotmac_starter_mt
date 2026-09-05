@@ -1031,6 +1031,41 @@ def _binding_from_document(
             "or the entitlement surface",
             where=where,
         )
+    # V1 REJECTS retirement evidence rather than accepting and discarding it.
+    #
+    # `retirement` is in `BINDING_FIELDS`, so the closed-field check above lets
+    # it through; this parser never read it; and `ConcernBinding.as_document`
+    # never emits it. Three consequences followed, and the third is why this is
+    # a refusal rather than a TODO:
+    #
+    #   * the PROFILE DIGEST DOES NOT COVER DISPLACEMENT EVIDENCE. A value the
+    #     digest does not cover is a value nobody is bound to, however carefully
+    #     it was written;
+    #   * a caller supplying `displaces` WITH its `retirement` rows was refused
+    #     by `ConcernBinding.__post_init__` for carrying NO typed retirement
+    #     evidence — a message that is FALSE ABOUT ITS INPUT, because the input
+    #     carried exactly that. An operator reading it would go and add what was
+    #     already there;
+    #   * so the accepting path silently dropped the evidence and the refusing
+    #     path lied about why. Neither is a state to leave reachable.
+    #
+    # V2 represents displacement and retirement canonically — the profile binds
+    # the specific legacy responsibility and its evidence reference, and terminal
+    # retirement binds back to the replacing assembly and provider. Until then V1
+    # says so, at the parse, in a message that is true about the document it was
+    # handed.
+    if "retirement" in document:
+        raise SpecError(
+            f"{where}: this document carries `retirement`, and "
+            "ApplicationFoundationProfile.v1 cannot bind it — `as_document` "
+            "does not emit it, so the profile digest would not cover it and "
+            "nothing would be bound to what you wrote. Accepting and discarding "
+            "it is worse than refusing: the binding would then be refused for "
+            "carrying no retirement evidence, which is false about this "
+            "document. Displacement and retirement are represented canonically "
+            "in the successor admission contract; V1 rejects them",
+            where=where,
+        )
     return ConcernBinding(
         implementation=str(document["implementation"]),
         version=str(document["version"]),
