@@ -78,68 +78,140 @@
     {
       "absent_from_dialect_because": "an import probe cannot observe outcomes at all",
       "case": "all_negative",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "the battery runs and EVERY outcome is negative (broken_shut)"
     },
     {
       "absent_from_dialect_because": "the dual of all-negative; needs Foundation-defined negative scenarios, which the dialect has none of",
       "case": "answers_everything",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "positive scenarios pass AND negative scenarios also 'pass'"
     },
     {
       "absent_from_dialect_because": "the dialect accepts a locally computed digest, so this is the shape it institutionalises",
       "case": "foreign_inventory",
-      "legacy_counterpart_exists": true,
-      "new_to_the_successor": false,
+      "legacy_relation": "has_counterpart",
       "requires": "an inventory digest supplied by the caller rather than computed by Foundation over typed entries"
     },
     {
       "absent_from_dialect_because": "the dialect has no injection site and no provider artifact identity to compare, so 'right site, wrong provenance' is not expressible",
       "case": "foreign_provenance",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "an object at the DECLARED injection site whose artifact identity is not the resolved provider's"
     },
     {
       "absent_from_dialect_because": "V1 cannot bind retirement at all and now refuses it; the dialect discards it",
       "case": "retirement_round_trip",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "displacement and terminal retirement survive encode->digest->decode and bind back to the replacing assembly and provider"
     },
     {
       "absent_from_dialect_because": "Platform's dialect collapses provider/binding/verification into one declaration, so an unwired provider is not expressible",
       "case": "uninjected",
-      "new_to_the_successor": true,
+      "legacy_relation": "approximated",
       "requires": "provider resolves, no consumer binding joins it"
     },
     {
       "absent_from_dialect_because": "the dialect closes encoding only",
       "case": "unknown_key",
-      "legacy_counterpart_exists": true,
-      "new_to_the_successor": false,
+      "legacy_relation": "has_counterpart",
       "requires": "any document carries a key outside the closed set, on DECODE"
     },
     {
       "absent_from_dialect_because": "the dialect's identities are module-scoped, so the case cannot arise in it",
       "case": "wrong_assembly",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "a verification joins a binding from a different assembly"
     },
     {
       "absent_from_dialect_because": "the dialect's identities are module-scoped; a re-composed assembly at the same artifact is indistinguishable in it",
       "case": "wrong_composition",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "a verification naming a composition_digest other than the binding's, with the SAME assembly artifact"
     },
     {
       "absent_from_dialect_because": "the dialect has no injection site to disagree with",
       "case": "wrong_site",
-      "new_to_the_successor": true,
+      "legacy_relation": "no_counterpart",
       "requires": "an object is present at a site other than the declared typed injection site"
     }
   ],
-  "added_new_total": 8,
+  "added_new_total": 7,
   "added_total": 10,
+  "case_join": {
+    "$comment": "Case-by-case against Platform's `added` at the pin. AGREE means both sides classify the legacy relationship the same way. The three one-sided entries are VERSION SKEW and are named as such.",
+    "agree": [
+      "foreign_inventory",
+      "unknown_key",
+      "all_negative",
+      "answers_everything",
+      "retirement_round_trip",
+      "wrong_assembly",
+      "wrong_site"
+    ],
+    "disagree": [
+      {
+        "case": "uninjected",
+        "foundation": "new_to_the_successor: true",
+        "platform": "approximated",
+        "resolution": "Platform is right and this map is coarse. It carries a legacy row (`concern_spec_bound_without_a_consumer`): Platform asserted the requirement at construction and could not OBSERVE it, so the runtime refusal is new and the intent is not. A boolean cannot say that. `legacy_relation` replaces the boolean with Platform's three-value vocabulary."
+      }
+    ],
+    "version_skew": [
+      {
+        "case": "nonce_only",
+        "only_in": "platform",
+        "why": "dropped in Foundation revision 3 \u2014 the nonce no longer exists, so the row could never fire. Platform measured against revision 2, which still had it."
+      },
+      {
+        "case": "foreign_provenance",
+        "only_in": "foundation",
+        "why": "added in revision 5 (F6). Post-dates Platform's measurement."
+      },
+      {
+        "case": "wrong_composition",
+        "only_in": "foundation",
+        "why": "added in revision 4. Post-dates Platform's measurement."
+      }
+    ]
+  },
+  "envelope_join": {
+    "$comment": "The five rows that BLOCK DELETION, joined by Platform row id to the Foundation code that closes each. Section 3A.1 of the contract adds the envelope stage; this is the row-level evidence that it closes all five rather than most of them.",
+    "rows": [
+      {
+        "foundation_code": "envelope_absent",
+        "note": "the only verdict this programme has ever observed against a real image",
+        "platform_case": "document_absent",
+        "row_id": "PCP-V-01"
+      },
+      {
+        "foundation_code": "envelope_not_utf8",
+        "note": "",
+        "platform_case": "document_not_utf8",
+        "row_id": "PCP-V-02"
+      },
+      {
+        "foundation_code": "envelope_not_json",
+        "note": "",
+        "platform_case": "document_not_json",
+        "row_id": "PCP-V-03"
+      },
+      {
+        "foundation_code": "envelope_not_an_object",
+        "note": "",
+        "platform_case": "document_not_an_object",
+        "row_id": "PCP-V-04"
+      },
+      {
+        "foundation_code": "envelope_contract_unknown",
+        "note": "Platform records this as PARTIAL: `contract_mismatch` covers a CONSUMER naming another contract, not an unknown contract in the envelope. The envelope code is what closes the remainder.",
+        "platform_case": "contract_unknown",
+        "row_id": "PCP-V-11"
+      }
+    ],
+    "unmapped_rows_closed": 5,
+    "unmapped_rows_total": 5
+  },
   "legacy_breakdown": {
     "builder": 14,
     "type_boundary": 6,
@@ -149,9 +221,20 @@
   "legacy_rows_supplied_here": false,
   "legacy_total": 53,
   "parity_gate_passed": false,
+  "parity_gate_requires": [
+    "the counterpart artifact is fetched at its pinned commit and its sha256 matches `counterpart_sha256`",
+    "every Platform row in state `unmapped` has a Foundation code in `envelope_join`",
+    "Platform's four map_states sum to `legacy_total`",
+    "every case present in BOTH `added` lists agrees on its `legacy_relation`",
+    "`measured_against_foundation_revision` equals this contract's revision, or every difference is classified as version skew"
+  ],
   "platform_row_map": {
     "commit": "74dab8a8ec97bd8492d4eec5bde4edab74d4c957",
+    "counterpart_sha256": "5d69b4a59fa3dd7c17674e319c60ef46f376d7e6fcfd102bafc98ab75bbfd6aa",
+    "measured_against_foundation_revision": 2,
+    "measured_against_note": "Platform's map was measured against revision 2 of the Foundation contract. This map is revision 5. The skew is RECORDED rather than silently reconciled: three of the differences below are version skew, not disagreement, and a join that could not tell those apart would report progress as a defect.",
     "path": "docs/inventories/platform-parity-row-map.json",
+    "repository": "michaelayoade/dotmac_platform_control_plane",
     "repository_pr": "platform-cp#170",
     "row_identity": "PCP-<surface>-<ordinal>, allocated once and NEVER reused",
     "row_identity_note": "A retired row SPENDS its ordinal. Reuse would silently re-point a foreign reference at a different property, which is the one failure a stable identifier exists to prevent.",
@@ -170,7 +253,9 @@
       "document_not_json",
       "document_not_an_object",
       "contract_unknown"
-    ]
+    ],
+    "verified_at_pin": true,
+    "verified_unmoved_at_head": true
   },
   "status": "design-only"
 }

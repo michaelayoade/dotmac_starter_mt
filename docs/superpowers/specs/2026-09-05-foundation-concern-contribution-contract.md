@@ -1,9 +1,18 @@
 # The Foundation concern-contribution contract — DESIGN FOR REVIEW
 
-**Status: CONTRACT DESIGN ONLY — revision 5.**
+**Status: CONTRACT DESIGN ONLY — revision 6.**
 Not accepted, not implemented, and nothing depends on it. This is **not** profile
 admission and **not** cutover readiness; governance ADR 0039 remains Proposed and
 unenforced.
+
+**Revision 6 changes**: the **cross-repository parity join** (§ 11A) — Platform's
+map is fetched at its pinned commit, anchored by the **sha256 of its bytes**, and
+joined by ROW ID; it fails closed when the counterpart cannot be fetched, because
+an unavailable oracle is not a pass. On its first run the join found a claim of
+this document's that was too coarse: Platform classifies `uninjected` as
+`approximated`, a boolean could not carry that, and the honest count of genuine
+additions drops from 8 to **7**. § 12A's *no semantic translator* constraint and
+the atomic-removal condition are recorded (§ 11B).
 
 **Revision 5 changes** (third review): the F2 ruling **reaches § 4.3, § 12A and
 § 3.1** — the verification record is rebuilt in the ruled vocabulary, the receipt
@@ -1377,8 +1386,13 @@ programme progress.**
    them as gains would overstate what the successor adds. Ten obligations, eight
    genuine additions.
 4. **Replace** Platform's acceptance invocation.
-5. **Delete** Platform's builder, canonicalizer and verifier **in that same
-   composed change** — never a separate one, because that produces a temporary
+5. **Delete** Platform's builder, canonicalizer and verifier **atomically, when
+   the generic path ADMITS THE RETAINED PLATFORM ARTIFACT** — not when the
+   contract merely exists, and **with NO Platform-to-Foundation semantic
+   translator.** A shim mapping Platform's verdicts onto Foundation's would be
+   the two-competing-contracts shape this redirection rejected at the outset,
+   arriving as a migration aid and staying as an architecture. Removal is in that
+   same composed change — never a separate one, because that produces a temporary
    state with neither verifier.
 6. **Ratchet** so the local dialect cannot return: a two-directional guard that
    fails when a product-local canonicalizer or profile verifier reappears, and
@@ -1437,6 +1451,89 @@ one of them, and a partial join is the defect § 1.1 exists to prevent.
 **This proof is scheduled, not assumed.** It belongs to the enrolment step and
 must be run before ERP is composed, not after — the cheapest moment to discover
 an ERP-shaped requirement is while the contract is still a document.
+
+---
+
+## 11A. The CROSS-REPOSITORY parity join
+
+> **"Independently green suites are insufficient."**
+
+`parity_gate_passed` cannot flip on Foundation asserting that it covers
+Platform's rows. Two teams each asserting 53 is exactly what the arithmetic
+reconciliation replaced one level up, and asserting coverage of five envelope
+rows is the same shape one level down. **Something must join the two
+repositories' artifacts and fail if they disagree.**
+
+### 11A.1 The anchor
+
+| | |
+| --- | --- |
+| repository | `michaelayoade/dotmac_platform_control_plane` |
+| commit | `74dab8a8ec97bd8492d4eec5bde4edab74d4c957` |
+| path | `docs/inventories/platform-parity-row-map.json` |
+| schema | `platform-parity-row-map/1` |
+| **sha256 of the counterpart bytes** | `5d69b4a5…6aa` |
+
+The digest is the join's anchor and the reason it is a join rather than a
+citation. A pinned commit says *which* artifact; the digest says the bytes
+compared were the bytes pinned.
+
+### 11A.2 What the join checks, and that it FAILS CLOSED
+
+1. fetch the counterpart at the pinned commit; **re-derive its sha256 and
+   compare.** If it cannot be fetched, the join **REFUSES** — an unavailable
+   oracle is not a pass, which is this repository's standing rule and the one
+   most likely to be quietly inverted for a cross-repository dependency;
+2. every Platform row in state `unmapped` has a Foundation code
+   (`envelope_join`);
+3. Platform's four `map_states` sum to `legacy_total`;
+4. every case present in **both** `added` lists agrees on its
+   `legacy_relation`;
+5. the revision Platform measured against is recorded, and every difference is
+   either agreement or **classified version skew**.
+
+**Only then may `parity_gate_passed` flip.** It is false today.
+
+### 11A.3 What the join found — verified, not inherited
+
+Fetched and checked rather than taken from a summary, because the numbers had
+already been relayed to me once with an error.
+
+* Platform's map: **53 rows, `mapped 33 / migrates 13 / retires 2 / unmapped 5`**
+  — confirmed against the artifact;
+* **unmoved since the pin**: head and pinned bytes hash identically;
+* **all five unmapped rows close** against § 3A.1's envelope codes, joined by row
+  id — `PCP-V-01`…`04` and `PCP-V-11`. `PCP-V-11` is recorded by Platform as
+  PARTIAL (`contract_mismatch` covers a *consumer* naming another contract, not
+  an unknown contract in the envelope), and the envelope code closes the
+  remainder;
+* Platform measured against **revision 2**; this is revision 5.
+
+**One genuine disagreement, and Platform is right.** Platform classifies
+`uninjected` as **`approximated`** — it carries a legacy row
+(`concern_spec_bound_without_a_consumer`) because Platform asserted the
+requirement at construction and could not OBSERVE it, so the runtime refusal is
+new and the intent is not. This map called it simply new. **A boolean cannot say
+that**, so `new_to_the_successor` is replaced by Platform's three-value
+`legacy_relation` — `has_counterpart` / `approximated` / `no_counterpart`. The
+honest count of genuine additions drops from 8 to **7**.
+
+That is the join earning its place on its first run: it found a claim of this
+document's that was too coarse, in the direction of overstating what the
+successor adds.
+
+**Three one-sided cases are VERSION SKEW, not disagreement**, and the join must
+be able to tell those apart or it reports progress as a defect: `nonce_only`
+exists only in Platform's list (dropped in revision 3 — the nonce no longer
+exists, so the row could never fire), and `foreign_provenance` and
+`wrong_composition` exist only here (added in revisions 5 and 4, after Platform
+measured).
+
+### 11A.4 What this does NOT do
+
+It does not run either suite. It compares two committed artifacts. Independently
+green suites remain insufficient by construction, because the join never consults
+them.
 
 ---
 
