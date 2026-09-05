@@ -2,6 +2,8 @@
 
 ## Unreleased — 0.1.0a2+dev
 
+- Adds append-only provider transport-message correlations supporting multiple
+  global or account-scoped aliases per message, with typed historical import.
 - Adds an explicit typed snooze-until-reply lifecycle state.
 - Adds conflict-safe late binding for transport observation references.
 - Adds opaque product-supplied thread and message identities without making

@@ -42,6 +42,14 @@ class MessageIdScope(StrEnum):
     SUPPLIED = "supplied"
 
 
+class TransportMessageIdScope(StrEnum):
+    """Scope of a provider transport message reference."""
+
+    GLOBAL = "global"
+    ACCOUNT = "account"
+    NONE = "none"
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelSpec:
     """One product-owned channel and the traits conversation behavior reads."""
@@ -53,6 +61,7 @@ class ChannelSpec:
     thread_identity: ThreadIdentity
     message_id_scope: MessageIdScope
     label: str = ""
+    transport_message_id_scope: TransportMessageIdScope | None = None
 
     def __post_init__(self) -> None:
         if not self.code or self.code != self.code.strip().lower():
@@ -65,6 +74,26 @@ class ChannelSpec:
             )
         if not self.owner or not self.owner.strip():
             raise ValueError(f"channel {self.code!r} must declare an owner")
+        if self.transport_message_id_scope is None:
+            # Existing non-SUPPLIED declarations historically described the
+            # provider id scope once. Preserve that explicit contract. A
+            # supplied admission identity is product-owned and cannot silently
+            # choose a transport scope (external channels must declare one).
+            if self.message_id_scope is not MessageIdScope.SUPPLIED:
+                object.__setattr__(
+                    self,
+                    "transport_message_id_scope",
+                    TransportMessageIdScope(self.message_id_scope.value),
+                )
+            elif self.transport is Transport.INTERNAL:
+                object.__setattr__(
+                    self, "transport_message_id_scope", TransportMessageIdScope.NONE
+                )
+            else:
+                raise ValueError(
+                    f"channel {self.code!r} must explicitly declare "
+                    "transport_message_id_scope when message_id_scope is supplied"
+                )
         if self.transport is Transport.INTERNAL:
             if self.thread_identity is ThreadIdentity.PROVIDER:
                 raise ValueError(
@@ -125,6 +154,7 @@ __all__ = [
     "AddressForm",
     "ChannelSpec",
     "MessageIdScope",
+    "TransportMessageIdScope",
     "ThreadIdentity",
     "Transport",
     "UnknownChannelError",
