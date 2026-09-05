@@ -157,8 +157,11 @@ from typing import Final
 #: an authorization binding, the replay coordinate echoed, a signed and
 #: settleable result, and the three bindings a rehearsal does not take: a
 #: captured prestate, the failed system's own observed state, and a desired
-#: poststate. It has NOT been built, and it must not be until Lane 3 passes on
-#: the exact SHA.
+#: poststate. It WAS built once in run ``33920058598`` from ``753a004e`` as
+#: artifact ``9954731961``, but the receipt never entered the tree and the
+#: importable source later drifted. It is therefore spent and must not be
+#: rebuilt or published. ``candidate_window_baseline.json`` is the authoritative
+#: build-oracle record; allocation of a successor remains a separate decision.
 #:
 #: **WHICH AUTHORIZATION VOCABULARY CARRIES IT IS NOT DECIDED BY THIS BUMP, AND
 #: ``recover`` IS NOT ADDED TO `authorization.OPERATIONS` HERE.** An earlier

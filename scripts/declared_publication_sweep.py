@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Find every distribution declaring a version nobody can install.
+"""Find every distribution with no verified publication for its declared version.
 
 `tests/architecture/test_module_version_sync.py` proves a module's three version
-surfaces AGREE. It cannot prove the agreed version EXISTS: three surfaces reading
-`0.1.0a2` in unison say nothing about whether `0.1.0a2` was ever built, uploaded
-and verified. Internal consistency and publication are different questions, and
-only the first one had a guard.
+surfaces AGREE. It cannot prove the agreed version was PUBLISHED: three surfaces
+reading `0.1.0a2` in unison say nothing about whether `0.1.0a2` was uploaded,
+installed back and tagged. Internal consistency, candidate construction and
+verified publication are different questions; this detector owns only the last.
 
 The live example is `dotmac-integration`. It declares `0.1.0a2` on all three
 surfaces — the version-identity guard passes — while the newest tag is
 `dotmac-integration-v0.1.0a1`. A consumer that reads the repository, the
-changelog or the module catalogue and pins `==0.1.0a2` gets a resolver error,
-and the repository as checked in offers no way to notice. `dotmac-imports` is
-the sharper case: it declares `0.1.0a2` and has NO tag at all, so a distribution
-that has never been published reads exactly like one that has.
+changelog or the module catalogue and pins `==0.1.0a2` has no verified tag to
+resolve against, and the repository as checked in offers no way to notice.
+`dotmac-imports` is
+the sharper case: it declares `0.1.0a2` and has NO tag at all, so the sweep cannot
+distinguish an unbuilt distribution from a build or upload whose publication was
+not verified here.
 
 This is a DETECTOR, not a fixer. The repair for a declared-but-unpublished
 version is a release run or a deliberate decision to leave it unreleased — never
@@ -116,7 +118,7 @@ NEVER_PUBLISHED: Final = "never-published"
 #: both through this name: a second copy of the literal would be the
 #: second-authority defect in miniature — edit one, and the guard silently
 #: stops recognising what the generator now writes.
-UNWRITTEN_REASON: Final = "TODO: state why this version is not installable"
+UNWRITTEN_REASON: Final = "TODO: state why this version has no verified publication"
 
 
 class SweepRefused(SystemExit):
@@ -376,7 +378,8 @@ def reconcile(survey_result: dict, ledger: dict[str, dict]) -> list[str]:
             problems.append(
                 f"{distribution}: declares {finding['declared']} and no "
                 f"{finding['tag_prefix']}{finding['declared']} tag exists "
-                f"({finding['state']}). A version consumers cannot install is "
+                f"({finding['state']}). A version with no verified publication "
+                "cannot be resolved from this repository's release record; it is "
                 "either released or recorded in "
                 "docs/inventories/declared-publication-baseline.json with the "
                 "reason — NEVER repaired by editing the declared version down."

@@ -8,7 +8,7 @@ repository has two ledgers that a publication invalidates the moment the tag
 lands:
 
 1. ``docs/inventories/declared-publication-baseline.json`` — the ``unpublished``
-   map excusing a distribution that declares a version nobody can install.
+   map excusing a distribution whose declared version has no verified publication.
    Publishing means REMOVING that row.
 2. ``RELEASED_TAGS`` in ``tests/architecture/test_released_migrations.py`` —
    ``tag -> (distribution, commit, {migration: sha256})``, which holds released

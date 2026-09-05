@@ -132,6 +132,10 @@ notice this. For every live candidate build it reports:
 * ``drifted`` — the facility's ``src/`` tree object at this revision differs from
   the one that build compiled. One version name, two sets of importable bytes.
 
+The corresponding receipt/disposition/version transitions are lifecycle acts,
+not side effects of this detector. Reporting either finding authorizes none of
+them; the script refuses and leaves the choice to the release authority.
+
 ## Where it runs, which is the half that was missing
 
 In `ci.yml`'s own ``candidate-window`` job, on every pull request and every push
@@ -817,11 +821,12 @@ def window_baseline_document(rows: list[WindowFinding]) -> dict[str, Any]:
             "regenerated with `--window --write`, so the count cannot fall",
             "silently.",
             "",
-            "Repair `unrecorded` by committing the receipt the run uploaded.",
-            "Repair `drifted` by allocating a NEW version and appending a",
-            "CandidateDisposition.v1 for the superseded candidate. Which version",
-            "that is, is a decision; this guard refuses and names the binding,",
-            "and deliberately does not choose one.",
+            "The state transitions that can repair `unrecorded` and `drifted` are",
+            "committing the run's receipt, appending a CandidateDisposition.v1 and",
+            "allocating a NEW version. Naming those transitions is not authorization",
+            "to perform them. For the current a1 row Michael has authorized none of",
+            "them; this guard refuses and names the binding, and deliberately does",
+            "not choose a successor or mutate a lifecycle record.",
             "",
             "An EMPTY rows array is the healthy state and is a claim, not an",
             "absence: it says the build oracle was reached and every candidate it",

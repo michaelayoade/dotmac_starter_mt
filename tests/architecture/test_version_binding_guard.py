@@ -171,9 +171,13 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
 
     WHICH purposes are admitted flips with the declared version's lifecycle
     stage, and the flip is part of the record rather than a loosening. The
-    declared version is now `0.4.0a1`, declared and UNBUILT, so both purposes
-    admit: nothing forbids building it once, and nothing forbids the release
-    that would reuse that build.
+    declared version is now `0.4.0a1`. The record-only guard still sees it as
+    unbuilt and admits both purposes because its candidate receipt never entered
+    the tree. That answer is intentionally NOT the lifecycle answer: run
+    `33920058598` built it once, and the external-oracle candidate-window gate
+    refuses both the missing receipt and the later source drift. This test
+    documents the narrower record-reader result; it must not be cited as
+    authority to build or release `0.4.0a1`.
 
     `0.3.0a6` reached this same stage and left it without ever being built —
     the first name in this facility's ledger to do so. It acquired no receipt
@@ -212,13 +216,17 @@ def test_the_version_this_tree_declares_is_admitted_for_its_own_release() -> Non
 
 
 def test_the_declared_version_has_no_candidate_artifact_yet() -> None:
-    """The other half of the flip, in its UNBUILT position — and this test is
-    deliberately a lifecycle-stage assertion rather than an invariant.
+    """The other half of the flip, in its NO-COMMITTED-RECORD position.
+
+    This is deliberately a record-stage assertion rather than a lifecycle
+    invariant. The build oracle proves `0.4.0a1` was built; this reader proves
+    only that no `CandidateArtifact.v1` reached the repository.
 
     It has exactly two forms and it flips between them at a build:
 
-    - **declared and unbuilt** (this one): no `candidate artifact` binding
-      exists, so a first build is admitted.
+    - **declared with no committed candidate record** (this one): no
+      `candidate artifact` binding exists, so this narrower guard admits a
+      first build even when the external build oracle says one already ran;
     - **built** (`..._is_refused_for_a_SECOND_build`): the one candidate receipt
       IS the refusal.
 

@@ -320,7 +320,8 @@ def test_both_planes_name_the_same_thing_the_same_way() -> None:
 
     One thing, two names, across a boundary where the two are COMPARED — which
     is the shape that invites a reader to conclude they are different facts.
-    Renamed while `HostLeaseRelease.v1` had never crossed an artifact boundary.
+    The rename reached the unrecorded, drifted `0.4.0a1` candidate but has not
+    crossed an admissible published-artifact boundary.
     """
     lease_fields = HostLease.__dataclass_fields__
     release_fields = HostLeaseReleaseV1.__dataclass_fields__
