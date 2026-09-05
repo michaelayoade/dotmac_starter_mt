@@ -108,6 +108,7 @@ class Message(Base, TimestampMixin):
             "id",
             name="uq_messages_conversation_id_id",
         ),
+        UniqueConstraint("tenant_id", "id", name="uq_messages_tenant_id_id"),
         Index(
             "ix_messages_tenant_conversation_time",
             "tenant_id",
@@ -139,6 +140,58 @@ class Message(Base, TimestampMixin):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class MessageTransportRef(Base, TimestampMixin):
+    """Append-only provider correlation aliases for one domain message."""
+
+    __tablename__ = "message_transport_refs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "message_id"],
+            [f"{SCHEMA}.messages.tenant_id", f"{SCHEMA}.messages.id"],
+            name="fk_message_transport_refs_message",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "message_id",
+            "transport_key",
+            name="uq_message_transport_refs_tenant_message_key",
+        ),
+        UniqueConstraint(
+            "tenant_id", "transport_key", name="uq_message_transport_refs_tenant_key"
+        ),
+        sa.CheckConstraint(
+            "trim(raw_ref) <> ''", name="ck_message_transport_refs_raw_nonblank"
+        ),
+        sa.CheckConstraint(
+            "scope IN ('global', 'account')",
+            name="ck_message_transport_refs_scope",
+        ),
+        sa.CheckConstraint(
+            "(scope = 'account') = (account_scope IS NOT NULL AND "
+            "trim(account_scope) <> '')",
+            name="ck_message_transport_refs_account_coherence",
+        ),
+        Index(
+            "ix_message_transport_refs_tenant_message",
+            "tenant_id",
+            "message_id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="RESTRICT"), nullable=False
+    )
+    message_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    raw_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    account_scope: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    transport_key: Mapped[str] = mapped_column(String(68), nullable=False)
 
 
 class ConversationReadState(Base, TimestampMixin):
@@ -189,7 +242,7 @@ class ConversationReadState(Base, TimestampMixin):
     )
 
 
-TENANT_MODELS = (Conversation, Message, ConversationReadState)
+TENANT_MODELS = (Conversation, Message, ConversationReadState, MessageTransportRef)
 TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
 
 __all__ = [
@@ -199,4 +252,5 @@ __all__ = [
     "Conversation",
     "ConversationReadState",
     "Message",
+    "MessageTransportRef",
 ]
