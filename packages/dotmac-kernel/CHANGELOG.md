@@ -6,10 +6,12 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a101 — Unreleased
+## 0.1.0a102 — Unreleased
 
-This heading records the repair that the next separately authorized kernel
-release will bind. It does not allocate, publish or tag `0.1.0a101`.
+This heading records the facility that the next separately authorized kernel
+release will bind. It does not allocate, publish or tag `0.1.0a102`: the
+numeric successor of the immutable a101 tag becomes an allocated version only
+through `KernelReleaseAuthorization.v1`.
 
 ### Added
 
@@ -62,6 +64,21 @@ release will bind. It does not allocate, publish or tag `0.1.0a101`.
   `dotmac_kernel.logging.request_id_var`, which this facility bridges to so log
   lines keep a correlation id. The two are ALTERNATIVES, not layers; an assembly
   must install one. No guard catches installing both, and none is claimed.
+
+## 0.1.0a101 — 2026-09-03
+
+Published and tagged `dotmac-kernel-v0.1.0a101`, peeled to
+`037ef065376c0ad4597cc59f86f4ef3eb7d5322b`.
+
+This heading said `Unreleased` for the whole of a101's published life, and while
+it did, the request-evidence entry above was filed beneath it. The changelog
+therefore credited a101 with a module its tag tree never held and its wheel does
+not contain — source-complete read as installable, which is the defect this
+repair exists to stop repeating. The entry now sits under the version that will
+actually ship it, and
+`tests/architecture/test_kernel_changelog_release_claims.py` refuses any section
+whose heading is already tagged and which names a `dotmac_kernel` module that
+tag does not carry.
 
 - `dotmac_kernel.semantic_encoding` (also on the package-root public surface) —
   `encode`, `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`,

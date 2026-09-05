@@ -25,6 +25,7 @@ here: a schema validating against a set the writer invents is not a validation.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from dotmac_deployment_foundation.controller_identity import (
@@ -92,7 +93,10 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
         "vm_slot": SLOT,
         "vm_installation_id": "",
         "candidate_version": "0.4.0a1",
-        "source_revision": "0" * 40,
+        # TWO revisions, DIFFERENT here on purpose: a fixture that used one
+        # value for both would let a writer emitting one of them twice pass.
+        "candidate_source_revision": "0" * 40,
+        "runner_revision": "1" * 40,
         "authorization_run_id": lease.authorization_run_id,
         "rehearsal_run_id": "33860000001",
         "outcome": TerminalOutcome(receipt_digest="sha256:" + "b" * 64),
@@ -114,6 +118,96 @@ def _destroy(release, *, now=AFTER, slot=SLOT, candidate="0.4.0a1", **kw):
     return require_release_before_destruction(
         _lease(), release, now=now, vm_slot=slot, candidate_version=candidate, **kw
     )
+
+
+# ── the record names WHICH ARTIFACT ran, and separately WHICH RUNNER ───────
+#
+# `source_revision`'s own docstring said "WHICH artifact ran — a release from
+# another candidate's run is evidence about another run", and the runner
+# populated it with its OWN head SHA. The field said one thing and carried
+# another, so a destroyer reading it attributed the bytes to the wrong commit.
+
+
+def test_the_release_names_both_revisions_and_they_are_not_one_field() -> None:
+    """Two questions, two fields. Fails before the change: `HostLeaseReleaseV1`
+    took `source_revision` and had no `runner_revision`, so this construction
+    raises `TypeError`."""
+    release = _release()
+    assert release.candidate_source_revision == "0" * 40
+    assert release.runner_revision == "1" * 40
+    assert release.candidate_source_revision != release.runner_revision
+
+
+def test_the_document_carries_both_under_their_own_names() -> None:
+    """The rename reaches the DOCUMENT, not just the attribute. A destroyer
+    reads the stored JSON, so a field renamed in Python and left alone in
+    `as_document` would change nothing where it matters."""
+    document = _release().as_document()
+    assert document["candidate_source_revision"] == "0" * 40
+    assert document["runner_revision"] == "1" * 40
+    assert "source_revision" not in document, (
+        "the old name is still emitted, so one record now answers the same "
+        "question twice and a reader may believe either"
+    )
+
+
+def test_the_writer_and_the_READER_agree_on_both_new_names(
+    tmp_path: Path,
+) -> None:
+    """A rename that reaches `as_document` and not the parser produces a record
+    the store can write and cannot read back. Driven through the real pair.
+
+    Written and reloaded through `lease.py`'s store, which is the only publisher
+    — the same one the `os.link` sweep pins — so this exercises the path a
+    destroyer actually reads from.
+    """
+    from dotmac_deployment_foundation.lease import write_lease
+    from dotmac_deployment_foundation.lease_release import load_release, write_release
+
+    lease = _lease()
+    write_lease(lease, directory=tmp_path)
+    original = _release(lease)
+    write_release(original, target=lease.target, directory=tmp_path)
+    reloaded = load_release(lease.target, directory=tmp_path)
+    assert reloaded is not None
+    assert reloaded.candidate_source_revision == original.candidate_source_revision
+    assert reloaded.runner_revision == original.runner_revision
+    assert reloaded.digest() == original.digest()
+
+
+@pytest.mark.parametrize("field", ["candidate_source_revision", "runner_revision"])
+def test_neither_revision_may_be_empty(field: str) -> None:
+    """Both are things a destroyer checks before wiping a machine, so both are
+    required. A field added as optional would be a field nobody fills."""
+    with pytest.raises(SpecError) as exc:
+        _release(**{field: "   "})
+    assert exc.value.code == RELEASE_MALFORMED
+    assert field in str(exc.value)
+
+
+def test_the_record_carries_NO_publication_revision() -> None:
+    """The producer cannot observe it, so the field must not exist.
+
+    A release is sealed by the Lane 3 runner. Which commit later publishes has
+    not been decided at that moment, so any value here would be a guess, a
+    default, or a copy of one of the other two — and each reads to a destroyer
+    as an established fact. A field its only producer cannot fill truthfully is
+    worse than an absent one.
+
+    Asserted over the DOCUMENT's key set rather than by name-spotting, so a
+    future `release_revision`, `publication_revision` or `tag_revision` is
+    caught by the same test rather than by whichever alias someone picks.
+    """
+    keys = set(_release().as_document())
+    forbidden = {k for k in keys if "publi" in k or "release_revision" in k}
+    assert forbidden == set(), (
+        f"the release record carries {sorted(forbidden)}. The Lane 3 runner "
+        "cannot observe the publication revision; a field it cannot fill "
+        "truthfully must not exist in its record"
+    )
+    # And the two it CAN observe are both present, so this is not passing by
+    # the record being empty.
+    assert {"candidate_source_revision", "runner_revision"} <= keys
 
 
 # ── expiry is not release ───────────────────────────────────────────────────

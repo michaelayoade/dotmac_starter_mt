@@ -2,6 +2,80 @@
 
 ## 0.4.0a1 — unreleased, NEVER BUILT
 
+### `HostLeaseRelease.v1` says which ARTIFACT ran, and separately which RUNNER
+
+`source_revision`'s own docstring said *"WHICH artifact ran — a release from
+another candidate's run is evidence about another run"*, and the Lane 3 runner
+populated it with its own head SHA. The field said one thing and carried
+another, so a destroyer reading it attributed the bytes to the wrong commit.
+
+- `source_revision` is renamed **`candidate_source_revision`** and is populated
+  from the committed `CandidateArtifact.v1`, through the runner's
+  `--candidate-source-revision` argument;
+- **`runner_revision`** is added, populated from `--foundation-revision`.
+
+Both are required and both reach `as_document`, the parser and the digest, so
+the writer and the reader cannot drift apart on the rename.
+
+**No publication revision, and this is the deciding reason rather than an
+omission: the Lane 3 runner cannot observe it.** A release is sealed before any
+commit has been chosen to publish. Any value would be a guess, a default, or a
+copy of one of the other two, and each reads to a destroyer as an established
+fact. A field its only producer cannot fill truthfully must not exist.
+
+Free to do now: `lease_release.py` is in no built candidate wheel — checked
+against `0.3.0a1` and `0.3.0a5` rather than assumed.
+
+### `IntegrationSurfaceAbsenceProofV1.image_digest` → `artifact_digest`
+
+Not cosmetic. It follows a ruling about **what the proof binds: the Platform
+application wheel, not the OCI image the proof travels inside.** A proof
+embedded in an image cannot carry that image's own digest — the digest is over
+the finished image, and the image is not finished until the proof is in it. The
+old name asked a producer for a value that does not exist yet, and every way out
+of that is worse than the rename.
+
+The field, the `satisfies` keyword, the emitted document key and the prose all
+move together; `satisfies` is keyword-only, so a caller still passing an OCI
+image digest gets a `TypeError` rather than a proof that quietly never
+satisfies. Every other `image_digest` in this package is a real OCI image digest
+and keeps its name.
+
+Free now, expensive later: the type is in no built candidate wheel.
+
+### Ruling 4 — the three revisions stand in a stated RELATIONSHIP
+
+Neither equality nor nothing.
+
+Equality recreates the bootstrap loop `foundation-candidate.yml` exists to
+break: a candidate must be buildable BEFORE the commit that rehearses it, so
+every later commit would invalidate it and the release could never be satisfied.
+All five recorded candidates were built at commits that are ancestors of `main`
+and not its head. Requiring nothing is the opposite failure: a candidate built on
+a divergent branch, rehearsed and published by a protected-main run, with
+nothing saying the bytes came from code that was never on main.
+
+`release_facility.require_revision_relationships` enforces **ancestry**, against
+BOTH protected revisions — checking only one leaves the other open. Equality
+satisfies ancestry, so a candidate built at the tip is still allowed.
+
+An unknown commit refuses as a FETCH problem and names `fetch-depth`, separately
+from a known non-ancestor, because a shallow clone answers "not an ancestor" for
+two commits that are related — which reads exactly like the defect and is how a
+real guard gets disabled.
+
+`require_tag_peels_to` enforces that **the version tag peels to the candidate
+source commit**, in the strict sense: `rev-list -n 1`, the peeled commit, never
+`rev-parse`, which returns an annotated tag's own object sha. The release lane
+now tags the commit the bytes were built from rather than the release run's SHA
+— a tag pointing at a tree that was never built sends a consumer inspecting what
+they installed to code that is not what they installed — and records the
+release-adapter revision separately in the annotation.
+
+The exact-digest half is unchanged and deliberately not re-derived:
+`verify-candidate` compares the bytes with the receipt and `require_rehearsal.py
+--artifact-digest` compares the receipt with the bytes.
+
 ### Three revisions, three bindings — and one of them was bound to nothing
 
 The build/rehearse/publish sequence involves three commits and they answer three

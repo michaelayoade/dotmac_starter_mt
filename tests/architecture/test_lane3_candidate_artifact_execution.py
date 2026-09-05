@@ -379,6 +379,296 @@ def test_resolve_candidate_emits_the_source_revision_under_its_own_name() -> Non
     )
 
 
+# ── ruling 4, the DECISIONS: driven against real git history ───────────────
+#
+# The workflow checks below read strings out of YAML. These run the functions
+# those strings invoke, over a real repository, because a flag in a workflow
+# that nobody has watched refuse is exactly as good as no flag.
+
+
+def _repo(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A real repository: two commits on main and one on a divergent branch."""
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def g(*a: str) -> str:
+        return subprocess.run(  # noqa: S603 - fixed argv, a test fixture
+            ["git", *a],  # noqa: S607
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "x@y")
+    g("config", "user.name", "x")
+    (root / "a").write_text("1", encoding="utf-8")
+    g("add", "a")
+    g("commit", "-qm", "one")
+    built_from = g("rev-parse", "HEAD")
+    (root / "a").write_text("2", encoding="utf-8")
+    g("add", "a")
+    g("commit", "-qm", "two")
+    tip = g("rev-parse", "HEAD")
+    g("checkout", "-q", "-b", "side", built_from)
+    (root / "b").write_text("3", encoding="utf-8")
+    g("add", "b")
+    g("commit", "-qm", "divergent")
+    divergent = g("rev-parse", "HEAD")
+    g("checkout", "-q", "main")
+    return root, built_from, tip, divergent
+
+
+def test_a_candidate_built_from_an_ANCESTOR_is_accepted(tmp_path: Path) -> None:
+    """The accepting control, and the case equality would wrongly refuse.
+
+    Every recorded candidate was built at a commit that is an ancestor of `main`
+    and not its head — `foundation-candidate.yml` exists so a candidate can be
+    built BEFORE the commit that rehearses it. Requiring equality here would not
+    be stricter; it would make the release unsatisfiable, and unsatisfiable
+    gates get waived rather than met.
+    """
+    facility = _release_facility()
+    root, built_from, tip, _ = _repo(tmp_path)
+    bound = facility.require_revision_relationships(
+        {"source_sha": built_from},
+        runner_revision=tip,
+        release_revision=tip,
+        repo_root=root,
+    )
+    assert bound["candidate_source_revision"] == built_from
+    assert bound["runner_revision"] == tip
+
+
+def test_a_candidate_built_at_the_TIP_is_also_accepted(tmp_path: Path) -> None:
+    """Ancestry admits equality, so the strict case still passes. Without this
+    the rule could be 'strictly older', which nobody ruled."""
+    facility = _release_facility()
+    root, _, tip, _ = _repo(tmp_path)
+    assert facility.require_revision_relationships(
+        {"source_sha": tip}, runner_revision=tip, release_revision=tip, repo_root=root
+    )
+
+
+def test_a_candidate_from_a_DIVERGENT_branch_is_refused(tmp_path: Path) -> None:
+    """The substitution 'no relationship' would permit: bytes built from code
+    that was never on the protected branch, rehearsed and published by a
+    protected-main run, with nothing saying so."""
+    facility = _release_facility()
+    root, _, tip, divergent = _repo(tmp_path)
+    with pytest.raises(facility.ReleaseRefused) as exc:
+        facility.require_revision_relationships(
+            {"source_sha": divergent},
+            runner_revision=tip,
+            release_revision=tip,
+            repo_root=root,
+        )
+    assert "NOT an ancestor" in str(exc.value)
+
+
+def test_BOTH_protected_revisions_are_checked(tmp_path: Path) -> None:
+    """Checking only one leaves the other open: only the release revision would
+    let a rehearsal run on a branch that never contained the candidate source;
+    only the runner's would let publication happen from one."""
+    facility = _release_facility()
+    root, built_from, tip, divergent = _repo(tmp_path)
+    # Sound against the runner, divergent against the release revision.
+    with pytest.raises(facility.ReleaseRefused) as exc:
+        facility.require_revision_relationships(
+            {"source_sha": tip},
+            runner_revision=tip,
+            release_revision=divergent,
+            repo_root=root,
+        )
+    assert "release revision" in str(exc.value)
+    # And the mirror image.
+    with pytest.raises(facility.ReleaseRefused) as exc:
+        facility.require_revision_relationships(
+            {"source_sha": tip},
+            runner_revision=divergent,
+            release_revision=tip,
+            repo_root=root,
+        )
+    assert "Lane 3 runner" in str(exc.value)
+
+
+def test_an_UNFETCHED_commit_refuses_as_a_fetch_problem_not_a_branch_one(
+    tmp_path: Path,
+) -> None:
+    """Two failures, two repairs, and collapsing them is how a real guard gets
+    disabled.
+
+    A shallow clone answers "not an ancestor" for two commits that are related,
+    so a check that reported that would blame a divergent branch for a missing
+    `fetch-depth: 0`. The refusal names the fetch.
+    """
+    facility = _release_facility()
+    root, _, tip, _ = _repo(tmp_path)
+    with pytest.raises(facility.ReleaseRefused) as exc:
+        facility.require_revision_relationships(
+            {"source_sha": "b" * 40},
+            runner_revision=tip,
+            release_revision=tip,
+            repo_root=root,
+        )
+    message = str(exc.value)
+    assert "fetch-depth" in message
+    assert "NOT an ancestor" not in message
+
+
+def test_the_tag_must_PEEL_to_the_candidate_source_commit(tmp_path: Path) -> None:
+    """`git rev-parse <annotated tag>` returns the TAG OBJECT's sha; only
+    `rev-list -n 1` returns the commit. This repository has already had a gate
+    turn on that distinction, so the loose reading is asserted to fail here.
+    """
+    facility = _release_facility()
+    root, built_from, tip, _ = _repo(tmp_path)
+
+    def g(*a: str) -> str:
+        return subprocess.run(  # noqa: S603 - fixed argv, a test fixture
+            ["git", *a],  # noqa: S607
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    g("tag", "-a", "v1", "-m", "annotated", built_from)
+    tag_object = g("rev-parse", "v1")
+    assert tag_object != built_from, "the fixture did not create an ANNOTATED tag"
+
+    assert (
+        facility.require_tag_peels_to("v1", expected_commit=built_from, repo_root=root)
+        == built_from
+    )
+    # Points at a real commit, the wrong one.
+    with pytest.raises(facility.ReleaseRefused):
+        facility.require_tag_peels_to("v1", expected_commit=tip, repo_root=root)
+    # The LOOSE reading: the tag object's own sha is not the commit.
+    with pytest.raises(facility.ReleaseRefused):
+        facility.require_tag_peels_to("v1", expected_commit=tag_object, repo_root=root)
+
+
+# ── ruling 4: the three revisions stand in a stated RELATIONSHIP ───────────
+
+
+def _publish_steps(document: dict[str, Any]) -> list[str]:
+    job = next(
+        name
+        for name, body in document["jobs"].items()
+        if any("git tag -a" in str(step.get("run", "")) for step in body["steps"])
+    )
+    return _run_steps(document, job)
+
+
+def test_the_release_lane_binds_the_three_revisions_by_ancestry() -> None:
+    """Neither equality nor nothing.
+
+    Equality recreates the bootstrap loop; no relationship permits a candidate
+    built on a divergent branch to be rehearsed and published by a
+    protected-main run. `verify-revisions` is the ancestry check, and the runner
+    revision must come from the RECEIPT rather than from a workflow variable —
+    a value re-derived in the lane would be the lane agreeing with itself.
+    """
+    runs = _run_steps(_document(RELEASE), "build")
+    bind = next((body for body in runs if "verify-revisions" in body), "")
+    assert bind, "the release lane does not bind the three revisions at all"
+    assert "--runner-revision" in bind and "--release-revision" in bind
+    assert (
+        "steps.rehearsal.outputs.rehearsal_runner_revision" in bind
+    ), "the runner revision is not taken from the verified receipt"
+    assert "${GITHUB_SHA}" in bind, "the release revision is not this run's SHA"
+
+
+def test_the_version_tag_targets_the_commit_the_candidate_was_built_from() -> None:
+    """A version tag names where this version's SOURCE is.
+
+    Tagging the release run's SHA points the tag at a tree that was never
+    built, so a consumer checking out the tag to inspect what they installed
+    gets code that is not what they installed.
+    """
+    tag_step = next(
+        body for body in _publish_steps(_document(RELEASE)) if "git tag -a" in body
+    )
+    assert (
+        "candidate_source_sha" in tag_step
+    ), "the tag does not target the candidate source commit"
+    assert 'git tag -a "${TAG}"' in tag_step
+    # The release revision is not lost — it is recorded separately, which is
+    # what "bound independently" means.
+    assert "release-adapter-revision: ${GITHUB_SHA}" in tag_step
+
+
+def test_the_tag_is_read_back_from_GIT_and_peeled() -> None:
+    """`git tag` succeeding says the command was accepted; only reading the ref
+    back says what it resolves to. And PEELED: an annotated tag is an object of
+    its own, so `rev-parse` returns that object's sha rather than the commit —
+    the distinction a released-manifest gate in this repository already turned
+    on."""
+    steps = _publish_steps(_document(RELEASE))
+    verify = next((body for body in steps if "verify-tag" in body), "")
+    assert verify, "the pushed tag is never read back"
+    positions = [
+        i
+        for i, body in enumerate(steps)
+        if "git tag -a" in body or "verify-tag" in body
+    ]
+    assert (
+        positions == sorted(positions) and len(positions) == 2
+    ), "the tag is verified before it is written"
+
+
+def test_those_three_guards_bite() -> None:
+    """Sensitivity, one planted defect each. All three assertions above pass
+    over a workflow that is already correct."""
+    original = _document(RELEASE)
+
+    # (1) ancestry dropped entirely.
+    unbound = copy.deepcopy(original)
+    unbound["jobs"]["build"]["steps"] = [
+        step
+        for step in unbound["jobs"]["build"]["steps"]
+        if "verify-revisions" not in str(step.get("run", ""))
+    ]
+    runs = _run_steps(unbound, "build")
+    assert not any("verify-revisions" in body for body in runs)
+
+    # (2) the runner revision re-derived in the lane instead of read from the
+    #     receipt — the shape that looks right and proves nothing.
+    self_agreeing = copy.deepcopy(original)
+    for step in self_agreeing["jobs"]["build"]["steps"]:
+        if "verify-revisions" in str(step.get("run", "")):
+            step["run"] = str(step["run"]).replace(
+                "${{ steps.rehearsal.outputs.rehearsal_runner_revision }}",
+                "${GITHUB_SHA}",
+            )
+    bind = next(
+        body
+        for body in _run_steps(self_agreeing, "build")
+        if "verify-revisions" in body
+    )
+    assert "steps.rehearsal.outputs.rehearsal_runner_revision" not in bind
+
+    # (3) the tag back on the release SHA.
+    mistagged = copy.deepcopy(original)
+    for step in mistagged["jobs"][
+        next(
+            name
+            for name, body in mistagged["jobs"].items()
+            if any("git tag -a" in str(s.get("run", "")) for s in body["steps"])
+        )
+    ]["steps"]:
+        if "git tag -a" in str(step.get("run", "")):
+            step["run"] = (
+                str(step["run"])
+                .replace('"${SOURCE}"\n', '"${GITHUB_SHA}"\n')
+                .replace("candidate_source_sha", "release_sha")
+            )
+    tag_step = next(body for body in _publish_steps(mistagged) if "git tag -a" in body)
+    assert "candidate_source_sha" not in tag_step
+
+
 # ── the isolation is proved, not asserted ──────────────────────────────────
 #
 # `-E -P` in a workflow is a string in a YAML file, and every check above is a
