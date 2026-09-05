@@ -68,6 +68,23 @@ def test_internal_transport_cannot_claim_provider_identity() -> None:
             thread_identity=ThreadIdentity.PROVIDER,
             message_id_scope=MessageIdScope.NONE,
         )
+
+
+def test_internal_transport_allows_only_none_or_supplied_message_identity() -> None:
+    internal = _email(
+        code="field_job",
+        transport=Transport.INTERNAL,
+        thread_identity=ThreadIdentity.SUPPLIED,
+        message_id_scope=MessageIdScope.SUPPLIED,
+    )
+    assert internal.message_id_scope is MessageIdScope.SUPPLIED
+    with pytest.raises(ValueError, match="message_id_scope"):
+        _email(
+            code="field_job",
+            transport=Transport.INTERNAL,
+            thread_identity=ThreadIdentity.SUPPLIED,
+            message_id_scope=MessageIdScope.GLOBAL,
+        )
     with pytest.raises(ValueError, match="message_id_scope"):
         _email(
             code="note",

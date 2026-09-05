@@ -20,7 +20,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_inbox.channels import channel_spec
-from dotmac_inbox.lifecycle import Direction, Status, validate_reason
+from dotmac_inbox.lifecycle import (
+    Direction,
+    SnoozeUntilReply,
+    Status,
+    validate_reason,
+)
 from dotmac_inbox.models import Conversation, ConversationReadState, Message
 from dotmac_inbox.service import (
     ConversationConflict,
@@ -40,7 +45,7 @@ class ImportConversation:
     first_message_at: datetime | None
     last_message_at: datetime | None
     resolved_at: datetime | None
-    snoozed_until: datetime | None
+    snoozed_until: datetime | SnoozeUntilReply | None
     created_at: datetime
     updated_at: datetime
 
@@ -82,6 +87,14 @@ def _optional_aware(value: datetime | None, field: str) -> datetime | None:
     return None if value is None else _aware(value, field)
 
 
+def _normalized_snooze_until(
+    value: datetime | SnoozeUntilReply | None,
+) -> datetime | None:
+    if isinstance(value, SnoozeUntilReply):
+        return None
+    return _optional_aware(value, "snoozed_until")
+
+
 def _instant(value: datetime) -> datetime:
     """Normalize SQLite's timezone-naive unit-test round trip."""
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
@@ -120,15 +133,18 @@ def _validate_conversation_times(command: ImportConversation) -> None:
     first = _optional_aware(command.first_message_at, "first_message_at")
     last = _optional_aware(command.last_message_at, "last_message_at")
     resolved = _optional_aware(command.resolved_at, "resolved_at")
-    snoozed = _optional_aware(command.snoozed_until, "snoozed_until")
+    snoozed = _normalized_snooze_until(command.snoozed_until)
     if first is not None and last is not None and _instant(last) < _instant(first):
         raise ValueError("last_message_at cannot precede first_message_at")
     if command.status is not Status.RESOLVED and resolved is not None:
         raise ConversationConflict("resolved_at is valid only for resolved history")
     if command.status is Status.SNOOZED:
         if snoozed is None:
-            raise ConversationConflict("snoozed history requires snoozed_until")
-    elif snoozed is not None:
+            if not isinstance(command.snoozed_until, SnoozeUntilReply):
+                raise ConversationConflict(
+                    "snoozed history requires snoozed_until or SnoozeUntilReply"
+                )
+    elif snoozed is not None or isinstance(command.snoozed_until, SnoozeUntilReply):
         raise ConversationConflict("snoozed_until is valid only for snoozed history")
 
 
@@ -138,6 +154,7 @@ def import_conversation(
     """Import or exactly replay one historical conversation under its source id."""
     _validate_conversation_times(command)
     created_at, updated_at = _history_timestamps(command.created_at, command.updated_at)
+    snoozed = _normalized_snooze_until(command.snoozed_until)
     channel = channel_spec(command.identity.channel).code
     canonical_thread_key = thread_key(command.identity)
     reason = validate_reason(command.reason, status=command.status)
@@ -149,6 +166,7 @@ def import_conversation(
         "contact": command.identity.contact,
         "thread_key": canonical_thread_key,
         "transport_thread_ref": command.identity.external_thread_id,
+        "supplied_thread_ref": command.identity.supplied_thread_ref,
         "status": command.status.value,
         "status_reason": reason,
         "subject": command.subject,
@@ -156,7 +174,7 @@ def import_conversation(
         "first_message_at": command.first_message_at,
         "last_message_at": command.last_message_at,
         "resolved_at": command.resolved_at,
-        "snoozed_until": command.snoozed_until,
+        "snoozed_until": snoozed,
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -234,6 +252,7 @@ def import_message(db: Session, *, tenant_id: UUID, command: ImportMessage) -> M
         "subject": command.identity.subject,
         "body": command.identity.body,
         "transport_message_ref": command.identity.external_message_id,
+        "supplied_message_ref": command.identity.supplied_message_ref,
         "transport_observation_ref": command.transport_observation_ref,
         "author_id": command.author_id,
         "occurred_at": occurred_at,

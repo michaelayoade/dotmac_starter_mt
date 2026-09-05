@@ -6843,7 +6843,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
-    "dotmac-inbox": frozenset(),
+    "dotmac-inbox": frozenset({"ib_0002_supplied_identity.py"}),
     "dotmac-kernel": frozenset(),
     "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),

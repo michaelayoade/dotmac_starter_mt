@@ -32,12 +32,14 @@ class Transport(StrEnum):
 class ThreadIdentity(StrEnum):
     PROVIDER = "provider"
     DERIVED = "derived"
+    SUPPLIED = "supplied"
 
 
 class MessageIdScope(StrEnum):
     GLOBAL = "global"
     ACCOUNT = "account"
     NONE = "none"
+    SUPPLIED = "supplied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +71,10 @@ class ChannelSpec:
                     f"channel {self.code!r} is internal but claims provider thread "
                     "identity"
                 )
-            if self.message_id_scope is not MessageIdScope.NONE:
+            if self.message_id_scope not in {
+                MessageIdScope.NONE,
+                MessageIdScope.SUPPLIED,
+            }:
                 raise ValueError(
                     f"channel {self.code!r} is internal but claims "
                     f"message_id_scope={self.message_id_scope.value!r}"

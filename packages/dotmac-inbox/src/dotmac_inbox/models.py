@@ -30,6 +30,21 @@ class Conversation(Base, TimestampMixin):
 
     __tablename__ = "conversations"
     __table_args__ = (
+        sa.CheckConstraint(
+            "supplied_thread_ref IS NULL OR trim(supplied_thread_ref) <> ''",
+            name="ck_conversations_supplied_thread_ref_nonblank",
+        ),
+        sa.CheckConstraint(
+            "trim(coalesce(contact, '')) <> '' OR "
+            "trim(coalesce(transport_thread_ref, '')) <> '' OR "
+            "trim(coalesce(supplied_thread_ref, '')) <> ''",
+            name="ck_conversations_identity_evidence",
+        ),
+        sa.CheckConstraint(
+            "NOT (supplied_thread_ref IS NOT NULL "
+            "AND transport_thread_ref IS NOT NULL)",
+            name="ck_conversations_thread_refs_exclusive",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_conversations_tenant_id_id"),
         UniqueConstraint(
             "tenant_id", "thread_key", name="uq_conversations_tenant_thread"
@@ -49,9 +64,10 @@ class Conversation(Base, TimestampMixin):
     )
     channel: Mapped[str] = mapped_column(String(40), nullable=False)
     account_scope: Mapped[str] = mapped_column(String(160), nullable=False)
-    contact: Mapped[str] = mapped_column(String(320), nullable=False)
+    contact: Mapped[str | None] = mapped_column(String(320), nullable=True)
     thread_key: Mapped[str] = mapped_column(String(512), nullable=False)
     transport_thread_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    supplied_thread_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     status_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -75,6 +91,10 @@ class Message(Base, TimestampMixin):
 
     __tablename__ = "messages"
     __table_args__ = (
+        sa.CheckConstraint(
+            "supplied_message_ref IS NULL OR trim(supplied_message_ref) <> ''",
+            name="ck_messages_supplied_message_ref_nonblank",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "conversation_id"],
             [f"{SCHEMA}.conversations.tenant_id", f"{SCHEMA}.conversations.id"],
@@ -111,6 +131,7 @@ class Message(Base, TimestampMixin):
     transport_message_ref: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )
+    supplied_message_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     transport_observation_ref: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )

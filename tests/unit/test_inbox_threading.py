@@ -46,12 +46,20 @@ FIELD_JOB = ChannelSpec(
     thread_identity=ThreadIdentity.DERIVED,
     message_id_scope=MessageIdScope.NONE,
 )
+SUPPLIED = ChannelSpec(
+    code="work_event",
+    owner="test_product",
+    address_form=AddressForm.OPAQUE,
+    transport=Transport.INTERNAL,
+    thread_identity=ThreadIdentity.SUPPLIED,
+    message_id_scope=MessageIdScope.SUPPLIED,
+)
 
 
 @pytest.fixture(autouse=True)
 def _registry():
     reset_channel_registry_for_tests()
-    register_channels([EMAIL, WHATSAPP, FIELD_JOB])
+    register_channels([EMAIL, WHATSAPP, FIELD_JOB, SUPPLIED])
     yield
     reset_channel_registry_for_tests()
 
@@ -123,6 +131,72 @@ def test_threading_with_neither_a_thread_id_nor_a_contact_is_refused() -> None:
         thread_key(
             InboundIdentity(channel="email", account_scope="support@x", contact="")
         )
+
+
+def test_a_supplied_thread_is_contact_independent_and_delimiter_safe() -> None:
+    first = thread_key(
+        InboundIdentity(
+            channel="work_event",
+            account_scope="dispatch:a",
+            contact=None,
+            supplied_thread_ref="work:42|north",
+        )
+    )
+    second = thread_key(
+        InboundIdentity(
+            channel="work_event",
+            account_scope="dispatch:a:work",
+            contact=None,
+            supplied_thread_ref="42|north",
+        )
+    )
+    assert (
+        first == "work_event:t1:"
+        "1d3ff13060124a4fcc726e5a320cc8a2200a295f5db3a06990f12b53a9728c86"
+    )
+    assert first != second
+    assert len(first) <= 512
+
+
+@pytest.mark.parametrize("ref", [None, "", "  ", " " * 256, "x" * 256])
+def test_a_supplied_thread_requires_a_bounded_nonblank_ref(ref: str | None) -> None:
+    with pytest.raises(ValueError, match="supplied_thread_ref"):
+        thread_key(
+            InboundIdentity(
+                channel="work_event",
+                account_scope="dispatch",
+                contact=None,
+                supplied_thread_ref=ref,
+            )
+        )
+
+
+def test_supplied_thread_refs_are_rejected_for_other_thread_traits() -> None:
+    with pytest.raises(ValueError, match="valid only"):
+        thread_key(
+            InboundIdentity(
+                channel="whatsapp",
+                account_scope="+234800",
+                contact="+234811",
+                supplied_thread_ref="work-42",
+            )
+        )
+
+
+@pytest.mark.parametrize("channel", ["email", "work_event"])
+def test_an_oversized_account_scope_is_refused_before_key_generation(
+    channel: str,
+) -> None:
+    identity = InboundIdentity(
+        channel=channel,
+        account_scope="a" * 161,
+        contact=None if channel == "work_event" else "customer@example.net",
+        supplied_thread_ref="work-42" if channel == "work_event" else None,
+    )
+    with pytest.raises(ValueError, match="account_scope exceeds 160"):
+        thread_key(identity)
+    with pytest.raises(ValueError, match="account_scope exceeds 160"):
+        dedup_key(identity)
 
 
 # ── Deduplication ────────────────────────────────────────────────────────────
@@ -218,6 +292,61 @@ def test_the_content_fingerprint_separates_different_messages() -> None:
 
     assert key("on my way") != key("running late")
     assert key("on my way") == key("on my way")
+
+
+def test_a_supplied_message_ref_is_account_scoped_and_not_content_derived() -> None:
+    first = dedup_key(
+        InboundIdentity(
+            channel="work_event",
+            account_scope="dispatch:a",
+            contact=None,
+            supplied_thread_ref="work-42",
+            supplied_message_ref="event:1|arrived",
+            body="same",
+        )
+    )
+    second = dedup_key(
+        InboundIdentity(
+            channel="work_event",
+            account_scope="dispatch:a:event",
+            contact=None,
+            supplied_thread_ref="work-42",
+            supplied_message_ref="1|arrived",
+            body="different",
+        )
+    )
+    assert (
+        first.value == "work_event:s1:"
+        "4756f1211833996af22e5bac55e74a543ca9108140b90b003aac3c4a5c03ef5a"
+    )
+    assert first != second
+    assert first.derived is False
+
+
+@pytest.mark.parametrize("ref", [None, "", "  ", " " * 256, "x" * 256])
+def test_a_supplied_message_requires_a_bounded_nonblank_ref(ref: str | None) -> None:
+    with pytest.raises(ValueError, match="supplied_message_ref"):
+        dedup_key(
+            InboundIdentity(
+                channel="work_event",
+                account_scope="dispatch",
+                contact=None,
+                supplied_thread_ref="work-42",
+                supplied_message_ref=ref,
+            )
+        )
+
+
+def test_supplied_message_refs_are_rejected_for_other_message_scopes() -> None:
+    with pytest.raises(ValueError, match="valid only"):
+        dedup_key(
+            InboundIdentity(
+                channel="email",
+                account_scope="support@example.net",
+                contact="customer@example.net",
+                supplied_message_ref="local-1",
+            )
+        )
 
 
 def test_a_missing_provider_id_degrades_to_a_fingerprint_rather_than_raising() -> None:

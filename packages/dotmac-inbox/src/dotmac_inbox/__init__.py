@@ -26,9 +26,11 @@ from dotmac_inbox.history import (
     import_read_state,
 )
 from dotmac_inbox.lifecycle import (
+    UNTIL_REPLY,
     Direction,
     InvalidTransitionError,
     ReasonSpec,
+    SnoozeUntilReply,
     Status,
     UnknownReasonError,
     is_open,
@@ -52,6 +54,7 @@ from dotmac_inbox.service import (
     ConversationConflict,
     ConversationNotFound,
     StaleConversationState,
+    bind_message_observation_ref,
     create_conversation,
     mark_conversation_read,
     record_message,
@@ -59,12 +62,13 @@ from dotmac_inbox.service import (
 )
 from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a2+dev"
 
 __all__ = [
     "SCHEMA",
     "TENANT_MODELS",
     "TENANT_TABLES",
+    "UNTIL_REPLY",
     "AddressForm",
     "ChannelSpec",
     "Conversation",
@@ -73,14 +77,15 @@ __all__ = [
     "ConversationReadState",
     "DedupKey",
     "Direction",
-    "InboundIdentity",
     "ImportConversation",
     "ImportMessage",
     "ImportReadState",
+    "InboundIdentity",
     "InvalidTransitionError",
     "Message",
     "MessageIdScope",
     "ReasonSpec",
+    "SnoozeUntilReply",
     "StaleConversationState",
     "Status",
     "ThreadIdentity",
@@ -89,12 +94,13 @@ __all__ = [
     "UnknownReasonError",
     "__version__",
     "channel_spec",
+    "bind_message_observation_ref",
     "create_conversation",
     "dedup_key",
-    "is_open",
     "import_conversation",
     "import_message",
     "import_read_state",
+    "is_open",
     "mark_conversation_read",
     "module",
     "record_message",

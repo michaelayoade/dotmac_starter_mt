@@ -145,3 +145,45 @@ the released seams are pinned. It is not precedent. Every later adopter uses
 these module-owned seams. Whether the same rule binds every other Dotmac module
 remains a fleet-governance decision; this ADR does not silently widen its own
 scope.
+
+## Amendment — 2026-09-05: explicit indefinite snooze
+
+The lifecycle contract distinguishes a finite snooze from “until reply”. A
+caller must pass the typed `SnoozeUntilReply` value (exported as `UNTIL_REPLY`)
+to request an indefinite snooze; an omitted `snoozed_until` remains invalid.
+The existing nullable column persists that explicit form as
+`status=snoozed, snoozed_until=NULL`, while a finite snooze keeps its
+timezone-aware deadline. Only inbound message activity owned by
+`dotmac-inbox` wakes an indefinite snooze; timed wake scheduling remains a
+product responsibility. The same validation, normalization, exact replay and
+conflict rules apply to the history import seam. No migration or scheduler is
+introduced by this amendment.
+
+## Amendment — 2026-09-05: late transport-observation correlation
+
+An Integrator observation may be correlated after a local message is admitted.
+The Inbox owner therefore exposes `bind_message_observation_ref`, which locks
+the tenant-scoped message identified by its local UUID and flushes only
+`transport_observation_ref`. A missing or cross-tenant message is not visible
+and raises `ConversationNotFound`; an empty reference is rejected; an exact
+existing reference replays; and a different existing reference raises
+`ConversationConflict`. `transport_message_ref` remains part of admission
+identity and is never late-bindable. The command does not alter message
+identity, content, direction, conversation activity, lifecycle, or delivery
+state, and never commits or rolls back.
+
+## Amendment — 2026-09-05: products may supply stable local identities
+
+Some product events have no provider identity at all, yet have a stable local
+thread and message reference. `dotmac-inbox` accepts these as declared
+`SUPPLIED` thread and message identity traits. The supplied values are opaque,
+bounded product-owned references; the module persists them separately from
+transport references and derives canonical scoped keys without treating either
+as provider evidence.
+
+This does not introduce a subscriber, person, ticket, or principal relation:
+the product retains those relationships and maps its own work records to a
+conversation. A product using supplied message identity must retain and reuse
+the same logical message reference for redelivery. This closes the repeated
+identical internal-message mechanism, but does not prove any product mapping or
+cutover, and does not transfer provider or delivery authority to the module.

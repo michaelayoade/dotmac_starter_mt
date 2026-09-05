@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from dotmac_inbox.channels import channel_spec
 from dotmac_inbox.lifecycle import (
     Direction,
+    SnoozeUntilReply,
     Status,
     validate_reason,
     validate_transition,
@@ -33,9 +34,23 @@ class StaleConversationState(ConversationConflict):
 
 
 def _aware(value: datetime, label: str) -> datetime:
-    if value.tzinfo is None:
+    if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{label} must be timezone-aware")
     return value
+
+
+def _persisted_snooze_deadline(
+    status: Status, snoozed_until: datetime | SnoozeUntilReply | None
+) -> datetime | None:
+    if status is Status.SNOOZED:
+        if snoozed_until is None:
+            raise ConversationConflict("snoozed conversation requires snoozed_until")
+        if isinstance(snoozed_until, SnoozeUntilReply):
+            return None
+        return _aware(snoozed_until, "snoozed_until")
+    if snoozed_until is not None:
+        raise ConversationConflict("snoozed_until is valid only for snoozed status")
+    return None
 
 
 def _conversation(db: Session, tenant_id: UUID, conversation_id: UUID) -> Conversation:
@@ -72,6 +87,17 @@ def _message_by_key(db: Session, tenant_id: UUID, message_key: str) -> Message |
     )
 
 
+def _message(db: Session, tenant_id: UUID, message_id: UUID) -> Message:
+    row = db.scalar(
+        select(Message)
+        .where(Message.tenant_id == tenant_id, Message.id == message_id)
+        .with_for_update()
+    )
+    if row is None:
+        raise ConversationNotFound("message not found")
+    return row
+
+
 def _require_same_message(
     row: Message,
     *,
@@ -89,6 +115,7 @@ def _require_same_message(
         "subject": identity.subject,
         "body": identity.body,
         "transport_message_ref": identity.external_message_id,
+        "supplied_message_ref": identity.supplied_message_ref,
         "author_id": author_id,
         "occurred_at": occurred_at,
     }
@@ -114,11 +141,12 @@ def _apply_message_activity(
     conversation.last_message_at = (
         occurred_at if last is None else max(last, occurred_at)
     )
-    if (
-        direction is Direction.INBOUND
-        and Status(conversation.status) is Status.RESOLVED
+    current = Status(conversation.status)
+    if direction is Direction.INBOUND and (
+        current is Status.RESOLVED
+        or (current is Status.SNOOZED and conversation.snoozed_until is None)
     ):
-        conversation.status = validate_transition(Status.RESOLVED, Status.OPEN).value
+        conversation.status = validate_transition(current, Status.OPEN).value
         conversation.status_reason = None
         conversation.resolved_at = None
         conversation.snoozed_until = None
@@ -131,11 +159,13 @@ def create_conversation(
     identity: InboundIdentity,
     status: Status = Status.OPEN,
     reason: str | None = None,
+    snoozed_until: datetime | SnoozeUntilReply | None = None,
     subject: str | None = None,
     tags: tuple[str, ...] = (),
 ) -> Conversation:
     """Create one thread, or replay the durable winner for the same identity."""
     validated_reason = validate_reason(reason, status=status)
+    persisted_snoozed_until = _persisted_snooze_deadline(status, snoozed_until)
     channel = channel_spec(identity.channel).code
     canonical_thread_key = thread_key(identity)
     existing = _conversation_by_thread(db, tenant_id, canonical_thread_key)
@@ -149,8 +179,10 @@ def create_conversation(
         contact=identity.contact,
         thread_key=canonical_thread_key,
         transport_thread_ref=identity.external_thread_id,
+        supplied_thread_ref=identity.supplied_thread_ref,
         status=status.value,
         status_reason=validated_reason,
+        snoozed_until=persisted_snoozed_until,
         subject=subject or identity.subject,
         tags=list(tags) or None,
     )
@@ -182,7 +214,7 @@ def transition_conversation_status(
     requested: Status,
     reason: str | None,
     occurred_at: datetime,
-    snoozed_until: datetime | None = None,
+    snoozed_until: datetime | SnoozeUntilReply | None = None,
 ) -> Conversation:
     """Apply an expected-state lifecycle transition without owning commit."""
     occurred = _aware(occurred_at, "occurred_at")
@@ -194,17 +226,12 @@ def transition_conversation_status(
         )
     resolved = validate_transition(current, requested)
     validated_reason = validate_reason(reason, status=resolved)
-    if resolved is Status.SNOOZED:
-        if snoozed_until is None:
-            raise ConversationConflict("snoozed conversation requires snoozed_until")
-        _aware(snoozed_until, "snoozed_until")
-    elif snoozed_until is not None:
-        raise ConversationConflict("snoozed_until is valid only for snoozed status")
+    persisted_snoozed_until = _persisted_snooze_deadline(resolved, snoozed_until)
 
     row.status = resolved.value
     row.status_reason = validated_reason
     row.resolved_at = occurred if resolved is Status.RESOLVED else None
-    row.snoozed_until = snoozed_until if resolved is Status.SNOOZED else None
+    row.snoozed_until = persisted_snoozed_until
     db.flush()
     return row
 
@@ -252,6 +279,7 @@ def record_message(
         subject=identity.subject,
         body=identity.body,
         transport_message_ref=identity.external_message_id,
+        supplied_message_ref=identity.supplied_message_ref,
         transport_observation_ref=transport_observation_ref,
         author_id=author_id,
         occurred_at=occurred,
@@ -282,6 +310,29 @@ def record_message(
             author_id=author_id,
             occurred_at=occurred,
         )
+    return row
+
+
+def bind_message_observation_ref(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    message_id: UUID,
+    transport_observation_ref: str,
+) -> Message:
+    """Late-bind one opaque transport observation reference to a message."""
+    if not transport_observation_ref.strip():
+        raise ValueError("transport_observation_ref must not be empty")
+
+    row = _message(db, tenant_id, message_id)
+    current = row.transport_observation_ref
+    if current is None:
+        row.transport_observation_ref = transport_observation_ref
+    elif current != transport_observation_ref:
+        raise ConversationConflict(
+            "message transport observation reference is already bound"
+        )
+    db.flush()
     return row
 
 
@@ -359,6 +410,7 @@ __all__ = [
     "ConversationConflict",
     "ConversationNotFound",
     "StaleConversationState",
+    "bind_message_observation_ref",
     "create_conversation",
     "mark_conversation_read",
     "record_message",
