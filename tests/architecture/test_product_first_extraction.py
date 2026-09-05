@@ -110,6 +110,50 @@ VALID_SOURCE_MODES = {
 # that claims the audit was done has to be backed by one of them.
 AUDITED_SOURCE_MODES = {"product-first", "greenfield-after-inventory"}
 
+# `source_mode_note` is THE narrative field for explaining a source-mode choice,
+# and it is the only one.  A package has ONE `source_mode`; a package whose
+# lanes were extracted under different modes still has one, and one place to say
+# so.  The rule exists because the alternative was tried: on 2026-09-02 the
+# kernel dossier grew `semantic_encoding_source_mode` to record that one lane
+# was greenfield while the package stayed `historical-mixed`, and it was removed
+# the same day.  A per-lane key is a second vocabulary for one job — it splits
+# the explanation across keys no reviewer knows to look for, every later lane
+# invents its own, and a validator that enumerates known fields has to be taught
+# each one.  The narrative field already carries whatever a lane needs to say.
+SOURCE_MODE_NARRATIVE_FIELD = "source_mode_note"
+
+# The only two top-level keys that may speak about the source mode: the mode
+# itself, and the one field that explains it.
+SOURCE_MODE_FIELDS = frozenset({"source_mode", SOURCE_MODE_NARRATIVE_FIELD})
+
+
+def _source_mode_narrative_problems(dossier: Mapping[str, Any]) -> list[str]:
+    """Refuse a SECOND top-level key that speaks about the source mode.
+
+    Substring rather than an exact list, because the shape being refused is
+    "someone invented a key for this", and an exact list of forbidden names
+    would only ever name the ones already invented.  `semantic_encoding_source_mode`,
+    `billing_source_mode`, `source_mode_rationale` and `source_mode_per_lane`
+    are all the same mistake and all caught by the same line.
+
+    Deliberately narrow: it governs the source-mode vocabulary only.  It is not
+    a general unknown-field gate, does not claim to be one, and says nothing
+    about any other key a dossier carries.
+    """
+    problems: list[str] = []
+    for field in sorted(dossier):
+        if field in SOURCE_MODE_FIELDS:
+            continue
+        if "source_mode" in field:
+            problems.append(
+                f"{field!r} is a second field for explaining a source mode; "
+                f"{SOURCE_MODE_NARRATIVE_FIELD!r} is the single narrative field "
+                "for that, and a per-lane key splits one explanation across "
+                "keys no reviewer knows to look for"
+            )
+    return problems
+
+
 # The evidence ladder (ADR-0006, 2026-08-12).  Every one of these permits a
 # shared module; they differ only in what has been proven about reuse.
 EVIDENCE_STATES = ("audit-complete", "adopted", "reuse-proven")
@@ -730,6 +774,7 @@ def _validate_dossier(
     source_mode = dossier.get("source_mode")
     if source_mode not in VALID_SOURCE_MODES:
         problems.append(f"source_mode must be one of {sorted(VALID_SOURCE_MODES)}")
+    problems.extend(_source_mode_narrative_problems(dossier))
 
     repositories = dossier.get("source_repositories")
     if isinstance(repositories, list) and not {"dotmac_erp", "dotmac_sub"}.issubset(
@@ -1031,6 +1076,116 @@ def test_every_shared_distribution_has_a_valid_extraction_dossier() -> None:
             distribution_name=distribution_name,
             package_dir=package_dir,
         )
+
+
+# --------------------------------------------------------------------------
+# one narrative field for a source-mode choice
+# --------------------------------------------------------------------------
+
+
+def test_source_mode_note_is_the_single_narrative_field_for_a_source_mode_choice() -> (
+    None
+):
+    """The definition, as code rather than as a comment.
+
+    A dossier says WHICH mode in `source_mode` and WHY in `source_mode_note`.
+    There is no third key, and a lane whose mode differs from its package's
+    explains itself in the same one field.
+    """
+
+    assert SOURCE_MODE_NARRATIVE_FIELD == "source_mode_note"
+    assert SOURCE_MODE_FIELDS == {"source_mode", "source_mode_note"}
+
+
+@pytest.mark.parametrize(
+    "invented",
+    [
+        # The exact key this rule was written for: added to the kernel dossier
+        # on 2026-09-02 and removed the same day.
+        "semantic_encoding_source_mode",
+        "billing_source_mode",
+        "source_mode_rationale",
+        "source_mode_per_lane",
+    ],
+)
+def test_a_per_lane_source_mode_key_is_refused(invented: str) -> None:
+    """Sensitivity proof: the rule bites on a real dossier, not just in theory.
+
+    A valid dossier is loaded, one invented key is planted on it, and the gate
+    that passed a moment ago must now refuse — naming the invented key and the
+    field that already does its job.
+    """
+
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-kernel/EXTRACTION.toml")
+    dossier[invented] = "greenfield-after-inventory"
+
+    with pytest.raises(ExtractionDossierError, match="single narrative field"):
+        _validate_dossier(
+            dossier,
+            directory_name="dotmac-kernel",
+            distribution_name="dotmac-kernel",
+            package_dir=PACKAGES_DIR / "dotmac-kernel",
+        )
+
+    problems = _source_mode_narrative_problems(dossier)
+    assert [problem for problem in problems if invented in problem], problems
+
+
+def test_the_source_mode_narrative_rule_is_not_simply_blind() -> None:
+    """The other half: the two legitimate keys are never reported.
+
+    A check that refuses every key containing the word would refuse
+    `source_mode` itself, and a refusal that fires on everything proves as
+    little as one that fires on nothing.
+    """
+
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-kernel/EXTRACTION.toml")
+    assert "source_mode" in dossier
+    assert SOURCE_MODE_NARRATIVE_FIELD in dossier
+    assert _source_mode_narrative_problems(dossier) == []
+
+
+def test_no_shipped_dossier_carries_a_second_source_mode_field() -> None:
+    """The fleet sweep, with its own non-vacuity check.
+
+    An empty sweep is the "returned nothing, so nothing is wrong" failure; the
+    count of dossiers actually read is asserted so a broken glob cannot pass.
+    """
+
+    read = 0
+    for package_dir in _shared_package_dirs():
+        dossier_path = package_dir / "EXTRACTION.toml"
+        if not dossier_path.is_file():
+            continue
+        read += 1
+        problems = _source_mode_narrative_problems(_load_toml(dossier_path))
+        assert not problems, f"{package_dir.name}: {problems}"
+
+    assert read >= 50, read
+
+
+def test_the_kernel_explains_its_greenfield_lane_in_the_narrative_field() -> None:
+    """The kernel dossier is `historical-mixed` and one of its lanes is not.
+
+    That difference is a real claim a reviewer has to be able to find, and the
+    narrative field is where it lives. The package-level mode stays
+    `historical-mixed` because the machine-credentials, credential-lifecycle
+    and settings lanes genuinely are product-first — relabelling the dossier to
+    suit one lane would make a false claim about the others — and the negative
+    inventory that licenses the greenfield lane stays cited as evidence.
+    """
+
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-kernel/EXTRACTION.toml")
+
+    assert dossier["source_mode"] == "historical-mixed"
+    note = dossier[SOURCE_MODE_NARRATIVE_FIELD]
+    assert "greenfield after inventory" in note.lower()
+    assert "semantic-encoder-sources.md" in note
+    assert "historical-mixed" in note
+    assert any(
+        "semantic-encoder-sources.md" in reference
+        for reference in dossier["inventory_evidence"]
+    )
 
 
 # --------------------------------------------------------------------------

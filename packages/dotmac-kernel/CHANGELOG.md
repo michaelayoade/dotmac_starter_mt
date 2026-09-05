@@ -6,12 +6,89 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a102 — Unreleased
+## 0.1.0a103 — Unreleased
 
-This heading records the facility that the next separately authorized kernel
-release will bind. It does not allocate, publish or tag `0.1.0a102`: the
-numeric successor of the immutable a101 tag becomes an allocated version only
-through `KernelReleaseAuthorization.v1`.
+This heading records what the next separately authorized kernel release will
+bind. It does not allocate, publish or tag `0.1.0a103`.
+
+`main` declares `0.1.0a102+dev` while these entries sit here, and that is the
+point: they add importable kernel source, and a bare `0.1.0a102` would make one
+published version name two different byte sets. **A103 IS NOW OWED.** Nothing
+can consume `dotmac_kernel.semantic_encoding` FROM AN ARTIFACT until it is
+released — the source is complete and the wheel does not exist, which is the
+exact trap a102 was cut to escape. The difference this time is that a guard
+catches it rather than a person noticing.
+
+### Added
+
+- `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER_DIGEST` and its verifier —
+  `migration_owner_ledger_digest`, `verify_migration_owner_ledger_digest`,
+  `encode_migration_owner`, `encode_migration_owner_ledger`,
+  `MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN`, `LedgerDigestError`. A committed
+  content digest of the whole allocation ledger, and the thing that makes two
+  sibling allocation branches CONFLICT instead of merging into a duplicate.
+
+  The measured defect: two branches off one base, one appending a row at the
+  tail and one inserting a row mid-list with the SAME `prefix`, merge under
+  `git merge-tree` with exit 0 and produce a ledger holding two rows on one
+  prefix. Nothing caught it. The ledger offered nothing to conflict on — an
+  order-insensitive tuple, a list `__all__`, a set literal, an unordered table.
+  A counter would not fix it: two branches can both change 90 to 91 on identical
+  text. The value has to be a function of the ledger's CONTENT, so it is a
+  `cv1:` digest over every field of every `MigrationOwner`, rows SORTED BY OWNER
+  — sorting is load-bearing, or a branch dodges the conflict by inserting its
+  row somewhere else in the tuple.
+
+  Reordering keywords or reflowing the literal is NOT a row change: the gate
+  normalises through `ast.unparse` and sorted keywords, because a gate that
+  demands a bump for formatting teaches reviewers to bump reflexively. The
+  digest forces a human to RESOLVE; it decides nothing about the resolution, so
+  `test_the_shipped_ledger_itself_composes` stays and is asserted by name.
+
+  Ledger unchanged: 84 rows. This introduces the digest over TODAY'S ledger and
+  allocates nothing — the one-time transition below is why it lands alone.
+
+- `dotmac_kernel.semantic_encoding` (also on the package-root public surface) —
+  `encode`, `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`,
+  `ABSENT`, `CANONICAL_ALGORITHM`. One encoder for values that get digested:
+  every value goes into a length-prefixed, self-describing frame, so no two
+  adjacent field values can reassociate into a different field split; `ABSENT`
+  is a TYPED sentinel, so a missing value cannot collide with `""` or the text
+  `"None"`; and `digest_of` domain-separates, so one document's digest can never
+  coincide with another's. GREENFIELD AFTER INVENTORY, not a product-first
+  extraction — `docs/inventories/semantic-encoder-sources.md` audits seven
+  repositories at immutable revisions and finds no encoder with all four
+  qualifying properties. It sits BESIDE `fingerprint_of`, not instead of it.
+
+### Fixed
+
+- `scripts/check_allocation_serialized.py` checks the ONE-TIME TRANSITION into
+  a digested ledger instead of skipping it. It returned early whenever the row
+  set was unchanged, before reading either digest — so the legitimate bootstrap,
+  a head carrying a MALFORMED digest, and a head carrying NO digest all exited
+  0, by the same unvalidated path; and a branch that allocated during the
+  transition exited 2, INDETERMINATE, the code a reviewer reads as "the gate is
+  broken" rather than "you did the forbidden thing". The transition is now its
+  own check and may do exactly one thing: introduce a well-formed digest over an
+  unchanged row set. `committed_digest` becomes the nullable `find_digest`,
+  because absence means the transition at the merge base and a REMOVAL at head —
+  both refused, with distinct diagnostics. Exit 2 is kept for what the gate
+  genuinely cannot read, such as a digest built by an expression.
+  `tests/architecture/test_allocation_gate_cli.py` asserts exit status and
+  diagnostic through the real subprocess, with its own non-vacuity note.
+
+## 0.1.0a102 — 2026-09-05
+
+Published and tagged `dotmac-kernel-v0.1.0a102`, peeled to
+`7a3c128b06eaba09784a9d8409d036169b3caa68`. Registry bytes were verified equal
+to the retained build bytes for both the wheel and the sdist, and the permanent
+record is `docs/inventories/kernel-release-verifications/0.1.0a102.json`.
+
+This section lists ONLY what that tag carries. The ledger-digest entries above
+were written against this heading while it still read `Unreleased`, and moving
+them was not optional: `tests/architecture/test_kernel_changelog_release_claims.py`
+refuses a tagged heading that names a module its tag does not hold, and it
+named `semantic_encoding` here.
 
 ### Added
 
@@ -1832,7 +1909,6 @@ A ledger row adds no behaviour — it is the checked-in allocation record that
 makes "globally unique" enforceable across repositories, and nothing consumes it
 but the module it names.
 
-
 ## 0.1.0a57 — 2026-08-14
 
 Corrects the live-catalog gate for a PLATFORM-ONLY module schema (ADR-0023).
@@ -1865,7 +1941,6 @@ as before.
 
 Failure messages now name the role AND the plane, so a violation says which
 half of the contract was missed.
-
 
 ## 0.1.0a56 — 2026-08-13
 
@@ -3328,10 +3403,6 @@ URL.
 ## 0.1.0a12 — 2026-08-06
 
 
-
-
-
-
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
 Alembic migration prefixes** — D1 of the white-label foundation programme
 (ADR-0006 § "Decision amendment — 2026-08-02"), the last blocker for stateful
@@ -3429,10 +3500,6 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
-
-
-
-
 
 
 > **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
@@ -3535,10 +3602,6 @@ stays `0012`.
 ## 0.1.0a10 — 2026-08-06
 
 
-
-
-
-
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -3613,10 +3676,6 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
-
-
-
-
 
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
@@ -3710,10 +3769,6 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 ## 0.1.0a8 — 2026-08-02
 
 
-
-
-
-
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -3799,10 +3854,6 @@ migration; the kernel head stays `0012`.
 ## 0.1.0a7 — 2026-08-01
 
 
-
-
-
-
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -3846,10 +3897,6 @@ receiver owns its durable applied/revocation state).
 ## 0.1.0a6 — 2026-07-31
 
 
-
-
-
-
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -3885,10 +3932,6 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
-
-
-
-
 
 
 Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing
@@ -3946,10 +3989,6 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 ## 0.1.0a3 — 2026-07-31
 
 
-
-
-
-
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -3975,10 +4014,6 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
-
-
-
-
 
 
 Second alpha. Adds exact money/FX value objects and platform-scoped audit +
@@ -4030,10 +4065,6 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
-
-
-
-
 
 
 First published release — the **alpha** of the DotMac platform kernel extracted

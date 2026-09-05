@@ -94,6 +94,15 @@ from dotmac_kernel.prerequisites import (
     TENANT_SCOPE_CATALOG_V1,
     validate_prerequisites,
 )
+from dotmac_kernel.semantic_encoding import (
+    ABSENT,
+    CANONICAL_ALGORITHM,
+    digest_of,
+    encode,
+    encode_fields,
+    encode_ordered,
+    encode_unordered,
+)
 
 if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
     from dotmac_kernel.modules import AnyManifest
@@ -1423,6 +1432,177 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
 )
 
 
+# ── Serialization: the ledger's content digest ──────────────────────────────
+#
+# ## Why a digest, and why not a counter
+#
+# `scripts/check_allocation_serialized.py` serializes a module's SOURCE behind
+# its allocation. It cannot serialize one allocation behind another, because
+# both sides only ever add rows and nothing about adding a row conflicts with
+# adding a different row. The measured defect: two sibling branches off one
+# base, one appending at the tail and one inserting mid-list with a DUPLICATE
+# prefix, merge under `git merge-tree` with exit 0 and no conflict, producing a
+# ledger holding two `prefix="me"` rows. The pinned-owner assertion in
+# `tests/unit/test_namespaces.py` is a SET literal, so the union satisfies it;
+# only the composed-ledger uniqueness check bites, and it bites after the merge,
+# on a red `main`.
+#
+# The reason it merges clean is that the ledger has no scalar to conflict on.
+# `MIGRATION_OWNER_LEDGER` is an order-insensitive tuple, `__all__` is a list,
+# the pinned owners are a set literal, and `COMPATIBILITY.md`'s allocation table
+# is an unordered markdown table. Every one of those absorbs an independent
+# addition. The kernel's alpha version USED to be that scalar — a93 and a95 each
+# bumped it, so two allocations racing for one release both had to move it — and
+# the `+dev` regime at `a76a887e` removed it.
+#
+# A COUNTER does not restore it. Two branches can both change 90 to 91, merge
+# cleanly on the identical text, and recreate the defect exactly. The value has
+# to be a function of the ledger's CONTENT, so that two different additions
+# necessarily produce two different literals and git has something to refuse.
+#
+# ## What the digest is taken over
+#
+# Every field of every `MigrationOwner`, canonically encoded, the rows sorted by
+# `owner`. Sorting is what makes requirement six hold: a row inserted mid-list
+# and the same row appended at the tail produce IDENTICAL bytes, so relocating a
+# row cannot dodge the conflict by landing somewhere else in the tuple.
+#
+# The encoder is `dotmac_kernel.semantic_encoding` — the kernel's existing `cv1`
+# encoding, reused rather than reinvented. It is the right one already: every
+# value goes into a length-prefixed, self-describing frame, so no two adjacent
+# field values can be reassociated into a different field split with the same
+# bytes; `ABSENT` is a typed sentinel, so `db_schema=None` (a host owner writing
+# into `public`) cannot collide with the string `"None"` or with `""`; and
+# `digest_of` namespaces the hash by domain, so this digest can never equal some
+# other document's digest by coincidence.
+#
+# One shape note, because it is visible in the bytes: `encode_fields` frames
+# every value through `encode`, and `encode` frames `bytes` as an opaque `x`
+# frame. `provides` is therefore an `x` frame wrapping the `u` (unordered) frame
+# of its members — self-describing and injective, just nested one deeper than a
+# hand-rolled encoding would be. Reordering `provides` deliberately does NOT
+# move the digest: it is a claim set, not a sequence, and a reorder is not an
+# allocation.
+#
+# ## What the digest does NOT do
+#
+# It forces a human to resolve, and nothing more. After a conflict is resolved
+# the resolver can still paste both rows and recompute — which is exactly why
+# `test_the_shipped_ledger_itself_composes` stays: the digest catches the race,
+# that test catches a bad resolution.
+
+#: Domain separation for `digest_of`. Versioned: a change to what is encoded
+#: below is a NEW domain, never a silent rehash under this one.
+MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN: Final[str] = "dotmac.migration_owner_ledger.v1"
+
+#: The shape a committed digest literal must have. Checked separately from the
+#: value so a TRUNCATED or hand-edited digest fails as malformed rather than as
+#: a mismatch — the two have different repairs.
+_LEDGER_DIGEST_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"\A{re.escape(CANONICAL_ALGORITHM)}:[0-9a-f]{{64}}\Z"
+)
+
+
+class LedgerDigestError(NamespaceError):
+    """The committed ledger digest is stale, malformed, or not recomputable."""
+
+
+def encode_migration_owner(owner: MigrationOwner) -> bytes:
+    """One owner's every field, canonically encoded.
+
+    Every field is named and framed, including the two optional ones, which
+    encode as the typed `ABSENT` sentinel when unset rather than being omitted.
+    Omitting them would make a row with no `db_schema` and a row with no
+    `legacy_revision_pattern` produce the same field count, and a shorter
+    encoding is exactly where an injective encoder stops being injective.
+    """
+    return encode_fields(
+        (
+            ("owner", owner.owner),
+            ("prefix", owner.prefix),
+            ("branch_label", owner.branch_label),
+            ("db_schema", owner.db_schema if owner.db_schema is not None else ABSENT),
+            (
+                "legacy_revision_pattern",
+                owner.legacy_revision_pattern
+                if owner.legacy_revision_pattern is not None
+                else ABSENT,
+            ),
+            ("provides", encode_unordered(encode(name) for name in owner.provides)),
+        )
+    )
+
+
+def encode_migration_owner_ledger(ledger: Sequence[MigrationOwner]) -> bytes:
+    """The whole ledger's canonical bytes, rows sorted by `owner`.
+
+    Sorted, not as declared: position in the tuple is a formatting choice, and
+    a serialization mechanism that a mid-list insert could dodge would not be
+    one. `owner` is unique across the ledger (`NamespaceRegistry` refuses a
+    duplicate), so the sort is total and the ordering never depends on a tie.
+    """
+    return encode_ordered(
+        encode_migration_owner(owner)
+        for owner in sorted(ledger, key=lambda row: row.owner)
+    )
+
+
+def migration_owner_ledger_digest(
+    ledger: Sequence[MigrationOwner] | None = None,
+) -> str:
+    """Recompute the ledger's content digest. Pure: no I/O, no git, no clock."""
+    rows = MIGRATION_OWNER_LEDGER if ledger is None else ledger
+    return digest_of(
+        MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN, encode_migration_owner_ledger(rows)
+    )
+
+
+#: The committed content digest of `MIGRATION_OWNER_LEDGER`.
+#:
+#: THIS LITERAL IS THE SERIALIZATION POINT. Every commit that adds, removes or
+#: edits a ledger row must recompute and update it — run
+#: `python -c "from dotmac_kernel.namespaces import migration_owner_ledger_digest
+#: as d; print(d())"` and paste the result. Two sibling allocation branches then
+#: necessarily write two different strings on this one line, which is a git
+#: conflict rather than a clean merge into a broken ledger.
+#:
+#: It is `cv1:` and not `sha256:` because the bytes are the kernel's `cv1`
+#: semantic encoding, domain-separated by `digest_of`. Naming it `sha256:` would
+#: advertise a plain SHA-256 over some unstated serialization and invite a
+#: consumer to recompute the wrong thing.
+MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
+    "cv1:905204e2457a5aefd0ec9a941c489646b99c8a30b74a17ace36e73c0b0709686"
+)
+
+
+def verify_migration_owner_ledger_digest(
+    ledger: Sequence[MigrationOwner] | None = None,
+    digest: str | None = None,
+) -> None:
+    """Raise `LedgerDigestError` unless the committed digest is well-formed and current.
+
+    Two distinct failures, reported distinctly because they have different
+    repairs: a MALFORMED literal (truncated, wrong algorithm, uppercase hex,
+    hand-typed) means the value was never a digest at all; a STALE one means the
+    ledger moved and the literal did not — which, on an allocation branch, is
+    the commit that would have merged cleanly into a duplicate.
+    """
+    committed = MIGRATION_OWNER_LEDGER_DIGEST if digest is None else digest
+    if not _LEDGER_DIGEST_PATTERN.fullmatch(committed):
+        raise LedgerDigestError(
+            f"MIGRATION_OWNER_LEDGER_DIGEST is malformed: {committed!r} is not "
+            f"{CANONICAL_ALGORITHM}:<64 lowercase hex digits>"
+        )
+    recomputed = migration_owner_ledger_digest(ledger)
+    if committed != recomputed:
+        raise LedgerDigestError(
+            "MIGRATION_OWNER_LEDGER_DIGEST is stale: the ledger digests to "
+            f"{recomputed} but the committed literal is {committed}. Every "
+            "commit that changes a ledger row must update that literal — it is "
+            "the only thing that makes two sibling allocations conflict."
+        )
+
+
 # ── The composed registry ───────────────────────────────────────────────────
 
 
@@ -1797,6 +1977,13 @@ __all__ = [
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
+    "MIGRATION_OWNER_LEDGER_DIGEST",
+    "MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN",
+    "LedgerDigestError",
+    "encode_migration_owner",
+    "encode_migration_owner_ledger",
+    "migration_owner_ledger_digest",
+    "verify_migration_owner_ledger_digest",
     "MODULE_SCHEMA_PREFIX",
     "RESERVED_SCHEMAS",
     "REVISION_SEQUENCE_DIGITS",

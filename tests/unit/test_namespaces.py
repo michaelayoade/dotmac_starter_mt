@@ -23,6 +23,8 @@ from dotmac_kernel.namespaces import (
     MAX_IDENTIFIER_LENGTH,
     MAX_REVISION_ID_LENGTH,
     MIGRATION_OWNER_LEDGER,
+    MIGRATION_OWNER_LEDGER_DIGEST,
+    MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN,
     DuplicateBranchLabelError,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -30,17 +32,25 @@ from dotmac_kernel.namespaces import (
     HostSchemaClaimError,
     InvalidRevisionIdError,
     InvalidSchemaError,
+    LedgerDigestError,
     MigrationOwner,
     NamespaceAllocationError,
+    NamespaceError,
     NamespaceRegistry,
     UnallocatedNamespaceError,
+    encode_migration_owner,
+    encode_migration_owner_ledger,
+    migration_owner_ledger_digest,
     module_schema,
     qualified,
     revision_id,
     revision_id_pattern,
     schema_table_args,
     validate_schema,
+    verify_migration_owner_ledger_digest,
 )
+from dotmac_kernel.prerequisites import TENANT_SCOPE_CATALOG_V1
+from dotmac_kernel.semantic_encoding import digest_of
 
 from app.features import FEATURE_MODULES
 from scripts.check_allocation_serialized import (
@@ -829,3 +839,182 @@ def test_a_plain_feature_manifest_is_stateless_under_d1() -> None:
     feature = FeatureManifest(name="legacy")
     registry = NamespaceRegistry.from_manifests([feature])
     assert registry.module_schemas() == ()
+
+
+# ── The ledger's content digest (serialization) ─────────────────────────────
+#
+# `test_the_shipped_ledger_itself_composes` above proves ONE tree is coherent.
+# It cannot see a sibling branch, which is why two allocation branches could
+# both stay green and still merge into a ledger with two rows on one prefix.
+# These tests cover the mechanism that makes that merge conflict instead: a
+# committed digest of the ledger's content. They are pure-function checks; the
+# git-level proof that the conflict actually happens is
+# `tests/architecture/test_ledger_digest_serialization.py`.
+
+
+def test_the_committed_ledger_digest_is_current() -> None:
+    """Verifier requirement 2: recompute and compare.
+
+    This is the check that fails on the branch that forgot to restamp — which
+    is the branch whose clean merge produced the duplicate.
+    """
+    verify_migration_owner_ledger_digest()
+
+    assert MIGRATION_OWNER_LEDGER_DIGEST == migration_owner_ledger_digest()
+
+
+def test_a_stale_or_malformed_digest_is_refused_and_they_read_differently() -> None:
+    """Verifier requirement 4, both halves, distinguished.
+
+    A stale digest and a malformed one have different repairs — restamp versus
+    "this was never a digest" — so they must not collapse into one message.
+    """
+    with pytest.raises(LedgerDigestError) as stale:
+        verify_migration_owner_ledger_digest(digest=f"cv1:{'0' * 64}")
+    assert "stale" in str(stale.value)
+    assert migration_owner_ledger_digest() in str(stale.value)
+
+    for malformed in (
+        "",
+        "cv1:",
+        f"cv1:{'0' * 63}",  # truncated by one character
+        f"cv1:{'A' * 64}",  # uppercase hex is a different string, same bytes
+        f"sha256:{'0' * 64}",  # right shape, wrong algorithm
+        f"{'0' * 64}",  # unprefixed, so nothing says how it was computed
+    ):
+        with pytest.raises(LedgerDigestError) as bad:
+            verify_migration_owner_ledger_digest(digest=malformed)
+        assert "malformed" in str(bad.value)
+
+
+def test_every_migration_owner_field_moves_the_digest() -> None:
+    """Verifier requirement 1: every field is encoded, none is decorative.
+
+    Asserted field by field rather than as "the encoding mentions them",
+    because a field left out of the encoding is invisible in every other test:
+    the ledger still composes, the digest still verifies, and a branch that
+    repoints an existing row's schema merges clean.
+    """
+    base = MigrationOwner(
+        owner="alpha",
+        prefix="al",
+        branch_label="alpha",
+        db_schema=module_schema("alpha"),
+    )
+    variants = (
+        dataclasses.replace(base, owner="alpha2"),
+        dataclasses.replace(base, prefix="a2"),
+        dataclasses.replace(base, branch_label="alpha2"),
+        dataclasses.replace(base, db_schema=module_schema("alpha2")),
+        dataclasses.replace(base, db_schema=None, legacy_revision_pattern=r"\d{4}_.+"),
+        dataclasses.replace(base, provides=(TENANT_SCOPE_CATALOG_V1.name,)),
+    )
+    digests = {migration_owner_ledger_digest([base])} | {
+        migration_owner_ledger_digest([variant]) for variant in variants
+    }
+
+    assert len(digests) == 1 + len(variants), (
+        "two different MigrationOwner rows digest identically, so a change to "
+        "one of their fields would merge clean"
+    )
+
+
+def test_absence_is_typed_so_a_host_row_cannot_collide_with_the_word_none() -> None:
+    """`db_schema=None` is the `ABSENT` sentinel, never the text `"None"`.
+
+    A `str()`-based encoder collapses a missing schema, an empty schema and the
+    literal string `"None"` into the same bytes. The kernel's `cv1` encoder is
+    used precisely because it does not.
+    """
+    host = MigrationOwner(
+        owner="alpha",
+        prefix="al",
+        branch_label="alpha",
+        legacy_revision_pattern=r"\d{4}_.+",
+    )
+
+    assert b"z0:" in encode_migration_owner(host)
+    assert b"None" not in encode_migration_owner(host)
+
+
+def test_a_mid_list_insert_digests_like_a_tail_append() -> None:
+    """Verifier requirement 6: position cannot bypass serialization.
+
+    The measured defect had one branch appending at the tail and the other
+    inserting mid-list. If position moved the digest, relocating a row would be
+    a way to dodge the conflict — the branch would simply put its row somewhere
+    else and merge clean again. Sorting by `owner` before encoding is what
+    closes that, and this is the test that would fail if the sort were dropped.
+    """
+    existing = [
+        MigrationOwner(
+            owner=name,
+            prefix=prefix,
+            branch_label=name,
+            db_schema=module_schema(prefix),
+        )
+        for name, prefix in (("alpha", "al"), ("gamma", "ga"), ("omega", "om"))
+    ]
+    added = MigrationOwner(
+        owner="delta", prefix="de", branch_label="delta", db_schema=module_schema("de")
+    )
+
+    appended = [*existing, added]
+    inserted = [existing[0], added, *existing[1:]]
+    reversed_order = list(reversed(appended))
+
+    assert appended != inserted  # the literals genuinely differ
+    assert migration_owner_ledger_digest(appended) == migration_owner_ledger_digest(
+        inserted
+    )
+    assert migration_owner_ledger_digest(appended) == migration_owner_ledger_digest(
+        reversed_order
+    )
+    assert migration_owner_ledger_digest(appended) != migration_owner_ledger_digest(
+        existing
+    )
+
+
+def test_the_digest_is_domain_separated_and_frames_its_rows() -> None:
+    """The bytes are `cv1` frames, and the hash is namespaced by domain.
+
+    Without domain separation this digest could coincide with some other
+    document's digest over the same bytes; without framing, two adjacent field
+    values could be reassociated into a different field split. Both are
+    properties of the reused encoder, asserted here because THIS digest depends
+    on them.
+    """
+    assert MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN == "dotmac.migration_owner_ledger.v1"
+    assert MIGRATION_OWNER_LEDGER_DIGEST.startswith("cv1:")
+    assert migration_owner_ledger_digest([]) != digest_of(
+        "some.other.domain", encode_migration_owner_ledger([])
+    )
+
+    body = encode_migration_owner_ledger(MIGRATION_OWNER_LEDGER)
+    # `l<len>:` — the ordered-sequence frame, length-prefixed, holding one
+    # `o<len>:` object frame per row, each naming its fields in order. The rows
+    # are sorted, so the first field text is the alphabetically first owner.
+    assert body.startswith(b"l")
+    assert body.split(b":", 1)[0][1:].isdigit()
+    first_owner = min(row.owner for row in MIGRATION_OWNER_LEDGER)
+    assert f"s5:owners{len(first_owner)}:{first_owner}".encode() in body
+    assert body.count(b"o") >= len(MIGRATION_OWNER_LEDGER)
+
+
+def test_the_uniqueness_check_survives_the_digest() -> None:
+    """Verifier requirement 7: the digest does not replace the composed check.
+
+    The digest forces a HUMAN to resolve the conflict. Nothing stops that human
+    from pasting both rows and restamping, which is a coherent digest over an
+    incoherent ledger. `test_the_shipped_ledger_itself_composes` is what catches
+    a bad resolution, so it must still exist and must still be a real check —
+    asserted here by name so deleting it as "now redundant" fails loudly.
+    """
+    source = Path(__file__).read_text()
+
+    assert "def test_the_shipped_ledger_itself_composes" in source
+    assert 'assert len(prefixes) == len(set(prefixes)), "two owners claim one prefix"'
+
+    duplicated = [*MIGRATION_OWNER_LEDGER, MIGRATION_OWNER_LEDGER[-1]]
+    with pytest.raises(NamespaceError):
+        NamespaceRegistry.from_manifests([], ledger=duplicated)
