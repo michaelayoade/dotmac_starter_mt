@@ -187,3 +187,17 @@ conversation. A product using supplied message identity must retain and reuse
 the same logical message reference for redelivery. This closes the repeated
 identical internal-message mechanism, but does not prove any product mapping or
 cutover, and does not transfer provider or delivery authority to the module.
+
+## Amendment — 2026-09-05: typed tenant read owner
+
+The module also owns the read contract for its aggregate. Products use frozen
+typed DTOs for tenant-scoped conversation get/list and ordered message timeline
+reads; they do not receive ORM rows or provide SQL predicates. Conversation
+lists expose only status, channel, and account-scope filters. Both list reads
+use bounded opaque keyset cursors with a stable UUID tie-break; cursor scope
+includes the tenant and query identity (including conversation id or filters),
+so a cursor cannot be reused across tenants, conversations, or changed filters.
+Conversation ordering keeps NULL activity timestamps after non-NULL timestamps,
+and timeline ordering is ascending by occurrence time. Cursor timestamps are
+validated as timezone-aware. Search, unread counts, assignment, operations,
+and workforce policy remain outside this owner.

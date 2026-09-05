@@ -11,6 +11,14 @@ transport observation reference by local message UUID; it locks the tenant
 message, is idempotent for the exact value, and never changes message identity
 or conversation activity.
 
+The read surface is exposed by `get_conversation`, `list_conversations`, and
+`list_messages`. It returns frozen value DTOs, always requires a tenant id,
+and uses bounded opaque keyset cursors. Conversation lists support only the
+declared status, channel, and account-scope filters; message timelines are
+ordered by occurrence time and UUID, so equal timestamps cannot create gaps or
+duplicates between pages. Reads do not expose ORM rows or accept SQL
+predicates from products.
+
 Snoozing has two explicit forms: a timezone-aware finite deadline, or the
 typed `UNTIL_REPLY` value (`SnoozeUntilReply`) for an indefinite snooze. An
 omitted deadline is rejected; `UNTIL_REPLY` persists as `status=snoozed` with

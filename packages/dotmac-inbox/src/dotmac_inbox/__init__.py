@@ -50,6 +50,18 @@ from dotmac_inbox.models import (
     ConversationReadState,
     Message,
 )
+from dotmac_inbox.read import (
+    ConversationFilter,
+    ConversationPage,
+    ConversationView,
+    MessagePage,
+    MessageView,
+)
+from dotmac_inbox.read_service import (
+    get_conversation,
+    list_conversations,
+    list_messages,
+)
 from dotmac_inbox.service import (
     ConversationConflict,
     ConversationNotFound,
@@ -75,6 +87,9 @@ __all__ = [
     "ConversationConflict",
     "ConversationNotFound",
     "ConversationReadState",
+    "ConversationFilter",
+    "ConversationPage",
+    "ConversationView",
     "DedupKey",
     "Direction",
     "ImportConversation",
@@ -83,6 +98,8 @@ __all__ = [
     "InboundIdentity",
     "InvalidTransitionError",
     "Message",
+    "MessagePage",
+    "MessageView",
     "MessageIdScope",
     "ReasonSpec",
     "SnoozeUntilReply",
@@ -100,6 +117,9 @@ __all__ = [
     "import_conversation",
     "import_message",
     "import_read_state",
+    "get_conversation",
+    "list_conversations",
+    "list_messages",
     "is_open",
     "mark_conversation_read",
     "module",

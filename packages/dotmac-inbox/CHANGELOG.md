@@ -6,6 +6,8 @@
 - Adds conflict-safe late binding for transport observation references.
 - Adds opaque product-supplied thread and message identities without making
   product principals or provider transport part of Inbox authority.
+- Adds typed tenant-scoped conversation and message reads with closed filters,
+  bounded opaque keyset cursors, and deterministic UUID tie-break ordering.
 
 ## 0.1.0a2 — 2026-08-23
 
