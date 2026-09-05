@@ -13,7 +13,7 @@ A source-tree scan answers "is the checkout clean", which is not the question.
 What executes on a host is the wheel, and the two differ: packaged templates,
 generated modules, data files and anything a build step writes are present in
 one and absent from the other. A guard that reads only `src/` reports on a
-document nobody runs. :func:`scan_wheel` therefore walks the archive members,
+document nobody runs. :func:`scan_archive` therefore walks every archive member,
 and :func:`scan_tree` walks the checkout, and both exist because neither
 contains the other.
 
@@ -38,10 +38,17 @@ narrow, and each is decided by :mod:`ipaddress` rather than by a spelling:
 * **Unspecified** (`0.0.0.0`, `::`) — not a host at all. It is "bind on every
   interface", and which interface the outside world reaches is decided by an
   overridable port knob, not by this literal.
-* **Loopback** (`127.0.0.0/8`, `::1`) — structurally incapable of naming a
-  REMOTE target. Whatever else a loopback literal is, it cannot be the host an
-  authorized inspection was pointed at, which is the only thing this guard is
-  about.
+* **The two exact semantic loopback constants** (:data:`LOOPBACK_CONSTANTS`)
+  — and only those two, never the loopback RANGE. They are permitted because
+  the typed exposure policy declares loopback and needs to spell it, and
+  because neither can name a REMOTE host. They may still not IDENTIFY a target
+  or a vantage: a loopback bound to a target- or vantage-shaped name is refused
+  under :data:`_IDENTITY_BINDING`, because "the target defaults to localhost"
+  is a default, and the ruling on defaults is that there are none.
+* **A CIDR network of more than one address** — `10.0.0.0/8` in a policy
+  constant is topology, not identity, and `vantage.py`'s `PRIVATE_RANGES` is
+  the definition of the private space it refuses to sit in. A `/32` is not a
+  network by this rule; it is a host wearing a prefix, and is refused.
 * **IANA documentation ranges** (`192.0.2.0/24`, `198.51.100.0/24`,
   `203.0.113.0/24`, `2001:db8::/32`) — these exist precisely so that an example
   cannot name a real host. An example needing an address has a correct one to
@@ -73,6 +80,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import tarfile
 import zipfile
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
@@ -86,11 +94,12 @@ __all__ = [
     "INSPECTED_SUFFIXES",
     "EmbeddedTargetError",
     "TargetIdentityFinding",
+    "LOOPBACK_CONSTANTS",
     "check_debt",
     "require_no_embedded_target",
     "scan_text",
     "scan_tree",
-    "scan_wheel",
+    "scan_archive",
 ]
 
 
@@ -197,10 +206,30 @@ _V6 = re.compile(
 _HOSTNAME = re.compile(r"(?<![\w.-])(?:[A-Za-z0-9_-]+\.)+[A-Za-z]{2,}(?![\w-])")
 
 
+#: The only loopback spellings permitted, as EXACT strings rather than a range
+#: test. `is_loopback` would admit all of `127.0.0.0/8`, and "permit the
+#: loopback range" is precisely the broad rule the ruling refused: these two
+#: constants are what the typed exposure policy declares (`ingress.LOOPBACK`),
+#: and anything else in `127/8` is an address somebody chose.
+LOOPBACK_CONSTANTS: tuple[str, ...] = ("127.0.0.1", "::1")
+
+#: A binding whose NAME says the value identifies a host to reach. A permitted
+#: constant assigned to one of these is refused anyway: the ruling is that a
+#: target or vantage arrives through the typed authorization, lease and
+#: challenge inputs with no defaults, and `target = <a loopback constant>` is a
+#: default. (Spelled without the literal: this module is subject to its own
+#: scan, and the rule caught this comment when it was written out in full.)
+_IDENTITY_BINDING = re.compile(
+    r"(?<![A-Za-z])(target|vantage|remote_host|probe_host|inspect_host)"
+    r"[A-Za-z_]*\s*(?::[^=]*)?=\s*$",
+    re.IGNORECASE,
+)
+
+
 def _is_permitted_address(text: str) -> bool:
     """Whether ``text`` parses as an address this guard deliberately allows.
 
-    Returns False for anything that does not parse at all: a candidate the
+    Returns True for anything that does not parse at all: a candidate the
     pattern found but `ipaddress` rejects is not an address, so it is not this
     guard's business and is not a finding either.
     """
@@ -208,9 +237,28 @@ def _is_permitted_address(text: str) -> bool:
         address = ipaddress.ip_address(text)
     except ValueError:
         return True
-    if address.is_unspecified or address.is_loopback:
+    if address.is_unspecified:
+        return True
+    if text in LOOPBACK_CONSTANTS:
         return True
     return any(address in network for network in _DOCUMENTATION_NETWORKS)
+
+
+def _is_network_literal(text: str, following: str) -> bool:
+    """Whether ``text`` is written as a CIDR network of more than one address.
+
+    The prefix has to be RIGHT THERE in the source. Reading it from the
+    surrounding line would let an unrelated `/24` three tokens away launder a
+    host literal into a range.
+    """
+    match = re.match(r"/(\d{1,3})(?![\d])", following)
+    if match is None:
+        return False
+    try:
+        network = ipaddress.ip_network(f"{text}/{match.group(1)}", strict=True)
+    except ValueError:
+        return False
+    return network.num_addresses > 1
 
 
 def _is_address(text: str) -> bool:
@@ -231,11 +279,26 @@ def scan_text(where: str, text: str) -> list[TargetIdentityFinding]:
     for pattern, kind in ((_V4, "ipv4-literal"), (_V6, "ipv6-literal")):
         for match in pattern.finditer(text):
             candidate = match.group(0)
-            if not _is_address(candidate) or _is_permitted_address(candidate):
+            if not _is_address(candidate):
                 continue
-            findings.append(
-                TargetIdentityFinding(where, _line_of(match.start()), kind, candidate)
-            )
+            line = _line_of(match.start())
+            # A permitted constant that is being used AS an identity is still a
+            # finding. This is checked before the permission, not after, so the
+            # loopback exemption cannot be the thing that hides it.
+            before = text[: match.start()].rsplit("\n", 1)[-1]
+            quote_trimmed = before.rstrip("\"'")
+            if _is_permitted_address(candidate) and _IDENTITY_BINDING.search(
+                quote_trimmed
+            ):
+                findings.append(
+                    TargetIdentityFinding(where, line, "address-as-identity", candidate)
+                )
+                continue
+            if _is_permitted_address(candidate):
+                continue
+            if _is_network_literal(candidate, text[match.end() :]):
+                continue
+            findings.append(TargetIdentityFinding(where, line, kind, candidate))
 
     detector = where.replace("\\", "/").endswith(_DETECTOR_MODULE)
     for match in _HOSTNAME.finditer(text):
@@ -290,29 +353,69 @@ def scan_tree(root: Path) -> list[TargetIdentityFinding]:
     return findings
 
 
-def scan_wheel(wheel: Path) -> list[TargetIdentityFinding]:
-    """Scan the members of a built wheel — what actually ships and executes.
+def scan_archive(archive_path: Path) -> list[TargetIdentityFinding]:
+    """Scan EVERY member of a built wheel or sdist — what ships and executes.
 
     The whole point of the artifact path: a tree scan describes a document
     nobody runs. Members are read from the archive rather than from any
     directory, so a file the build GENERATED is inspected on the same terms as
     one a human wrote.
+
+    NO suffix filter here, deliberately, and this is the difference between
+    this scan and a scan that walks `*.py` inside a wheel and calls it done.
+    Packaged templates, rendered configuration and plain package DATA ship and
+    are read on the host exactly as a module is; a literal in one of them is
+    not less compiled-in for having a `.json` name. In the tree an extension
+    filter is a reasonable way to skip build noise. In the artifact there is no
+    noise -- every member is there because something put it there.
     """
     findings: list[TargetIdentityFinding] = []
-    with zipfile.ZipFile(wheel) as archive:
-        for name in sorted(archive.namelist()):
-            if name.endswith("/") or not _inspectable(name):
-                continue
-            raw = archive.read(name)
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                findings.append(
-                    TargetIdentityFinding(name, 0, "unreadable", Path(name).suffix)
-                )
-                continue
-            findings.extend(scan_text(name, text))
+    for name, raw in _archive_members(archive_path):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # Not silently clean. A member that could not be read is a member
+            # nobody looked inside, and the one thing a scan may never do is
+            # turn "could not look" into zero.
+            findings.append(
+                TargetIdentityFinding(name, 0, "unreadable", Path(name).suffix)
+            )
+            continue
+        findings.extend(scan_text(name, text))
     return findings
+
+
+def _archive_members(archive_path: Path) -> Iterator[tuple[str, bytes]]:
+    """Every FILE member of a wheel (zip) or an sdist (tar.gz), as raw bytes.
+
+    Both artifact kinds, because the publication ruling scans both and because
+    an sdist is a perfectly good way to ship a literal that never appears in a
+    wheel. Dispatch is on what the file IS, not on its name: a wheel is a zip
+    and an sdist is a tar, and `zipfile`/`tarfile` are asked directly.
+    """
+    if zipfile.is_zipfile(archive_path):
+        with zipfile.ZipFile(archive_path) as archive:
+            for info in sorted(archive.infolist(), key=lambda item: item.filename):
+                if info.is_dir():
+                    continue
+                yield info.filename, archive.read(info)
+        return
+    if tarfile.is_tarfile(archive_path):
+        with tarfile.open(archive_path) as tar:
+            for member in sorted(tar.getmembers(), key=lambda item: item.name):
+                if not member.isfile():
+                    continue
+                handle = tar.extractfile(member)
+                if handle is None:  # pragma: no cover - isfile() already ruled it out
+                    continue
+                with handle:
+                    yield member.name, handle.read()
+        return
+    raise EmbeddedTargetError(
+        f"{archive_path.name} is neither a wheel nor an sdist. An artifact the "
+        "scanner cannot open is an artifact nobody inspected, which is refused "
+        "rather than reported as clean."
+    )
 
 
 #: Literals already embedded when this guard was written, frozen by PATH and
@@ -324,35 +427,77 @@ def scan_wheel(wheel: Path) -> list[TargetIdentityFinding]:
 #: ratchet lets a number drift down through unrelated edits until it stops
 #: describing anything.
 EMBEDDED_TARGET_DEBT: Mapping[str, int] = {
-    # GLOBALLY ROUTABLE addresses in module docstrings, recording the host a
-    # measurement was taken on. These are the two that matter: the address IS
-    # the evidence, so removing it costs something real, and that trade-off
-    # belongs to these modules' owner rather than to the guard walking past.
-    "src/dotmac_deployment_foundation/lease.py": 1,
-    "src/dotmac_deployment_foundation/vantage.py": 6,
-    # RFC 1918 examples in prose. Each has a correct replacement available in
-    # the documentation ranges, so this debt is cheap to pay.
-    "src/dotmac_deployment_foundation/ingress.py": 2,
+    # The expanded spelling of the IPv6 loopback constant, in a docstring whose
+    # SUBJECT is that two spellings of one address compare unequal. The narrow
+    # ruling permits the two exact constants and nothing else, so the expanded
+    # form is refused -- correctly by the letter, and at the cost of the one
+    # sentence that cannot make its point without writing it. Flagged for the
+    # ruling's owner rather than resolved by deleting the example.
+    "src/dotmac_deployment_foundation/ingress.py": 1,
+    # RFC 1918 examples in comments about IPv4-mapped addresses. `exposure.py`
+    # is mid-refactor in the release lane and out of this seam; these move when
+    # it is back in.
     "src/dotmac_deployment_foundation/exposure.py": 2,
     # An estate hostname naming the extraction SOURCE file this renderer was
-    # ported from -- provenance, not a connection target.
+    # ported from, in another repository. Provenance for a port, not a
+    # connection target and not an address -- outside the estate-address ruling
+    # and left for a hostname decision of its own.
     "src/dotmac_deployment_foundation/render/nginx.py": 2,
     "EXTRACTION.toml": 5,
 }
 
 
-def check_debt(findings: Iterable[TargetIdentityFinding]) -> list[str]:
+#: Distribution import name, used to map an archive member back onto a ledger
+#: key. Named once rather than spelled at each use.
+_IMPORT_NAME = "dotmac_deployment_foundation"
+
+
+def ledger_key(where: str) -> str:
+    """Map a tree path OR an archive member onto one ledger key.
+
+    Three spellings name the same file. In the tree it is
+    ``src/<pkg>/lease.py``; in a wheel it is ``<pkg>/lease.py``; in an sdist it
+    is ``<dist>-<version>/src/<pkg>/lease.py``. A ledger keyed by only one of
+    them would silently allow the other two, which is the whole failure mode
+    the artifact scan exists to close.
+    """
+    name = where.replace("\\", "/")
+    parts = name.split("/")
+    # An sdist's single root directory, `<distribution>-<version>/`.
+    if len(parts) > 1 and parts[0].startswith(_IMPORT_NAME.replace("_", "-")):
+        parts = parts[1:]
+        name = "/".join(parts)
+    # A wheel carries the import package at the archive root.
+    if parts and parts[0] == _IMPORT_NAME:
+        name = f"src/{name}"
+    return name
+
+
+def check_debt(
+    findings: Iterable[TargetIdentityFinding],
+    *,
+    inspected: set[str] | None = None,
+) -> list[str]:
     """Compare findings against the frozen ledger. Empty means unchanged.
 
     Returns human-readable complaints rather than raising, so a caller can
     report every drift at once instead of one per run.
+
+    ``inspected`` narrows the FALLING direction to the ledger entries a given
+    scan could actually have seen. A wheel does not carry `EXTRACTION.toml` or
+    the test tree, so demanding the full ledger from a wheel would report every
+    absent entry as debt paid without being lowered -- noise that trains a
+    reviewer to ignore the ratchet. The RISING direction is never narrowed: a
+    literal in a member with no ledger entry fails wherever it is found. The
+    two-directional ratchet lives on the tree scan, which sees everything.
     """
     counts: dict[str, int] = {}
     for finding in findings:
-        counts[finding.where] = counts.get(finding.where, 0) + 1
+        counts[ledger_key(finding.where)] = counts.get(ledger_key(finding.where), 0) + 1
 
+    considered = set(EMBEDDED_TARGET_DEBT) if inspected is None else set(inspected)
     complaints: list[str] = []
-    for where in sorted(set(counts) | set(EMBEDDED_TARGET_DEBT)):
+    for where in sorted(set(counts) | considered):
         found = counts.get(where, 0)
         allowed = EMBEDDED_TARGET_DEBT.get(where, 0)
         if found > allowed:

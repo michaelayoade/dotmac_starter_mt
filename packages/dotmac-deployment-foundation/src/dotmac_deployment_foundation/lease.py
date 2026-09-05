@@ -1,10 +1,18 @@
 """``HostLease.v1`` — exclusive use of a shared target, and why it cannot be
 self-granted.
 
-Measured on `85.190.246.211`, 2026-08-30: `/var/lock` held `lvm/` and
+Measured on the shared rehearsal host, 2026-08-30: `/var/lock` held `lvm/` and
 `subsys/` and nothing else. There was **no lease mechanism at all**, while
 eleven agents' worktrees and four agents' containers shared the host. "Exclusive
 lease" was a sentence in a plan, and a sentence is not a lock.
+
+The host that measurement was taken on is recorded in
+`docs/inventories/deployment-foundation-measurement-provenance.md`, outside this
+package, and deliberately not here: this wheel is reusable and an address
+compiled into it ships to every consumer of the distribution. The finding is
+what this module needs; the identity of the host it was found on is evidence,
+and evidence belongs in the inventory. A target reaches this module only through
+`HostLease.target`, which has no default.
 
 ## The rule that shapes this file
 

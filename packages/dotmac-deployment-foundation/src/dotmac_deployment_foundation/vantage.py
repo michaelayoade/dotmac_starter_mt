@@ -1,25 +1,31 @@
 """``VantageQualification.v1`` — proving a probe host may be believed.
 
-`94.72.99.155` was qualified on 2026-08-29 as "outside every Dotmac allowlist"
-on the strength of three refusals and one positive control. It then turned out
-to hold a second NIC, `eth1 10.0.0.4/22`, routing into the `idp-ha` private
-network. The refusals were real and the conclusion was not: a vantage untrusted
-publicly and inside the perimeter privately is the more dangerous shape, because
-its refusals read as proof of isolation that the private path never had to
-satisfy.
+A candidate vantage was qualified on 2026-08-29 as "outside every Dotmac
+allowlist" on the strength of three refusals and one positive control. It then
+turned out to hold a second NIC routing into the `idp-ha` private network. The
+refusals were real and the conclusion was not: a vantage untrusted publicly and
+inside the perimeter privately is the more dangerous shape, because its
+refusals read as proof of isolation that the private path never had to satisfy.
+
+Which vantage, which NIC and which private address are recorded in
+`docs/inventories/deployment-foundation-measurement-provenance.md`, outside this
+package. They are evidence, and this wheel is reusable: a vantage identity
+compiled into it would ship to every consumer and would also be a default, and
+a vantage reaches this module only through the typed observations
+`qualify_vantage` is handed.
 
 Re-measured 2026-08-30, that NIC is **gone**. Which creates the problem this
 module exists for.
 
 ## A removed risk that also removed the control
 
-The old qualification's discriminating control was
-``ip route get 10.0.0.2 -> dev eth1``: proof that the routing query SELECTS a
-path rather than always naming the same interface. With the NIC detached, that
-query answers `eth0` like everything else. The risk is resolved and **the
-control is gone with it**, and those are different facts. A check that stops
-discriminating because the thing it discriminated against was removed has been
-lost, not passed.
+The old qualification's discriminating control was an `ip route get` against
+an address inside the private range, answering `dev eth1`: proof that the
+routing query SELECTS a path rather than always naming the same interface.
+With the NIC detached, that query answers `eth0` like everything else. The
+risk is resolved and **the control is gone with it**, and those are different
+facts. A check that stops discriminating because the thing it discriminated
+against was removed has been lost, not passed.
 
 So qualification is no longer "no second NIC was found". It is a set of POSITIVE
 proofs, each of which fails loudly when absent:

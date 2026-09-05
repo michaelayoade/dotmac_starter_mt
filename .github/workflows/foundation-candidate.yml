@@ -170,6 +170,28 @@ jobs:
           python scripts/release_facility.py inspect "${{ inputs.facility }}" \
             --dist "${{ steps.resolve.outputs.package_dir }}/dist"
 
+      # Target-identity scan over the COMPLETED wheel AND sdist, before any
+      # coordinates exist for these bytes. This is the stage that makes the
+      # refusal meaningful: once the candidate is uploaded and the receipt is
+      # recorded, the bytes are citable, and everything downstream is built to
+      # prove it is fetching exactly them. A dirty artifact must never become
+      # something the rest of the lane is faithfully preserving.
+      #
+      # A target or vantage host reaches this facility through the typed
+      # authorization, lease and challenge inputs; an address compiled into the
+      # artifact survives every environment and ships to everyone who can pull
+      # the distribution.
+      #
+      # Every member is inspected, not `*.py`. A literal in a packaged
+      # template, in configuration, or in a data file with no extension at all
+      # ships and is read on the host exactly as one in a module, and a scanner
+      # that walks Python and calls it done is the documented failure this step
+      # exists to avoid.
+      - name: Scan artifacts for an embedded target identity
+        run: |
+          python scripts/release_facility.py scan-targets "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
       - name: Release wheel CLI smoke
         run: |
           python scripts/release_facility.py verify-wheel "${{ inputs.facility }}" \

@@ -33,13 +33,15 @@ from dotmac_deployment_foundation.target_identity_guard import (
     EMBEDDED_TARGET_DEBT,
     ESTATE_SUFFIXES,
     INSPECTED_SUFFIXES,
+    LOOPBACK_CONSTANTS,
     EmbeddedTargetError,
     TargetIdentityFinding,
     check_debt,
+    ledger_key,
     require_no_embedded_target,
+    scan_archive,
     scan_text,
     scan_tree,
-    scan_wheel,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -167,8 +169,7 @@ def test_permitted_addresses_state_premises_that_ipaddress_can_decide():
     permitted = [
         "0.0.0.0",  # noqa: S104 -- the point: a bind is not a host
         "::",  # unspecified, v6
-        "127.0.0.1",  # loopback cannot name a REMOTE target
-        "::1",
+        *LOOPBACK_CONSTANTS,  # the two exact constants, never the range
         "192.0.2.10",  # RFC 5737 documentation space
         "198.51.100.10",
         "203.0.113.10",
@@ -261,7 +262,7 @@ def test_a_planted_literal_in_the_built_artifact_is_refused(tmp_path: Path):
     wheel = _wheel_with(
         tmp_path, {"dotmac_deployment_foundation/provider.py": f'T = "{_PLANTED_V4}"\n'}
     )
-    findings = scan_wheel(wheel)
+    findings = scan_archive(wheel)
     assert _values(findings) == {_PLANTED_V4}
 
 
@@ -287,7 +288,7 @@ def test_a_member_present_only_in_the_artifact_is_still_inspected(tmp_path: Path
             "dotmac_deployment_foundation/_generated.py": f'HOST = "{_PLANTED_V4}"\n',
         },
     )
-    findings = scan_wheel(wheel)
+    findings = scan_archive(wheel)
     assert [f.where for f in findings] == ["dotmac_deployment_foundation/_generated.py"]
 
 
@@ -302,7 +303,7 @@ def test_a_non_utf8_member_is_reported_rather_than_counted_clean(tmp_path: Path)
         archive.writestr(
             "dotmac_deployment_foundation/data.json", b"\xff\xfe\x00binary"
         )
-    findings = scan_wheel(wheel)
+    findings = scan_archive(wheel)
     assert _kinds(findings) == {"unreadable"}
 
 
@@ -367,3 +368,207 @@ def test_the_exemption_covers_hostnames_only_and_not_addresses():
     address hide in the detector. It already caught one in its own docstring."""
     findings = scan_text("target_identity_guard.py", f'A = "{_PLANTED_V4}"\n')
     assert _kinds(findings) == {"ipv4-literal"}
+
+
+# ── The narrowed loopback ruling ───────────────────────────────────────────
+
+
+def test_only_the_two_exact_loopback_constants_are_permitted():
+    """`is_loopback` would admit all of `127.0.0.0/8`. The ruling is narrower:
+    two exact constants, because those are what the typed exposure policy
+    declares and anything else in that range is an address somebody chose."""
+    assert set(LOOPBACK_CONSTANTS) == {"127.0.0.1", "::1"}
+    for permitted in LOOPBACK_CONSTANTS:
+        assert scan_text("ingress.py", f'LOOPBACK = "{permitted}"\n') == []
+
+
+@pytest.mark.parametrize("refused", ["127.0.0.53", "127.1.2.3", "127.0.0.2", "::2"])
+def test_the_rest_of_the_loopback_range_is_refused(refused: str):
+    """The near-miss that a `is_loopback` rule would have let through."""
+    assert scan_text("x.py", f'A = "{refused}"\n'), f"{refused} was permitted"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'target = "127.0.0.1"',
+        'vantage_host = "127.0.0.1"',
+        'TARGET: str = "127.0.0.1"',
+        'probe_host = "::1"',
+        'inspect_host = "127.0.0.1"',
+    ],
+)
+def test_a_permitted_constant_may_still_not_IDENTIFY_a_target(line: str):
+    """ "The target defaults to localhost" is a default, and there are none.
+
+    This is checked BEFORE the permission rather than after, so the loopback
+    exemption cannot be the thing that hides it.
+    """
+    findings = scan_text("provider.py", line + "\n")
+    assert _kinds(findings) == {"address-as-identity"}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'LOOPBACK = {"ipv4": "127.0.0.1", "ipv6": "::1"}',
+        'loopback: str = "127.0.0.1"',
+        'bind = "127.0.0.1"',
+    ],
+)
+def test_the_exposure_policy_may_still_declare_loopback(line: str):
+    """The near-miss for the rule above. If declaring loopback in the exposure
+    policy started failing, the guard would have made the legitimate use
+    impossible and an exemption would be written for it within the week."""
+    assert scan_text("ingress.py", line + "\n") == []
+
+
+# ── CIDR policy constants are topology, not identity ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "network", ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "2001:db8::/32"]
+)
+def test_a_cidr_network_is_topology_and_is_permitted(network: str):
+    """`vantage.py`'s `PRIVATE_RANGES` is the definition of the private space
+    it refuses to sit in. A /8 cannot identify a host, and a guard that refused
+    it would be demanding the module delete its own policy."""
+    assert scan_text("vantage.py", f'PRIVATE_RANGES = ("{network}",)\n') == []
+
+
+@pytest.mark.parametrize(
+    "host", ["10.0.0.4/32", "198.18.7.42/32", "2001:4860:4860::8888/128"]
+)
+def test_a_single_address_prefix_is_a_host_wearing_a_prefix(host: str):
+    """The near-miss for the rule above, and the way it would be abused: a /32
+    is not a network, it is one address with a suffix stuck on it."""
+    assert scan_text("x.py", f'A = "{host}"\n'), f"{host} was permitted"
+
+
+def test_the_prefix_must_be_adjacent_to_the_address():
+    """An unrelated `/24` elsewhere on the line may not launder a host literal."""
+    planted = _PLANTED_V4
+    assert scan_text("x.py", f'A = "{planted}"  # see the /24 above\n')
+
+
+# ── The estate-address ruling, asserted directly ───────────────────────────
+
+
+@pytest.mark.parametrize("module", ["lease.py", "vantage.py"])
+def test_the_relocated_modules_carry_no_embedded_identity(module: str):
+    """Ruling: both real addresses come out of the reusable wheel. Their
+    provenance is preserved in `docs/inventories/`, outside the artifact."""
+    path = PACKAGE_DIR / "src" / "dotmac_deployment_foundation" / module
+    assert scan_text(module, path.read_text(encoding="utf-8")) == []
+
+
+def test_the_relocated_provenance_record_exists_and_names_both_modules():
+    """Relocation, not deletion. If the record vanishes, the addresses were
+    deleted rather than moved and two design decisions became uncheckable."""
+    record = (
+        PROJECT_ROOT
+        / "docs"
+        / "inventories"
+        / "deployment-foundation-measurement-provenance.md"
+    )
+    assert record.is_file(), "the provenance was deleted rather than relocated"
+    text = record.read_text(encoding="utf-8")
+    assert "lease.py" in text and "vantage.py" in text
+
+
+def test_no_module_supplies_a_default_target_or_vantage():
+    """The load-bearing half of the ruling. A module that stops NAMING an
+    address but keeps a fallback to one has moved the problem, not fixed it."""
+    package = PACKAGE_DIR / "src" / "dotmac_deployment_foundation"
+    offenders = [
+        f"{path.name}:{finding.line}"
+        for path in sorted(package.rglob("*.py"))
+        for finding in scan_text(path.name, path.read_text(encoding="utf-8"))
+        if finding.kind == "address-as-identity"
+    ]
+    assert not offenders, f"a target or vantage identity has a default: {offenders}"
+
+
+# ── One ledger key for three spellings ─────────────────────────────────────
+
+
+def test_one_ledger_key_covers_tree_wheel_and_sdist_spellings():
+    """A ledger keyed by only the tree spelling would silently allow the other
+    two, which is exactly what the artifact scan exists to close."""
+    tree = "src/dotmac_deployment_foundation/lease.py"
+    wheel = "dotmac_deployment_foundation/lease.py"
+    sdist = (
+        "dotmac-deployment-foundation-0.3.0a1/src/dotmac_deployment_foundation/lease.py"
+    )
+    assert ledger_key(tree) == ledger_key(wheel) == ledger_key(sdist) == tree
+
+
+def test_a_root_level_member_keeps_its_own_name():
+    assert ledger_key("EXTRACTION.toml") == "EXTRACTION.toml"
+    assert (
+        ledger_key("dotmac-deployment-foundation-0.3.0a1/EXTRACTION.toml")
+        == "EXTRACTION.toml"
+    )
+
+
+# ── Both artifact kinds, and every member of them ──────────────────────────
+
+
+def _sdist_with(tmp_path: Path, members: dict[str, str]) -> Path:
+    import io
+    import tarfile
+
+    root = "dotmac-deployment-foundation-0.3.0a1"
+    path = tmp_path / f"{root}.tar.gz"
+    with tarfile.open(path, "w:gz") as tar:
+        for name, text in members.items():
+            raw = text.encode("utf-8")
+            info = tarfile.TarInfo(f"{root}/src/{name}")
+            info.size = len(raw)
+            tar.addfile(info, io.BytesIO(raw))
+    return path
+
+
+def test_an_sdist_is_scanned_as_well_as_a_wheel(tmp_path: Path):
+    """An sdist is a perfectly good way to ship a literal that never reaches a
+    wheel. Scanning only the wheel would leave that route open."""
+    sdist = _sdist_with(
+        tmp_path, {"dotmac_deployment_foundation/x.py": f'T = "{_PLANTED_V4}"\n'}
+    )
+    assert _values(scan_archive(sdist)) == {_PLANTED_V4}
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "dotmac_deployment_foundation/render/site.j2",
+        "dotmac_deployment_foundation/data/collector.json",
+        "dotmac_deployment_foundation/conf/nginx.conf",
+        "dotmac_deployment_foundation/data/hosts",
+        "dotmac_deployment_foundation/scripts/run",
+    ],
+)
+def test_a_literal_in_NON_PYTHON_package_data_is_caught_in_the_artifact(
+    tmp_path: Path, member: str
+):
+    """THE case the ruling singles out.
+
+    A scanner that walks `*.py` inside a wheel and calls it done is the shape
+    already found in `dotmac_observability`'s guard. A packaged template, a
+    config file and a plain data file with no extension at all ship and are
+    read on the host exactly as a module is. Note the last two names: an
+    extension allowlist would miss both.
+    """
+    wheel = _wheel_with(tmp_path, {member: f"endpoint: {_PLANTED_V4}:4317\n"})
+    findings = scan_archive(wheel)
+    assert [f.where for f in findings] == [member]
+
+
+def test_an_archive_the_scanner_cannot_open_is_refused_not_reported_clean(
+    tmp_path: Path,
+):
+    """An artifact nobody could inspect is not an artifact with nothing in it."""
+    bogus = tmp_path / "not-an-archive.whl"
+    bogus.write_bytes(b"this is not a zip or a tar")
+    with pytest.raises(EmbeddedTargetError):
+        scan_archive(bogus)

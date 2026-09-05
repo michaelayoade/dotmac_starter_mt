@@ -678,7 +678,7 @@ class HostLeaseReleaseV1:
     #:
     #: An address is the wrong identity here and the sequence is why: the
     #: addresses are exactly what a destroy-and-restore can change, so a record
-    #: binding `10.120.120.54` would bind a value that survives the wipe by
+    #: binding the target's IPv4 would bind a value that survives the wipe by
     #: coincidence rather than by identity, and could name a different machine
     #: afterwards.
     #:

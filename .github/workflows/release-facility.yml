@@ -331,6 +331,22 @@ jobs:
           python scripts/release_facility.py inspect "${{ inputs.facility }}" \
             --dist candidate-dist
 
+      # Target-identity scan over the COMPLETED wheel AND sdist. A target or
+      # vantage host reaches this facility through the operator's typed
+      # authorization, lease and challenge inputs; an address compiled into the
+      # artifact survives every environment and ships to everyone who can pull
+      # the distribution. Refusing HERE is what makes it true that no candidate
+      # coordinates are ever issued for bytes carrying one.
+      #
+      # Every member is inspected, not `*.py`: a literal in a packaged template
+      # or in plain package data ships and is read on the host exactly as one
+      # in a module, and a scanner that walks Python and calls it done is the
+      # documented failure this step exists to avoid.
+      - name: Scan artifacts for an embedded target identity
+        run: |
+          python scripts/release_facility.py scan-targets "${{ inputs.facility }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
       # Release-artifact smoke: install the freshly built wheel into a clean
       # venv and prove the CONSOLE SCRIPT it exposes runs against a real
       # descriptor. `deploy/product.toml` is this repository's own descriptor
@@ -428,6 +444,16 @@ jobs:
       # that should have screamed "this version already exists, and the bytes
       # you just built are not the ones behind it" instead reports a green
       # publish that published nothing.
+
+      # ...and the SAME scanner runs again over those exact bytes, on the
+      # credentialed side. Credential-free in itself: no index, no token and no
+      # network, only the archives already on disk. It never rebuilds -- a
+      # rebuild would attest something other than what is about to be
+      # published, and neither job here can build one anyway.
+      - name: Re-scan the exact published bytes for a target identity
+        run: |
+          python scripts/release_facility.py scan-targets "${{ inputs.facility }}" \
+            --dist dist
       - name: Publish to the Forgejo private index
         env:
           TWINE_USERNAME: ci-publisher
