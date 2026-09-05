@@ -492,12 +492,55 @@ def require_candidate_bytes(receipt: dict[str, Any], dist: Path) -> None:
         )
 
 
+def candidate_source_revision(receipt: dict[str, Any]) -> str:
+    """The commit the recorded candidate was BUILT FROM. A third revision.
+
+    Three different commits are in play across the build/rehearse/publish
+    sequence and they are three different questions:
+
+      * the CANDIDATE SOURCE revision — what the artifact was built from. This
+        one. It lives here, in the committed ``CandidateArtifact.v1``, and
+        nowhere else;
+      * the LANE 3 RUNNER revision — whose runner drove the rehearsal. That is
+        the rehearsal run's own head SHA, and it is what
+        ``RehearsalReceipt.v1.foundation_revision`` records;
+      * the RELEASE/TAG revision — what publishes. The release run's head SHA,
+        which ``verify_publication`` already compares against the receipt's.
+
+    They were not distinguishable from one another because only two of them
+    were ever named: the candidate's was never emitted, so nothing downstream
+    could refer to it, let alone compare it. Emitting it is what makes a
+    binding possible at all — "build once, run those exact bytes, publish
+    unchanged" is a claim about three commits agreeing in a stated way, and a
+    value nobody can name cannot be shown to agree with anything.
+
+    Refused rather than defaulted when absent or not a full commit: a receipt
+    that cannot say what it was built from is a receipt that binds nothing, and
+    a short or empty revision compared against a full one silently never
+    matches.
+    """
+    value = str(receipt.get("source_sha", "")).strip().lower()
+    if len(value) != 40 or any(c not in "0123456789abcdef" for c in value):
+        raise ReleaseRefused(
+            f"the candidate receipt records source_sha {receipt.get('source_sha')!r}, "
+            "which is not a full 40-character commit. The revision an artifact "
+            "was built from is one of the three this sequence binds; an "
+            "unusable one cannot be compared and must not be passed on as "
+            "though it could"
+        )
+    return value
+
+
 def cmd_resolve_candidate(args: argparse.Namespace) -> None:
     """Emit the recorded candidate's coordinates for the workflow to fetch."""
     resolve(args.distribution)
     path, receipt = candidate_receipt(args.distribution, args.version)
     for key in ("repository", "run_id", "artifact_id", "filename", "sha256"):
         print(f"candidate_{key}={receipt[key]}")
+    # Named separately from `candidate_sha256`, and from the workflow's own
+    # `GITHUB_SHA`, because those are three answers to three questions. See
+    # `candidate_source_revision`.
+    print(f"candidate_source_sha={candidate_source_revision(receipt)}")
     print(f"candidate_receipt={path.relative_to(REPO_ROOT)}")
 
 
@@ -591,6 +634,7 @@ rebuilt = FoundationExecutionPlanV1(
     manifest_digest=document["manifest_digest"],
     descriptor_digest=document["descriptor_digest"],
     host_prestate=HostPrestateV1.from_document(document["host_prestate"]),
+    application_profile_digest=document["application_profile_digest"],
     strategy=document["strategy"],
     environment_inventory=tuple(document["environment_inventory"]),
     steps=tuple(

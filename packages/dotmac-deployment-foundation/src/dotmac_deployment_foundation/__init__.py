@@ -329,6 +329,7 @@ from .rehearsal import (
     RequirementStatus,
     build_receipt,
     render_status_document,
+    require_rehearsed_artifact,
     verify_publication,
 )
 from .spec import (
@@ -669,6 +670,7 @@ __all__ = [
     "steps_for_rollback",
     "verify_exposure",
     "verify_plane_isolation",
+    "require_rehearsed_artifact",
     "verify_publication",
     "verify_recovery",
     "write_lease",

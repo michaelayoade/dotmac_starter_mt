@@ -31,6 +31,7 @@ from dotmac_deployment_foundation.rehearsal import (
     RequirementStatus,
     build_receipt,
     render_status_document,
+    require_rehearsed_artifact,
     verify_publication,
 )
 
@@ -72,6 +73,85 @@ def _receipt(**overrides: RequirementStatus) -> RehearsalReceiptV1:
         finished_at="2026-08-30T10:40:00+00:00",
         results=_results(**overrides),
     )
+
+
+# ── the receipt is about BYTES, not only about a revision ──────────────────
+#
+# `verify_publication` compares the LANE 3 RUNNER revision with the RELEASE
+# revision and every item's status. Until this commit nothing compared the
+# receipt with the ARTIFACT, so a rehearsal of one candidate satisfied a
+# publication of another whenever both ran at the same commit — and
+# `candidate_version` is a dispatch input on `exposure-rehearsal.yml`
+# specifically so that two candidates CAN be rehearsed from one SHA.
+
+
+def test_a_receipt_for_these_bytes_satisfies_the_artifact_binding() -> None:
+    """The accepting control, without which every refusal below could belong to
+    a check that refuses everything.
+
+    Fails before the change: `require_rehearsed_artifact` did not exist, so the
+    import at the top of this module raises `ImportError`.
+    """
+    require_rehearsed_artifact(_receipt(), artifact_digest=ARTIFACT)
+
+
+def test_a_receipt_for_OTHER_bytes_does_not_satisfy_publication() -> None:
+    """THE substitution. Same revision, same sixteen passes, different wheel.
+
+    Note what does NOT catch it: `verify_publication` accepts this receipt
+    completely, because the revision and the statuses are all correct. The two
+    checks are about different questions, which is why the second one had to
+    exist rather than be folded into the first.
+    """
+    other = "sha256:" + "e" * 64
+    verify_publication(_receipt(), revision=REVISION)
+    with pytest.raises(SpecError) as exc:
+        require_rehearsed_artifact(_receipt(), artifact_digest=other)
+    assert ARTIFACT in str(exc.value) and other in str(exc.value)
+
+
+def test_the_artifact_binding_reads_the_digest_and_not_a_prefix() -> None:
+    """The near-miss: a digest that AGREES on a prefix and names other bytes.
+
+    A comparison written as `startswith` or over a truncated value would credit
+    this, and a truncation is exactly what a hand-copied digest produces.
+    """
+    truncated = ARTIFACT[:-1] + "c"
+    with pytest.raises(SpecError):
+        require_rehearsed_artifact(_receipt(), artifact_digest=truncated)
+
+
+def test_the_artifact_binding_refuses_a_value_that_is_not_a_DIGEST() -> None:
+    """An unparseable comparand refuses rather than comparing unequal.
+
+    "Not a digest" and "a digest for other bytes" are different facts, and a
+    check that reported the second for the first would send an operator looking
+    for a wheel mix-up when the actual defect is a workflow expression that
+    resolved to an empty string.
+    """
+    for value in ("", "not-a-digest", "sha256:" + "b" * 63):
+        with pytest.raises(SpecError):
+            require_rehearsed_artifact(_receipt(), artifact_digest=value)
+
+
+def test_the_same_digest_spelled_without_its_algorithm_is_the_same_digest() -> None:
+    """The near-miss in the OTHER direction, and it would bite in practice.
+
+    `Digest.parse` normalises a bare 64-character hex value to `sha256:<hex>`,
+    so an unprefixed spelling names the same bytes. A comparison written over
+    raw strings would refuse this and report "a rehearsal of other bytes" about
+    a receipt that is exactly right — the most confusing possible failure, since
+    every digit matches.
+    """
+    require_rehearsed_artifact(_receipt(), artifact_digest="b" * 64)
+
+
+def test_the_receipt_exposes_the_artifact_it_rehearsed() -> None:
+    """`build_receipt` has always WRITTEN this field and nothing could ask for
+    it, which is how publication came to compare the revision and never the
+    bytes. The accessor reads a field every v1 receipt already carries, so no
+    document changes shape."""
+    assert _receipt().foundation_artifact_digest == ARTIFACT
 
 
 # ── the accepting control ───────────────────────────────────────────────────

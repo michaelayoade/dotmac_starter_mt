@@ -45,6 +45,7 @@ import ast
 import copy
 import json
 import tomllib
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,20 @@ def _load_release_facility():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _execution_plan_probe_keywords(source: str) -> set[str]:
+    """Constructor fields exercised by the installed-wheel round-trip probe."""
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "FoundationExecutionPlanV1"
+    ]
+    assert len(calls) == 1
+    return {keyword.arg for keyword in calls[0].keywords if keyword.arg is not None}
 
 
 def _references(path: Path, needle: str) -> bool:
@@ -200,6 +215,33 @@ def test_release_facility_reasserts_freshness_before_publish_and_before_verify()
         steps = workflow["jobs"][job_name]["steps"]
         blob = "\n".join(str(step.get("run", "")) for step in steps)
         assert "assert_current_main.sh" in blob, job_name
+
+
+def test_the_installed_wheel_probe_rebuilds_every_execution_plan_field() -> None:
+    """A required plan field must fail CI before it fails a candidate build."""
+    from dotmac_deployment_foundation.execution_plan import (
+        FoundationExecutionPlanV1,
+    )
+
+    facility = _load_release_facility()
+    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
+    observed = _execution_plan_probe_keywords(facility._EXECUTION_PLAN_PROBE)
+    assert observed == expected
+
+
+def test_the_execution_plan_probe_field_guard_detects_an_omission() -> None:
+    """Sensitivity proof for the omission that stopped candidate run 33917635417."""
+    from dotmac_deployment_foundation.execution_plan import (
+        FoundationExecutionPlanV1,
+    )
+
+    facility = _load_release_facility()
+    planted = facility._EXECUTION_PLAN_PROBE.replace(
+        '    application_profile_digest=document["application_profile_digest"],\n',
+        "",
+    )
+    expected = {field.name for field in fields(FoundationExecutionPlanV1)}
+    assert _execution_plan_probe_keywords(planted) != expected
 
 
 # ── the lane consumes a candidate and cannot build one ──────────────────────
@@ -760,6 +802,90 @@ def test_every_required_wheel_module_exists_in_the_package_source() -> None:
                 "module name"
             )
     assert checked, "no facility declared any required wheel contents"
+
+
+def _store_publishers(package_src: Path) -> set[str]:
+    """Every module in the package that PUBLISHES with `os.link`.
+
+    Derived from the source rather than named, so this control cannot be
+    satisfied by a rename and cannot go stale against one. `os.link` is the
+    store's single publish primitive — creating the name and failing on a taken
+    name in one syscall — so the module that calls it is the module that owns
+    where records live.
+    """
+    found: set[str] = set()
+    for path in sorted(package_src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", None) == "link"
+                and getattr(getattr(node.func, "value", None), "id", None) == "os"
+            ):
+                found.add(path.relative_to(package_src.parent).as_posix())
+    return found
+
+
+def test_the_module_that_owns_the_STORE_is_required_in_the_wheel() -> None:
+    """A wheel can hold the record type and not know where records live.
+
+    `lease_release.py` is required and defines `HostLeaseRelease.v1`; `lease.py`
+    owns `load_lease`, `release_path` and the single `os.link` publish every
+    record in that directory goes in through. The list required the first and
+    not the second, so the artifact check would have passed a wheel whose
+    `write_release` could not place what it built — and a check that is
+    incomplete in a way nobody can see is worse than a check that is absent.
+
+    Stated as a PROPERTY of the store rather than as the string `lease.py`, in
+    the same shape as the entry-point control above: whatever module publishes
+    into the store must be in the wheel.
+    """
+    facilities = _load_json(FACILITY_ALLOWLIST)["facilities"]
+    checked = 0
+    for name, entry in sorted(facilities.items()):
+        package_src = PROJECT_ROOT / str(entry["package_dir"]) / "src"
+        required = set(entry["wheel_contents"]["required"])
+        publishers = _store_publishers(package_src / str(entry["import_name"]))
+        for publisher in sorted(publishers):
+            checked += 1
+            assert publisher in required, (
+                f"{name} ships {publisher}, which publishes into a store with "
+                "`os.link`, and does not require it in the wheel. A record type "
+                "without the module that knows where records live is a wheel "
+                "that builds a release it cannot place"
+            )
+    assert checked, "no facility was found to publish into any store"
+
+
+def test_that_store_control_is_not_satisfied_by_the_RECORD_module(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity, with the near-miss that separates the two modules.
+
+    The planted defect is the shape this list was actually in: the record type
+    required, the store owner not. The near-miss is a list holding
+    `lease_release.py` — the obvious neighbour, and the one a reviewer skimming
+    for "something lease-shaped" would credit. The control reads which module
+    CALLS `os.link`, so the neighbour does not satisfy it.
+    """
+    package = tmp_path / "src" / "pkg"
+    package.mkdir(parents=True)
+    (package / "lease.py").write_text(
+        "import os\ndef publish(p, t):\n    os.link(t, p)\n", encoding="utf-8"
+    )
+    (package / "lease_release.py").write_text(
+        "from .lease import publish\nSCHEMA = 'HostLeaseRelease.v1'\n",
+        encoding="utf-8",
+    )
+    publishers = _store_publishers(package)
+    assert publishers == {"pkg/lease.py"}
+    assert "pkg/lease_release.py" not in publishers
+    # The planted defect, against the control's OWN predicate: a required list
+    # holding the record module and not the store owner does not satisfy it.
+    assert not publishers <= {"pkg/lease_release.py"}
+    # And the repaired list does, so the control is not one that only ever says
+    # no — a check that cannot pass proves as little as one that cannot fail.
+    assert publishers <= {"pkg/lease.py", "pkg/lease_release.py"}
 
 
 def test_the_cli_entry_points_own_module_is_required() -> None:
