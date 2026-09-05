@@ -34,13 +34,16 @@ at the write rather than confuse a report.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
 __all__ = [
+    "UNTIL_REPLY",
     "Direction",
     "InvalidTransitionError",
     "ReasonSpec",
+    "SnoozeUntilReply",
     "Status",
     "UnknownReasonError",
     "is_open",
@@ -67,6 +70,22 @@ class Status(StrEnum):
     #: Terminal for this exchange. A new inbound message may reopen it — that is
     #: the product's policy, and the transition table below permits it.
     RESOLVED = "resolved"
+
+
+@dataclass(frozen=True, slots=True)
+class SnoozeUntilReply:
+    """Explicitly request an indefinite snooze that ends on inbound activity.
+
+    ``None`` remains an omitted/invalid snooze deadline at command boundaries;
+    callers must pass this value to ask for the persisted NULL deadline.
+    """
+
+
+SnoozeTarget = datetime | SnoozeUntilReply | None
+
+# A named value keeps the command readable while the class remains available
+# for callers that prefer constructing the typed value explicitly.
+UNTIL_REPLY = SnoozeUntilReply()
 
 
 def is_open(status: Status | str) -> bool:

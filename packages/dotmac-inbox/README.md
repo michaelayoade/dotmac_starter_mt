@@ -7,6 +7,12 @@ declared threading and message-identity traits. Thread creation and message
 recording are conflict-safe and replay the durable winner for exact redelivery;
 reusing a message identity with different content fails closed.
 
+Snoozing has two explicit forms: a timezone-aware finite deadline, or the
+typed `UNTIL_REPLY` value (`SnoozeUntilReply`) for an indefinite snooze. An
+omitted deadline is rejected; `UNTIL_REPLY` persists as `status=snoozed` with
+`snoozed_until=NULL`, and only inbound module-owned message activity wakes it.
+Timed wake scheduling remains product-owned and outside this package.
+
 Adopters preserve established UUIDs through the separate typed
 `import_conversation`, `import_message` and `import_read_state` history seam.
 Those commands validate the same owner contracts, preserve source timestamps,

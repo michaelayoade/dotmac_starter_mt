@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from uuid import uuid4
 
 import pytest
 from dotmac_inbox import (
+    UNTIL_REPLY,
     AddressForm,
     ChannelSpec,
     ConversationConflict,
@@ -18,6 +19,7 @@ from dotmac_inbox import (
     InboundIdentity,
     MessageIdScope,
     ReasonSpec,
+    SnoozeUntilReply,
     StaleConversationState,
     Status,
     ThreadIdentity,
@@ -38,6 +40,17 @@ from dotmac_inbox.models import Conversation, ConversationReadState, Message
 from dotmac_kernel.models import Base, Tenant
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+
+
+class _OffsetlessTimezone(tzinfo):
+    def utcoffset(self, dt: datetime | None) -> None:
+        return None
+
+    def dst(self, dt: datetime | None) -> None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str:
+        return "offsetless"
 
 
 @pytest.fixture
@@ -164,6 +177,35 @@ def test_create_conversation_replays_the_existing_thread(db: Session) -> None:
     assert db.scalars(select(Conversation)).all() == [first]
 
 
+def test_create_snoozed_conversation_requires_an_explicit_target(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+
+    with pytest.raises(ConversationConflict, match="requires snoozed_until"):
+        create_conversation(
+            db,
+            tenant_id=tenant.id,
+            identity=_identity(),
+            status=Status.SNOOZED,
+        )
+
+
+def test_create_conversation_accepts_explicit_until_reply(db: Session) -> None:
+    tenant = _tenant(db)
+
+    conversation = create_conversation(
+        db,
+        tenant_id=tenant.id,
+        identity=_identity(),
+        status=Status.SNOOZED,
+        snoozed_until=UNTIL_REPLY,
+    )
+
+    assert conversation.status == Status.SNOOZED.value
+    assert conversation.snoozed_until is None
+
+
 def test_record_message_replays_an_exact_provider_redelivery(db: Session) -> None:
     tenant = _tenant(db)
     conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
@@ -261,6 +303,198 @@ def test_a_stale_transition_is_refused_before_mutation(db: Session) -> None:
             occurred_at=datetime.now(UTC),
         )
     assert conversation.status == Status.OPEN.value
+
+
+def test_snooze_until_reply_is_explicit_and_persists_a_null_deadline(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    occurred_at = datetime(2026, 8, 18, 8, tzinfo=UTC)
+
+    transitioned = transition_conversation_status(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        expected=Status.OPEN,
+        requested=Status.SNOOZED,
+        reason=None,
+        occurred_at=occurred_at,
+        snoozed_until=UNTIL_REPLY,
+    )
+
+    assert transitioned.status == Status.SNOOZED.value
+    assert transitioned.snoozed_until is None
+    assert isinstance(UNTIL_REPLY, SnoozeUntilReply)
+
+
+def test_snooze_without_an_explicit_deadline_is_still_rejected(db: Session) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+
+    with pytest.raises(ConversationConflict, match="requires snoozed_until"):
+        transition_conversation_status(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            expected=Status.OPEN,
+            requested=Status.SNOOZED,
+            reason=None,
+            occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        )
+
+
+def test_until_reply_is_rejected_for_non_snoozed_statuses(db: Session) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+
+    with pytest.raises(ConversationConflict, match="only for snoozed status"):
+        transition_conversation_status(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            expected=Status.OPEN,
+            requested=Status.OPEN,
+            reason=None,
+            occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+            snoozed_until=UNTIL_REPLY,
+        )
+
+
+def test_a_finite_snooze_stays_until_its_deadline_and_is_timezone_aware(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    deadline = datetime(2026, 8, 19, 8, tzinfo=UTC)
+
+    transitioned = transition_conversation_status(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        expected=Status.OPEN,
+        requested=Status.SNOOZED,
+        reason=None,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        snoozed_until=deadline,
+    )
+    assert transitioned.snoozed_until == deadline
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        transition_conversation_status(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            expected=Status.SNOOZED,
+            requested=Status.SNOOZED,
+            reason=None,
+            occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+            snoozed_until=datetime(2026, 8, 19, 8),
+        )
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        transition_conversation_status(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            expected=Status.SNOOZED,
+            requested=Status.SNOOZED,
+            reason=None,
+            occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+            snoozed_until=datetime(2026, 8, 19, 8, tzinfo=_OffsetlessTimezone()),
+        )
+
+
+def test_inbound_message_wakes_only_an_until_reply_snooze(db: Session) -> None:
+    tenant = _tenant(db)
+    until_reply = create_conversation(
+        db,
+        tenant_id=tenant.id,
+        identity=replace(
+            _identity("until-reply-thread"), external_thread_id="until-reply-thread"
+        ),
+    )
+    transition_conversation_status(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=until_reply.id,
+        expected=Status.OPEN,
+        requested=Status.SNOOZED,
+        reason=None,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        snoozed_until=UNTIL_REPLY,
+    )
+    record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=until_reply.id,
+        identity=replace(
+            _identity("until-reply-message"),
+            external_thread_id="until-reply-thread",
+        ),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 9, tzinfo=UTC),
+    )
+    assert until_reply.status == Status.OPEN.value
+
+    finite = create_conversation(
+        db,
+        tenant_id=tenant.id,
+        identity=replace(
+            _identity("finite-thread"), external_thread_id="finite-thread"
+        ),
+    )
+    transition_conversation_status(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=finite.id,
+        expected=Status.OPEN,
+        requested=Status.SNOOZED,
+        reason=None,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        snoozed_until=datetime(2026, 8, 19, 8, tzinfo=UTC),
+    )
+    record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=finite.id,
+        identity=replace(
+            _identity("finite-message"), external_thread_id="finite-thread"
+        ),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 9, tzinfo=UTC),
+    )
+    assert finite.status == Status.SNOOZED.value
+
+
+@pytest.mark.parametrize("direction", [Direction.OUTBOUND, Direction.INTERNAL])
+def test_non_inbound_message_does_not_wake_an_until_reply_snooze(
+    db: Session, direction: Direction
+) -> None:
+    tenant = _tenant(db)
+    identity = replace(
+        _identity(f"{direction.value}-message"),
+        external_thread_id=f"{direction.value}-thread",
+    )
+    conversation = create_conversation(
+        db,
+        tenant_id=tenant.id,
+        identity=identity,
+        status=Status.SNOOZED,
+        snoozed_until=UNTIL_REPLY,
+    )
+
+    record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=identity,
+        direction=direction,
+        occurred_at=datetime(2026, 8, 18, 9, tzinfo=UTC),
+    )
+
+    assert conversation.status == Status.SNOOZED.value
+    assert conversation.snoozed_until is None
 
 
 def test_read_state_advances_to_a_message_on_the_same_conversation(db: Session) -> None:
@@ -443,3 +677,95 @@ def test_history_import_refuses_same_identity_with_different_facts(
             tenant_id=tenant.id,
             command=replace(command, id=uuid4()),
         )
+
+
+def test_history_import_preserves_until_reply_and_rejects_finite_rewrite(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    recorded_at = datetime(2025, 1, 2, 8, tzinfo=UTC)
+    command = ImportConversation(
+        id=uuid4(),
+        identity=_identity("historical-until-reply"),
+        status=Status.SNOOZED,
+        reason=None,
+        subject="Snoozed history",
+        tags=(),
+        first_message_at=None,
+        last_message_at=None,
+        resolved_at=None,
+        snoozed_until=UNTIL_REPLY,
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+
+    conversation = import_conversation(db, tenant_id=tenant.id, command=command)
+    assert conversation.status == Status.SNOOZED.value
+    assert conversation.snoozed_until is None
+    assert import_conversation(db, tenant_id=tenant.id, command=command) is conversation
+
+    with pytest.raises(ConversationConflict, match="different snoozed_until"):
+        import_conversation(
+            db,
+            tenant_id=tenant.id,
+            command=replace(
+                command,
+                snoozed_until=recorded_at + timedelta(days=1),
+            ),
+        )
+
+
+def test_history_import_rejects_implicit_or_naive_snooze_targets(db: Session) -> None:
+    tenant = _tenant(db)
+    recorded_at = datetime(2025, 1, 2, 8, tzinfo=UTC)
+    command = ImportConversation(
+        id=uuid4(),
+        identity=_identity("historical-invalid-snooze"),
+        status=Status.SNOOZED,
+        reason=None,
+        subject="Invalid snoozed history",
+        tags=(),
+        first_message_at=None,
+        last_message_at=None,
+        resolved_at=None,
+        snoozed_until=None,
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+
+    with pytest.raises(ConversationConflict, match="requires snoozed_until"):
+        import_conversation(db, tenant_id=tenant.id, command=command)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        import_conversation(
+            db,
+            tenant_id=tenant.id,
+            command=replace(
+                command,
+                snoozed_until=datetime(2025, 1, 3, 8),
+            ),
+        )
+
+
+def test_history_import_rejects_until_reply_for_non_snoozed_status(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    recorded_at = datetime(2025, 1, 2, 8, tzinfo=UTC)
+    command = ImportConversation(
+        id=uuid4(),
+        identity=_identity("historical-invalid-until-reply"),
+        status=Status.OPEN,
+        reason=None,
+        subject="Invalid snooze marker",
+        tags=(),
+        first_message_at=None,
+        last_message_at=None,
+        resolved_at=None,
+        snoozed_until=UNTIL_REPLY,
+        created_at=recorded_at,
+        updated_at=recorded_at,
+    )
+
+    with pytest.raises(ConversationConflict, match="only for snoozed history"):
+        import_conversation(db, tenant_id=tenant.id, command=command)

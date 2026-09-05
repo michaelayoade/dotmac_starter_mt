@@ -145,3 +145,16 @@ the released seams are pinned. It is not precedent. Every later adopter uses
 these module-owned seams. Whether the same rule binds every other Dotmac module
 remains a fleet-governance decision; this ADR does not silently widen its own
 scope.
+
+## Amendment — 2026-09-05: explicit indefinite snooze
+
+The lifecycle contract distinguishes a finite snooze from “until reply”. A
+caller must pass the typed `SnoozeUntilReply` value (exported as `UNTIL_REPLY`)
+to request an indefinite snooze; an omitted `snoozed_until` remains invalid.
+The existing nullable column persists that explicit form as
+`status=snoozed, snoozed_until=NULL`, while a finite snooze keeps its
+timezone-aware deadline. Only inbound message activity owned by
+`dotmac-inbox` wakes an indefinite snooze; timed wake scheduling remains a
+product responsibility. The same validation, normalization, exact replay and
+conflict rules apply to the history import seam. No migration or scheduler is
+introduced by this amendment.
