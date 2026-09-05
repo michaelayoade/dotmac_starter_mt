@@ -29,6 +29,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from dotmac_deployment_foundation.errors import SpecError
+from dotmac_deployment_foundation.ingress import refuse_address_literal
 from dotmac_deployment_foundation.target_identity_guard import (
     EMBEDDED_TARGET_DEBT,
     ESTATE_SUFFIXES,
@@ -43,6 +45,7 @@ from dotmac_deployment_foundation.target_identity_guard import (
     scan_text,
     scan_tree,
 )
+from dotmac_deployment_foundation.vantage import PRIVATE_RANGES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_DIR = PROJECT_ROOT / "packages" / "dotmac-deployment-foundation"
@@ -71,7 +74,7 @@ def test_a_planted_production_ipv4_literal_is_refused():
     """The defect this guard exists for, planted. Fails before the module existed."""
     findings = scan_text("provider.py", f'TARGET = "{_PLANTED_V4}"\n')
     assert _values(findings) == {_PLANTED_V4}
-    assert _kinds(findings) == {"ipv4-literal"}
+    assert _kinds(findings) == {"address-as-identity"}
 
 
 def test_a_planted_production_ipv6_literal_is_refused():
@@ -83,7 +86,7 @@ def test_a_planted_production_ipv6_literal_is_refused():
     RUN and lets `ipaddress` decide, which is what the v4 rule already did.
     """
     findings = scan_text("provider.py", f'TARGET = "{_PLANTED_V6}"\n')
-    assert _kinds(findings) == {"ipv6-literal"}
+    assert _kinds(findings) == {"address-as-identity"}
     assert _values(findings) == {_PLANTED_V6}
 
 
@@ -325,7 +328,7 @@ def test_the_ratchet_fails_when_debt_RISES():
         for _ in range(allowed + 1)
     ]
     complaints = check_debt(findings)
-    assert complaints and "ledger allows" in complaints[0]
+    assert any("ledger allows" in complaint for complaint in complaints)
 
 
 def test_the_ratchet_fails_when_debt_FALLS_without_being_lowered():
@@ -427,13 +430,38 @@ def test_the_exposure_policy_may_still_declare_loopback(line: str):
 
 
 @pytest.mark.parametrize(
-    "network", ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "2001:db8::/32"]
+    "network",
+    [
+        *PRIVATE_RANGES,
+        "192.0.2.0/24",
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+        "2001:db8::/32",
+    ],
 )
-def test_a_cidr_network_is_topology_and_is_permitted(network: str):
-    """`vantage.py`'s `PRIVATE_RANGES` is the definition of the private space
-    it refuses to sit in. A /8 cannot identify a host, and a guard that refused
-    it would be demanding the module delete its own policy."""
-    assert scan_text("vantage.py", f'PRIVATE_RANGES = ("{network}",)\n') == []
+def test_exact_policy_and_documentation_networks_are_permitted(network: str):
+    """Only the owner-defined private ranges and IANA examples are topology."""
+    assert (
+        scan_text(
+            "src/dotmac_deployment_foundation/vantage.py",
+            f'PRIVATE_RANGES = ("{network}",)\n',
+        )
+        == []
+    )
+
+
+def test_a_private_policy_network_is_not_an_exemption_in_another_module():
+    assert scan_text("provider.py", f'NETWORK = "{PRIVATE_RANGES[0]}"\n')
+
+
+def test_an_arbitrary_multi_address_cidr_is_refused():
+    assert scan_text("x.py", 'NETWORK = "100.64.0.0/10"\n')
+
+
+def test_a_cidr_bound_as_target_or_vantage_is_refused_before_permission():
+    for binding in ("target", "vantage"):
+        findings = scan_text("x.py", f'{binding} = "{PRIVATE_RANGES[0]}"\n')
+        assert _kinds(findings) == {"address-as-identity"}
 
 
 @pytest.mark.parametrize(
@@ -443,6 +471,16 @@ def test_a_single_address_prefix_is_a_host_wearing_a_prefix(host: str):
     """The near-miss for the rule above, and the way it would be abused: a /32
     is not a network, it is one address with a suffix stuck on it."""
     assert scan_text("x.py", f'A = "{host}"\n'), f"{host} was permitted"
+
+
+@pytest.mark.parametrize("cidr", ["100.64.0.0/10", "192.0.2.0/24"])
+def test_product_descriptor_cidr_is_still_refused(cidr: str):
+    with pytest.raises(SpecError):
+        refuse_address_literal(cidr, field="source_set", where="<test>")
+
+
+def test_expanded_loopback_prose_has_no_debt_entry():
+    assert "src/dotmac_deployment_foundation/ingress.py" not in EMBEDDED_TARGET_DEBT
 
 
 def test_the_prefix_must_be_adjacent_to_the_address():
@@ -459,7 +497,8 @@ def test_the_relocated_modules_carry_no_embedded_identity(module: str):
     """Ruling: both real addresses come out of the reusable wheel. Their
     provenance is preserved in `docs/inventories/`, outside the artifact."""
     path = PACKAGE_DIR / "src" / "dotmac_deployment_foundation" / module
-    assert scan_text(module, path.read_text(encoding="utf-8")) == []
+    where = f"src/dotmac_deployment_foundation/{module}"
+    assert scan_text(where, path.read_text(encoding="utf-8")) == []
 
 
 def test_the_relocated_provenance_record_exists_and_names_both_modules():

@@ -45,8 +45,9 @@ narrow, and each is decided by :mod:`ipaddress` rather than by a spelling:
   or a vantage: a loopback bound to a target- or vantage-shaped name is refused
   under :data:`_IDENTITY_BINDING`, because "the target defaults to localhost"
   is a default, and the ruling on defaults is that there are none.
-* **A CIDR network of more than one address** — `10.0.0.0/8` in a policy
-  constant is topology, not identity, and `vantage.py`'s `PRIVATE_RANGES` is
+* **An owner-defined policy CIDR of more than one address** — a private-range
+  network in a policy constant is topology, not identity, and `vantage.py`'s
+  `PRIVATE_RANGES` is
   the definition of the private space it refuses to sit in. A `/32` is not a
   network by this rule; it is a host wearing a prefix, and is refused.
 * **IANA documentation ranges** (`192.0.2.0/24`, `198.51.100.0/24`,
@@ -87,6 +88,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import DeploymentFoundationError
+from .vantage import PRIVATE_RANGES
 
 __all__ = [
     "EMBEDDED_TARGET_DEBT",
@@ -179,6 +181,11 @@ _DOCUMENTATION_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ..
     ipaddress.ip_network("203.0.113.0/24"),
     ipaddress.ip_network("2001:db8::/32"),
 )
+_PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in PRIVATE_RANGES)
+_PRIVATE_POLICY_SOURCE_SUFFIXES = (
+    "src/dotmac_deployment_foundation/vantage.py",
+    "dotmac_deployment_foundation/vantage.py",
+)
 
 # A dotted quad, bounded so it does not bite out of the middle of a longer
 # dotted string. Validity is decided by `ipaddress`, not by this pattern: the
@@ -207,8 +214,8 @@ _HOSTNAME = re.compile(r"(?<![\w.-])(?:[A-Za-z0-9_-]+\.)+[A-Za-z]{2,}(?![\w-])")
 
 
 #: The only loopback spellings permitted, as EXACT strings rather than a range
-#: test. `is_loopback` would admit all of `127.0.0.0/8`, and "permit the
-#: loopback range" is precisely the broad rule the ruling refused: these two
+#: test. `is_loopback` would admit the whole IPv4 loopback range, and "permit
+#: the loopback range" is precisely the broad rule the ruling refused: these two
 #: constants are what the typed exposure policy declares (`ingress.LOOPBACK`),
 #: and anything else in `127/8` is an address somebody chose.
 LOOPBACK_CONSTANTS: tuple[str, ...] = ("127.0.0.1", "::1")
@@ -244,8 +251,8 @@ def _is_permitted_address(text: str) -> bool:
     return any(address in network for network in _DOCUMENTATION_NETWORKS)
 
 
-def _is_network_literal(text: str, following: str) -> bool:
-    """Whether ``text`` is written as a CIDR network of more than one address.
+def _is_network_literal(text: str, following: str, *, where: str) -> bool:
+    """Whether ``text`` is an exact permitted policy/example CIDR.
 
     The prefix has to be RIGHT THERE in the source. Reading it from the
     surrounding line would let an unrelated `/24` three tokens away launder a
@@ -258,7 +265,16 @@ def _is_network_literal(text: str, following: str) -> bool:
         network = ipaddress.ip_network(f"{text}/{match.group(1)}", strict=True)
     except ValueError:
         return False
-    return network.num_addresses > 1
+    if network.num_addresses == 1:
+        return False
+    if network in _DOCUMENTATION_NETWORKS:
+        return True
+    normalized_where = where.replace("\\", "/")
+    owns_private_policy = any(
+        normalized_where == suffix or normalized_where.endswith(f"/{suffix}")
+        for suffix in _PRIVATE_POLICY_SOURCE_SUFFIXES
+    )
+    return owns_private_policy and network in _PRIVATE_NETWORKS
 
 
 def _is_address(text: str) -> bool:
@@ -287,16 +303,18 @@ def scan_text(where: str, text: str) -> list[TargetIdentityFinding]:
             # loopback exemption cannot be the thing that hides it.
             before = text[: match.start()].rsplit("\n", 1)[-1]
             quote_trimmed = before.rstrip("\"'")
-            if _is_permitted_address(candidate) and _IDENTITY_BINDING.search(
-                quote_trimmed
-            ):
+            identity_binding = _IDENTITY_BINDING.search(quote_trimmed)
+            network_literal = _is_network_literal(
+                candidate, text[match.end() :], where=where
+            )
+            if identity_binding:
                 findings.append(
                     TargetIdentityFinding(where, line, "address-as-identity", candidate)
                 )
                 continue
             if _is_permitted_address(candidate):
                 continue
-            if _is_network_literal(candidate, text[match.end() :]):
+            if network_literal:
                 continue
             findings.append(TargetIdentityFinding(where, line, kind, candidate))
 
@@ -427,13 +445,6 @@ def _archive_members(archive_path: Path) -> Iterator[tuple[str, bytes]]:
 #: ratchet lets a number drift down through unrelated edits until it stops
 #: describing anything.
 EMBEDDED_TARGET_DEBT: Mapping[str, int] = {
-    # The expanded spelling of the IPv6 loopback constant, in a docstring whose
-    # SUBJECT is that two spellings of one address compare unequal. The narrow
-    # ruling permits the two exact constants and nothing else, so the expanded
-    # form is refused -- correctly by the letter, and at the cost of the one
-    # sentence that cannot make its point without writing it. Flagged for the
-    # ruling's owner rather than resolved by deleting the example.
-    "src/dotmac_deployment_foundation/ingress.py": 1,
     # RFC 1918 examples in comments about IPv4-mapped addresses. `exposure.py`
     # is mid-refactor in the release lane and out of this seam; these move when
     # it is back in.
