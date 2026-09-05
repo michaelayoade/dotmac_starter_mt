@@ -25,6 +25,41 @@ A third meaning would make three different repairs indistinguishable in a log.
 Both halves are exercised: the refusal fires for three non-integration concerns,
 and `INTEGRATION` still constructs — a guard that refused everything would
 satisfy the first test completely while making the type unusable.
+### A proven absence is a SLOT VALUE, and satisfies only when established
+
+`IntegrationSurfaceAbsenceProofV1`'s own docstring described absent-proven as
+one of four states and said the proof SATISFIES a concern, while
+`ApplicationFoundationProfile` refused any slot that was not a `ConcernBinding`
+or an `InapplicableConcern`. So a product with genuinely no integration surface
+could construct the proof and still not reach 13/13 — the unmeetable gate the
+type exists to prevent, reintroduced one level up by the vocabulary it was
+bolted beside.
+
+`ConcernSlot` now admits it. Three constructible members for four states;
+**not-yet-implemented deliberately has none**, because it IS the 13/13 gate — a
+constructible "owed" member would be the knob that admits an incomplete profile
+for one deployment.
+
+Two guards come with the slot:
+
+- a proof carries its OWN concern and the mapping key is the concern the profile
+  claims about. **Misfiling is refused** (`absence_proof.wrong_concern`). Until a
+  proof could be a slot the question could not arise; the profile is the more
+  dangerous level for it, because 13/13 is read off the slots.
+- `verify_profile_against_candidate` **re-establishes** every absent-proven slot
+  instead of skipping it. Construction settles well-formedness and nothing else,
+  so the proof is re-asked through its own `satisfies` against values the caller
+  derived independently. A slot whose evidence was not supplied is a FINDING,
+  never a pass — silence and establishment must not produce the same outcome.
+
+The verifier now takes `artifact_digest` and `observed_inventory_digests`
+alongside `image_digest`, because **those are two different values**: the image
+digest is what a BINDING is checked against, the artifact digest is the
+application wheel a PROVEN ABSENCE is checked against. Comparing a proof against
+the image digest could never match and would make the gate unsatisfiable — the
+failure that looks like strictness. A profile with no proven absence is
+unaffected, which is asserted so the new inputs cannot be passing by turning
+verification off.
 
 ### `HostLeaseRelease.v1` says which ARTIFACT ran, and separately which RUNNER
 
