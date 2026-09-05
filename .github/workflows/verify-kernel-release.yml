@@ -188,6 +188,16 @@ jobs:
         with:
           client-id: ${{ vars.RELEASE_RECORDER_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_RECORDER_PRIVATE_KEY }}
+      # `--package-dir` is REQUIRED here, not decorative. `write_release_record.py`
+      # owns three ledgers, and its `RELEASED_TAGS` reconciliation lives behind
+      # `if package_dir and import_name:`. Every other release lane passes the
+      # flag; this one never did, so the kernel's tag oracle was never updated by
+      # the recorder and `main` went red on the next pull request to touch it.
+      # That cost two releases: a101 was repaired by hand INSIDE its own record
+      # pull request, which left the mechanism gap no separate trace, and a102 hit
+      # it again unchanged. The kernel's directory is a literal because it is one:
+      # an `inputs` expression in a `run:` block is refused by
+      # `test_kernel_verify_only_release.py`.
       - name: Open the post-release record
         env:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
@@ -198,6 +208,7 @@ jobs:
             --distribution dotmac-kernel \
             --version "$RELEASE_VERSION" \
             --tag "dotmac-kernel-v${RELEASE_VERSION}" \
+            --package-dir packages/dotmac-kernel \
             --release-run "$RELEASE_RUN_ID" \
             --verification-receipt "${{ runner.temp }}/receipt/KernelReleaseVerificationReceipt.v1.json" \
             --tag-decision-receipt "${{ runner.temp }}/tag/KernelReleaseTagDecision.v1.json"
