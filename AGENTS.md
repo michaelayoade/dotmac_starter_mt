@@ -173,7 +173,33 @@ specifics) points here and must never fork these rules.
     allocation — schema, prefix AND branch label — resolving a row by `code`
     or, if the code was renamed, by `migration_branch` against the immutable
     `branch_label`.
+    **Serialization needs a scalar, and the scalar is a content DIGEST**
+    (2026-09-04): the merge-base rule above serializes SOURCE behind
+    ALLOCATION, and nothing serialized one allocation against another — two
+    sibling branches off one base, one appending a row at the tail and one
+    inserting a row mid-list with the SAME prefix, merge under `git merge-tree`
+    with exit 0 into a ledger holding two rows on one prefix. Every structure
+    involved absorbs an independent addition (order-insensitive tuple, list
+    `__all__`, SET literal of pinned owners, unordered markdown table), so only
+    the composed uniqueness check bites, and it bites after the merge on a red
+    `main`. A COUNTER is insufficient: two branches can both change 90 to 91,
+    merge cleanly on identical text, and recreate the defect. So the ledger
+    carries `MIGRATION_OWNER_LEDGER_DIGEST` — `cv1:<64 hex>` over every field
+    of every `MigrationOwner`, rows SORTED BY OWNER, in the kernel's existing
+    `cv1` semantic encoding (length-prefixed frames, typed absence sentinel,
+    domain-separated hash) rather than a new one. Sorting is load-bearing: a
+    mid-list insert and a tail append of the same row must digest identically,
+    or relocating a row would dodge the conflict. EVERY commit that adds,
+    removes or repoints a row restamps that literal; a stale or malformed one
+    is refused in-tree by `verify_migration_owner_ledger_digest()`, and a
+    branch that changes a row without moving it is refused by the allocation
+    gate against its merge base (a ledger with no digest at all exits 2, never
+    passes). The digest forces a HUMAN to resolve and decides nothing about the
+    resolution — `test_the_shipped_ledger_itself_composes` stays, and is now
+    asserted by name, because it is what catches a resolver who pasted both
+    rows and restamped.
     (`tests/unit/test_namespaces.py`, `tests/unit/test_migration_gate.py`,
+    `tests/architecture/test_ledger_digest_serialization.py`,
     `tests/unit/test_prerequisites.py`,
     `tests/unit/test_live_catalog_contract.py`;
     `tests/test_module_schema_catalog.py` is the post-migration live-catalog

@@ -290,3 +290,19 @@ Python repository cannot run a check over any of them.
   `dotmac_starter_mt` and `dotmac_workspace`, at named commits. Evidence and
   boundary rulings only; explicitly NOT a decision to extract anything
   (ADR-0006 § 5).
+
+- `semantic-encoder-sources.md` — the inventory behind
+  `dotmac_kernel.semantic_encoding`'s **`greenfield-after-inventory`**
+  classification, at immutable `origin/main` revisions of `dotmac_starter_mt`,
+  `dotmac_sub`, `dotmac_erp`, `dotmac_vendor_control_plane`, `dotmac_crm`,
+  `dotmac_integrator` and `dotmac_workspace`. The finding is a NEGATIVE: no
+  product holds an encoder with all four qualifying properties (length-prefixed
+  framing, a TYPED absence sentinel, exact money at currency scale, a
+  domain-separated digest), so there was no qualifying product-first source to
+  port. Records every near-miss and the exact property it fails on — ERP's
+  production `_content_source_version` (P1+P3, no P4, magic-string sentinel),
+  Sub's `migration_source/canonical.py` (which rejects the typed sentinel in its
+  own docstring), `dotmac-tax`'s `rv1` (the only correct P1), `dotmac-sales`'
+  `canonical_digest` (the only correct P4) — and records that NO audited
+  implementation has a typed absence sentinel. Claims no release, pin, adoption
+  or production state.
