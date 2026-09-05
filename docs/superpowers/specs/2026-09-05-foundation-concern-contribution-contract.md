@@ -1,9 +1,20 @@
 # The Foundation concern-contribution contract — DESIGN FOR REVIEW
 
-**Status: CONTRACT DESIGN ONLY — revision 3, after two independent reviews.**
+**Status: CONTRACT DESIGN ONLY — revision 4.**
 Not accepted, not implemented, and nothing depends on it. This is **not** profile
 admission and **not** cutover readiness; governance ADR 0039 remains Proposed and
 unenforced.
+
+**Revision 4 changes**: **F2 is RULED** — the Foundation-owned challenge space,
+with the seed drawn AFTER the candidate bytes are fixed and the provider
+returning typed outputs rather than its own verdict, which defeats the lookup
+table and both boundary attacks (§ 3.3b); the **seven required mutants**,
+including `broken-shut-verifier`, which turns the rule on the tool (§ 3.4b);
+§ 3.4's residual restated in Michael's terms as an **inertness AND correctness**
+limit; and — from Platform's merged row map — an **ENVELOPE admission stage**
+(§ 3A.1), because none of its five unmapped rows had a successor code and
+`document_absent` is the only verdict this programme has ever observed against a
+real image.
 
 **Revision 3 changes** (second review): the five-identity repair reaches the
 SCHEMAS — the provider carries only what a module build can know, the binding
@@ -286,16 +297,15 @@ Refusal 7 is the one this revision exists to add, and refusals 6 and 7 are
 everything are both non-providers, and each is invisible to the check that
 catches the other.
 
-### 3.3b OPEN — the battery does not close the inert class (F2, awaiting ruling)
+### 3.3b RULED — the Foundation-owned CHALLENGE SPACE (F2)
 
-**Not fixed here. Michael has not ruled, and this is his call.** Stated in full
-so the decision is made against the actual hole.
+Revision 3 stated this as open. **Michael has ruled: the challenge space, with a
+construction stronger than recording a seed.**
 
-*"No constant satisfies both halves"* is **true**. *"The inert class is closed"*
-does **not** follow, and revision 2 slid from one to the other.
-
-A versioned battery has **fixed inputs by definition** — that is what makes it
-versioned and comparable. Fixed inputs are a **key**:
+The hole it closes, restated so the ruling is read against it: *"no constant
+satisfies both halves"* is true, but *"the inert class is closed"* does not
+follow. A versioned battery has **fixed inputs by definition**, and fixed inputs
+are a key —
 
 ```python
 _TABLE = {digest(inp): verdict}
@@ -303,47 +313,105 @@ def answer(self, inp):
     return _TABLE.get(digest(inp), refuse)
 ```
 
-Passes every positive scenario, refuses every negative one, discriminates
-perfectly, implements nothing. **It needs no bad intent**: "special-case the
-battery inputs until CI is green" produces it one scenario at a time, and each
-step looks like progress.
+— which passes both halves, discriminates perfectly and implements nothing. It
+needs no bad intent: *"special-case the battery inputs until CI is green"*
+produces it one scenario at a time, each step looking like progress.
 
-Two cheaper attacks exist, and both are this document's doing: § 4.3 places
-`expected` beside `observed` in the same record, and nothing here forbids the
-expected outcome from crossing the call boundary to the provider. A provider
-that can see what it is supposed to answer does not need a table.
+**The ruled construction:**
 
-**Two options, neither implemented:**
+1. the verifier generates a **fresh unpredictable seed AFTER the candidate bytes
+   are fixed**;
+2. Foundation creates **typed challenges and expected relations independently**;
+3. the provider is reached **through the assembly's real injection site**;
+4. the provider returns **typed OUTPUTS — never its own pass/fail verdict**;
+5. the **public receipt** records: challenge-space version, **seed commitment**,
+   challenge-set digest, case count, verifier artifact digest;
+6. the **raw seed stays in restricted verifier evidence**.
 
-| option | closes | leaves open |
+#### Why clauses 1 and 4 are the ones doing the work
+
+**Clause 1 defeats the table.** The seed is drawn *after* the candidate bytes are
+fixed, so the challenges cannot have been known when the artifact was built. A
+table cannot be baked into bytes that predate the seed that selects the inputs.
+This is why "record `(space_version, seed)`" was not enough on its own: recording
+a seed makes a run reproducible, but if the seed is chosen before or during the
+build, the inputs are still knowable in advance.
+
+**Clause 4 defeats the two cheap attacks directly.** Revision 2 put `expected`
+beside `observed` in one record and forbade nothing about the boundary. Now the
+provider never sees `expected`, never sees a scenario identity, and never gets to
+say whether it passed. It returns outputs; **Foundation judges.** A provider that
+cannot see the question's answer cannot special-case it, and one that cannot
+report a verdict cannot assert one.
+
+Clauses 5 and 6 split the record: the receipt is **public** and carries a **seed
+commitment** rather than the seed, so a later run can be checked against it
+without publishing the material that would let the next candidate be built
+against it. Publishing the raw seed would reintroduce clause 1's hole for every
+subsequent build.
+
+#### Consequences for § 4.3
+
+`ConcernVerification` changes shape: no `expected` beside `observed` in anything
+the provider can reach, and the recorded fields become the six of clause 5. The
+provider-facing surface carries **typed challenge inputs only**.
+
+### 3.4 The residual, stated honestly — an INERTNESS limit and a correctness one
+
+> **"This defeats the cheap memorisation paths. It still cannot prove arbitrary
+> business correctness; a concern without an independent oracle remains
+> unproven."**
+
+Both halves of that are load-bearing and revision 2 recorded only the second.
+
+**Inertness.** The challenge space defeats the *cheap* memorisation paths — the
+constant, the nonce echo, the pre-built lookup table, and the two boundary
+attacks clause 4 closes. It does not make inertness impossible in principle: a
+provider that reimplements enough of the contract to answer unpredictable
+challenges is no longer cheap to write, but "expensive" is not "excluded", and
+this section does not claim otherwise.
+
+**Correctness.** A concern **without an independent oracle remains unproven.**
+The challenges establish that the composed path answers Foundation's questions
+in the expected relation; where Foundation has no oracle for a concern, there is
+no question to ask that the provider is not also the only authority on.
+
+The honest summary is that the battery's strength is bounded by two things
+neither of which is the battery's own design: whether the inputs could have been
+known in advance (clause 1) and whether Foundation has an independent oracle for
+the concern at all.
+
+### 3.4b The SEVEN required mutants
+
+A refusal nobody has watched fire is a refusal nobody should trust, and a design
+that names refusals without naming the artefacts that provoke them leaves the
+proving to whoever implements it. All seven are built; each must be **refused**,
+and refused **for its own reason** rather than by whichever check happens to
+trip first.
+
+| mutant | what it is | must be caught by |
 | --- | --- | --- |
-| **A — seeded input space.** Foundation owns an input SPACE per contract, not a fixed list; each run draws from it and records `(space_version, seed)` | the table: inputs are not knowable in advance, so there is nothing to key on | reproducibility becomes seed-replay rather than fixed-input equality |
-| **B — input-isolation rule.** A stated rule, with a refusal and a matrix row, that the expected outcome must never be reachable by the provider | the two cheap attacks | the table itself, which stays named and unclosed |
+| `constant-positive` | answers positively to everything | `answers_everything` (negative challenges) |
+| `nonce-echo` | revision 1's five-line stub, echoing and asserting success | `answers_everything`; it also cannot report a verdict at all under clause 4 |
+| `lookup-table` | the memorising table of § 3.3b | the seed drawn AFTER candidate bytes are fixed (clause 1) |
+| `missing-injection` | provider installed, never wired | `uninjected` |
+| `swapped-binding` | a binding joined to another assembly's verification | `wrong_assembly` |
+| `stale-provider` | a binding naming a provider artifact the assembly no longer carries | `contract_mismatch` |
+| `broken-shut-verifier` | **the VERIFIER refuses everything** | see below |
 
-They are not exclusive; B is a subset of the discipline A also needs.
+**`broken-shut-verifier` is the one nobody asked for, and it is the reason this
+list is seven rather than six.** Every other mutant is a defective *provider*,
+and every check in this document points at providers. A verifier that refuses
+everything makes **every** provider look inert — the whole fleet fails admission,
+each failure individually plausible, and nothing in the matrix would say the
+instrument was the broken part.
 
-**Whichever is ruled, § 3.4's limit is restated as an INERTNESS limit and not
-only a correctness one.** A memorising table is inert *everywhere*, including
-on-battery — so "the battery establishes discrimination" is exactly as strong as
-"the inputs could not have been memorised", and no stronger.
-
-### 3.4 What the battery still does NOT establish, stated plainly
-
-It establishes that the composed path **discriminates on Foundation's inputs** —
-accepting what the contract says to accept and refusing what it says to refuse.
-
-**This is an INERTNESS limit as well as a correctness one**, and revision 2
-recorded only the second. Correctness beyond the battery was always outside the
-claim. But per § 3.3b a **memorising table** discriminates perfectly on exactly
-those inputs while implementing nothing, so the battery's inertness claim is
-bounded by whether its inputs could have been memorised — not by the battery's
-own design. A provider that is inert everywhere can be inert *on-battery too*
-and still pass.
-
-That limit is real and is not patched over with a metric. It is narrower than
-the previous revision's limit by exactly the amount that matters — the nonce
-could not distinguish a five-line stub from an implementation at all — and it is
-**not zero**, which is what § 3.3b is for.
+It is `broken_shut` turned on the tool itself, and it needs its own control: the
+verifier must be shown **admitting a known-good provider** in the same run that
+it refuses the six mutants. A verifier that only ever refuses has not been shown
+to work; it has been shown to fail uniformly — which is precisely the argument
+§ 3.3 makes about providers, and there is no reason the tool should be exempt
+from its own rule.
 
 ### 3.5 Still NOT inertness signals
 
@@ -437,6 +505,54 @@ Two immediate consequences:
   supplying `displaces` with its retirement rows was refused for carrying none,
   a message false about its own input. V1 now refuses at the parse (point 7's
   "until V2 supports this");
+### 3A.1 The ENVELOPE — what Platform's row map found missing
+
+Platform's merged row map (`74dab8a8`, `docs/inventories/platform-parity-row-map.json`)
+leaves **five rows unmapped, and all five are envelope-level**:
+
+`document_absent` · `document_not_utf8` · `document_not_json` ·
+`document_not_an_object` · `contract_unknown`
+
+**No successor code covers an artifact carrying no profile at all**, and the gap
+is structural rather than an omission from a list:
+
+* `missing` is **per-concern** — it says *this concern has no admitted
+  contribution*;
+* N17 requires every refusal to name **the highest stage actually attained**;
+* for a document that was never read, no concern attained any stage, so
+  13 × `missing` is not merely noisy — it is **unrepresentable**, because there
+  is no stage to name for any of them.
+
+So the contract discriminates *contributions* superbly and says almost nothing
+about the **envelope they arrive in**. That asymmetry is not a small hole:
+`document_absent` is **the only verdict this programme has ever observed against
+a real image.**
+
+**The repair: envelope admission is its own stage, before any concern is
+considered.**
+
+| refusal | shape |
+| --- | --- |
+| `envelope_absent` | the retained artifact carries no profile document |
+| `envelope_not_utf8` | the bytes are not UTF-8 |
+| `envelope_not_json` | the bytes are not JSON |
+| `envelope_not_an_object` | the JSON is not an object |
+| `envelope_contract_unknown` | the `schema` is not in the accepted set (§ 8.0) |
+| `envelope_digest_stale` | the declared self-digest does not cover the content |
+
+These are **profile-scoped, not concern-scoped**, and they terminate admission:
+no per-concern refusal is emitted alongside one, because no concern was reached.
+The lifecycle gains a stage before `declared`:
+
+```
+envelope → declared → resolved → injected → exercised → admitted
+```
+
+`envelope_digest_stale` is Platform's other finding and had no case either: a
+document that declares a digest which does not cover its own content is
+well-formed, parses, and is wrong about itself. It belongs here rather than with
+the concerns, because it is a property of the document and not of any slot.
+
 ### 3B.1 RULED: the names, and TWO families rather than one
 
 | | Python type | wire schema |
@@ -952,6 +1068,14 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N11d | unknown key on **decode** | `unknown_key` | a closed document decodes |
 | N11e | a V1 document carrying `retirement` | refusal at the parse | a document without it parses |
 | N11f | a wrapper CONTAINING an accepted schema | refused by the canonicalizer | each accepted schema canonicalises (§ 8.0) |
+| N20 | the artifact carries **no profile at all** | `envelope_absent` | an artifact carrying one proceeds |
+| N21 | bytes not UTF-8 / not JSON / not an object | the matching `envelope_*` | well-formed bytes proceed |
+| N22 | `schema` outside the accepted set | `envelope_contract_unknown` | an accepted schema proceeds |
+| N23 | declared self-digest does not cover the content | `envelope_digest_stale` | a covering digest proceeds |
+| N24 | an envelope refusal emitted **alongside** per-concern refusals | must be unrepresentable | an envelope refusal terminates admission |
+| N25 | the **verifier** refuses everything | `broken-shut-verifier` mutant | the verifier admits a known-good provider in the same run |
+| N26 | a provider that memorises the challenge set | defeated by clause 1 | the seed is drawn AFTER candidate bytes are fixed |
+| N27 | the expected relation reachable by the provider | must be unrepresentable | the provider returns typed outputs only |
 | N12 | absence proof, no observed inventory | finding | supplied inventory verifies |
 | N13 | absence proof for another artifact | finding | matching artifact verifies |
 | N14 | absence proof misfiled under another concern | `absence_proof.wrong_concern` | correctly filed admits |
@@ -969,6 +1093,16 @@ is removed.
 **N11e and N12–N14 exist today** and are exercised
 (`test_deployment_foundation_application_profile.py`). The rest are owed by the
 implementation step.
+
+**N20–N24 are the envelope stage** (§ 3A.1), and N20 is the only verdict this
+programme has ever observed against a real image — it had no code until
+revision 4. **N24 is the one that keeps the stage honest**: an envelope refusal
+must terminate admission, or a reader gets an envelope failure and thirteen
+concern failures describing a document nobody read.
+
+**N25–N27 come from the F2 ruling.** N25 turns `broken_shut` on the tool itself:
+a verifier that refuses everything makes every provider look inert, and nothing
+else in the matrix would say the instrument was the broken part.
 
 **N5d, N7d and N11f are revision 3's rows.** N5d is the F1 repair made
 falsifiable: the previous revision's claim that every fact carries every identity
@@ -1039,7 +1173,8 @@ programme progress.**
    (point 8). It is **two-directional** — `legacy_total` and the length of
    `added` are both fixed, so a case cannot appear or vanish as a side effect;
    a shrinking count would otherwise read as cleanup and a growing one as
-   progress. **Ten** added cases: `uninjected`, `wrong_site`,
+   progress. **Ten** added cases (eight of them genuinely new — see below):
+   `uninjected`, `wrong_site`,
    `foreign_provenance`, `all_negative`, `answers_everything`, `wrong_assembly`,
    `wrong_composition`, `foreign_inventory`, `unknown_key`,
    `retirement_round_trip`.
@@ -1061,10 +1196,34 @@ programme progress.**
    historical defeat lives in § 3.0, where a defeated design belongs, not as a
    test case that cannot fail.
 
-   **The 53 rows themselves are a COUNT here, not a list, and that is a stated
-   gap.** They live in Platform's inventory and are not restated — a copy would
-   be a second authority that drifts. The Platform lane owns the row-by-row
-   mapping and must supply it before the parity gate can pass.
+   **Platform's row map is MERGED and is now the join partner** —
+   `platform-cp#170`, `74dab8a8`, `docs/inventories/platform-parity-row-map.json`,
+   schema `platform-parity-row-map/1`. Row identity is `PCP-<surface>-<ordinal>`,
+   **allocated once and never reused**: a retired row *spends* its ordinal,
+   because reuse would silently re-point a foreign reference at a different
+   property.
+
+   | state | rows |
+   | --- | ---: |
+   | mapped | 33 |
+   | migrates | 13 |
+   | retires | 2 |
+   | **unmapped — blocks deletion** | **5** |
+
+   Those sum to 53, so the two halves reconcile arithmetically rather than by
+   assertion. The rows themselves are still not restated here — a copy would be
+   a second authority that drifts.
+
+   **The five unmapped rows are all envelope-level, and § 3A.1 is their
+   resolution.** They had no successor code at all, which is a structural gap
+   rather than an omission: `missing` is per-concern and N17 makes 13 × `missing`
+   unrepresentable for a document that was never read.
+
+   **Two of the added cases are NOT new**, and the map records it:
+   `foreign_inventory` and `unknown_key` have legacy counterparts. They are still
+   required — a case with a counterpart still has to be reproduced — but counting
+   them as gains would overstate what the successor adds. Ten obligations, eight
+   genuine additions.
 4. **Replace** Platform's acceptance invocation.
 5. **Delete** Platform's builder, canonicalizer and verifier **in that same
    composed change** — never a separate one, because that produces a temporary

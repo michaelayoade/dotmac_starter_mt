@@ -55,60 +55,90 @@
     "",
     "`legacy_total` and the length of `added` are both fixed. A change in",
     "either direction requires an explicit row change in this file, so a case",
-    "cannot appear or vanish as a side effect."
+    "cannot appear or vanish as a side effect.",
+    "",
+    "## Platform's row map is the join partner (74dab8a8)",
+    "",
+    "Its four states sum to 53, which is the number this file is accountable to,",
+    "so the two halves now reconcile arithmetically rather than by assertion.",
+    "",
+    "The five UNMAPPED rows are all envelope-level and had no successor code at",
+    "all: `missing` is per-concern, and N17's 'name the highest stage actually",
+    "attained' makes 13x`missing` unrepresentable for a document never read. The",
+    "contract's section 3A.1 adds an envelope stage to close them.",
+    "",
+    "## Two added cases are NOT new, and saying so keeps the list honest",
+    "",
+    "`foreign_inventory` and `unknown_key` have legacy counterparts. They are",
+    "still required -- a case with a counterpart still has to be reproduced -- but",
+    "counting them as gains would overstate what the successor adds.",
+    "`added_new_total` is the honest number; `added_total` is the obligation."
   ],
   "added": [
     {
       "absent_from_dialect_because": "an import probe cannot observe outcomes at all",
       "case": "all_negative",
+      "new_to_the_successor": true,
       "requires": "the battery runs and EVERY outcome is negative (broken_shut)"
     },
     {
       "absent_from_dialect_because": "the dual of all-negative; needs Foundation-defined negative scenarios, which the dialect has none of",
       "case": "answers_everything",
+      "new_to_the_successor": true,
       "requires": "positive scenarios pass AND negative scenarios also 'pass'"
     },
     {
       "absent_from_dialect_because": "the dialect accepts a locally computed digest, so this is the shape it institutionalises",
       "case": "foreign_inventory",
+      "legacy_counterpart_exists": true,
+      "new_to_the_successor": false,
       "requires": "an inventory digest supplied by the caller rather than computed by Foundation over typed entries"
     },
     {
       "absent_from_dialect_because": "the dialect has no injection site and no provider artifact identity to compare, so 'right site, wrong provenance' is not expressible",
       "case": "foreign_provenance",
+      "new_to_the_successor": true,
       "requires": "an object at the DECLARED injection site whose artifact identity is not the resolved provider's"
     },
     {
       "absent_from_dialect_because": "V1 cannot bind retirement at all and now refuses it; the dialect discards it",
       "case": "retirement_round_trip",
+      "new_to_the_successor": true,
       "requires": "displacement and terminal retirement survive encode->digest->decode and bind back to the replacing assembly and provider"
     },
     {
       "absent_from_dialect_because": "Platform's dialect collapses provider/binding/verification into one declaration, so an unwired provider is not expressible",
       "case": "uninjected",
+      "new_to_the_successor": true,
       "requires": "provider resolves, no consumer binding joins it"
     },
     {
       "absent_from_dialect_because": "the dialect closes encoding only",
       "case": "unknown_key",
+      "legacy_counterpart_exists": true,
+      "new_to_the_successor": false,
       "requires": "any document carries a key outside the closed set, on DECODE"
     },
     {
       "absent_from_dialect_because": "the dialect's identities are module-scoped, so the case cannot arise in it",
       "case": "wrong_assembly",
+      "new_to_the_successor": true,
       "requires": "a verification joins a binding from a different assembly"
     },
     {
       "absent_from_dialect_because": "the dialect's identities are module-scoped; a re-composed assembly at the same artifact is indistinguishable in it",
       "case": "wrong_composition",
+      "new_to_the_successor": true,
       "requires": "a verification naming a composition_digest other than the binding's, with the SAME assembly artifact"
     },
     {
       "absent_from_dialect_because": "the dialect has no injection site to disagree with",
       "case": "wrong_site",
+      "new_to_the_successor": true,
       "requires": "an object is present at a site other than the declared typed injection site"
     }
   ],
+  "added_new_total": 8,
   "added_total": 10,
   "legacy_breakdown": {
     "builder": 14,
@@ -119,5 +149,28 @@
   "legacy_rows_supplied_here": false,
   "legacy_total": 53,
   "parity_gate_passed": false,
+  "platform_row_map": {
+    "commit": "74dab8a8ec97bd8492d4eec5bde4edab74d4c957",
+    "path": "docs/inventories/platform-parity-row-map.json",
+    "repository_pr": "platform-cp#170",
+    "row_identity": "PCP-<surface>-<ordinal>, allocated once and NEVER reused",
+    "row_identity_note": "A retired row SPENDS its ordinal. Reuse would silently re-point a foreign reference at a different property, which is the one failure a stable identifier exists to prevent.",
+    "schema": "platform-parity-row-map/1",
+    "states": {
+      "mapped": 33,
+      "migrates": 13,
+      "retires": 2,
+      "unmapped": 5
+    },
+    "unmapped_blocks_deletion": true,
+    "unmapped_resolution": "All five are ENVELOPE-level and none had a successor code. The contract's section 3A.1 adds an envelope admission stage before `declared` with six refusals, which is where these five map. `document_absent` is the only verdict this programme has ever observed against a real image.",
+    "unmapped_rows": [
+      "document_absent",
+      "document_not_utf8",
+      "document_not_json",
+      "document_not_an_object",
+      "contract_unknown"
+    ]
+  },
   "status": "design-only"
 }

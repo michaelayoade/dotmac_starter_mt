@@ -200,6 +200,40 @@ def test_the_parity_GATE_blocks_deletion_and_is_not_merely_a_note() -> None:
     )
 
 
+def test_the_two_halves_of_the_parity_map_RECONCILE_arithmetically() -> None:
+    """Platform's row map is merged, so the count this file is accountable to and
+    the states that account for it must add up — by arithmetic rather than by
+    two teams asserting the same number.
+
+    The five unmapped rows block deletion, and all five are envelope-level: they
+    had no successor code at all, because `missing` is per-concern and N17 makes
+    13x`missing` unrepresentable for a document that was never read.
+    """
+    parity = _parity()
+    rows = parity["platform_row_map"]
+    assert sum(rows["states"].values()) == parity["legacy_total"] == 53
+    assert rows["states"]["unmapped"] == 5
+    assert rows["unmapped_blocks_deletion"] is True
+    assert len(rows["unmapped_rows"]) == rows["states"]["unmapped"]
+    # Row identity is spent, never reused — recorded so a later editor cannot
+    # "tidy up" a retired ordinal.
+    assert "NEVER reused" in rows["row_identity"]
+
+
+def test_the_added_list_does_not_OVERSTATE_what_the_successor_gains() -> None:
+    """`foreign_inventory` and `unknown_key` have legacy counterparts. They are
+    still obligations — a case with a counterpart still has to be reproduced —
+    but counting them as gains would overstate the successor.
+
+    Two numbers, deliberately: `added_total` is the obligation and
+    `added_new_total` is the honest gain.
+    """
+    parity = _parity()
+    not_new = {r["case"] for r in parity["added"] if not r["new_to_the_successor"]}
+    assert not_new == {"foreign_inventory", "unknown_key"}
+    assert parity["added_new_total"] == parity["added_total"] - len(not_new) == 8
+
+
 def test_the_map_does_not_RESTATE_platforms_rows() -> None:
     """A copy of another repository's inventory is a second authority that
     drifts. The map is accountable to the count and names who owns the rows."""
