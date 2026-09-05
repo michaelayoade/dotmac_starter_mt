@@ -293,7 +293,10 @@ def _release(lease: HostLease | None = None, **over) -> HostLeaseReleaseV1:
         "vm_slot": SLOT,
         "vm_installation_id": "",
         "candidate_version": "0.4.0a1",
-        "source_revision": "0" * 40,
+        # TWO revisions, DIFFERENT here on purpose: a fixture that used one
+        # value for both would let a writer emitting one of them twice pass.
+        "candidate_source_revision": "0" * 40,
+        "runner_revision": "1" * 40,
         "authorization_run_id": RUN,
         "rehearsal_run_id": REHEARSAL,
         "outcome": TerminalOutcome(receipt_digest="sha256:" + "b" * 64),
