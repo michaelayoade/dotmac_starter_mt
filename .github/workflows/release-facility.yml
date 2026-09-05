@@ -213,6 +213,21 @@ jobs:
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             --dist candidate-dist
 
+      # RULING 4: the three revisions stand in a stated RELATIONSHIP, and it is
+      # neither equality nor nothing.
+      #
+      # Equality recreates the bootstrap loop `foundation-candidate.yml` exists
+      # to break — a candidate must be buildable BEFORE the commit that
+      # rehearses it, so every later commit would invalidate it and the release
+      # could never be satisfied. No relationship permits the opposite: a
+      # candidate built on a divergent branch, rehearsed and published by a
+      # protected-main run, with nothing saying the bytes came from code that
+      # was never on main.
+      #
+      # ANCESTRY is the requirement, checked against BOTH protected revisions.
+      # `fetch-depth: 0` above is what makes it decidable; the check refuses
+      # rather than answers when the history is not there, because a shallow
+      # clone reports "not an ancestor" for two commits that are related.
       # The second oracle must be interpreted by the same Foundation bytes the
       # rehearsal executed and this lane will publish. Importing the checkout
       # here would let a source change teach the verifier to accept a receipt
@@ -257,6 +272,7 @@ jobs:
       # pointing at the checkout would quietly make the gate validate the
       # source it was written beside instead of the bytes about to be published.
       - name: Require a passing Lane 3 rehearsal on this exact SHA
+        id: rehearsal
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -275,7 +291,35 @@ jobs:
           echo "candidate_source_revision=${{ steps.candidate.outputs.candidate_source_sha }}"
           .foundation-candidate/bin/python -E -P scripts/require_rehearsal.py \
             "${GITHUB_SHA}" --receipt .rehearsal/receipt.json \
-            --artifact-digest "${{ steps.candidate.outputs.candidate_sha256 }}"
+            --artifact-digest "${{ steps.candidate.outputs.candidate_sha256 }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # RULING 4: the three revisions stand in a stated RELATIONSHIP, and it is
+      # neither equality nor nothing.
+      #
+      # Equality recreates the bootstrap loop `foundation-candidate.yml` exists
+      # to break — a candidate must be buildable BEFORE the commit that
+      # rehearses it, so every commit landing afterwards would invalidate it and
+      # the release could never be satisfied. Requiring nothing permits the
+      # opposite: a candidate built on a divergent branch, rehearsed and
+      # published by a protected-main run, with nothing saying the bytes came
+      # from code that was never on main.
+      #
+      # ANCESTRY, against BOTH protected revisions. The runner revision is taken
+      # from the RECEIPT the step above just verified — not from a workflow
+      # variable — because the receipt is what says which runner executed, and a
+      # value re-derived here would be this lane agreeing with itself.
+      #
+      # `fetch-depth: 0` is what makes ancestry decidable; the check refuses
+      # rather than answers when the history is absent, because a shallow clone
+      # reports "not an ancestor" for two commits that are related and that
+      # reads exactly like the defect.
+      - name: Bind the three revisions
+        run: |
+          python scripts/release_facility.py verify-revisions \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --runner-revision "${{ steps.rehearsal.outputs.rehearsal_runner_revision }}" \
+            --release-revision "${GITHUB_SHA}"
 
       # Wheel-content policy: the declared surface and py.typed present, no
       # assembly/test/tooling content, NO migration lineage anywhere under the
@@ -454,17 +498,50 @@ jobs:
             --pin "${{ inputs.facility }}==${{ inputs.version }}" \
             --descriptor deploy/product.toml
 
-      # Only AFTER registry verification: tag the published SHA.
-      - name: Tag the verified release
+      # Only AFTER registry verification: tag.
+      #
+      # RULING 4: the version tag PEELS TO THE CANDIDATE SOURCE COMMIT, not to
+      # this run's SHA. A version tag names where this version's SOURCE is, and
+      # the bytes were built from the candidate source commit — this run merely
+      # publishes them. Tagging ${GITHUB_SHA} made the tag point at a tree that
+      # was never built, so a consumer checking out the tag to inspect what they
+      # installed got code that is not what they installed.
+      #
+      # The release revision is not lost by this; it is recorded separately in
+      # the annotation below, which is what "bound independently" means. It is in
+      # the MESSAGE rather than the target because a tag has exactly one target
+      # and that slot is now spoken for by the question it actually answers.
+      - name: Resolve the commit this version's tag must name
+        id: tagtarget
         run: |
+          python scripts/release_facility.py resolve-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | grep '^candidate_source_sha=' | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Tag the verified release on the commit it was built from
+        run: |
+          set -euo pipefail
           TAG="${{ needs.build.outputs.tag }}"
+          SOURCE="${{ steps.tagtarget.outputs.candidate_source_sha }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${TAG}" \
             -m "${{ inputs.facility }} ${{ inputs.version }} (verified on the Forgejo registry; installed and CLI entry point proved alone)" \
-            "${GITHUB_SHA}"
+            -m "candidate-source-revision: ${SOURCE}" \
+            -m "release-adapter-revision: ${GITHUB_SHA}" \
+            "${SOURCE}"
           git push origin "${TAG}"
-          echo "tagged ${TAG} on ${GITHUB_SHA}"
+          echo "tagged ${TAG} on the candidate source ${SOURCE}; released from ${GITHUB_SHA}"
+
+      # Read back from git, never from the variable that created it: `git tag`
+      # succeeding says the command was accepted, and this says what the ref
+      # actually resolves to. PEELED — an annotated tag is an object of its own,
+      # and `rev-parse` would return that object's sha rather than the commit.
+      - name: Refuse unless the tag peels to the candidate source commit
+        run: |
+          python scripts/release_facility.py verify-tag \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --tag "${{ needs.build.outputs.tag }}"
 
       # Universal facilities own no migration lineage, but publication still
       # retires their declared-unpublished row. Keep the same tag -> record
