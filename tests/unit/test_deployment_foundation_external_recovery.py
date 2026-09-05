@@ -869,6 +869,18 @@ ALLOWED_ENUMERATION: dict[tuple[str, str, str], str] = {
     ("launcher.py", "_package_digest", ".rglob"): (
         "hashes the facility's own .py files to digest the installed package"
     ),
+    ("target_identity_guard.py", "scan_tree", ".rglob"): (
+        "walks a CALLER-SUPPLIED root comparing address literals against the "
+        "embedded-target ledger. It cannot reach a receipt in three independent "
+        "ways: the module imports only stdlib and `.errors`, so "
+        "`external_recovery` is not reachable from it at all; no other module "
+        "in the package calls it, so it is on no path that obtains a receipt; "
+        "and its return type is `list[TargetIdentityFinding]`, a closed "
+        "four-field record of (path, line, kind, address), so even a receipt "
+        "file it happened to walk over could yield nothing but an address "
+        "literal. The scan that gates a release is `scan_archive`, which reads "
+        "a zip or tar and touches no filesystem enumeration at all"
+    ),
 }
 
 #: The modules that handle recovery receipts: the contract itself, anything
