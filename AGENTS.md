@@ -1636,6 +1636,68 @@ specifics) points here and must never fork these rules.
     `test_the_digest_covers_the_document_alone` plants the six-sibling-keys
     wrapper and observes both a different digest and an outright refusal)
 
+50. **The window between a candidate BUILD and its PUBLICATION is guarded, and
+    a build the tree does not record is the defect — not the bookkeeping.**
+    `dotmac-deployment-foundation 0.4.0a1` is the FOURTH recurrence of rule 48's
+    shape and the first where every guard was silent *and correct*: run
+    `33920058598` built the candidate from `753a004e` on 2026-09-04, the
+    `CandidateArtifact.v1` receipt stayed in the run's artifacts and never
+    reached `docs/inventories/`, and `#628` and `#631` then moved 4 files of the
+    facility's importable source under the unchanged declared name.
+    `candidate_source_binding.py --check` reported `0 drifted` because it
+    compares against receipts; `version_binding_guard` ADMITTED `0.4.0a1` for a
+    fresh build for the same reason; `test_version_binding_guard.py` went on
+    asserting the version was *not recorded as built*. All three were true of
+    the ledger and false of the artifact. **Allocating a successor is the repair
+    that keeps being applied and keeps not preventing recurrence** — the missing
+    thing was a gate in the window, so Michael held the release (2026-09-05) to
+    build one.
+
+    **A LIVE CANDIDATE is a build that happened and has not been consumed** — a
+    successful candidate-lane run, at a commit whose declared version for that
+    facility is the one this tree declares, that produced the
+    `<facility>-candidate` artifact. Not "a receipt in the tree": presupposing
+    the record is exactly what made the region look covered.
+
+    **The build oracle is external, because the claim is.** *"No candidate has
+    been built for the declared version"* is a claim about the BUILD SYSTEM, so
+    per rule 30 it takes an authoritative oracle carrying immutable coordinates
+    — the run id and the artifact id, the same two facts `CandidateArtifact.v1`
+    records. No repository-local formulation can see this population: at the
+    moment `#628` was opened every byte in the tree was consistent with
+    `0.4.0a1` never having been built. A run is attributed to a facility by the
+    ARTIFACT it produced and to a version by its own commit's `pyproject.toml`,
+    never by a workflow input.
+
+    **It compares TREE OBJECTS, never a version string** — a version string is
+    what failed to notice this — and it runs in `ci.yml`'s `candidate-window`
+    job, on every pull request and every push, which is where the source
+    actually moves and where a refusal is cheap. The release lane is not that
+    place and cannot become it: its checks fire at dispatch, and
+    `release_facility.require_candidate_ancestry` deliberately PERMITS the tree
+    to have moved, because requiring equality there would be unsatisfiable and
+    would get waived.
+
+    **It refuses and explains; it never chooses the successor.** A check that
+    emitted "rebuild as 0.4.0a2" would be issuing a release identity as a side
+    effect, and the identity would then exist because a script printed it. The
+    refusal names the run, the artifact, both tree objects and the repair —
+    commit the receipt for `unrecorded`, allocate a NEW version and append a
+    `CandidateDisposition.v1` for `drifted` — and stops.
+
+    **Exit 0 clean / 1 violation / 2 indeterminate**, and an unreachable oracle,
+    an unresolvable build commit or a shallow clone is 2, never a pass. Open
+    windows are frozen debt in `tests/architecture/candidate_window_baseline.json`,
+    ratcheted in BOTH directions; the row omits the moving current tree so the
+    debt is one stable fact rather than a file regenerated per commit
+    (`scripts/candidate_source_binding.py --window`; the `candidate-window` job
+    in `.github/workflows/ci.yml`;
+    `tests/architecture/test_candidate_window_binding.py`, whose sensitivity
+    proof replays the real history — the build at `753a004e` against the tree at
+    `c427b9df` (`#628`, which must fire) and against the tree at `4895f179`
+    (`#629`, which landed on the same candidate, touched no importable source,
+    and must stay silent))
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

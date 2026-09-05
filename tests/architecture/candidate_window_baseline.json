@@ -1,0 +1,51 @@
+{
+  "$comment": [
+    "LIVE CANDIDATES whose window between BUILD and PUBLICATION is open",
+    "in a way that must not stand: bytes were built for the version this",
+    "tree declares, and either no CandidateArtifact.v1 records them or",
+    "the facility's importable source has moved since.",
+    "",
+    "Owner and checker: scripts/candidate_source_binding.py --window.",
+    "Gate: the `candidate-window` job in .github/workflows/ci.yml, which",
+    "is where a pull request that moves the source can still be stopped.",
+    "Sensitivity proof: tests/architecture/test_candidate_window_binding.py.",
+    "",
+    "A row does NOT carry the current src tree. The debt is 'this",
+    "candidate's window is open', which is one fact and does not change",
+    "as further commits land; recording a moving value would demand a",
+    "rewrite per commit and teach everyone to regenerate this file",
+    "without reading it.",
+    "",
+    "FROZEN DEBT, ratcheted in BOTH directions (ADR-0018): a newly opened",
+    "window fails, and a REPAIRED one fails too until this file is",
+    "regenerated with `--window --write`, so the count cannot fall",
+    "silently.",
+    "",
+    "Repair `unrecorded` by committing the receipt the run uploaded.",
+    "Repair `drifted` by allocating a NEW version and appending a",
+    "CandidateDisposition.v1 for the superseded candidate. Which version",
+    "that is, is a decision; this guard refuses and names the binding,",
+    "and deliberately does not choose one.",
+    "",
+    "An EMPTY rows array is the healthy state and is a claim, not an",
+    "absence: it says the build oracle was reached and every candidate it",
+    "knows of is either recorded and unmoved, or built under a version",
+    "this tree no longer declares."
+  ],
+  "rows": [
+    {
+      "artifact_id": "9954731961",
+      "built_src_tree": "504bc8f71b62646a5e20a22c41827b20ddd88d33",
+      "facility": "dotmac-deployment-foundation",
+      "reasons": [
+        "unrecorded",
+        "drifted"
+      ],
+      "run_id": "33920058598",
+      "run_url": "https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/33920058598",
+      "source_sha": "753a004e7f8dbab034d5d6ca565c680d931a5309",
+      "version": "0.4.0a1"
+    }
+  ],
+  "total": 1
+}

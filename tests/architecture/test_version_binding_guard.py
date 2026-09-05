@@ -241,6 +241,18 @@ def test_the_declared_version_has_no_candidate_artifact_yet() -> None:
     It still bites in this position: a hand-written `0.4.0a1` receipt for a
     build that never happened, or a guard reporting a candidate that does not
     exist, fails here.
+
+    **READ THIS BEFORE TAKING IT AS EVIDENCE `0.4.0a1` IS UNBUILT. It is not.**
+    Run 33920058598 built the candidate from `753a004e` on 2026-09-04 and the
+    receipt was never committed, so this assertion is true of the LEDGER and
+    false of the artifact — and its passing was one of the four green signals
+    that let `#628` and `#631` move the facility source underneath the name.
+    Nothing here is wrong: `bindings_for` reads records and there is no record.
+    The population a record-reader cannot see is `AGENTS.md` rule 50's, answered
+    from the build oracle by `candidate_source_binding.py --window` and frozen in
+    `tests/architecture/candidate_window_baseline.json`. Do not "repair" this by
+    hand-writing the receipt — the line above says why, and the repair is a
+    decision recorded in the window baseline.
     """
     declared = _declared_version()
     found = _bindings(declared, purpose="candidate")

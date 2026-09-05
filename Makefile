@@ -114,6 +114,15 @@ candidate-source-check: ## Fail if a declared version's candidate was built from
 	python3 scripts/candidate_source_binding.py --check
 candidate-source-write: ## Re-record the candidate-source drift baseline
 	python3 scripts/candidate_source_binding.py --write
+# The OTHER question the same owner answers, and the one four recurrences needed:
+# is a candidate LIVE for the declared version, and has this tree left its bytes
+# behind? "Was it built?" is a claim about the build system, so this reads the
+# Actions API through `gh` and needs `gh auth` locally / `actions: read` in CI.
+# Not in `check` for that reason; its gate is the `candidate-window` CI job.
+candidate-window-check: ## Fail if a live candidate's window is open (unrecorded build, or source moved under it)
+	python3 scripts/candidate_source_binding.py --window --check
+candidate-window-write: ## Re-record the open-candidate-window baseline (state the repair; commit the diff in the same change)
+	python3 scripts/candidate_source_binding.py --window --write
 rehearsal-status-check: ## Fail if the GENERATED Lane 3 status document drifted
 	poetry run python scripts/generate_rehearsal_status.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
