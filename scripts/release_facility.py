@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -1763,6 +1764,59 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     print(f"registry verification OK for {args.pin} ({len(expected)} artifacts)")
 
 
+def _load_guard(entry: dict) -> object:
+    """Import the guard FROM THE REPOSITORY under test, not from site-packages.
+
+    The scanner is part of the package it scans, which is the arrangement that
+    keeps one policy rather than two. Importing an installed copy would let a
+    stale wheel on the runner decide whether a fresh wheel is clean.
+    """
+    src = Path(entry["package_dir"]) / "src"
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    module = importlib.import_module(f"{entry['import_name']}.target_identity_guard")
+    return module
+
+
+def cmd_scan_targets(args: argparse.Namespace) -> None:
+    """Refuse an artifact carrying a target or vantage identity.
+
+    Runs over the COMPLETED wheel AND sdist -- both, because an sdist is a
+    perfectly good way to ship a literal that never reaches a wheel, and
+    because the publication job re-runs this same command over the same bytes.
+    One scanner, two stages, and the second never rebuilds.
+
+    Every member is inspected, not `*.py`: packaged templates, rendered
+    configuration and plain package data ship and are read on the host exactly
+    as a module is.
+    """
+    entry = resolve(args.distribution)
+    guard = _load_guard(entry)
+
+    artifacts = sorted(
+        [*Path(args.dist).glob("*.whl"), *Path(args.dist).glob("*.tar.gz")]
+    )
+    if not artifacts:
+        raise ReleaseRefused(
+            f"no wheel or sdist in {args.dist}. An artifact scan that found "
+            "nothing to scan has not passed; it has not run."
+        )
+
+    problems: list[str] = []
+    for artifact in artifacts:
+        findings = guard.scan_archive(artifact)  # type: ignore[attr-defined]
+        inspected = {guard.ledger_key(f.where) for f in findings}  # type: ignore[attr-defined]
+        complaints = guard.check_debt(findings, inspected=inspected)  # type: ignore[attr-defined]
+        problems.extend(f"{artifact.name}: {complaint}" for complaint in complaints)
+        print(f"{artifact.name}: scanned {len(findings)} finding(s)")
+
+    if problems:
+        raise ReleaseRefused(
+            "artifact carries a target identity:\n  - " + "\n  - ".join(problems)
+        )
+    print(f"target-identity scan OK across {len(artifacts)} artifact(s)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1815,6 +1869,14 @@ def main() -> int:
     p.add_argument("--version", required=True)
     p.add_argument("--tag", required=True)
     p.set_defaults(func=cmd_verify_tag)
+
+    p = sub.add_parser(
+        "scan-targets",
+        help="refuse a wheel or sdist carrying a target/vantage identity",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--dist", required=True)
+    p.set_defaults(func=cmd_scan_targets)
 
     p = sub.add_parser("verify-wheel", help="install the built wheel and smoke its CLI")
     p.add_argument("distribution")

@@ -107,8 +107,8 @@ def refuse_address_literal(value: str, *, field: str, where: str) -> None:
     """Refuse anything that parses as an address or network.
 
     Called on every free-form ingress string a product can write. The refusal
-    is deliberately BROADER than "is a valid IP": ``10.0.0.0/8``,
-    ``2001:db8::/32`` and a bare ``192.168.1.10`` are all topology, and a
+    is deliberately BROADER than "is a valid IP": a private IPv4 network, a
+    documentation IPv6 network and a bare example host are all topology, and a
     product repository is the wrong owner for any of them.
     """
     candidate = value.strip().strip("[]")
@@ -185,7 +185,8 @@ def normalize_address(value: str, *, where: str) -> AdmittedAddress:
 
     Semantic normalization matters because two spellings of the same address
     produce two different digests and two different comparison results:
-    ``::1`` and ``0:0:0:0:0:0:0:1`` are the same socket and different strings.
+    ``::1`` and its fully expanded spelling are the same socket and different
+    strings.
     Everything downstream compares the canonical form.
 
     Refused here, before family or exposure is considered:
