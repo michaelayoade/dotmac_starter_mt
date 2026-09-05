@@ -116,15 +116,15 @@ def test_a_genuinely_non_lineage_distribution_takes_the_explicit_path() -> None:
         ),
         pytest.param(
             {"package_dir": "packages/dotmac-kernel", "no_lineage": True},
-            "contradictory lineage declaration",
+            "CONTRADICTORY lineage declaration",
             id="both-flags",
         ),
         pytest.param(
-            {"package_dir": "/etc"}, "INVALID --package-dir", id="invalid-shape"
+            {"package_dir": "/etc"}, "INCORRECT --package-dir", id="invalid-shape"
         ),
         pytest.param(
             {"package_dir": "packages/dotmac-kernal"},
-            "MISMATCHED --package-dir",
+            "INCORRECT --package-dir",
             id="mismatched-name-the-a102-typo",
         ),
         pytest.param(
@@ -132,7 +132,7 @@ def test_a_genuinely_non_lineage_distribution_takes_the_explicit_path() -> None:
         ),
         pytest.param(
             {"package_dir": None, "no_lineage": True},
-            "MISMATCHED lineage declaration",
+            "CONTRADICTORY lineage declaration",
             id="no-lineage-claimed-for-an-anchored-distribution",
         ),
     ],
@@ -181,7 +181,7 @@ def test_the_old_silent_skip_implementation_passes_incorrectly() -> None:
         "is not what closes the gap — re-derive before trusting it"
     )
 
-    with pytest.raises(module.ReleaseRecordError, match="MISMATCHED"):
+    with pytest.raises(module.ReleaseRecordError, match="INCORRECT"):
         resolve(package_dir=package_dir)
 
 
@@ -231,3 +231,34 @@ def test_every_release_lane_declares_one_or_the_other() -> None:
         f"{undeclared} call the recorder without declaring a lineage; the writer "
         "now refuses that, so these lanes would fail at record time"
     )
+
+
+def test_a_readable_path_carrying_another_lineage_is_contradictory() -> None:
+    """The fourth kind, and the branch that needs a planted defect to be worth
+    anything.
+
+    The other refusals are reachable from the command line. This one is a claim
+    about the TREE: a path that is present, readable and whose migrations are
+    not this distribution's lineage. No flag combination reaches it, so it is
+    proven by planting the contradiction in the map and showing a near miss —
+    the real glob — still passes.
+    """
+    module = writer()
+    real = module_text()
+    planted = real.replace(
+        '"dotmac-kernel": "2*_[0-9][0-9][0-9][0-9]_*.py"',
+        '"dotmac-kernel": "zz_*.py"',
+        1,
+    )
+    assert planted != real, (
+        "the kernel's lineage glob moved; re-derive this plant rather than "
+        "leaving it matching nothing"
+    )
+
+    with pytest.raises(module.ReleaseRecordError, match="CONTRADICTORY lineage"):
+        resolve(module_text=planted)
+
+    package_dir, _, digests = resolve(module_text=real)
+    assert (
+        package_dir == "packages/dotmac-kernel" and len(digests) == 28
+    ), "the near miss must pass, or this guard is refusing everything"

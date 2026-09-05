@@ -676,6 +676,11 @@ def resolve_lineage_inputs(
 ) -> tuple[str | None, str | None, dict[str, str]]:
     """Answer "where is this release's lineage?" or refuse, saying which input is wrong.
 
+    FOUR KINDS, named as the rule names them: MISSING (nothing was declared),
+    INCORRECT (a path that is malformed or names another package), UNREADABLE
+    (a path that reads no migration at the tag) and CONTRADICTORY (declarations
+    that cannot both hold, or migrations that are not this distribution's).
+
     ONE REFUSAL PER WAY OF BEING WRONG, deliberately. `git ls-tree` exits 0 and
     prints nothing for a path that does not exist, so a typo'd `--package-dir`
     and a distribution with no migrations produce the SAME value — an empty dict
@@ -689,7 +694,7 @@ def resolve_lineage_inputs(
 
     if package_dir is not None and no_lineage:
         raise ReleaseRecordError(
-            f"contradictory lineage declaration for {distribution}: "
+            f"CONTRADICTORY lineage declaration for {distribution}: "
             f"--package-dir {package_dir!r} and --no-lineage were both given; "
             "exactly one is true"
         )
@@ -697,7 +702,7 @@ def resolve_lineage_inputs(
         if no_lineage:
             if carries_lineage:
                 raise ReleaseRecordError(
-                    f"MISMATCHED lineage declaration: {distribution} was declared "
+                    f"CONTRADICTORY lineage declaration: {distribution} was declared "
                     "--no-lineage, but it is anchored in RELEASED_TAGS and its "
                     "released migrations are immutable. Pass --package-dir "
                     f"packages/{distribution} instead"
@@ -713,12 +718,12 @@ def resolve_lineage_inputs(
     shape = _PACKAGE_DIR_SHAPE.fullmatch(package_dir)
     if shape is None:
         raise ReleaseRecordError(
-            f"INVALID --package-dir {package_dir!r} for {distribution}: expected "
+            f"INCORRECT --package-dir {package_dir!r} for {distribution}: expected "
             f"the form packages/<distribution>, e.g. packages/{distribution}"
         )
     if shape.group("name") != distribution:
         raise ReleaseRecordError(
-            f"MISMATCHED --package-dir {package_dir!r} for {distribution}: it "
+            f"INCORRECT --package-dir {package_dir!r} for {distribution}: it "
             f"names {shape.group('name')!r}. A well-formed path to the wrong "
             "package reads no migrations and would have skipped in silence"
         )
@@ -748,7 +753,7 @@ def resolve_lineage_inputs(
     glob = _lineage_glob(module_text, distribution)
     if glob is not None and not any(fnmatch(name, glob) for name in digests):
         raise ReleaseRecordError(
-            f"MISMATCHED lineage for {distribution}: {sorted(digests)[:3]} under "
+            f"CONTRADICTORY lineage for {distribution}: {sorted(digests)[:3]} under "
             f"{package_dir} match none of its recorded lineage glob {glob!r}; the "
             "path is readable but the migrations are not this distribution's"
         )
