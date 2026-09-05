@@ -121,7 +121,73 @@ def test_the_design_is_marked_PROPOSED_and_allocates_no_ADR_number() -> None:
     intent; a proposal that read as a decision would be a decision nobody took.
     """
     text = DESIGN.read_text(encoding="utf-8")
-    assert "Status: PROPOSED" in text
+    assert "CONTRACT DESIGN ONLY" in text
+    assert "not implemented" in text
+    # Michael's standing scope line: this is neither of the two things a reader
+    # is most likely to mistake it for.
+    assert (
+        "not** profile\nadmission" in text
+        or "not profile admission" in text.replace("**", "").replace("\n", " ")
+    )
     assert not list(
         (ROOT / "docs" / "adr").glob("*concern-contribution*")
     ), "the design allocated an ADR number while still under review"
+
+
+# ── the parity map is a RATCHET, in both directions ────────────────────────
+
+PARITY = ROOT / "docs" / "inventories" / "foundation-admission-parity-map.json"
+
+
+def _parity() -> dict:
+    return json.loads(PARITY.read_text(encoding="utf-8"))
+
+
+def test_the_parity_map_holds_its_counts_in_both_directions() -> None:
+    """A one-directional map lets either half slip: a shrinking count reads as
+    cleanup and a growing one as progress. Both totals are fixed, so a case
+    cannot appear or vanish as a side effect of some other change."""
+    parity = _parity()
+    assert parity["legacy_total"] == 53
+    assert sum(parity["legacy_breakdown"].values()) == parity["legacy_total"]
+    assert len(parity["added"]) == parity["added_total"]
+
+
+def test_the_added_cases_are_the_ones_the_dialect_could_not_STATE() -> None:
+    """Reproducing 53 and adding none would mean the generic path had reproduced
+    the dialect rather than replaced it. Each added case records WHY the dialect
+    has no counterpart, so a row cannot be added as a round number."""
+    added = _parity()["added"]
+    cases = {row["case"] for row in added}
+    assert cases == {
+        "all_negative",
+        "answers_everything",
+        "foreign_inventory",
+        "nonce_only",
+        "retirement_round_trip",
+        "unknown_key",
+        "uninjected",
+        "wrong_assembly",
+        "wrong_site",
+    }
+    for row in added:
+        assert row["requires"].strip()
+        assert row["absent_from_dialect_because"].strip()
+
+
+def test_the_map_does_not_RESTATE_platforms_rows() -> None:
+    """A copy of another repository's inventory is a second authority that
+    drifts. The map is accountable to the count and names who owns the rows."""
+    parity = _parity()
+    assert parity["legacy_rows_supplied_here"] is False
+    assert "d7b8ca6a" in parity["legacy_rows_owned_by"]
+
+
+def test_the_design_and_the_map_agree_on_the_added_cases() -> None:
+    """A number in a review package that no longer holds is a false statement in
+    the artifact a decision gets made from — the same rule as the golden digest,
+    applied to the case list."""
+    text = DESIGN.read_text(encoding="utf-8")
+    for row in _parity()["added"]:
+        assert row["case"] in text, row["case"]
+    assert str(_parity()["legacy_total"]) in text
