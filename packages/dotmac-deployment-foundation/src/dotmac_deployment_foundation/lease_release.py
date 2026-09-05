@@ -52,8 +52,21 @@ else:
   to be on that target next.
 * ``vm_identity`` — the machine. A target name can be re-pointed; the host that
   gets destroyed is a machine.
-* ``candidate_version`` / ``source_revision`` — WHICH artifact ran. A release
-  from another candidate's run is evidence about another run.
+* ``candidate_version`` / ``candidate_source_revision`` — WHICH artifact ran,
+  and the commit it was BUILT FROM. A release from another candidate's run is
+  evidence about another run.
+* ``runner_revision`` — the commit whose Lane 3 RUNNER executed. A DIFFERENT
+  question from the one above, and it used to be the answer to both: the field
+  named ``source_revision`` was populated with the runner's SHA, which made a
+  record that claims to say which artifact ran actually say which runner ran.
+  Two questions, two fields.
+
+  **The publication revision is deliberately absent.** A release is written by
+  the Lane 3 runner, and the runner cannot observe which commit will later
+  publish — that decision has not been taken when this record is sealed. A field
+  its only producer cannot fill truthfully must not exist: it would be populated
+  by a guess, a default, or a copy of one of the two above, and each of those
+  reads to a destroyer as an established fact.
 * ``authorization_run_id`` / ``rehearsal_run_id`` — the decision and the
   execution. `HostLease` already refuses to be self-granted; a release that
   could be self-granted would reopen that at the other end.
@@ -685,7 +698,14 @@ class HostLeaseReleaseV1:
     #: slot re-provisioned between release and destroy.
     vm_installation_id: str
     candidate_version: str
-    source_revision: str
+    #: The commit the CANDIDATE ARTIFACT was built from — what this record has
+    #: always claimed to name and did not. Read from the committed
+    #: ``CandidateArtifact.v1``, never from the run's own head SHA.
+    candidate_source_revision: str
+    #: The commit whose Lane 3 RUNNER executed. Its own field because it answers
+    #: its own question; folding it into the one above is the conflation this
+    #: rename repairs.
+    runner_revision: str
     authorization_run_id: str
     rehearsal_run_id: str
     outcome: TerminalOutcome
@@ -738,7 +758,8 @@ class HostLeaseReleaseV1:
             )
         for field in (
             "candidate_version",
-            "source_revision",
+            "candidate_source_revision",
+            "runner_revision",
             "authorization_run_id",
             "rehearsal_run_id",
         ):
@@ -835,7 +856,8 @@ class HostLeaseReleaseV1:
             ),
             "released_by": self.released_by.as_document(),
             "schema": LEASE_RELEASE_SCHEMA,
-            "source_revision": self.source_revision,
+            "candidate_source_revision": self.candidate_source_revision,
+            "runner_revision": self.runner_revision,
             "vm_installation_id": str(self.vm_installation_id),
             "vm_slot": self.vm_slot,
         }
@@ -1114,7 +1136,8 @@ def load_release(
         vm_slot=str(document["vm_slot"]),
         vm_installation_id=str(document.get("vm_installation_id", "")),
         candidate_version=str(document["candidate_version"]),
-        source_revision=str(document["source_revision"]),
+        candidate_source_revision=str(document["candidate_source_revision"]),
+        runner_revision=str(document["runner_revision"]),
         authorization_run_id=str(document["authorization_run_id"]),
         rehearsal_run_id=str(document["rehearsal_run_id"]),
         outcome=TerminalOutcome(

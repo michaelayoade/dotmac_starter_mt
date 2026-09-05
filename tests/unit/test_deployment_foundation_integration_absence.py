@@ -45,7 +45,10 @@ from dotmac_deployment_foundation.errors import SpecError
 #: pytest's working directory.
 _SOURCE = pathlib.Path(inspect.getsourcefile(application_profile) or "")
 
-IMAGE = "sha256:" + "a" * 64
+#: The PLATFORM APPLICATION WHEEL's digest — not an OCI image digest. Named
+#: for what it is, because the constant's old name (`IMAGE`) was half of why the
+#: field it feeds was called `image_digest`.
+ARTIFACT = "sha256:" + "a" * 64
 INVENTORY = "sha256:" + "b" * 64
 
 
@@ -53,10 +56,10 @@ def _proof(**over) -> IntegrationSurfaceAbsenceProofV1:
     kwargs = {
         "concern": FoundationConcern.INTEGRATION,
         "source_revision": "0" * 40,
-        "image_digest": IMAGE,
+        "artifact_digest": ARTIFACT,
         "observed_inventory_digest": INVENTORY,
         "families": dict.fromkeys(INTEGRATION_SURFACE_FAMILIES, ()),
-        "method": "entry-point metadata + AST walk over the installed image",
+        "method": "entry-point metadata + AST walk over the installed wheel",
         "positive_control": ("dotmac_integration.connectors:paystack",),
         "established_at": "2026-09-04T12:00:00Z",
         "established_by": "platform-cp-profile-job",
@@ -72,12 +75,14 @@ def test_a_well_formed_proof_satisfies_only_against_the_OBSERVED_inventory() -> 
     """The half that keeps the gate reachable without making it bypassable.
 
     A caller can write any string into `observed_inventory_digest`. It cannot
-    make that string EQUAL one an independent party derived from the image
-    without having examined that image — so this compares rather than trusts.
+    make that string EQUAL one an independent party derived from the artifact
+    without having examined it — so this compares rather than trusts.
     """
     proof = _proof()
     assert proof.satisfies(
-        FoundationConcern.INTEGRATION, image_digest=IMAGE, inventory_digest=INVENTORY
+        FoundationConcern.INTEGRATION,
+        artifact_digest=ARTIFACT,
+        inventory_digest=INVENTORY,
     )
 
 
@@ -85,15 +90,17 @@ def test_a_manufactured_digest_does_not_satisfy() -> None:
     """A placeholder wearing a type: perfectly well-formed, establishes nothing."""
     proof = _proof(observed_inventory_digest="sha256:" + "9" * 64)
     assert not proof.satisfies(
-        FoundationConcern.INTEGRATION, image_digest=IMAGE, inventory_digest=INVENTORY
+        FoundationConcern.INTEGRATION,
+        artifact_digest=ARTIFACT,
+        inventory_digest=INVENTORY,
     )
 
 
-def test_a_proof_for_another_IMAGE_does_not_satisfy() -> None:
-    """It may be perfectly well-formed and still say nothing about THIS image."""
+def test_a_proof_for_another_ARTIFACT_does_not_satisfy() -> None:
+    """It may be perfectly well-formed and still say nothing about THIS wheel."""
     assert not _proof().satisfies(
         FoundationConcern.INTEGRATION,
-        image_digest="sha256:" + "c" * 64,
+        artifact_digest="sha256:" + "c" * 64,
         inventory_digest=INVENTORY,
     )
 
@@ -103,7 +110,7 @@ def test_a_proof_cannot_certify_ANOTHER_concern() -> None:
     failure as a single `AbsenceProof` for all thirteen, one level up."""
     assert not _proof().satisfies(
         FoundationConcern.WORKER_EXECUTION,
-        image_digest=IMAGE,
+        artifact_digest=ARTIFACT,
         inventory_digest=INVENTORY,
     )
 
@@ -115,7 +122,9 @@ def test_construction_alone_grants_nothing() -> None:
     proof = _proof(observed_inventory_digest="sha256:" + "9" * 64)
     assert proof  # constructed fine
     assert not proof.satisfies(
-        FoundationConcern.INTEGRATION, image_digest=IMAGE, inventory_digest=INVENTORY
+        FoundationConcern.INTEGRATION,
+        artifact_digest=ARTIFACT,
+        inventory_digest=INVENTORY,
     )
 
 
@@ -169,7 +178,9 @@ def test_ONE_installed_surface_makes_the_concern_unbound_not_absent() -> None:
     assert exc.value.code == ABSENCE_NOT_ABSENT
     # And with it removed, the same inputs construct and satisfy.
     assert _proof().satisfies(
-        FoundationConcern.INTEGRATION, image_digest=IMAGE, inventory_digest=INVENTORY
+        FoundationConcern.INTEGRATION,
+        artifact_digest=ARTIFACT,
+        inventory_digest=INVENTORY,
     )
 
 
@@ -219,7 +230,66 @@ def test_the_document_carries_the_artifact_binding() -> None:
     artifact by name, and it reads these two fields to do it."""
     document = _proof().as_document()
     assert document["source_revision"] == "0" * 40
-    assert document["image_digest"] == IMAGE
+    assert document["artifact_digest"] == ARTIFACT
+
+
+def test_the_document_no_longer_calls_the_binding_an_IMAGE_digest() -> None:
+    """The rename follows a ruling about WHAT the proof binds: the Platform
+    application wheel, not the OCI image the proof travels inside.
+
+    A proof embedded in an image cannot carry that image's own digest — the
+    digest is over the finished image and the image is not finished until the
+    proof is in it. So `image_digest` asked a producer for a value that does not
+    exist yet, and the ways out were all worse than the rename.
+
+    Asserted over the emitted DOCUMENT, because that is what a reader binds to.
+    Fails before the change: the key was `image_digest`.
+    """
+    document = _proof().as_document()
+    assert "artifact_digest" in document
+    assert "image_digest" not in document, (
+        "the proof still emits `image_digest`, which invites the circular "
+        "binding a proof inside an image cannot satisfy"
+    )
+
+
+def test_the_keyword_is_renamed_at_the_CALL_too() -> None:
+    """A record renamed and a parameter left alone would let a caller keep
+    passing an OCI image digest into a comparison that now means something else.
+
+    `satisfies` is keyword-only, so the old spelling is a `TypeError` rather
+    than a silent mismatch — loud at the call site instead of a proof that
+    quietly never satisfies.
+    """
+    with pytest.raises(TypeError):
+        _proof().satisfies(
+            FoundationConcern.INTEGRATION,
+            image_digest=ARTIFACT,  # type: ignore[call-arg]
+            inventory_digest=INVENTORY,
+        )
+
+
+def test_no_image_digest_survives_anywhere_in_this_TYPE() -> None:
+    """The prose too, not only the field. A type whose docstring still explains
+    itself in terms of an image teaches the next reader the name that was wrong,
+    and this repository has shipped a detector that matched its own stale prose.
+
+    Scoped to the class, because `AbsenceProof` and the candidate-image helper in
+    the same module carry REAL OCI image digests and keep their names.
+    """
+    source = _SOURCE.read_text(encoding="utf-8")
+    start = source.index("class IntegrationSurfaceAbsenceProofV1")
+    end = source.index("class ConcernBinding")
+    body = source[start:end]
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if "image_digest" in line
+        and "NOT ``image_digest``" not in line
+        and "was named ``image_digest``" not in line
+        and "other ``image_digest``" not in line
+    ]
+    assert offenders == [], offenders
 
 
 # ── no inert refusal codes ─────────────────────────────────────────────────

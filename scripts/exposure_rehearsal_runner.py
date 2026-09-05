@@ -1056,7 +1056,14 @@ def build_release(
         "vm_slot": args.vm_slot,
         "vm_installation_id": ctx.vm_installation_id,
         "candidate_version": args.candidate_version,
-        "source_revision": args.foundation_revision,
+        # TWO revisions, from TWO arguments. `candidate_source_revision` used to
+        # be `source_revision` fed `args.foundation_revision` — so a record whose
+        # own documentation says it names WHICH ARTIFACT RAN actually named which
+        # RUNNER ran, and a destroyer reading it would have attributed the bytes
+        # to the wrong commit. The publication revision is deliberately not here:
+        # this runner cannot observe which commit will later publish.
+        "candidate_source_revision": args.candidate_source_revision,
+        "runner_revision": args.foundation_revision,
         "authorization_run_id": args.authorization_run,
         "rehearsal_run_id": rehearsal_run_id,
         "outcome": outcome,

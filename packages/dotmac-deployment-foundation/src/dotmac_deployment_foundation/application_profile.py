@@ -348,7 +348,7 @@ class AbsenceProof:
 
     1. a closed, authoritative subject inventory — :data:`WORK_ENTRY_POINT_FAMILIES`,
        enumerated BEFORE the proof runs and never from the proof's own results;
-    2. exact refs — the image digest, not "the build";
+    2. exact refs — the artifact digest, not "the build";
     3. complete enumeration — every family visited, each outcome individually
        known, so a family that was never looked at is distinguishable from one
        that was looked at and found empty;
@@ -478,20 +478,35 @@ class IntegrationSurfaceAbsenceProofV1:
     That is the load-bearing half: a proof a caller can construct without
     establishing anything is a placeholder wearing a type, and it would turn
     "the gate is reachable" into "the gate is bypassable". Hence
-    :meth:`satisfies`, which takes the image's own inventory and compares —
+    :meth:`satisfies`, which takes the artifact's own inventory and compares —
     construction alone proves nothing and grants nothing.
 
     ## Why the evidence cannot be manufactured
 
     ``observed_inventory_digest`` is a digest over the INSTALLED ARTIFACT's own
     distribution inventory. A caller can write any string there; it cannot make
-    that string EQUAL the digest a verifier computes independently from the image
-    without actually having examined that image. Parse and compare, never
+    that string EQUAL the digest a verifier computes independently from the
+    artifact without actually having examined it. Parse and compare, never
     construct and trust — the same shape the fleet's received-digest types use.
 
-    ``source_revision`` and ``image_digest`` bind it to one artifact, so a
+    ``source_revision`` and ``artifact_digest`` bind it to one artifact, so a
     perfectly well-formed proof produced for a different build says nothing about
     this one. Platform's readback already refuses that case by name.
+
+    ## ``artifact_digest``, and why it is NOT ``image_digest``
+
+    The field was named ``image_digest`` and the name invited a binding that
+    cannot be satisfied. **What this proof binds is the Platform APPLICATION
+    WHEEL, not the OCI image the proof travels inside.** A proof embedded in an
+    image cannot carry that image's own digest: the digest is over the finished
+    image, and the image is not finished until the proof is in it. Naming the
+    field for the image asks a producer for a value that does not exist yet, and
+    the ways out of that are all worse than the rename — a placeholder, a digest
+    of a different image, or a second build.
+
+    So the field names the artifact whose inventory was actually scanned. Every
+    other ``image_digest`` in this package is a real OCI image digest and keeps
+    its name; this one never was one.
 
     ## ADR 0033's five requirements, each checked
 
@@ -512,7 +527,10 @@ class IntegrationSurfaceAbsenceProofV1:
     #: `AbsenceProof` for all thirteen, one level up.
     concern: FoundationConcern
     source_revision: str
-    image_digest: str
+    #: The digest of the ARTIFACT whose inventory was scanned — the Platform
+    #: application wheel. NOT an OCI image digest: see the class docstring for
+    #: why a proof travelling inside an image cannot name that image.
+    artifact_digest: str
     #: A digest over the installed artifact's own distribution inventory. The
     #: unmanufacturable half: see the class docstring.
     observed_inventory_digest: str
@@ -545,7 +563,7 @@ class IntegrationSurfaceAbsenceProofV1:
                     "when — or it is a null with a type around it",
                     code=ABSENCE_UNESTABLISHED,
                 )
-        _require_coordinate(self.image_digest, where="absence proof image_digest")
+        _require_coordinate(self.artifact_digest, where="absence proof artifact_digest")
         _require_coordinate(
             self.observed_inventory_digest, where="absence proof inventory digest"
         )
@@ -589,22 +607,31 @@ class IntegrationSurfaceAbsenceProofV1:
             )
 
     def satisfies(
-        self, concern: FoundationConcern, *, image_digest: str, inventory_digest: str
+        self,
+        concern: FoundationConcern,
+        *,
+        artifact_digest: str,
+        inventory_digest: str,
     ) -> bool:
         """Does this proof ESTABLISH that concern's absence for THIS artifact?
 
         Not "is it well-formed" — that was settled at construction. This is the
         half that makes absence count without making the gate bypassable: the
-        caller supplies the image digest and the inventory digest it computed
+        caller supplies the artifact digest and the inventory digest it computed
         ITSELF, and both must equal what the proof claims.
 
         A caller can write any string into the proof. It cannot make that string
-        equal one an independent party derived from the image without having
-        examined that image, which is why this compares rather than trusts.
+        equal one an independent party derived from the artifact without having
+        examined it, which is why this compares rather than trusts.
+
+        The keyword is ``artifact_digest`` and the rename is deliberate at the
+        CALL as well as in the record: a caller that still passes an OCI image
+        digest here is answering a different question, and a keyword-only
+        parameter makes that a `TypeError` rather than a silent mismatch.
         """
         return (
             self.concern is concern
-            and str(self.image_digest) == str(image_digest)
+            and str(self.artifact_digest) == str(artifact_digest)
             and str(self.observed_inventory_digest) == str(inventory_digest)
         )
 
@@ -616,7 +643,7 @@ class IntegrationSurfaceAbsenceProofV1:
             "families": {
                 name: sorted(found) for name, found in sorted(self.families.items())
             },
-            "image_digest": self.image_digest,
+            "artifact_digest": self.artifact_digest,
             "method": self.method,
             "observed_inventory_digest": self.observed_inventory_digest,
             "positive_control": sorted(self.positive_control),

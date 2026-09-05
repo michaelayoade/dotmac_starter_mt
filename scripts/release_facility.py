@@ -531,6 +531,207 @@ def candidate_source_revision(receipt: dict[str, Any]) -> str:
     return value
 
 
+#: Stable identifiers for the four relationship refusals, so a caller asserts a
+#: code rather than prose.
+REVISION_NOT_ANCESTOR: Final = "revisions.candidate_source_not_ancestor"
+REVISION_UNKNOWN_COMMIT: Final = "revisions.commit_unknown"
+REVISION_TAG_MISPEELED: Final = "revisions.tag_does_not_peel_to_candidate_source"
+
+
+def _git(*args: str, repo_root: Path = REPO_ROOT) -> str:
+    """git, refusing rather than answering when it cannot.
+
+    An unavailable oracle is not a pass — the same rule
+    `version_binding_guard.tag_bindings` states for a checkout with no tags. A
+    shallow clone is the concrete way this bites: `merge-base --is-ancestor`
+    against history that was never fetched answers "not an ancestor" for two
+    commits that are related, so the failure would look like the defect.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=repo_root, capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        raise ReleaseRefused(
+            f"cannot run `git {args[0]}` in {repo_root}: {exc}"
+        ) from None
+    if result.returncode != 0:
+        raise ReleaseRefused(f"`git {' '.join(args)}` failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def _require_known_commit(revision: str, *, what: str, repo_root: Path) -> str:
+    """The commit exists in THIS checkout, so a comparison against it means
+    something.
+
+    Separate from the ancestry question and checked first, because the two fail
+    for opposite reasons and demand opposite repairs: an unknown commit is a
+    FETCH problem (`fetch-depth: 0`), a known non-ancestor is a BRANCH problem.
+    Collapsing them would report a shallow clone as a divergent branch, which is
+    the failure mode most likely to get a real guard disabled.
+    """
+    text = str(revision).strip().lower()
+    if len(text) != 40 or any(c not in "0123456789abcdef" for c in text):
+        raise ReleaseRefused(f"{what} {revision!r} is not a full 40-character commit")
+    proc = subprocess.run(
+        ["git", "cat-file", "-e", f"{text}^{{commit}}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ReleaseRefused(
+            f"{what} {text} is not a commit in this checkout. Ancestry cannot be "
+            "decided against history that was never fetched, and a shallow clone "
+            "would answer 'not an ancestor' for two commits that are related — "
+            "which reads exactly like the defect this check exists to find. "
+            "Check out with `fetch-depth: 0`"
+        )
+    return text
+
+
+def require_revision_relationships(
+    receipt: dict[str, Any],
+    *,
+    runner_revision: str,
+    release_revision: str,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, str]:
+    """The relationship between the three revisions. Neither equality nor nothing.
+
+    ## Why not equality, and why not nothing
+
+    Requiring the candidate source to EQUAL the runner and release revisions
+    recreates the bootstrap loop `foundation-candidate.yml` exists to break: a
+    candidate must be buildable BEFORE the commit that rehearses it, so any
+    commit landing afterwards — the rehearsal repairs above all — would
+    invalidate it and the release could never be satisfied. Every one of the five
+    recorded candidates was built at a commit that is an ancestor of `main` and
+    not its head, so equality is not a stricter rule; it is an unsatisfiable one,
+    and unsatisfiable gates get waived rather than met.
+
+    Requiring NO relationship is the other failure: a candidate built on a
+    divergent branch could then be rehearsed and published by a protected-main
+    run, and nothing would say the bytes came from code that was never on main.
+    That is substitution, and it is the whole reason the three are named apart.
+
+    **ANCESTRY is the requirement.** The candidate source must be reachable from
+    both protected revisions: the artifact was built from code that is now part
+    of the history being rehearsed and published, and no other branch can supply
+    it. Equality satisfies ancestry, so a candidate built at the tip is still
+    allowed — the rule admits the strict case without demanding it.
+
+    Both protected revisions are checked, not just one. Checking only the release
+    revision would let a rehearsal run on a branch that never contained the
+    candidate source; checking only the runner's would let publication happen
+    from one.
+    """
+    source = candidate_source_revision(receipt)
+    runner = _require_known_commit(
+        runner_revision, what="the Lane 3 runner revision", repo_root=repo_root
+    )
+    release = _require_known_commit(
+        release_revision, what="the release revision", repo_root=repo_root
+    )
+    _require_known_commit(
+        source, what="the candidate source revision", repo_root=repo_root
+    )
+    for name, protected in (("Lane 3 runner", runner), ("release", release)):
+        proc = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", source, protected],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 1:
+            raise ReleaseRefused(
+                f"the candidate was built from {source}, which is NOT an "
+                f"ancestor of the {name} revision {protected}. The bytes about "
+                "to be rehearsed or published came from code that is not in "
+                "this history — a candidate from a divergent branch, which is "
+                "the substitution these three revisions are named apart to make "
+                "visible",
+            )
+        if proc.returncode != 0:
+            raise ReleaseRefused(
+                f"`git merge-base --is-ancestor` could not answer for {source} "
+                f"and {protected}: {proc.stderr.strip()}. An oracle that cannot "
+                "answer is not a pass"
+            )
+    return {
+        "candidate_source_revision": source,
+        "runner_revision": runner,
+        "release_revision": release,
+    }
+
+
+def require_tag_peels_to(
+    tag: str, *, expected_commit: str, repo_root: Path = REPO_ROOT
+) -> str:
+    """The version tag PEELS to the candidate source commit.
+
+    ## Peels, in the strict sense
+
+    An annotated tag is an object of its own. ``git rev-parse <tag>`` returns
+    that TAG OBJECT's sha; ``git rev-list -n 1 <tag>`` returns the COMMIT it
+    ultimately points at. Only the second answers "which source is this version".
+    This repository has already had a gate turn on exactly that distinction —
+    `released_manifest_sweep` records `peeled_commit` and re-derives it the same
+    way — so the idiom is reused rather than re-invented.
+
+    ## Why the candidate source and not the release run's own SHA
+
+    A version tag names WHERE THIS VERSION'S SOURCE IS. The bytes were built from
+    the candidate source commit; the release run merely publishes them. Tagging
+    the release SHA makes the tag point at a tree that was never built, and every
+    consumer who checks out the tag to inspect what they installed gets code that
+    is not what they installed. The release revision is not lost by this — it is
+    recorded separately, which is what "bound independently" means.
+    """
+    expected = str(expected_commit).strip().lower()
+    peeled = _git("rev-list", "-n", "1", tag, repo_root=repo_root).strip()
+    if peeled != expected:
+        raise ReleaseRefused(
+            f"{tag} peels to {peeled} and the candidate was built from "
+            f"{expected}. A version tag names where this version's SOURCE is; "
+            "one pointing anywhere else sends a consumer inspecting what they "
+            "installed to a tree that was never built"
+        )
+    return peeled
+
+
+def cmd_verify_revisions(args: argparse.Namespace) -> None:
+    """Refuse unless the three revisions stand in the ruled relationship.
+
+    The exact-digest half is NOT repeated here: `verify-candidate` compares the
+    fetched bytes with the receipt and `require_rehearsal.py --artifact-digest`
+    compares the receipt with those bytes. Re-deriving it in a third place would
+    be a third answer to one question.
+    """
+    resolve(args.distribution)
+    _, receipt = candidate_receipt(args.distribution, args.version)
+    bound = require_revision_relationships(
+        receipt,
+        runner_revision=args.runner_revision,
+        release_revision=args.release_revision,
+    )
+    for key, value in bound.items():
+        print(f"{key}={value}")
+    print(f"candidate_artifact_digest={receipt['sha256']}")
+
+
+def cmd_verify_tag(args: argparse.Namespace) -> None:
+    """Refuse unless the pushed tag peels to the candidate source commit."""
+    resolve(args.distribution)
+    _, receipt = candidate_receipt(args.distribution, args.version)
+    peeled = require_tag_peels_to(
+        args.tag, expected_commit=candidate_source_revision(receipt)
+    )
+    print(f"tag_peeled_commit={peeled}")
+
+
 def cmd_resolve_candidate(args: argparse.Namespace) -> None:
     """Emit the recorded candidate's coordinates for the workflow to fetch."""
     resolve(args.distribution)
@@ -1592,6 +1793,28 @@ def main() -> int:
     p.add_argument("--version", required=True)
     p.add_argument("--dist", required=True)
     p.set_defaults(func=cmd_verify_candidate)
+
+    p = sub.add_parser(
+        "verify-revisions",
+        help=(
+            "refuse unless the candidate source commit is an ancestor of both "
+            "the Lane 3 runner and the release revisions"
+        ),
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--runner-revision", required=True)
+    p.add_argument("--release-revision", required=True)
+    p.set_defaults(func=cmd_verify_revisions)
+
+    p = sub.add_parser(
+        "verify-tag",
+        help="refuse unless the tag PEELS to the candidate source commit",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--tag", required=True)
+    p.set_defaults(func=cmd_verify_tag)
 
     p = sub.add_parser("verify-wheel", help="install the built wheel and smoke its CLI")
     p.add_argument("distribution")
