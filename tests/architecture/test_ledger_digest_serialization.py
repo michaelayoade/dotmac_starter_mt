@@ -194,9 +194,9 @@ def test_the_digest_turns_that_clean_merge_into_a_conflict(tmp_path: Path) -> No
 
     result = _merge_tree(repository)
 
-    assert result.returncode != 0, (
-        "two sibling allocations still merge clean with the digest present"
-    )
+    assert (
+        result.returncode != 0
+    ), "two sibling allocations still merge clean with the digest present"
     assert "CONFLICT" in result.stdout
 
 
