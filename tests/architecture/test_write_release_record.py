@@ -506,7 +506,17 @@ def test_a_row_describing_a_different_version_is_refused(
     the tool meant to maintain it."""
     writer = _writer()
     ledger = json.loads(_ledger_text(writer))["unpublished"]
-    distribution, row = next(iter(sorted(ledger.items())))
+    # A distribution with NO migration lineage, so `--no-lineage` is the honest
+    # declaration and the ledger refusal below is the one under test. Picking
+    # the alphabetically-first row regardless would make this test fail the day
+    # that row becomes a lineage-bearing distribution, and it would fail with a
+    # lineage message that has nothing to do with what it is checking.
+    anchored = writer.anchored_distributions(
+        writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
+    )
+    distribution, row = next(
+        (name, value) for name, value in sorted(ledger.items()) if name not in anchored
+    )
     wrong_version = row["declared"] + "-not-this-one"
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     with pytest.raises(writer.ReleaseRecordError) as refusal:
@@ -516,8 +526,12 @@ def test_a_row_describing_a_different_version_is_refused(
             tag=f"{distribution}-v{wrong_version}",
             package_dir=None,
             import_name=None,
+            no_lineage=True,
         )
-    assert "describes a different" in str(refusal.value)
+    assert "describes a different" in str(refusal.value), (
+        "the ledger refusal is shadowed; lineage validation runs first and must "
+        "not mask a state refusal the caller has already satisfied"
+    )
 
 
 def test_a_first_enrolment_records_history_and_every_migration_guard_map() -> None:
@@ -783,6 +797,19 @@ def test_kernel_record_consumes_authorization_and_refreshes_source_census(
     monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
+    # These two tests are about consuming the authorization and refreshing the
+    # census, not about lineage. Until `--package-dir` became required they
+    # reached that path through the SILENT SKIP -- the same omission that left
+    # `main` red after a101 and again after a102, here in a test rather than a
+    # release. Declaring a real path would not keep them on their subject: it
+    # pulls `published_release_history` and `add_released_tag` -- real git, real
+    # map parsing, the tag oracle -- into tests that touched none of it, which
+    # widens what "fully reconciled" means in the rerun case. So the collaborator
+    # is stubbed, exactly as `tag_commit` and `require_kernel_evidence` are; the
+    # refusals themselves are proven in test_recorder_lineage_refusal.py.
+    monkeypatch.setattr(
+        writer, "resolve_lineage_inputs", lambda **_arguments: (None, None, {})
+    )
     monkeypatch.setattr(
         writer,
         "_local_script",
@@ -851,6 +878,19 @@ def test_kernel_record_rerun_accepts_only_the_fully_reconciled_state(
     monkeypatch.setattr(writer, "KERNEL_AUTHORIZATION", authorization_path)
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
     monkeypatch.setattr(writer, "require_kernel_evidence", lambda **_values: {})
+    # These two tests are about consuming the authorization and refreshing the
+    # census, not about lineage. Until `--package-dir` became required they
+    # reached that path through the SILENT SKIP -- the same omission that left
+    # `main` red after a101 and again after a102, here in a test rather than a
+    # release. Declaring a real path would not keep them on their subject: it
+    # pulls `published_release_history` and `add_released_tag` -- real git, real
+    # map parsing, the tag oracle -- into tests that touched none of it, which
+    # widens what "fully reconciled" means in the rerun case. So the collaborator
+    # is stubbed, exactly as `tag_commit` and `require_kernel_evidence` are; the
+    # refusals themselves are proven in test_recorder_lineage_refusal.py.
+    monkeypatch.setattr(
+        writer, "resolve_lineage_inputs", lambda **_arguments: (None, None, {})
+    )
     monkeypatch.setattr(
         writer,
         "_local_script",

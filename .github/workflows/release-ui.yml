@@ -263,4 +263,5 @@ jobs:
           bash scripts/open_release_record_pr.sh \
             --distribution dotmac-ui \
             --version "${{ inputs.version }}" \
-            --tag "dotmac-ui-v${{ inputs.version }}"
+            --tag "dotmac-ui-v${{ inputs.version }}" \
+            --no-lineage

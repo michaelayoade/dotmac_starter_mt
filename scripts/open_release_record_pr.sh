@@ -87,6 +87,7 @@ MANIFEST_PYTHON=""
 RELEASE_RUN=""
 VERIFICATION_RECEIPT=""
 TAG_DECISION_RECEIPT=""
+NO_LINEAGE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -94,6 +95,7 @@ while [ $# -gt 0 ]; do
     --version)      VERSION="$2";      shift 2 ;;
     --tag)          TAG="$2";          shift 2 ;;
     --package-dir)  PACKAGE_DIR="$2";  shift 2 ;;
+    --no-lineage)   NO_LINEAGE="1";    shift 1 ;;
     --import-name)  IMPORT_NAME="$2";  shift 2 ;;
     --manifest-python) MANIFEST_PYTHON="$2"; shift 2 ;;
     --release-run)  RELEASE_RUN="$2";  shift 2 ;;
@@ -116,6 +118,8 @@ if [ -n "${PACKAGE_DIR}" ]; then
   if [ -n "${IMPORT_NAME}" ]; then
     MANUAL="${MANUAL} --import-name ${IMPORT_NAME}"
   fi
+elif [ -n "${NO_LINEAGE}" ]; then
+  MANUAL="${MANUAL} --no-lineage"
 fi
 if [ -n "${MANIFEST_PYTHON}" ]; then
   MANUAL="${MANUAL}
@@ -150,11 +154,16 @@ git fetch origin main --quiet || give_up "could not fetch main"
 git checkout -B "${BRANCH}" origin/main --quiet || give_up "could not branch from main"
 
 ARGS=(--distribution "${DISTRIBUTION}" --version "${VERSION}" --tag "${TAG}")
+# Forwarded, never inferred. The writer requires exactly one of these two and
+# refuses the empty case, so a lane that declares neither fails here rather than
+# recording a release whose tag oracle was never updated.
 if [ -n "${PACKAGE_DIR}" ]; then
   ARGS+=(--package-dir "${PACKAGE_DIR}")
   if [ -n "${IMPORT_NAME}" ]; then
     ARGS+=(--import-name "${IMPORT_NAME}")
   fi
+elif [ -n "${NO_LINEAGE}" ]; then
+  ARGS+=(--no-lineage)
 fi
 
 OUTPUT=""

@@ -37,7 +37,15 @@ recording only the newest tag would immediately fail the bidirectional tag
 oracle. The history is derived only from peeled tags, package identity and the
 migration prefix carried by the reviewed release inputs. It refuses when the
 requested tag does not exist or the declared version and tag disagree. A
-missing ledger row is a no-op so a partial repair can converge.
+A missing ledger row is a no-op so a partial repair can converge.
+
+It also REFUSES rather than skipping when it cannot tell where a release's
+migrations are. ``--package-dir`` and ``--no-lineage`` are mutually
+exclusive and one is required, and a supplied path is checked for shape,
+for naming this distribution, for being readable at the tag, and for
+carrying this distribution's lineage -- four separate refusals, because
+``git ls-tree`` exits 0 and prints nothing for a path that does not exist,
+so a typo and 'no migrations' were previously the same empty dict.
 
 It is deliberately runnable BY HAND for repair: the same command that the
 workflow runs closes an older gap, which is how the a11 and a12 records were
@@ -61,6 +69,7 @@ import json
 import re
 import subprocess
 import sys
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import cast
 
@@ -624,6 +633,133 @@ def require_kernel_evidence(
     return record
 
 
+_PACKAGE_DIR_SHAPE = re.compile(r"packages/(?P<name>[a-z0-9][a-z0-9.-]*)\Z")
+
+
+def anchored_distributions(text: str) -> set[str]:
+    """Every distribution with a lineage, read from the map that already says so.
+
+    ``RELEASED_TAGS`` anchors one entry per distribution whose migrations are
+    immutable, so "does this distribution carry a lineage?" is already answered
+    in a file this writer parses. Asking it here means clause 1 needs no second
+    declaration to drift out of step with the first.
+    """
+    return {owner for owner, _, _ in _released_tags(text).values()}
+
+
+def _lineage_glob(text: str, distribution: str) -> str | None:
+    tree = ast.parse(_mapping_text(text, "LINEAGE_GLOBS"))
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "LINEAGE_GLOBS"
+    )
+    if assignment.value is None:  # pragma: no cover - annotated-assignment invariant
+        raise ReleaseRecordError("LINEAGE_GLOBS has no literal value")
+    parsed = ast.literal_eval(assignment.value)
+    if not isinstance(parsed, dict):  # pragma: no cover - literal-map invariant
+        raise ReleaseRecordError("LINEAGE_GLOBS is not a literal dictionary")
+    value = parsed.get(distribution)
+    return value if isinstance(value, str) else None
+
+
+def resolve_lineage_inputs(
+    *,
+    distribution: str,
+    tag: str,
+    package_dir: str | None,
+    import_name: str | None,
+    no_lineage: bool,
+    module_text: str,
+) -> tuple[str | None, str | None, dict[str, str]]:
+    """Answer "where is this release's lineage?" or refuse, saying which input is wrong.
+
+    FOUR KINDS, named as the rule names them: MISSING (nothing was declared),
+    INCORRECT (a path that is malformed or names another package), UNREADABLE
+    (a path that reads no migration at the tag) and CONTRADICTORY (declarations
+    that cannot both hold, or migrations that are not this distribution's).
+
+    ONE REFUSAL PER WAY OF BEING WRONG, deliberately. `git ls-tree` exits 0 and
+    prints nothing for a path that does not exist, so a typo'd `--package-dir`
+    and a distribution with no migrations produce the SAME value — an empty dict
+    from a successful call. That is why `if digests:` reported success at a101
+    and again at a102, and it is why one generic failure would not be enough: a
+    single message cannot tell the operator whether to fix the flag, fix the
+    import name, or stop passing the flag at all.
+    """
+    anchored = anchored_distributions(module_text)
+    carries_lineage = distribution in anchored
+
+    if package_dir is not None and no_lineage:
+        raise ReleaseRecordError(
+            f"CONTRADICTORY lineage declaration for {distribution}: "
+            f"--package-dir {package_dir!r} and --no-lineage were both given; "
+            "exactly one is true"
+        )
+    if package_dir is None:
+        if no_lineage:
+            if carries_lineage:
+                raise ReleaseRecordError(
+                    f"CONTRADICTORY lineage declaration: {distribution} was declared "
+                    "--no-lineage, but it is anchored in RELEASED_TAGS and its "
+                    "released migrations are immutable. Pass --package-dir "
+                    f"packages/{distribution} instead"
+                )
+            return None, None, {}
+        raise ReleaseRecordError(
+            f"MISSING lineage declaration for {distribution}: pass --package-dir "
+            "for a distribution with migrations, or --no-lineage for one without. "
+            "Omission used to mean 'not applicable' and silently skipped the tag "
+            "oracle, which left main red after a101 and again after a102"
+        )
+
+    shape = _PACKAGE_DIR_SHAPE.fullmatch(package_dir)
+    if shape is None:
+        raise ReleaseRecordError(
+            f"INCORRECT --package-dir {package_dir!r} for {distribution}: expected "
+            f"the form packages/<distribution>, e.g. packages/{distribution}"
+        )
+    if shape.group("name") != distribution:
+        raise ReleaseRecordError(
+            f"INCORRECT --package-dir {package_dir!r} for {distribution}: it "
+            f"names {shape.group('name')!r}. A well-formed path to the wrong "
+            "package reads no migrations and would have skipped in silence"
+        )
+
+    # The caller may override the import name; if it does, the readability
+    # check below runs against the path the override actually resolves to.
+    # Deriving here and letting a later override recompute the digests would
+    # reinstate the silent skip through a second door.
+    resolved_import = import_name or distribution.replace("-", "_")
+    digests = migration_digests(tag, package_dir, resolved_import)
+    if not digests:
+        if carries_lineage:
+            raise ReleaseRecordError(
+                f"UNREADABLE lineage for {distribution}: no migration is readable "
+                f"under {package_dir}/"
+                f"{_MIGRATIONS.format(import_name=resolved_import)} "
+                f"at {tag}, yet {distribution} is anchored in RELEASED_TAGS. git "
+                "ls-tree exits 0 on a path that does not exist, so this is a "
+                "refusal rather than an empty result"
+            )
+        raise ReleaseRecordError(
+            f"UNREADABLE lineage for {distribution}: --package-dir {package_dir!r} "
+            f"carries no migration at {tag}. If this distribution has no lineage, "
+            "say so with --no-lineage rather than passing a path that reads empty"
+        )
+
+    glob = _lineage_glob(module_text, distribution)
+    if glob is not None and not any(fnmatch(name, glob) for name in digests):
+        raise ReleaseRecordError(
+            f"CONTRADICTORY lineage for {distribution}: {sorted(digests)[:3]} under "
+            f"{package_dir} match none of its recorded lineage glob {glob!r}; the "
+            "path is readable but the migrations are not this distribution's"
+        )
+    return package_dir, resolved_import, digests
+
+
 def write_record(
     *,
     distribution: str,
@@ -631,6 +767,7 @@ def write_record(
     tag: str,
     package_dir: str | None,
     import_name: str | None,
+    no_lineage: bool = False,
 ) -> list[str]:
     """Apply both halves of the record. Returns what changed, for the caller."""
     expected_tag = f"{distribution}-v{version}"
@@ -654,6 +791,18 @@ def write_record(
     new_baseline = baseline_text
     authorization_text = KERNEL_AUTHORIZATION.read_text(encoding="utf-8")
     new_authorization = authorization_text
+    # Validate the caller's lineage inputs BEFORE reading any state. A wrong
+    # --package-dir is the caller's defect; masking it behind a ledger or
+    # authorization refusal sends the operator to repair the wrong thing.
+    resolved_dir, resolved_import, digests = resolve_lineage_inputs(
+        distribution=distribution,
+        tag=tag,
+        package_dir=package_dir,
+        import_name=import_name,
+        no_lineage=no_lineage,
+        module_text=module_text,
+    )
+    package_dir, import_name = resolved_dir, resolved_import
     changed: list[str] = []
 
     row = json.loads(ledger_text)["unpublished"].get(distribution)
@@ -671,7 +820,6 @@ def write_record(
             changed.append(f"removed the {distribution} publication-ledger row")
 
     if package_dir and import_name:
-        digests = migration_digests(tag, package_dir, import_name)
         if digests:
             historical_releases = published_release_history(
                 distribution, package_dir, import_name
@@ -759,10 +907,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--distribution", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--tag", required=True)
-    parser.add_argument(
+    # EXACTLY ONE, and neither has a default. Omission used to mean "this
+    # distribution has no migration lineage" -- and also "the caller forgot",
+    # because nothing could tell them apart. argparse refuses the empty case
+    # here so no release lane can express it again.
+    lineage = parser.add_mutually_exclusive_group(required=True)
+    lineage.add_argument(
         "--package-dir",
-        help="package directory, e.g. packages/dotmac-integration; omit for a "
-        "distribution with no migration lineage",
+        help="package directory of a distribution WITH migrations, e.g. "
+        "packages/dotmac-integration",
+    )
+    lineage.add_argument(
+        "--no-lineage",
+        action="store_true",
+        help="declare that this distribution has NO migration lineage. An "
+        "explicit claim, checked against RELEASED_TAGS -- not an omission",
     )
     parser.add_argument(
         "--import-name",
@@ -783,6 +942,7 @@ def main(argv: list[str] | None = None) -> int:
             tag=args.tag,
             package_dir=args.package_dir,
             import_name=import_name,
+            no_lineage=args.no_lineage,
         )
     except ReleaseRecordError as failure:
         print(f"release record REFUSED: {failure}", file=sys.stderr)
