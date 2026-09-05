@@ -1,9 +1,22 @@
 # The Foundation concern-contribution contract — DESIGN FOR REVIEW
 
-**Status: CONTRACT DESIGN ONLY — revision 2, after independent review.**
+**Status: CONTRACT DESIGN ONLY — revision 3, after two independent reviews.**
 Not accepted, not implemented, and nothing depends on it. This is **not** profile
 admission and **not** cutover readiness; governance ADR 0039 remains Proposed and
 unenforced.
+
+**Revision 3 changes** (second review): the five-identity repair reaches the
+SCHEMAS — the provider carries only what a module build can know, the binding
+carries the assembly-scoped half, and the verification carries all five and is
+the fact that binds them (§ 1.1, § 4.1, § 4.2, § 4.2b); § 8's canonicalizer claim
+was **false** and is ruled — one canonicalizer, the schema check widens to a
+closed accepted set (§ 8.0); the successor names are ruled, in two families, with
+admission outcomes kept OUT of the profile (§ 3B.1); "right site, wrong
+provenance" gets the refusal it never had (§ 3.3 row 5b); § 0's claim is
+qualified where it is made and § 7's refusal citation corrected (F7); a live
+merged-code defect is logged (§ 6.0); and **F2 — the battery does not close the
+inert class — is stated as an OPEN decision with both options** (§ 3.3b), which
+is Michael's to rule.
 
 **Revision 2 changes** (independent review + Michael's nine-point gate): the
 nonce echo was **defeated** and is replaced by a Foundation-owned versioned
@@ -48,8 +61,10 @@ is compatibility plumbing, not composition.
 The test of the rule is mechanical: **if a value could differ between two
 correct deployments of the same artifacts, it is not profile material** — it
 belongs to settings, the deployment descriptor, or the entitlement surface.
-`ConcernBinding`'s closed field set already states this and refuses an extra key
-rather than ignoring it; the contract below inherits that discipline.
+`ConcernBinding`'s closed field set states this, and `_binding_from_document`
+**would** refuse an extra key — **but nothing in production calls that parser
+today; see § 6C, which is part of this claim and not a footnote to it.** The
+contract below inherits the discipline; § 12A is what gives it a caller.
 
 ---
 
@@ -92,8 +107,12 @@ JOIN = (
 )
 ```
 
-All three facts carry all five, and all five MUST be **identical** across the
-three — not compatible, identical. Each omission is exploitable:
+Each component MUST be **identical** wherever it appears — not compatible,
+identical. It does **not** follow that every fact carries every component:
+`ConcernProvider` is produced at module build, when no assembly exists, so it
+cannot name `assembly_artifact`, `composition_digest` or `injection_site`. § 4.2b
+states which fact carries which, and the **verification carries all five and is
+the fact that binds them.** Each omission from the KEY is exploitable:
 
 | omit | what becomes joinable |
 | --- | --- |
@@ -233,7 +252,17 @@ Consequences, each of which was a hole before:
   the battery cannot run — `uninjected`, distinguishable from a missing row;
 * an object present at a **different** site than declared is `wrong_site`;
 * the object obtained must have the **same artifact identity** as the resolved
-  provider, or the assembly wired something else with the right shape.
+  provider, or the assembly wired something else with the right shape. **This is
+  a refusal — `foreign_provenance`** (§ 3.3, row 5b), not merely a consequence.
+  Revision 2 stated it as an implication and gave it no code and no row, which
+  left "right site, wrong provenance" nameless: an assembly wiring a look-alike
+  from another distribution is not `wrong_site` (the site is right) and not
+  `contract_mismatch` (the declarations agree). It had no refusal at all.
+
+  **ARTIFACT identity, not object identity**, and the distinction is load-bearing:
+  requiring the obtained object to *be* the resolved provider object would refuse
+  every factory-based composition, which is most of them. What must match is
+  which distribution the object came from.
 
 ### 3.3 The refusals
 
@@ -244,6 +273,7 @@ Consequences, each of which was a hole before:
 | 3 | consumer names another contract/version/artifact | `contract_mismatch` |
 | 4 | nothing at the declared injection site | `unexercised` |
 | 5 | object present at a site other than the declared one | `wrong_site` |
+| 5b | right site, object from another distribution | `foreign_provenance` |
 | 6 | battery run, **every** outcome negative | `broken_shut` |
 | 7 | **positive scenarios pass and negative scenarios also "pass"** | `answers_everything` |
 | 8 | verification joins a different assembly | `wrong_assembly` |
@@ -256,16 +286,64 @@ Refusal 7 is the one this revision exists to add, and refusals 6 and 7 are
 everything are both non-providers, and each is invisible to the check that
 catches the other.
 
+### 3.3b OPEN — the battery does not close the inert class (F2, awaiting ruling)
+
+**Not fixed here. Michael has not ruled, and this is his call.** Stated in full
+so the decision is made against the actual hole.
+
+*"No constant satisfies both halves"* is **true**. *"The inert class is closed"*
+does **not** follow, and revision 2 slid from one to the other.
+
+A versioned battery has **fixed inputs by definition** — that is what makes it
+versioned and comparable. Fixed inputs are a **key**:
+
+```python
+_TABLE = {digest(inp): verdict}
+def answer(self, inp):
+    return _TABLE.get(digest(inp), refuse)
+```
+
+Passes every positive scenario, refuses every negative one, discriminates
+perfectly, implements nothing. **It needs no bad intent**: "special-case the
+battery inputs until CI is green" produces it one scenario at a time, and each
+step looks like progress.
+
+Two cheaper attacks exist, and both are this document's doing: § 4.3 places
+`expected` beside `observed` in the same record, and nothing here forbids the
+expected outcome from crossing the call boundary to the provider. A provider
+that can see what it is supposed to answer does not need a table.
+
+**Two options, neither implemented:**
+
+| option | closes | leaves open |
+| --- | --- | --- |
+| **A — seeded input space.** Foundation owns an input SPACE per contract, not a fixed list; each run draws from it and records `(space_version, seed)` | the table: inputs are not knowable in advance, so there is nothing to key on | reproducibility becomes seed-replay rather than fixed-input equality |
+| **B — input-isolation rule.** A stated rule, with a refusal and a matrix row, that the expected outcome must never be reachable by the provider | the two cheap attacks | the table itself, which stays named and unclosed |
+
+They are not exclusive; B is a subset of the discipline A also needs.
+
+**Whichever is ruled, § 3.4's limit is restated as an INERTNESS limit and not
+only a correctness one.** A memorising table is inert *everywhere*, including
+on-battery — so "the battery establishes discrimination" is exactly as strong as
+"the inputs could not have been memorised", and no stronger.
+
 ### 3.4 What the battery still does NOT establish, stated plainly
 
-It establishes that the composed path **discriminates** — that it accepts what
-the contract says to accept and refuses what it says to refuse, on Foundation's
-inputs. It does not establish that the provider is *correct* on inputs the
-battery does not contain.
+It establishes that the composed path **discriminates on Foundation's inputs** —
+accepting what the contract says to accept and refusing what it says to refuse.
+
+**This is an INERTNESS limit as well as a correctness one**, and revision 2
+recorded only the second. Correctness beyond the battery was always outside the
+claim. But per § 3.3b a **memorising table** discriminates perfectly on exactly
+those inputs while implementing nothing, so the battery's inertness claim is
+bounded by whether its inputs could have been memorised — not by the battery's
+own design. A provider that is inert everywhere can be inert *on-battery too*
+and still pass.
 
 That limit is real and is not patched over with a metric. It is narrower than
-the previous revision's limit by exactly the amount that matters: the previous
-design could not distinguish a stub from an implementation at all.
+the previous revision's limit by exactly the amount that matters — the nonce
+could not distinguish a five-line stub from an implementation at all — and it is
+**not zero**, which is what § 3.3b is for.
 
 ### 3.5 Still NOT inertness signals
 
@@ -359,8 +437,33 @@ Two immediate consequences:
   supplying `displaces` with its retirement rows was refused for carrying none,
   a message false about its own input. V1 now refuses at the parse (point 7's
   "until V2 supports this");
-* **no number is allocated here.** Naming the successor is part of accepting
-  this design, not part of proposing it.
+### 3B.1 RULED: the names, and TWO families rather than one
+
+| | Python type | wire schema |
+| --- | --- | --- |
+| the composition an assembly declares | `ApplicationFoundationProfileV2` | `ApplicationFoundationProfile.v2` |
+| Foundation's proof it exercised that composition | `ApplicationFoundationAdmissionReceiptV1` | `ApplicationFoundationAdmissionReceipt.v1` |
+
+> **"The profile declares the exact composition. The receipt proves Foundation
+> exercised that composition from the retained artifact. Do not place admission
+> outcomes inside the profile; that would collapse assertion and independent
+> proof."**
+
+Two families, and the separation is the same one § 1 is built on. A profile is
+what the assembly **asserts**; a receipt is what Foundation **observed**. Folding
+the outcomes into the profile would make the asserting party the author of its
+own proof — § 1.2's rule, arriving one level up.
+
+It also keeps the digests apart, which matters mechanically: the profile digest
+must be computable **before** admission runs, because admission is *about* that
+digest. A profile carrying its own admission outcome could not be hashed until
+the thing that hashes it had finished.
+
+The receipt is the immutable artifact § 12A's release path consumes.
+
+**Note the version numbers are independent**: the profile is at v2 because v1
+shipped; the receipt is at v1 because it is new. They are not a matched pair and
+must not be renumbered to look like one.
 
 ---
 
@@ -368,29 +471,63 @@ Two immediate consequences:
 
 ### 4.1 `ConcernProvider.v1` — owned by the MODULE
 
-| field | owner | notes |
+**Carries the module-scoped subset of the join key, and only that.** § 1.1 said
+all three facts carry all five identities; that is **impossible here** and the
+first revision of this section did not notice. A provider document is produced
+**at module build**, when no assembly exists — it cannot name
+`assembly_artifact`, `composition_digest` or `injection_site` without inventing
+them, and a field a producer must invent is the defect § 12A's build-once rules
+name.
+
+| field | owner | join component |
 | --- | --- | --- |
-| `schema` | Foundation | fixed literal |
-| `concern` | Foundation vocabulary | one of the closed thirteen |
-| `contract_id` | Foundation | the typed concern contract this answers |
-| `contract_version` | Foundation | see § 5 |
-| `implementation` | module | distribution name |
-| `version` | module | distribution version |
-| `artifact_coordinates` | module | immutable; see § 1.1 |
-| `entry_point` | module | the declared row this was resolved from |
-| `displaces` | module | local writers this provider retires |
+| `schema` | Foundation | — |
+| `concern` | Foundation vocabulary | `concern_contract` |
+| `contract_id` | Foundation | `concern_contract` |
+| `contract_version` | Foundation | `concern_contract` |
+| `implementation` | module | `provider_artifact` |
+| `version` | module | `provider_artifact` |
+| `artifact_coordinates` | module | `provider_artifact` (immutable) |
+| `entry_point` | module | `provider_artifact` |
+| `displaces` | module | — (see § 6B) |
 
 ### 4.2 `ConsumerBinding.v1` — owned by the ASSEMBLY
 
-| field | owner | notes |
-| --- | --- | --- |
-| `schema` | Foundation | fixed literal |
-| `concern` / `contract_id` / `contract_version` / `artifact_coordinates` | Foundation vocabulary, **restated by the assembly** | the JOIN key; a restatement that disagrees is refusal 3, never a merge |
-| `injection_site` | assembly | where the assembly wires it |
-| `declared_by` | assembly | the assembly's own identity |
+**Carries the assembly-scoped identities the provider cannot know, and restates
+the module-scoped ones so they can disagree.**
 
-The assembly restates the join key rather than referencing the provider's copy.
-That is deliberate: a reference cannot disagree, and disagreement is the signal.
+| field | owner | join component |
+| --- | --- | --- |
+| `schema` | Foundation | — |
+| `assembly_artifact` | assembly | `assembly_artifact` (immutable) |
+| `composition_digest` | Foundation computes over the assembly's composition | `composition_digest` |
+| `injection_site` | assembly, **typed** | `injection_site` |
+| `concern` / `contract_id` / `contract_version` | restated by the assembly | `concern_contract` |
+| `provider_artifact` | restated by the assembly | `provider_artifact` |
+| `declared_by` | assembly | — |
+
+The assembly **restates** the module-scoped components rather than referencing
+the provider's copy. A reference cannot disagree, and disagreement is the signal.
+
+### 4.2b The join, stated as who carries what
+
+| component | provider | binding | verification |
+| --- | --- | --- | --- |
+| `concern_contract` | ✓ | ✓ | ✓ |
+| `provider_artifact` | ✓ | ✓ | ✓ |
+| `assembly_artifact` | — | ✓ | ✓ |
+| `composition_digest` | — | ✓ | ✓ |
+| `injection_site` | — | ✓ | ✓ |
+
+**The join is over each component by the facts that can carry it**, and the
+**verification is the fact that binds them** — it is the only document holding
+all five, because it is the only one produced when all five exist. That is not a
+weakening of § 1.1: two independent statements of a component must still be
+identical, and a component with only one carrier is still bound, by the
+verification, to the assembly it was observed in.
+
+A verification is therefore not a third opinion to be reconciled with two
+others. It is the join itself, written down.
 
 ### 4.3 `ConcernVerification` — owned by the GENERIC TOOL
 
@@ -489,6 +626,31 @@ A proven absence is **not** an inertness escape hatch. `broken_shut` is a
 provider that does not work and `answers_everything` is one that does not
 discriminate; absent-proven is a subject that is not there. A contribution that
 fails § 3 may not be re-filed as an absence.
+
+### 6.0 LOGGED: a live defect in merged code, today
+
+`IntegrationSurfaceAbsenceProofV1` validates `families` against the integration
+inventory while its `concern` field accepts **any of the thirteen**. So a proof
+with `concern=WORKER_EXECUTION` carrying INTEGRATION families **constructs
+cleanly** — and then **passes the profile's misfiling guard**, because that guard
+compares the slot key against the proof's own `concern` field. *The two things
+that agree are the two things checked.* The inventory, which is the only thing
+that would disagree, is never consulted.
+
+The misfiling guard landed 2026-09-05 and is not vacuous in general — it catches
+a correctly-built proof filed under the wrong key. It cannot catch a proof
+**built against the wrong inventory**, which is the earlier and quieter defect.
+
+Revision 2 presented this as motivation for a future generalisation. **It is live
+now**, and this section says so rather than describing it in the future tense.
+
+**Not repaired in this PR**, because the shape of the repair depends on the
+ruling below: if § 6.1's per-concern inventories are accepted, the type is
+replaced rather than patched. The narrow interim fix — refuse a `concern` other
+than `INTEGRATION`, since the only inventory the type has is integration's — is
+correct under **both** outcomes and is a few lines with a control. **It is
+offered and not taken unilaterally**, since it changes shipped behaviour and was
+asked to be logged.
 
 ### 6.1 THIRTEEN closed inventories, not one (point 6)
 
@@ -657,7 +819,9 @@ run, and the two differ routinely and innocently — an uncommitted pin, a build
 argument, a dependency resolved to a newer compatible release, a wheel that
 never reached the registry.
 
-At runtime the readback **compares and never derives** (refusal 6). Editing an
+At runtime the readback **compares and never derives** (§ 3.3 refusal 11,
+`readback_drift` — revision 2 cited "refusal 6", which the renumbering had made
+`broken_shut`). Editing an
 accepted profile to match what a deployed image turned out to contain inverts
 the relationship, and from that moment drift and correction arrive as the same
 commit.
@@ -666,8 +830,49 @@ commit.
 
 ## 8. Canonical bytes and digest
 
-Reused verbatim from `canonical_profile_bytes`, not re-specified — a restatement
-of a rule is a copy of it:
+### 8.0 RULED: one canonicalizer, and the schema check widens to an accepted set
+
+**Revision 2 asserted this section was reusable verbatim. That was false, and
+revision 2 made it larger.** `canonical_profile_bytes`
+(`application_profile.py:961-968`, pinned by
+`test_the_canonicalizer_still_refuses_a_wrapper`) hard-refuses any document
+whose `schema` is not `ApplicationFoundationProfile.v1`. Under revision 2, FOUR
+documents claimed these rules and **none of them could be canonicalised by the
+shipped function**: the three contribution documents and `InventoryDigest.v1`.
+
+Left unruled, the default outcome is a **second canonicalizer** — which is
+precisely what that function's own error message warns about: *"two parties come
+to compute permanently unequal values while both look correct."* A design whose
+unstated default is the defect it cites is not neutral.
+
+**The ruling: ONE canonicalizer. The schema check widens from a single literal to
+a CLOSED ACCEPTED SET of Foundation-owned schemas.**
+
+* the check stays a **membership test against a closed set**, never a prefix
+  match, a regex or "starts with a Foundation name" — an open predicate is how
+  a wrapper eventually passes, and the wrapper refusal is the whole point;
+* the accepted set is **enumerated longhand**, so adding a document to it is a
+  reviewed diff;
+* the rules themselves do **not** change, so every digest already computed stays
+  valid — this widens *what may be hashed*, never *how*;
+* the wrapper refusal survives unchanged: a document whose schema is not in the
+  set is refused, and a wrapper's schema never is.
+
+**The alternative was considered and refused.** A `canonical_contribution_bytes`
+beside `canonical_profile_bytes` would be two functions implementing one
+specification. They would agree on the day they were written, and this
+repository has paid for that shape repeatedly — `discovery.py`'s own docstring
+exists because of it. Two canonicalizers is not a smaller change than one
+widened check; it is the same change with a second authority attached.
+
+**This is a change to shipped behaviour and is NOT in this PR.** It lands with
+the implementation, and its own guard is the near miss: a wrapper containing an
+accepted schema must still be refused.
+
+### 8.1 The rules
+
+Reused from `canonical_profile_bytes`, not re-specified — a restatement of a
+rule is a copy of it:
 
 * sorted keys at **every** depth;
 * separators `(",", ":")` — no spaces;
@@ -681,8 +886,8 @@ of a rule is a copy of it:
 
 `profile_digest` = `sha256:` + hex over those bytes.
 
-The three contribution documents use the **same** rules. One canonicalizer, one
-answer.
+Every document in this contract uses the **same** rules through the **same**
+function, per § 8.0. One canonicalizer, one answer.
 
 ---
 
@@ -729,11 +934,15 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N2 | provider, no consumer binding | `uninjected` | provider + binding proceeds |
 | N3 | consumer names another `contract_id` | `contract_mismatch` | identical ids join |
 | N4 | consumer names another `contract_version` | `contract_mismatch` | identical versions join |
-| N5 | consumer names other `artifact_coordinates` | `contract_mismatch` | identical coordinates join |
+| N5 | consumer names another `provider_artifact` | `contract_mismatch` | identical provider artifacts join |
+| N5b | verification names another `composition_digest` | `wrong_composition` | same composition joins |
+| N5c | verification names another `injection_site` | `wrong_site` | the declared site joins |
+| N5d | a provider document carrying `assembly_artifact`, `composition_digest` or `injection_site` | refused — a producer inventing a fact it cannot know | a module-scoped provider document admits |
 | N6 | nothing at the declared injection site | `unexercised` | an object at the declared site admits |
 | N7 | all battery outcomes negative | `broken_shut` | a battery passing both halves admits |
 | N7b | **negative scenarios "pass" too** — the five-line stub | `answers_everything` | a provider that refuses what it must admits |
 | N7c | object present at a site other than the declared one | `wrong_site` | the declared site admits |
+| N7d | right site, object from another distribution | `foreign_provenance` | matching artifact identity admits |
 | N8 | two providers for one concern | `duplicate` | one provider admits |
 | N9 | concern with nothing at all | `missing` | 13/13 admits |
 | N10 | runtime digest ≠ admitted digest | `readback_drift` | equal digests pass |
@@ -742,6 +951,7 @@ exists. "Non-vacuity" is the column that fails in practice.
 | N11c | caller-supplied inventory digest | `foreign_inventory` | Foundation-computed over typed entries admits |
 | N11d | unknown key on **decode** | `unknown_key` | a closed document decodes |
 | N11e | a V1 document carrying `retirement` | refusal at the parse | a document without it parses |
+| N11f | a wrapper CONTAINING an accepted schema | refused by the canonicalizer | each accepted schema canonicalises (§ 8.0) |
 | N12 | absence proof, no observed inventory | finding | supplied inventory verifies |
 | N13 | absence proof for another artifact | finding | matching artifact verifies |
 | N14 | absence proof misfiled under another concern | `absence_proof.wrong_concern` | correctly filed admits |
@@ -760,7 +970,14 @@ is removed.
 (`test_deployment_foundation_application_profile.py`). The rest are owed by the
 implementation step.
 
-**N7b is the row this revision exists to add.** Its absence is what the
+**N5d, N7d and N11f are revision 3's rows.** N5d is the F1 repair made
+falsifiable: the previous revision's claim that every fact carries every identity
+was not merely imprecise, it demanded that a module-build document name an
+assembly. N7d gives "right site, wrong provenance" the refusal it never had.
+N11f is § 8.0's near miss — widening the accepted schema set must not weaken the
+wrapper refusal, which is the whole reason the check exists.
+
+**N7b is the row revision 2 existed to add.** Its absence is what the
 independent review defeated: the previous design's nonce echo made N7b
 unrepresentable, so a five-line stub filled a slot. N7 and N7b are duals — a
 provider that refuses everything and one that accepts everything are both
@@ -822,9 +1039,27 @@ programme progress.**
    (point 8). It is **two-directional** — `legacy_total` and the length of
    `added` are both fixed, so a case cannot appear or vanish as a side effect;
    a shrinking count would otherwise read as cleanup and a growing one as
-   progress. Nine added cases: `uninjected`, `wrong_site`, `nonce_only`,
-   `all_negative`, `answers_everything`, `wrong_assembly`, `foreign_inventory`,
-   `unknown_key`, `retirement_round_trip`.
+   progress. **Ten** added cases: `uninjected`, `wrong_site`,
+   `foreign_provenance`, `all_negative`, `answers_everything`, `wrong_assembly`,
+   `wrong_composition`, `foreign_inventory`, `unknown_key`,
+   `retirement_round_trip`.
+
+   **`parity_gate_passed` is FALSE, and deleting Platform's dialect requires it
+   TRUE.** Revision 2 recorded the debt and gated nothing: it asserted
+   `legacy_rows_supplied_here` stays false, and nothing failed if deletion
+   proceeded while it was. A field that records an obligation without blocking
+   on it is a note, not a gate. Flipping it requires the per-row mapping of all
+   53, which the Platform lane owns.
+
+   **`nonce_only` was dropped in revision 3.** It was a case under revision 1,
+   where the nonce was the liveness signal; revision 3 removes the nonce
+   entirely, so the shape cannot be represented and the row could never fire.
+   A provider that answers positively while implementing nothing is
+   `answers_everything`, which is real and fireable. Keeping both would have been
+   one defect wearing two names — and the ratchet would have frozen the
+   duplicate in place, which is why it is resolved now rather than later. The
+   historical defeat lives in § 3.0, where a defeated design belongs, not as a
+   test case that cannot fail.
 
    **The 53 rows themselves are a COUNT here, not a list, and that is a stated
    gap.** They live in Platform's inventory and are not restated — a copy would

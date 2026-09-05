@@ -163,16 +163,41 @@ def test_the_added_cases_are_the_ones_the_dialect_could_not_STATE() -> None:
         "all_negative",
         "answers_everything",
         "foreign_inventory",
-        "nonce_only",
+        "foreign_provenance",
         "retirement_round_trip",
         "unknown_key",
         "uninjected",
         "wrong_assembly",
+        "wrong_composition",
         "wrong_site",
     }
+    # `nonce_only` was dropped in revision 3: the nonce no longer exists, so the
+    # shape cannot be represented and the row could never fire. A row that
+    # cannot fire is the inert shape this whole design is about, and the ratchet
+    # would have frozen it in place.
+    assert "nonce_only" not in cases
     for row in added:
         assert row["requires"].strip()
         assert row["absent_from_dialect_because"].strip()
+
+
+def test_the_parity_GATE_blocks_deletion_and_is_not_merely_a_note() -> None:
+    """Revision 2 recorded the debt and gated nothing: it asserted
+    `legacy_rows_supplied_here` stays false, and nothing failed if Platform's
+    dialect were deleted while it was.
+
+    A field that records an obligation without blocking on it is a note. The
+    gate is false today and flipping it requires the per-row mapping, so this
+    test is what makes "owed" mean "blocking".
+    """
+    parity = _parity()
+    assert parity["parity_gate_passed"] is False
+    # And the two are not independent: the gate cannot be true while the rows
+    # are still owed, which is the pairing that makes the flip meaningful.
+    assert parity["legacy_rows_supplied_here"] is False
+    assert not (
+        parity["parity_gate_passed"] and not parity["legacy_rows_supplied_here"]
+    )
 
 
 def test_the_map_does_not_RESTATE_platforms_rows() -> None:
