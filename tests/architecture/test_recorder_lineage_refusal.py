@@ -35,6 +35,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -48,12 +49,30 @@ MIGRATIONS_MODULE = ROOT / "tests" / "architecture" / "test_released_migrations.
 KERNEL_TAG = "dotmac-kernel-v0.1.0a102"
 
 
+@lru_cache(maxsize=1)
 def writer():
+    """ONE module instance, and the cache is load-bearing rather than a speed tweak.
+
+    `exec_module` builds a fresh module object every call, so two loads define
+    two DIFFERENT `ReleaseRecordError` classes and `except`/`pytest.raises`
+    against one does not catch the other. `resolve()` below calls `writer()`
+    too, so an uncached loader had every refusal escaping the `pytest.raises`
+    that was watching a different class of the same name — the refusals fired
+    correctly and the harness could not see them.
+    """
     spec = importlib.util.spec_from_file_location("write_release_record", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_the_harness_watches_one_exception_class() -> None:
+    """Guard the guard. Without this, a future refactor that drops the cache
+    turns every refusal test below into a silent error rather than a failure
+    anyone would read as harness breakage."""
+    assert writer() is writer()
+    assert writer().ReleaseRecordError is writer().ReleaseRecordError
 
 
 def module_text() -> str:
