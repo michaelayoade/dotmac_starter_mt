@@ -62,7 +62,7 @@ from dotmac_inbox.service import (
 )
 from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a2+dev"
 
 __all__ = [
     "SCHEMA",

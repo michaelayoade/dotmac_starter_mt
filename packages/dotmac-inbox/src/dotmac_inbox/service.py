@@ -115,6 +115,7 @@ def _require_same_message(
         "subject": identity.subject,
         "body": identity.body,
         "transport_message_ref": identity.external_message_id,
+        "supplied_message_ref": identity.supplied_message_ref,
         "author_id": author_id,
         "occurred_at": occurred_at,
     }
@@ -178,6 +179,7 @@ def create_conversation(
         contact=identity.contact,
         thread_key=canonical_thread_key,
         transport_thread_ref=identity.external_thread_id,
+        supplied_thread_ref=identity.supplied_thread_ref,
         status=status.value,
         status_reason=validated_reason,
         snoozed_until=persisted_snoozed_until,
@@ -277,6 +279,7 @@ def record_message(
         subject=identity.subject,
         body=identity.body,
         transport_message_ref=identity.external_message_id,
+        supplied_message_ref=identity.supplied_message_ref,
         transport_observation_ref=transport_observation_ref,
         author_id=author_id,
         occurred_at=occurred,

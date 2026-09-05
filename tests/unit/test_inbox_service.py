@@ -91,7 +91,15 @@ def _declarations():
                 transport=Transport.EXTERNAL,
                 thread_identity=ThreadIdentity.PROVIDER,
                 message_id_scope=MessageIdScope.GLOBAL,
-            )
+            ),
+            ChannelSpec(
+                code="field_job",
+                owner="test_product",
+                address_form=AddressForm.OPAQUE,
+                transport=Transport.INTERNAL,
+                thread_identity=ThreadIdentity.SUPPLIED,
+                message_id_scope=MessageIdScope.SUPPLIED,
+            ),
         ]
     )
     register_reasons(
@@ -124,6 +132,19 @@ def _identity(message_id: str | None = None) -> InboundIdentity:
         external_message_id=message_id,
         subject="Hello",
         body="Can you help?",
+    )
+
+
+def _supplied_identity(
+    message_ref: str, *, thread_ref: str = "work-order-42"
+) -> InboundIdentity:
+    return InboundIdentity(
+        channel="field_job",
+        account_scope="dispatch",
+        contact=None,
+        supplied_thread_ref=thread_ref,
+        supplied_message_ref=message_ref,
+        body="technician arrived",
     )
 
 
@@ -456,6 +477,81 @@ def test_message_key_reuse_with_different_content_is_a_conflict(db: Session) -> 
             conversation_id=conversation.id,
             identity=changed,
             direction=Direction.INBOUND,
+            occurred_at=occurred_at,
+        )
+
+
+def test_supplied_identities_persist_distinct_repeated_messages_and_conflict(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    first_identity = _supplied_identity("event-1")
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=first_identity)
+    occurred_at = datetime(2026, 9, 5, 8, tzinfo=UTC)
+    first = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=first_identity,
+        direction=Direction.INTERNAL,
+        occurred_at=occurred_at,
+    )
+    second = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_supplied_identity("event-2"),
+        direction=Direction.INTERNAL,
+        occurred_at=occurred_at,
+    )
+    db.expire_all()
+    reloaded = db.get(Conversation, conversation.id)
+    assert reloaded is not None
+    assert reloaded.contact is None
+    assert reloaded.supplied_thread_ref == "work-order-42"
+    reloaded_message = db.get(Message, first.id)
+    assert reloaded_message is not None
+    assert reloaded_message.supplied_message_ref == "event-1"
+    assert first.id != second.id
+    with pytest.raises(ConversationConflict, match="reused with different body"):
+        record_message(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            identity=replace(first_identity, body="different"),
+            direction=Direction.INTERNAL,
+            occurred_at=occurred_at,
+        )
+
+
+def test_same_supplied_message_ref_cannot_move_to_a_different_thread(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    occurred_at = datetime(2026, 9, 5, 8, tzinfo=UTC)
+    first_identity = _supplied_identity("event-1", thread_ref="work-order-42")
+    second_identity = _supplied_identity("event-1", thread_ref="work-order-43")
+    first_conversation = create_conversation(
+        db, tenant_id=tenant.id, identity=first_identity
+    )
+    second_conversation = create_conversation(
+        db, tenant_id=tenant.id, identity=second_identity
+    )
+    record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=first_conversation.id,
+        identity=first_identity,
+        direction=Direction.INTERNAL,
+        occurred_at=occurred_at,
+    )
+    with pytest.raises(ConversationConflict, match="different conversation_id"):
+        record_message(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=second_conversation.id,
+            identity=second_identity,
+            direction=Direction.INTERNAL,
             occurred_at=occurred_at,
         )
 
@@ -968,3 +1064,105 @@ def test_history_import_rejects_until_reply_for_non_snoozed_status(
 
     with pytest.raises(ConversationConflict, match="only for snoozed history"):
         import_conversation(db, tenant_id=tenant.id, command=command)
+
+
+def test_history_reloads_and_exactly_replays_supplied_identities(db: Session) -> None:
+    tenant = _tenant(db)
+    occurred_at = datetime(2026, 9, 5, 8, tzinfo=UTC)
+    conversation_command = ImportConversation(
+        id=uuid4(),
+        identity=_supplied_identity("event-1"),
+        status=Status.OPEN,
+        reason=None,
+        subject=None,
+        tags=(),
+        first_message_at=None,
+        last_message_at=None,
+        resolved_at=None,
+        snoozed_until=None,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    conversation = import_conversation(
+        db, tenant_id=tenant.id, command=conversation_command
+    )
+    message_command = ImportMessage(
+        id=uuid4(),
+        conversation_id=conversation.id,
+        identity=_supplied_identity("event-1"),
+        direction=Direction.INTERNAL,
+        occurred_at=occurred_at,
+        author_id=None,
+        transport_observation_ref=None,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    message = import_message(db, tenant_id=tenant.id, command=message_command)
+    db.flush()
+    db.expunge_all()
+    assert (
+        import_conversation(db, tenant_id=tenant.id, command=conversation_command).id
+        == conversation.id
+    )
+    assert (
+        import_message(db, tenant_id=tenant.id, command=message_command).id
+        == message.id
+    )
+    with pytest.raises(ConversationConflict, match="different body"):
+        import_message(
+            db,
+            tenant_id=tenant.id,
+            command=replace(
+                message_command,
+                identity=replace(message_command.identity, body="changed"),
+            ),
+        )
+
+
+def test_history_refuses_a_supplied_message_natural_key_in_another_thread(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    occurred_at = datetime(2026, 9, 5, 8, tzinfo=UTC)
+
+    def conversation(thread_ref: str) -> Conversation:
+        command = ImportConversation(
+            id=uuid4(),
+            identity=_supplied_identity("event-1", thread_ref=thread_ref),
+            status=Status.OPEN,
+            reason=None,
+            subject=None,
+            tags=(),
+            first_message_at=None,
+            last_message_at=None,
+            resolved_at=None,
+            snoozed_until=None,
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+        return import_conversation(db, tenant_id=tenant.id, command=command)
+
+    first, second = conversation("work-order-42"), conversation("work-order-43")
+    first_command = ImportMessage(
+        id=uuid4(),
+        conversation_id=first.id,
+        identity=_supplied_identity("event-1", thread_ref="work-order-42"),
+        direction=Direction.INTERNAL,
+        occurred_at=occurred_at,
+        author_id=None,
+        transport_observation_ref=None,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    import_message(db, tenant_id=tenant.id, command=first_command)
+    with pytest.raises(ConversationConflict, match="already belongs"):
+        import_message(
+            db,
+            tenant_id=tenant.id,
+            command=replace(
+                first_command,
+                id=uuid4(),
+                conversation_id=second.id,
+                identity=_supplied_identity("event-1", thread_ref="work-order-43"),
+            ),
+        )

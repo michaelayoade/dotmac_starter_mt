@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-inbox"
-version = "0.1.0a2"
+version = "0.1.0a2+dev"
 description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
 authors = ["DotMac"]
 readme = "README.md"

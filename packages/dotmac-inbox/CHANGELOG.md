@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0a2 — 2026-08-23 (unreleased)
+## Unreleased — 0.1.0a2+dev
+
+- Adds an explicit typed snooze-until-reply lifecycle state.
+- Adds conflict-safe late binding for transport observation references.
+- Adds opaque product-supplied thread and message identities without making
+  product principals or provider transport part of Inbox authority.
+
+## 0.1.0a2 — 2026-08-23
 
 - Adds typed `import_conversation`, `import_message` and `import_read_state`
   adoption seams that preserve source UUIDs and timestamps without replaying

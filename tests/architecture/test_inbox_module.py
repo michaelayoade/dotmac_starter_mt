@@ -137,11 +137,16 @@ def test_the_channel_vocabulary_is_declared_and_consumed_inside_the_owner() -> N
     assert (MODULE_ROOT / "channels.py").is_file()
     source = Path(inspect.getfile(threading)).read_text(encoding="utf-8")
     assert "from dotmac_inbox.channels import" in source
-    assert [item.value for item in channels.ThreadIdentity] == ["provider", "derived"]
+    assert [item.value for item in channels.ThreadIdentity] == [
+        "provider",
+        "derived",
+        "supplied",
+    ]
     assert [item.value for item in channels.MessageIdScope] == [
         "global",
         "account",
         "none",
+        "supplied",
     ]
 
 
@@ -200,18 +205,51 @@ def test_every_model_is_bound_to_the_module_schema() -> None:
         assert model.__table__.schema == "mod_inbox", model.__name__
 
 
-def test_the_lineage_is_a_single_rooted_revision() -> None:
+def test_the_lineage_is_a_rooted_two_revision_chain() -> None:
     revisions = sorted(MIGRATIONS.glob("ib_*.py"))
-    assert [p.name for p in revisions] == ["ib_0001_conversations.py"]
-    source = revisions[0].read_text(encoding="utf-8")
-    assert 'revision = "ib_0001_conversations"' in source
-    assert "down_revision = None" in source
-    assert 'branch_labels = ("inbox",)' in source
+    assert [p.name for p in revisions] == [
+        "ib_0001_conversations.py",
+        "ib_0002_supplied_identity.py",
+    ]
+    root = revisions[0].read_text(encoding="utf-8")
+    supplied = revisions[1].read_text(encoding="utf-8")
+    assert 'revision = "ib_0001_conversations"' in root
+    assert "down_revision = None" in root
+    assert 'branch_labels = ("inbox",)' in root
+    assert 'revision = "ib_0002_supplied_identity"' in supplied
+    assert 'down_revision = "ib_0001_conversations"' in supplied
+    assert "branch_labels = None" in supplied
     # Cross-lineage ordering is `depends_on`, never `down_revision` — the latter
     # would splice two independently released lineages into one chain.
-    assert "depends_on = resolve_depends_on(REQUIRES)" in source
-    assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
-    assert "REQUIRES = (" in source
+    assert "depends_on = resolve_depends_on(REQUIRES)" in root
+    assert "require_prerequisites(op.get_bind(), REQUIRES)" in root
+    assert "REQUIRES = (" in root
+
+
+def test_supplied_identity_storage_and_migration_are_structural_only() -> None:
+    conversation = models.Conversation.__table__
+    message = models.Message.__table__
+    assert conversation.c.contact.nullable is True
+    assert conversation.c.supplied_thread_ref.type.length == 255
+    assert message.c.supplied_message_ref.type.length == 255
+    assert {
+        constraint.name
+        for constraint in conversation.constraints
+        if constraint.name and constraint.name.startswith("ck_conversations_")
+    } == {
+        "ck_conversations_identity_evidence",
+        "ck_conversations_supplied_thread_ref_nonblank",
+        "ck_conversations_thread_refs_exclusive",
+    }
+    source = (MIGRATIONS / "ib_0002_supplied_identity.py").read_text(encoding="utf-8")
+    for expected in (
+        "supplied_thread_ref",
+        "supplied_message_ref",
+        "nullable=True",
+        "cannot downgrade inbox supplied identity",
+        "op.create_check_constraint",
+    ):
+        assert expected in source
 
 
 # ── Hard rule 11: tenancy in the same migration ──────────────────────────────

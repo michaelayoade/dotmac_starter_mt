@@ -85,7 +85,7 @@ class InboundIdentity:
     account_scope: str
     #: The external party's address or opaque provider id, already normalized by
     #: the product when the channel's address form is not OPAQUE.
-    contact: str
+    contact: str | None
     #: The provider's thread id, when it supplies one.
     external_thread_id: str | None = None
     #: The provider's message id, when it supplies one.
@@ -94,10 +94,46 @@ class InboundIdentity:
     subject: str | None = None
     #: Used only when the channel declares ``MessageIdScope.NONE``.
     body: str | None = None
+    #: A stable product-owned thread reference for ``ThreadIdentity.SUPPLIED``.
+    supplied_thread_ref: str | None = None
+    #: A stable product-owned message reference for ``MessageIdScope.SUPPLIED``.
+    supplied_message_ref: str | None = None
 
 
 def _spec(channel: str | ChannelSpec) -> ChannelSpec:
     return channel if isinstance(channel, ChannelSpec) else channel_spec(channel)
+
+
+def _supplied_digest(*parts: str) -> str:
+    """Hash an unambiguous, length-prefixed UTF-8 tuple for supplied keys only."""
+    digest = hashlib.sha256()
+    for part in parts:
+        encoded = part.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _required_account_scope(value: str, *, channel: str) -> str:
+    if not value:
+        raise ValueError(
+            f"channel {channel!r}: account_scope is required — it is part of "
+            "the thread key on every channel, so that two connected accounts "
+            "talking to one contact stay two conversations"
+        )
+    if len(value) > 160:
+        raise ValueError(f"channel {channel!r}: account_scope exceeds 160 characters")
+    return value
+
+
+def _required_supplied_ref(value: str | None, *, label: str) -> str:
+    if value is None:
+        raise ValueError(f"{label} is required and cannot be blank")
+    if len(value) > 255:
+        raise ValueError(f"{label} exceeds 255 characters")
+    if not value.strip():
+        raise ValueError(f"{label} is required and cannot be blank")
+    return value
 
 
 def thread_key(identity: InboundIdentity) -> str:
@@ -113,35 +149,45 @@ def thread_key(identity: InboundIdentity) -> str:
       through every caller for a case that has an obviously correct answer.
     * ``DERIVED`` — ``(channel, account_scope, contact)``. Every message from
       one contact at one of our accounts on one channel is one thread.
+    * ``SUPPLIED`` — a product-owned stable local thread reference. It is not
+      transport evidence and has no contact fallback.
 
     The account scope is always present, for both branches. See
     :class:`InboundIdentity`.
     """
     spec = _spec(identity.channel)
-    if not identity.account_scope:
+    account_scope = _required_account_scope(identity.account_scope, channel=spec.code)
+    if spec.thread_identity is ThreadIdentity.SUPPLIED:
+        if identity.external_thread_id is not None:
+            raise ValueError(
+                "supplied thread identity cannot also carry external_thread_id"
+            )
+        supplied = _required_supplied_ref(
+            identity.supplied_thread_ref, label="supplied_thread_ref"
+        )
+        digest = _supplied_digest(spec.code, account_scope, supplied)
+        return f"{spec.code}:t1:{digest}"
+    if identity.supplied_thread_ref is not None:
         raise ValueError(
-            f"channel {spec.code!r}: account_scope is required — it is part of "
-            "the thread key on every channel, so that two connected accounts "
-            "talking to one contact stay two conversations"
+            "supplied_thread_ref is valid only for supplied thread identity"
         )
     if spec.thread_identity is ThreadIdentity.PROVIDER and identity.external_thread_id:
-        return f"{spec.code}:{identity.account_scope}:t:{identity.external_thread_id}"
+        return f"{spec.code}:{account_scope}:t:{identity.external_thread_id}"
     if not identity.contact:
         raise ValueError(
             f"channel {spec.code!r}: no external_thread_id and no contact, so "
             "the message cannot be threaded at all"
         )
-    return f"{spec.code}:{identity.account_scope}:c:{identity.contact}"
+    return f"{spec.code}:{account_scope}:c:{identity.contact}"
 
 
 @dataclass(frozen=True, slots=True)
 class DedupKey:
-    """The key a message is unique by, and whether it came from the provider.
+    """The key a message is unique by, and whether it is content-derived.
 
-    ``derived`` distinguishes "the provider told us this id" from "we hashed the
-    content because the provider gives none". Callers should treat a derived
-    match as weaker evidence — it is the only one that can produce a false
-    positive, when a customer genuinely sends the same short message twice.
+    ``derived=False`` means a declared stable identity supplied by either a
+    provider or the product. ``derived=True`` means a content fingerprint, the
+    weaker identity that can falsely match repeated identical messages.
     """
 
     value: str
@@ -158,6 +204,8 @@ def dedup_key(identity: InboundIdentity) -> DedupKey:
       case CRM's narrower index gets wrong.
     * ``NONE`` — a SHA-256 over channel, account, contact, subject and body.
       Declared, not stumbled into.
+    * ``SUPPLIED`` — a product-owned stable message reference, scoped to its
+      channel and connected account. It never falls back to content.
 
     A channel declaring ``GLOBAL`` or ``ACCOUNT`` that then arrives with no
     ``external_message_id`` falls back to the content fingerprint rather than
@@ -165,22 +213,32 @@ def dedup_key(identity: InboundIdentity) -> DedupKey:
     The result is flagged ``derived`` so the caller knows the match is weaker.
     """
     spec = _spec(identity.channel)
+    account_scope = _required_account_scope(identity.account_scope, channel=spec.code)
     scope = spec.message_id_scope
     external = identity.external_message_id
 
-    if scope is not MessageIdScope.NONE and external:
+    if scope not in {MessageIdScope.NONE, MessageIdScope.SUPPLIED} and external:
         if scope is MessageIdScope.GLOBAL:
             return DedupKey(f"{spec.code}:m:{external}", derived=False)
-        return DedupKey(
-            f"{spec.code}:{identity.account_scope}:m:{external}", derived=False
+        return DedupKey(f"{spec.code}:{account_scope}:m:{external}", derived=False)
+
+    if scope is MessageIdScope.SUPPLIED:
+        supplied = _required_supplied_ref(
+            identity.supplied_message_ref, label="supplied_message_ref"
+        )
+        digest = _supplied_digest(spec.code, account_scope, supplied)
+        return DedupKey(f"{spec.code}:s1:{digest}", derived=False)
+    if identity.supplied_message_ref is not None:
+        raise ValueError(
+            "supplied_message_ref is valid only for supplied message scope"
         )
 
     digest = hashlib.sha256(
         "\x1f".join(
             (
                 spec.code,
-                identity.account_scope,
-                identity.contact,
+                account_scope,
+                identity.contact or "",
                 identity.subject or "",
                 identity.body or "",
             )

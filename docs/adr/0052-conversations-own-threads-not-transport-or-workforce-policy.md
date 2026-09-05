@@ -171,3 +171,19 @@ existing reference replays; and a different existing reference raises
 identity and is never late-bindable. The command does not alter message
 identity, content, direction, conversation activity, lifecycle, or delivery
 state, and never commits or rolls back.
+
+## Amendment — 2026-09-05: products may supply stable local identities
+
+Some product events have no provider identity at all, yet have a stable local
+thread and message reference. `dotmac-inbox` accepts these as declared
+`SUPPLIED` thread and message identity traits. The supplied values are opaque,
+bounded product-owned references; the module persists them separately from
+transport references and derives canonical scoped keys without treating either
+as provider evidence.
+
+This does not introduce a subscriber, person, ticket, or principal relation:
+the product retains those relationships and maps its own work records to a
+conversation. A product using supplied message identity must retain and reuse
+the same logical message reference for redelivery. This closes the repeated
+identical internal-message mechanism, but does not prove any product mapping or
+cutover, and does not transfer provider or delivery authority to the module.

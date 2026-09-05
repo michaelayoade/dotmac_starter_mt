@@ -37,7 +37,7 @@
     "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
-  "released_total": 74,
+  "released_total": 73,
   "drifted_total": 3,
   "drifted": [
     {
