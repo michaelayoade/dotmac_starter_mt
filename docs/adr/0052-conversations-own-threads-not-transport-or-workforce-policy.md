@@ -158,3 +158,16 @@ timezone-aware deadline. Only inbound message activity owned by
 product responsibility. The same validation, normalization, exact replay and
 conflict rules apply to the history import seam. No migration or scheduler is
 introduced by this amendment.
+
+## Amendment — 2026-09-05: late transport-observation correlation
+
+An Integrator observation may be correlated after a local message is admitted.
+The Inbox owner therefore exposes `bind_message_observation_ref`, which locks
+the tenant-scoped message identified by its local UUID and flushes only
+`transport_observation_ref`. A missing or cross-tenant message is not visible
+and raises `ConversationNotFound`; an empty reference is rejected; an exact
+existing reference replays; and a different existing reference raises
+`ConversationConflict`. `transport_message_ref` remains part of admission
+identity and is never late-bindable. The command does not alter message
+identity, content, direction, conversation activity, lifecycle, or delivery
+state, and never commits or rolls back.

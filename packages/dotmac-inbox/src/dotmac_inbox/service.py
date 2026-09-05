@@ -87,6 +87,17 @@ def _message_by_key(db: Session, tenant_id: UUID, message_key: str) -> Message |
     )
 
 
+def _message(db: Session, tenant_id: UUID, message_id: UUID) -> Message:
+    row = db.scalar(
+        select(Message)
+        .where(Message.tenant_id == tenant_id, Message.id == message_id)
+        .with_for_update()
+    )
+    if row is None:
+        raise ConversationNotFound("message not found")
+    return row
+
+
 def _require_same_message(
     row: Message,
     *,
@@ -299,6 +310,29 @@ def record_message(
     return row
 
 
+def bind_message_observation_ref(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    message_id: UUID,
+    transport_observation_ref: str,
+) -> Message:
+    """Late-bind one opaque transport observation reference to a message."""
+    if not transport_observation_ref.strip():
+        raise ValueError("transport_observation_ref must not be empty")
+
+    row = _message(db, tenant_id, message_id)
+    current = row.transport_observation_ref
+    if current is None:
+        row.transport_observation_ref = transport_observation_ref
+    elif current != transport_observation_ref:
+        raise ConversationConflict(
+            "message transport observation reference is already bound"
+        )
+    db.flush()
+    return row
+
+
 def mark_conversation_read(
     db: Session,
     *,
@@ -373,6 +407,7 @@ __all__ = [
     "ConversationConflict",
     "ConversationNotFound",
     "StaleConversationState",
+    "bind_message_observation_ref",
     "create_conversation",
     "mark_conversation_read",
     "record_message",

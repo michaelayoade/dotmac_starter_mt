@@ -12,6 +12,7 @@ from dotmac_inbox import (
     AddressForm,
     ChannelSpec,
     ConversationConflict,
+    ConversationNotFound,
     Direction,
     ImportConversation,
     ImportMessage,
@@ -24,6 +25,7 @@ from dotmac_inbox import (
     Status,
     ThreadIdentity,
     Transport,
+    bind_message_observation_ref,
     create_conversation,
     import_conversation,
     import_message,
@@ -234,6 +236,203 @@ def test_record_message_replays_an_exact_provider_redelivery(db: Session) -> Non
     assert db.scalars(select(Message)).all() == [first]
     assert conversation.first_message_at == occurred_at
     assert conversation.last_message_at == occurred_at
+
+
+def test_late_binding_sets_observation_ref_without_changing_message_or_activity(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    occurred_at = datetime(2026, 8, 18, 8, tzinfo=UTC)
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_identity("message-bind"),
+        direction=Direction.INBOUND,
+        occurred_at=occurred_at,
+    )
+    immutable = (
+        message.message_key,
+        message.subject,
+        message.body,
+        message.direction,
+        message.conversation_id,
+        message.transport_message_ref,
+        message.author_id,
+        message.occurred_at,
+    )
+    activity = (
+        conversation.first_message_at,
+        conversation.last_message_at,
+        conversation.status,
+        conversation.status_reason,
+        conversation.resolved_at,
+        conversation.snoozed_until,
+    )
+
+    bound = bind_message_observation_ref(
+        db,
+        tenant_id=tenant.id,
+        message_id=message.id,
+        transport_observation_ref="  receipt:opaque  ",
+    )
+
+    assert bound is message
+    assert message.transport_observation_ref == "  receipt:opaque  "
+    assert (
+        message.message_key,
+        message.subject,
+        message.body,
+        message.direction,
+        message.conversation_id,
+        message.transport_message_ref,
+        message.author_id,
+        message.occurred_at,
+    ) == immutable
+    assert (
+        conversation.first_message_at,
+        conversation.last_message_at,
+        conversation.status,
+        conversation.status_reason,
+        conversation.resolved_at,
+        conversation.snoozed_until,
+    ) == activity
+
+
+def test_late_binding_exact_replay_is_idempotent_and_initial_value_is_compatible(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_identity("message-bound-at-admission"),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        transport_observation_ref="receipt:admission",
+    )
+
+    assert (
+        bind_message_observation_ref(
+            db,
+            tenant_id=tenant.id,
+            message_id=message.id,
+            transport_observation_ref="receipt:admission",
+        )
+        is message
+    )
+    assert message.transport_observation_ref == "receipt:admission"
+
+
+def test_record_message_replay_is_not_an_alternate_late_binding_path(
+    db: Session,
+) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    identity = _identity("message-replay-before-bind")
+    occurred_at = datetime(2026, 8, 18, 8, tzinfo=UTC)
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=identity,
+        direction=Direction.INBOUND,
+        occurred_at=occurred_at,
+    )
+
+    replay = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=identity,
+        direction=Direction.INBOUND,
+        occurred_at=occurred_at,
+        transport_observation_ref="receipt:late",
+    )
+
+    assert replay is message
+    assert message.transport_observation_ref is None
+    assert db.scalars(select(Message)).all() == [message]
+
+
+def test_late_binding_conflict_preserves_original_ref(db: Session) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_identity("message-bind-conflict"),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+        transport_observation_ref="receipt:original",
+    )
+
+    with pytest.raises(ConversationConflict):
+        bind_message_observation_ref(
+            db,
+            tenant_id=tenant.id,
+            message_id=message.id,
+            transport_observation_ref="receipt:different",
+        )
+
+    assert message.transport_observation_ref == "receipt:original"
+
+
+def test_late_binding_rejects_empty_ref_without_mutation(db: Session) -> None:
+    tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_identity("message-bind-empty"),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        bind_message_observation_ref(
+            db,
+            tenant_id=tenant.id,
+            message_id=message.id,
+            transport_observation_ref=" \t\n",
+        )
+
+    assert message.transport_observation_ref is None
+
+
+def test_late_binding_refuses_missing_and_cross_tenant_messages(db: Session) -> None:
+    tenant = _tenant(db)
+    other_tenant = _tenant(db)
+    conversation = create_conversation(db, tenant_id=tenant.id, identity=_identity())
+    message = record_message(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        identity=_identity("message-bind-scope"),
+        direction=Direction.INBOUND,
+        occurred_at=datetime(2026, 8, 18, 8, tzinfo=UTC),
+    )
+
+    with pytest.raises(ConversationNotFound):
+        bind_message_observation_ref(
+            db,
+            tenant_id=other_tenant.id,
+            message_id=message.id,
+            transport_observation_ref="receipt:cross-tenant",
+        )
+    with pytest.raises(ConversationNotFound):
+        bind_message_observation_ref(
+            db,
+            tenant_id=tenant.id,
+            message_id=uuid4(),
+            transport_observation_ref="receipt:missing",
+        )
+    assert message.transport_observation_ref is None
 
 
 def test_message_key_reuse_with_different_content_is_a_conflict(db: Session) -> None:

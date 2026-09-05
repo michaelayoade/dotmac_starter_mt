@@ -6,6 +6,10 @@ cursor. Channel names remain product vocabulary; the module branches only on
 declared threading and message-identity traits. Thread creation and message
 recording are conflict-safe and replay the durable winner for exact redelivery;
 reusing a message identity with different content fails closed.
+The public `bind_message_observation_ref` command may late-bind only the opaque
+transport observation reference by local message UUID; it locks the tenant
+message, is idempotent for the exact value, and never changes message identity
+or conversation activity.
 
 Snoozing has two explicit forms: a timezone-aware finite deadline, or the
 typed `UNTIL_REPLY` value (`SnoozeUntilReply`) for an indefinite snooze. An
