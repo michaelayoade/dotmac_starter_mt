@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
 
 from sqlalchemy import select
@@ -245,9 +245,10 @@ def _equal(current: Any, expected: Any) -> bool:
     return bool(current == expected)
 
 
-def _require_same[Row: (Conversation, Message, ConversationReadState)](
-    row: Row, *, identity: str, expected: dict[str, Any]
-) -> Row:
+_Row = TypeVar("_Row", Conversation, Message, ConversationReadState)
+
+
+def _require_same(row: _Row, *, identity: str, expected: dict[str, Any]) -> _Row:
     changed = sorted(
         name
         for name, value in expected.items()
