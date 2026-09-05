@@ -113,6 +113,7 @@ __all__ = [
     "ABSENCE_WRONG_CONCERN",
     "ABSENCE_UNREGISTERED_SURFACE",
     "ABSENCE_UNESTABLISHED",
+    "ABSENCE_UNSUPPORTED_CONCERN",
     "ABSENCE_NOT_ABSENT",
     "ABSENCE_INVENTORY_INCOMPLETE",
     "APPLICATION_PROFILE_SCHEMA",
@@ -444,6 +445,15 @@ ABSENCE_UNREGISTERED_SURFACE: Final = "absence_proof.unregistered_surface"
 ABSENCE_NOT_ABSENT: Final = "absence_proof.not_absent"
 ABSENCE_UNESTABLISHED: Final = "absence_proof.unestablished"
 
+#: Refused: this proof TYPE has one inventory and it is integration's, so it can
+#: prove no other concern's absence. A DISTINCT code from
+#: `ABSENCE_WRONG_CONCERN`, which already carries two meanings — "not a
+#: `FoundationConcern` at all" at construction, and "filed under the wrong slot
+#: key" at the profile level. A third meaning would make three different repairs
+#: indistinguishable in a log, which is the discrimination argument this package
+#: makes everywhere else.
+ABSENCE_UNSUPPORTED_CONCERN: Final = "absence_proof.unsupported_concern"
+
 INTEGRATION_ABSENCE_SCHEMA: Final = "IntegrationSurfaceAbsenceProofV1"
 
 
@@ -554,6 +564,33 @@ class IntegrationSurfaceAbsenceProofV1:
                 f"{type(self.concern).__name__}. An absence proof that cannot "
                 "say WHICH concern it proves absent could certify any of them",
                 code=ABSENCE_WRONG_CONCERN,
+            )
+        # THE INVENTORY IS INTEGRATION'S, so the concern must be integration's.
+        #
+        # `families` is validated against `INTEGRATION_SURFACE_FAMILIES` while
+        # `concern` accepted any of the thirteen. A proof with
+        # `concern=WORKER_EXECUTION` carrying INTEGRATION families therefore
+        # constructed cleanly — and then PASSED the profile's misfiling guard,
+        # because that guard compares the slot key with this same `concern`
+        # field. The two things that agree were the two things checked; the
+        # inventory, the only thing that would have disagreed, was never
+        # consulted.
+        #
+        # The misfiling guard is not vacuous in general — it catches a correctly
+        # built proof filed under the wrong key. It cannot catch a proof BUILT
+        # against the wrong inventory, which is the earlier and quieter defect
+        # and the one this refuses.
+        if self.concern is not FoundationConcern.INTEGRATION:
+            raise SpecError(
+                f"this proof type carries the INTEGRATION surface inventory "
+                f"{list(INTEGRATION_SURFACE_FAMILIES)} and cannot establish the "
+                f"absence of {self.concern.value}. Its families would be "
+                "enumerated from a closed inventory belonging to a different "
+                "concern, so a complete enumeration would prove the emptiness "
+                "of something nobody asked about. A concern with its own "
+                "absence surface needs its own closed inventory and its own "
+                "positive control",
+                code=ABSENCE_UNSUPPORTED_CONCERN,
             )
         for field in ("source_revision", "method", "established_at", "established_by"):
             if not str(getattr(self, field)).strip():
