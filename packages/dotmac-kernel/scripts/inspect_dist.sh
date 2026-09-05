@@ -10,7 +10,11 @@
 #   4. Package data ships: templates/, static/ (incl. static/fonts/ and the
 #      COMPILED static/css/main.css — REQUIRED for a published web kernel),
 #      migrations/. check-wheel-contents flags empties/dupes.
-#   5. Neither the assembly (app/) nor any secret/env file leaked into the wheel
+#   5. Every .py under src/dotmac_kernel/ is IN the wheel and the sdist, and
+#      nothing extra is: the artifact's importable module set equals the
+#      source's. Metadata, dep and package-data checks all pass on a wheel
+#      missing a module, which is how a merged capability gets read as shipped.
+#   6. Neither the assembly (app/) nor any secret/env file leaked into the wheel
 #      or sdist; the only top-level import package is dotmac_kernel.
 #
 # Usage: inspect_dist.sh <dist-dir>
@@ -26,13 +30,20 @@ SDIST=$(ls "$DIST_DIR"/*.tar.gz 2>/dev/null | head -n1)
 
 PY="${INSPECT_PYTHON:-python3}"
 
-echo "==> [1/5] Install inspection tooling"
+# The artifact is compared against the source tree that produced it, located
+# from this script rather than from $PWD so the gate cannot be pointed at a
+# different checkout by the directory it happens to run in.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KERNEL_SRC="${SCRIPT_DIR}/../src/dotmac_kernel"
+[ -d "$KERNEL_SRC" ] || { echo "no kernel source at $KERNEL_SRC" >&2; exit 1; }
+
+echo "==> [1/6] Install inspection tooling"
 "$PY" -m pip install --quiet twine check-wheel-contents pkginfo
 
-echo "==> [2/5] twine check (metadata renders)"
+echo "==> [2/6] twine check (metadata renders)"
 "$PY" -m twine check "$DIST_DIR"/*
 
-echo "==> [3/5] Metadata: name / version / runtime-dep closure"
+echo "==> [3/6] Metadata: name / version / runtime-dep closure"
 WHEEL="$WHEEL" "$PY" - <<'PY'
 import os
 from pkginfo import Wheel
@@ -56,7 +67,7 @@ assert extra_httpx and all("extra ==" in r for r in extra_httpx), "httpx must be
 print(f"    runtime deps OK ({sorted(runtime_names)}); httpx gated behind testing extra")
 PY
 
-echo "==> [4/5] Package data (templates / static incl. fonts + compiled main.css / migrations)"
+echo "==> [4/6] Package data (templates / static incl. fonts + compiled main.css / migrations)"
 WHEEL="$WHEEL" "$PY" - <<'PY'
 import os, zipfile, sys
 
@@ -90,7 +101,56 @@ PY
 # real distinct weights — guarded by tests/architecture/test_vendored_fonts.py.)
 "$PY" -m check_wheel_contents --ignore W004 "$WHEEL"
 
-echo "==> [5/5] No assembly / no secrets leaked (wheel + sdist)"
+echo "==> [5/6] Every source module reached the wheel and the sdist"
+# WHY THIS EXISTS, and it is not hypothetical. `dotmac_kernel.request_evidence`
+# merged to main and was read as shipped: the source was complete, so the
+# capability was believed installable. It was in no artifact at all -- a101
+# predates it -- and the platform pinning a98 could not have consumed it under
+# any version. Steps 2-4 above would all pass on a wheel missing any given
+# module, because they check metadata, declared deps and package DATA; nothing
+# compared the importable module set against the source claiming to be in it.
+#
+# Set equality in BOTH directions, deliberately. Missing-only would accept a
+# wheel that also carried a module the source no longer has -- a stale build
+# tree publishing bytes nobody reviewed.
+WHEEL="$WHEEL" SDIST="$SDIST" KERNEL_SRC="$KERNEL_SRC" "$PY" - <<'PY'
+import os, pathlib, sys, tarfile, zipfile
+
+src = pathlib.Path(os.environ["KERNEL_SRC"]).resolve()
+source = {p.relative_to(src).as_posix() for p in src.rglob("*.py")}
+if not source:
+    sys.exit("FAIL: no .py under the kernel source; this gate would prove nothing")
+
+wheel = {
+    n[len("dotmac_kernel/"):]
+    for n in zipfile.ZipFile(os.environ["WHEEL"]).namelist()
+    if n.startswith("dotmac_kernel/") and n.endswith(".py")
+}
+sdist_marker = "/src/dotmac_kernel/"
+sdist = {
+    n.split(sdist_marker, 1)[1]
+    for n in tarfile.open(os.environ["SDIST"]).getnames()
+    if sdist_marker in n and n.endswith(".py")
+}
+
+for label, shipped in (("wheel", wheel), ("sdist", sdist)):
+    absent = sorted(source - shipped)
+    extra = sorted(shipped - source)
+    if absent:
+        sys.exit(
+            f"FAIL: {label} is missing {len(absent)} module(s) present in "
+            f"{src}: {absent[:10]} -- the artifact does not contain the "
+            "source this release claims to publish"
+        )
+    if extra:
+        sys.exit(
+            f"FAIL: {label} carries {len(extra)} module(s) absent from {src}: "
+            f"{extra[:10]} -- built from a stale tree"
+        )
+print(f"    {len(source)} source modules present in both wheel and sdist")
+PY
+
+echo "==> [6/6] No assembly / no secrets leaked (wheel + sdist)"
 WHEEL="$WHEEL" "$PY" - <<'PY'
 import os, zipfile, sys
 
