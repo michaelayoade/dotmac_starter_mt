@@ -47,6 +47,7 @@ from dotmac_deployment_foundation.host_source import (
     ABSENT,
     DISAGREES,
     DISTRIBUTION,
+    MALFORMED_SOURCE_REVISION,
     NO_RECEIPT,
     WRONG_KIND,
     CandidateReceipt,
@@ -248,6 +249,41 @@ def test_a_receipt_about_another_facility_does_not_bind_these_bytes() -> None:
     assert "dotmac-deployment-control" in str(refusal.value)
 
 
+def test_a_matching_digest_with_the_wrong_version_is_refused() -> None:
+    """PLANTED — the exact admitted defect this finding closes: a matching
+    digest previously bound regardless of `version`. `version="9.9.9"` here
+    would, before this fix, sail through unopposed because only facility and
+    digest were compared."""
+    document = _receipt_document()
+    document["version"] = "9.9.9"
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(
+            receipt=candidate_receipt_from_mapping(document),
+            metadata=FakeInstall(),
+            source_tree_digest=_source_tree_digest,
+        )
+
+    assert refusal.value.code == DISAGREES
+    message = str(refusal.value)
+    # NAMING BOTH — which term failed, and against what.
+    assert "9.9.9" in message, message
+    assert VERSION in message, message
+
+
+def test_a_matching_version_stays_silent_the_near_miss() -> None:
+    """NEAR-MISS, MUST BE SILENT. A version that legitimately agrees with the
+    installed distribution must not be refused — without this, a check that
+    refused every version would pass the mismatch test above for the wrong
+    reason."""
+    bound = require_host_source(
+        receipt=_receipt(),
+        metadata=FakeInstall(version=VERSION),
+        source_tree_digest=_source_tree_digest,
+    )
+    assert bound.version == VERSION
+
+
 # ── planted defect 2: no digest at all, and it is NOT a disagreement ────────
 
 
@@ -306,6 +342,95 @@ def test_a_recorded_url_with_no_hash_is_absent_not_a_mismatch() -> None:
         require_host_source(receipt=_receipt(), metadata=install)
 
     assert refusal.value.code == ABSENT
+
+
+def test_a_directory_install_is_absent_and_names_itself_a_checkout() -> None:
+    """PLANTED. `pip install -e` is the EDITABLE branch tested above; a plain
+    `pip install /path/to/checkout` (no `editable` key at all) is the sibling
+    branch — a directory with no artifact and no digest any receipt binds."""
+    install = FakeInstall(
+        files={
+            "RECORD": _record(),
+            "direct_url.json": json.dumps(
+                {"dir_info": {}, "url": "file:///Users/x/checkout"}
+            ),
+        }
+    )
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(receipt=_receipt(), metadata=install)
+
+    assert refusal.value.code == ABSENT
+    assert "DIRECTORY" in str(refusal.value)
+
+
+def test_a_missing_record_is_absent() -> None:
+    """PLANTED. No `RECORD` at all — an installation whose own manifest is
+    missing has no declared file set and nothing to call the bound set,
+    independent of whatever `direct_url.json` says."""
+    install = FakeInstall(files={"direct_url.json": _direct_url()})
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(receipt=_receipt(), metadata=install)
+
+    assert refusal.value.code == ABSENT
+    assert "RECORD" in str(refusal.value)
+
+
+def test_a_direct_url_that_is_not_json_is_absent_not_an_uncoded_crash() -> None:
+    """PLANTED. Corrupt `direct_url.json` bytes — a different fact from an
+    absent file, and refused with the same code but a distinguishing
+    message rather than an uncaught `json.JSONDecodeError`."""
+    install = FakeInstall(
+        files={"RECORD": _record(), "direct_url.json": "{not json at all"}
+    )
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(receipt=_receipt(), metadata=install)
+
+    assert refusal.value.code == ABSENT
+    assert "not JSON" in str(refusal.value)
+
+
+def test_a_direct_url_holding_a_non_object_is_absent() -> None:
+    """PLANTED. Valid JSON, wrong shape — a bare list rather than the object
+    PEP 610 defines."""
+    install = FakeInstall(
+        files={"RECORD": _record(), "direct_url.json": json.dumps([1, 2, 3])}
+    )
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(receipt=_receipt(), metadata=install)
+
+    assert refusal.value.code == ABSENT
+    assert "not an object" in str(refusal.value)
+
+
+def test_a_malformed_archive_hash_is_refused_not_an_uncoded_spec_error() -> None:
+    """PLANTED — the second half of finding 2. `Digest.parse` raises a bare
+    `SpecError` for an unparsable hash; this module promises `PreconditionFailed`
+    with a coded refusal and classifies unreadable provenance under `ABSENT`.
+    `pytest.raises(PreconditionFailed)` is itself the proof the conversion
+    happened: before it, this exact input propagated an uncaught `SpecError`
+    that this assertion could not have caught."""
+    install = FakeInstall(
+        files={
+            "RECORD": _record(),
+            "direct_url.json": json.dumps(
+                {
+                    "archive_info": {"hashes": {"sha256": "not-a-digest"}},
+                    "url": "https://example.invalid/x.whl",
+                }
+            ),
+        }
+    )
+
+    with pytest.raises(PreconditionFailed) as refusal:
+        require_host_source(receipt=_receipt(), metadata=install)
+
+    assert refusal.value.code == ABSENT
+    assert isinstance(refusal.value, PreconditionFailed)
+    assert not isinstance(refusal.value, SpecError)
 
 
 def test_a_distribution_that_is_not_installed_is_absent() -> None:
@@ -453,6 +578,38 @@ def test_every_receipt_field_the_binding_needs_is_required(field: str) -> None:
         candidate_receipt_from_mapping(document)
 
 
+@pytest.mark.parametrize(
+    "source_sha",
+    [
+        "not-a-commit",
+        "753a004",  # abbreviated — a real short SHA a human might paste
+        "z" * 40,  # right length, not hex
+        SOURCE_SHA + "0",  # one character too long
+    ],
+)
+def test_a_source_revision_that_is_not_a_full_commit_is_refused(
+    source_sha: str,
+) -> None:
+    """PLANTED — the other half of the admitted defect: `source_sha` was only
+    checked for non-emptiness, so ``"not-a-commit"`` parsed cleanly. Matches
+    `scripts/release_facility.py::candidate_source_revision`'s own 40-hex
+    check on the identical field."""
+    document = _receipt_document(source_sha=source_sha)
+
+    with pytest.raises(SpecError) as refusal:
+        candidate_receipt_from_mapping(document)
+
+    assert refusal.value.code == MALFORMED_SOURCE_REVISION
+
+
+def test_a_full_forty_hex_source_revision_stays_silent_the_near_miss() -> None:
+    """NEAR-MISS, MUST BE SILENT. A genuine full commit — the near-miss that
+    proves the check above is a SHAPE check, not a check that refuses every
+    `source_sha`."""
+    receipt = _receipt()
+    assert receipt.source_revision == SOURCE_SHA
+
+
 def test_the_committed_receipts_on_disk_parse(pytestconfig: pytest.Config) -> None:
     """The reader is pointed at the REAL documents, not only at fixtures.
 
@@ -562,6 +719,54 @@ def test_the_content_digest_is_sensitive_to_a_file_INSIDE_the_declared_set() -> 
     observed = read_installed_artifact(DISTRIBUTION, metadata=tampered)
 
     assert observed.installed_content_digest != baseline.installed_content_digest
+
+
+# ── finding 3: `read_from` names the spelling actually used ─────────────────
+
+
+def test_read_from_names_the_modern_hashes_spelling_when_that_is_what_was_read() -> (
+    None
+):
+    """The fixture's `direct_url.json` carries BOTH spellings (measured on a
+    real install, which writes both); `_archive_hash` prefers `hashes.sha256`,
+    so that is the path a truthful `read_from` must name."""
+    reading = read_installed_artifact(DISTRIBUTION, metadata=FakeInstall())
+
+    assert reading.read_from == "direct_url.json archive_info.hashes.sha256"
+
+
+def test_read_from_names_the_legacy_hash_spelling_when_that_is_all_there_is() -> None:
+    """PLANTED. `direct_url.json` here carries ONLY the legacy
+    ``archive_info.hash`` spelling — no ``hashes`` key at all. Before this fix,
+    `read_from` unconditionally reported ``archive_info.hashes.sha256``, which
+    is a claim about a key this document does not even have: a reporting lie
+    that sends an operator to inspect the wrong line of the file mid-incident."""
+    install = FakeInstall(
+        files={
+            "RECORD": _record(),
+            "direct_url.json": json.dumps(
+                {
+                    "archive_info": {"hash": f"sha256={WHEEL_SHA256}"},
+                    "url": "https://example.invalid/x.whl",
+                }
+            ),
+        }
+    )
+
+    reading = read_installed_artifact(DISTRIBUTION, metadata=install)
+
+    assert reading.artifact_digest == Digest.parse(WHEEL_SHA256)
+    assert reading.read_from == "direct_url.json archive_info.hash"
+    assert "hashes.sha256" not in reading.read_from
+
+    # And the full binding still admits through this spelling — the finding is
+    # about reporting, not about a second, weaker acceptance path.
+    bound = require_host_source(
+        receipt=_receipt(),
+        metadata=install,
+        source_tree_digest=_source_tree_digest,
+    )
+    assert bound.read_from == "direct_url.json archive_info.hash"
 
 
 # ── the units, stated once so they cannot quietly converge ──────────────────

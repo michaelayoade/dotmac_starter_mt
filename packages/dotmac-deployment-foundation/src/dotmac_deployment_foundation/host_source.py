@@ -126,6 +126,7 @@ __all__ = [
     "ABSENT",
     "DISAGREES",
     "DISTRIBUTION",
+    "MALFORMED_SOURCE_REVISION",
     "NO_RECEIPT",
     "WRONG_KIND",
     "CandidateReceipt",
@@ -169,6 +170,13 @@ DISAGREES: Final = "host-source-artifact-digest-disagrees"
 #: A digest with no candidate receipt behind it. The repair is to commit the
 #: receipt for the build that produced these bytes.
 NO_RECEIPT: Final = "host-source-candidate-receipt-absent"
+
+#: The committed receipt's `source_sha` is not a full 40-character commit.
+#: Matches `scripts/release_facility.py::candidate_source_revision`'s own
+#: check on the same field, so a receipt is refused by the SAME rule whether
+#: it is read there or here — an abbreviated or synthetic revision cannot be
+#: compared and must not be passed on as though it identified a tree.
+MALFORMED_SOURCE_REVISION: Final = "host-source-candidate-source-revision-malformed"
 
 
 # ── what the installed distribution can be asked ────────────────────────────
@@ -284,11 +292,26 @@ def candidate_receipt_from_mapping(
                 "facility, which bytes, or which tree",
                 where=where,
             )
+    source_revision = str(document["source_sha"]).strip().lower()
+    if len(source_revision) != 40 or any(
+        c not in "0123456789abcdef" for c in source_revision
+    ):
+        raise SpecError(
+            f"{where}: source_sha {document['source_sha']!r} is not a full "
+            "40-character commit. `scripts/release_facility.py"
+            "::candidate_source_revision` refuses the identical shape on the "
+            "identical field: the revision an artifact was built from is one "
+            "of the three this facility binds, and an abbreviated or "
+            "synthetic one cannot be compared and must not be passed on as "
+            "though it could",
+            where=where,
+            code=MALFORMED_SOURCE_REVISION,
+        )
     return CandidateReceipt(
         facility=str(document["facility"]),
         version=str(document["version"]),
         artifact_digest=Digest.parse(str(document["sha256"]), where=f"{where}.sha256"),
-        source_revision=str(document["source_sha"]),
+        source_revision=source_revision,
     )
 
 
@@ -347,19 +370,27 @@ def _record_digest(record: str) -> Digest:
     return Digest.of(payload)
 
 
-def _archive_hash(archive: Mapping[str, Any]) -> str:
-    """The sha256 out of `archive_info`, in either spelling PEP 610 allows."""
+def _archive_hash(archive: Mapping[str, Any]) -> tuple[str, str]:
+    """The sha256 out of `archive_info`, in either spelling PEP 610 allows.
+
+    Returns the value AND the exact key it was read from, so a refusal or a
+    successful reading can name the actual path used rather than always
+    naming the modern one. The two spellings are read from different keys
+    (``hashes.sha256`` vs. ``hash``) and reporting the wrong one is a small
+    lie that sends an operator to inspect the wrong line of a real
+    `direct_url.json` mid-incident.
+    """
     hashes = archive.get("hashes")
     if isinstance(hashes, Mapping):
         value = hashes.get(CANONICAL_ALGORITHM)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return value.strip(), "archive_info.hashes.sha256"
     legacy = archive.get("hash")
     if isinstance(legacy, str) and legacy.strip():
         algorithm, separator, body = legacy.strip().partition("=")
         if separator and algorithm.lower() == CANONICAL_ALGORITHM:
-            return body
-    return ""
+            return body, "archive_info.hash"
+    return "", ""
 
 
 def read_installed_artifact(
@@ -459,7 +490,7 @@ def read_installed_artifact(
             code=ABSENT,
         )
 
-    recorded = _archive_hash(archive)
+    recorded, hash_path = _archive_hash(archive)
     if not recorded:
         raise PreconditionFailed(
             f"{distribution} {version} was installed from "
@@ -472,14 +503,27 @@ def read_installed_artifact(
             code=ABSENT,
         )
 
+    try:
+        artifact_digest = Digest.parse(
+            recorded, where=f"{distribution} direct_url.json {hash_path}"
+        )
+    except SpecError as exc:
+        raise PreconditionFailed(
+            f"{distribution} {version} has a direct_url.json {hash_path} of "
+            f"{recorded!r}, which is not a valid sha256 digest ({exc}). "
+            "Unreadable installer-recorded provenance is classified the same "
+            "as absent provenance: neither one connects these bytes to a "
+            "candidate receipt, and inventing a digest out of an unparsable "
+            "string would be worse than refusing",
+            code=ABSENT,
+        ) from exc
+
     return InstalledArtifact(
         distribution=distribution,
         version=version,
-        artifact_digest=Digest.parse(
-            recorded, where=f"{distribution} direct_url.json archive_info"
-        ),
+        artifact_digest=artifact_digest,
         installed_content_digest=_record_digest(record),
-        read_from="direct_url.json archive_info.hashes.sha256",
+        read_from=f"direct_url.json {hash_path}",
     )
 
 
@@ -585,6 +629,18 @@ def require_host_source(
             f"distribution is {reading.distribution!r}. A receipt for another "
             "facility binds another facility's bytes; it says nothing about "
             "these",
+            code=DISAGREES,
+        )
+
+    if receipt.version != reading.version:
+        raise PreconditionFailed(
+            f"the receipt is for {reading.distribution} version "
+            f"{receipt.version!r} and the installed distribution is version "
+            f"{reading.version!r}. A version name is not the identity — "
+            "`version.py` is a hundred lines of why — but it is still a term "
+            "of the binding: a receipt built for one version says nothing "
+            "about the bytes of another, even when a digest happens to "
+            "collide",
             code=DISAGREES,
         )
 
