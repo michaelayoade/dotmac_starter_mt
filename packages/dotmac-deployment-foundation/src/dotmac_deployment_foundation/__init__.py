@@ -21,10 +21,15 @@ tenant. A facility that decides how a deployment is built cannot be a table
 inside one of the deployments it builds.
 
 **No implicit runtime.** The plan is data and the executor talks to an injected
-`Effects` provider. The public CLI and Lane 3 rehearsal can nevertheless invoke
-`ExposureTransaction` directly against an explicitly supplied host provider;
-today those paths sit outside `Executor`'s grant and execution-plan checks.
-That separation is an as-built composition gap, not a second authority to copy.
+`Effects` provider. The composition gap this paragraph used to record — the
+public CLI and Lane 3 rehearsal invoking a second transaction class directly
+against a host provider, outside `Executor`'s grant and execution-plan checks —
+is CLOSED. Exposure is a typed effect the executor performs from
+`FoundationExecutionPlanV2.exposure_reconciliations`, under the caller's
+deployment lock; `exposure.py` keeps the seam and the measurement and orders
+nothing. `dotmac-deploy exposure-apply` observes and reports, and can no longer
+apply: an `--execute` with no `--authorization` to offer was a mutation
+authorized by whoever typed it.
 The injected seam is what makes the failure-injection matrix — wrong digest,
 failed backup, candidate never ready, maintenance-required release attempted
 online — ordinary unit tests instead of disposable-VM exercises, and a gate
@@ -121,6 +126,7 @@ from .document import (
 )
 from .drift import DriftReport, Observation, Verdict, compare
 from .engine import (
+    DeploymentLockHeld,
     DeploymentOutcome,
     DeploymentPlan,
     Effects,
@@ -169,6 +175,7 @@ from .execution_plan import (
 )
 from .execution_plan_v2 import (
     EXECUTION_PLAN_V2_SCHEMA,
+    ExposureReconciliationV1,
     FoundationExecutionPlanV2,
     PostgresPrincipalCredentialBootstrapV1,
     canonical_execution_plan_v2_bytes,
@@ -179,7 +186,6 @@ from .execution_plan_v2 import (
 from .exposure import (
     OWNERSHIP_PREFIX,
     ExposureEffects,
-    ExposureTransaction,
     Finding,
     HostObservation,
     PrivilegedVantageError,
@@ -189,10 +195,12 @@ from .exposure import (
     Severity,
     VerificationReport,
     accept_public_exposure_evidence,
-    apply_exposure,
+    foreign_rule_arguments,
     foreign_rules,
+    managed_ports,
     observation_from_text,
     ownership_comment,
+    require_preserved_foreign_rules,
     verify_exposure,
 )
 from .external_recovery import (
@@ -470,7 +478,6 @@ __all__ = [
     "ExecutionGrant",
     "Executor",
     "ExposureEffects",
-    "ExposureTransaction",
     "ExternalExecutorV1",
     "ExternalRecoveryReceiptV1",
     "Finding",
@@ -523,6 +530,7 @@ __all__ = [
     "StepEvidenceV1",
     "StepStanding",
     "EXECUTION_PLAN_V2_SCHEMA",
+    "ExposureReconciliationV1",
     "FoundationExecutionPlanV2",
     "PostgresPrincipalCredentialBootstrapV1",
     "canonical_execution_plan_v2_bytes",
@@ -618,7 +626,6 @@ __all__ = [
     "accept_release_evidence",
     "adjudicate_restore",
     "admit_bind_address",
-    "apply_exposure",
     "assess",
     "audit_image",
     "authorize",
@@ -639,15 +646,18 @@ __all__ = [
     "compare",
     "compare_database_contract",
     "deployment_lock",
+    "DeploymentLockHeld",
     "derive_role_closure",
     "endpoint_token",
     "execution_plan_digest",
+    "foreign_rule_arguments",
     "foreign_rules",
     "format_plan",
     "identify_launcher",
     "ingress_policy_document",
     "invariant_breaches",
     "load_lease",
+    "managed_ports",
     "load_manifest",
     "normalize_digest",
     "observation_from_text",
@@ -660,6 +670,7 @@ __all__ = [
     "refuse_backwards_deploy",
     "refuse_identity_stripping",
     "refuse_untrusted_launcher",
+    "require_preserved_foreign_rules",
     "render_execution_plan",
     "render_status_document",
     "require_database_precondition",

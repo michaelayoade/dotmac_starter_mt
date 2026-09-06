@@ -99,6 +99,23 @@ class ExecutionBindings:
     #: change a closed vocabulary AND put parsed catalogue facts inside the
     #: document whose value-free-ness lets `recovery.py` run with no database.
     build_recovery_session: Callable[..., Any] | None = None
+    #: ``(spec, deploy_dir) -> ExposureEffects``. Supplies the seam through
+    #: which `Executor` reconciles a target's firewall rules.
+    #:
+    #: It is here, rather than being constructed inside the CLI, because it was
+    #: constructed inside the CLI and that was the defect. `cmd_exposure_apply`
+    #: hardcoded `ComposeHostExposureEffects` and the in-package runner, so the
+    #: one path that wrote to a shared `DOCKER-USER`/`INPUT` chain never passed
+    #: through discovery, never carried an `ExecutionGrant`, and could not be
+    #: replaced by an assembly that reaches its hosts differently. A capability
+    #: reachable only from a closed switch in an adapter is a capability an
+    #: embedder does not have.
+    #:
+    #: None means a plan authorizing exposure REFUSES for want of a provider —
+    #: never that exposure is skipped. An authorized act with no capability is
+    #: a deployment environment built wrong, which is the same judgement
+    #: `discover_bindings` already makes about a broken distribution.
+    build_exposure_effects: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         name = str(self.provider).strip()
@@ -129,6 +146,14 @@ class ExecutionBindings:
                 f"((spec, deploy_dir) -> Effects), got "
                 f"{type(self.build_effects).__name__}"
             )
+        if self.build_exposure_effects is not None and not callable(
+            self.build_exposure_effects
+        ):
+            raise SpecError(
+                "ExecutionBindings.build_exposure_effects must be callable "
+                "((spec, deploy_dir) -> ExposureEffects), got "
+                f"{type(self.build_exposure_effects).__name__}"
+            )
         if self.authorization_verifier is not None and not isinstance(
             self.authorization_verifier, AuthorizationVerifier
         ):
@@ -154,6 +179,7 @@ class ExecutionBindings:
                 )
         if (
             self.build_effects is None
+            and self.build_exposure_effects is None
             and self.build_recovery_session is None
             and self.authorization_verifier is None
             and self.evidence_policy is None

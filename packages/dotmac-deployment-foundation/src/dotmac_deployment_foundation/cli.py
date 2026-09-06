@@ -169,6 +169,28 @@ def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
     return discover_bindings()
 
 
+def _build_exposure_effects(
+    spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
+) -> object | None:
+    """The `ExposureEffects` the executor reconciles firewall rules through.
+
+    Mirrors `_build_effects` deliberately: same provider selection, same
+    discovered-bindings precedence, same lazy import. Returns None when the
+    selected provider offers no exposure factory — the executor then REFUSES a
+    plan that authorizes exposure, rather than silently performing none.
+    """
+    if args.provider != PROVIDER_COMPOSE_HOST:
+        if bindings is None or bindings.build_exposure_effects is None:
+            return None
+        return bindings.build_exposure_effects(spec, Path(args.deploy_dir))
+    from .providers.compose_host import _default_runner
+    from .providers.exposure_host import ComposeHostExposureEffects
+
+    return ComposeHostExposureEffects(
+        spec, deploy_dir=args.deploy_dir, runner=_default_runner
+    )
+
+
 def _build_effects(
     spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
 ) -> Effects:
@@ -519,18 +541,25 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         evidence_policy=bindings.evidence_policy if bindings else None,
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
+        exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
     )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
     # (`engine/run.py`) — a lock released when the first step returns is not
     # a lock, it is a lock-shaped gap between the check and the mutation the
     # 2026-07-12 incident (`engine/lock.py`) actually needed closed.
+    #
+    # The hold is now HANDED OVER rather than described. `held` is a
+    # `DeploymentLockHeld` obtainable nowhere but inside this block, `run`
+    # requires one, and it goes dead when the block exits — so the sentence
+    # this comment has carried since the incident is finally something the
+    # executor can check instead of something a reader has to believe.
     with deployment_lock(
         spec.product,
         label=f"dotmac-deploy deploy {plan.image_digest}",
         directory=args.lock_dir,
-    ):
-        outcome = executor.run(plan)
+    ) as held:
+        outcome = executor.run(plan, lock=held)
     print()
     _print_outcome(outcome)
     if outcome.succeeded:
@@ -948,14 +977,34 @@ def cmd_ingress_policy(args: argparse.Namespace) -> int:
 
 
 def cmd_exposure_apply(args: argparse.Namespace) -> int:
-    """Apply the exposure plan through `ExposureTransaction` — DRY RUN by default.
+    """Report whether this host ALREADY matches the declared exposure.
 
-    Routed through the transaction rather than a script on purpose: apply,
-    snapshot, re-observation and rollback then live in one tested code path
-    instead of in an operator's habit. A dry run still snapshots and still
-    verifies, so it answers "would this host pass?" without touching it.
+    ## Why this no longer applies anything
+
+    It used to. `--execute` drove `exposure.ExposureTransaction`, which took
+    its own lock, recreated the product's containers, replaced this product's
+    rules in `DOCKER-USER` and `INPUT`, re-observed, verified and compensated —
+    a complete deployment procedure against a production host, reached through
+    a subcommand with **no `--authorization` flag in its parser at all**. Every
+    other mutating path in this facility requires a Control receipt, an
+    `ExecutionGrant` that only `authorize()` can issue, and a frozen plan
+    digest recomputed before the first effect. This one required a boolean the
+    operator supplied to themselves, which is precisely the advisory
+    authorization `authorization.py` was written to abolish.
+
+    Adding `--authorization` here would have been the smaller change and the
+    wrong one: it would have left two executors, one of them re-deriving its
+    own ordering and its own compensation. So the ACT moved to
+    `Executor._reconcile_exposure`, driven from
+    `FoundationExecutionPlanV2.exposure_reconciliations` under the caller's
+    lock, and this subcommand keeps the half that was always safe — looking.
+
+    Looking is not a lesser capability. It answers "would this host pass?"
+    without touching it, and `exposure-verify` answers the same question
+    off-host from recorded text months later. What is gone is the ability to
+    change a shared firewall chain because someone typed a flag.
     """
-    from .exposure import APPLY_COMMAND, ExposureTransaction, verify_exposure
+    from .exposure import verify_exposure
     from .providers.compose_host import _default_runner
     from .providers.exposure_host import ComposeHostExposureEffects
 
@@ -963,25 +1012,10 @@ def cmd_exposure_apply(args: argparse.Namespace) -> int:
     effects = ComposeHostExposureEffects(
         spec, deploy_dir=args.deploy_dir, runner=_default_runner
     )
-    if not args.execute:
-        report = verify_exposure(spec, effects.observe())
-        print(f"DRY RUN — nothing applied. descriptor {report.descriptor_digest}")
-        _print_exposure_report(report)
-        return EXIT_OK if report.ok else EXIT_REFUSED
-
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=args.lock_dir
-    )
-    try:
-        report = transaction.run(command=APPLY_COMMAND)
-    except PreconditionFailed as exc:
-        state = "rolled back" if transaction.rolled_back else "NOT rolled back"
-        print(f"error: {exc}", file=sys.stderr)
-        print(f"({state})", file=sys.stderr)
-        return EXIT_REFUSED
-    print(f"applied and verified. descriptor {report.descriptor_digest}")
+    report = verify_exposure(spec, effects.observe())
+    print(f"OBSERVED ONLY — nothing applied. descriptor {report.descriptor_digest}")
     _print_exposure_report(report)
-    return EXIT_OK
+    return EXIT_OK if report.ok else EXIT_REFUSED
 
 
 def _print_exposure_report(report: VerificationReport) -> None:
@@ -1123,14 +1157,16 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         evidence_policy=bindings.evidence_policy if bindings else None,
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
+        exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
     )
-    # Same rule as `cmd_deploy`: the lock wraps the whole run.
+    # Same rule as `cmd_deploy`: the lock wraps the whole run, and the hold is
+    # handed to it rather than asserted around it.
     with deployment_lock(
         spec.product,
         label=f"dotmac-deploy rollback {plan.previous_image}",
         directory=args.lock_dir,
-    ):
-        outcome = executor.rollback(plan)
+    ) as held:
+        outcome = executor.rollback(plan, lock=held)
     print()
     _print_outcome(outcome)
     if outcome.succeeded:
@@ -1384,18 +1420,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="also print the provider capability matrix",
     )
 
+    # NO `--execute`, and its absence is the point rather than an oversight.
+    # This subcommand observed a host and then mutated it — recreating
+    # containers and rewriting shared firewall chains — with no authorization
+    # flag to offer and no frozen plan to check against. The act now belongs to
+    # `Executor`, under a grant and the caller's lock; what is left here reads.
+    # `test_every_execute_subcommand_offers_an_authorization` is what keeps the
+    # next one from arriving the same way.
     apply_exposure_cmd = add(
         "exposure-apply",
         cmd_exposure_apply,
-        "apply the exposure plan under the lock (DRY RUN unless --execute)",
+        "report whether this host matches the declared exposure (never applies)",
     )
-    apply_exposure_cmd.add_argument("--execute", action="store_true")
     apply_exposure_cmd.add_argument("--deploy-dir", default=DEFAULT_DEPLOY_DIR)
-    apply_exposure_cmd.add_argument(
-        "--lock-dir",
-        default="/var/lock",
-        help="where the product deployment lock lives",
-    )
 
     verify = add(
         "exposure-verify",

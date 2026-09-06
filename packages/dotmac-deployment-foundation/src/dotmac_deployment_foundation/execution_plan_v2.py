@@ -90,6 +90,7 @@ from .canonical_plan import canonical_plan_bytes
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
 from .execution_plan import EXECUTION_PLAN_DIGEST_SCHEMA, HostPrestateV1
+from .ingress import FAMILIES, FILTER_CHAIN
 from .secrets_guard import require_no_secrets
 from .version import VERSION
 
@@ -100,6 +101,7 @@ __all__ = [
     "BOOTSTRAP_TRANSITIONS",
     "EXECUTION_PLAN_V2_SCHEMA",
     "EXECUTION_PLAN_V2_WRONG_TYPE",
+    "ExposureReconciliationV1",
     "FoundationExecutionPlanV2",
     "PostgresPrincipalCredentialBootstrapV1",
     "canonical_execution_plan_v2_bytes",
@@ -230,6 +232,72 @@ class PostgresPrincipalCredentialBootstrapV1:
         }
 
 
+EXPOSURE_BAD_FAMILY: Final = "exposure_reconciliation.bad_family"
+EXPOSURE_BAD_CHAIN: Final = "exposure_reconciliation.bad_chain"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ExposureReconciliationV1:
+    """Authority to reconcile ONE address family's exposure on this target.
+
+    ## What it does NOT carry, and why that is the whole design
+
+    There is no field for a rule, a port, a source CIDR, a chain position, a
+    command or a compose invocation. The rules are DERIVED from the descriptor
+    by `ingress.build_firewall_plan`, and the descriptor digest is already
+    inside this plan and inside `ExecutionGrant`. So the exposure that will be
+    applied is frozen transitively and exactly once, and there is nowhere in
+    the authorized document to put a rule the descriptor does not imply.
+
+    That is the same argument :class:`PostgresPrincipalCredentialBootstrapV1`
+    makes one screen above about SQL: a member that could carry the effect
+    itself turns a signed plan into a delivery vehicle, and
+    `secrets_guard.require_no_secrets` is a SHAPE detector that cannot tell an
+    attacker's iptables argument from a legitimate one.
+
+    ## Why the chain is stated rather than looked up
+
+    ``chain`` is required and is checked against `ingress.FILTER_CHAIN` — so it
+    can only ever be the chain this family already implies. A reader of the
+    signed document should not have to import this package to learn which
+    shared chain a deployment is about to insert into; `DOCKER-USER` and
+    `INPUT` are shared with everything else on the host, and "which chain" is
+    the first question an operator reviewing an exposure change asks. Stating a
+    value that is then verified is redundancy on purpose: the alternative is a
+    document that authorizes an effect it does not name.
+    """
+
+    family: str
+    chain: str
+
+    def __post_init__(self) -> None:
+        if self.family not in FAMILIES:
+            raise SpecError(
+                f"unknown address family {self.family!r}; expected one of "
+                f"{list(FAMILIES)}. `dual_stack` is a DESCRIPTOR posture, not a "
+                "chain to write into: it derives one reconciliation per "
+                "concrete family, and collapsing the two here would authorize "
+                "one act to touch two shared chains under a single name",
+                where="exposure_reconciliations",
+                code=EXPOSURE_BAD_FAMILY,
+            )
+        expected = FILTER_CHAIN[self.family]
+        if self.chain != expected:
+            raise SpecError(
+                f"the {self.family} reconciliation names chain "
+                f"{self.chain!r}, and {self.family} rules are derived into "
+                f"{expected!r}. A plan that named a different chain would be "
+                "authority to insert this product's rules somewhere nobody "
+                "reviewed — the chains on a host are shared, so the wrong one "
+                "is not a typo, it is a different act",
+                where="exposure_reconciliations",
+                code=EXPOSURE_BAD_CHAIN,
+            )
+
+    def as_document(self) -> dict[str, Any]:
+        return {"chain": self.chain, "family": self.family}
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class FoundationExecutionPlanV2:
     """V1's terms, plus the bootstraps this deployment is authorized to perform.
@@ -256,6 +324,12 @@ class FoundationExecutionPlanV2:
     #: Sorted and deduplicated by (service, principal): it is a SET of acts, and
     #: a digest must not depend on the order a caller happened to list them.
     principal_bootstraps: tuple[PostgresPrincipalCredentialBootstrapV1, ...] = ()
+    #: Sorted by family and deduplicated, for the same reason: a SET of acts.
+    #: Empty means this deployment performs no exposure reconciliation, which
+    #: is a STATED value in the document rather than an omitted key — rule 5 of
+    #: `canonical_plan`, and the difference between a deployment that declares
+    #: no exposure and one whose plumbing forgot to ask.
+    exposure_reconciliations: tuple[ExposureReconciliationV1, ...] = ()
 
     def __post_init__(self) -> None:
         if self.operation not in OPERATIONS:
@@ -265,8 +339,7 @@ class FoundationExecutionPlanV2:
             )
         if not self.target.strip():
             raise SpecError(
-                "an execution plan with no target is a plan that authorizes "
-                "every host"
+                "an execution plan with no target is a plan that authorizes every host"
             )
         if not isinstance(self.host_prestate, HostPrestateV1):
             raise SpecError(
@@ -303,6 +376,19 @@ class FoundationExecutionPlanV2:
                 )
             ),
         )
+        families = [item.family for item in self.exposure_reconciliations]
+        duplicated = sorted({name for name in families if families.count(name) > 1})
+        if duplicated:
+            raise SpecError(
+                f"exposure_reconciliations names {duplicated} more than once. "
+                "Two records for one family is two authorities over one shared "
+                "chain, and nothing here would pick between them"
+            )
+        object.__setattr__(
+            self,
+            "exposure_reconciliations",
+            tuple(sorted(self.exposure_reconciliations, key=lambda item: item.family)),
+        )
 
     def as_document(self) -> dict[str, Any]:
         """The document the digest covers. No wrapper, ever."""
@@ -311,6 +397,9 @@ class FoundationExecutionPlanV2:
             "application_profile_digest": self.application_profile_digest,
             "descriptor_digest": self.descriptor_digest,
             "environment_inventory": list(self.environment_inventory),
+            "exposure_reconciliations": [
+                item.as_document() for item in self.exposure_reconciliations
+            ],
             "foundation_version": self.foundation_version,
             "host_prestate": self.host_prestate.as_document(),
             "image_digest": self.image_digest,
@@ -372,6 +461,7 @@ def render_execution_plan_v2(
     plan_v1: Any,
     *,
     principal_bootstraps: tuple[PostgresPrincipalCredentialBootstrapV1, ...] = (),
+    exposure_reconciliations: tuple[ExposureReconciliationV1, ...] = (),
 ) -> FoundationExecutionPlanV2:
     """Render V2 from an already-rendered V1 plan plus the bootstraps.
 
@@ -397,6 +487,7 @@ def render_execution_plan_v2(
         application_profile_digest=plan_v1.application_profile_digest,
         steps=tuple(plan_v1.steps),
         principal_bootstraps=tuple(principal_bootstraps),
+        exposure_reconciliations=tuple(exposure_reconciliations),
     )
     require_no_secrets(rendered.as_document(), source="execution plan v2")
     return rendered

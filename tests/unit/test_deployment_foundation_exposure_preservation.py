@@ -3,7 +3,7 @@
 `ComposeHostExposureEffects` is careful never to flush a shared chain, and
 `test_deployment_foundation_exposure_host.py` proves it. That is a property of
 one implementation. This file covers the guarantee one level up: whatever
-implements `ExposureEffects`, :class:`ExposureTransaction` measures the rules it
+implements `ExposureEffects`, `Executor._reconcile_exposure` measures the rules it
 does not own before and after, and refuses when one of them has vanished.
 
 Why that split is worth a second file. The rule Michael set is *"the controller
@@ -29,7 +29,6 @@ from pathlib import Path
 import pytest
 from dotmac_deployment_foundation.errors import PreconditionFailed
 from dotmac_deployment_foundation.exposure import (
-    ExposureTransaction,
     HostObservation,
     ObservedChain,
     ObservedRule,
@@ -37,6 +36,8 @@ from dotmac_deployment_foundation.exposure import (
     ownership_comment,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+from tests.unit.exposure_reconciliation import reconcile
 
 _MANIFEST_DIGEST = "sha256:" + "a" * 64
 _IMAGE = f"registry.example.com/acme/app@sha256:{'b' * 64}"
@@ -236,12 +237,13 @@ def test_a_rollback_that_replays_a_whole_chain_is_refused(
         after=_observation(FOREIGN),
         destructive=True,
     )
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=tmp_path
-    )
     with pytest.raises(PreconditionFailed) as excinfo:
-        transaction.run()
+        reconcile(spec, effects, families=("ipv4",))
     message = str(excinfo.value)
+    # BOTH facts survive: the exposure failure that triggered the compensation,
+    # and the compensation eating a bystander's rule on the way back. Ranking
+    # them the other way — a data-loss event buried in a step record while the
+    # exception discusses a port binding — is the failure this wording avoids.
     assert "does not own" in message
     assert "never restored wholesale" in message
     assert "restore" in effects.calls
@@ -262,15 +264,14 @@ def test_a_preserving_rollback_reports_the_verification_failure_instead(
         after=_observation(FOREIGN),
         destructive=False,
     )
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=tmp_path
-    )
+    outcome = None
     with pytest.raises(PreconditionFailed) as excinfo:
-        transaction.run()
+        outcome = reconcile(spec, effects, families=("ipv4",))
     message = str(excinfo.value)
-    assert "did not verify and was rolled back" in message
+    assert "did not verify" in message
     assert "does not own" not in message
-    assert transaction.rolled_back is True
+    assert "rolled back" in message
+    assert outcome is None
 
 
 def test_a_foreign_rule_that_appears_mid_transaction_is_not_a_refusal(
@@ -290,10 +291,7 @@ def test_a_foreign_rule_that_appears_mid_transaction_is_not_a_refusal(
         after=_observation(FOREIGN, arrived),
         destructive=False,
     )
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=tmp_path
-    )
     with pytest.raises(PreconditionFailed) as excinfo:
-        transaction.run()
+        reconcile(spec, effects, families=("ipv4",))
     # It still fails — the exposure does not verify — but NOT for preservation.
     assert "does not own" not in str(excinfo.value)

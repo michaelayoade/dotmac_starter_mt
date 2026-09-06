@@ -731,9 +731,9 @@ def test_an_expired_lease_is_still_EXPIRED_HELD_after_a_refused_run(
         # THE case Michael ruled on: the compose apply failed ON THE HOST.
         StepFailed("apply_compose", "docker compose up exited 1"),
         # `errors.py` documents this as "a gate refused before anything was
-        # mutated", and `ExposureTransaction.run` raises it AFTER applying the
-        # stack, rewriting both filter chains and rolling back. The type cannot
-        # discriminate; the position can.
+        # mutated", and `Executor._reconcile_exposure` raises it AFTER writing
+        # this product's rules into both shared filter chains and compensating.
+        # The type cannot discriminate; the position can.
         PreconditionFailed("the applied exposure did not verify"),
         # `build_receipt` raises this after the whole transaction.
         SpecError("a receipt is missing an item"),
@@ -765,9 +765,9 @@ def test_a_refusal_below_this_lane_AFTER_mutation_is_host_state_uncertified(
         StepFailed("apply_compose", "docker compose up exited 1"),
         PreconditionFailed("the applied exposure did not verify"),
         SpecError("a receipt is missing an item"),
-        # THE instance: `ExposureTransaction.run` takes the deployment lock
-        # BEFORE its first effect, so this arrives with the lease in hand and
-        # nothing touched.
+        # THE instance: the CALLER takes the deployment lock before the
+        # executor's first effect and hands it over as a `DeploymentLockHeld`,
+        # so this arrives with the lease in hand and nothing touched.
         LockUnavailableError("another deployment holds the lock"),
         DeploymentFoundationError("bare"),
     ],
@@ -1116,7 +1116,7 @@ def _first_mutation_line(function: ast.FunctionDef) -> int:
         ("inside_source_set", "a question about the descriptor"),
         (
             "require_inside_probe_harness",
-            "a missing harness, argument or jump key is a fact about the " "INVOCATION",
+            "a missing harness, argument or jump key is a fact about the INVOCATION",
         ),
     ],
 )

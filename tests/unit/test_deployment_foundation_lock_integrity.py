@@ -2,7 +2,7 @@
 
 Mutual exclusion is a property of an INODE. Every guarantee `deployment_lock`
 offers — that two deployments of one product cannot run at once, that the
-`ExposureTransaction` holding it is alone in rewriting shared firewall chains —
+the exposure reconciliation holding it is alone in rewriting shared chains —
 reduces to "both contenders ended up on the same file". A lock that quietly
 lands on a *different* file still returns, still writes a pid, and still lets
 the caller proceed; it simply excludes nobody. That is the failure mode worth
@@ -40,9 +40,14 @@ from dotmac_deployment_foundation.errors import LockUnavailableError
 
 def test_the_lock_is_taken_on_a_regular_file(tmp_path: Path) -> None:
     """The baseline. Without this the refusals below could be refusing everything."""
-    with deployment_lock("acme", directory=tmp_path) as path:
-        assert path.is_file()
-        assert path.read_text().split()[0] == str(os.getpid())
+    with deployment_lock("acme", directory=tmp_path) as held:
+        # `deployment_lock` yields a `DeploymentLockHeld` rather than the path
+        # now: the value a caller carries out of the block is EVIDENCE of the
+        # hold, because `Executor.run` requires one. The path is still reachable
+        # and is still the same inode, which is what this asserts.
+        assert held.path.is_file()
+        assert held.path.read_text().split()[0] == str(os.getpid())
+        assert held.live and held.product == "acme"
 
 
 def test_a_second_holder_is_refused_while_the_first_holds(tmp_path: Path) -> None:
@@ -131,4 +136,4 @@ def test_the_helper_and_the_context_manager_agree_on_the_path(tmp_path: Path) ->
     the one actually locked.
     """
     with deployment_lock("acme", directory=tmp_path) as held:
-        assert held == lock_path("acme", directory=tmp_path)
+        assert held.path == lock_path("acme", directory=tmp_path)

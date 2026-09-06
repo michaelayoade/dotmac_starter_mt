@@ -42,7 +42,6 @@ from dotmac_deployment_foundation import ingress
 from dotmac_deployment_foundation.errors import PreconditionFailed
 from dotmac_deployment_foundation.exposure import (
     APPLY_COMMAND,
-    ExposureTransaction,
     HostObservation,
     ObservedChain,
     PrivilegedVantageError,
@@ -61,6 +60,8 @@ from dotmac_deployment_foundation.exposure import (
     verify_exposure,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+from tests.unit.exposure_reconciliation import reconcile
 
 _MANIFEST_DIGEST = "sha256:" + "a" * 64
 _IMAGE = f"registry.example.com/acme/app@sha256:{'b' * 64}"
@@ -302,7 +303,7 @@ def test_a_v6_rule_in_docker_user_is_refused_as_inert(
     )
     mutated_v6 = CONFORMING_V6.replace(
         ":DOCKER-USER - [0:0]",
-        ":DOCKER-USER - [0:0]\n" "-A DOCKER-USER -p tcp --dport 9001 -j DROP",
+        ":DOCKER-USER - [0:0]\n-A DOCKER-USER -p tcp --dport 9001 -j DROP",
     )
     sockets = "\n".join(
         [
@@ -605,23 +606,35 @@ class _FakeEffects:
         self.restored = list(chains)
 
 
-def test_a_verifying_apply_takes_the_lock_snapshots_applies_and_reobserves(
-    spec: ProductDeploymentSpec, tmp_path: Path
+def test_a_verifying_reconciliation_snapshots_applies_and_reobserves(
+    spec: ProductDeploymentSpec,
 ) -> None:
+    """The ordering, now owned by `Executor` rather than by a second executor.
+
+    Note what is NOT in `calls` any more: `apply_compose`. The old transaction
+    recreated the containers itself and then replaced the rules, which made the
+    rule write a SECOND mutation on top of an already-irreversible one. The
+    recreate belongs to `_do_switch`, which has run by the time this does, so
+    the reconciliation performs the one half nothing else performs.
+    """
     effects = _FakeEffects(before=_observation(), after=_observation())
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=tmp_path
-    )
-    report = transaction.run()
-    assert report.ok
-    assert effects.calls[0] == "observe"
-    assert "apply_compose" in effects.calls
+    outcome = reconcile(spec, effects)
+
+    assert effects.calls[0] == "observe", "it looks BEFORE it touches anything"
     assert effects.calls[-1] == "observe", "the last thing it does is LOOK"
-    assert transaction.rolled_back is False
+    assert "apply_compose" not in effects.calls
+    assert "restore_chains" not in effects.calls
+    applied = [call for call in effects.calls if call.startswith("replace_rules")]
+    assert applied == ["replace_rules:ipv4", "replace_rules:ipv6"]
+    assert [(r.kind.value, r.ok) for r in outcome.records] == [("apply_exposure", True)]
+    assert outcome.mutated, (
+        "a reconciliation that wrote to a shared chain and reported "
+        "`mutated=False` would tell an operator it is safe to re-run"
+    )
 
 
 def test_an_apply_that_does_not_verify_is_rolled_back_to_the_SNAPSHOT(
-    spec: ProductDeploymentSpec, tmp_path: Path
+    spec: ProductDeploymentSpec,
 ) -> None:
     """Rolled back to an OBSERVED state, not a remembered intention. A rollback
     that restores only what it thinks it changed cannot repair what it did not
@@ -632,34 +645,44 @@ def test_an_apply_that_does_not_verify_is_rolled_back_to_the_SNAPSHOT(
         sockets=CONFORMING_SOCKETS.replace("127.0.0.1:8003", f"{wildcard}:8003")
     )
     effects = _FakeEffects(before=before, after=after)
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=tmp_path
-    )
-    with pytest.raises(PreconditionFailed) as caught:
-        transaction.run()
-    assert "rolled back" in str(caught.value)
-    assert transaction.rolled_back is True
-    assert effects.restored == list(before.chains)
+
+    with pytest.raises(PreconditionFailed, match="did not verify"):
+        reconcile(spec, effects, families=("ipv4",))
+
     assert "restore_chains" in effects.calls
+    assert effects.restored == list(before.chains), (
+        "compensation must restore the OBSERVED snapshot. Restoring a "
+        "remembered intention cannot repair what it did not notice changing"
+    )
 
 
-def test_the_transaction_holds_the_product_lock_for_its_whole_duration(
+def test_the_reconciliation_takes_no_lock_of_its_own(
     spec: ProductDeploymentSpec, tmp_path: Path
 ) -> None:
-    """An exposure change and a deployment must not interleave: one of them
-    recreates the containers the other is measuring."""
+    """The inversion, and it is the whole reason boundaries 1 and 3 are one change.
+
+    This test used to assert the OPPOSITE: that the transaction held the
+    product lock across its own duration. It did — by taking it itself — and
+    that is what made exposure impossible to sequence inside a deployment.
+    `fcntl.flock` attaches to the open file description, so a caller already
+    holding the product's lock got `EAGAIN` against its own process when the
+    transaction reached for it again.
+
+    So the requirement inverted. The reconciliation must take NO lock: the
+    caller's hold, proven as a `DeploymentLockHeld` by `Executor.run`, covers
+    the whole mutating sequence including this. A lock taken here would be a
+    second acquisition that can only fail.
+    """
     from dotmac_deployment_foundation.engine.lock import lock_path
 
-    seen: list[bool] = []
+    effects = _FakeEffects(before=_observation(), after=_observation())
+    reconcile(spec, effects)
 
-    class _LockWatchingEffects(_FakeEffects):
-        def observe(self) -> HostObservation:
-            seen.append(lock_path(spec.product, directory=tmp_path).exists())
-            return super().observe()
-
-    effects = _LockWatchingEffects(before=_observation(), after=_observation())
-    ExposureTransaction(spec=spec, effects=effects, lock_directory=tmp_path).run()
-    assert seen == [True, True]
+    assert not lock_path(spec.product, directory=tmp_path).exists(), (
+        "the reconciliation took a lock of its own. Nested acquisition in one "
+        "process refuses with EAGAIN, so this does not merely duplicate the "
+        "caller's hold — it makes exposure unreachable from inside a deployment"
+    )
 
 
 @pytest.mark.parametrize(

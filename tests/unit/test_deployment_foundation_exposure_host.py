@@ -2,7 +2,7 @@
 
 Items 1-3 and 8 of the exposure rehearsal were hand-driven, which proves an
 operator can apply and roll back, not that the code can. This file drives the
-real provider through `ExposureTransaction` with a scripted runner.
+real provider through `Executor._reconcile_exposure` with a scripted runner.
 
 ## The property under test
 
@@ -31,13 +31,14 @@ from dotmac_deployment_foundation.engine.run import CommandResult
 from dotmac_deployment_foundation.errors import PreconditionFailed, StepFailed
 from dotmac_deployment_foundation.exposure import (
     APPLY_COMMAND,
-    ExposureTransaction,
 )
 from dotmac_deployment_foundation.providers.exposure_host import (
     ComposeHostExposureEffects,
     ownership_comment,
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+
+from tests.unit.exposure_reconciliation import reconcile
 
 _IMAGE = f"registry.example.com/acme/app@sha256:{'b' * 64}"
 
@@ -48,11 +49,11 @@ environment = "prod"
 
 [assembly]
 manifest_path = "deploy/product.toml"
-manifest_digest = "sha256:{'a' * 64}"
+manifest_digest = "sha256:{"a" * 64}"
 
 [image]
 reference = "{_IMAGE}"
-source_revision = "{'c' * 40}"
+source_revision = "{"c" * 40}"
 
 [migration]
 command = ["alembic", "upgrade", "heads"]
@@ -94,7 +95,7 @@ FOREIGN = (
 )
 
 CONFORMING_SS = (
-    "LISTEN 0 4096 10.20.0.7:9001 0.0.0.0:* " 'users:(("docker-proxy",pid=101,fd=7))'
+    'LISTEN 0 4096 10.20.0.7:9001 0.0.0.0:* users:(("docker-proxy",pid=101,fd=7))'
 )
 CONFORMING_PS = (
     "root 101 /usr/bin/docker-proxy -proto tcp -host-ip 10.20.0.7 "
@@ -138,6 +139,11 @@ class FakeHost:
         #: Injected between the apply and the re-observation, so a rule can
         #: appear exactly where a snapshot-replay implementation loses it.
         self.on_apply = None
+        #: Fired on the first firewall write. `on_apply` used to be where a
+        #: test injected a concurrent third party, because the transaction
+        #: recreated containers; the reconciliation does not, so the hook moved
+        #: to an act it still performs.
+        self.on_rule_write = None
 
     def _family(self, binary: str) -> str:
         return "ipv6" if binary.startswith("ip6") else "ipv4"
@@ -169,6 +175,8 @@ class FakeHost:
                 self.on_apply(self)
             return CommandResult(0, "recreated")
         if binary in ("iptables", "ip6tables"):
+            if self.on_rule_write is not None:
+                self.on_rule_write(self)
             return self._firewall(binary, argv)
         return CommandResult(0, "")
 
@@ -326,16 +334,24 @@ def test_rollback_restores_our_rules_and_keeps_a_MID_RUN_foreign_rule(
     no way to attribute the loss.
     """
     host = FakeHost()
-    host.on_apply = lambda h: h.chains["ipv4"].append(FOREIGN)
-    # Force verification to fail so the transaction rolls back: the socket
+    # The rule arrives MID-RUN, after the snapshot. It used to be hung off
+    # `on_apply` — the compose recreate — and the reconciliation no longer
+    # recreates anything, so it hangs off the first rule write instead. Same
+    # property, hooked to an act this code still performs: a third party wrote
+    # to the shared chain while we held the lock.
+    inserted: list[bool] = []
+
+    def arrive(h: FakeHost) -> None:
+        if not inserted:
+            inserted.append(True)
+            h.chains["ipv4"].append(FOREIGN)
+
+    host.on_rule_write = arrive
+    # Force verification to fail so the reconciliation compensates: the socket
     # observation no longer matches the declared private publication.
     host.sockets = ""
-    transaction = ExposureTransaction(
-        spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-    )
-    with pytest.raises(PreconditionFailed):
-        transaction.run()
-    assert transaction.rolled_back is True
+    with pytest.raises(PreconditionFailed, match="rolled back"):
+        reconcile(spec, _effects(host, spec))
     assert FOREIGN in host.rules("ipv4"), "a mid-run foreign rule was destroyed"
     assert not [line for line in host.rules("ipv4") if OWNER in line]
 
@@ -351,11 +367,8 @@ def test_rollback_restores_rules_we_owned_BEFORE_the_transaction(
     )
     host = FakeHost(v4=[FOREIGN, prior])
     host.sockets = ""
-    transaction = ExposureTransaction(
-        spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-    )
     with pytest.raises(PreconditionFailed):
-        transaction.run()
+        reconcile(spec, _effects(host, spec))
     assert FOREIGN in host.rules("ipv4")
     assert any(_same_rule(prior, line) for line in host.rules("ipv4"))
 
@@ -370,9 +383,7 @@ def test_nothing_is_ever_flushed(spec: ProductDeploymentSpec, tmp_path: Path) ->
     host = FakeHost(v4=[FOREIGN])
     host.sockets = ""
     with pytest.raises(PreconditionFailed):
-        ExposureTransaction(
-            spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-        ).run()
+        reconcile(spec, _effects(host, spec))
     forbidden = {"-F", "--flush", "-X", "--delete-chain", "iptables-restore"}
     for argv in host.calls:
         assert not forbidden & set(argv), f"chain-wide operation used: {argv}"
@@ -388,83 +399,91 @@ def test_deletes_are_by_argument_never_by_index(
     host = FakeHost(v4=[FOREIGN])
     host.sockets = ""
     with pytest.raises(PreconditionFailed):
-        ExposureTransaction(
-            spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-        ).run()
+        reconcile(spec, _effects(host, spec))
     for argv in host.calls:
         if len(argv) > 3 and argv[1] == "-D":
             assert not argv[3].isdigit(), f"index-based delete: {argv}"
 
 
-# ── the transaction, driven through the real provider ───────────────────────
+# ── the reconciliation, driven through the real provider ────────────────────
 
 
 def test_a_verifying_run_applies_reobserves_and_does_not_roll_back(
-    spec: ProductDeploymentSpec, tmp_path: Path
+    spec: ProductDeploymentSpec,
 ) -> None:
+    """The happy path, with the compose half removed from this act.
+
+    The reconciliation no longer recreates containers. `Executor._do_switch`
+    does that, has already run by the time this does, and this fixture models
+    the result: the sockets are up before the rules are written. The old
+    transaction did both, which made the rule write a SECOND mutation stacked
+    on an already-irreversible one.
+    """
     host = FakeHost()
+    outcome = reconcile(spec, _effects(host, spec))
+    applied = [record for record in outcome.records if record.ok]
+    assert applied, "the reconciliation recorded nothing; it proves nothing"
+    assert not any(
+        record.kind.value == "restore_exposure" for record in outcome.records
+    ), "a verifying run compensated for something"
 
-    def install(h: FakeHost) -> None:
-        # The apply is what makes the socket appear; before it the host has
-        # nothing, exactly as a real recreate behaves.
-        h.sockets = CONFORMING_SS
 
-    host.sockets = ""
-    host.on_apply = install
-    transaction = ExposureTransaction(
-        spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
+def test_the_reconciliation_never_invokes_compose(
+    spec: ProductDeploymentSpec,
+) -> None:
+    """The boundary, measured against the real provider.
+
+    This test used to assert the OPPOSITE — that the transaction ran
+    `docker compose up -d --force-recreate` — and the inversion IS the
+    boundary. One act, one owner: recreating containers belongs to the step
+    that owns it, and an exposure reconciliation that also recreated them was
+    a second executor doing a second executor's work.
+    """
+    host = FakeHost()
+    reconcile(spec, _effects(host, spec))
+    compose = [call for call in host.calls if Path(call[0]).name == "docker"]
+    assert compose == [], (
+        f"the reconciliation invoked compose: {compose}. The recreate belongs "
+        "to `_do_switch`; performing it here is how the old transaction came "
+        "to hold an entire deployment procedure of its own"
     )
-    report = transaction.run()
-    assert report.ok, [f.detail for f in report.refusals]
-    assert transaction.rolled_back is False
-    assert any(Path(c[0]).name == "docker" for c in host.calls)
 
 
-def test_the_apply_command_forces_recreation(
+def test_the_recreation_guard_still_refuses_a_non_recreating_command() -> None:
+    """`refuse_non_recreating_apply` outlives the transaction that called it.
+
+    The guard is about the NEXT caller, not the last one: `docker compose
+    restart` reuses the container it has WITH THE BINDINGS IT HAS, so a correct
+    file plus a restart looks exactly like a successful publication and is not
+    one. Tested directly now that no exposure path invokes compose, because a
+    guard with no live caller and no test is a guard that quietly rots.
+    """
+    from dotmac_deployment_foundation.exposure import refuse_non_recreating_apply
+
+    with pytest.raises(PreconditionFailed):
+        refuse_non_recreating_apply(("restart",))
+    with pytest.raises(PreconditionFailed):
+        refuse_non_recreating_apply(("up", "-d"))
+    refuse_non_recreating_apply(APPLY_COMMAND)
+
+
+def test_the_reconciliation_takes_no_lock_of_its_own(
     spec: ProductDeploymentSpec, tmp_path: Path
 ) -> None:
-    """`docker compose restart` reuses the container it has, with the bindings
-    it has, and a plain `up -d` will not recreate an unchanged image."""
-    host = FakeHost()
-    host.sockets = ""
-    host.on_apply = lambda h: setattr(h, "sockets", CONFORMING_SS)
-    ExposureTransaction(
-        spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-    ).run()
-    compose = [c for c in host.calls if Path(c[0]).name == "docker"]
-    assert compose
-    assert all(part in compose[0] for part in APPLY_COMMAND)
+    """Inverted, and the inversion is why boundaries 1 and 3 are one change.
 
+    This asserted that the transaction held the product lock across its own
+    duration. It did — by taking it itself — and `fcntl.flock` attaches to the
+    open file description, so a caller already holding that lock got `EAGAIN`
+    against its own process. Exposure was not merely ungoverned alongside a
+    deployment; it could not be sequenced inside one.
 
-def test_a_failed_apply_raises_and_does_not_pretend_to_have_verified(
-    spec: ProductDeploymentSpec, tmp_path: Path
-) -> None:
-    host = FakeHost()
-    host.compose_failure = True
-    with pytest.raises(StepFailed):
-        ExposureTransaction(
-            spec=spec, effects=_effects(host, spec), lock_directory=tmp_path
-        ).run()
-
-
-def test_the_transaction_holds_the_product_lock_while_it_runs(
-    spec: ProductDeploymentSpec, tmp_path: Path
-) -> None:
-    """An exposure change and a deployment must not interleave: one recreates
-    the containers the other is measuring."""
+    The caller's hold now covers this, proven as a `DeploymentLockHeld` in
+    `test_deployment_foundation_lock_capability.py`. What must be true HERE is
+    that this act reaches for nothing.
+    """
     from dotmac_deployment_foundation.engine.lock import lock_path
 
-    seen: list[bool] = []
     host = FakeHost()
-    host.sockets = ""
-    host.on_apply = lambda h: setattr(h, "sockets", CONFORMING_SS)
-    effects = _effects(host, spec)
-    original = effects.observe
-
-    def watching():
-        seen.append(lock_path(spec.product, directory=tmp_path).exists())
-        return original()
-
-    effects.observe = watching  # type: ignore[method-assign]
-    ExposureTransaction(spec=spec, effects=effects, lock_directory=tmp_path).run()
-    assert seen == [True, True]
+    reconcile(spec, _effects(host, spec))
+    assert not lock_path(spec.product, directory=tmp_path).exists()

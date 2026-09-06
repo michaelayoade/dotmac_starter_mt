@@ -42,15 +42,12 @@ they live in reports containment that does not exist (see :mod:`.ingress`).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Final, Protocol
 
 from . import ingress
-from .engine.lock import DEFAULT_LOCK_DIR, deployment_lock
 from .errors import DeploymentError, PreconditionFailed, SpecError
 from .policy import build_firewall_plan
 from .spec import ProductDeploymentSpec
@@ -60,7 +57,6 @@ __all__ = [
     "OWNERSHIP_PREFIX",
     "Binding",
     "ExposureEffects",
-    "ExposureTransaction",
     "Finding",
     "HostObservation",
     "ObservedChain",
@@ -74,16 +70,18 @@ __all__ = [
     "Severity",
     "VerificationReport",
     "accept_public_exposure_evidence",
-    "apply_exposure",
     "conclude_binding",
     "expected_bindings",
+    "foreign_rule_arguments",
     "foreign_rules",
+    "managed_ports",
     "observation_from_text",
     "ownership_comment",
     "parse_docker_proxy_processes",
     "parse_iptables_save",
     "parse_socket_listing",
     "refuse_non_recreating_apply",
+    "require_preserved_foreign_rules",
     "verify_exposure",
 ]
 
@@ -805,7 +803,7 @@ def refuse_non_recreating_apply(command: Sequence[str]) -> None:
 #: Ownership is what makes the preservation property below checkable at all, so
 #: it cannot be a private convention of one implementation — a second provider
 #: that invented its own marker would satisfy every test in the provider's own
-#: file and still let :class:`ExposureTransaction` mistake its rules for
+#: file and still let the exposure reconciliation mistake its rules for
 #: somebody else's.
 OWNERSHIP_PREFIX: Final = "dotmac-exposure"
 
@@ -867,10 +865,11 @@ class ExposureEffects(Protocol):
     ``restore_chains`` receives the snapshot's chains, and an implementation
     MUST restore only its own rules from them. Restoring a whole chain reverts
     rules the transaction never created, which on a shared host is data loss
-    wearing the word *restore*. :class:`ExposureTransaction` no longer takes
-    that on trust — it measures the foreign rules before and after and refuses
-    when they move — but the contract states it too, because a property that is
-    only checked is a property the next implementer has to rediscover.
+    wearing the word *restore*. `Executor._reconcile_exposure` no longer takes
+    that on trust — :func:`require_preserved_foreign_rules` measures the foreign
+    rules before and after and refuses when they move — but the contract states
+    it too, because a property that is only checked is a property the next
+    implementer has to rediscover.
     """
 
     def observe(self) -> HostObservation: ...
@@ -886,148 +885,74 @@ class ExposureEffects(Protocol):
     def restore_chains(self, chains: Sequence[ObservedChain]) -> None: ...
 
 
-@dataclass(slots=True)
-class ExposureTransaction:
-    """Apply an exposure plan under the lock, then prove it, or put it back.
-
-    The ordering is the contract:
-
-    1. take the product's exclusive deployment lock — an exposure change and a
-       deployment must not interleave, because one of them recreates the
-       containers the other is measuring;
-    2. SNAPSHOT the host before touching it, so a rollback restores an observed
-       state rather than a remembered intention;
-    3. apply, through a command that can actually change a binding;
-    4. RE-OBSERVE. Not "assume the apply worked" — go and look;
-    5. verify against the descriptor, and roll back on any refusal.
-
-    Step 2 is a full :class:`HostObservation` rather than a diff because a
-    rollback that restores only what it thinks it changed cannot repair what it
-    did not notice changing.
-    """
-
-    spec: ProductDeploymentSpec
-    effects: ExposureEffects
-    lock_directory: str | Path = DEFAULT_LOCK_DIR
-    timeout_seconds: int = 300
-    snapshot: HostObservation | None = field(default=None, init=False)
-    report: VerificationReport | None = field(default=None, init=False)
-    rolled_back: bool = field(default=False, init=False)
-
-    @property
-    def owner(self) -> str:
-        """The ownership comment identifying this product's rules."""
-        return ownership_comment(self.spec.product)
-
-    @property
-    def _managed_ports(self) -> tuple[int, ...]:
-        return tuple(rule.host_port for rule in build_firewall_plan(self.spec))
-
-    def _foreign(self, observation: HostObservation) -> list[str]:
-        return sorted(
-            rule.arguments
-            for rule in foreign_rules(
-                observation, owner=self.owner, managed_ports=self._managed_ports
-            )
-        )
-
-    def _check_preserved(
-        self, before: HostObservation, after: HostObservation, *, phase: str
-    ) -> None:
-        """Refuse if a rule this transaction does not own has VANISHED.
-
-        The measurement Michael's constraint asks for, taken rather than
-        promised. `ComposeHostExposureEffects` is careful never to flush a
-        shared chain — but "the provider is careful" is a property of one
-        implementation, and the transaction is where the guarantee has to live
-        so a second provider cannot quietly lose it.
-
-        Only the disappearing direction is a refusal, and the asymmetry is the
-        point. A foreign rule that vanished was deleted by us: that is the
-        data-loss bug wearing the word *restore*, and it is exactly what
-        replaying a whole chain does. A foreign rule that APPEARED was written
-        by somebody else while we held the lock — noise about the host's
-        exclusivity, not evidence that we replaced anything — and refusing on
-        it would reject the correct behaviour of preserving a rule that
-        arrived mid-transaction.
-
-        Comparison is by rule TEXT, unordered. Ordering in these chains is
-        genuinely load-bearing for packet processing, but our own inserts shift
-        foreign rules' indices without changing what they match, so an
-        order-sensitive comparison would fail on every correct run.
-        """
-        was = self._foreign(before)
-        now = set(self._foreign(after))
-        removed = sorted(rule for rule in was if rule not in now)
-        if not removed:
-            return
-        raise PreconditionFailed(
-            f"the exposure {phase} deleted {len(removed)} rule(s) this "
-            f"transaction does not own: {removed[:3]}. Only rules carrying "
-            f"`{self.owner}` may be added or removed — a shared chain is never "
-            "restored wholesale, because replaying a snapshot reverts whatever "
-            "another process legitimately added while we were running"
-        )
-
-    @contextmanager
-    def _locked(self) -> Iterator[None]:
-        with deployment_lock(
-            self.spec.product,
-            directory=self.lock_directory,
-            label=f"{self.spec.product} exposure",
-        ):
-            yield
-
-    def run(self, *, command: Sequence[str] = APPLY_COMMAND) -> VerificationReport:
-        refuse_non_recreating_apply(command)
-        with self._locked():
-            self.snapshot = self.effects.observe()
-            self.effects.apply_compose(command, timeout_seconds=self.timeout_seconds)
-            for family in ingress.FAMILIES:
-                rules = tuple(
-                    rule
-                    for rule in build_firewall_plan(self.spec)
-                    if rule.family == family
-                )
-                self.effects.replace_rules(family, ingress.FILTER_CHAIN[family], rules)
-            observed = self.effects.observe()
-            self._check_preserved(self.snapshot, observed, phase="apply")
-            report = verify_exposure(self.spec, observed)
-            self.report = report
-            if not report.ok:
-                self._rollback(command)
-                raise PreconditionFailed(
-                    "the applied exposure did not verify and was rolled back: "
-                    + "; ".join(finding.detail for finding in report.refusals)
-                )
-            return report
-
-    def _rollback(self, command: Sequence[str]) -> None:
-        """Put back what we changed, and prove we put back nothing else.
-
-        The re-observation at the end is the point. A rollback that is never
-        looked at is a rollback that is believed, and "restore" is exactly the
-        word a chain-flushing implementation would also use.
-        """
-        if self.snapshot is None:  # pragma: no cover - run() always snapshots
-            raise PreconditionFailed("no snapshot to roll back to")
-        self.effects.restore_chains(self.snapshot.chains)
-        self.effects.apply_compose(command, timeout_seconds=self.timeout_seconds)
-        self.rolled_back = True
-        self._check_preserved(self.snapshot, self.effects.observe(), phase="rollback")
+def managed_ports(spec: ProductDeploymentSpec) -> tuple[int, ...]:
+    """The host ports this product's own firewall rules cover."""
+    return tuple(rule.host_port for rule in build_firewall_plan(spec))
 
 
-def apply_exposure(
-    spec: ProductDeploymentSpec,
-    effects: ExposureEffects,
+def foreign_rule_arguments(
+    observation: HostObservation, *, owner: str, managed: Sequence[int]
+) -> list[str]:
+    """Every rule in the observation that this product does NOT own, as text."""
+    return sorted(
+        rule.arguments
+        for rule in foreign_rules(observation, owner=owner, managed_ports=managed)
+    )
+
+
+def require_preserved_foreign_rules(
+    before: HostObservation,
+    after: HostObservation,
     *,
-    lock_directory: str | Path = DEFAULT_LOCK_DIR,
-    command: Sequence[str] = APPLY_COMMAND,
-) -> VerificationReport:
-    """One call for the whole transaction, for a caller that wants no state."""
-    return ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=lock_directory
-    ).run(command=command)
+    owner: str,
+    managed: Sequence[int],
+    phase: str,
+) -> None:
+    """Refuse if a rule this product does not own has VANISHED.
+
+    ## Why this is a free function now
+
+    It was the deleted transaction's `_check_preserved`, a method on a class that also
+    took a lock, ordered an apply, re-observed and compensated — in other words
+    on a second executor. That class is gone: this facility has exactly one
+    thing that orders effects against a host (`engine.run.Executor`), and
+    exposure is performed there, from an authorized plan, under the caller's
+    lock. What is left here is MEASUREMENT, which is what this module was always
+    good at — `verify_exposure` and `observation_from_text` are the same shape,
+    and the reason an incident's pasted `iptables-save` can be replayed months
+    later with no host present is that none of it decides anything.
+
+    ## The property, unchanged
+
+    `ComposeHostExposureEffects` is careful never to flush a shared chain — but
+    "the provider is careful" is a property of one implementation, and the
+    guarantee has to live where a second provider cannot quietly lose it.
+
+    Only the disappearing direction is a refusal, and the asymmetry is the
+    point. A foreign rule that vanished was deleted by us: that is the data-loss
+    bug wearing the word *restore*, and it is exactly what replaying a whole
+    chain does. A foreign rule that APPEARED was written by somebody else while
+    we held the lock — noise about the host's exclusivity, not evidence that we
+    replaced anything — and refusing on it would reject the correct behaviour of
+    preserving a rule that arrived mid-transaction.
+
+    Comparison is by rule TEXT, unordered. Ordering in these chains is genuinely
+    load-bearing for packet processing, but our own inserts shift foreign rules'
+    indices without changing what they match, so an order-sensitive comparison
+    would fail on every correct run.
+    """
+    was = foreign_rule_arguments(before, owner=owner, managed=managed)
+    now = set(foreign_rule_arguments(after, owner=owner, managed=managed))
+    removed = sorted(rule for rule in was if rule not in now)
+    if not removed:
+        return
+    raise PreconditionFailed(
+        f"the exposure {phase} deleted {len(removed)} rule(s) this "
+        f"deployment does not own: {removed[:3]}. Only rules carrying "
+        f"`{owner}` may be added or removed — a shared chain is never "
+        "restored wholesale, because replaying a snapshot reverts whatever "
+        "another process legitimately added while we were running"
+    )
 
 
 def observation_from_text(
