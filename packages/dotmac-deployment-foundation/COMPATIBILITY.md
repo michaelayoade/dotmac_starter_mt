@@ -147,27 +147,40 @@
   terminal postcondition and promotion evidence. Authorization binds the
   result descriptor; the starting descriptor is the live/CAS precondition.
 
-## Removed in the 0.4 series
+## Retired before any tagged release
 
-Stated here rather than only in the changelog, because this file is what a
-consumer reads to decide whether an upgrade can break them.
+These two entries were declared under "What is public" and have been withdrawn.
+**They are NOT breaking changes**, and the distinction is the point of this
+section rather than a softening of it: a breaking change removes something a
+consumer could have depended on, and nothing could depend on these.
 
-**Neither entry below has ever appeared in a tagged version.** Verified against
-the tags in this repository: `dotmac-deployment-foundation-v0.2.0a2` is the
-newest tag, and `exposure.py` does not exist in it at all — the module was
-introduced after that tag. Two further facts belong with that one rather than
-being left to inference: `0.2.0a2`'s own changelog heading AT THAT TAG reads
-`## 0.2.0a2 — unreleased`, and **no version of this facility has ever been
-published**. So there is no published baseline these removals are measured
-against, and no installed consumer can be holding them. They are listed as
-BREAKING because they were listed under "What is public" and this document's
-promises do not depend on whether anyone happened to take them up.
+What was measured, and how:
 
-### `ExposureTransaction` and `apply_exposure()` — REMOVED
+- `ExposureTransaction` and `apply_exposure()` have **never appeared in a
+  tagged version**. `exposure.py` does not exist at
+  `dotmac-deployment-foundation-v0.2.0a2`, the newest of this facility's three
+  tags — the module was introduced after it.
+- `dotmac-deploy exposure-apply` likewise. `cli.py` DOES exist at that tag and
+  the subcommand is absent from it, so this is a subcommand added after the
+  last tag rather than a tagged surface withdrawn.
+- `0.2.0a2` is in any case not a published baseline. Its own changelog heading
+  AT THAT TAG reads `## 0.2.0a2 — unreleased`, and **no version of this
+  facility has ever been published**.
+
+So the accurate record is a **declared surface retired before it ever shipped**.
+It was written down here, in this document, as something consumers would be
+able to rely on; that promise is withdrawn before anyone could take it up, and
+withdrawing it is exactly why it is recorded rather than quietly deleted.
+
+**An in-tree consumer still has to migrate**, and that is real work regardless
+of what shipped. The migration boundary is below.
+
+### `ExposureTransaction` and `apply_exposure()` — withdrawn
 
 No shim, no alias, no re-export;
 `test_the_retired_surface_is_UNAVAILABLE_not_merely_unmentioned` asserts that
-`from dotmac_deployment_foundation.exposure import ExposureTransaction` raises.
+`from dotmac_deployment_foundation.exposure import ExposureTransaction` raises
+`ImportError`.
 
 They were a second executor. They took the product's deployment lock
 themselves, ordered apply / re-observe / verify / compensate, and no
@@ -179,8 +192,8 @@ courtesy.
 **Replacement: `Executor`, holding an `ExecutionGrant`.** The exposure act is
 `Executor._reconcile_exposure`, performed from the authorized plan.
 
-**The migration boundary** — what a caller must now supply, and why each is not
-optional:
+**The migration boundary** — what a caller must now supply, and why none of it
+can be defaulted:
 
 | was | is | why it cannot be defaulted |
 |---|---|---|
@@ -191,26 +204,30 @@ optional:
 
 A caller that constructed the transaction has **no in-package direct
 replacement**, and that is the change rather than a gap in it: performing this
-act without an authorization is what was removed, not an API. Callers that only
-MEASURED are unaffected and better served — `require_preserved_foreign_rules()`,
-`foreign_rule_arguments()` and `managed_ports()` are now public functions taking
-observations, so a caller that mutates nothing can still make the measurement
-that used to require constructing a transaction.
+act without an authorization is what was withdrawn, not an API. Callers that
+only MEASURED are unaffected and better served —
+`require_preserved_foreign_rules()`, `foreign_rule_arguments()` and
+`managed_ports()` are public functions taking observations, so a caller that
+mutates nothing can still make the measurement that used to require
+constructing a transaction.
 
-**Known consequence, recorded rather than deferred:** Lane 3's `apply_under_lock`
-and `provoked_rollback` items are `blocked`. Control issues no V2 plan carrying
-an exposure reconciliation yet, so no grant in existence names the act, and
-Foundation must not mint one. `verify_publication` refuses a receipt with a
-blocked item, so this is loud at the publication gate rather than silent.
+**Known consequence, recorded rather than deferred:** Lane 3's
+`apply_under_lock` and `provoked_rollback` items are `blocked`. Control issues
+no V2 plan carrying an exposure reconciliation yet, so no grant in existence
+names the act, and Foundation must not mint one. `verify_publication` refuses a
+receipt with a blocked item, so this is loud at the publication gate rather
+than silent.
 
-### `dotmac-deploy exposure-apply --execute` — REMOVED
+### `dotmac-deploy exposure-apply --execute` — withdrawn
 
-The CLI's subcommands and flags are public contract (see "What is public"), so
-a dropped flag is breaking on its own terms. The subcommand survives and still
-observes, verifies and reports; it can no longer change a shared firewall
-chain. It never accepted `--authorization`, so there was no way to hand it a
-Control decision and nothing in it looked for one — the flag was permission
-supplied by whoever typed it.
+The subcommand survives and still observes, verifies and reports; it can no
+longer change a shared firewall chain. It never accepted `--authorization`, so
+there was no way to hand it a Control decision and nothing in it looked for one
+— the flag was permission supplied by whoever typed it.
+
+The CLI's subcommands and flags ARE public contract (see "What is public"), so
+this would be breaking had the flag ever been tagged. It was not, per the
+measurement above.
 
 ## What is not
 
