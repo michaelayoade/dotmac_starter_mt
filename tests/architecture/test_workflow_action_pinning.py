@@ -32,9 +32,15 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 # shape GitHub Actions fixes anyway, and the trailing `# v7.0.0` comment is
 # stripped rather than matched.
 _USES = re.compile(r"^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)")
-# Every interpreter any workflow sets up must have its own lock — see
-# `_python_versions_used`.
+# Every interpreter a workflow sets up AND bootstraps Poetry on must have its
+# own lock — see `_python_versions_needing_a_lock`.
 _SETUP_PY_VERSION = re.compile(r'python-version:\s*"?(?P<v>3\.\d+)"?')
+# `uses: ./.github/actions/setup-poetry` is the sanctioned bootstrap; a bare
+# `poetry` in a `run:` step is the unsanctioned one that
+# `test_poetry_toolchain_contract.py` separately refuses. Either is Poetry use,
+# and this module needs the union rather than the approved half: a workflow
+# reaching for an ambient Poetry still needs the lock this guard is about.
+_SETUP_POETRY = "./.github/actions/setup-poetry"
 
 
 def _workflow_files() -> list[Path]:
@@ -67,19 +73,92 @@ def _iter_uses() -> list[tuple[str, str]]:
     return found
 
 
-def _python_versions_used() -> set[str]:
-    """Every concrete Python minor a workflow sets up, including matrix values
+def _versions_set_up_by(text: str) -> set[str]:
+    """Every concrete Python minor one workflow sets up, including matrix values
     (which appear as a literal list, e.g. `["3.11", "3.12"]`)."""
-    versions: set[str] = set()
+    versions = {m.group("v") for m in _SETUP_PY_VERSION.finditer(text)}
+    for line in text.splitlines():
+        if "python-version:" in line and "[" in line:
+            versions.update(re.findall(r"3\.\d+", line))
+    return versions
+
+
+def _uses_poetry(text: str) -> bool:
+    """Whether this workflow puts Poetry on an interpreter, by either route.
+
+    Textual for the same reason `_USES` is: the question is whether the bytes
+    reach for Poetry at all, and a YAML parse would answer a narrower question
+    about where.
+    """
+    if _SETUP_POETRY in text:
+        return True
+    return any(
+        ("run:" in line and "poetry" in line.lower())
+        or line.lstrip().startswith("poetry ")
+        for line in text.splitlines()
+    )
+
+
+def _python_versions_needing_a_lock() -> set[str]:
+    """Interpreters that a workflow sets up AND bootstraps Poetry on.
+
+    NARROWED on 2026-09-06, and the narrowing is the point rather than a
+    convenience. This used to be every interpreter any workflow set up, which
+    is broader than the reason the lock exists — stated in this module, in
+    `regenerate.sh`, and in the assertion's own docstring: *pip resolves a
+    different dependency SET per interpreter, so reusing one interpreter's
+    Poetry lock on another fails `--require-hashes`*. A workflow that installs
+    nothing has no lock to reuse and no `--require-hashes` install to fail.
+
+    `deployment-render-check.yml` is the case that surfaced it. It sets up 3.11
+    and 3.13 to run the deployment renderer straight off the source tree —
+    `dotmac-deployment-foundation` has zero runtime dependencies, so there is
+    no install of any kind, Poetry or otherwise. The old match demanded a
+    hash-locked 46-package bootstrap for an interpreter that never sees pip,
+    and the only ways to satisfy it were to generate a lock nothing installs or
+    to reuse 3.12's — which `regenerate.sh` names, in capitals, as the thing
+    not to do.
+
+    The premise is ENFORCEABLE rather than stated: it is decided per workflow
+    from that workflow's own bytes, and it re-arms the moment one of these
+    files grows a `setup-poetry` step or a `poetry` command.
+    `test_an_interpreter_that_gains_poetry_needs_a_lock_again` plants exactly
+    that.
+
+    WHAT IS NOW UNMONITORED, said plainly rather than left to be inferred: an
+    interpreter set up only by non-Poetry workflows has no hash-locked
+    bootstrap and this guard does not ask for one. That is correct — there is
+    nothing to lock — but it means adding a `pip install` to such a workflow
+    would introduce an unpinned install this module would not see. The guard
+    that would see it is `test_poetry_comes_only_from_the_hash_locked_bootstrap`
+    for Poetry specifically; a general unpinned-pip guard does not exist in this
+    repository and is not created here.
+    """
+    needed: set[str] = set()
     for path in _workflow_files():
         if ACTIONS in path.parents:
             continue  # action manifests do not set up interpreters
         text = path.read_text()
-        versions.update(m.group("v") for m in _SETUP_PY_VERSION.finditer(text))
-        for line in text.splitlines():
-            if "python-version:" in line and "[" in line:
-                versions.update(re.findall(r"3\.\d+", line))
-    return versions
+        if not _uses_poetry(text):
+            continue
+        needed.update(_versions_set_up_by(text))
+    return needed
+
+
+def _all_python_versions_set_up() -> set[str]:
+    """Every interpreter any workflow sets up, Poetry or not.
+
+    Kept so the non-vacuity assertion below still measures the whole corpus. A
+    parser that silently stopped finding `python-version:` would otherwise make
+    the narrowed check pass over an empty set, which is the failure mode the
+    narrowing itself could introduce.
+    """
+    return {
+        version
+        for path in _workflow_files()
+        if ACTIONS not in path.parents
+        for version in _versions_set_up_by(path.read_text())
+    }
 
 
 def test_every_third_party_action_is_pinned_to_a_full_sha() -> None:
@@ -131,25 +210,94 @@ def test_poetry_comes_only_from_the_hash_locked_bootstrap() -> None:
     )
 
 
-def test_every_python_version_ci_uses_has_its_own_lock() -> None:
+def _missing_locks(versions: set[str]) -> list[str]:
+    return [
+        v
+        for v in sorted(versions)
+        if not (BOOTSTRAP / f"poetry-requirements-py{v.replace('.', '')}.txt").exists()
+    ]
+
+
+def test_every_python_version_that_bootstraps_poetry_has_its_own_lock() -> None:
     """pip resolves a DIFFERENT dependency set per interpreter — on 3.11 Poetry
     additionally needs backports.tarfile, importlib_metadata and zipp (49
     packages vs 46). Reusing one lock on another interpreter fails
     `--require-hashes` with a missing requirement, which would break the
-    kernel-floors matrix that deliberately runs both."""
-    used = _python_versions_used()
-    assert used, "no python-version found in any workflow — the parser drifted"
-    missing = [
-        v
-        for v in sorted(used)
-        if not (BOOTSTRAP / f"poetry-requirements-py{v.replace('.', '')}.txt").exists()
-    ]
+    kernel-floors matrix that deliberately runs both.
+
+    Scoped to interpreters that actually bootstrap Poetry — see
+    `_python_versions_needing_a_lock` for why that is the guard's real premise
+    and what it leaves unmonitored.
+    """
+    assert (
+        _all_python_versions_set_up()
+    ), "no python-version found in any workflow — the parser drifted"
+    needed = _python_versions_needing_a_lock()
+    assert needed, (
+        "no workflow both sets up an interpreter and bootstraps Poetry. That is "
+        "not a pass — it means `_uses_poetry` stopped matching, and this check "
+        "is now asking nothing of anybody"
+    )
+    missing = _missing_locks(needed)
     assert not missing, (
-        "these interpreters are set up by a workflow but have no hash-locked "
-        f"Poetry bootstrap: {missing}. Add them to PYTHON_MINORS in "
+        "these interpreters bootstrap Poetry in a workflow and have no "
+        f"hash-locked bootstrap: {missing}. Add them to PYTHON_MINORS in "
         ".github/bootstrap/regenerate.sh and regenerate — do NOT reuse another "
         "interpreter's lock."
     )
+
+
+def test_an_interpreter_that_gains_poetry_needs_a_lock_again() -> None:
+    """Sensitivity. The narrowing above is only honest if it re-arms.
+
+    A workflow setting up an unlocked interpreter is silent today. The same
+    workflow with a `setup-poetry` step must be named — otherwise the exemption
+    is not a premise, it is a hole with a docstring.
+    """
+    unlocked = sorted(_all_python_versions_set_up() - _python_versions_needing_a_lock())
+    assert unlocked, (
+        "no interpreter is currently exempt, so this test would pass without "
+        "exercising the narrowing at all"
+    )
+    victim = unlocked[0]
+    assert _missing_locks({victim}) == [victim], (
+        f"{victim} is exempt from the lock requirement AND has a lock. Pick a "
+        "genuinely unlocked interpreter, or the planted defect below proves "
+        "nothing"
+    )
+
+    inert = (
+        "    steps:\n"
+        f"      - uses: actions/setup-python@{'0' * 40}\n"
+        "        with:\n"
+        f'          python-version: "{victim}"\n'
+    )
+    assert not _uses_poetry(inert)
+    assert _versions_set_up_by(inert) == {victim}
+
+    planted = inert + f"      - uses: {_SETUP_POETRY}\n"
+    assert _uses_poetry(planted), (
+        "a `setup-poetry` step is not recognised as Poetry use, so the "
+        "exemption would survive the thing it is supposed to re-arm on"
+    )
+    ambient = inert + "      - run: poetry install\n"
+    assert _uses_poetry(ambient), (
+        "an ambient `poetry` command is not recognised as Poetry use. That is "
+        "the route `test_poetry_comes_only_from_the_hash_locked_bootstrap` "
+        "refuses, and it still needs the lock this guard is about"
+    )
+
+
+def test_the_exemption_is_refused_over_a_workflow_that_bootstraps_poetry() -> None:
+    """The near-miss, from the other side: a locked interpreter that DOES use
+    Poetry must stay inside the requirement, or the narrowing quietly excused
+    the whole corpus."""
+    needed = _python_versions_needing_a_lock()
+    assert "3.12" in needed, (
+        "3.12 bootstraps Poetry in `ci.yml` and must still be required to have "
+        "a lock; if it is not, `_uses_poetry` is under-matching"
+    )
+    assert _missing_locks({"3.12"}) == []
 
 
 def test_the_bootstrap_installs_into_a_fresh_venv_not_the_interpreter() -> None:

@@ -43,8 +43,24 @@ fi
 
 POETRY_PIN="$(python3 "${REPO}/scripts/check_poetry_toolchain.py" --print-requirement)"
 
-# Must cover every interpreter any workflow sets up — see the kernel-floors
-# matrix in .github/workflows/ci.yml.
+# Must cover every interpreter a workflow sets up AND BOOTSTRAPS POETRY ON —
+# see the kernel-floors matrix in .github/workflows/ci.yml.
+#
+# "and bootstraps Poetry on" is load-bearing rather than a hedge. This list
+# used to be described as every interpreter any workflow sets up, which is
+# broader than the reason above it: the lock exists because pip resolves a
+# different dependency SET per interpreter, and a workflow that runs no pip has
+# no set to resolve. `deployment-render-check.yml` sets up 3.13 to run the
+# deployment renderer straight off the source tree — the facility has zero
+# runtime dependencies, so nothing is installed — and generating a 46-package
+# hash-locked bootstrap that no job would ever install would be ceremony
+# standing in for a premise.
+#
+# `tests/architecture/test_workflow_action_pinning.py` decides the same
+# question mechanically, per workflow, from that workflow's own bytes, and
+# re-arms the moment one of them grows a `setup-poetry` step or a `poetry`
+# command. If you are here because that test named an interpreter, add it below
+# and regenerate; do NOT reuse another interpreter's lock.
 PYTHON_MINORS=("3.11" "3.12")
 
 if ! docker info >/dev/null 2>&1; then

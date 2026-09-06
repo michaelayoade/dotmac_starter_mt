@@ -179,6 +179,38 @@ on its own bytes this file reads as inert.
 """
 
 [[entrypoint]]
+name = "workflow:deployment-render-check"
+family = "workflow"
+path = ".github/workflows/deployment-render-check.yml"
+trigger = "push, pull_request, workflow_dispatch"
+credential = "none"
+disposition = "not_an_executor"
+premise = """
+Compares the committed `deploy/rendered/**` against what `deploy/product.toml`
+renders, and reads nothing else. It commands no deployment verb, directly or
+through any in-tree callee: `render --check` writes no file, opens no socket
+and starts no process, and the only other command in the file is `git ls-files`.
+
+TWO PROPERTIES WORTH DECLARING RATHER THAN LEAVING TO BE INFERRED, because both
+are unusual for a workflow in this repository and both are what keep the verdict
+above true.
+
+It TAKES NO CREDENTIAL. `credential = "none"` here is a stronger claim than it
+looks beside `deployment-conformance`, which needs FORGEJO_READ_TOKEN to reach
+the private index. This file has no `secrets:` block and no `env:` reading one,
+and its `permissions:` is `contents: read`.
+
+It INSTALLS NOTHING. No pip, no Poetry, no action that fetches a package.
+`dotmac-deployment-foundation` has zero runtime dependencies, so the renderer
+runs off `packages/dotmac-deployment-foundation/src` through PYTHONPATH on a
+bare `setup-python`. That is why this workflow can execute on every pull request
+while `deployment-adopter` cannot: the adopter installs a PUBLISHED wheel, and
+no version of the facility has ever been published. It is also why 3.13 has no
+hash-locked Poetry bootstrap and is not required to have one — see
+`tests/architecture/test_workflow_action_pinning.py`.
+"""
+
+[[entrypoint]]
 name = "workflow:deployment-rehearsal"
 family = "workflow"
 path = ".github/workflows/deployment-rehearsal.yml"
