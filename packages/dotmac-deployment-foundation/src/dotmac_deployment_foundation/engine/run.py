@@ -83,6 +83,13 @@ from ..external_recovery import (
     backup_record_from_receipt,
     require_restore_proof,
 )
+from ..host_source import (
+    CandidateReceipt,
+    HostSource,
+    InstalledArtifact,
+    InstalledMetadata,
+    require_host_source,
+)
 from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -470,6 +477,10 @@ class Executor:
         now_epoch: int = 0,
         exposure_effects: ExposureEffects | None = None,
         execution_plan: FoundationExecutionPlanV1,
+        host_source_receipt: CandidateReceipt | None = None,
+        host_source_installed: InstalledArtifact | None = None,
+        host_source_metadata: InstalledMetadata | None = None,
+        host_source_probe: Callable[[], str] | None = None,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -598,6 +609,27 @@ class Executor:
         # rather than Optional-with-a-default-path: a value invented at
         # construction would be a lock path for a lock nobody took.
         self._lock_path: Path | str = ""
+        # THE HOST SOURCE INGREDIENTS, held rather than a `HostSource` itself.
+        #
+        # A caller handing in an already-built `HostSource` would prove
+        # nothing: `HostSource` is a plain dataclass, constructible directly by
+        # anyone who imports it, so accepting one here would make "was
+        # verified" indistinguishable from "was asserted". What is accepted
+        # instead is the raw material `require_host_source` itself checks —
+        # the committed candidate receipt Boundary 4's `cli.py` loads from
+        # disk, and (for a test double only) a pre-read `InstalledArtifact`,
+        # an `InstalledMetadata` reader, or a source-tree-digest probe. `run`
+        # and `rollback` call `require_host_source` THEMSELVES, in
+        # `_verify_host_source` below; nothing else in this class can make
+        # that call satisfied by construction.
+        self._host_source_receipt = host_source_receipt
+        self._host_source_installed = host_source_installed
+        self._host_source_metadata = host_source_metadata
+        self._host_source_probe = host_source_probe
+        # The bound identity, once verified. `None` until `_verify_host_source`
+        # runs; held so a caller inspecting a completed run can see which
+        # Foundation performed it, never read before that point.
+        self._host_source: HostSource | None = None
 
     # ── entry point ─────────────────────────────────────────────────────────
 
@@ -609,6 +641,29 @@ class Executor:
         only that the caller can compute a digest.
         """
         return self._spec.to_canonical_document().sha256_digest()
+
+    def _verify_host_source(self) -> None:
+        """THE MANDATORY PREREQUISITE every mutating entry point calls.
+
+        Boundary 4's ruling, verbatim: "the executor must call
+        `require_host_source` itself" — not be handed a `HostSource`, which
+        proves nothing because anyone can construct one. This method is that
+        call, made with the raw ingredients held since construction, so the
+        one thing every mutating entry point shares in common is that IT, not
+        a caller, performed the verification.
+
+        Ordering is the other half of the ruling: called after the lock is
+        proven held (so there is something to serialise against) and before
+        EVERYTHING else — grant revalidation, plan-digest recomputation,
+        annotations, principal bootstrap, every step. A wrong-artifact host
+        must not reach any of those, however briefly.
+        """
+        self._host_source = require_host_source(
+            receipt=self._host_source_receipt,
+            installed=self._host_source_installed,
+            metadata=self._host_source_metadata,
+            source_tree_digest=self._host_source_probe,
+        )
 
     def run(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
@@ -628,6 +683,11 @@ class Executor:
         # was two concurrent deployments; this is the first thing in this
         # facility that would actually have refused the second one.
         self._lock_path = lock.require_held(product=self._spec.product)
+        # Which Foundation is asking, verified before anything else this
+        # method does. See `_verify_host_source`'s docstring for why the
+        # position — right after the lock, ahead of the grant — is the ruling
+        # rather than a preference.
+        self._verify_host_source()
         # Re-checked here, not merely at construction: the grant names a
         # descriptor, and this asserts the plan in hand is that descriptor's.
         # A grant built early and used late is exactly where "nothing changed
@@ -1128,6 +1188,10 @@ class Executor:
         because that is the half a "wrap the happy path" reading omits.
         """
         self._lock_path = lock.require_held(product=self._spec.product)
+        # Same gate, same position, same reason as `run`: rollback mutates a
+        # host exactly like a deploy does, and the ruling names it explicitly
+        # so this is not left to a "wrap the happy path" reading.
+        self._verify_host_source()
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
         )
