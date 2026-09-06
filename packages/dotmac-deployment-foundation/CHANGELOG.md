@@ -106,6 +106,46 @@ already carried). Both are now refused for `--purpose candidate` and
 committing the drifted receipt, appending a disposition, or allocating a
 successor — those remain Michael's decisions.
 
+### Control owns the rehearsal grant; this facility consumes one and mints none
+
+Lane 3 item 8 is `provoked_rollback` — *"Rollback, provoked rather than
+simulated"* — and provoking it means writing rules that belong to nobody into
+`DOCKER-USER` and `INPUT` and arming a condition a running deployment cannot
+reconcile. A named destructive act against a host, an executor for it in
+`scripts/lane3_provocation.py`, and **no grant type anywhere**. The distance
+between describing that and doing it was calling the function.
+
+`rehearsal_grant.py` closes it as a CONSUMER ONLY. `RehearsalGrant.v1` arrives
+as raw material and becomes usable only through a `RehearsalGrantVerifier` the
+assembly injects at `ExecutionBindings.rehearsal_grant_verifier`; the two
+witnesses mirror the deployment path exactly, so `permit_provocation` is the
+sole issuer of a `ProvocationPermit` and `verify_rehearsal_grant` the sole
+route to verified terms. `seed_foreign_rules` and `provoke_apply_failure` now
+require that permit and re-check the refusal and step it names.
+
+There is deliberately **no issuer**: no `build_rehearsal_grant`, no default
+verifier, no inference of permission from a `RehearsalReceiptV1`.
+`tests/architecture/test_deployment_foundation_rehearsal_grant.py` holds the
+static half — no function in this facility returns a `RehearsalGrantV1` — and
+the near-miss it must stay silent on is `rehearsal.build_receipt`, measured on
+the real tree. Minting evidence about a run that happened is this facility's
+job; minting permission is not.
+
+The protocol method is `attest_rehearsal`, not `attest`, so an
+`AuthorizationVerifier` cannot fill the rehearsal slot: the key that authorizes
+production is not the key that authorizes an act which must fail.
+
+**Two things this does not do, stated rather than left to be discovered.**
+`provocation_at_step` is checked against `engine.plan.StepKind`, which this
+facility owns — Control's PR #45 mirrors that vocabulary as a literal read at
+`98435a0c`, and the mirror predates `apply_exposure` and `restore_exposure`, so
+a grant Control can issue today cannot name the step item 8's verification
+actually refuses at. That divergence is Control's to repair. And
+`restore-rehearsal --execute` stays in `UNAUTHORIZED_EXECUTE_BACKLOG`: PR #45's
+`ProvocableRefusal` is closed at one member bound to item 8, a restore
+rehearsal is not a provocation, and inventing a member here to make the two
+line up is the `recover` mistake from the other direction.
+
 ### An absence proof can only prove the concern its inventory belongs to
 
 `IntegrationSurfaceAbsenceProofV1` validated `families` against
