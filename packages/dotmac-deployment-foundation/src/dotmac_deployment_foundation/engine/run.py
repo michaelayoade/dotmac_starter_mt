@@ -40,6 +40,7 @@ import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Final, Protocol, runtime_checkable
 
 from ..authorization import ExecutionGrant
@@ -64,17 +65,28 @@ from ..execution_plan import (
     require_execution_plan_digest,
 )
 from ..execution_plan_v2 import (
+    ExposureReconciliationV1,
     FoundationExecutionPlanV2,
     PostgresPrincipalCredentialBootstrapV1,
     require_execution_plan_v2_digest,
+)
+from ..exposure import (
+    ExposureEffects,
+    HostObservation,
+    managed_ports,
+    ownership_comment,
+    require_preserved_foreign_rules,
+    verify_exposure,
 )
 from ..external_recovery import (
     accept_external_recovery_receipt,
     backup_record_from_receipt,
     require_restore_proof,
 )
+from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
+from .lock import DeploymentLockHeld
 from .plan import (
     DeploymentPlan,
     Step,
@@ -456,6 +468,7 @@ class Executor:
         recovery_verifier: SignatureVerifier | None = None,
         recovery_records: Mapping[str, Sequence[BackupRecord]] | None = None,
         now_epoch: int = 0,
+        exposure_effects: ExposureEffects | None = None,
         execution_plan: FoundationExecutionPlanV1,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
@@ -547,6 +560,23 @@ class Executor:
         self._bootstraps: tuple[PostgresPrincipalCredentialBootstrapV1, ...] = tuple(
             getattr(execution_plan, "principal_bootstraps", ()) or ()
         )
+        # AUTHORIZED exposure, read off the plan and nowhere else — same rule,
+        # same `getattr` shape, and for the same reason: a V1 plan carries none,
+        # so an old authorization cannot acquire a new act by being run through
+        # a newer executor. The RULES are not here and never will be: they are
+        # derived from the descriptor, whose digest is inside this plan and
+        # inside the grant, so what gets written to a shared chain is frozen
+        # transitively rather than restated somewhere it could disagree.
+        self._exposure: tuple[ExposureReconciliationV1, ...] = tuple(
+            getattr(execution_plan, "exposure_reconciliations", ()) or ()
+        )
+        # HANDED OVER, never constructed here. `exposure.py` owns the seam and
+        # the measurement; `providers/exposure_host.py` owns one implementation
+        # of it; this class owns the ORDER, which until now was owned by a
+        # second class in a third place. Defaults to None and refuses at the
+        # point of use, like the evidence policy above: a plan that authorizes
+        # no exposure must not require a provider to be installed.
+        self._exposure_effects = exposure_effects
         self._sleep = sleep
         self._clock = clock
         self._rolling_back = False
@@ -564,6 +594,10 @@ class Executor:
         # The real BackupResult per dataset, kept as a value rather than
         # reconstructed from a formatted note. See `_do_verify_backup`.
         self._backups: dict[str, BackupResult] = {}
+        # Set by `run`/`rollback` from the caller's proven hold. Empty here
+        # rather than Optional-with-a-default-path: a value invented at
+        # construction would be a lock path for a lock nobody took.
+        self._lock_path: Path | str = ""
 
     # ── entry point ─────────────────────────────────────────────────────────
 
@@ -576,7 +610,24 @@ class Executor:
         """
         return self._spec.to_canonical_document().sha256_digest()
 
-    def run(self, plan: DeploymentPlan) -> DeploymentOutcome:
+    def run(
+        self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
+    ) -> DeploymentOutcome:
+        # THE LOCK, PROVEN RATHER THAN ASSUMED, and FIRST — before the grant,
+        # before the plan digest, before `_bootstrap_principals`, before any
+        # step. `_do_acquire_lock` used to return the sentence "held by the
+        # caller for the duration of the run" without asking anybody, and the
+        # executor named no lock, took no lock and checked no lock. The rule
+        # lived in two comments in `cli.py` and held only for the two callers
+        # who had read them.
+        #
+        # Required and keyword-only with no default, the same construction the
+        # grant uses one line below: a caller holding no lock has nothing to
+        # pass, so "deploy without serialising" stops being expressible rather
+        # than merely being discouraged. The 2026-07-12 incident (`lock.py`)
+        # was two concurrent deployments; this is the first thing in this
+        # facility that would actually have refused the second one.
+        self._lock_path = lock.require_held(product=self._spec.product)
         # Re-checked here, not merely at construction: the grant names a
         # descriptor, and this asserts the plan in hand is that descriptor's.
         # A grant built early and used late is exactly where "nothing changed
@@ -607,6 +658,11 @@ class Executor:
         try:
             self._bootstrap_principals(outcome)
             self._run_steps(plan.steps, plan, outcome)
+            # AFTER the steps, and the ordering is the act's rather than a
+            # preference: the rules published here point at containers that
+            # `_do_switch` has already recreated, so reconciling before the
+            # switch would open ports onto the outgoing image.
+            self._reconcile_exposure(outcome)
             outcome.succeeded = True
             outcome.standing = RunStanding.SUCCEEDED
         except DeploymentError:
@@ -790,6 +846,179 @@ class Executor:
                 )
             )
 
+    def _reconcile_exposure(self, outcome: DeploymentOutcome) -> None:
+        """Apply the exposure this plan was authorized to apply, or put it back.
+
+        ## Why this is here and not in `exposure.py`
+
+        Because it is an ORDER of effects against a host, and this facility has
+        exactly one of those. `ExposureTransaction` used to own this sequence —
+        take a lock, snapshot, apply, re-observe, verify, compensate — which
+        made it a second executor: no `ExecutionGrant` reached it, no frozen
+        plan bound it, no receipt named it, and the CLI subcommand that drove
+        it had no `--authorization` flag to offer. Every guarantee the rest of
+        this package spends a thousand lines establishing simply did not apply
+        on that path.
+
+        It also took its OWN lock, which is worse than it sounds. `flock` is
+        per open file description, so a caller already holding the product's
+        deployment lock could not call it at all — the inner acquisition
+        refuses with `EAGAIN` against its own process. Exposure and deployment
+        were not merely ungoverned together; they were structurally unable to
+        be sequenced. That is why boundary 1 and boundary 3 are one change.
+
+        ## What it does NOT do
+
+        It does not recreate containers. `_do_switch` already does that, and
+        the old transaction's `apply_compose` was a SECOND mutation on top of
+        the first irreversible one. Here the compose half belongs to the step
+        that owns it and this reconciles the firewall half only, which is the
+        half nothing else in the executor performs. `verify_exposure` then
+        checks BOTH against the descriptor, so the division of labour is not a
+        division of verification.
+
+        ## Compensation, and its limit
+
+        On any refusal this restores the snapshot's chains and re-measures. The
+        limit is stated rather than hidden: `restore_chains` is the provider's
+        promise, and `require_preserved_foreign_rules` is how that promise is
+        MEASURED rather than believed — in both directions, apply and restore,
+        because a compensation that eats a bystander's rule is the same bug as
+        an apply that does.
+        """
+        if not self._exposure:
+            return
+        effects = self._exposure_effects
+        if effects is None:
+            raise PreconditionFailed(
+                "this plan authorizes exposure reconciliation for "
+                f"{[item.family for item in self._exposure]} and no exposure "
+                "provider is installed. The authorization is real and the "
+                "capability is absent, which is a deployment environment that "
+                "was built wrong — not a step to skip. Declare one through the "
+                "assembly's execution bindings"
+            )
+        owner = ownership_comment(self._spec.product)
+        managed = managed_ports(self._spec)
+        started = self._clock()
+        # Read BEFORE the flag: observing mutates nothing, and a snapshot is
+        # what a rollback restores TO. A full observation rather than a diff,
+        # because a compensation that restores only what it thinks it changed
+        # cannot repair what it did not notice changing.
+        snapshot = effects.observe()
+        # Claimed BEFORE the first write, like every other mutating act here: a
+        # reconciliation that failed partway has already touched a shared chain.
+        outcome.mutated = True
+        try:
+            for item in self._exposure:
+                rules = tuple(
+                    rule
+                    for rule in build_firewall_plan(self._spec)
+                    if rule.family == item.family
+                )
+                effects.replace_rules(item.family, item.chain, rules)
+            observed = effects.observe()
+            require_preserved_foreign_rules(
+                snapshot, observed, owner=owner, managed=managed, phase="apply"
+            )
+            report = verify_exposure(self._spec, observed)
+            if not report.ok:
+                raise PreconditionFailed(
+                    "the applied exposure did not verify: "
+                    + "; ".join(finding.detail for finding in report.refusals)
+                )
+        except DeploymentError as exc:
+            compensated = self._restore_exposure(snapshot, outcome, owner, managed)
+            refused = isinstance(exc, PreconditionFailed)
+            # BOTH facts, in one sentence, and neither one displacing the other.
+            #
+            # The original diagnosis is what the operator came for: a
+            # compensation that raises its own error instead sends them looking
+            # for the wrong cause. But a compensation that DELETED a bystander's
+            # firewall rule is a data-loss event, and burying that in a step
+            # record while the exception talks about a port binding would rank
+            # the two exactly backwards. So the raised message leads with what
+            # went wrong and ends with what putting it back did.
+            detail = f"{exc} ({compensated})"
+            outcome.records.append(
+                StepRecord(
+                    StepKind.APPLY_EXPOSURE,
+                    self._spec.product,
+                    False,
+                    detail,
+                    self._clock() - started,
+                    StepStanding.REFUSED if refused else StepStanding.FAILED,
+                )
+            )
+            outcome.failed_step = StepKind.APPLY_EXPOSURE
+            outcome.failure = detail
+            outcome.succeeded = False
+            outcome.standing = RunStanding.REFUSED if refused else RunStanding.FAILED
+            raise type(exc)(detail) from exc
+        outcome.records.append(
+            StepRecord(
+                StepKind.APPLY_EXPOSURE,
+                self._spec.product,
+                True,
+                f"reconciled {[item.family for item in self._exposure]} against "
+                f"descriptor {report.descriptor_digest}",
+                self._clock() - started,
+                StepStanding.OK,
+            )
+        )
+
+    def _restore_exposure(
+        self,
+        snapshot: HostObservation,
+        outcome: DeploymentOutcome,
+        owner: str,
+        managed: Sequence[int],
+    ) -> str:
+        """Put back this product's rules, and MEASURE that nothing else moved.
+
+        Returns a sentence for the failing record rather than raising, because
+        the caller is already carrying a failure and a compensation that
+        replaces the original diagnosis with its own has lost the thing the
+        operator needed. A compensation that itself failed is recorded as its
+        own step, so both facts survive.
+        """
+        effects = self._exposure_effects
+        if effects is None:  # pragma: no cover - guarded by the caller
+            return "no provider to compensate with"
+        started = self._clock()
+        try:
+            effects.restore_chains(snapshot.chains)
+            require_preserved_foreign_rules(
+                snapshot,
+                effects.observe(),
+                owner=owner,
+                managed=managed,
+                phase="restore",
+            )
+        except DeploymentError as exc:
+            outcome.records.append(
+                StepRecord(
+                    StepKind.RESTORE_EXPOSURE,
+                    self._spec.product,
+                    False,
+                    str(exc),
+                    self._clock() - started,
+                    StepStanding.FAILED,
+                )
+            )
+            return f"NOT rolled back: {exc}"
+        outcome.records.append(
+            StepRecord(
+                StepKind.RESTORE_EXPOSURE,
+                self._spec.product,
+                True,
+                "this product's rules restored; no foreign rule moved",
+                self._clock() - started,
+                StepStanding.OK,
+            )
+        )
+        return "rolled back"
+
     def _run_steps(
         self,
         steps: Sequence[Step],
@@ -881,7 +1110,9 @@ class Executor:
         except Exception as exc:
             outcome.notes.append(f"evidence could not be written: {exc}")
 
-    def rollback(self, plan: DeploymentPlan) -> DeploymentOutcome:
+    def rollback(
+        self, plan: DeploymentPlan, *, lock: DeploymentLockHeld
+    ) -> DeploymentOutcome:
         """Execute the rollback, or refuse it.
 
         `steps_for_rollback` returns the steps and nothing ran them, so
@@ -889,7 +1120,14 @@ class Executor:
         actually execute, and `_rolling_back` makes `switch` target the previous
         digest rather than the deploying one — which the shared handler would
         otherwise have done, restoring the image that had just failed.
+
+        ``lock`` is required here for the same reason it is required by
+        :meth:`run`, and the rollback half is if anything the sharper one: a
+        rollback races the deployment it is undoing, and the two must not
+        interleave. Boundary 3 names failure and rollback handling explicitly
+        because that is the half a "wrap the happy path" reading omits.
         """
+        self._lock_path = lock.require_held(product=self._spec.product)
         self._grant.require(
             operation="rollback", descriptor_digest=self._descriptor_digest()
         )
@@ -950,7 +1188,19 @@ class Executor:
         # here: a lock taken inside the executor would be released the moment
         # this method returns, which is the beginning of the deployment rather
         # than the end of it.
-        return "held by the caller for the duration of the run"
+        #
+        # This step no longer ASSERTS that. `run`/`rollback` refuse without a
+        # live `DeploymentLockHeld` before reaching any step, so by the time
+        # this executes the hold is established and this reports the actual
+        # inode rather than restating a convention. A step that narrated a
+        # property nobody checked is how the property came to be unchecked.
+        if not self._lock_path:  # pragma: no cover - run()/rollback() set it
+            raise PreconditionFailed(
+                "no deployment lock is recorded for this run. Reaching this "
+                "step without one means an entry point mutated a host without "
+                "passing through the lock requirement"
+            )
+        return f"held by the caller at {self._lock_path} for the whole run"
 
     def _do_verify_image(
         self, step: Step, plan: DeploymentPlan, outcome: DeploymentOutcome
@@ -1163,8 +1413,7 @@ class Executor:
             now_epoch=self._now_epoch or receipt.proved_at_epoch,
         )
         outcome.notes.append(
-            f"recovery receipt {receipt.sha256_digest()} for {step.target}: "
-            f"{detail}"
+            f"recovery receipt {receipt.sha256_digest()} for {step.target}: {detail}"
         )
         return (
             f"{receipt.executor.kind}:{receipt.executor.identifier}"

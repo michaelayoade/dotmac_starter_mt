@@ -127,6 +127,26 @@ class StepKind(str, Enum):
     #: the evidence record can carry; the executor drives it from the authorized
     #: V2 plan.
     BOOTSTRAP_PRINCIPALS = "bootstrap_principals"
+    #: Reconcile the target's declared exposure — recreate the published
+    #: containers and replace this product's own firewall rules — and its
+    #: compensation.
+    #:
+    #: DELIBERATELY NOT EMITTED BY `build_plan`, for the identical reason
+    #: `BOOTSTRAP_PRINCIPALS` is not, and the reason is worth restating rather
+    #: than cross-referencing: `FoundationExecutionPlanV1.steps` is inside the
+    #: V1 digest, so a step `build_plan` emits moves every V1 digest Control
+    #: has already frozen. The members exist here so the acts HAVE NAMES the
+    #: evidence record can carry; the executor drives them from
+    #: `FoundationExecutionPlanV2.exposure_reconciliations`.
+    #:
+    #: They exist AT ALL because until now this ordering lived in a second
+    #: class — `exposure.ExposureTransaction` — which took its own lock, ran
+    #: its own apply/verify/compensate sequence, and was reachable from a CLI
+    #: subcommand that had no `--authorization` flag to offer. Two executors is
+    #: one more than a facility whose whole premise is that mutation passes
+    #: through one authorized seam can have.
+    APPLY_EXPOSURE = "apply_exposure"
+    RESTORE_EXPOSURE = "restore_exposure"
     RECORD_EVIDENCE = "record_evidence"
     PRUNE_IMAGES = "prune_images"
     RELEASE_LOCK = "release_lock"
@@ -329,16 +349,14 @@ def build_plan(
     steps.append(
         Step(
             StepKind.VERIFY_REVISION,
-            f"Verify the image was built from source revision "
-            f"{spec.source_revision}",
+            f"Verify the image was built from source revision {spec.source_revision}",
             target=spec.source_revision,
         )
     )
     steps.append(
         Step(
             StepKind.VERIFY_MANIFEST,
-            f"Verify the composed product manifest hashes to "
-            f"{spec.manifest_digest}",
+            f"Verify the composed product manifest hashes to {spec.manifest_digest}",
             target=spec.manifest_path,
         )
     )

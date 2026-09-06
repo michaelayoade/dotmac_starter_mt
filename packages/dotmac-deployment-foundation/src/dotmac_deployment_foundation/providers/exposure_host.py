@@ -1,9 +1,15 @@
 """`ExposureEffects` against a real host, and the preservation property.
 
-`ExposureTransaction` describes apply, re-observe and roll back. Until now
-nothing implemented it against a host, so items 1-3 and 8 of the exposure
-rehearsal were hand-driven — and a hand-driven equivalent proves the operator
-can do it, not that the code can.
+`ExposureEffects` describes observe, apply and restore. Until now nothing
+implemented it against a host, so items 1-3 and 8 of the exposure rehearsal
+were hand-driven — and a hand-driven equivalent proves the operator can do it,
+not that the code can.
+
+The ORDER those effects are performed in is not here and is no longer in
+`exposure.py` either: it belongs to `engine.run.Executor`, under an
+`ExecutionGrant` and the caller's deployment lock. A provider performs typed
+effects; it does not become a second executor, and neither does the module
+that declares the seam.
 
 ## The property that shapes this file
 
@@ -71,9 +77,9 @@ Runner = Callable[..., CommandResult]
 
 # `OWNERSHIP_PREFIX` and `ownership_comment` MOVED to `..exposure` and are
 # re-exported here so existing importers keep working. They belong to the
-# contract rather than to this provider: `ExposureTransaction` now measures the
-# preservation property itself, and it can only do that if "ours" means the
-# same thing to the transaction and to every implementation of the seam.
+# contract rather than to this provider: `require_preserved_foreign_rules` now
+# measures the preservation property, and it can only do that if "ours" means
+# the same thing to the executor and to every implementation of the seam.
 
 
 def _port_match_args(rule: FirewallRule) -> list[str]:

@@ -731,9 +731,9 @@ def test_an_expired_lease_is_still_EXPIRED_HELD_after_a_refused_run(
         # THE case Michael ruled on: the compose apply failed ON THE HOST.
         StepFailed("apply_compose", "docker compose up exited 1"),
         # `errors.py` documents this as "a gate refused before anything was
-        # mutated", and `ExposureTransaction.run` raises it AFTER applying the
-        # stack, rewriting both filter chains and rolling back. The type cannot
-        # discriminate; the position can.
+        # mutated", and `Executor._reconcile_exposure` raises it AFTER writing
+        # this product's rules into both shared filter chains and compensating.
+        # The type cannot discriminate; the position can.
         PreconditionFailed("the applied exposure did not verify"),
         # `build_receipt` raises this after the whole transaction.
         SpecError("a receipt is missing an item"),
@@ -765,9 +765,9 @@ def test_a_refusal_below_this_lane_AFTER_mutation_is_host_state_uncertified(
         StepFailed("apply_compose", "docker compose up exited 1"),
         PreconditionFailed("the applied exposure did not verify"),
         SpecError("a receipt is missing an item"),
-        # THE instance: `ExposureTransaction.run` takes the deployment lock
-        # BEFORE its first effect, so this arrives with the lease in hand and
-        # nothing touched.
+        # THE instance: the CALLER takes the deployment lock before the
+        # executor's first effect and hands it over as a `DeploymentLockHeld`,
+        # so this arrives with the lease in hand and nothing touched.
         LockUnavailableError("another deployment holds the lock"),
         DeploymentFoundationError("bare"),
     ],
@@ -1099,69 +1099,148 @@ def _first_mutation_line(function: ast.FunctionDef) -> int:
     return lines[0]
 
 
-@pytest.mark.parametrize(
-    ("call", "why"),
-    [
-        (
-            "ControllerSshFingerprintV1.parse",
-            "whether `--controller-identity` is a key fingerprint is decidable "
-            "from the argument alone",
-        ),
-        (
-            "require_commit",
-            "whether `--foundation-revision` and `--candidate-source-revision` "
-            "are full commits is decidable from the arguments alone",
-        ),
-        ("private_port", "a question about the descriptor"),
-        ("inside_source_set", "a question about the descriptor"),
-        (
-            "require_inside_probe_harness",
-            "a missing harness, argument or jump key is a fact about the " "INVOCATION",
-        ),
-    ],
+#: Every call in the runner that CHANGES a host. Derived from the seam it goes
+#: through (`ExposureEffects`) plus the provocation harness, so a new mutator
+#: has to be added here as a reviewed diff.
+_HOST_MUTATORS = frozenset(
+    {
+        "apply_compose",
+        "replace_rules",
+        "restore_chains",
+        "seed_foreign_rules",
+        "provoke_apply_failure",
+        "disarm_apply_failure",
+        "withdraw_foreign_rules",
+    }
 )
-def test_every_precondition_unfit_site_is_asked_BEFORE_first_mutation(
-    call: str, why: str
-) -> None:
-    """`precondition_unfit` asserts the host was never touched. Asked after the
-    apply that sentence is FALSE about the machine, and a release carrying it
-    would tell a destroyer the host was untouched when it was not.
 
-    Three of these were once reached only after the compose stack had been
-    applied and both filter chains rewritten. This is the check that says so.
+
+def _host_mutating_calls(function: ast.FunctionDef) -> dict[str, int]:
+    """Every host-mutating call in ``function``, by name and first line."""
+    found: dict[str, int] = {}
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call):
+            name = ast.unparse(node.func).split(".")[-1]
+            if name in _HOST_MUTATORS:
+                found.setdefault(name, node.lineno)
+    return found
+
+
+def test_the_runner_MUTATES_NOTHING_and_the_ordering_guards_are_RETIRED() -> None:
+    """The two position guards that used to live here are retired. Why, exactly.
+
+    They asserted an ORDERING around `ctx.host_mutated = True`: five
+    `precondition_unfit` sites before it, three sites after it. That was the
+    right guard against the defect that shipped — three preconditions reached
+    only once the compose stack had been applied and both filter chains
+    rewritten, so a release could claim `precondition_unfit` about a host it had
+    already changed.
+
+    **Their subject no longer exists.** The apply moved to
+    `Executor._reconcile_exposure` behind an authorization Control does not yet
+    issue, so `apply_under_lock` and `provoked_rollback` are `blocked` and the
+    runner mutates nothing at all. One of the three "after" cases was
+    `transaction.run`, a call to a class that has been deleted.
+
+    They are RETIRED rather than relaxed, and the difference is this test. An
+    ordering assertion around a line that does not exist cannot be made to pass
+    honestly — `_first_mutation_line` would have to stop requiring exactly one
+    assignment, which is precisely the loosening that lets two of them back in.
+    So the weaker claim is dropped and a STRONGER one takes its place: there is
+    no mutation, which makes every `precondition_unfit` site trivially truthful.
+
+    It is a two-directional ratchet. The moment any mutation returns to `run`,
+    this fails and names the guards to restore; the detector they need
+    (`_first_mutation_line`, `_first_call_line`) is deliberately kept and kept
+    under test below, so restoring them is re-pointing a working tool rather
+    than rewriting one from this docstring.
     """
     function = _run_function()
-    assert _first_call_line(function, call) < _first_mutation_line(function), (
-        f"`{call}` is reached after `ctx.host_mutated = True`, and it refuses "
-        f"with `precondition_unfit` — {why}, so it belongs before the host is "
-        "touched or the member it raises says something false"
+
+    mutators = _host_mutating_calls(function)
+    assert mutators == {}, (
+        f"the Lane 3 runner mutates a host again: {sorted(mutators)}. That is "
+        "not wrong in itself — it is what this lane is FOR — but it means "
+        "`precondition_unfit` can now be claimed about a changed host. Restore "
+        "`ctx.host_mutated = True` immediately before the first mutation and "
+        "restore the two ordering guards this test replaced (git log this "
+        "file); `_first_mutation_line` and `_first_call_line` below are kept "
+        "working precisely so that is a re-point rather than a rewrite"
+    )
+
+    declared = [
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "ctx.host_mutated" for target in node.targets)
+        and ast.unparse(node.value) == "True"
+    ]
+    assert declared == [], (
+        f"`run` declares the host mutated at line(s) {declared} while calling "
+        "no mutator. The flag and the act must not disagree: a release saying "
+        "the host was touched when nothing touched it sends a destroyer to "
+        "quarantine a clean machine"
     )
 
 
-@pytest.mark.parametrize(
-    ("call", "member"),
-    [
-        ("inside_vantage.collect", "evidence_unreadable"),
-        ("build_receipt", "host_state_uncertified, as an unnamed below-lane refusal"),
-        (
-            "transaction.run",
-            "host_state_uncertified, as an unnamed below-lane refusal",
-        ),
-    ],
-)
-def test_the_after_mutation_sites_really_are_after_it(call: str, member: str) -> None:
-    """The other half, and the reason it is not enough to check one direction.
+def test_the_no_mutation_ratchet_still_bites() -> None:
+    """Sensitivity, on synthetic sources. A clean tree proves nothing by passing.
 
-    A test that only proved the precondition sites come first would pass over a
-    `run` that had moved everything before the mutation — including the probe
-    that must be taken while the stack is UP. `inside_vantage.collect` refuses
-    with `evidence_unreadable` precisely BECAUSE it is reached long after the
-    apply, where "the host was never touched" cannot be claimed.
+    Both directions, because the detector's value is entirely in telling them
+    apart: a `run` that observes as often as it likes is silent, and one that
+    writes a single rule is named.
     """
-    function = _run_function()
-    assert _first_call_line(function, call) > _first_mutation_line(function), (
-        f"`{call}` now runs before the first mutation, so it no longer maps to "
-        f"{member} — revisit TerminalRefusal rather than the assertion"
+    planted = _synthetic_run(
+        """
+        snapshot = effects.observe()
+        effects.replace_rules("ipv4", "DOCKER-USER", ())
+        """
+    )
+    assert set(_host_mutating_calls(planted)) == {"replace_rules"}
+
+    near_miss = _synthetic_run(
+        """
+        snapshot = effects.observe()
+        report = verify_exposure(spec, effects.observe())
+        """
+    )
+    assert _host_mutating_calls(near_miss) == {}
+
+
+def test_the_retired_ordering_detector_still_works() -> None:
+    """The retired guards' TOOL, kept proven against synthetic sources.
+
+    `_first_mutation_line` and `_first_call_line` have no subject in the runner
+    today. Deleting them would mean re-deriving the ordering check from an
+    incident description when the mutation comes back — the same argument
+    `exposure_rehearsal_runner` makes for keeping `lane3_provocation`'s
+    functions. Keeping them UNTESTED would be worse than deleting them: a tool
+    nobody exercises is a tool that has quietly stopped working by the time it
+    is needed.
+
+    This is the exact assertion the retired guards made, against the exact
+    defect that shipped, on a source this test writes.
+    """
+    planted = _synthetic_run(
+        """
+        ctx.host_mutated = True
+        report = transaction.run()
+        require_inside_probe_harness(args, target_v6="::1", port=1)
+        """
+    )
+    assert _first_call_line(planted, "require_inside_probe_harness") > (
+        _first_mutation_line(planted)
+    )
+
+    near_miss = _synthetic_run(
+        """
+        require_inside_probe_harness(args, target_v6="::1", port=1)
+        ctx.host_mutated = True
+        report = transaction.run()
+        """
+    )
+    assert _first_call_line(near_miss, "require_inside_probe_harness") < (
+        _first_mutation_line(near_miss)
     )
 
 
@@ -1204,35 +1283,6 @@ def _synthetic_run(body: str) -> ast.FunctionDef:
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "run"
-    )
-
-
-def test_the_position_guard_would_see_a_precondition_moved_after_the_mutation() -> None:
-    """Sensitivity. The assertions above pass over a tree that is already
-    correct, so they prove nothing about their own ability to fail — and the
-    defect they target is the one that actually shipped: three
-    `precondition_unfit` sites reached only after the compose stack was applied.
-    """
-    planted = _synthetic_run(
-        """
-        ctx.host_mutated = True
-        report = transaction.run()
-        require_inside_probe_harness(args, target_v6="::1", port=1)
-        """
-    )
-    assert _first_call_line(planted, "require_inside_probe_harness") > (
-        _first_mutation_line(planted)
-    )
-
-    near_miss = _synthetic_run(
-        """
-        require_inside_probe_harness(args, target_v6="::1", port=1)
-        ctx.host_mutated = True
-        report = transaction.run()
-        """
-    )
-    assert _first_call_line(near_miss, "require_inside_probe_harness") < (
-        _first_mutation_line(near_miss)
     )
 
 
@@ -1509,16 +1559,26 @@ def test_that_detector_bites() -> None:
     assert _broad_handlers(near_miss, "main") == []
 
 
-def test_the_preconditions_are_asked_before_the_first_mutation() -> None:
-    """`precondition_unfit` asserts the host was never touched, so it must be true.
+def test_the_precondition_sites_exist_and_take_no_argument_from_the_spec() -> None:
+    """What survives of the retired ordering check, and what replaced the rest.
 
-    All three sites that raise it used to be reached only after
-    `transaction.run()` had applied the stack and rewritten both filter chains.
+    The ordering half — `refusal_of(PreconditionUnfit)` appearing before
+    `ctx.host_mutated = True` — is retired with its siblings above: the runner
+    mutates nothing, so there is no line to be before, and
+    `test_the_runner_MUTATES_NOTHING_and_the_ordering_guards_are_RETIRED`
+    holds the stronger property that makes every such site truthful.
+
+    Two independent facts in that test were NOT about ordering and are kept.
+    They assert the precondition sites do not take their arguments from the
+    descriptor: a question answered from the descriptor is not a question about
+    the INVOCATION, and `precondition_unfit` is a claim about the invocation.
+    Retiring the ordering half must not quietly drop them.
     """
     source = RUNNER.read_text(encoding="utf-8")
-    guard = source.index("with refusal_of(PreconditionUnfit):")
-    mutation = source.index("ctx.host_mutated = True")
-    assert guard < mutation
+    assert "with refusal_of(PreconditionUnfit):" in source, (
+        "the precondition sites are gone entirely; this test is now asserting "
+        "nothing rather than asserting something true"
+    )
     assert "port=private_port(spec)" not in source
     assert "accepted_source_sets=(inside_source_set(spec),)" not in source
 

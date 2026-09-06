@@ -588,11 +588,15 @@ failure-injection matrix a unit-test file rather than a disposable-VM exercise â
 and a gate that has never been shown to fire is a gate nobody should trust. Two
 of the source engine's gates were in fact found to be wrong only in production.
 
-This does not mean every host path is routed through `engine/run.py`'s
-`Executor`. The `dotmac-deploy exposure-apply --execute` CLI and the Lane 3
-rehearsal invoke the public `ExposureTransaction` directly over the composed
-host effects; they remain separate, explicitly invoked paths outside
-`Executor`'s grant and execution-plan checks. The
+Every host MUTATION is now routed through `engine/run.py`'s `Executor`. The
+`dotmac-deploy exposure-apply --execute` CLI and the Lane 3 rehearsal used to
+invoke a second transaction class directly over the composed host effects,
+outside `Executor`'s grant and execution-plan checks; that class is deleted.
+Exposure is a typed effect the executor performs from an authorized
+`FoundationExecutionPlanV2`, and `exposure-apply` observes without applying.
+The residue is stated rather than hidden: Lane 3's two exposure items are
+`blocked`, because Control issues no V2 plan carrying a reconciliation yet, so
+the act has an owner and no authorization naming it. The
 `ApplicationFoundationProfile.v1` verifier is likewise report-only: this
 assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately

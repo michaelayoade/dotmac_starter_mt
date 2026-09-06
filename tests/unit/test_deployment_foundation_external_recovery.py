@@ -51,6 +51,8 @@ from dotmac_deployment_foundation.recovery_identity import (
 )
 from dotmac_deployment_foundation.spec import BackupDataset, ProductDeploymentSpec
 
+from tests.unit.deployment_lock_harness import held_lock
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESCRIPTOR = REPO_ROOT / "deploy" / "product.toml"
 
@@ -261,7 +263,7 @@ def test_a_missing_recovery_receipt_refuses_before_any_effect(
     offered", and would happily find last quarter's."""
     effects = _recording_effects(external_spec)
     plan, executor = _executor_for(external_spec, effects)
-    outcome = executor.run(plan)
+    outcome = executor.run(plan, lock=held_lock(external_spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_external_recovery_receipt"
@@ -281,7 +283,7 @@ def test_an_accepted_recovery_receipt_lets_the_deploy_proceed(
         recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
         recovery_verifier=_ACCEPTS,
     )
-    outcome = executor.run(plan)
+    outcome = executor.run(plan, lock=held_lock(external_spec.product))
     steps = {record.kind.value: record for record in outcome.records}
     receipt_step = steps.get("verify_external_recovery_receipt")
     assert receipt_step is not None and receipt_step.ok, outcome.failure
@@ -301,7 +303,7 @@ def test_an_unsigned_recovery_receipt_refuses_at_the_engine(
         recovery_receipts={dataset.code: _envelope(_document(external_spec, dataset))},
         recovery_verifier=_Rejects(),
     )
-    outcome = executor.run(plan)
+    outcome = executor.run(plan, lock=held_lock(external_spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_external_recovery_receipt"

@@ -57,6 +57,8 @@ from dotmac_deployment_foundation.provenance import (
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
+from tests.unit.deployment_lock_harness import held_lock
+
 GOOD_DIGEST = "sha256:" + "a" * 64
 OLD_DIGEST = "sha256:" + "b" * 64
 REVISION = "c" * 40
@@ -510,7 +512,7 @@ def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
     )
-    return plan, executor.run(plan)
+    return plan, executor.run(plan, lock=held_lock(spec.product))
 
 
 # ── the happy path, which every failure test needs to exist ─────────────────
@@ -1192,7 +1194,7 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
     )
-    outcome = executor.rollback(plan)
+    outcome = executor.rollback(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     assert effects.switched_to == [OLD_DIGEST]
     assert all(item.image_digest == OLD_DIGEST for item in effects.observe_roles())
@@ -1218,7 +1220,7 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
         spec, effects, grant, execution_plan=execution_plan, sleep=lambda _: None
     )
     with pytest.raises(PreconditionFailed) as caught:
-        executor.rollback(plan)
+        executor.rollback(plan, lock=held_lock(spec.product))
     assert "maintenance_required" in str(caught.value)
     assert effects.switched_to == [], "nothing may be switched by a refused rollback"
     assert effects.evidence_written, "the refusal is itself worth recording"
@@ -1275,7 +1277,7 @@ def test_a_rollback_annotates_itself() -> None:
         clock=clock.read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
-    ).rollback(plan)
+    ).rollback(plan, lock=held_lock(spec.product))
     assert "deployment.rollback" in [item["event"] for item in effects.annotations]
 
 

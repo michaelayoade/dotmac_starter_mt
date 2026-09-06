@@ -29,6 +29,7 @@ standard library.
 
 from __future__ import annotations
 
+import dataclasses
 import errno
 import fcntl
 import os
@@ -36,12 +37,111 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Final
 
-from ..errors import LockUnavailableError
+from ..errors import LockUnavailableError, PreconditionFailed
 
-__all__ = ["DEFAULT_LOCK_DIR", "LockUnavailableError", "deployment_lock", "lock_path"]
+__all__ = [
+    "DEFAULT_LOCK_DIR",
+    "DeploymentLockHeld",
+    "LockUnavailableError",
+    "deployment_lock",
+    "lock_path",
+]
 
 DEFAULT_LOCK_DIR = "/var/lock"
+
+
+class _HeldWitness:
+    """Proof that :func:`deployment_lock` produced this value, not a caller."""
+
+    __slots__ = ()
+
+
+_HELD: Final = _HeldWitness()
+
+
+@dataclasses.dataclass(eq=False)
+class DeploymentLockHeld:
+    """Evidence, carried as a value, that this process holds ``product``'s lock.
+
+    ## Why a token rather than a convention
+
+    Until this type existed the rule "the caller holds the lock around the whole
+    run" was written in three comments — `cli.py`'s two deploy paths and
+    :meth:`Executor._do_acquire_lock`, which returned the sentence *"held by the
+    caller for the duration of the run"* without ever asking. `Executor` took no
+    lock, named no lock and checked no lock, so any second caller — a script, a
+    worker, an embedder, a future subcommand — could construct a fully
+    authorized executor and mutate a host with nothing serialising it. The
+    2026-07-12 incident that produced `deployment_lock` in the first place was
+    two concurrent deployments; the guard against it was a comment.
+
+    So the lock now yields a value, that value is a required argument of every
+    mutating entry point, and it can only be obtained INSIDE the ``with`` block.
+    This is the `authorization._Witness` idiom applied to a different question:
+    there, a caller with no grant has nothing to construct an `Executor` with;
+    here, a caller holding no lock has nothing to call `run` with.
+
+    ## Why it goes dead on exit
+
+    A dataclass captured inside the block and used after it would be a lock
+    token for a lock nobody holds — the exact "lock-shaped gap between the check
+    and the mutation" `cli.py:524` warns about, wearing a type. :attr:`live` is
+    cleared in `deployment_lock`'s ``finally`` BEFORE the descriptor is
+    unlocked, so a token that escapes its block refuses rather than lies.
+
+    ## Why it names its product
+
+    `lock_path` is per-product deliberately: two products deploying at once is
+    fine and must not serialise. That makes "a token" insufficient on its own —
+    holding ACME's lock says nothing about deploying BETA — so
+    :meth:`require_held` compares the product as well as the liveness.
+    """
+
+    #: Positional and first, with no default, so a hand-built token cannot be
+    #: mistaken for an ordinary constructor call in review.
+    witness: _HeldWitness
+    product: str
+    path: Path
+    #: Cleared when the ``with`` block exits. Not a property of the file: the
+    #: file outlives every holder by design (`deployment_lock` never unlinks
+    #: it), so liveness is a property of THIS acquisition and nothing else.
+    live: bool = True
+
+    def __post_init__(self) -> None:
+        if self.witness is not _HELD:
+            raise PreconditionFailed(
+                "a DeploymentLockHeld may only be produced by deployment_lock(). "
+                "A hand-built token is a deployment that serialised itself "
+                "against nothing, which is the exact failure this type exists "
+                "to make impossible to write by accident"
+            )
+
+    def require_held(self, *, product: str) -> Path:
+        """Refuse unless this token is a live hold on ``product``'s lock.
+
+        Returns the lock path so a caller can report the real file rather than
+        reconstructing it — the same reason
+        `test_the_helper_and_the_context_manager_agree_on_the_path` exists.
+        """
+        if not self.live:
+            raise PreconditionFailed(
+                f"the deployment lock on {self.product!r} was released before "
+                "this point: the token was captured inside the `with` block and "
+                "used after it exited. Nothing is serialising this run, and a "
+                "token that outlives its hold is worse than no token — it reads "
+                "in a diff exactly like a real one"
+            )
+        if self.product != product:
+            raise PreconditionFailed(
+                f"this token holds the deployment lock for {self.product!r}, "
+                f"and the work in hand is {product!r}. The lock is per-product "
+                "deliberately — two products deploying to one host must not "
+                "serialise — so holding one product's lock authorises nothing "
+                "about another's"
+            )
+        return self.path
 
 
 def lock_path(
@@ -98,11 +198,17 @@ def deployment_lock(
     *,
     directory: str | os.PathLike[str] = DEFAULT_LOCK_DIR,
     label: str = "",
-) -> Iterator[Path]:
+) -> Iterator[DeploymentLockHeld]:
     """Hold ``product``'s exclusive deployment lock for the duration of the block.
 
     Raises :class:`LockUnavailableError` immediately when another deployment
     holds it. The error names the contender.
+
+    Yields a :class:`DeploymentLockHeld` rather than the path. The path is still
+    reachable (``held.path``) and still the same inode, but the value a caller
+    now carries out of this block is EVIDENCE of the hold, because the mutating
+    entry points require one. A `Path` proves nothing: it can be constructed by
+    anybody, at any time, holding nothing.
 
     The file is never deleted on release. Deleting it opens a window in which
     one process has unlinked the path while another has already opened the same
@@ -162,9 +268,16 @@ def deployment_lock(
         os.ftruncate(handle, 0)
         os.write(handle, f"{os.getpid()} {label or product}\n".encode())
         os.fsync(handle)
+        held = DeploymentLockHeld(_HELD, product=product, path=path)
         try:
-            yield path
+            yield held
         finally:
+            # Cleared BEFORE the unlock, not after. Between `LOCK_UN` and this
+            # assignment the token would claim a hold that had already ended,
+            # and that window is exactly the shape of bug the token exists to
+            # close. Ordering it this way makes the dead interval strictly
+            # larger than the unheld one, which is the safe direction.
+            held.live = False
             fcntl.flock(handle, fcntl.LOCK_UN)
     finally:
         os.close(handle)
