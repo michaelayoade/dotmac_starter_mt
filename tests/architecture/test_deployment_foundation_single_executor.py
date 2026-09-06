@@ -36,9 +36,33 @@ from pathlib import Path
 import pytest
 from dotmac_deployment_foundation.cli import build_parser
 
-SRC = Path(__file__).resolve().parents[2] / (
-    "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
-)
+REPO = Path(__file__).resolve().parents[2]
+SRC = REPO / "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+
+#: EVERY entry-point family that can reach a host, not one directory.
+#:
+#: The first version of this file scanned `SRC` alone and shipped green while
+#: `scripts/exposure_rehearsal_runner.py` still imported and constructed the
+#: deleted class — CI found it at collection, and this guard, whose entire
+#: subject is that class, did not. That is `AGENTS.md` rule 25's extent shape
+#: exactly: a guard scoped to one directory reads as covering a property when
+#: it covers a location. `scripts/` is where Lane 3, the release facility and
+#: the provocation harness live, and all three drive real hosts.
+#:
+#: DERIVED per root rather than declared per file, so a new script joins the
+#: population by existing.
+SCANNED_ROOTS = (SRC, REPO / "scripts")
+
+
+def _scanned_files() -> list[Path]:
+    found = [path for root in SCANNED_ROOTS for path in sorted(root.rglob("*.py"))]
+    assert found, "the scan found no files; every assertion below would be vacuous"
+    return found
+
+
+def _rel(path: Path) -> str:
+    return str(path.relative_to(REPO))
+
 
 #: `--execute` subcommands that reach an effect WITHOUT offering
 #: `--authorization`, with the boundary that owns each. This is a
@@ -137,7 +161,7 @@ _MUTATORS = frozenset({"apply_compose", "replace_rules", "restore_chains"})
 def _modules_ordering_host_mutation() -> dict[str, set[str]]:
     """Every module whose own code calls more than one exposure mutator."""
     offenders: dict[str, set[str]] = {}
-    for path in sorted(SRC.rglob("*.py")):
+    for path in _scanned_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         called = {
             node.func.attr
@@ -147,7 +171,7 @@ def _modules_ordering_host_mutation() -> dict[str, set[str]]:
             and node.func.attr in _MUTATORS
         }
         if len(called) > 1:
-            offenders[str(path.relative_to(SRC))] = called
+            offenders[_rel(path)] = called
     return offenders
 
 
@@ -159,7 +183,8 @@ def test_only_the_engine_orders_exposure_mutations() -> None:
     against a host is the thing `Executor` exists to be the only holder of.
     """
     assert _modules_ordering_host_mutation() == {
-        "engine/run.py": {"replace_rules", "restore_chains"},
+        "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
+        "/engine/run.py": {"replace_rules", "restore_chains"},
     }, (
         "a module other than the engine is sequencing host mutations again. "
         "That is how `ExposureTransaction` came to be a second executor: it "
@@ -224,8 +249,8 @@ def test_no_module_still_names_the_deleted_transaction() -> None:
     grew a body.
     """
     survivors = [
-        str(path.relative_to(SRC))
-        for path in sorted(SRC.rglob("*.py"))
+        _rel(path)
+        for path in _scanned_files()
         if {"ExposureTransaction", "apply_exposure"} & _identifiers(path)
     ]
     assert survivors == [], (
@@ -259,9 +284,43 @@ def test_the_deleted_name_guard_still_bites(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("symbol", ["ExposureTransaction", "apply_exposure"])
-def test_the_deleted_names_are_not_re_exported(symbol: str) -> None:
-    """The package surface, checked independently of the source scan above."""
+def test_the_retired_surface_is_UNAVAILABLE_not_merely_unmentioned(
+    symbol: str,
+) -> None:
+    """Assert the import FAILS. A test that stops naming the class proves nothing.
+
+    This is the difference between evidence and absence. Every other test in
+    this file was rewritten to drive `Executor`, and a reader could reasonably
+    ask whether the old surface went with it or is simply no longer exercised —
+    a shim, a lazy re-export or a `__getattr__` fallback would leave every one
+    of them green while the second executor stayed reachable. So the retirement
+    is asserted directly, at both surfaces a consumer can reach:
+
+    * the module the name lived in, where `from ... import X` must raise; and
+    * the package root, where a re-export would be the tempting courtesy.
+
+    The import is executed as the STATEMENT a consumer would actually write.
+    `__import__(..., fromlist=[symbol])` was the first attempt and is wrong: it
+    returns the module regardless and the missing name surfaces later as an
+    `AttributeError`, so the test would have asserted the wrong exception and
+    failed against a correctly retired surface. `from X import Y` is what
+    breaks in a consumer's file, so `from X import Y` is what is asserted.
+
+    A real import rather than a `hasattr` check, too: `hasattr` is satisfied by
+    a module-level `__getattr__` returning something, which is precisely the
+    shape a compatibility shim takes.
+    """
     import dotmac_deployment_foundation as facility
 
-    assert not hasattr(facility, symbol)
+    with pytest.raises(ImportError):
+        exec(  # noqa: S102 - the statement under test IS an import statement
+            f"from dotmac_deployment_foundation.exposure import {symbol}",
+            {},
+        )
+
+    assert not hasattr(facility, symbol), (
+        f"{symbol} is reachable from the package root. A re-export keeps the "
+        "removed ordering callable while reading in a diff as a kindness to "
+        "existing consumers"
+    )
     assert symbol not in facility.__all__

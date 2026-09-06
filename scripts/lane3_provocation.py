@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Item 8's provocation — a condition the apply path structurally cannot satisfy.
 
-`provoked_rollback` has never been executed. `ExposureTransaction.run()` rolls
-back automatically when `verify_exposure` refuses, so `transaction.rolled_back`
-stays `None` on a clean run and the lane caps at 15 of 16. Nothing here calls
-`_rollback`. **A rollback the runner invokes proves the rollback function runs;
+`provoked_rollback` has never been executed. The apply path compensates
+automatically when `verify_exposure` refuses, so a clean run never exercises the
+compensation and the lane caps at 15 of 16. Nothing here calls the compensation
+directly. **A rollback the runner invokes proves the rollback function runs;
 only one triggered by a verification that genuinely failed proves the path.**
+
+STATUS, 2026-09-06: item 8 is BLOCKED and this module's provocation is not
+currently driven. The compensation moved to `Executor._restore_exposure`, which
+is reachable only through an authorized `FoundationExecutionPlanV2` carrying an
+exposure reconciliation, and Control issues none yet. This file is kept rather
+than deleted for the reason `exposure_rehearsal_runner` states at its import:
+the rehearsal is right and only its driver is missing, and a provocation
+re-derived from incident notes later is a measurement paid for twice.
 
 ## What is induced, and why the apply cannot clear it
 

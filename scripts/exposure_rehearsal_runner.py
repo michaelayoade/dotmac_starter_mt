@@ -8,8 +8,8 @@ That is not evidence, and its own header proved it: on 2026-08-29 it read
 "14 of 16 CLOSED" while the rows beneath recorded four `partial` and one `n/a`.
 
 This runner is the fix. It ORIGINATES every host MUTATION through the library —
-`ExposureTransaction` over `ComposeHostExposureEffects` — rather than shelling
-out beside it. That distinction is the whole point of the lane: a human running
+the `ExposureEffects` seam over `ComposeHostExposureEffects` — rather than
+shelling out beside it. That distinction is the whole point of the lane: a human running
 the same eight commands proves the operator can do it, not that the code can.
 
 ## MUTATION, not "every action" — and the narrowing is structural
@@ -176,10 +176,9 @@ from dotmac_deployment_foundation.errors import (
     SpecError,
 )
 from dotmac_deployment_foundation.exposure import (
-    ExposureTransaction,
     ObservedProxy,
-    ownership_comment,
     refuse_non_recreating_apply,
+    verify_exposure,
 )
 from dotmac_deployment_foundation.lease import HostLease, load_lease
 from dotmac_deployment_foundation.lease_release import (
@@ -211,14 +210,19 @@ from lane3_authorization import (
     AuthorizationUnverifiable,
     establish_authorization,
 )
+
+# `observed_foreign`, `provoke_apply_failure` and `seed_foreign_rules` are NOT
+# imported any more and are deliberately NOT deleted from `lane3_provocation`.
+# They are the provocation half of item 8, which is blocked rather than retired:
+# the rehearsal is still the right one and only its driver is missing. Deleting
+# them would mean rewriting them from the 2026-08-29 incident notes when the
+# driver arrives, which is how a repository loses a measurement it already paid
+# for. An unused export is cheap; a re-derived provocation is not.
 from lane3_provocation import (
     SeededRule,
     disarm_apply_failure,
     inside_source_set,
-    observed_foreign,
     private_port,
-    provoke_apply_failure,
-    seed_foreign_rules,
     withdraw_foreign_rules,
 )
 
@@ -260,7 +264,7 @@ BLOCKED = RequirementStatus.BLOCKED
 # The type is not the WHOLE answer, and it cannot be. A refusal raised below this
 # lane carries none of these classes, and its own type does not discriminate it:
 # `PreconditionFailed` is documented as "nothing has changed" and is raised by
-# `ExposureTransaction.run` after the apply, and `SpecError` is raised both by
+# `Executor._reconcile_exposure` after the apply, and `SpecError` is raised both by
 # `ProductDeploymentSpec.load` before host contact and by `build_receipt` after
 # the whole transaction. `classify_refusal` therefore answers by TYPE first, and
 # then by whether an exact lease was in hand at all — a refusal below this lane
@@ -1493,7 +1497,6 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         target_v6 = str((evidence.get("vantage") or {}).get("target_v6", args.target))
         require_inside_probe_harness(args, target_v6=target_v6, port=private)
 
-    owner = ownership_comment(spec.product)
     # ONE seam onto the host, wrapped so that what a best-effort cleanup throws
     # away is still seen. A second `_ssh_runner` would be a second writer.
     controller = CapturingRunner(_ssh_runner(args.target, args.controller_key))
@@ -1527,23 +1530,49 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         PASSED,
         f"{len(snapshot.sockets)} sockets, {len(snapshot.chains)} chains captured "
         "before mutation",
-        "ExposureTransaction.snapshot",
+        "effects.observe() before any mutation",
     )
-    transaction = ExposureTransaction(
-        spec=spec, effects=effects, lock_directory=args.lock_dir
-    )
-    # From here the host is mutated, whatever happens next. `precondition_unfit`
-    # may not be claimed past this line, and this flag is what a reader of the
-    # terminal evidence checks rather than inferring it from the refusal.
-    ctx.host_mutated = True
-    report = transaction.run()
+    # ── item 4 is BLOCKED, and the block is the honest answer ───────────────
+    #
+    # This item drove `ExposureTransaction`, which no longer exists: applying a
+    # product's exposure is now `Executor._reconcile_exposure`, performed from
+    # `FoundationExecutionPlanV2.exposure_reconciliations` under an
+    # `ExecutionGrant`. Lane 3 already reaches a real grant through
+    # `establish_authorization`, so the missing prerequisite is NOT
+    # authorization in general — it is narrower and it is somebody else's:
+    # **Control does not yet issue a V2 plan carrying an exposure
+    # reconciliation**, so no grant in existence names this act.
+    #
+    # The three things this must not do, in the order they were tempting:
+    #
+    # 1. Order the effects here. `effects.replace_rules` is right there and the
+    #    sequence is twenty lines. Writing it would make this script the second
+    #    executor that boundary 1 exists to remove, in a directory the package's
+    #    own guard did not scan until this commit widened it.
+    # 2. Mint a grant. Foundation must never self-authorize; this file's own
+    #    docstring records the 2026-09-05 defect where dispatch TEXT was
+    #    compared against a lease and no `ExecutionGrant` ever existed.
+    # 3. Report `not_executed` or quietly drop the item. `blocked` is a distinct
+    #    status precisely because "nothing ran it" and "a prerequisite is
+    #    missing" send an operator in different directions, and
+    #    `verify_publication` refuses on either — loudly, which is the point.
+    #
+    # CONSEQUENCE, stated here rather than discovered at the publication gate:
+    # a Lane 3 receipt from this runner can no longer be all-`executed_passed`
+    # while this holds, so it cannot satisfy `verify_publication`. Closing it
+    # needs a Control-issued V2 plan, which is a cross-repository dependency.
+    #
+    # The host is NOT mutated by this phase any more, so the flag stays false
+    # and `precondition_unfit` remains claimable — the opposite of what the
+    # deleted line asserted, and true for the same reason the item is blocked.
     results.record(
         "apply_under_lock",
-        PASSED if report.ok else FAILED,
-        f"applied and verified under the {spec.product} deployment lock",
-        # The project Docker was actually given, read from the same attribute
-        # `apply_compose` passes to `--project-name`. It used to name a derived
-        # value the effects never saw.
+        BLOCKED,
+        "the exposure apply moved to `Executor._reconcile_exposure`, driven "
+        "from `FoundationExecutionPlanV2.exposure_reconciliations`. Control "
+        "issues no V2 plan carrying one, so no ExecutionGrant names this act. "
+        "Foundation cannot mint one and this runner will not order the effects "
+        "itself: either would rebuild the second executor boundary 1 removed",
         f"project={spec.product}",
     )
 
@@ -1749,88 +1778,53 @@ def run(args: argparse.Namespace, ctx: TerminalContext) -> int:
         f"accepted_source_set:{accepted_source_set}",
     )
 
-    # ── item 8: a SECOND transaction, provoked into a real rollback ─────────
+    # ── item 8 is BLOCKED, and NOTHING IS SEEDED ────────────────────────────
     #
-    # Two transactions, deliberately. The first one above is CLEAN and its
-    # evidence is what items 1-7 and 9-16 rest on; provoking it would have made
-    # every one of them the record of a failed run. This one exists only to
-    # execute item 8, and it is the only item that reads it.
+    # This item provoked a real rollback: seed foreign rules into shared chains,
+    # arm an apply that cannot verify, let the transaction meet its own failure
+    # and compensate, then prove the bystanders survived. Every part of that is
+    # still the right rehearsal. What is gone is the thing that performed it —
+    # the compensation now lives in `Executor._restore_exposure`, reached only
+    # through an authorized V2 plan that Control does not yet issue (see the
+    # `apply_under_lock` block above for why this runner may neither mint one
+    # nor order the effects itself).
     #
-    # Nothing here calls `_rollback`. `ExposureTransaction.run()` re-observes,
-    # runs `verify_exposure`, and rolls back ITSELF when the report refuses —
-    # so the rollback is the system's response to a failure it met, which is
-    # the whole distinction item 8 turns on.
-    # The seeding goes through the SAME capturing runner the effects use, so the
-    # seeder's own unwind — which issues its deletes and ignores whether they
-    # worked — is observed rather than assumed.
-    seeded: tuple[SeededRule, ...] = ()
-    try:
-        with controller.watching() as seeding:
-            try:
-                with refusal_of(HostStateUncertified):
-                    seeded = seed_foreign_rules(controller)
-            except HostStateUncertified:
-                ctx.record_cleanup(
-                    disposition_of(
-                        "foreign_seed_unwind",
-                        [c for c in seeding if "-D" in c.argv],
-                    )
-                )
-                raise
-
-        provoked = ExposureTransaction(spec=spec, effects=effects)
-        # Set BEFORE the call: `replace_rules` deletes our owned rules and then
-        # inserts, so an arm that fails part way has still changed the chain and
-        # still has something to take back out.
-        ctx.arm_attempted = True
-        armed = provoke_apply_failure(effects, port=private)
-        provoked_snapshot = effects.observe()
-        seeded_before = observed_foreign(provoked_snapshot, owner=owner)
-        refusal = ""
-        try:
-            provoked.run()
-        except DeploymentFoundationError as encountered:
-            refusal = str(encountered)
-
-        restored = effects.observe()
-        foreign_after = observed_foreign(restored, owner=owner)
-        lost = sorted(seeded_before - foreign_after)
-
-        # Four conditions, and the third is the one that stops this passing
-        # vacuously. `foreign rules lost: none` reads identically whether five
-        # rules were preserved or none existed, so the snapshot is required to
-        # have been NON-EMPTY and the count is rendered rather than the word.
-        rolled_back = provoked.rolled_back
-        preserved = not lost
-        non_vacuous = bool(seeded_before)
-        provoked_ok = bool(rolled_back) and preserved and non_vacuous and bool(refusal)
-        met = refusal[:160] if refusal else "NONE — the run was never provoked"
-        results.record(
-            "provoked_rollback",
-            PASSED if provoked_ok else FAILED,
-            (
-                "induced an ip6tables DOCKER-USER rule for the descriptor's private "
-                f"port {armed.host_port} — a chain that can never fire for IPv6, so "
-                "the apply path has no authority to clear it. Met at "
-                "`verify_exposure`, which refused and rolled back on its own: "
-                f"rolled_back={rolled_back}; refusal={met}; compared against "
-                f"{len(seeded_before)} foreign rule(s) across "
-                f"{len(seeded)} seeded famil(ies); lost: {lost or 'none'}"
-            ),
-            "ExposureTransaction.run -> verify_exposure -> _rollback",
-            f"provocation:{armed.chain}/{armed.family}/{armed.host_port}",
-            *(f"seeded:{rule.family}:{rule.arguments}" for rule in seeded),
-        )
-    finally:
-        # In a `finally` because the seeds are a real change to a shared host and
-        # must come back out whether or not the phase above finished. The verdict
-        # is already recorded by the time this runs, and `run_cleanup` never
-        # raises: a cleanup failure is a fact about the HOST and it lands in the
-        # release's `cleanup` and closure, never in an item's status.
-        run_cleanup(ctx, controller, effects, seeded)
+    # THE SEEDING DOES NOT RUN, and that ordering is the whole care in this
+    # edit. `seed_foreign_rules` writes real rules into `DOCKER-USER` and
+    # `INPUT` on a shared host; it is safe only because a provocation follows
+    # it and a `finally` withdraws it. Seeding first and blocking afterwards
+    # would leave a host dirtied to rehearse something that never ran, with the
+    # unwind's own failure modes exercised for no reason. A blocked item
+    # touches nothing.
+    #
+    # `provoke_apply_failure` and `seed_foreign_rules` keep their homes in
+    # `lane3_provocation.py`. They are not dead: they are the provocation half
+    # of the rehearsal, waiting on a driver, and deleting them would mean
+    # rewriting them from the incident notes when the driver arrives.
+    results.record(
+        "provoked_rollback",
+        BLOCKED,
+        "the compensation moved to `Executor._restore_exposure` and is reached "
+        "only through an authorized `FoundationExecutionPlanV2` carrying an "
+        "exposure reconciliation, which Control does not yet issue. No foreign "
+        "rule was seeded: a blocked item must not dirty a shared host to "
+        "rehearse something that will not run",
+        "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
+    )
 
     # ── item 9: three terms, enforced by build_receipt ──────────────────────
-    execution_report = report.descriptor_digest
+    #
+    # The controller's term used to be read off the `VerificationReport` the
+    # deleted transaction returned. It comes from a verification of the host
+    # this run actually observed instead — the SAME function, `verify_exposure`,
+    # on the same observation, so the value is unchanged and its provenance is
+    # now a call this file makes rather than a side effect of an apply.
+    #
+    # Deliberately NOT `descriptor_digest` restated. Item 9 is an equality
+    # between three independently produced terms, and reading the controller's
+    # from the variable the other two come from would make the comparison pass
+    # for every input — a check that compares something with itself.
+    execution_report = verify_exposure(spec, observed).descriptor_digest
     results.record(
         "digest_equality",
         PASSED,

@@ -33,7 +33,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .engine.run import DeploymentOutcome, Effects
     from .execution_bindings import ExecutionBindings
     from .execution_plan import HostPrestateV1
-    from .exposure import VerificationReport
+    from .exposure import ExposureEffects, VerificationReport
 
 from .authorization import OPERATIONS
 from .errors import (
@@ -171,13 +171,37 @@ def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
 
 def _build_exposure_effects(
     spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
-) -> object | None:
+) -> ExposureEffects | None:
     """The `ExposureEffects` the executor reconciles firewall rules through.
 
     Mirrors `_build_effects` deliberately: same provider selection, same
     discovered-bindings precedence, same lazy import. Returns None when the
     selected provider offers no exposure factory — the executor then REFUSES a
     plan that authorizes exposure, rather than silently performing none.
+
+    ## Why the PROTOCOL and not the concrete provider
+
+    `object` was the first answer and it is the wrong one: it pushes narrowing
+    to every call site, where it becomes a cast somebody eventually writes
+    wrongly. Typed here, a factory returning the wrong shape is a type error at
+    the boundary that discovered it.
+
+    Between the protocol and the concrete class, the test is how many
+    implementations are VALID today, and the answer is two: the in-package
+    `ComposeHostExposureEffects` below, and whatever an assembly returns from
+    `ExecutionBindings.build_exposure_effects` — a distribution that reaches
+    its hosts over something other than a local docker socket is the entire
+    reason that field exists. Annotating the concrete class would make the
+    discovered path a lie the checker happens not to catch, because the
+    binding's factory is `Callable[..., Any]`. So: `ExposureEffects`.
+
+    Had the in-package provider been the only valid one, the concrete class
+    would be the honest annotation and this paragraph would say so.
+    `ExposureEffects` is a structural protocol, so this costs the discovered
+    path nothing: an assembly's factory satisfies it by having the methods and
+    does not have to inherit anything. Deliberately NOT `@runtime_checkable` —
+    an `isinstance` against it would check method NAMES and no signature, which
+    reads as a shape check and is not one.
     """
     if args.provider != PROVIDER_COMPOSE_HOST:
         if bindings is None or bindings.build_exposure_effects is None:

@@ -32,12 +32,22 @@
   never produces: `dotmac-deployment-control` owns authorization, and the
   receipt is bound by VALUE so a zero-dependency build runner never acquires a
   stateful module and never reaches into another owner's state.
-- `ExposureEffects` and `ExposureTransaction`, plus `OWNERSHIP_PREFIX`,
-  `ownership_comment()` and `foreign_rules()`. Ownership is part of the
-  CONTRACT rather than of one provider, because the transaction measures the
-  preservation property against it: a shared filter chain is never restored
-  wholesale, and an implementation that replays one is refused by the
-  transaction rather than trusted not to.
+- `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
+  `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
+  `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather
+  than of one provider, because the preservation property is measured against
+  it: a shared filter chain is never restored wholesale, and an implementation
+  that replays one is refused rather than trusted not to. The measurement is a
+  FUNCTION taking a before and an after observation, so a caller that never
+  mutates can still make it.
+- `ExposureReconciliationV1` and `FoundationExecutionPlanV2`'s
+  `exposure_reconciliations` field — the typed authority to reconcile one
+  address family's exposure. The member carries no rule, port, chain position
+  or command: the rules are derived from the descriptor, whose digest is
+  already in the plan and in the grant. Adding the field CHANGES the V2
+  document's key set and therefore every V2 digest, which would be a MINOR bump
+  at least — it is free here only because V2 has existed solely under the spent
+  `0.4.0a1` and has never been published.
 - `Digest`, `require_same_digest()`, `ALGORITHMS` and `CANONICAL_ALGORITHM`.
   The canonical serialization is `sha256:<64 lowercase hex>`; the bare form is
   accepted on INPUT as a compatibility affordance for
@@ -136,6 +146,71 @@
   `promotion_pending`; the idempotent compare-and-swap promotion port; and the
   terminal postcondition and promotion evidence. Authorization binds the
   result descriptor; the starting descriptor is the live/CAS precondition.
+
+## Removed in the 0.4 series
+
+Stated here rather than only in the changelog, because this file is what a
+consumer reads to decide whether an upgrade can break them.
+
+**Neither entry below has ever appeared in a tagged version.** Verified against
+the tags in this repository: `dotmac-deployment-foundation-v0.2.0a2` is the
+newest tag, and `exposure.py` does not exist in it at all — the module was
+introduced after that tag. Two further facts belong with that one rather than
+being left to inference: `0.2.0a2`'s own changelog heading AT THAT TAG reads
+`## 0.2.0a2 — unreleased`, and **no version of this facility has ever been
+published**. So there is no published baseline these removals are measured
+against, and no installed consumer can be holding them. They are listed as
+BREAKING because they were listed under "What is public" and this document's
+promises do not depend on whether anyone happened to take them up.
+
+### `ExposureTransaction` and `apply_exposure()` — REMOVED
+
+No shim, no alias, no re-export;
+`test_the_retired_surface_is_UNAVAILABLE_not_merely_unmentioned` asserts that
+`from dotmac_deployment_foundation.exposure import ExposureTransaction` raises.
+
+They were a second executor. They took the product's deployment lock
+themselves, ordered apply / re-observe / verify / compensate, and no
+`ExecutionGrant`, frozen execution plan or Control receipt reached any of it.
+A compatibility alias was considered and refused: it is a fork with a friendly
+name, keeping the removed ordering callable while reading in a diff as a
+courtesy.
+
+**Replacement: `Executor`, holding an `ExecutionGrant`.** The exposure act is
+`Executor._reconcile_exposure`, performed from the authorized plan.
+
+**The migration boundary** — what a caller must now supply, and why each is not
+optional:
+
+| was | is | why it cannot be defaulted |
+|---|---|---|
+| `ExposureTransaction(spec=..., effects=...)` | `Executor(spec, effects, grant, execution_plan=..., exposure_effects=...)` | the grant is positional and only `authorize()` can issue one, from a `VerifiedAuthorization` |
+| `.run()` | `Executor.run(plan, lock=held)` | `lock` is a `DeploymentLockHeld`, obtainable only inside `deployment_lock`'s `with` block |
+| implicit — any transaction could apply | `FoundationExecutionPlanV2.exposure_reconciliations` must name the address families | the act is inside the frozen plan digest, so Control authorizes THIS deployment's exposure and not exposure in general |
+| `.rolled_back` | the `restore_exposure` record on `DeploymentOutcome` | compensation is evidence on the run, not state on a caller's object |
+
+A caller that constructed the transaction has **no in-package direct
+replacement**, and that is the change rather than a gap in it: performing this
+act without an authorization is what was removed, not an API. Callers that only
+MEASURED are unaffected and better served — `require_preserved_foreign_rules()`,
+`foreign_rule_arguments()` and `managed_ports()` are now public functions taking
+observations, so a caller that mutates nothing can still make the measurement
+that used to require constructing a transaction.
+
+**Known consequence, recorded rather than deferred:** Lane 3's `apply_under_lock`
+and `provoked_rollback` items are `blocked`. Control issues no V2 plan carrying
+an exposure reconciliation yet, so no grant in existence names the act, and
+Foundation must not mint one. `verify_publication` refuses a receipt with a
+blocked item, so this is loud at the publication gate rather than silent.
+
+### `dotmac-deploy exposure-apply --execute` — REMOVED
+
+The CLI's subcommands and flags are public contract (see "What is public"), so
+a dropped flag is breaking on its own terms. The subcommand survives and still
+observes, verifies and reports; it can no longer change a shared firewall
+chain. It never accepted `--authorization`, so there was no way to hand it a
+Control decision and nothing in it looked for one — the flag was permission
+supplied by whoever typed it.
 
 ## What is not
 
