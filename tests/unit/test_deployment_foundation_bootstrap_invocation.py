@@ -43,6 +43,7 @@ from dotmac_deployment_foundation.execution_plan_v2 import (
 )
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
     AcceptingVerifier,
     _fixture,
@@ -86,6 +87,7 @@ def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     # SELF-CHECK, because this helper has been wrong once already in this
     # package's history and the failure mode is silent: a run that dies BEFORE
@@ -259,6 +261,7 @@ def test_a_v1_plan_bootstraps_nothing_and_records_nothing() -> None:
         execution_plan=v1,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     assert effects.bootstrapped == []
     kinds = [s["kind"] for s in outcome.as_evidence()["steps"]]

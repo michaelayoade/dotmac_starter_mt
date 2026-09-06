@@ -180,6 +180,7 @@ def _envelope(document: dict[str, Any], **overrides: Any) -> dict[str, Any]:
 def _executor_for(spec: ProductDeploymentSpec, effects: Any, **kwargs: Any) -> Any:
     from dotmac_deployment_foundation.engine.run import Executor
 
+    from tests.unit.host_source_stance import valid_host_source_kwargs
     from tests.unit.test_deployment_foundation_execution_binding import (
         _grant,
         _plan_and_digest,
@@ -193,6 +194,8 @@ def _executor_for(spec: ProductDeploymentSpec, effects: Any, **kwargs: Any) -> A
     execution_plan, digest = _plan_and_digest(spec, plan, effects=effects)
     kwargs.setdefault("evidence_policy", evidence_policy())
     kwargs.setdefault("evidence_verifier", AcceptingVerifier())
+    for key, value in valid_host_source_kwargs().items():
+        kwargs.setdefault(key, value)
     return plan, Executor(
         spec,
         effects,

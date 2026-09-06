@@ -67,6 +67,7 @@ from dotmac_deployment_foundation.provenance import (
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_failure_injection import (
     DESCRIPTOR,
     GOOD_DIGEST,
@@ -280,7 +281,13 @@ def test_absent_execution_plan_produces_zero_effects() -> None:
     """
     spec, plan, effects = _fixture()
     before = effects.snapshot()
-    executor = Executor(spec, effects, _grant(spec), execution_plan=None)  # type: ignore[arg-type]
+    executor = Executor(
+        spec,
+        effects,
+        _grant(spec),
+        execution_plan=None,  # type: ignore[arg-type]
+        **valid_host_source_kwargs(),
+    )
     with pytest.raises(PreconditionFailed, match="no execution plan"):
         executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
@@ -307,6 +314,7 @@ def test_an_unfrozen_plan_produces_zero_effects() -> None:
         effects,
         _grant(spec, execution_plan_digest=WRONG_DIGEST),
         execution_plan=execution_plan,
+        **valid_host_source_kwargs(),
     )
     with pytest.raises(PreconditionFailed):
         executor.run(plan, lock=held_lock(spec.product))
@@ -342,6 +350,7 @@ def test_a_plan_for_an_unauthorized_image_produces_zero_effects() -> None:
         effects,
         _grant(spec, execution_plan_digest=frozen_digest),
         execution_plan=running,
+        **valid_host_source_kwargs(),
     )
     with pytest.raises(PreconditionFailed):
         executor.run(plan, lock=held_lock(spec.product))
@@ -368,6 +377,7 @@ def test_a_host_that_moved_after_authorization_refuses_with_zero_effects() -> No
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     )
     # The host moves: some OTHER deployment lands a different digest.
     moved = "sha256:" + "7" * 64
@@ -392,6 +402,7 @@ def test_an_empty_prestate_is_a_claim_a_populated_host_fails() -> None:
         _grant(spec, execution_plan_digest=digest),
         execution_plan=execution_plan,
         sleep=lambda _: None,
+        **valid_host_source_kwargs(),
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
@@ -418,6 +429,7 @@ def test_migration_family_work_runs_in_the_candidate_image() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     assert effects.migration_images, "no migration-family work was recorded"
@@ -458,6 +470,7 @@ def test_a_role_that_never_becomes_ready_fails_the_deployment() -> None:
         clock=clock.read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
@@ -489,6 +502,7 @@ def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
@@ -527,6 +541,7 @@ def test_the_replay_coordinate_reaches_the_execution_report() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     assert (outcome.execution_sequence, outcome.attempt_no) == (42, 3)
@@ -606,6 +621,7 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     )
     outcome = executor.run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
@@ -653,6 +669,7 @@ def test_a_second_execution_of_one_authorization_switches_again_not_silently() -
             sleep=lambda _: None,
             evidence_policy=evidence_policy(),
             evidence_verifier=AcceptingVerifier(),
+            **valid_host_source_kwargs(),
         )
         return executor.run(plan, lock=held_lock(spec.product))
 

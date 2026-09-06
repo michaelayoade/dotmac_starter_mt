@@ -58,6 +58,7 @@ from dotmac_deployment_foundation.provenance import (
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.host_source_stance import valid_host_source_kwargs
 
 GOOD_DIGEST = "sha256:" + "a" * 64
 OLD_DIGEST = "sha256:" + "b" * 64
@@ -511,6 +512,11 @@ def run(spec: ProductDeploymentSpec, effects: FakeEffects, **plan_kwargs: object
         clock=clock.read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        # A GENUINE host-source stance, satisfying the mandatory prerequisite
+        # `Executor.run` now checks itself before any of the failures this
+        # file injects. See `tests/unit/host_source_stance.py` for why this is
+        # a stance rather than a bypass.
+        **valid_host_source_kwargs(),
     )
     return plan, executor.run(plan, lock=held_lock(spec.product))
 
@@ -1193,6 +1199,7 @@ def test_rollback_actually_restores_the_previous_digest() -> None:
         clock=FakeClock().read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     )
     outcome = executor.rollback(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
@@ -1217,7 +1224,12 @@ def test_rollback_is_REFUSED_for_a_maintenance_required_release() -> None:
     plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     grant, execution_plan = _bound(spec, plan, "rollback", effects=effects)
     executor = Executor(
-        spec, effects, grant, execution_plan=execution_plan, sleep=lambda _: None
+        spec,
+        effects,
+        grant,
+        execution_plan=execution_plan,
+        sleep=lambda _: None,
+        **valid_host_source_kwargs(),
     )
     with pytest.raises(PreconditionFailed) as caught:
         executor.rollback(plan, lock=held_lock(spec.product))
@@ -1277,6 +1289,7 @@ def test_a_rollback_annotates_itself() -> None:
         clock=clock.read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     ).rollback(plan, lock=held_lock(spec.product))
     assert "deployment.rollback" in [item["event"] for item in effects.annotations]
 

@@ -266,62 +266,86 @@ def test_the_gate_fires_before_the_grant_when_both_are_invalid(monkeypatch) -> N
     )
 
 
-def test_the_gate_fires_before_lock_dependent_steps_and_after_the_lock(
+def test_the_gate_fires_before_the_annotation_and_therefore_before_the_grant(
     monkeypatch,
 ) -> None:
-    """Direct call-order proof via a spy on the module-level function the
-    executor calls. `_verify_host_source` calls the unqualified name
-    `require_host_source`, resolved from `engine.run`'s module globals at call
-    time — monkeypatching that attribute intercepts every call `Executor`
-    makes, without changing what `_verify_host_source` does."""
+    """Direct call-order proof via spies on two module/class-level callables.
+
+    `_verify_host_source` calls the unqualified name `require_host_source`,
+    resolved from `engine.run`'s module globals at call time — monkeypatching
+    that module attribute intercepts every call `Executor` makes. `_annotate`
+    is patched on the CLASS (`Executor._annotate`), not on the `executor`
+    instance or on `executor._grant`: `ExecutionGrant` is a
+    `frozen=True, slots=True` dataclass (`authorization.py`), and patching an
+    attribute onto a frozen, slotted INSTANCE is exactly the shape that broke
+    this test's first draft. Patching the plain `Executor` class avoids that
+    entirely.
+
+    `run()`'s body is linear between the host-source call and the annotation
+    — `_verify_host_source()`, then `self._grant.require(...)`, then
+    `_require_execution_plan(...)`, then `self._annotate("deployment.start",
+    ...)` — so "host source fires before the annotation" already establishes
+    "before the grant and before the plan check", without needing a second,
+    riskier spy on the grant itself.
+    """
     calls: list[str] = []
-    real = run_module.require_host_source
+    real_require = run_module.require_host_source
 
-    def spy(**kwargs):  # type: ignore[no-untyped-def]
+    def require_spy(**kwargs):  # type: ignore[no-untyped-def]
         calls.append("host_source")
-        return real(**kwargs)
+        return real_require(**kwargs)
 
-    monkeypatch.setattr(run_module, "require_host_source", spy)
+    monkeypatch.setattr(run_module, "require_host_source", require_spy)
+
+    real_annotate = run_module.Executor._annotate
+
+    def annotate_spy(self, *a, **kw):  # type: ignore[no-untyped-def]
+        calls.append("annotate")
+        return real_annotate(self, *a, **kw)
+
+    monkeypatch.setattr(run_module.Executor, "_annotate", annotate_spy)
 
     spec, plan, effects, executor = _valid_executor()
-
-    original_grant_require = executor._grant.require
-
-    def grant_spy(*a, **kw):  # type: ignore[no-untyped-def]
-        calls.append("grant")
-        return original_grant_require(*a, **kw)
-
-    monkeypatch.setattr(executor._grant, "require", grant_spy)
-
-    original_annotate = executor._annotate
-
-    def annotate_spy(*a, **kw):  # type: ignore[no-untyped-def]
-        calls.append("annotate")
-        return original_annotate(*a, **kw)
-
-    monkeypatch.setattr(executor, "_annotate", annotate_spy)
-
     outcome = executor.run(plan, lock=held_lock(spec.product))
 
     assert calls, "no calls were recorded; this proves nothing"
     assert calls[0] == "host_source", (
         f"host source was not FIRST: {calls}. The ruling requires it to fire "
-        "immediately after the lock and before everything else"
+        "immediately after the lock and before everything else, including "
+        "the grant, the plan check and every annotation"
     )
-    assert calls.index("host_source") < calls.index("grant")
-    assert calls.index("grant") < calls.index("annotate")
-    assert outcome.succeeded or outcome.records, "the run never proceeded at all"
+    assert "annotate" in calls, (
+        "the annotation was never reached; this shows nothing about ORDER, "
+        "only that the run stopped somewhere"
+    )
+    assert calls.index("host_source") < calls.index("annotate")
+    assert outcome.succeeded, outcome.failure
 
 
-# ── 4. admit control, plus non-vacuity ──────────────────────────────────────
+# ── 4. the COMPOSITION admit proof, plus non-vacuity ────────────────────────
+#
+# Neither test below is THE real admit proof. Both drive the gate with an
+# injected `FakeInstall`/`CandidateReceipt` pair — a genuinely AGREEING pair,
+# shaped after the real fixtures `test_deployment_foundation_host_source.py`
+# already measured, but no wheel was built and no digest was matched against
+# an actual installed artifact. What this proves is COMPOSITION: the gate is
+# actually reached, called exactly once, and admits when its own inputs
+# agree — i.e. that `Executor` does not skip the call, double-call it, or
+# refuse unconditionally regardless of what it is given. The real admit proof
+# — an installed, digest-matched WHEEL reaching this same code path — is not
+# available from this repository: no published `dotmac-deployment-foundation`
+# version carries this gate yet, and `test_a_bare_executor_refuses_by_default`
+# below is what shows the REAL default (no fakes) still refuses today, in
+# this and every editable checkout. That test remains the standing proof that
+# nothing here is a bypass.
 
 
 def test_valid_host_source_and_valid_authorization_proceeds_past_the_gate() -> None:
-    """THE ADMIT CONTROL. Without this, every refusal test above could be
-    passing because the gate refuses UNCONDITIONALLY. Proceeding past the gate
-    is observed as the `deployment.start` annotation actually being emitted —
-    which happens only after the lock, the host source gate AND the grant all
-    accepted."""
+    """COMPOSITION PROOF, not the real admit proof (see above). Without this,
+    every refusal test above could be passing because the gate refuses
+    UNCONDITIONALLY. Proceeding past the gate is observed as the
+    `deployment.start` annotation actually being emitted — which happens only
+    after the lock, the host source gate AND the grant all accepted."""
     spec, plan, effects, executor = _valid_executor()
     executor.run(plan, lock=held_lock(spec.product))
     started = [
@@ -338,12 +362,13 @@ def test_valid_host_source_and_valid_authorization_proceeds_past_the_gate() -> N
 def test_the_verification_call_happens_exactly_once_on_the_admit_path(
     monkeypatch,
 ) -> None:
-    """NON-VACUITY. A `require_host_source` that is imported but never CALLED
-    would let every refusal test above fail for an unrelated reason and let
-    this one pass by accident, because nothing here yet asserts the call
-    actually happened. A `MagicMock` wrapping the real function proves both
-    that it fires, and that it fires exactly once — not once per step, not
-    zero times because some earlier branch short-circuited it."""
+    """NON-VACUITY, for the composition proof above. A `require_host_source`
+    that is imported but never CALLED would let every refusal test in this
+    file fail for an unrelated reason and let this one pass by accident,
+    because nothing here yet asserts the call actually happened. A
+    `MagicMock` wrapping the real function proves both that it fires, and
+    that it fires exactly once — not once per step, not zero times because
+    some earlier branch short-circuited it."""
     real = run_module.require_host_source
     spy = MagicMock(side_effect=real)
     monkeypatch.setattr(run_module, "require_host_source", spy)
@@ -359,12 +384,36 @@ def test_the_verification_call_happens_exactly_once_on_the_admit_path(
 
 
 def test_rollback_also_reaches_the_verification_call(monkeypatch) -> None:
-    """The admit control's rollback half."""
+    """The admit control's rollback half.
+
+    `_fixture()`'s plan carries no `previous_image`, so `steps_for_rollback`
+    returns nothing and `rollback()` refuses with "no previous release" —
+    AFTER `_verify_host_source` already ran and admitted, since the ruling
+    puts the gate ahead of that check too, but a refusal there would still
+    make this test's own `.rollback(...)` call raise, obscuring the
+    assertion below. A plan built WITH a previous image
+    (`build_plan(..., previous_image=...)`, the same fixture shape
+    `test_deployment_foundation_failure_injection.py::
+    test_rollback_actually_restores_the_previous_digest` uses) lets rollback
+    actually complete, so the call count is asserted on a genuine admit
+    rather than merely on "it didn't raise before the gate"."""
+    from dotmac_deployment_foundation.engine.plan import build_plan
+
+    from tests.unit.test_deployment_foundation_execution_binding import (
+        RecordingEffects,
+    )
+    from tests.unit.test_deployment_foundation_failure_injection import (
+        OLD_DIGEST,
+        load,
+    )
+
     real = run_module.require_host_source
     spy = MagicMock(side_effect=real)
     monkeypatch.setattr(run_module, "require_host_source", spy)
 
-    spec, plan, effects = _fixture()
+    spec = load()
+    effects = RecordingEffects()
+    plan = build_plan(spec, previous_image=f"ghcr.io/example/app@{OLD_DIGEST}")
     execution_plan, digest = _plan_and_digest(
         spec, plan, operation="rollback", effects=effects
     )
@@ -380,5 +429,6 @@ def test_rollback_also_reaches_the_verification_call(monkeypatch) -> None:
         host_source_metadata=FakeInstall(),
         host_source_probe=_source_tree_digest,
     )
-    executor.rollback(plan, lock=held_lock(spec.product))
+    outcome = executor.rollback(plan, lock=held_lock(spec.product))
+    assert outcome.succeeded, outcome.failure
     assert spy.call_count == 1

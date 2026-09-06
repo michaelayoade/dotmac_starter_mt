@@ -62,6 +62,7 @@ from dotmac_deployment_foundation.telemetry import (
 )
 
 from tests.unit.deployment_lock_harness import held_lock
+from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
     _fixture,
     _grant,
@@ -374,6 +375,7 @@ def _refused_run():  # type: ignore[no-untyped-def]
         execution_plan=execution_plan,
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
+        **valid_host_source_kwargs(),
     )
     outcome = executor.run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded, "the fixture stopped refusing; it proves nothing"
