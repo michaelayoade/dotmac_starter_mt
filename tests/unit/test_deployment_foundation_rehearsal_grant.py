@@ -298,7 +298,7 @@ def test_a_deployment_authorization_is_not_rehearsal_authority() -> None:
     a production deployment authorization issued for an act whose entire purpose
     is to fail, with every link in the chain correct and the SUBJECT wrong.
     """
-    with pytest.raises(SpecError, match="is not"):
+    with pytest.raises(SpecError, match="no deployment authorization becomes one"):
         verify_rehearsal_grant(
             _material(schema="DeploymentAuthorization.v1"), verifier=_Verifier()
         )
