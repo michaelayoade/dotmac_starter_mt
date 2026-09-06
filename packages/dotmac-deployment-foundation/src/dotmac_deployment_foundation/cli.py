@@ -1020,7 +1020,7 @@ def cmd_exposure_apply(args: argparse.Namespace) -> int:
     wrong one: it would have left two executors, one of them re-deriving its
     own ordering and its own compensation. So the ACT moved to
     `Executor._reconcile_exposure`, driven from
-    `FoundationExecutionPlanV2.exposure_reconciliations` under the caller's
+    the authorized execution plan's exposure reconciliations, under the caller's
     lock, and this subcommand keeps the half that was always safe — looking.
 
     Looking is not a lesser capability. It answers "would this host pass?"

@@ -174,20 +174,41 @@ def test_the_command_line_offers_no_way_to_supply_a_result() -> None:
 # ── behavioural: today's main, and every reason planted ─────────────────────
 
 
-def test_this_tree_is_capable_and_that_is_the_gate_on_the_build() -> None:
-    """The verdict `foundation-candidate.yml` refuses to build without.
+def test_this_tree_is_NOT_capable_for_exactly_one_reason() -> None:
+    """The verdict `foundation-candidate.yml` refuses to build without — and it
+    is now `not_capable`, truthfully.
 
-    All five reasons are repaired, so no live reason remains for a detector to
-    demonstrate itself against. That is the good outcome and also the dangerous
-    one: from here EVERY detector's only proof is its regression plant, because
-    a scanner that had quietly stopped looking would produce this same verdict.
+    This asserted `capable` with no reasons. It changed because the tree
+    changed, and the honest record is the reason rather than the verdict:
+    **item 8's provocation is no longer driven.** The compensation it provoked
+    moved to `Executor._restore_exposure`, reachable only through an authorized
+    `FoundationExecutionPlanV2` carrying an exposure reconciliation, which
+    Control does not issue. So `exposure_rehearsal_runner` records
+    `provoked_rollback` as `blocked` and calls no provocation seam, and this
+    scanner correctly says so.
 
-    So the plants below are not belt-and-braces any more — they are the whole
-    evidence that this `capable` means anything.
+    CONSEQUENCE, and it is a schedule fact rather than a test detail: a
+    candidate BUILD is gated on this verdict, so no candidate can be built
+    while this holds. That is the correct behaviour — a candidate whose Lane 3
+    cannot execute item 8 is a candidate whose exposure compensation has never
+    been demonstrated — and it is a cross-repository dependency, not something
+    this repository can clear on its own.
+
+    A TWO-DIRECTIONAL ratchet. A second reason appearing is a new capability
+    gap and fails here. This reason DISAPPEARING also fails here, because it
+    would mean either that the provocation is driven again — in which case this
+    test should assert `capable` and say so deliberately — or that the detector
+    stopped looking, which produces the identical verdict and is the failure
+    this file exists to catch.
     """
     record = capability.assess(ROOT)
-    assert record["verdict"] == "capable", record["reasons"]
-    assert record["reasons"] == []
+    reasons = {entry["reason"] for entry in record["reasons"]}  # type: ignore[index]
+    assert reasons == {capability.Reason.NO_INDUCED_FAILURE}, (
+        f"the capability reasons moved: {sorted(reasons)}. Read the docstring "
+        "above before changing this assertion — a reason that VANISHED is not "
+        "self-evidently good news"
+    )
+    assert record["verdict"] == "not_capable"
 
 
 def _tree_with(tmp_path: Path, repairs: dict[Path, list[tuple[str, str]]]) -> Path:
@@ -329,29 +350,53 @@ def test_reintroducing_a_far_end_sentinel_is_refused_again(tmp_path: Path) -> No
     assert capability.Reason.FAR_END_SENTINEL in reasons
 
 
-def test_removing_the_provocation_seam_is_refused_again(tmp_path: Path) -> None:
-    """REGRESSION PLANT for item 8's repair.
+def test_restoring_the_provocation_seam_CLEARS_the_reason(tmp_path: Path) -> None:
+    """The plant, INVERTED, because the reason it targets is now live.
 
-    The detector looks for a call to the DECLARED provocation seam rather than
-    pattern-matching arbitrary code, so removing the call must bring the reason
-    back. A detector that accepted any `raise` would be satisfied by every error
-    path the runner already has, none of which the apply path meets.
+    This used to remove the provocation call from a copy of the tree and check
+    that `NO_INDUCED_FAILURE` came back — the right proof while the tree was
+    capable, when a detector that had stopped looking and a tree with no defect
+    produced the same verdict.
+
+    The tree now exhibits that reason for real (item 8 is blocked). A live
+    reason inverts the risk: the danger is no longer a detector that never
+    fires, it is one that is STUCK ON — a scanner returning
+    `NO_INDUCED_FAILURE` unconditionally would satisfy
+    `test_this_tree_is_NOT_capable_for_exactly_one_reason` perfectly, and would
+    also keep failing the build after somebody had genuinely restored the
+    provocation.
+
+    So the plant restores a call to the declared seam in a copy and requires
+    the reason to CLEAR. That is the direction that cannot be faked by a
+    detector which has stopped discriminating.
     """
     root = _tree_with(tmp_path, {})
     runner = root / capability.RUNNER
     text = runner.read_text(encoding="utf-8")
-    assert f"{capability.PROVOCATION_SEAM}(" in text
+    assert f"{capability.PROVOCATION_SEAM}(" not in text, (
+        "the runner drives the provocation again. Item 8 is presumably no "
+        "longer blocked — revisit this file's two tests together rather than "
+        "this assertion alone"
+    )
+    assert _reasons(root) == {capability.Reason.NO_INDUCED_FAILURE}
+
+    # A call to the DECLARED seam, spelled as the runner spells it. The
+    # detector matches the seam name rather than any `raise`, so an arbitrary
+    # error path would not clear this — which is the property the original
+    # plant was written to establish and this keeps.
+    marker = '    results.record(\n        "provoked_rollback",'
+    assert marker in text, "the anchor moved; the plant would silently do nothing"
     runner.write_text(
         text.replace(
-            f"{capability.PROVOCATION_SEAM}(effects", "_no_provocation(effects"
+            marker,
+            f"    {capability.PROVOCATION_SEAM}(effects, port=1)\n" + marker,
         ),
         encoding="utf-8",
     )
-    reasons = {
-        entry["reason"]
-        for entry in capability.assess(root)["reasons"]  # type: ignore[index]
-    }
-    assert capability.Reason.NO_INDUCED_FAILURE in reasons
+    assert _reasons(root) == set(), (
+        "restoring a call to the declared provocation seam did not clear "
+        "`no_induced_failure`. The detector is stuck on rather than looking"
+    )
 
 
 def test_re_deriving_an_unused_compose_project_is_refused_again(
