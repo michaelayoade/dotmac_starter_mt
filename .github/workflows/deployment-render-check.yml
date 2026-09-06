@@ -1,0 +1,138 @@
+name: Deployment render check
+
+# ADR 0014's second half, executed on every pull request.
+#
+# The declaration is `deploy/product.toml`; the render is that declaration plus
+# one environment, and this workflow is what compares the render byte-for-byte
+# against the committed assets. It is the workflow `.dotmac/standards-profile.json`
+# names in `deployment_artefact_surfaces[].render_check_workflow`.
+#
+# WHY THIS FILE EXISTS RATHER THAN THE POINTER STAYING WHERE IT WAS
+#
+# The profile used to name `deployment-conformance.yml`. Governance's
+# `deployment.render-check.absent` is a TEXTUAL check — it reads the named
+# workflow and looks for the declared command — so that pointer was green.
+# It was green over a workflow that never runs on a pull request:
+# `deployment-conformance.yml` is `workflow_call`-only, its single caller
+# `deployment-adopter.yml` is `workflow_dispatch`-only, and that caller is
+# pinned to `foundation-version: "0.1.0a1"`, a version nothing has ever
+# published. So the declared comparison existed, read as coverage, and executed
+# on nobody's merge — the exact shape `test_engine_parse_is_required_ci.py`
+# already records for `docker compose config`, arriving a second time through
+# the Governance declaration instead of through a job list.
+#
+# `ci.yml`'s `quality` matrix does run `make deployment-check`, which runs the
+# real comparison. It could not be the declared workflow: the literal command
+# lives in the Makefile, not in `ci.yml`, so the textual check would not find
+# it there — and satisfying a textual check by writing the command into a
+# comment would be manufacturing a pass. This workflow runs the command.
+#
+# NO INSTALLATION, AND THAT IS THE POINT
+#
+# `dotmac-deployment-foundation` has ZERO runtime dependencies (its
+# `pyproject.toml` names nothing beyond a Python range). So the renderer runs
+# straight off the source tree on a bare interpreter — no wheel, no index, no
+# credential, no published version. That dissolves the circularity that kept
+# `deployment-adopter.yml` dispatch-only: a comparison that must install a
+# published artifact cannot run before the first publication, and no version of
+# this facility has ever been published.
+#
+# What that costs, stated rather than implied: this proves the SOURCE TREE
+# renders the committed bytes. It does not prove a built wheel does, and it is
+# not a substitute for `deployment-conformance.yml`, which is the gate a
+# CONSUMING product runs against an installed release. Both are wanted; only
+# one of them can run today.
+#
+# CROSS-PROCESS AND CROSS-INTERPRETER, NOT MERELY SAME-PROCESS
+#
+# The facility's own unit tests assert `render_compose(spec) == render_compose(spec)`
+# inside one process, which cannot see a set iteration order or a hash-derived
+# key ordering that is stable within a run and varies between runs. Each matrix
+# leg below is a fresh process on a DIFFERENT Python minor version with a
+# DIFFERENT `PYTHONHASHSEED`, and every leg compares against the SAME committed
+# bytes. Agreement is therefore transitive: if 3.11 renders the committed bytes
+# and 3.13 renders the committed bytes, the two interpreters rendered the same
+# bytes. No artifact plumbing between jobs is needed to establish it.
+#
+# THE COMPARISON REFUSES AN EMPTY RENDERED SET
+#
+# `cmd_render`'s check arm enumerates the assets the DESCRIPTOR produces and
+# reports every one it cannot find, so an absent or emptied `deploy/rendered/`
+# is three `missing` findings rather than a vacuous pass. That is a property of
+# the tool, so it is proven rather than asserted here:
+# `tests/architecture/test_render_check_is_sensitive.py` plants exactly that
+# defect, alongside a changed file, a stray file, and two near-misses that must
+# stay silent.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  render-check:
+    name: The committed render matches the declaration (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The ends of the facility's supported range (`>=3.11,<3.14`). A
+        # renderer that is deterministic on one interpreter and not the other
+        # is a renderer whose output depends on the machine that produced it.
+        include:
+          - python-version: "3.11"
+            hash-seed: "0"
+          - python-version: "3.13"
+            # Deliberately not a second constant. A fixed seed on both legs
+            # would compare two runs that happen to share an ordering; `random`
+            # makes the leg fail on any hash-derived ordering that survived
+            # into the output.
+            hash-seed: "random"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Deliberately no `pip install` of anything, including the facility
+      # itself. See "NO INSTALLATION" above.
+      - name: The declaration renders the committed assets, byte for byte
+        env:
+          PYTHONPATH: packages/dotmac-deployment-foundation/src
+          PYTHONHASHSEED: ${{ matrix.hash-seed }}
+        run: |
+          set -euo pipefail
+          python -m dotmac_deployment_foundation.cli \
+            -f deploy/product.toml \
+            render --check \
+            -o deploy/rendered \
+            --thresholds deploy/alerts/thresholds.json
+
+      # The comparison above is only as meaningful as the set it compares.
+      # `render --check` reads the WORKING TREE, so a `deploy/rendered/`
+      # produced by an earlier step — or restored from a cache, or ignored by
+      # git and never reviewed by anybody — would satisfy it exactly as well as
+      # committed bytes would. This asks the one question the tool structurally
+      # cannot: are the files it just compared the files a reviewer approved?
+      #
+      # It is placed AFTER the comparison on purpose. Before it, a failure here
+      # would mask the drift report, which is the finding somebody actually
+      # needs to read.
+      - name: The compared assets are tracked, reviewed bytes
+        run: |
+          set -euo pipefail
+          tracked="$(git ls-files -- deploy/rendered)"
+          if [ -z "${tracked}" ]; then
+            echo "::error::deploy/rendered holds no git-tracked file. A render" >&2
+            echo "check over an untracked or ignored directory compares the" >&2
+            echo "renderer against itself and passes for the wrong reason." >&2
+            exit 1
+          fi
+          printf '%s\n' "${tracked}"

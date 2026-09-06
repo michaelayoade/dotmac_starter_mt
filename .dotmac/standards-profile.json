@@ -232,7 +232,7 @@
         "deploy/rendered/otel-collector.yaml",
         "deploy/rendered/alerts.rules.yml"
       ],
-      "render_check_workflow": ".github/workflows/deployment-conformance.yml",
+      "render_check_workflow": ".github/workflows/deployment-render-check.yml",
       "render_check_command": "render --check",
       "acknowledged_non_deployments": [
         {
