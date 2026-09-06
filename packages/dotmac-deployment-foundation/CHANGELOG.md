@@ -86,6 +86,26 @@ published Foundation remains `0.2.0a2`. Closing the candidate window and
 allocating any successor are separate authorized lifecycle acts; this
 changelog does neither.
 
+### `version_binding_guard.py` now refuses this coordinate offline — 2026-09-06
+
+The freeze-oracle gap: `scripts/version_binding_guard.py` read tags,
+`CandidateArtifact.v1` receipts and `CandidateDisposition.v1` entries, and none
+of the three had anything to point at for `0.4.0a1` — its receipt never
+reached this repository, so the guard ADMITTED it for both a candidate build
+and a release, exactly the coordinate the paragraph above says must never be
+rebuilt or published.
+
+A fourth typed binding source, `spent_identity_bindings`, reads
+`SpentIdentity.v1` rows from `docs/inventories/spent-version-identities.json`
+by schema, the same way the guard already reads a disposition log. Two rows
+seed it: `0.4.0a1` (built once, unrecorded, drifted — the coordinate above,
+by run `33920058598` and artifact `9954731961`) and `0.3.0a6` (declared,
+never built, retired unbuilt — a separate, older gap this facility's ledger
+already carried). Both are now refused for `--purpose candidate` and
+`--purpose release`, offline, with no GitHub access. Neither row authorizes
+committing the drifted receipt, appending a disposition, or allocating a
+successor — those remain Michael's decisions.
+
 ### An absence proof can only prove the concern its inventory belongs to
 
 `IntegrationSurfaceAbsenceProofV1` validated `families` against
