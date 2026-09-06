@@ -66,6 +66,7 @@ from dotmac_deployment_foundation.provenance import (
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
+from tests.unit.deployment_lock_harness import held_lock
 from tests.unit.test_deployment_foundation_failure_injection import (
     DESCRIPTOR,
     GOOD_DIGEST,
@@ -281,7 +282,7 @@ def test_absent_execution_plan_produces_zero_effects() -> None:
     before = effects.snapshot()
     executor = Executor(spec, effects, _grant(spec), execution_plan=None)  # type: ignore[arg-type]
     with pytest.raises(PreconditionFailed, match="no execution plan"):
-        executor.run(plan)
+        executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
 
 
@@ -308,7 +309,7 @@ def test_an_unfrozen_plan_produces_zero_effects() -> None:
         execution_plan=execution_plan,
     )
     with pytest.raises(PreconditionFailed):
-        executor.run(plan)
+        executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
 
 
@@ -343,7 +344,7 @@ def test_a_plan_for_an_unauthorized_image_produces_zero_effects() -> None:
         execution_plan=running,
     )
     with pytest.raises(PreconditionFailed):
-        executor.run(plan)
+        executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
 
 
@@ -376,7 +377,7 @@ def test_a_host_that_moved_after_authorization_refuses_with_zero_effects() -> No
         )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
-        executor.run(plan)
+        executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
 
 
@@ -394,7 +395,7 @@ def test_an_empty_prestate_is_a_claim_a_populated_host_fails() -> None:
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
-        executor.run(plan)
+        executor.run(plan, lock=held_lock(spec.product))
     _assert_untouched(effects, before)
 
 
@@ -417,7 +418,7 @@ def test_migration_family_work_runs_in_the_candidate_image() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
-    ).run(plan)
+    ).run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     assert effects.migration_images, "no migration-family work was recorded"
     for command, image in effects.migration_images:
@@ -457,7 +458,7 @@ def test_a_role_that_never_becomes_ready_fails_the_deployment() -> None:
         clock=clock.read,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
-    ).run(plan)
+    ).run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "verify_roles"
@@ -488,7 +489,7 @@ def test_evidence_that_does_not_read_back_fails_the_deployment() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
-    ).run(plan)
+    ).run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded
     assert outcome.failed_step is not None
     assert outcome.failed_step.value == "record_evidence"
@@ -526,7 +527,7 @@ def test_the_replay_coordinate_reaches_the_execution_report() -> None:
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
-    ).run(plan)
+    ).run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     assert (outcome.execution_sequence, outcome.attempt_no) == (42, 3)
     evidence = outcome.as_evidence()
@@ -606,7 +607,7 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
     )
-    outcome = executor.run(plan)
+    outcome = executor.run(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure
     switches = [call for call in effects.mutations if call[0] == "switch"]
     assert len(switches) == 1, f"expected exactly one switch, saw {switches}"
@@ -653,7 +654,7 @@ def test_a_second_execution_of_one_authorization_switches_again_not_silently() -
             evidence_policy=evidence_policy(),
             evidence_verifier=AcceptingVerifier(),
         )
-        return executor.run(plan)
+        return executor.run(plan, lock=held_lock(spec.product))
 
     def counts() -> tuple[int, int]:
         return (

@@ -61,6 +61,7 @@ from dotmac_deployment_foundation.telemetry import (
     Annotation,
 )
 
+from tests.unit.deployment_lock_harness import held_lock
 from tests.unit.test_deployment_foundation_execution_binding import (
     _fixture,
     _grant,
@@ -374,7 +375,7 @@ def _refused_run():  # type: ignore[no-untyped-def]
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
     )
-    outcome = executor.run(plan)
+    outcome = executor.run(plan, lock=held_lock(spec.product))
     assert not outcome.succeeded, "the fixture stopped refusing; it proves nothing"
     return outcome
 
