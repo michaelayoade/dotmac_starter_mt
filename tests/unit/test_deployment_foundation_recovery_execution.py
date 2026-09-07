@@ -6,50 +6,45 @@ deployment `Effects` protocol has no restore method among its twenty-four. That
 is the same shape as `ExecutionPlanDigestV1` before a5: built, tested, and
 unreachable from anything that touches a host.
 
-## What these tests hold
+## `RecoveryExecutor.run` refuses UNCONDITIONALLY — the full sequence is UNMONITORED
 
-The executor DECIDES nothing the data contract already decides. So the
-assertions are about obedience and ordering, not about judgement:
+`_verify_host_source` always calls `require_host_source(receipt=None)`, which
+always refuses — a typed refusal with zero effects, in every environment.
+`RecoveryExecutor.run(...)` therefore cannot reach `_do_fresh_target` or any
+step after it, anywhere, until trusted provenance (separate, future work) lands.
 
-- a DESTROY verdict from `adjudicate_restore` is PERFORMED, before anything
-  inspects the target, and the run stops there;
-- a catalog that differs from the bundle stops the recovery rather than
-  reporting a difference and continuing;
-- an image that never becomes ready is a failed recovery — a database that
-  restores and cannot run the application is a copy;
-- and the happy path walks all ten steps in the contract's order.
+An earlier repair (`061cf4bd`) drove the ten steps through `_drive_steps`, a
+test helper that replicated `run()`'s dispatch loop — `restore_plan`, the
+procedure-drift check, the `for`/`_dispatch` loop, the `StepFailed`/
+`PreconditionFailed` handling — MINUS the `_verify_host_source()` call.
+Michael's ruling on review: **`_drive_steps` was an unguarded second recovery
+executor**, and it had already drifted from the real one on its first day —
+its docstring called it a "byte-for-byte replica" while it silently omitted
+the procedure-drift refusal (`run()`'s own `if tuple(...) != tuple(...):
+raise PreconditionFailed` check has no equivalent in `_drive_steps`). A
+replica that drifts on day one is the strongest argument against keeping one
+at all, not a reason to fix the drift and keep going.
 
-## `RecoveryExecutor.run` now refuses UNCONDITIONALLY — read this before editing
+`_drive_steps` and everything it enabled — the ten-step happy path, the
+whole-sequence catalog-mismatch stop, the whole-sequence unready-image
+failure — are DELETED, not repaired. **The full recovery sequence (all ten
+steps executing in the real declared order, via the real `run()`/`_dispatch`)
+is UNMONITORED by this test suite** until trusted provenance makes the real
+`RecoveryExecutor.run` reachable.
 
-An independent review at `541cee5d` found that the host-source seam this file
-used to admit through (`host_source_metadata=`/`host_source_receipts_dir=`,
-resolving a receipt from an operator-named directory) was the SAME exploit
-shape closed on `engine.run.Executor`, respelled. Michael's ruling removed
-BOTH parameters from `RecoveryExecutor.__init__` entirely — see
-`recovery_execution.py::RecoveryExecutor._verify_host_source`, which now
-always calls `require_host_source(receipt=None)` and therefore always
-refuses, with a typed refusal and zero effects, in every environment.
+What remains, per Michael's instruction to retain "direct pure-function and
+individual-handler tests" — those exercise REAL subjects with no
+reimplemented sequencing:
 
-So `RecoveryExecutor(...).run(...)` can no longer reach `_do_fresh_target` or
-any step after it — not in this sandbox, not anywhere, until trusted
-provenance (a separate piece of work, not started here) lands. Every test
-below that used to assert on `RecoveryExecutor(...).run(bundle=...)`'s
-OUTCOME (the ten-step happy path, the DESTROY-before-inspection proof, the
-catalog-mismatch stop, the unready-image failure) is testing behaviour that
-lives BELOW the gate, inside the ten step handlers `run()` dispatches to.
-Per Michael's guidance ("test post-gate behaviour by exercising the
-underlying steps/pure functions directly rather than through the executor"),
-`_drive_steps` below replicates `run()`'s dispatch loop verbatim MINUS the
-`_verify_host_source()` call, and every such test now calls that instead of
-`.run(...)`.
-
-**This does not touch, patch, subclass or bypass `run()` or
-`_verify_host_source` in ANY way** — `run()` itself is never called by these
-tests any more, and its own unconditional refusal is proved separately, on
-its own, in the "the host-source gate" section below. `_drive_steps` is test
-code that exercises the same private step methods `run()` calls, in the same
-order, from outside the gate `run()` enforces — it is not `run()` with the
-gate removed, because nothing calls it AS `run()`.
+* each `_do_*` step handler, called directly with a manually-prepared
+  `RecoveryOutcome` (never through `_dispatch`, never through a loop this
+  file owns) — `test_do_fresh_target_...`, `test_do_adjudicate_...`,
+  `test_do_prove_catalog_...`, `test_do_start_product_image_...` below;
+* `tests/architecture/
+  test_deployment_foundation_recovery_execution_host_source_coverage.py`
+  for STRUCTURAL proof, over the real `run()` method's own source, that
+  `_verify_host_source` precedes `restore_plan` and the dispatch loop —
+  not a re-driven copy of any of them.
 """
 
 from __future__ import annotations
@@ -66,11 +61,9 @@ from dotmac_deployment_foundation.host_source import (
     WRONG_KIND,
 )
 from dotmac_deployment_foundation.recovery import (
-    RESTORE_PROCEDURE,
     CatalogEvidence,
     Disposition,
     RestoreAttempt,
-    restore_plan,
 )
 from dotmac_deployment_foundation.recovery_execution import (
     RecoveryEffects,
@@ -103,6 +96,8 @@ VENDOR_CP_PARTIAL = RestoreAttempt(
 )
 
 IMAGE = "ghcr.io/example/app@sha256:" + "a" * 64
+
+TARGET = RestoreTarget(identifier="recovery-1", major_version=16)
 
 
 class RecordingRecoveryEffects:
@@ -173,33 +168,6 @@ def _executor(effects: RecordingRecoveryEffects) -> RecoveryExecutor:
     )
 
 
-def _drive_steps(
-    executor: RecoveryExecutor, bundle: Mapping[str, Any]
-) -> RecoveryOutcome:
-    """Exercise the ten step handlers directly — see the module docstring.
-
-    A byte-for-byte replica of `RecoveryExecutor.run`'s dispatch loop, MINUS
-    the `_verify_host_source()` call at its top. This is TEST code calling
-    `executor`'s own private `_dispatch` method (the same one `run()` calls);
-    it does not modify, patch, or subclass `RecoveryExecutor`, and `run()`
-    itself — the only place the host-source gate lives — is never invoked
-    here and is never made to skip anything.
-    """
-    outcome = RecoveryOutcome()
-    procedure = restore_plan(executor._spec, executor._manifest)
-    completed: list[str] = []
-    try:
-        for spec in procedure:
-            executor._dispatch(spec.step, bundle, outcome, completed)
-            completed.append(spec.step.value)
-    except StepFailed as exc:
-        outcome.failure = str(exc)
-    except PreconditionFailed as exc:
-        outcome.failure = str(exc)
-    outcome.steps_completed = tuple(completed)
-    return outcome
-
-
 # ── the seam is a protocol a product can satisfy ────────────────────────────
 
 
@@ -209,84 +177,73 @@ def test_the_recording_effects_satisfies_the_protocol() -> None:
     assert isinstance(RecordingRecoveryEffects(), RecoveryEffects)
 
 
-# ── the happy path: all ten steps, in the contract's order ──────────────────
-# (below the host-source gate; see `_drive_steps` in the module docstring)
+# ── individual handlers, called directly — real subjects, no reimplemented
+# sequencing. Each test prepares the ONE piece of `RecoveryOutcome` state the
+# handler under test needs and calls that handler alone; none of them drive
+# `_dispatch`, a loop, or `restore_plan`. ──────────────────────────────────
 
 
-def test_a_clean_restore_walks_every_step_of_the_declared_procedure() -> None:
+def test_do_fresh_target_creates_from_the_manifests_postgres_major() -> None:
+    """`_do_fresh_target` is step 1 and needs no prior state."""
     effects = RecordingRecoveryEffects()
-    outcome = _drive_steps(_executor(effects), bundle={})
-    assert outcome.failure == "", outcome.failure
-    assert outcome.proved is True
-    assert outcome.destroyed is False
-    assert outcome.steps_completed == tuple(
-        step.step.value for step in RESTORE_PROCEDURE
-    ), "the executor walked a different procedure than the contract declares"
+    executor = _executor(effects)
+    outcome = RecoveryOutcome()
+
+    executor._do_fresh_target({}, outcome)
+
+    assert outcome.target is not None
     assert effects.created == [_manifest().postgres_major], (
-        "the major version must come from the BUNDLE — a restore across majors "
-        "is a migration wearing a recovery's clothes"
+        "the major version must come from the BUNDLE/manifest — a restore "
+        "across majors is a migration wearing a recovery's clothes"
     )
 
 
-def test_the_procedure_is_read_from_the_contract_not_copied() -> None:
-    """Ten steps today. If the contract grows an eleventh, the executor walks it
-    or this fails — which is the point of driving `restore_plan`'s output rather
-    than a list in the executor."""
-    effects = RecordingRecoveryEffects()
-    outcome = _drive_steps(_executor(effects), bundle={})
-    assert len(outcome.steps_completed) == len(RESTORE_PROCEDURE) == 10
-
-
-# ── the adjudicator's DESTROY is PERFORMED, not reported ────────────────────
-
-
-def test_a_partial_restore_is_destroyed_before_anything_inspects_it() -> None:
+def test_do_adjudicate_destroys_a_partial_restore_before_anything_inspects_it() -> None:
     """THE refusal this module exists for, with the measured failure as input.
 
     A non-zero restore that left 45 tables, 23 policies and 16 RLS-enabled
-    tables is not "failed, therefore nothing happened" — it is a database that
-    will pass a table count, a policy listing and an RLS check. The verdict is
-    `adjudicate_restore`'s; performing it is the executor's.
+    tables is not "failed, therefore nothing happened" — it is a database
+    that will pass a table count, a policy listing and an RLS check. The
+    verdict is `adjudicate_restore`'s; performing it is `_do_adjudicate`'s.
     """
     effects = RecordingRecoveryEffects(attempt=VENDOR_CP_PARTIAL)
-    outcome = _drive_steps(_executor(effects), bundle={})
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET, attempt=VENDOR_CP_PARTIAL)
 
+    with pytest.raises(StepFailed) as failed:
+        executor._do_adjudicate({}, outcome)
+
+    assert "destroyed" in str(failed.value)
     assert outcome.adjudication is not None
     assert outcome.adjudication.disposition is Disposition.DESTROY
     assert outcome.destroyed is True
     assert effects.destroyed == ["recovery-1"]
-    assert outcome.proved is False
-    assert "destroyed" in outcome.failure
-
-    # And nothing looked at it afterwards.
-    after_destroy = effects.calls[effects.calls.index("destroy_target") + 1 :]
-    assert after_destroy == [], (
-        f"the target was inspected after being destroyed: {after_destroy}. A "
-        "partial target is destroyed BEFORE anything reads it, or the reader "
-        "finds policies present and concludes the isolation survived"
+    assert effects.calls == ["destroy_target"], (
+        "nothing else was called: the target is destroyed and NOTHING "
+        "inspects it afterward, in the same call"
     )
-    assert "observe_catalog" not in effects.calls
-    assert "start_product_image" not in effects.calls
 
 
-def test_a_clean_exit_is_not_destroyed() -> None:
+def test_do_adjudicate_does_not_destroy_a_clean_exit() -> None:
     """The positive control. Without it, the refusal above is equally
-    consistent with an executor that destroys every target it makes."""
+    consistent with a handler that destroys every target it judges."""
     effects = RecordingRecoveryEffects()
-    outcome = _drive_steps(_executor(effects), bundle={})
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET, attempt=CLEAN)
+
+    executor._do_adjudicate({}, outcome)
+
     assert outcome.destroyed is False
     assert effects.destroyed == []
     assert outcome.adjudication is not None
     assert outcome.adjudication.disposition is Disposition.PROCEED
 
 
-# ── the proofs stop the recovery rather than annotating it ──────────────────
-
-
-def test_a_catalog_that_differs_from_the_bundle_stops_the_recovery() -> None:
+def test_do_prove_catalog_stops_on_a_catalog_that_differs_from_the_bundle() -> None:
     """`verify_recovery` returns findings rather than raising, so an operator
-    sees them all at once. The executor must still STOP: a recovery reported as
-    proved with findings attached is one nobody reads the findings of."""
+    sees them all at once. `_do_prove_catalog` must still STOP: a recovery
+    reported as proved with findings attached is one nobody reads the
+    findings of."""
     lost_roles = CatalogEvidence(
         **{
             **{f: getattr(_evidence(), f) for f in _evidence().__dataclass_fields__},
@@ -294,21 +251,46 @@ def test_a_catalog_that_differs_from_the_bundle_stops_the_recovery() -> None:
         }
     )
     effects = RecordingRecoveryEffects(restored=lost_roles)
-    outcome = _drive_steps(_executor(effects), bundle={})
-    assert outcome.proved is False
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET)
+
+    with pytest.raises(StepFailed):
+        executor._do_prove_catalog({}, outcome)
+
     assert outcome.findings, "the findings must be carried, not just the failure"
-    assert "prove_catalog" not in outcome.steps_completed
-    assert "start_product_image" not in effects.calls
 
 
-def test_an_image_that_never_becomes_ready_fails_the_recovery() -> None:
-    """A database that restores and cannot run the application is a copy, not a
-    recovery."""
+def test_do_prove_catalog_stays_silent_on_an_agreeing_catalog() -> None:
+    """NEAR-MISS, MUST BE SILENT. The positive control for the stop above."""
+    effects = RecordingRecoveryEffects()
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET)
+
+    executor._do_prove_catalog({}, outcome)
+
+    assert outcome.findings == ()
+
+
+def test_do_start_product_image_fails_when_the_image_never_becomes_ready() -> None:
+    """A database that restores and cannot run the application is a copy,
+    not a recovery."""
     effects = RecordingRecoveryEffects(image_ready=False)
-    outcome = _drive_steps(_executor(effects), bundle={})
-    assert outcome.proved is False
-    assert "did not become ready" in outcome.failure
-    assert "emit_receipt" not in outcome.steps_completed
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET)
+
+    with pytest.raises(StepFailed) as failed:
+        executor._do_start_product_image({}, outcome)
+
+    assert "did not become ready" in str(failed.value)
+
+
+def test_do_start_product_image_succeeds_when_the_image_becomes_ready() -> None:
+    """NEAR-MISS, MUST BE SILENT."""
+    effects = RecordingRecoveryEffects(image_ready=True)
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET)
+
+    executor._do_start_product_image({}, outcome)  # must not raise
 
 
 # ── the host-source gate: SAFETY-ONLY, unconditional, no admit path ─────────
@@ -395,16 +377,23 @@ def test_a_target_with_no_identifier_is_refused() -> None:
         RestoreTarget(identifier="", major_version=16)
 
 
-# ── the evidence shape ──────────────────────────────────────────────────────
+# ── the evidence shape ────────────────────────────────────────────────────
 
 
 def test_the_outcome_records_what_happened_including_a_destruction() -> None:
+    """Built from a manually-driven `_do_adjudicate` call (see above), not a
+    full run — `.as_evidence()` is a pure function of `RecoveryOutcome`'s own
+    fields and is exercised as such."""
     effects = RecordingRecoveryEffects(attempt=VENDOR_CP_PARTIAL)
-    evidence = _drive_steps(_executor(effects), bundle={}).as_evidence()
+    executor = _executor(effects)
+    outcome = RecoveryOutcome(target=TARGET, attempt=VENDOR_CP_PARTIAL)
+    with pytest.raises(StepFailed):
+        executor._do_adjudicate({}, outcome)
+
+    evidence = outcome.as_evidence()
     assert evidence["schema"] == "RecoveryExecution.v1"
     assert evidence["disposition"] == "destroy"
     assert evidence["destroyed"] is True
-    assert evidence["proved"] is False
     assert evidence["exit_status"] == 1
     assert evidence["adjudication_reasons"], "a DESTROY must say why"
     assert evidence["target"] == "recovery-1"
