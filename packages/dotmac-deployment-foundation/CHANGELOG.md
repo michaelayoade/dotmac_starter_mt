@@ -471,14 +471,11 @@ artifact, and the shape is new:
   `BUILT_CANDIDATES` are unchanged;
   `tests/architecture/candidate_source_binding_baseline.json` stays empty,
   which is still the healthy state.
-- **NO MACHINE ORACLE REFUSES `0.3.0a6`.** Stated plainly so it is not read as
-  coverage. The guard has three record sets — tags, candidate receipts,
-  dispositions — and this name is in none of them. `ABANDONED_UNBUILT` in the
-  binding-guard test asserts the freshness expectation longhand, the same shape
-  `PUBLISHED` uses so a stated expectation can be wrong and get caught; it is
-  an EXPECTATION, not an enforcement. A dispatched build of `0.3.0a6` would not
-  be refused. That is an unmonitored population recorded as one, and it is not
-  repaired by pretending otherwise.
+- **The spent-identity oracle refuses `0.3.0a6`.** The guard reads four
+  binding sources — tags, candidate receipts, dispositions and `SpentIdentity.v1`
+  records — and this name is recorded in the fourth. Both candidate and release
+  checks refuse it, while the inventory row preserves the historical reason
+  without pretending that an artifact or disposition exists.
 
 ### `RecoveryExecutionPlanV1` — the distinct plan type, deliberately unreachable
 

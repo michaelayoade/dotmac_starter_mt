@@ -78,7 +78,7 @@ already declares.
 
 ## Two purposes, because a release lane's input is a candidate
 
-`--purpose candidate` refuses all three bindings: a version about to be BUILT
+`--purpose candidate` refuses all four bindings: a version about to be BUILT
 must be untouched.
 
 `--purpose release` deliberately does not refuse on a candidate receipt, because
