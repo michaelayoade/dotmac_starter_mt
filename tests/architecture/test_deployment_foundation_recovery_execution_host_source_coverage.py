@@ -182,3 +182,142 @@ def test_the_real_class_is_actually_found() -> None:
         isinstance(node, ast.FunctionDef) and node.name == "_verify_host_source"
         for node in executor.body
     ), "RecoveryExecutor no longer defines _verify_host_source at all"
+
+
+# ── STRUCTURAL ordering, over the real `run()` method's own source ─────────
+#
+# `_drive_steps` (a test helper that re-implemented `run()`'s dispatch loop
+# to exercise post-gate behaviour) was removed after review found it had
+# already drifted from the real method it copied — see
+# `tests/unit/test_deployment_foundation_recovery_execution.py`'s module
+# docstring. The replacement for the ordering claim that helper used to make
+# is NOT another re-driven copy: it is a direct read of `run()`'s own
+# top-level statements, asserting that the statement calling
+# `_verify_host_source` appears BEFORE the statement calling `restore_plan`
+# (procedure validation) and BEFORE the statement containing the dispatch
+# loop (`_dispatch`). If a future edit reorders `run()`'s body, THIS test —
+# reading that body directly — is what catches it; nothing here executes
+# `run()` or any substitute for it.
+
+
+def _run_method(class_node: ast.ClassDef) -> ast.FunctionDef:
+    for node in class_node.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "run":
+            return node
+    raise AssertionError("RecoveryExecutor.run not found; this proves nothing")
+
+
+def _first_top_level_index(
+    body: list[ast.stmt], *, attr_call: str | None = None, name_call: str | None = None
+) -> int | None:
+    """The index of the first TOP-LEVEL statement in `body` whose subtree
+    contains a call matching `attr_call` (an attribute call, `self.x(...)`)
+    or `name_call` (a bare-name call, `f(...)`). Top-level, not nested — this
+    is what lets "before"/"after" mean something about the method's own
+    control flow rather than about arbitrary nesting depth.
+    """
+    for index, stmt in enumerate(body):
+        for node in ast.walk(stmt):
+            if not isinstance(node, ast.Call):
+                continue
+            if (
+                attr_call
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == attr_call
+            ):
+                return index
+            if (
+                name_call
+                and isinstance(node.func, ast.Name)
+                and node.func.id == name_call
+            ):
+                return index
+    return None
+
+
+def test_run_calls_verify_host_source_before_restore_plan_and_dispatch() -> None:
+    """The named, structural proof: reading `RecoveryExecutor.run`'s own
+    statement order, `_verify_host_source` precedes both `restore_plan`
+    (procedure validation) and `_dispatch` (the step loop)."""
+    tree = ast.parse(
+        RECOVERY_EXECUTION_PY.read_text(encoding="utf-8"),
+        filename=str(RECOVERY_EXECUTION_PY),
+    )
+    executor = _recovery_executor_class(tree)
+    run = _run_method(executor)
+
+    verify_index = _first_top_level_index(run.body, attr_call="_verify_host_source")
+    restore_plan_index = _first_top_level_index(run.body, name_call="restore_plan")
+    dispatch_index = _first_top_level_index(run.body, attr_call="_dispatch")
+
+    assert verify_index is not None, "run() no longer calls _verify_host_source at all"
+    assert restore_plan_index is not None, "run() no longer calls restore_plan at all"
+    assert dispatch_index is not None, "run() no longer calls _dispatch at all"
+
+    assert verify_index < restore_plan_index, (
+        f"_verify_host_source (statement {verify_index}) does not precede "
+        f"restore_plan (statement {restore_plan_index}) in run()'s own body"
+    )
+    assert restore_plan_index <= dispatch_index, (
+        f"restore_plan (statement {restore_plan_index}) does not precede or "
+        f"coincide with the dispatch loop (statement {dispatch_index}) in "
+        "run()'s own body"
+    )
+    assert verify_index < dispatch_index, (
+        f"_verify_host_source (statement {verify_index}) does not precede "
+        f"the dispatch loop (statement {dispatch_index}) in run()'s own body"
+    )
+
+
+def test_the_ordering_guard_names_a_planted_reversal() -> None:
+    """PLANTED, in memory. A synthetic `run()` that calls `restore_plan` and
+    dispatches BEFORE `_verify_host_source` must be caught, by index
+    comparison, on this exact plant."""
+    source = (
+        "class RecoveryExecutor:\n"
+        "    def run(self, bundle):\n"
+        "        procedure = restore_plan(self._spec, self._manifest)\n"
+        "        for spec in procedure:\n"
+        "            self._dispatch(spec.step, bundle, None, [])\n"
+        "        self._verify_host_source()\n"
+        "        return None\n"
+    )
+    tree = ast.parse(source, filename="<plant: verification reordered after dispatch>")
+    executor = _recovery_executor_class(tree)
+    run = _run_method(executor)
+
+    verify_index = _first_top_level_index(run.body, attr_call="_verify_host_source")
+    restore_plan_index = _first_top_level_index(run.body, name_call="restore_plan")
+    dispatch_index = _first_top_level_index(run.body, attr_call="_dispatch")
+
+    assert verify_index is not None
+    assert restore_plan_index is not None
+    assert dispatch_index is not None
+    assert verify_index > restore_plan_index, "the plant does not exhibit the reversal"
+    assert verify_index > dispatch_index, "the plant does not exhibit the reversal"
+
+
+def test_the_ordering_guard_stays_silent_on_the_correctly_ordered_near_miss() -> None:
+    """NEAR-MISS, MUST BE SILENT, and EXERCISED: the correctly-ordered shape
+    (the real one) must not be flagged."""
+    source = (
+        "class RecoveryExecutor:\n"
+        "    def run(self, bundle):\n"
+        "        self._verify_host_source()\n"
+        "        procedure = restore_plan(self._spec, self._manifest)\n"
+        "        for spec in procedure:\n"
+        "            self._dispatch(spec.step, bundle, None, [])\n"
+        "        return None\n"
+    )
+    tree = ast.parse(source, filename="<near-miss: correctly ordered>")
+    executor = _recovery_executor_class(tree)
+    run = _run_method(executor)
+
+    verify_index = _first_top_level_index(run.body, attr_call="_verify_host_source")
+    restore_plan_index = _first_top_level_index(run.body, name_call="restore_plan")
+    dispatch_index = _first_top_level_index(run.body, attr_call="_dispatch")
+
+    assert verify_index is not None
+    assert restore_plan_index is not None
+    assert dispatch_index is not None
+    assert verify_index < restore_plan_index < dispatch_index
