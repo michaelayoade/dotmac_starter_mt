@@ -292,67 +292,72 @@ matching module or product verifier into Foundation; a schema name or contract
 id alone is not an adapter and proves nothing. Neither a schema name nor an
 Alembic head is substituted for structural proof.
 
-### Amendment — 2026-09-07: a health receipt has one producer, and Foundation only verifies it
+### Amendment — 2026-09-07: Platform Health authors signed evidence; Control freezes authorization
 
-Implementation of a deployment health check was blocked on exactly this gap:
-the receipt producer and the provenance chain were undeclared. This amendment
-declares both. The source-of-truth standard and independent review agree, and
-Michael accepts, that `dotmac-platform-health` remains the **sole durable-health
-owner**: Foundation never stores or derives health state, only verifies it.
+On 2026-09-07, Michael explicitly approves this two-document authority chain.
+It is an architecture contract only: implementation and adoption remain zero
+until the Platform Health producer, Control extension, Platform CP composition,
+Foundation verifier and a production run land. No prior text is treated as
+having declared this producer or provenance chain.
 
-**The seam, in order:**
+**Canonical health evidence.** Platform Health is the sole durable-health owner
+and authors `DeploymentHealthEvidence.v1`. Its canonical bytes contain exactly
+the requested component roster, each component's observation identity,
+observation time, state and freshness, the evaluation time, and an owner-derived
+`valid_until`. The evidence contains no deployment coordinates. Platform Health
+signs those exact canonical bytes with Ed25519. Its private key is held only in
+the Platform Health service composition through an approved `SecretSource` /
+OpenBao pointer; it is never held by the Platform CP deployment runner or any
+repository. Control owns the versioned public-key eligibility/revocation
+registry and verifies the signature through the existing Kernel verification
+pattern. Foundation adds no cryptography.
 
-1. **The Integrator** authenticates a health source and transports its bounded
-   observation into Platform Health's existing ingestion contract
-   (`HealthObservationInput`, `dotmac_platform_health.contracts`). It decides
-   nothing about state or freshness — per ADR-0024, an inbound adapter writes a
-   typed observation, never an authoritative lifecycle field.
-2. **Platform Health** stores the observation immutably and derives the two
-   projections it already owns: per-component `HealthState`
-   (`healthy`/`degraded`/`unhealthy`/`unknown`) and a fresh/stale/missing
-   freshness classification. It binds no deployment coordinate — target,
-   environment, plan, descriptor and image are foreign to a health fact, and
-   `dotmac-deployment-control`'s own README already disclaims "no health status
-   at all" for the identical reason.
-3. **Platform CP's deployment runner** — used here the same way AGENTS.md rule
-   49 and ADR-0071 already use "Platform CP": an external deployment
-   orchestrator, not a package under this repository's `packages/` tree — reads
-   Platform-Health-owned evidence for a target and BINDS it to the same five
-   coordinates the execution-plan-digest pattern already binds (rule 49:
-   target, environment, plan, descriptor, image). Binding is not a health
-   decision: the runner may not recompute a component's state or freshness,
-   only attach Platform Health's already-derived facts to a target/plan/image
-   tuple.
-4. **Foundation verifies the resulting receipt** — a document supplied to it,
-   not a live query it issues. `dotmac-deployment-foundation` already declares
-   zero runtime dependencies beyond the standard library and two import-linter
-   contracts hold that Foundation neither imports nor is imported by the
-   kernel, the UI or the assembly; this amendment extends the same posture to
-   `dotmac_platform_health`, `dotmac_deployment_control` and the Integrator —
-   Foundation checks a receipt's bytes, never their origin's code or network
-   endpoint. That is the "dependency-free receipt."
+Integrator authenticates and transports bounded raw observations into Platform
+Health through `HealthObservationInput`; it authors neither canonical health
+evidence nor either signature, and decides no state or freshness.
 
-**Seven refusal states, kept distinct because collapsing any two lets one
-condition be reported as another:**
+Platform CP only orchestrates, submits and translates. It authors and signs
+neither document. It submits the signed health evidence together with the exact
+`ExecutionPlanDigestV1` to Control. Control verifies the inner signature, binds
+its digest to target, environment, operation, plan, descriptor, image and the
+exact required-component roster, then freezes and signs the outer authorization.
+Adding the health-evidence digest and roster to that signed authorization
+requires an explicit successor/versioned authorization schema; it must not
+silently widen or redefine the existing published statement. Control does not
+recompute health. The binding logic is Control-owned; Platform CP owns
+exhaustive adapter and runner composition.
 
-- **missing** — no receipt exists for this target/environment/plan/descriptor/
-  image tuple.
-- **incomplete** — a receipt exists but does not bind all five coordinates, or
-  a required component has no entry.
-- **expired** — the receipt itself has passed its own validity window.
-- **unknown** — a bound component's `HealthState` is `unknown`.
-- **degraded** — a bound component's `HealthState` is `degraded`.
-- **stale** — Platform Health's own freshness classification for a bound
-  component was `stale` at the moment the receipt was produced.
-- **unhealthy** — a bound component's `HealthState` is `unhealthy`.
+**The Foundation boundary.** Foundation receives the inner evidence as an
+offline supplied document; a caller-chosen path is transport, never authority.
+It accepts only after the evidence digest and every coordinate and roster entry
+match a `VerifiedAuthorization` / `ExecutionGrant` produced through the
+existing signed Control path. Foundation makes no network call and imports
+neither Platform Health, Control nor Integrator. The import-linter must forbid
+those dependencies explicitly; dependency absence alone is unmonitored.
 
-Foundation refuses on any of the seven. None substitutes for another: `missing`
-names an absent receipt, not an absent component inside a present one (that is
-`incomplete`); `expired` names the receipt's own clock, not the freshness of
-what it carries (that is `stale`); `unknown` is a component's own reported
-state, not the receipt's presence (that is `missing`).
+The required component set is a product-owned declarative input and must enter
+a successor/versioned descriptor and plan contract. Platform Health signs
+exactly that requested roster and represents missing entries explicitly.
+Foundation evaluates every entry and emits a deterministic, sorted set of
+findings. Admission requires an exact roster, every state `healthy`, every
+freshness `fresh`, and both the evidence and outer authorization to be live.
+Aggregation is therefore neither worst-of nor first-refusing.
 
-**What stays separate.** The role-level readiness/liveness gate already in
+**Refusal vocabulary.** The contract requires seven health/receipt refusals:
+`missing`, `incomplete`, `expired`, `unknown`, `degraded`, `stale` and
+`unhealthy`; Foundation refuses each. They are not the complete integrity
+vocabulary. Malformed evidence,
+an unknown or revoked signer, an invalid signature, evidence-digest mismatch,
+wrong deployment subject or roster, and future-dated evidence remain distinct
+refusals. A missing required component is `incomplete`; evidence whose signed
+evaluation or observation time is future-dated relative to Foundation's
+injected execution time is also refused. Outer Control expiry must not extend
+Platform Health's `valid_until`.
+
+**What stays separate.** Local readiness, liveness, worker and scheduler gates
+remain separate static or runtime gates; a health evidence admission does not
+satisfy them, and they do not satisfy this chain. The role-level readiness/
+liveness gate already in
 `_validate_cross_field` (`spec.py` lines 2706–2721: a role with `replicas > 0`
 must declare an HTTP `live`/`ready` probe, a `WorkerContract.ping_command`, or a
 `scheduler_tick_max_age_seconds` budget, or the descriptor is refused as
@@ -362,61 +367,13 @@ per-deployment-attempt, cross-service artifact checked at a different point in
 the pipeline. Passing one does not satisfy the other, and this amendment adds
 no exception to either.
 
-**What this is not.** A passing health-receipt check is production-composition
-evidence — the deployment's declared dependencies were healthy at binding time
-— not adoption evidence. It does not, by itself, satisfy the
-`deployment_run`/`live_observation` requirement any package's own adoption
-claim needs (AGENTS.md rule 24's 2026-08-29 "a pin is installation, not
-adoption" amendment, and rule 30's authoritative-external-oracle requirement;
-`dotmac-platform-health`'s
-`EXTRACTION.toml` still records `contract_consumers = []`). The freeze/
-production-composition gate and the adoption claim remain the two separate
-things they already were.
-
-#### Open questions
-
-These are named rather than decided, because Michael's decision states the
-seam and the refusal vocabulary but not the mechanics below, and inventing
-them would repeat the confident-but-unfounded text this programme has already
-paid for once:
-
-1. **Who authors the receipt's bytes.** The execution-plan-digest precedent
-   (AGENTS.md rule 49) has Foundation compute a digest and Platform CP submit
-   it, but Control — not Platform CP — freezes and signs. Whether Platform
-   Health plays the equivalent role here (Platform CP requests a binding and
-   Platform Health returns a signed receipt) or Platform CP itself
-   authors/signs after consuming Platform Health's evidence is not stated.
-2. **The receipt's integrity mechanism.** Signature, key set, digest-compare,
-   or something else — and, if a signature, who holds the verification key set
-   on Foundation's side. The shape `LICENCE_VERIFICATION_KEYS` already takes
-   for licensing is an available precedent, not a decision.
-3. **Where the binding logic lives.** Whether the code that performs step 3 is
-   new surface in `dotmac-deployment-control`, code entirely external to this
-   repository's `packages/` tree, or split between them is not decided here.
-4. **Transport into Foundation.** Whether the receipt arrives as a supplied
-   file argument to the existing `dotmac-deploy` CLI shape (`--observed
-   observed.json` is the closest existing precedent) or some other channel is
-   not decided; only that Foundation must not need a runtime dependency or a
-   network call to obtain or check it.
-5. **The exact mapping from Platform Health's existing vocabulary to the seven
-   refusal states, and how N components aggregate to one receipt-level
-   refusal.** `HealthState` already has four members
-   (`healthy`/`degraded`/`unhealthy`/`unknown`) and freshness already has three
-   (`fresh`/`stale`/`missing`); the receipt's seven states borrow four of those
-   names directly (`unknown`, `degraded`, `unhealthy`, `stale`) and add three
-   receipt-level ones (`missing`, `incomplete`, `expired`) that describe the
-   receipt rather than a component. Whether aggregation is worst-of,
-   first-refusing, or something else is not decided.
-
-This repository was searched for a checked-in rule requiring two independently
-acquired evidence producers plus a negative control proving a single caller
-controlling both cannot pass, and no such rule was found under that or an
-equivalent name in `docs/adr/` or `AGENTS.md`. The substance Michael restated —
-the receipt's producer and its verifier must not be the same party — is
-recorded here as satisfied by construction: Foundation holds zero runtime
-dependency on `dotmac_platform_health` and cannot itself compute a component's
-state. It is not recorded as satisfying a named local rule, because none was
-located.
+This producer/verifier separation is construction and pending Governance
+ratification, not a claim that a local independent-provenance rule already
+exists. Rule 49 is valid on the current branch and supplies the exact-plan
+digest precedent. Rule 24's product-first and adoption requirements, and rule
+30's authoritative-external-oracle boundary, remain accurate: a passing receipt
+is composition evidence, not adoption evidence. Until the implementation and
+production run land, `dotmac-platform-health` remains unadopted.
 
 ## What this ADR does not decide
 
