@@ -388,6 +388,18 @@ from .transition import (
     recover_database_promotion,
     require_database_precondition,
 )
+from .trusted_host_source import (
+    ATTESTATION_SCHEMA,
+    CANDIDATE_ATTESTATION_PURPOSE,
+    INSTALLED_OBSERVATION_PURPOSE,
+    AttestationEnvelopeV2,
+    AttestationTrustPolicy,
+    AttestationTrustRootV2,
+    AttestationVerifier,
+    CandidateAttestationSubjectV2,
+    InstalledHostAttestationSubjectV2,
+    verify_attestation_pair,
+)
 from .vantage import (
     PRIVATE_RANGES,
     TUNNEL_KINDS,
@@ -702,4 +714,14 @@ __all__ = [
     "candidate_receipt_from_mapping",
     "read_installed_artifact",
     "require_host_source",
+    "ATTESTATION_SCHEMA",
+    "CANDIDATE_ATTESTATION_PURPOSE",
+    "INSTALLED_OBSERVATION_PURPOSE",
+    "AttestationEnvelopeV2",
+    "AttestationTrustPolicy",
+    "AttestationTrustRootV2",
+    "AttestationVerifier",
+    "CandidateAttestationSubjectV2",
+    "InstalledHostAttestationSubjectV2",
+    "verify_attestation_pair",
 ]

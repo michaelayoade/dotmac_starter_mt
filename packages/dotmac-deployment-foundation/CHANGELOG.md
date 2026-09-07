@@ -2,6 +2,168 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### Correction: the v1 sidecar was held before freeze; v2 is a contract, not admission
+
+The earlier `TrustedAttestationBinding` sidecar is removed.  It let key-id
+labels stand in for public key material and did not bind custody, audience,
+replay identity, root validity or the complete candidate subject.  That shape
+is not extended across an artifact boundary.
+
+`trusted_host_source.py` now defines `TrustedHostAttestation.v2`.  Each signed
+envelope binds schema/purpose, issuer, key id, algorithm, public-key
+fingerprint, custody domain, trust-root version, issued/expiry times,
+role-specific audience, observation identity and a complete immutable subject.
+Candidate subjects bind package/version/final wheel digest/source revision plus
+the CandidateArtifact.v1 `repository`/`run_id`/`artifact_id` coordinates. Host
+subjects bind the expected host identity supplied by Control, installed
+package/version/digest and the digest of that complete candidate subject. The
+authoritative owner and grammar for that host identity remain unresolved;
+caller-selected paths convey no authority. Trust is over immutable
+fingerprints, purposes and distinct custody domains, never labels. The pure
+verifier refuses aliases of the same material, shared custody,
+revocation/invalid roots, wrong purpose/audience, stale/future evidence, bad
+signatures and subject mismatch.
+
+This is only a typed parsing/testing contract. Observation identity is signed,
+but atomic replay consumption belongs to future Control/admission ownership,
+not this stateless verifier. The protected Starter release
+workflow must author candidate evidence and a distinct target-local workload
+must author host evidence; Platform transports only. Foundation holds neither
+private keys nor a network client. Control has not yet installed those bindings.
+There is consequently no positive executor admission before 0.4.0a2, no
+preverified authority result, and both executors retain their unconditional,
+zero-effect refusal. A successful verifier call proves agreement only relative
+to the supplied policy and verifier; trusted composition must source both from
+Control before that result can participate in authority. The 73 skip inventory
+is unchanged.
+
+### A caller who cannot produce two independently authored signatures cannot pass the host-source gate — the fail-closed verifier and sidecar contract, not yet admission
+
+The entry below this one found no reachable trust root for either half of
+trusted host-source provenance and, correctly, changed nothing about
+`Executor`/`RecoveryExecutor`. Michael's sequencing correction that followed:
+land the fail-closed verifier and the exact sidecar contract NOW, so the two
+attestation producers and the rehearsal that composes them (future work —
+Foundation frozen at a new version, Control V3, Platform CP's translator) have
+something fixed to build against; admission itself waits until those exist and
+is proved once, at that point, not claimed here.
+
+`trusted_host_source.py` (new module) adds `verify_trusted_host_source()`,
+which admits a `TrustedAttestationBinding` only when:
+
+* a `CandidateArtifactAttestation` (envelope around the existing
+  `CandidateArtifact.v1` document) and an `InstalledHostObservation.v1`
+  envelope are BOTH present;
+* each envelope's signature verifies against its OWN `SignatureVerifier`,
+  using a `key_id` its OWN `AttestationTrustRoot` accepts;
+* the two roots are STRUCTURALLY disjoint — `DistinctTrustRoots` refuses at
+  CONSTRUCTION if `candidate.accepted_key_ids` and `installed.accepted_key_ids`
+  share any key, so "two roots that happen to accept the same signer" cannot
+  be built, not merely cannot be exploited;
+* the two envelopes were not signed by the SAME `key_id` — checked first,
+  before either key is matched against a trust root, so this refusal does not
+  depend on `DistinctTrustRoots` having been configured correctly elsewhere;
+* the authenticated candidate and installed contents agree (facility,
+  version, artifact digest).
+
+**This directly targets what sank both prior admission attempts**: a single
+caller supplying both halves of the comparison from data it authored itself.
+`tests/unit/test_deployment_foundation_trusted_host_source.py` proves it with
+a REAL keyed-MAC `SignatureVerifier` (`hmac.new(secret, message, sha256)`,
+`hmac.compare_digest` — not the codebase's own `"probe-valid"` magic string),
+over two distinct secrets: a genuine two-authority pair admits; the identical
+pair signed by ONE key instead is refused (`SAME_KEY_SIGNED_BOTH`) even though
+each individual signature verifies; two trust roots sharing an accepted key
+refuse at construction (`TRUST_ROOTS_NOT_DISTINCT`); a tampered document with
+a stale-but-real signature, a genuinely valid signature from an untrusted key,
+and two authentically-signed-but-disagreeing attestations each refuse with
+their own named code.
+
+**Not wired into `Executor` or `RecoveryExecutor`.** No production signer for
+either half exists anywhere reachable in this repository (unchanged from the
+entry below — re-measured: neither `foundation-candidate.yml` nor
+`release-facility.yml` gained a sign/attest/cosign/sigstore/gpg step). Wiring
+an unpopulated verifier field into `ExecutionBindings` now would repeat the
+exact failure mode `execution_bindings.py`'s own docstring names for the seams
+that already exist ("real for an embedder and decorative for the CLI"), so
+this is deliberately not done. `_verify_host_source` on both executors is
+unchanged and still calls `require_host_source(receipt=None)` unconditionally.
+
+**Skip inventory: unchanged, 73 before and 73 after** (recomputed and diffed
+against the recorded set — see `host_source_skip_inventory.py`).
+`RETIRE_WHEN = "trusted-provenance-admission"` is met only when a real
+admission path exists for either executor; this PR delivers the verifier and
+the contract two future attestation producers can build against, not
+admission, so nothing here retires.
+
+### Trusted provenance was investigated (step 3) and found to have no reachable trust root today; nothing here admits, and nothing was wired to pretend otherwise
+
+Michael's ruling for this step named the required shape precisely: an
+externally committed/signed candidate attestation, an independently signed
+installed-host observation, verified inside the executor against DISTINCT
+trust roots, and no public "already verified" dataclass an arbitrary caller
+can construct. This entry records what was actually found reachable in this
+repository against that shape, MEASURED rather than assumed, and why neither
+`Executor` nor `RecoveryExecutor` changed as a result.
+
+**Candidate half.** `scripts/foundation_candidate.py` writes an unsigned
+`CandidateArtifact.v1` JSON document from a GitHub Actions run; the only
+document that ever reaches this repository is a plain file, committed by a
+human-reviewed PR (`docs/inventories/foundation-candidate-*.json`). Nothing
+signs it — `.github/workflows/foundation-candidate.yml` and
+`release-facility.yml` were read in full; neither contains a `sign`, `attest`,
+`cosign`, `sigstore`, or `gpg` step, and publication is a plain `twine upload`
+to a private Forgejo index (`registry.dotmac.io`) with no build-provenance
+attestation attached. So the ONLY assurance behind a committed candidate
+receipt is git history and branch-protected review — a real trust root, but
+not the "signed" one the ruling names, and not one `require_host_source` can
+verify cryptographically today because it has nothing to verify it WITH.
+Independently, the coverage gap the second failed attempt already measured
+still holds: `docs/inventories/` carries receipts through `0.3.0a5`, the
+declared version is `0.4.0a1` (`version.py`), and no
+`foundation-candidate-0.4.0a1.json` exists — there is no candidate receipt for
+the version this package would actually ship as.
+
+**Installed-host half.** `read_installed_artifact` reads PEP 610
+`direct_url.json`, written by pip itself at install time with no signature of
+any kind — it is the installer's own unauthenticated bookkeeping, not an
+"independently signed" observation by any party distinct from whoever ran
+`pip install`. No mechanism anywhere in this repository produces a signed
+statement about what is installed on a host; `evidence.py`'s
+`SignatureVerifier`/`TrustPolicy` pair is the one place this facility already
+knows how to verify a signed document without holding a crypto dependency
+itself (ADR-0070, zero runtime deps — the assembly supplies the verifier and
+carries the trust root), but it exists today for `ReleaseEvidence.v1` (a
+revision had a green CI run) — a different subject from "this installed
+artifact is the one a release process built" — and `ExecutionBindings`
+(`execution_bindings.py`) has no host-source-purpose verifier field. Even
+where that pattern IS wired (`evidence_verifier`, `recovery_verifier`), no
+production caller supplies real key material anywhere reachable from this
+repository — `scripts/release_facility.py`'s own probe uses a literal
+`"probe-signer"`/`"probe-valid"` stub, and no assembly in this repository
+declares the `dotmac_deployment_foundation.execution_bindings` entry point
+with real bindings. `execution_bindings.py`'s own docstring names exactly this
+failure mode for the seams that already exist ("real for an embedder and
+decorative for the CLI") — adding an unpopulated host-source verifier field to
+`ExecutionBindings` now would be that same shape again, not a step past it.
+
+**Conclusion.** Both trust-root positions the ruling requires are open
+architecture decisions, not implementation gaps: what signs a candidate
+attestation and with what key custody; how that attestation reaches a
+`pip install`ed consumer that by design carries no source checkout (`launcher.py`
+already refuses to run from one); what independently signs an installed-host
+observation, and who holds that second key. None of these is a choice this
+change makes. `Executor.__init__`/`RecoveryExecutor.__init__` therefore accept
+no new parameter, `_verify_host_source` still calls
+`require_host_source(receipt=None)` unconditionally, and both executors keep
+refusing in every environment — the identical SAFETY-ONLY posture the prior
+entry established, now with the "what would have to exist" question answered
+rather than left open. `tests/architecture/host_source_skip_inventory.py`'s
+73 recorded entries are unchanged (73 before, 73 after): `RETIRE_WHEN =
+"trusted-provenance-admission"` is not met by an investigation that found no
+admissible path, and retiring any of them here would misrepresent what was
+proven.
+
 ### The host-source seam was respelled, not closed, and is now GONE entirely — SAFETY-ONLY until trusted provenance exists
 
 An independent review at exact head `541cee5d` found that the entries below

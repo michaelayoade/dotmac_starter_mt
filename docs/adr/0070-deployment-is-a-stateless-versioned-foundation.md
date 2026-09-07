@@ -375,6 +375,34 @@ digest precedent. Rule 24's product-first and adoption requirements, and rule
 is composition evidence, not adoption evidence. Until the implementation and
 production run land, `dotmac-platform-health` remains unadopted.
 
+## Amendment, 2026-09-07: trusted host provenance v2 custody contract is held, not admitted
+
+Foundation's discarded sidecar allowed a `TrustedAttestationBinding` result and
+trusted key-id labels. It is replaced before freeze by
+`TrustedHostAttestation.v2`: signed candidate and installed-host envelopes bind
+the signer public-key fingerprint, declared custody domain, root version,
+purpose/schema, issuer, algorithm, validity interval, role-specific audience,
+observation identity and complete immutable subject. Atomic replay consumption
+is future Control/admission ownership, not this stateless verifier. Candidate
+evidence belongs to the protected Starter release-workflow signer and binds
+package, version, final wheel digest, source revision, repository, run id and
+artifact id. Installed-host evidence belongs to a distinct target-local
+host-attestation workload and binds the Control-supplied expected host identity,
+installed package/version/digest and the candidate-subject digest. The
+authoritative owner and grammar of that host identity remain unresolved;
+caller-selected paths convey no authority. Platform is transport only; this
+package contains no private key or network client.
+
+Control must later bind fingerprint/purpose/domain roots. Until it does, and
+until independently produced v2 evidence exists for 0.4.0a2, the verifier is
+only a typed parsing/testing seam and no executor may accept evidence, a
+verifier, roots, paths or a preverified result from a caller. Both mutating
+executors continue their explicit no-evidence refusal before effects. This
+amendment implements a contract and does not claim adoption or positive
+admission. Its successful return establishes agreement only relative to the
+supplied policy and verifier; those inputs become authority only when a trusted
+composition sources them from Control.
+
 ## What this ADR does not decide
 
 - It does not authorize a production deployment, a host, or an SSH session.

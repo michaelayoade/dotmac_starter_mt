@@ -521,6 +521,10 @@ CANONICALIZING_MODULES: dict[str, int] = {
     "run.py": 2,
     "telemetry.py": 1,
     "transition.py": 1,
+    # A TrustedHostAttestation.v2 envelope/subject is signed evidence, not a
+    # deployment plan. Its canonical bytes must be stable across producers
+    # and verifiers, so this document kind owns one canonicalizer.
+    "trusted_host_source.py": 1,
 }
 
 
