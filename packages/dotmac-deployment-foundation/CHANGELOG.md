@@ -2,6 +2,65 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### A caller who cannot produce two independently authored signatures cannot pass the host-source gate — the fail-closed verifier and sidecar contract, not yet admission
+
+The entry below this one found no reachable trust root for either half of
+trusted host-source provenance and, correctly, changed nothing about
+`Executor`/`RecoveryExecutor`. Michael's sequencing correction that followed:
+land the fail-closed verifier and the exact sidecar contract NOW, so the two
+attestation producers and the rehearsal that composes them (future work —
+Foundation frozen at a new version, Control V3, Platform CP's translator) have
+something fixed to build against; admission itself waits until those exist and
+is proved once, at that point, not claimed here.
+
+`trusted_host_source.py` (new module) adds `verify_trusted_host_source()`,
+which admits a `TrustedAttestationBinding` only when:
+
+* a `CandidateArtifactAttestation` (envelope around the existing
+  `CandidateArtifact.v1` document) and an `InstalledHostObservation.v1`
+  envelope are BOTH present;
+* each envelope's signature verifies against its OWN `SignatureVerifier`,
+  using a `key_id` its OWN `AttestationTrustRoot` accepts;
+* the two roots are STRUCTURALLY disjoint — `DistinctTrustRoots` refuses at
+  CONSTRUCTION if `candidate.accepted_key_ids` and `installed.accepted_key_ids`
+  share any key, so "two roots that happen to accept the same signer" cannot
+  be built, not merely cannot be exploited;
+* the two envelopes were not signed by the SAME `key_id` — checked first,
+  before either key is matched against a trust root, so this refusal does not
+  depend on `DistinctTrustRoots` having been configured correctly elsewhere;
+* the authenticated candidate and installed contents agree (facility,
+  version, artifact digest).
+
+**This directly targets what sank both prior admission attempts**: a single
+caller supplying both halves of the comparison from data it authored itself.
+`tests/unit/test_deployment_foundation_trusted_host_source.py` proves it with
+a REAL keyed-MAC `SignatureVerifier` (`hmac.new(secret, message, sha256)`,
+`hmac.compare_digest` — not the codebase's own `"probe-valid"` magic string),
+over two distinct secrets: a genuine two-authority pair admits; the identical
+pair signed by ONE key instead is refused (`SAME_KEY_SIGNED_BOTH`) even though
+each individual signature verifies; two trust roots sharing an accepted key
+refuse at construction (`TRUST_ROOTS_NOT_DISTINCT`); a tampered document with
+a stale-but-real signature, a genuinely valid signature from an untrusted key,
+and two authentically-signed-but-disagreeing attestations each refuse with
+their own named code.
+
+**Not wired into `Executor` or `RecoveryExecutor`.** No production signer for
+either half exists anywhere reachable in this repository (unchanged from the
+entry below — re-measured: neither `foundation-candidate.yml` nor
+`release-facility.yml` gained a sign/attest/cosign/sigstore/gpg step). Wiring
+an unpopulated verifier field into `ExecutionBindings` now would repeat the
+exact failure mode `execution_bindings.py`'s own docstring names for the seams
+that already exist ("real for an embedder and decorative for the CLI"), so
+this is deliberately not done. `_verify_host_source` on both executors is
+unchanged and still calls `require_host_source(receipt=None)` unconditionally.
+
+**Skip inventory: unchanged, 73 before and 73 after** (recomputed and diffed
+against the recorded set — see `host_source_skip_inventory.py`).
+`RETIRE_WHEN = "trusted-provenance-admission"` is met only when a real
+admission path exists for either executor; this PR delivers the verifier and
+the contract two future attestation producers can build against, not
+admission, so nothing here retires.
+
 ### Trusted provenance was investigated (step 3) and found to have no reachable trust root today; nothing here admits, and nothing was wired to pretend otherwise
 
 Michael's ruling for this step named the required shape precisely: an
