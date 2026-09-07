@@ -2,6 +2,41 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### `HostSource` binds facility, VERSION, digest and a full source revision — not two of the four
+
+`require_host_source` compared facility and artifact digest but never the
+receipt's `version` against the installed distribution's, and
+`candidate_receipt_from_mapping` accepted any nonempty `source_sha`. A
+candidate receipt for `version="9.9.9"` with `source_sha="not-a-commit"`
+therefore bound cleanly against a matching digest — a receipt for a build
+that never happened, naming a tree that does not exist, admitted because the
+two checked terms happened to agree.
+
+`require_host_source` now refuses a version disagreement under the same
+`DISAGREES` code the facility check already uses, naming both versions.
+`candidate_receipt_from_mapping` now requires `source_sha` to be a full
+40-character lowercase-hex commit, under a new `MALFORMED_SOURCE_REVISION`
+code — the identical shape `scripts/release_facility.py
+::candidate_source_revision` already enforces on the same field, so a receipt
+is refused by one rule whether it is read there or here.
+
+Two further corrections, same module, same review:
+
+* `Digest.parse` raised an uncoded `SpecError` straight through
+  `read_installed_artifact` for an unparsable installer-recorded hash (e.g.
+  `archive_info.hashes.sha256="not-a-digest"`), despite this module's stated
+  contract of `PreconditionFailed` refusals with unreadable provenance
+  classified `ABSENT`. Converted deliberately, at the one call site, into the
+  same coded refusal every other malformed-metadata case already raises.
+* `InstalledArtifact.read_from` unconditionally named
+  `archive_info.hashes.sha256` even when the digest was read from the legacy
+  `archive_info.hash` spelling PEP 610 also permits — a small reporting lie
+  that would send an operator to the wrong line of a real `direct_url.json`
+  mid-incident. It now names whichever key was actually read.
+
+No version is allocated and `0.4.0a1` remains unbuilt and unpublished; see
+the candidate-state correction below.
+
 ### Candidate-state correction — 2026-09-05
 
 Run `33920058598` built `0.4.0a1` once from protected-main source

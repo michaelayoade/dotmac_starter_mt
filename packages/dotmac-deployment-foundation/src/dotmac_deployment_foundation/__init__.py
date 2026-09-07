@@ -211,6 +211,14 @@ from .external_recovery import (
     backup_record_from_receipt,
     require_restore_proof,
 )
+from .host_source import (
+    CandidateReceipt,
+    HostSource,
+    InstalledArtifact,
+    candidate_receipt_from_mapping,
+    read_installed_artifact,
+    require_host_source,
+)
 from .image import AuditReport, audit_image
 from .ingress import (
     ADDRESS_FAMILIES,
@@ -688,4 +696,10 @@ __all__ = [
     "verify_publication",
     "verify_recovery",
     "write_lease",
+    "CandidateReceipt",
+    "HostSource",
+    "InstalledArtifact",
+    "candidate_receipt_from_mapping",
+    "read_installed_artifact",
+    "require_host_source",
 ]
