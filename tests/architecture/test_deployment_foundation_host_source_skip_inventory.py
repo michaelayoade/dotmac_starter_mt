@@ -21,7 +21,9 @@ from tests.architecture.host_source_skip_inventory import (
     SKIP_INVENTORY,
     TARGET_CALL,
     TARGET_MODULE,
-    tests_reaching,
+)
+from tests.architecture.host_source_skip_inventory import (
+    tests_reaching as _tests_reaching,
 )
 
 
@@ -37,7 +39,7 @@ def _test_files(root=REPO) -> tuple[str, ...]:
 def _current_inventory() -> frozenset[tuple[str, str]]:
     current: set[tuple[str, str]] = set()
     for rel in _test_files():
-        for name in tests_reaching(REPO / rel):
+        for name in _tests_reaching(REPO / rel):
             current.add((rel, name))
     return frozenset(current)
 
@@ -102,7 +104,7 @@ def test_tests_reaching_names_a_new_call_site(tmp_path) -> None:
         "    pass\n",
         encoding="utf-8",
     )
-    found = tests_reaching(module)
+    found = _tests_reaching(module)
     assert found == {"test_something_that_now_reaches_it"}, found
 
 
@@ -119,7 +121,7 @@ def test_tests_reaching_scans_a_new_seventh_file(tmp_path) -> None:
         encoding="utf-8",
     )
     assert _test_files(tmp_path) == ("tests/test_seventh_file.py",)
-    assert tests_reaching(tmp_path / "tests/test_seventh_file.py") == {
+    assert _tests_reaching(tmp_path / "tests/test_seventh_file.py") == {
         "test_new_file_reaches_the_fixture"
     }
 
@@ -133,7 +135,7 @@ def test_tests_reaching_follows_an_alias_import(tmp_path) -> None:
         "    stance()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {"test_calls_alias"}
+    assert _tests_reaching(module) == {"test_calls_alias"}
 
 
 def test_tests_reaching_follows_a_module_alias_import(tmp_path) -> None:
@@ -146,7 +148,7 @@ def test_tests_reaching_follows_a_module_alias_import(tmp_path) -> None:
         "    stance_module.valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {"test_calls_module_alias"}
+    assert _tests_reaching(module) == {"test_calls_module_alias"}
 
 
 def test_tests_reaching_follows_an_unaliased_full_module_import(tmp_path) -> None:
@@ -159,7 +161,7 @@ def test_tests_reaching_follows_an_unaliased_full_module_import(tmp_path) -> Non
         "    tests.unit.host_source_stance.valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {"test_calls_full_module_path"}
+    assert _tests_reaching(module) == {"test_calls_full_module_path"}
 
 
 def test_tests_reaching_follows_from_parent_package_alias(tmp_path) -> None:
@@ -171,7 +173,7 @@ def test_tests_reaching_follows_from_parent_package_alias(tmp_path) -> None:
         "    stance.valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {"test_calls_parent_alias"}
+    assert _tests_reaching(module) == {"test_calls_parent_alias"}
 
 
 def test_tests_reaching_follows_imported_parent_module_prefixes(tmp_path) -> None:
@@ -187,7 +189,7 @@ def test_tests_reaching_follows_imported_parent_module_prefixes(tmp_path) -> Non
         "    unit_alias.host_source_stance.valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {
+    assert _tests_reaching(module) == {
         "test_calls_from_module_alias",
         "test_calls_from_parent_import",
     }
@@ -205,7 +207,7 @@ def test_tests_reaching_does_not_leak_a_function_local_import(tmp_path) -> None:
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {"test_local_import"}
+    assert _tests_reaching(module) == {"test_local_import"}
 
 
 def test_tests_reaching_stays_silent_on_a_local_same_named_function(tmp_path) -> None:
@@ -220,7 +222,7 @@ def test_tests_reaching_stays_silent_on_a_local_same_named_function(tmp_path) ->
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == set()
+    assert _tests_reaching(module) == set()
 
 
 def test_tests_reaching_stays_silent_on_a_local_assignment_shadow(tmp_path) -> None:
@@ -234,7 +236,7 @@ def test_tests_reaching_stays_silent_on_a_local_assignment_shadow(tmp_path) -> N
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == set()
+    assert _tests_reaching(module) == set()
 
 
 def test_tests_reaching_stays_silent_on_a_parameter_shadow(tmp_path) -> None:
@@ -247,7 +249,7 @@ def test_tests_reaching_stays_silent_on_a_parameter_shadow(tmp_path) -> None:
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == set()
+    assert _tests_reaching(module) == set()
 
 
 def test_tests_reaching_refuses_an_import_rebound_in_one_function(tmp_path) -> None:
@@ -263,7 +265,7 @@ def test_tests_reaching_refuses_an_import_rebound_in_one_function(tmp_path) -> N
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="rebound in the same function scope"):
-        tests_reaching(module)
+        _tests_reaching(module)
 
 
 def test_tests_reaching_stays_silent_on_a_nested_definition_shadow(tmp_path) -> None:
@@ -278,7 +280,7 @@ def test_tests_reaching_stays_silent_on_a_nested_definition_shadow(tmp_path) -> 
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == set()
+    assert _tests_reaching(module) == set()
 
 
 def test_tests_reaching_does_not_execute_an_uncalled_nested_function(tmp_path) -> None:
@@ -294,7 +296,7 @@ def test_tests_reaching_does_not_execute_an_uncalled_nested_function(tmp_path) -
         "    assert callable(nested)\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == set()
+    assert _tests_reaching(module) == set()
 
 
 def test_tests_reaching_includes_collected_class_methods_and_helpers(tmp_path) -> None:
@@ -314,7 +316,7 @@ def test_tests_reaching_includes_collected_class_methods_and_helpers(tmp_path) -
         "        pass\n",
         encoding="utf-8",
     )
-    assert tests_reaching(module) == {
+    assert _tests_reaching(module) == {
         "TestHostSource.test_calls_directly",
         "TestHostSource.test_calls_helper",
     }
@@ -330,7 +332,7 @@ def test_vanished_entry_is_named_by_identity(tmp_path) -> None:
         f"    {TARGET_CALL}()\n",
         encoding="utf-8",
     )
-    current = {("tests/plant_vanished.py", name) for name in tests_reaching(module)}
+    current = {("tests/plant_vanished.py", name) for name in _tests_reaching(module)}
     recorded = frozenset({("tests/plant_vanished.py", "test_old_name")})
     assert recorded - current == {("tests/plant_vanished.py", "test_old_name")}
 
@@ -352,7 +354,7 @@ def test_tests_reaching_stays_silent_on_a_near_miss(tmp_path) -> None:
         "    Obj().valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    found = tests_reaching(module)
+    found = _tests_reaching(module)
     assert found == set(), (
         f"a same-named METHOD call was wrongly treated as reaching the "
         f"module-level function: {found}"
@@ -377,5 +379,5 @@ def test_tests_reaching_follows_a_transitive_helper_chain(tmp_path) -> None:
         "    _outer()\n",
         encoding="utf-8",
     )
-    found = tests_reaching(module)
+    found = _tests_reaching(module)
     assert found == {"test_two_hops_away"}, found
