@@ -37,6 +37,39 @@ Two further corrections, same module, same review:
 No version is allocated and `0.4.0a1` remains unbuilt and unpublished; see
 the candidate-state correction below.
 
+### The executor calls `require_host_source` itself — a handed-in `HostSource` proves nothing
+
+`host_source.require_host_source` existed and nothing mutating a host ever
+called it. `HostSource` is a plain frozen dataclass; a caller handing one to
+`Executor` would prove only that the caller could construct a dataclass, not
+that the installed artifact was verified. Boundary 4's ruling: the executor
+must perform the call itself, against inputs it cannot forge.
+
+`Executor.run` and `Executor.rollback` now call a new `_verify_host_source`
+prerequisite immediately after the caller's deployment-lock hold is proven and
+before everything else — grant revalidation, execution-plan digest
+recomputation, the `deployment.start`/`deployment.rollback` annotation,
+principal bootstrap, every step. `Executor` accepts the RAW ingredients
+`require_host_source` itself checks (`host_source_receipt`, plus
+`host_source_installed`/`host_source_metadata`/`host_source_probe` test-only
+override hooks) rather than a `HostSource`, so there is no parameter that
+satisfies the gate without going through the call. `cli.py`'s `deploy` and
+`rollback` subcommands gained `--host-source-receipt`, loading the committed
+`CandidateArtifact.v1` and handing it to the executor; the executor is still
+what verifies it.
+
+Measured, not assumed: this package is a Poetry path dependency with
+`develop = true` (`pyproject.toml`), which installs it EDITABLE in this
+repository's own `poetry install` unit-test job — the shape `host_source.py`
+already documents as unable to answer either question it asks. The mandatory
+gate therefore refuses under that install, by design: a release only ever
+executes against a wheel-installed artifact (`.foundation-candidate`,
+`.lane3-foundation`, or the equivalent CI venv), and refusing a dev checkout is
+the property being enforced, not a defect. No bypass, environment flag, or
+degraded-start path was added for this; unit tests that need to reach past the
+gate inject `host_source_receipt`/`host_source_metadata` fakes, the same
+pattern `host_source.py`'s own tests already use for `InstalledMetadata`.
+
 ### Candidate-state correction — 2026-09-05
 
 Run `33920058598` built `0.4.0a1` once from protected-main source

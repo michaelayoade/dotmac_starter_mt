@@ -47,6 +47,7 @@ from dotmac_deployment_foundation.errors import (
     PreconditionFailed,
 )
 
+from tests.unit.host_source_stance import valid_host_source_kwargs
 from tests.unit.test_deployment_foundation_execution_binding import (
     AcceptingVerifier,
     _fixture,
@@ -66,6 +67,7 @@ def _executor(spec, effects, plan):  # type: ignore[no-untyped-def]
         sleep=lambda _: None,
         evidence_policy=evidence_policy(),
         evidence_verifier=AcceptingVerifier(),
+        **valid_host_source_kwargs(),
     )
 
 
