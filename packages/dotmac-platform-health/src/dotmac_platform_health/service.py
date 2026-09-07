@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from dotmac_platform_health.contracts import (
+    ComponentEvidence,
+    DeploymentHealthEvidence,
     HealthObservationInput,
     HealthState,
     HealthSummary,
@@ -120,6 +123,12 @@ def record_observation(
         observation_key=command.observation_key,
         request_fingerprint=digest,
         state=command.state.value,
+        # Snapshotted NOW, from the component's freshness policy as it stands
+        # at acceptance. This value travels with the observation forever —
+        # `register_component` may later widen or narrow the policy, but that
+        # never retroactively changes what an already-accepted observation
+        # meant. See the field's docstring on `HealthObservation`.
+        freshness_seconds=component.freshness_seconds,
         observed_at=command.observed_at,
         received_at=command.received_at,
         summary=command.summary,
@@ -137,7 +146,7 @@ def record_observation(
             state=row.state,
             observed_at=row.observed_at,
             freshness_deadline=row.observed_at
-            + timedelta(seconds=component.freshness_seconds),
+            + timedelta(seconds=row.freshness_seconds),
         )
         db.add(projection)
     elif (_instant(row.observed_at), _instant(row.received_at), str(row.id)) > (
@@ -149,7 +158,7 @@ def record_observation(
         projection.state = row.state
         projection.observed_at = row.observed_at
         projection.freshness_deadline = row.observed_at + timedelta(
-            seconds=component.freshness_seconds
+            seconds=row.freshness_seconds
         )
     db.flush()
     return ObservationReceipt(row)
@@ -192,8 +201,17 @@ def rebuild_projections(db: Session, *, rebuilt_at: datetime) -> None:
                     observation_id=latest.id,
                     state=latest.state,
                     observed_at=latest.observed_at,
+                    # From the OBSERVATION's own snapshot, never from
+                    # `component.freshness_seconds` — the component's current
+                    # policy may have moved since `latest` was accepted, and a
+                    # rebuild must reproduce the classification the observation
+                    # was accepted under, not re-derive a different one under
+                    # today's policy. Reading the live policy here was the
+                    # freshness-policy defect: a rebuild after a policy change
+                    # could flip a projection's freshness with no new
+                    # observation.
                     freshness_deadline=latest.observed_at
-                    + timedelta(seconds=component.freshness_seconds),
+                    + timedelta(seconds=latest.freshness_seconds),
                     created_at=rebuilt_at,
                     updated_at=rebuilt_at,
                 )
@@ -232,10 +250,78 @@ def summarize_health(db: Session, *, as_of: datetime) -> tuple[HealthSummary, ..
     )
 
 
+def build_health_evidence(
+    db: Session, *, requested_components: Sequence[str], evaluated_at: datetime
+) -> DeploymentHealthEvidence:
+    """Derive the canonical, UNSIGNED health-evidence document for a roster.
+
+    Platform Health decides state and freshness here, from its own durable
+    projections — this is the boundary the ADR-0070 amendment draws: the
+    producer "stores immutably, derives `HealthState`/freshness, and produces
+    the canonical, signed evidence" but "may not bind deployment
+    coordinates". Signing (`evidence.produce_signed_evidence`) and binding
+    (Control, out of scope here) both happen strictly after this call.
+
+    `requested_components` is the EXACT roster the caller (the product's
+    deployment descriptor, eventually) declares required — a code with no
+    registered component and no observation is represented as an explicit
+    `"missing"` entry, never silently dropped.
+    """
+    _aware(evaluated_at, "evaluated_at")
+    if not requested_components:
+        raise ValueError("requested_components must be non-empty")
+    codes = tuple(requested_components)
+    if len(set(codes)) != len(codes):
+        raise ValueError("requested_components must not repeat a component code")
+    rows = db.execute(
+        select(HealthComponent, HealthProjection)
+        .outerjoin(
+            HealthProjection, HealthProjection.component_id == HealthComponent.id
+        )
+        .where(HealthComponent.code.in_(codes))
+    ).all()
+    found = {component.code: (component, projection) for component, projection in rows}
+    components: list[ComponentEvidence] = []
+    deadlines: list[datetime] = []
+    for code in codes:
+        match = found.get(code)
+        projection = match[1] if match is not None else None
+        if projection is None:
+            components.append(
+                ComponentEvidence(
+                    code, None, None, HealthState.UNKNOWN.value, "missing"
+                )
+            )
+            continue
+        deadline = _instant(projection.freshness_deadline)
+        deadlines.append(deadline)
+        components.append(
+            ComponentEvidence(
+                code,
+                projection.observation_id,
+                _instant(projection.observed_at),
+                projection.state,
+                "fresh" if evaluated_at <= deadline else "stale",
+            )
+        )
+    # Owner-derived `valid_until`: the earliest point any INCLUDED component's
+    # own freshness deadline falls, i.e. the moment this evidence document
+    # would stop being able to say every component is still fresh even if
+    # nothing changes. A roster with no deadline at all (every entry missing)
+    # is valid for no longer than the instant it was evaluated.
+    valid_until = min(deadlines) if deadlines else evaluated_at
+    return DeploymentHealthEvidence(
+        evaluated_at=evaluated_at,
+        valid_until=valid_until,
+        components=tuple(sorted(components, key=lambda c: c.component_code)),
+    )
+
+
 __all__ = [
     "HealthConflict",
     "HealthError",
     "ObservationReceipt",
+    "build_health_evidence",
     "rebuild_projections",
     "record_observation",
     "register_component",
