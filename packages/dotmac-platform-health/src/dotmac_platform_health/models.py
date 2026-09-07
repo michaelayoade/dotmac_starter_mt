@@ -62,7 +62,7 @@ class HealthObservation(Base):
     # observation was accepted under, not whatever policy happens to be live
     # when the rebuild runs. See `service.py`'s `record_observation` and
     # `rebuild_projections`.
-    freshness_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    freshness_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

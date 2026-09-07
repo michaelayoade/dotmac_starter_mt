@@ -14,7 +14,6 @@ from dotmac_platform_health.evidence import (
     HealthEvidenceSigner,
     SignedHealthEvidence,
     canonical_health_evidence_bytes,
-    produce_signed_evidence,
 )
 from dotmac_platform_health.manifest import module
 from dotmac_platform_health.migrations import versions_dir
@@ -26,10 +25,11 @@ from dotmac_platform_health.service import (
     rebuild_projections,
     record_observation,
     register_component,
+    produce_signed_health_evidence,
     summarize_health,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"
 
 __all__ = [
     "__version__",
@@ -49,7 +49,7 @@ __all__ = [
     "build_health_evidence",
     "canonical_health_evidence_bytes",
     "module",
-    "produce_signed_evidence",
+    "produce_signed_health_evidence",
     "rebuild_projections",
     "record_observation",
     "register_component",

@@ -23,8 +23,8 @@ proof standard:
    `PYTHONHASHSEED` values, and a single-field mutation changes the bytes
    (non-vacuity: a signer that ignored its input and signed a constant would
    pass a "signature field is present" test but fail
-   `test_a_one_field_mutation_changes_the_signed_bytes`).
-3. `produce_signed_evidence` refuses outright without an injected signer, and
+   `test_authoritative_signing_uses_durable_observations`).
+3. authoritative signed evidence refuses without an injected signer, and
    holds no default implementation anywhere in this package.
 """
 
@@ -44,21 +44,25 @@ from dotmac_platform_health import (
     DeploymentHealthEvidence,
     HealthEvidenceError,
     HealthEvidenceSignature,
+    HealthError,
     HealthObservationInput,
     HealthState,
     build_health_evidence,
     canonical_health_evidence_bytes,
-    produce_signed_evidence,
+    produce_signed_health_evidence,
     rebuild_projections,
     record_observation,
     register_component,
     summarize_health,
 )
-from dotmac_platform_health.models import PLATFORM_MODELS
-from sqlalchemy import create_engine
+from dotmac_platform_health.models import HealthProjection, PLATFORM_MODELS
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = (
+    REPO_ROOT / "packages/dotmac-platform-health/src/dotmac_platform_health"
+)
 
 
 @pytest.fixture
@@ -147,6 +151,128 @@ def test_the_observation_carries_its_own_freshness_snapshot(db: Session) -> None
     assert receipt.observation.freshness_seconds == 42
 
 
+def test_rebuild_refuses_legacy_unknown_provenance_before_projection_delete(
+    db: Session,
+) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at = datetime(2026, 9, 7, 8, 0, tzinfo=UTC)
+    receipt = record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
+        ),
+    )
+    projection = db.scalar(select(HealthProjection))
+    receipt.observation.freshness_seconds = None
+    with pytest.raises(HealthError, match="freshness provenance"):
+        rebuild_projections(db, rebuilt_at=at + timedelta(seconds=1))
+    assert db.scalar(select(HealthProjection)).id == projection.id
+
+
+def test_evidence_refuses_selected_projection_without_freshness_provenance(
+    db: Session,
+) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    receipt = record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
+        ),
+    )
+    receipt.observation.freshness_seconds = None
+    db.flush()
+    with pytest.raises(HealthError, match="freshness provenance"):
+        build_health_evidence(db, requested_components=("api",), evaluated_at=as_of)
+
+
+def test_summary_hides_legacy_health_and_freshness(db: Session) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    legacy = record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:legacy", "api", HealthState.HEALTHY, at, at, "ok", {}
+        ),
+    )
+    legacy.observation.freshness_seconds = None
+    db.flush()
+    summary = summarize_health(db, as_of=as_of)[0]
+    assert (summary.state, summary.freshness, summary.summary) == (
+        HealthState.UNKNOWN.value,
+        "missing",
+        None,
+    )
+
+
+def test_legacy_signing_refusal_does_not_call_signer(db: Session) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    legacy = record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:legacy", "api", HealthState.HEALTHY, at, at, "ok", {}
+        ),
+    )
+    legacy.observation.freshness_seconds = None
+
+    class _ShouldNotBeCalled:
+        def sign_health_evidence(self, evidence, canonical_bytes):
+            raise AssertionError("legacy evidence reached signer")
+
+    with pytest.raises(HealthError, match="freshness provenance"):
+        produce_signed_health_evidence(
+            db, requested_components=("api",), evaluated_at=as_of,
+            signer=_ShouldNotBeCalled()
+        )
+
+
+def test_newer_observation_repairs_legacy_provenance_refusal(db: Session) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    legacy = record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:legacy", "api", HealthState.HEALTHY, at, at, "old", {}
+        ),
+    )
+    legacy.observation.freshness_seconds = None
+    db.flush()
+    with pytest.raises(HealthError, match="freshness provenance"):
+        rebuild_projections(db, rebuilt_at=as_of)
+
+    # Later receipt does not make an earlier observation the selected latest
+    # fact, so the refusal remains in force.
+    record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:late-receipt", "api", HealthState.HEALTHY,
+            at - timedelta(seconds=1), at + timedelta(seconds=2), "old", {}
+        ),
+    )
+    with pytest.raises(HealthError, match="freshness provenance"):
+        rebuild_projections(db, rebuilt_at=as_of)
+
+    record_observation(
+        db,
+        HealthObservationInput(
+            "agent",
+            "api:new",
+            "api",
+            HealthState.HEALTHY,
+            at + timedelta(seconds=1),
+            at + timedelta(seconds=1),
+            "new",
+            {},
+        ),
+    )
+    rebuild_projections(db, rebuilt_at=as_of)
+    evidence = build_health_evidence(
+        db, requested_components=("api",), evaluated_at=as_of
+    )
+    assert evidence.components[0].freshness == "fresh"
+
+
 # ── 2. Canonical evidence: determinism, roster exactness, valid_until ──────
 
 
@@ -159,6 +285,9 @@ def test_build_health_evidence_represents_missing_entries_explicitly(
     db: Session,
 ) -> None:
     register_component(db, code="api", display_name="API", freshness_seconds=60)
+    register_component(
+        db, code="registered-empty", display_name="Empty", freshness_seconds=60
+    )
     at, as_of = _evidence_now()
     record_observation(
         db,
@@ -167,17 +296,20 @@ def test_build_health_evidence_represents_missing_entries_explicitly(
         ),
     )
     evidence = build_health_evidence(
-        db, requested_components=("api", "never-registered"), evaluated_at=as_of
+        db,
+        requested_components=("api", "registered-empty", "never-registered"),
+        evaluated_at=as_of,
     )
     assert [c.component_code for c in evidence.components] == [
         "api",
+        "registered-empty",
         "never-registered",
     ]
-    missing = evidence.components[1]
-    assert missing.state == HealthState.UNKNOWN.value
-    assert missing.freshness == "missing"
-    assert missing.observation_id is None
-    assert missing.observed_at is None
+    for missing in evidence.components[1:]:
+        assert missing.state == HealthState.UNKNOWN.value
+        assert missing.freshness == "missing"
+        assert missing.observation_id is None
+        assert missing.observed_at is None
 
 
 def test_build_health_evidence_roster_is_exact_not_every_active_component(
@@ -279,9 +411,8 @@ def test_canonical_bytes_are_self_describing_and_plain_json() -> None:
     # "Foundation imports neither Platform Health, Control nor Integrator".
 
 
-def test_a_one_field_mutation_changes_the_signed_bytes() -> None:
-    """Non-vacuity, named explicitly in the brief: a plant that changes one
-    fact must change the canonical bytes a signer receives."""
+def test_a_one_field_mutation_changes_canonical_bytes() -> None:
+    """A one-field fact change must change canonical bytes."""
     base = _sample_evidence()
     mutated = DeploymentHealthEvidence(
         evaluated_at=base.evaluated_at,
@@ -292,13 +423,32 @@ def test_a_one_field_mutation_changes_the_signed_bytes() -> None:
                 base.components[1].component_code,
                 base.components[1].observation_id,
                 base.components[1].observed_at,
-                "degraded",  # the one changed fact
+                "degraded",
                 base.components[1].freshness,
             ),
         ),
     )
     assert canonical_health_evidence_bytes(base) != canonical_health_evidence_bytes(
         mutated
+    )
+
+
+def test_authoritative_signing_uses_durable_observations(db: Session) -> None:
+    """The signer receives exact bytes built from durable state."""
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    first = record_observation(
+        db,
+        HealthObservationInput(
+            "agent",
+            "api:1",
+            "api",
+            HealthState.HEALTHY,
+            at,
+            at,
+            "ok",
+            {},
+        ),
     )
 
     class _RecordingSigner:
@@ -310,14 +460,42 @@ def test_a_one_field_mutation_changes_the_signed_bytes() -> None:
             return HealthEvidenceSignature("ed25519", "test-key", canonical_bytes[:8])
 
     signer = _RecordingSigner()
-    signed_base = produce_signed_evidence(base, signer=signer)
-    signed_mutated = produce_signed_evidence(mutated, signer=signer)
+    signed_base = produce_signed_health_evidence(
+        db,
+        requested_components=("api",),
+        evaluated_at=as_of,
+        signer=signer,
+    )
+    record_observation(
+        db,
+        HealthObservationInput(
+            "agent",
+            "api:2",
+            "api",
+            HealthState.UNHEALTHY,
+            at + timedelta(seconds=1),
+            at + timedelta(seconds=1),
+            "down",
+            {},
+        ),
+    )
+    projection = db.scalar(select(HealthProjection))
+    projection.observation_id = first.observation.id
+    projection.state = HealthState.HEALTHY.value
+    db.flush()
+    signed_mutated = produce_signed_health_evidence(
+        db,
+        requested_components=("api",),
+        evaluated_at=as_of,
+        signer=signer,
+    )
 
     # The signer received the ACTUAL canonical bytes of each document, not a
     # constant and not a summary — this is what rules out an implementation
     # that signs a fixed payload regardless of input.
-    assert signed_base.canonical_bytes == canonical_health_evidence_bytes(base)
-    assert signed_mutated.canonical_bytes == canonical_health_evidence_bytes(mutated)
+    assert signed_base.evidence.components[0].state == "healthy"
+    assert signed_mutated.evidence.components[0].state == "unhealthy"
+    assert signed_mutated.evidence.components[0].observation_id != first.observation.id
     assert signed_base.canonical_bytes != signed_mutated.canonical_bytes
     assert signer.seen[0] != signer.seen[1]
     assert signed_base.signature.signature != signed_mutated.signature.signature
@@ -365,9 +543,29 @@ def test_determinism_survives_a_hash_seed_change_across_processes() -> None:
 # ── 3. The injected signer port ─────────────────────────────────────────────
 
 
-def test_produce_signed_evidence_refuses_without_a_signer() -> None:
-    with pytest.raises(HealthEvidenceError, match="no default signer"):
-        produce_signed_evidence(_sample_evidence(), signer=None)
+def test_produce_signed_health_evidence_refuses_without_a_signer(db: Session) -> None:
+    with pytest.raises(HealthEvidenceError, match="signer"):
+        produce_signed_health_evidence(
+            db, requested_components=("api",), evaluated_at=_evidence_now()[1], signer=None
+        )
+
+
+def test_non_ed25519_signer_is_refused(db: Session) -> None:
+    register_component(db, code="api", display_name="API", freshness_seconds=60)
+    at, as_of = _evidence_now()
+    record_observation(db, HealthObservationInput(
+        "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
+    ))
+
+    class _WrongAlgorithm:
+        def sign_health_evidence(self, evidence, canonical_bytes):
+            return HealthEvidenceSignature("rsa", "test-key", canonical_bytes[:8])
+
+    with pytest.raises(HealthEvidenceError, match="ed25519"):
+        produce_signed_health_evidence(
+            db, requested_components=("api",), evaluated_at=as_of,
+            signer=_WrongAlgorithm()
+        )
 
 
 def test_this_package_defines_no_default_signer_implementation() -> None:
@@ -377,45 +575,68 @@ def test_this_package_defines_no_default_signer_implementation() -> None:
     such as constructing a private key or calling a crypto library)."""
     import ast
 
-    evidence_source = (
-        REPO_ROOT
-        / "packages/dotmac-platform-health/src/dotmac_platform_health/evidence.py"
-    ).read_text(encoding="utf-8")
-    tree = ast.parse(evidence_source)
     implementations = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "sign_health_evidence":
-            body = node.body
-            is_stub = (
-                len(body) == 1
-                and isinstance(body[0], ast.Expr | ast.Pass)
-                and (
-                    isinstance(body[0], ast.Pass)
-                    or isinstance(body[0].value, ast.Constant)
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "sign_health_evidence"
+            ):
+                body = node.body
+                is_stub = (
+                    len(body) == 1
+                    and (
+                        isinstance(body[0], ast.Pass)
+                        or (
+                            isinstance(body[0], ast.Expr)
+                            and isinstance(body[0].value, ast.Constant)
+                            and body[0].value.value is Ellipsis
+                        )
+                    )
                 )
-            )
-            implementations.append((node.lineno, is_stub))
+                implementations.append(
+                    (str(path.relative_to(PACKAGE_ROOT)), node.lineno, is_stub)
+                )
     assert implementations, "sign_health_evidence must be declared somewhere"
-    assert all(is_stub for _, is_stub in implementations), (
-        "a real (non-stub) sign_health_evidence body exists in "
-        f"dotmac_platform_health.evidence: {implementations} — this package "
+    assert all(is_stub for _, _, is_stub in implementations), (
+        f"a real (non-stub) sign_health_evidence body exists: {implementations} — "
+        "this package "
         "must hold no default signer implementation"
     )
 
 
-def test_no_network_or_key_material_import_in_the_evidence_module() -> None:
+def test_package_holds_no_network_or_key_material_imports() -> None:
     import ast
 
-    source = (
-        REPO_ROOT
-        / "packages/dotmac-platform-health/src/dotmac_platform_health/evidence.py"
-    ).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    roots: set[str] = set()
+    forbidden = {"httpx", "requests", "cryptography", "nacl"}
+    violations = []
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            roots: set[str] = set()
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".", 1)[0])
+            for root in sorted(roots & forbidden):
+                violations.append(
+                    (str(path.relative_to(PACKAGE_ROOT)), node.lineno, root)
+                )
+    assert not violations, violations
+
+
+def test_evidence_module_stays_kernel_independent() -> None:
+    import ast
+
+    path = PACKAGE_ROOT / "evidence.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    roots = {
+        node.module.split(".", 1)[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             roots.update(alias.name.split(".", 1)[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            roots.add(node.module.split(".", 1)[0])
-    forbidden = {"httpx", "requests", "cryptography", "nacl", "dotmac_kernel"}
-    assert not roots & forbidden, roots & forbidden
+    assert "dotmac_kernel" not in roots

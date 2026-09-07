@@ -7,6 +7,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -17,6 +18,12 @@ from dotmac_platform_health.contracts import (
     HealthObservationInput,
     HealthState,
     HealthSummary,
+)
+from dotmac_platform_health.evidence import (
+    HealthEvidenceError,
+    HealthEvidenceSigner,
+    SignedHealthEvidence,
+    canonical_health_evidence_bytes,
 )
 from dotmac_platform_health.models import (
     HealthComponent,
@@ -134,6 +141,7 @@ def record_observation(
         summary=command.summary,
         labels=dict(command.labels),
     )
+    freshness_seconds = component.freshness_seconds
     db.add(row)
     db.flush()
     projection = db.scalar(
@@ -146,7 +154,7 @@ def record_observation(
             state=row.state,
             observed_at=row.observed_at,
             freshness_deadline=row.observed_at
-            + timedelta(seconds=row.freshness_seconds),
+            + timedelta(seconds=freshness_seconds),
         )
         db.add(projection)
     elif (_instant(row.observed_at), _instant(row.received_at), str(row.id)) > (
@@ -158,7 +166,7 @@ def record_observation(
         projection.state = row.state
         projection.observed_at = row.observed_at
         projection.freshness_deadline = row.observed_at + timedelta(
-            seconds=row.freshness_seconds
+            seconds=freshness_seconds
         )
     db.flush()
     return ObservationReceipt(row)
@@ -175,25 +183,49 @@ def _projection_received(db: Session, projection: HealthProjection) -> datetime:
     return value
 
 
+def _require_freshness_provenance(observation: HealthObservation) -> int:
+    freshness_seconds = observation.freshness_seconds
+    if freshness_seconds is None:
+        raise HealthError(
+            "freshness provenance is unavailable for the selected observation"
+        )
+    return freshness_seconds
+
+
+def _latest_observation(db: Session, component_id: UUID) -> HealthObservation | None:
+    return db.scalars(
+        select(HealthObservation)
+        .where(HealthObservation.component_id == component_id)
+        .order_by(
+            HealthObservation.observed_at.desc(),
+            HealthObservation.received_at.desc(),
+            HealthObservation.id.desc(),
+        )
+        .limit(1)
+    ).first()
+
+
 def rebuild_projections(db: Session, *, rebuilt_at: datetime) -> None:
     _aware(rebuilt_at, "rebuilt_at")
-    db.execute(delete(HealthProjection))
     components = db.scalars(
         select(HealthComponent)
         .where(HealthComponent.active.is_(True))
         .order_by(HealthComponent.code)
     ).all()
+    latest_by_component: list[tuple[HealthComponent, HealthObservation | None]] = []
     for component in components:
-        latest = db.scalars(
-            select(HealthObservation)
-            .where(HealthObservation.component_id == component.id)
-            .order_by(
-                HealthObservation.observed_at.desc(),
-                HealthObservation.received_at.desc(),
-                HealthObservation.id.desc(),
+        latest_by_component.append(
+            (
+                component,
+                _latest_observation(db, component.id),
             )
-            .limit(1)
-        ).first()
+        )
+    for _, latest in latest_by_component:
+        if latest is not None:
+            _require_freshness_provenance(latest)
+
+    db.execute(delete(HealthProjection))
+    for component, latest in latest_by_component:
         if latest is not None:
             db.add(
                 HealthProjection(
@@ -211,7 +243,7 @@ def rebuild_projections(db: Session, *, rebuilt_at: datetime) -> None:
                     # could flip a projection's freshness with no new
                     # observation.
                     freshness_deadline=latest.observed_at
-                    + timedelta(seconds=latest.freshness_seconds),
+                    + timedelta(seconds=_require_freshness_provenance(latest)),
                     created_at=rebuilt_at,
                     updated_at=rebuilt_at,
                 )
@@ -236,15 +268,25 @@ def summarize_health(db: Session, *, as_of: datetime) -> tuple[HealthSummary, ..
         HealthSummary(
             component.code,
             component.display_name,
-            projection.state if projection else HealthState.UNKNOWN.value,
+            (
+                projection.state
+                if projection
+                and observation
+                and observation.freshness_seconds is not None
+                else HealthState.UNKNOWN.value
+            ),
             "missing"
             if projection is None
+            or observation is None
+            or observation.freshness_seconds is None
             else (
                 "fresh" if as_of <= _instant(projection.freshness_deadline) else "stale"
             ),
             projection.observation_id if projection else None,
             _instant(projection.observed_at) if projection else None,
-            observation.summary if observation else None,
+            observation.summary
+            if observation and observation.freshness_seconds is not None
+            else None,
         )
         for component, projection, observation in rows
     )
@@ -255,11 +297,11 @@ def build_health_evidence(
 ) -> DeploymentHealthEvidence:
     """Derive the canonical, UNSIGNED health-evidence document for a roster.
 
-    Platform Health decides state and freshness here, from its own durable
-    projections — this is the boundary the ADR-0070 amendment draws: the
+    Platform Health decides state and freshness here, from its own immutable
+    observations — this is the boundary the ADR-0070 amendment draws: the
     producer "stores immutably, derives `HealthState`/freshness, and produces
     the canonical, signed evidence" but "may not bind deployment
-    coordinates". Signing (`evidence.produce_signed_evidence`) and binding
+    coordinates". Signing (`produce_signed_health_evidence`) and binding
     (Control, out of scope here) both happen strictly after this call.
 
     `requested_components` is the EXACT roster the caller (the product's
@@ -273,34 +315,42 @@ def build_health_evidence(
     codes = tuple(requested_components)
     if len(set(codes)) != len(codes):
         raise ValueError("requested_components must not repeat a component code")
-    rows = db.execute(
-        select(HealthComponent, HealthProjection)
-        .outerjoin(
-            HealthProjection, HealthProjection.component_id == HealthComponent.id
-        )
-        .where(HealthComponent.code.in_(codes))
-    ).all()
-    found = {component.code: (component, projection) for component, projection in rows}
+    found = {
+        component.code: component
+        for component in db.scalars(
+            select(HealthComponent).where(HealthComponent.code.in_(codes))
+        ).all()
+    }
     components: list[ComponentEvidence] = []
     deadlines: list[datetime] = []
     for code in codes:
         match = found.get(code)
-        projection = match[1] if match is not None else None
-        if projection is None:
+        if match is None:
             components.append(
                 ComponentEvidence(
                     code, None, None, HealthState.UNKNOWN.value, "missing"
                 )
             )
             continue
-        deadline = _instant(projection.freshness_deadline)
+        observation = _latest_observation(db, match.id)
+        if observation is None:
+            components.append(
+                ComponentEvidence(
+                    code, None, None, HealthState.UNKNOWN.value, "missing"
+                )
+            )
+            continue
+        freshness_seconds = _require_freshness_provenance(observation)
+        deadline = _instant(observation.observed_at) + timedelta(
+            seconds=freshness_seconds
+        )
         deadlines.append(deadline)
         components.append(
             ComponentEvidence(
                 code,
-                projection.observation_id,
-                _instant(projection.observed_at),
-                projection.state,
+                observation.id,
+                _instant(observation.observed_at),
+                observation.state,
                 "fresh" if evaluated_at <= deadline else "stale",
             )
         )
@@ -317,11 +367,32 @@ def build_health_evidence(
     )
 
 
+def produce_signed_health_evidence(
+    db: Session,
+    *,
+    requested_components: Sequence[str],
+    evaluated_at: datetime,
+    signer: HealthEvidenceSigner | None,
+) -> SignedHealthEvidence:
+    """Build and sign evidence only from authoritative durable state."""
+    if signer is None:
+        raise HealthEvidenceError("a HealthEvidenceSigner must be supplied")
+    evidence = build_health_evidence(
+        db, requested_components=requested_components, evaluated_at=evaluated_at
+    )
+    canonical_bytes = canonical_health_evidence_bytes(evidence)
+    signature = signer.sign_health_evidence(evidence, canonical_bytes)
+    if signature.algorithm != "ed25519":
+        raise HealthEvidenceError("health evidence signatures must use ed25519")
+    return SignedHealthEvidence(evidence, canonical_bytes, signature)
+
+
 __all__ = [
     "HealthConflict",
     "HealthError",
     "ObservationReceipt",
     "build_health_evidence",
+    "produce_signed_health_evidence",
     "rebuild_projections",
     "record_observation",
     "register_component",

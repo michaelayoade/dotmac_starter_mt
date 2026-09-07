@@ -12,7 +12,7 @@ implements and injects.
 defines its OWN domain-specific port (`HealthEvidenceSigner`); an assembly
 composes a concrete implementation (Ed25519, key material from an approved
 `SecretSource`/OpenBao pointer) and supplies it as an ordinary constructor
-argument to `produce_signed_evidence` — there is no
+argument to the service's `produce_signed_health_evidence` — there is no
 `install_health_evidence_signer()`-style global registration. Read
 `dotmac_kernel.settings_crypto.KeyProvider` for the SHAPE this follows (a port
 loaded once, held, refreshed only explicitly, never fetched per request) —
@@ -128,7 +128,7 @@ class HealthEvidenceSigner(Protocol):
     """The injected port. Platform Health defines it; a product supplies it.
 
     No default implementation exists anywhere in this package — see module
-    docstring. `produce_signed_evidence` refuses outright if `signer` is
+    docstring. `produce_signed_health_evidence` refuses outright if `signer` is
     `None`, rather than falling back to emitting unsigned evidence.
     """
 
@@ -137,34 +137,10 @@ class HealthEvidenceSigner(Protocol):
     ) -> HealthEvidenceSignature: ...
 
 
-def produce_signed_evidence(
-    evidence: DeploymentHealthEvidence, *, signer: HealthEvidenceSigner | None
-) -> SignedHealthEvidence:
-    """Canonicalize `evidence` and hand it to the caller-supplied signer.
-
-    Refuses rather than degrading: a `None` (or otherwise absent) signer
-    raises `HealthEvidenceError` immediately. There is no configuration
-    knob, environment variable or default that produces unsigned evidence
-    from this function — an assembly that has not composed a real signer
-    cannot reach this call at all without supplying one explicitly.
-    """
-    if signer is None:
-        raise HealthEvidenceError(
-            "a HealthEvidenceSigner must be supplied; dotmac-platform-health "
-            "holds no default signer and no key material"
-        )
-    canonical_bytes = canonical_health_evidence_bytes(evidence)
-    signature = signer.sign_health_evidence(evidence, canonical_bytes)
-    return SignedHealthEvidence(
-        evidence=evidence, canonical_bytes=canonical_bytes, signature=signature
-    )
-
-
 __all__ = [
     "HealthEvidenceError",
     "HealthEvidenceSignature",
     "HealthEvidenceSigner",
     "SignedHealthEvidence",
     "canonical_health_evidence_bytes",
-    "produce_signed_evidence",
 ]
