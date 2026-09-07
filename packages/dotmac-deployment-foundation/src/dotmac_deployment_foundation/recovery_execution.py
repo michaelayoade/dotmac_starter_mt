@@ -105,9 +105,18 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .errors import PreconditionFailed, StepFailed
+from .host_source import (
+    DEFAULT_CANDIDATE_RECEIPTS_DIR,
+    HostSource,
+    InstalledMetadata,
+    installed_distribution_version,
+    require_host_source,
+    resolve_committed_candidate_receipt,
+)
 from .recovery import (
     RESTORE_PROCEDURE,
     Adjudication,
@@ -294,6 +303,8 @@ class RecoveryExecutor:
         *,
         source_evidence: CatalogEvidence,
         product_image: str,
+        host_source_metadata: InstalledMetadata | None = None,
+        host_source_receipts_dir: str | Path = DEFAULT_CANDIDATE_RECEIPTS_DIR,
     ) -> None:
         self._spec = spec
         self._manifest = manifest
@@ -306,9 +317,59 @@ class RecoveryExecutor:
                 "restore nothing has started the real application against is a "
                 "database that was copied rather than a system that recovered"
             )
+        # THE SAME SEAM `engine.run.Executor` keeps, and nothing wider.
+        #
+        # `_do_fresh_target` (below) is this class's first effect — creating a
+        # cluster — and Boundary 4's ruling ("the same prerequisite covers
+        # every mutating executor path") applies to it exactly as it applies
+        # to `Executor.run`/`rollback`. The naive way to add that check here
+        # would be a `host_source_receipt`/`host_source_probe` constructor
+        # parameter a caller fills in directly — which is precisely the shape
+        # of the bypass `engine/run.py::Executor.__init__` just had removed:
+        # a caller-supplied value standing in for a digest this class must
+        # instead READ. So there is no such parameter. `host_source_metadata`
+        # is the one test seam, identical in type and purpose to `Executor`'s;
+        # the receipt is never a constructor argument at all — `_verify_host_
+        # source` below resolves it itself, from the installed version, the
+        # same way `cli.py` resolves it for `Executor`.
+        # `host_source_receipts_dir` names WHERE to look for that committed
+        # receipt (see `resolve_committed_candidate_receipt`) — never WHICH
+        # receipt, and never a digest of anything.
+        self._host_source_metadata = host_source_metadata
+        self._host_source_receipts_dir = host_source_receipts_dir
+        self._host_source: HostSource | None = None
+
+    def _verify_host_source(self) -> None:
+        """THE MANDATORY PREREQUISITE, called before this class's first effect.
+
+        Same shape as `engine.run.Executor._verify_host_source`: the receipt
+        is RESOLVED, from the installed version, against the committed
+        directory — never handed in — and the installed artifact is always
+        read for real (through `host_source_metadata` when a test supplies
+        one, through the real interpreter otherwise). Nothing here accepts an
+        artifact digest or a launcher digest directly.
+        """
+        version = installed_distribution_version(metadata=self._host_source_metadata)
+        receipt = (
+            resolve_committed_candidate_receipt(
+                version, receipts_dir=self._host_source_receipts_dir
+            )
+            if version is not None
+            else None
+        )
+        self._host_source = require_host_source(
+            receipt=receipt,
+            metadata=self._host_source_metadata,
+        )
 
     def run(self, bundle: Mapping[str, Any]) -> RecoveryOutcome:
         """Restore, adjudicate, prove — or destroy and say why."""
+        # Which Foundation is asking, verified before the plan check and
+        # before every step — see `_verify_host_source`'s docstring. Reachable
+        # before any mutation: `_do_fresh_target` below is this class's first
+        # effect, and a wrong-artifact host must not reach it, however
+        # briefly.
+        self._verify_host_source()
         outcome = RecoveryOutcome()
         # The plan is asked for FIRST and from the contract, so a bundle that
         # does not match the descriptor refuses before a cluster exists.

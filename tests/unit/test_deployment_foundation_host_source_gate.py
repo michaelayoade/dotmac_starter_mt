@@ -12,12 +12,23 @@
   dataclass, constructible by anyone who imports it. The executor must call
   `require_host_source` itself, against inputs it cannot forge.
 
-`Executor` therefore accepts the RAW INGREDIENTS `require_host_source` itself
-checks (`host_source_receipt`, plus test-only override hooks
-`host_source_installed`/`host_source_metadata`/`host_source_probe`), never a
-`HostSource`. `Executor.__all__`-style surface has no `host_source=` parameter
-at all — there is nothing to hand it that would satisfy the gate without going
-through `_verify_host_source`.
+`Executor` therefore accepts the committed candidate receipt
+(`host_source_receipt`) plus ONE test-only override hook
+(`host_source_metadata`, typed to `InstalledMetadata`), never a `HostSource`.
+`Executor.__all__`-style surface has no `host_source=` parameter at all —
+there is nothing to hand it that would satisfy the gate without going through
+`_verify_host_source`.
+
+`host_source_installed` (a pre-built `InstalledArtifact`, carrying the
+artifact digest itself) and `host_source_probe` (standing in for the launcher
+digest) USED to be accepted here too, forwarded straight into
+`require_host_source` as `installed=`/`source_tree_digest=`. That was a LIVE
+BYPASS this file did not test: a caller passing `installed=InstalledArtifact
+(artifact_digest=X, ...)` alongside a receipt naming `sha256=X` was admitted
+without a single byte of either claim being read from this interpreter or
+this launcher. `test_deployment_foundation_host_source_constructor_seam.py`
+proves, by AST, that neither parameter exists on `Executor.__init__` any
+longer, and that `host_source_metadata` still does.
 
 ## Measured, not assumed: what happens under the real default
 
@@ -68,7 +79,6 @@ from tests.unit.test_deployment_foundation_host_source import (
     SOURCE_SHA,
     FakeInstall,
     _receipt,
-    _source_tree_digest,
 )
 
 HOST_SOURCE_CODES = {ABSENT, WRONG_KIND, DISAGREES, NO_RECEIPT}
@@ -95,7 +105,6 @@ def _valid_executor(*, spec=None, plan=None, effects=None, receipt=None, install
             evidence_verifier=AcceptingVerifier(),
             host_source_receipt=receipt if receipt is not None else _receipt(),
             host_source_metadata=install if install is not None else FakeInstall(),
-            host_source_probe=_source_tree_digest,
         ),
     )
 
@@ -172,7 +181,6 @@ def test_valid_host_source_and_invalid_authorization_refuses() -> None:
         sleep=lambda _: None,
         host_source_receipt=_receipt(),  # VALID host source
         host_source_metadata=FakeInstall(),
-        host_source_probe=_source_tree_digest,
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed):
@@ -196,7 +204,6 @@ def test_valid_authorization_and_invalid_host_source_refuses() -> None:
         # one FakeInstall() reports as installed.
         host_source_receipt=_receipt(sha256=OTHER_WHEEL_SHA256),
         host_source_metadata=FakeInstall(),
-        host_source_probe=_source_tree_digest,
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed) as refusal:
@@ -217,7 +224,6 @@ def test_valid_authorization_and_absent_host_source_refuses() -> None:
         sleep=lambda _: None,
         host_source_receipt=None,
         host_source_metadata=FakeInstall(),
-        host_source_probe=_source_tree_digest,
     )
     before = effects.snapshot()
     with pytest.raises(PreconditionFailed) as refusal:
@@ -246,7 +252,6 @@ def test_the_gate_fires_before_the_grant_when_both_are_invalid(monkeypatch) -> N
         sleep=lambda _: None,
         host_source_receipt=None,  # invalid: NO_RECEIPT
         host_source_metadata=FakeInstall(),
-        host_source_probe=_source_tree_digest,
     )
     annotate_calls: list[str] = []
     monkeypatch.setattr(
@@ -427,7 +432,6 @@ def test_rollback_also_reaches_the_verification_call(monkeypatch) -> None:
         evidence_verifier=AcceptingVerifier(),
         host_source_receipt=_receipt(),
         host_source_metadata=FakeInstall(),
-        host_source_probe=_source_tree_digest,
     )
     outcome = executor.rollback(plan, lock=held_lock(spec.product))
     assert outcome.succeeded, outcome.failure

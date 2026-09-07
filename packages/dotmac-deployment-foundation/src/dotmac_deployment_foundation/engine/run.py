@@ -86,7 +86,6 @@ from ..external_recovery import (
 from ..host_source import (
     CandidateReceipt,
     HostSource,
-    InstalledArtifact,
     InstalledMetadata,
     require_host_source,
 )
@@ -478,9 +477,7 @@ class Executor:
         exposure_effects: ExposureEffects | None = None,
         execution_plan: FoundationExecutionPlanV1,
         host_source_receipt: CandidateReceipt | None = None,
-        host_source_installed: InstalledArtifact | None = None,
         host_source_metadata: InstalledMetadata | None = None,
-        host_source_probe: Callable[[], str] | None = None,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -615,17 +612,37 @@ class Executor:
         # nothing: `HostSource` is a plain dataclass, constructible directly by
         # anyone who imports it, so accepting one here would make "was
         # verified" indistinguishable from "was asserted". What is accepted
-        # instead is the raw material `require_host_source` itself checks —
-        # the committed candidate receipt Boundary 4's `cli.py` loads from
-        # disk, and (for a test double only) a pre-read `InstalledArtifact`,
-        # an `InstalledMetadata` reader, or a source-tree-digest probe. `run`
-        # and `rollback` call `require_host_source` THEMSELVES, in
+        # instead is the committed candidate receipt `cli.py` resolves from
+        # disk, and — for a test double only — an `InstalledMetadata` reader.
+        #
+        # `host_source_installed` (a pre-built `InstalledArtifact`, carrying
+        # the artifact digest itself) and `host_source_probe` (a callable
+        # standing in for the launcher digest) USED to be accepted here too,
+        # and `_verify_host_source` forwarded both straight into
+        # `require_host_source` as `installed=`/`source_tree_digest=`. That
+        # made them a live bypass: a caller passing
+        # `installed=InstalledArtifact(artifact_digest=X, ...)` alongside a
+        # receipt naming `sha256=X` was admitted without a single byte of the
+        # claim ever being read from this interpreter or this launcher. They
+        # are REMOVED, not merely undocumented as "test-only" — the CHANGELOG
+        # calling them that never stopped a real caller from supplying them,
+        # and a check that only asserts `_verify_host_source` was CALLED (see
+        # the architecture coverage test) never inspected what it was fed.
+        #
+        # `host_source_metadata` remains the ONE test seam. It stands in for
+        # `importlib.metadata` — WHERE the installed distribution's own
+        # RECORD/direct_url.json are read from — never for the digest itself;
+        # `read_installed_artifact` still parses real-shaped PEP 610/RECORD
+        # content through it and computes the artifact digest from that
+        # parse, exactly as it would from a real interpreter. There is no
+        # parameter here, and no attribute this class exposes, through which
+        # a caller can state the artifact digest or the launcher's
+        # source-tree digest directly — both are always read, never handed
+        # in. `run` and `rollback` call `require_host_source` THEMSELVES, in
         # `_verify_host_source` below; nothing else in this class can make
         # that call satisfied by construction.
         self._host_source_receipt = host_source_receipt
-        self._host_source_installed = host_source_installed
         self._host_source_metadata = host_source_metadata
-        self._host_source_probe = host_source_probe
         # The bound identity, once verified. `None` until `_verify_host_source`
         # runs; held so a caller inspecting a completed run can see which
         # Foundation performed it, never read before that point.
@@ -660,9 +677,7 @@ class Executor:
         """
         self._host_source = require_host_source(
             receipt=self._host_source_receipt,
-            installed=self._host_source_installed,
             metadata=self._host_source_metadata,
-            source_tree_digest=self._host_source_probe,
         )
 
     def run(
