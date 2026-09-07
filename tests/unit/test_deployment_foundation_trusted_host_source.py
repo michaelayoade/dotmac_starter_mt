@@ -326,7 +326,13 @@ def test_audience_future_and_subject_mismatch_refuse(
     if change == "audience":
         candidate = dataclasses.replace(candidate, audience="host:other")
     elif change == "issued_at":
-        candidate = dataclasses.replace(candidate, issued_at="2026-09-08T00:00:00Z")
+        # Keep the envelope internally valid so verification reaches the
+        # intended future-issued refusal instead of rejecting the interval.
+        candidate = dataclasses.replace(
+            candidate,
+            issued_at="2026-09-08T00:00:00Z",
+            expires_at="2026-09-08T00:10:00Z",
+        )
     elif change == "subject":
         installed = dataclasses.replace(
             installed, subject={**installed.subject, "version": "other"}
