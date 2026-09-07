@@ -292,6 +292,89 @@ matching module or product verifier into Foundation; a schema name or contract
 id alone is not an adapter and proves nothing. Neither a schema name nor an
 Alembic head is substituted for structural proof.
 
+### Amendment — 2026-09-07: Platform Health authors signed evidence; Control freezes authorization
+
+On 2026-09-07, Michael explicitly approves this two-document authority chain.
+It is an architecture contract only: implementation and adoption remain zero
+until the Platform Health producer, Control extension, Platform CP composition,
+Foundation verifier and a production run land. No prior text is treated as
+having declared this producer or provenance chain.
+
+**Canonical health evidence.** Platform Health is the sole durable-health owner
+and authors `DeploymentHealthEvidence.v1`. Its canonical bytes contain exactly
+the requested component roster, each component's observation identity,
+observation time, state and freshness, the evaluation time, and an owner-derived
+`valid_until`. The evidence contains no deployment coordinates. Platform Health
+signs those exact canonical bytes with Ed25519. Its private key is held only in
+the Platform Health service composition through an approved `SecretSource` /
+OpenBao pointer; it is never held by the Platform CP deployment runner or any
+repository. Control owns the versioned public-key eligibility/revocation
+registry and verifies the signature through the existing Kernel verification
+pattern. Foundation adds no cryptography.
+
+Integrator authenticates and transports bounded raw observations into Platform
+Health through `HealthObservationInput`; it authors neither canonical health
+evidence nor either signature, and decides no state or freshness.
+
+Platform CP only orchestrates, submits and translates. It authors and signs
+neither document. It submits the signed health evidence together with the exact
+`ExecutionPlanDigestV1` to Control. Control verifies the inner signature, binds
+its digest to target, environment, operation, plan, descriptor, image and the
+exact required-component roster, then freezes and signs the outer authorization.
+Adding the health-evidence digest and roster to that signed authorization
+requires an explicit successor/versioned authorization schema; it must not
+silently widen or redefine the existing published statement. Control does not
+recompute health. The binding logic is Control-owned; Platform CP owns
+exhaustive adapter and runner composition.
+
+**The Foundation boundary.** Foundation receives the inner evidence as an
+offline supplied document; a caller-chosen path is transport, never authority.
+It accepts only after the evidence digest and every coordinate and roster entry
+match a `VerifiedAuthorization` / `ExecutionGrant` produced through the
+existing signed Control path. Foundation makes no network call and imports
+neither Platform Health, Control nor Integrator. The import-linter must forbid
+those dependencies explicitly; dependency absence alone is unmonitored.
+
+The required component set is a product-owned declarative input and must enter
+a successor/versioned descriptor and plan contract. Platform Health signs
+exactly that requested roster and represents missing entries explicitly.
+Foundation evaluates every entry and emits a deterministic, sorted set of
+findings. Admission requires an exact roster, every state `healthy`, every
+freshness `fresh`, and both the evidence and outer authorization to be live.
+Aggregation is therefore neither worst-of nor first-refusing.
+
+**Refusal vocabulary.** The contract requires seven health/receipt refusals:
+`missing`, `incomplete`, `expired`, `unknown`, `degraded`, `stale` and
+`unhealthy`; Foundation refuses each. They are not the complete integrity
+vocabulary. Malformed evidence,
+an unknown or revoked signer, an invalid signature, evidence-digest mismatch,
+wrong deployment subject or roster, and future-dated evidence remain distinct
+refusals. A missing required component is `incomplete`; evidence whose signed
+evaluation or observation time is future-dated relative to Foundation's
+injected execution time is also refused. Outer Control expiry must not extend
+Platform Health's `valid_until`.
+
+**What stays separate.** Local readiness, liveness, worker and scheduler gates
+remain separate static or runtime gates; a health evidence admission does not
+satisfy them, and they do not satisfy this chain. The role-level readiness/
+liveness gate already in
+`_validate_cross_field` (`spec.py` lines 2706–2721: a role with `replicas > 0`
+must declare an HTTP `live`/`ready` probe, a `WorkerContract.ping_command`, or a
+`scheduler_tick_max_age_seconds` budget, or the descriptor is refused as
+unmonitored) is unchanged and is not this receipt. It is a static, per-role
+declaration check at descriptor-validation time; the health receipt is a
+per-deployment-attempt, cross-service artifact checked at a different point in
+the pipeline. Passing one does not satisfy the other, and this amendment adds
+no exception to either.
+
+This producer/verifier separation is construction and pending Governance
+ratification, not a claim that a local independent-provenance rule already
+exists. Rule 49 is valid on the current branch and supplies the exact-plan
+digest precedent. Rule 24's product-first and adoption requirements, and rule
+30's authoritative-external-oracle boundary, remain accurate: a passing receipt
+is composition evidence, not adoption evidence. Until the implementation and
+production run land, `dotmac-platform-health` remains unadopted.
+
 ## What this ADR does not decide
 
 - It does not authorize a production deployment, a host, or an SSH session.
