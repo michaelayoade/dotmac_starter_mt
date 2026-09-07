@@ -420,11 +420,12 @@ def verify_trusted_host_source(
 
     Every refusal is `PreconditionFailed`: nothing has changed, and the
     identical call can be re-run once the stated cause is resolved. Ordering,
-    deliberately: absence, then each signature independently, then the
-    same-signer check, then agreement — signature verification never runs on
-    a document whose presence was never established, and content is compared
-    only once both signatures are known-good, so a stranger cannot use this
-    function to probe which content it would have accepted.
+    deliberately: absence, then the same-key (one-caller) check, then each
+    key's trust-root membership, then each signature, then agreement —
+    signature verification never runs on a document whose presence was never
+    established or that already failed a cheaper check, and content is
+    compared only once both signatures are known-good, so a stranger cannot
+    use this function to probe which content it would have accepted.
     """
     if candidate is None:
         raise PreconditionFailed(
@@ -439,6 +440,26 @@ def verify_trusted_host_source(
             "attestation alone says what SHOULD be running somewhere; it "
             "says nothing about what actually is",
             code=OBSERVATION_ABSENT,
+        )
+
+    # THE ONE-CALLER CHECK, FIRST — before either key is checked against a
+    # trust root, and deliberately not merely a restatement of what
+    # `DistinctTrustRoots` already refuses at construction. That refusal
+    # protects against a MISCONFIGURED pair of roots; this one protects
+    # against a single party presenting two envelopes under one key
+    # regardless of how the roots are configured, so it fires on its own
+    # evidence rather than depending on `trust_roots` having been built
+    # correctly. Checked before signature verification too: a stranger must
+    # not be able to use signature failure output to probe past this one.
+    if candidate.key_id == installed.key_id:
+        raise PreconditionFailed(
+            f"both attestations are signed by the same key "
+            f"({candidate.key_id!r}). A candidate attestation and an "
+            "installed-host observation signed by one key are one party's "
+            "word twice, not two independent readings — the exact shape both "
+            "prior attempts at this admission path had, in different "
+            "clothing",
+            code=SAME_KEY_SIGNED_BOTH,
         )
 
     if candidate.key_id not in trust_roots.candidate.accepted_key_ids:
@@ -456,22 +477,6 @@ def verify_trusted_host_source(
             f"installed-observation signer "
             f"{sorted(trust_roots.installed.accepted_key_ids)}",
             code=KEY_NOT_TRUSTED,
-        )
-
-    # THE ONE-CALLER CHECK. `DistinctTrustRoots` already refused overlapping
-    # accepted-key sets at construction, so this is structurally guaranteed —
-    # and checked again, directly, so a refusal here names the exact defect
-    # both prior attempts had rather than relying solely on a property proved
-    # earlier and elsewhere.
-    if candidate.key_id == installed.key_id:
-        raise PreconditionFailed(
-            f"both attestations are signed by the same key "
-            f"({candidate.key_id!r}). A candidate attestation and an "
-            "installed-host observation signed by one key are one party's "
-            "word twice, not two independent readings — the exact shape both "
-            "prior attempts at this admission path had, in different "
-            "clothing",
-            code=SAME_KEY_SIGNED_BOTH,
         )
 
     try:
