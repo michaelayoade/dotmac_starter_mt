@@ -34,8 +34,9 @@ Two further corrections, same module, same review:
   that would send an operator to the wrong line of a real `direct_url.json`
   mid-incident. It now names whichever key was actually read.
 
-No version is allocated and `0.4.0a1` remains unbuilt and unpublished; see
-the candidate-state correction below.
+No version is allocated; `0.4.0a1` was built once, but is unrecorded and
+drifted, so it remains unpublished and spent; see the candidate-state
+correction below.
 
 ### The executor calls `require_host_source` itself — a handed-in `HostSource` proves nothing
 
@@ -1137,6 +1138,13 @@ No wheel for `0.3.0a6` exists. It must be built exactly once, by
 > bytes are now `0.4.0a1`'s, because a version that was never built carries
 > nothing away with it. Read the `0.4.0a1` entry for why an unbuilt name is
 > nonetheless SPENT, and for the machine-oracle gap that retirement leaves.
+
+> **Amended 2026-09-07.** The paragraph above was written at allocation and
+> its machine-oracle gap was accurate at that time. The later `SpentIdentity.v1`
+> source now closes that gap for offline candidate and release checks: the
+> guard reads the recorded spent identity for `0.3.0a6` and refuses both
+> purposes. This amendment records the later control without rewriting the
+> historical account as though it had always existed.
 
 ## 0.3.0a5 — built once, SUPERSEDED and unpublishable (2026-09-03); heading below written at allocation
 
