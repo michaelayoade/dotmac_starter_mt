@@ -2,6 +2,22 @@
 
 ## What is public
 
+- `ArtifactIdentity.v1`: `ArtifactIdentity`, `ArtifactIdentityError`,
+  `ARTIFACT_IDENTITY_SCHEMA` and `observe_artifact_identity(Path)`. The observer
+  derives size, distribution `Name`/`Version`, exact-wheel SHA-256
+  and a domain-separated semantic-manifest SHA-256 solely from a local wheel
+  selected by trusted composition. It takes no expected digest, source,
+  version, metadata or file-list input. The semantic digest covers member paths
+  and bytes in canonical order except the selected top-level `.dist-info/RECORD`,
+  not ZIP packing; it is semantic evidence rather than installed-content
+  integrity, and does not treat RECORD hash strings as integrity evidence. This
+  candidate observer is not its own
+  bootstrap trust root: protected Control independently fetches and hashes
+  immutable coordinates. The outer filename remains the trusted-composition
+  locator bound by CandidateArtifact/Control, rather than an archive-derived
+  identity fact. It minimally validates the Core Metadata framing (one sane
+  `Metadata-Version`, `Name` and `Version`), rather than claiming full Core
+  Metadata validation.
 - `ProductDeploymentSpec` and every type it exposes, plus the `SCHEMA` string.
 - `ProductDeploymentSpec.to_canonical_document()` and
   `DeploymentDescriptorDocumentV1` — its `canonical_bytes()`,

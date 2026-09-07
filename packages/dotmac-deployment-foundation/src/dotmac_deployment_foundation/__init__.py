@@ -54,6 +54,12 @@ from .application_profile import (
     IntegrationSurfaceAbsenceProofV1,
     WriterClaim,
 )
+from .artifact_identity import (
+    ARTIFACT_IDENTITY_SCHEMA,
+    ArtifactIdentity,
+    ArtifactIdentityError,
+    observe_artifact_identity,
+)
 from .authorization import OPERATIONS, ExecutionGrant, authorize
 from .backup import (
     ArtefactClass,
@@ -397,6 +403,9 @@ from .vantage import (
 from .version import VERSION as __version__
 
 __all__ = [
+    "ARTIFACT_IDENTITY_SCHEMA",
+    "ArtifactIdentity",
+    "ArtifactIdentityError",
     "ADDRESS_FAMILIES",
     "ALGORITHMS",
     "Adjudication",
@@ -661,6 +670,7 @@ __all__ = [
     "foreign_rule_arguments",
     "foreign_rules",
     "format_plan",
+    "observe_artifact_identity",
     "identify_launcher",
     "ingress_policy_document",
     "invariant_breaches",
