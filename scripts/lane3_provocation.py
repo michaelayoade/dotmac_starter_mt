@@ -77,9 +77,52 @@ from dataclasses import dataclass
 from typing import Final
 
 from dotmac_deployment_foundation import ingress
+from dotmac_deployment_foundation.engine.plan import StepKind
 from dotmac_deployment_foundation.errors import DeploymentFoundationError
 from dotmac_deployment_foundation.exposure import foreign_rules
 from dotmac_deployment_foundation.ingress import FirewallRule
+from dotmac_deployment_foundation.rehearsal_grant import (
+    ProvocableRefusal,
+    ProvocationPermit,
+)
+
+#: The refusal these seeds and this arming exist to provoke, and the step the
+#: executor performs it at. Stated once, here, so the permit is re-checked
+#: against the same pair every mutation below is about.
+PROVOKED_REFUSAL: Final = ProvocableRefusal.PLAN_VERIFICATION_REFUSAL
+PROVOKED_STEP: Final = StepKind.APPLY_EXPOSURE.value
+
+
+def _require_permit(permit: ProvocationPermit, *, what: str) -> None:
+    """Refuse unless a Control-issued grant covers THIS provocation.
+
+    ## Why every mutation below takes one
+
+    These functions write real rules into `DOCKER-USER` and `INPUT` — chains
+    SHARED with everything else on the host — in order to break a running
+    deployment on purpose. Until the rehearsal grant existed, the entire
+    distance between describing that and doing it was calling the function.
+    `authorization.py` names the shape: the party being restrained was the party
+    answering the question, and here nobody was even asking.
+
+    The permit is unconstructable without
+    `rehearsal_grant.permit_provocation`, which requires a grant an injected
+    verifier attested. So a harness that skips authorization has nothing to pass
+    — the same "insufficient by construction" argument `ExecutionGrant` makes
+    for the deployment path, applied to the act that deliberately breaks things.
+
+    Re-checked here rather than trusted from construction, because the permit is
+    obtained while a run is being assembled and spent later.
+    """
+    if not isinstance(permit, ProvocationPermit):
+        raise ProvocationError(
+            f"{what} requires a ProvocationPermit, got "
+            f"{type(permit).__name__}. This facility issues none: a grant is "
+            "Control's to make, and a harness that could mint its own "
+            "permission to break a host would be authorizing itself"
+        )
+    permit.require(refusal=PROVOKED_REFUSAL, at_step=PROVOKED_STEP)
+
 
 #: The comment that makes a seeded rule FOREIGN. It must not be this product's
 #: ownership comment, or `foreign_rules` will not see it and the vacuity guard
@@ -135,13 +178,19 @@ def _foreign_argv(family: str, verb: str) -> tuple[str, ...]:
     )
 
 
-def seed_foreign_rules(runner, *, timeout_seconds: int = 60) -> tuple[SeededRule, ...]:
+def seed_foreign_rules(
+    runner, *, permit: ProvocationPermit, timeout_seconds: int = 60
+) -> tuple[SeededRule, ...]:
     """Put a rule belonging to nobody in each family's filter chain.
 
     Returns what was seeded so the caller can withdraw it. Both families,
     always: `foreign_before - foreign_after` over an empty set is a comparison
     that ranges over nothing, and a v4-only seed proves nothing about v6.
+
+    `permit` is REQUIRED and keyword-only. This writes to chains shared with
+    every other service on the host; see :func:`_require_permit`.
     """
+    _require_permit(permit, what="seeding foreign rules")
     seeded: list[SeededRule] = []
     for family in sorted(ingress.FILTER_CHAIN):
         insert = _foreign_argv(family, "-I")
@@ -196,14 +245,21 @@ def inert_rule(port: int) -> FirewallRule:
     )
 
 
-def provoke_apply_failure(effects, *, port: int) -> FirewallRule:
+def provoke_apply_failure(
+    effects, *, port: int, permit: ProvocationPermit
+) -> FirewallRule:
     """Arm the condition, through the library, and return what was armed.
 
     Named for what it does to the SYSTEM, not for what it does to the test: it
     induces a state the apply path cannot reconcile. The verification that
     follows is the system's own, and the rollback after it is the system's own
     response.
+
+    `permit` is REQUIRED and keyword-only. This is the named act itself — Lane
+    3 item 8's `provoked_rollback` — and it is the one mutation in this file
+    whose entire purpose is to make a live deployment fail.
     """
+    _require_permit(permit, what="arming the apply failure")
     rule = inert_rule(port)
     effects.replace_rules("ipv6", ingress.DOCKER_USER_CHAIN, (rule,))
     return rule
@@ -255,6 +311,8 @@ def observed_foreign(observation, *, owner: str) -> set[str]:
 __all__ = [
     "FOREIGN_OWNER",
     "FOREIGN_PORTS",
+    "PROVOKED_REFUSAL",
+    "PROVOKED_STEP",
     "ProvocationError",
     "SeededRule",
     "disarm_apply_failure",
