@@ -387,7 +387,7 @@ def test_a_stringified_document_is_refused_rather_than_silently_restringified() 
     """
     with pytest.raises(SpecError) as excinfo:
         SignedAttestationEnvelope(
-            document="{'schema': 'CandidateArtifact.v1'}",
+            document="{'schema': 'CandidateArtifact.v1'}",  # type: ignore[arg-type]
             signature="deadbeef",
             key_id=CANDIDATE_KEY,
         )
