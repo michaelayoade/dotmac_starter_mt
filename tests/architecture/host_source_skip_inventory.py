@@ -50,6 +50,7 @@ REPO = Path(__file__).resolve().parents[2]
 #: ONLY thing that removes a test's ability to reach its subject through
 #: either executor; nothing else in this analysis is a proxy for it.
 TARGET_CALL = "valid_host_source_kwargs"
+TARGET_MODULE = "tests.unit.host_source_stance"
 
 SKIP_REASON = (
     "unreachable: neither Executor nor RecoveryExecutor accepts a "
@@ -66,20 +67,195 @@ SKIP_REASON = (
 RETIRE_WHEN = "trusted-provenance-admission"
 
 
-def _called_names(node: ast.AST) -> set[str]:
-    """Every name directly called (`f(...)`) inside `node`'s subtree.
+def _binding_path(node: ast.expr) -> tuple[str, ...] | None:
+    """Return the dotted spelling of a name/attribute expression."""
+    if isinstance(node, ast.Name):
+        return (node.id,)
+    if isinstance(node, ast.Attribute):
+        prefix = _binding_path(node.value)
+        return (*prefix, node.attr) if prefix else None
+    return None
 
-    Deliberately excludes `ast.Attribute` calls (`obj.method(...)`): matching
-    on the bare attribute name collides with unrelated methods that happen to
-    share a name with a module-level helper (`executor.run(...)` is not a
-    call to this module's `def run(...):`), which produced false positives
-    the first time this analysis was run.
+
+def _scope_nodes(scope: ast.AST) -> list[ast.AST]:
+    """Yield nodes in one lexical scope, not inside nested function bodies."""
+    result: list[ast.AST] = []
+    pending = list(ast.iter_child_nodes(scope))
+    while pending:
+        node = pending.pop()
+        result.append(node)
+        if isinstance(
+            node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+        ):
+            # The definition itself binds in this scope; its body does not.
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+    return result
+
+
+def _target_bindings(
+    scope: ast.AST,
+    *,
+    inherited_direct: set[str] | None = None,
+    inherited_modules: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[set[str], dict[str, tuple[str, ...]]]:
+    """Resolve the fixture bindings visible in one lexical scope.
+
+    A same-named local assignment or nested definition shadows an imported
+    fixture. Module-qualified imports retain their full attribute path, so
+    both ``import tests.unit.host_source_stance`` and
+    ``from tests.unit import host_source_stance as stance`` are resolved
+    without leaking imports between sibling test functions.
     """
-    names: set[str] = set()
-    for n in ast.walk(node):
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-            names.add(n.func.id)
-    return names
+    local_direct: set[str] = set()
+    local_modules: dict[str, tuple[str, ...]] = {}
+    bound_non_import: set[str] = set()
+    for node in _scope_nodes(scope):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if module == TARGET_MODULE and alias.name == TARGET_CALL:
+                    local_direct.add(local)
+                elif alias.name == "*" and (
+                    module == TARGET_MODULE or TARGET_MODULE.startswith(f"{module}.")
+                ):
+                    raise ValueError(
+                        f"wildcard import from {module!r} makes the host-source "
+                        "fixture binding unresolvable"
+                    )
+                else:
+                    qualified = f"{module}.{alias.name}" if module else alias.name
+                    if qualified == TARGET_MODULE or TARGET_MODULE.startswith(
+                        f"{qualified}."
+                    ):
+                        local_modules[local] = tuple(qualified.split("."))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == TARGET_MODULE or TARGET_MODULE.startswith(
+                    f"{alias.name}."
+                ):
+                    local = alias.asname or alias.name.split(".")[0]
+                    local_modules[local] = (
+                        tuple(alias.name.split(".")) if alias.asname else (local,)
+                    )
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound_non_import.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound_non_import.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound_non_import.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound_non_import.add(node.id)
+    local_target_bindings = local_direct | local_modules.keys()
+    ambiguous = local_target_bindings & bound_non_import
+    if ambiguous and isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+        raise ValueError(
+            "host-source fixture import is rebound in the same function scope: "
+            f"{sorted(ambiguous)}"
+        )
+    direct = {*inherited_direct} if inherited_direct is not None else set()
+    direct.update(local_direct)
+    modules = {**(inherited_modules or {}), **local_modules}
+    direct.difference_update(bound_non_import)
+    for name in bound_non_import:
+        modules.pop(name, None)
+    return direct, modules
+
+
+def _called_target_names(
+    node: ast.AST,
+    *,
+    target: str,
+    direct_bindings: set[str],
+    module_bindings: dict[str, tuple[str, ...]],
+) -> bool:
+    """Whether ``node`` calls the imported fixture, directly or by alias."""
+    for n in _scope_nodes(node):
+        if isinstance(n, ast.Call):
+            if isinstance(n.func, ast.Name) and n.func.id in direct_bindings:
+                return True
+            if isinstance(n.func, ast.Attribute) and isinstance(
+                n.func.value, ast.Name | ast.Attribute
+            ):
+                parts = _binding_path(n.func)
+                if parts and parts[-1] == target:
+                    for root, module_path in module_bindings.items():
+                        if parts[0] == root:
+                            resolved = (*module_path, *parts[1:])
+                            if resolved == (*TARGET_MODULE.split("."), target):
+                                return True
+    return False
+
+
+def _scope_call_facts(
+    scope: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    target: str,
+    inherited_direct: set[str],
+    inherited_modules: dict[str, tuple[str, ...]],
+    seen: set[int] | None = None,
+) -> tuple[bool, set[str], set[str]]:
+    """Return a target hit and outward calls for one reachable scope.
+
+    Nested helpers count only when this scope actually calls them. Their
+    bodies are then analysed with the enclosing fixture bindings, while calls
+    to module-level helpers are returned for the outer call graph to follow.
+    """
+    visited = set() if seen is None else seen
+    if id(scope) in visited:
+        return False, set(), set()
+    visited.add(id(scope))
+
+    direct_bindings, module_bindings = _target_bindings(
+        scope,
+        inherited_direct=inherited_direct,
+        inherited_modules=inherited_modules,
+    )
+    nodes = _scope_nodes(scope)
+    called = {
+        node.func.id
+        for node in nodes
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    called_methods = {
+        node.func.attr
+        for node in nodes
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in {"self", "cls"}
+    }
+    hit = _called_target_names(
+        scope,
+        target=target,
+        direct_bindings=direct_bindings,
+        module_bindings=module_bindings,
+    )
+    nested = {
+        node.name: node
+        for node in nodes
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    pending = list(called & nested.keys())
+    followed: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in followed:
+            continue
+        followed.add(name)
+        nested_hit, nested_calls, nested_method_calls = _scope_call_facts(
+            nested[name],
+            target=target,
+            inherited_direct=direct_bindings,
+            inherited_modules=module_bindings,
+            seen=visited,
+        )
+        hit |= nested_hit
+        called.update(nested_calls)
+        called_methods.update(nested_method_calls)
+        pending.extend((nested_calls & nested.keys()) - followed)
+    return hit, called - nested.keys(), called_methods
 
 
 def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
@@ -89,19 +265,53 @@ def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
     A static, same-file call-graph reachability analysis — it does not
     resolve calls across module boundaries (a test importing a helper from
     ANOTHER test file would not be traced further than the import), which is
-    sufficient here because every file in `SKIP_INVENTORY` defines its own
-    `_executor`/`run`-shaped helper locally.
+    sufficient here because the target fixture's imported binding is resolved
+    per file, while helper calls remain inside the same file.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    module_direct, module_bindings = _target_bindings(tree)
     funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {
         node.name: node
         for node in tree.body
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     }
-    direct_calls = {
-        name: _called_names(node) & set(funcs) for name, node in funcs.items()
-    }
-    direct_hit = {name: target in _called_names(node) for name, node in funcs.items()}
+    direct_calls: dict[str, set[str]] = {}
+    direct_hit: dict[str, bool] = {}
+    for name, node in funcs.items():
+        hit, called_names, _ = _scope_call_facts(
+            node,
+            target=target,
+            inherited_direct=module_direct,
+            inherited_modules=module_bindings,
+        )
+        direct_hit[name] = hit
+        direct_calls[name] = called_names & funcs.keys()
+
+    class_tests: set[str] = set()
+    for class_node in (
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test")
+    ):
+        methods = {
+            node.name: node
+            for node in class_node.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for method_name, method_node in methods.items():
+            identity = f"{class_node.name}.{method_name}"
+            hit, called_names, called_methods = _scope_call_facts(
+                method_node,
+                target=target,
+                inherited_direct=module_direct,
+                inherited_modules=module_bindings,
+            )
+            direct_hit[identity] = hit
+            direct_calls[identity] = (called_names & funcs.keys()) | {
+                f"{class_node.name}.{name}" for name in called_methods & methods.keys()
+            }
+            if method_name.startswith("test_"):
+                class_tests.add(identity)
 
     def reaches(name: str, seen: set[str]) -> bool:
         if name in seen:
@@ -111,7 +321,8 @@ def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
             return True
         return any(reaches(callee, seen) for callee in direct_calls.get(name, ()))
 
-    return {name for name in funcs if name.startswith("test_") and reaches(name, set())}
+    function_tests = {name for name in funcs if name.startswith("test_")}
+    return {name for name in function_tests | class_tests if reaches(name, set())}
 
 
 #: THE RECORDED INVENTORY. 73 `(relative path, test function)` pairs,

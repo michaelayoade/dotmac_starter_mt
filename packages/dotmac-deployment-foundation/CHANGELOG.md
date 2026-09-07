@@ -64,12 +64,10 @@ seam. `valid_host_source_kwargs()` now calls `pytest.skip(...)` rather than
 returning admitting kwargs, naming every remaining caller's lost coverage
 explicitly rather than crashing or silently passing.
 `test_deployment_foundation_recovery_execution.py`'s ten-step behaviour tests
-were rewritten to drive the step handlers directly (`_drive_steps`, a
-faithful copy of `run()`'s dispatch loop MINUS the `_verify_host_source`
-call) rather than through `RecoveryExecutor.run`, per the instruction to test
-post-gate behaviour at the pure-function/step level rather than build a new
-bypass. These behaviours are UNMONITORED through the executor itself until
-trusted provenance lands.
+were reduced to individual step-handler tests rather than copied into a
+second dispatch loop. The complete sequence is therefore UNMONITORED through
+the executor itself until trusted provenance lands; no test-only loop or
+constructor hook recreates reachability merely to keep those tests green.
 
 **Trusted provenance is separate, future work, and nothing here starts it or
 leaves a hook for it:** an externally committed/signed candidate attestation,

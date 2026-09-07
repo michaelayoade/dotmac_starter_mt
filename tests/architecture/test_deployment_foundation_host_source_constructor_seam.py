@@ -111,7 +111,7 @@ def _positional_names(args: ast.arguments) -> list[str]:
     WITHOUT naming them, which is why they get their own, stricter check
     (an exact ordered list, not a set) rather than being folded into the
     keyword-only denylist below."""
-    return [a.arg for a in args.args if a.arg != "self"]
+    return [a.arg for a in (*args.posonlyargs, *args.args) if a.arg != "self"]
 
 
 # ── the named proof: no forbidden KEYWORD parameter, on the real files ─────
@@ -321,6 +321,27 @@ def test_the_guard_names_a_planted_positional_smuggle() -> None:
         _ALLOWED_POSITIONAL["Executor"]
     ), "the plant does not exhibit the shape being detected"
     assert _positional_names(args) == ["spec", "effects", "grant", "sneaky"]
+
+
+def test_the_guard_names_a_planted_positional_only_smuggle() -> None:
+    """PLANTED. Positional-only parameters are another channel a keyword
+    denylist cannot see; the exact ordered positional allowlist must include
+    them when it decides whether a constructor shape is admissible."""
+    source = (
+        "class Executor:\n"
+        "    def __init__(self, spec, effects, grant, sneaky, /):\n"
+        "        pass\n"
+    )
+    tree = ast.parse(source, filename="<plant: positional-only smuggle>")
+    args = _init_args("Executor", tree, path=Path("<plant>"))
+
+    assert [a.arg for a in args.posonlyargs if a.arg != "self"] == [
+        "spec",
+        "effects",
+        "grant",
+        "sneaky",
+    ]
+    assert _positional_names(args) != list(_ALLOWED_POSITIONAL["Executor"])
 
 
 def test_the_guard_names_a_planted_kwargs_catch_all() -> None:
