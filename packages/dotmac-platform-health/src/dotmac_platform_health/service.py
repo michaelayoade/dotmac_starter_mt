@@ -153,8 +153,7 @@ def record_observation(
             observation_id=row.id,
             state=row.state,
             observed_at=row.observed_at,
-            freshness_deadline=row.observed_at
-            + timedelta(seconds=freshness_seconds),
+            freshness_deadline=row.observed_at + timedelta(seconds=freshness_seconds),
         )
         db.add(projection)
     elif (_instant(row.observed_at), _instant(row.received_at), str(row.id)) > (

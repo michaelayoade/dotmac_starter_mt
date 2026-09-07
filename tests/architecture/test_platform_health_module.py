@@ -15,7 +15,9 @@ from dotmac_platform_health.manifest import module
 
 ROOT = Path(inspect.getfile(models)).parent
 MIGRATION = ROOT / "migrations/versions/ph_0001_platform_health.py"
-FRESHNESS_MIGRATION = ROOT / "migrations/versions/ph_0002_observation_freshness_snapshot.py"
+FRESHNESS_MIGRATION = (
+    ROOT / "migrations/versions/ph_0002_observation_freshness_snapshot.py"
+)
 
 
 def test_platform_health_is_one_declared_platform_lineage() -> None:

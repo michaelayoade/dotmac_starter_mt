@@ -42,9 +42,9 @@ from dotmac_kernel.models import Base
 from dotmac_platform_health import (
     ComponentEvidence,
     DeploymentHealthEvidence,
+    HealthError,
     HealthEvidenceError,
     HealthEvidenceSignature,
-    HealthError,
     HealthObservationInput,
     HealthState,
     build_health_evidence,
@@ -55,14 +55,12 @@ from dotmac_platform_health import (
     register_component,
     summarize_health,
 )
-from dotmac_platform_health.models import HealthProjection, PLATFORM_MODELS
+from dotmac_platform_health.models import PLATFORM_MODELS, HealthProjection
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = (
-    REPO_ROOT / "packages/dotmac-platform-health/src/dotmac_platform_health"
-)
+PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-platform-health/src/dotmac_platform_health"
 
 
 @pytest.fixture
@@ -222,8 +220,10 @@ def test_legacy_signing_refusal_does_not_call_signer(db: Session) -> None:
 
     with pytest.raises(HealthError, match="freshness provenance"):
         produce_signed_health_evidence(
-            db, requested_components=("api",), evaluated_at=as_of,
-            signer=_ShouldNotBeCalled()
+            db,
+            requested_components=("api",),
+            evaluated_at=as_of,
+            signer=_ShouldNotBeCalled(),
         )
 
 
@@ -246,8 +246,14 @@ def test_newer_observation_repairs_legacy_provenance_refusal(db: Session) -> Non
     record_observation(
         db,
         HealthObservationInput(
-            "agent", "api:late-receipt", "api", HealthState.HEALTHY,
-            at - timedelta(seconds=1), at + timedelta(seconds=2), "old", {}
+            "agent",
+            "api:late-receipt",
+            "api",
+            HealthState.HEALTHY,
+            at - timedelta(seconds=1),
+            at + timedelta(seconds=2),
+            "old",
+            {},
         ),
     )
     with pytest.raises(HealthError, match="freshness provenance"):
@@ -546,16 +552,22 @@ def test_determinism_survives_a_hash_seed_change_across_processes() -> None:
 def test_produce_signed_health_evidence_refuses_without_a_signer(db: Session) -> None:
     with pytest.raises(HealthEvidenceError, match="signer"):
         produce_signed_health_evidence(
-            db, requested_components=("api",), evaluated_at=_evidence_now()[1], signer=None
+            db,
+            requested_components=("api",),
+            evaluated_at=_evidence_now()[1],
+            signer=None,
         )
 
 
 def test_non_ed25519_signer_is_refused(db: Session) -> None:
     register_component(db, code="api", display_name="API", freshness_seconds=60)
     at, as_of = _evidence_now()
-    record_observation(db, HealthObservationInput(
-        "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
-    ))
+    record_observation(
+        db,
+        HealthObservationInput(
+            "agent", "api:1", "api", HealthState.HEALTHY, at, at, "ok", {}
+        ),
+    )
 
     class _WrongAlgorithm:
         def sign_health_evidence(self, evidence, canonical_bytes):
@@ -563,8 +575,10 @@ def test_non_ed25519_signer_is_refused(db: Session) -> None:
 
     with pytest.raises(HealthEvidenceError, match="ed25519"):
         produce_signed_health_evidence(
-            db, requested_components=("api",), evaluated_at=as_of,
-            signer=_WrongAlgorithm()
+            db,
+            requested_components=("api",),
+            evaluated_at=as_of,
+            signer=_WrongAlgorithm(),
         )
 
 
@@ -584,15 +598,12 @@ def test_this_package_defines_no_default_signer_implementation() -> None:
                 and node.name == "sign_health_evidence"
             ):
                 body = node.body
-                is_stub = (
-                    len(body) == 1
-                    and (
-                        isinstance(body[0], ast.Pass)
-                        or (
-                            isinstance(body[0], ast.Expr)
-                            and isinstance(body[0].value, ast.Constant)
-                            and body[0].value.value is Ellipsis
-                        )
+                is_stub = len(body) == 1 and (
+                    isinstance(body[0], ast.Pass)
+                    or (
+                        isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and body[0].value.value is Ellipsis
                     )
                 )
                 implementations.append(

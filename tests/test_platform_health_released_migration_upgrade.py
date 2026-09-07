@@ -45,7 +45,7 @@ def _scratch_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
         conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
         conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
         for role in ("platform_api", "app_user"):
-            conn.execute(text(f"GRANT CONNECT ON DATABASE \"{name}\" TO {role}"))
+            conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO {role}'))
             conn.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
     setup.dispose()
     admin_url = _url(superuser, name, user="app_admin")
@@ -70,9 +70,7 @@ def _config():
 
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "alembic"))
-    config.set_main_option(
-        "version_locations", f"{KERNEL} {ASSEMBLY} {HEALTH}"
-    )
+    config.set_main_option("version_locations", f"{KERNEL} {ASSEMBLY} {HEALTH}")
     return config
 
 
@@ -101,7 +99,8 @@ def test_ph_0002_does_not_backfill_ph_0001_observations(
                     "(id, component_id, source_ref, observation_key, "
                     "request_fingerprint, state, observed_at, received_at, "
                     "summary, labels) VALUES (:id, :component, 'agent', "
-                    "'legacy', :fingerprint, 'healthy', now(), now(), 'ok', '{}'::jsonb)"
+                    "'legacy', :fingerprint, 'healthy', now(), now(), 'ok', "
+                    "'{}'::jsonb)"
                 ),
                 {
                     "id": observation_id,
@@ -114,13 +113,16 @@ def test_ph_0002_does_not_backfill_ph_0001_observations(
         command.upgrade(_config(), "ph_0002_freshness_snapshot")
         engine = create_engine(admin_url)
         with engine.begin() as conn:
-            assert conn.scalar(
-                text(
-                    "SELECT freshness_seconds FROM mod_health.health_observations "
-                    "WHERE id = :id"
-                ),
-                {"id": observation_id},
-            ) is None
+            assert (
+                conn.scalar(
+                    text(
+                        "SELECT freshness_seconds FROM mod_health.health_observations "
+                        "WHERE id = :id"
+                    ),
+                    {"id": observation_id},
+                )
+                is None
+            )
             conn.execute(
                 text(
                     "INSERT INTO mod_health.health_observations "

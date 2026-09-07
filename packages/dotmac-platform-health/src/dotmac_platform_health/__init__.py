@@ -22,10 +22,10 @@ from dotmac_platform_health.service import (
     HealthError,
     ObservationReceipt,
     build_health_evidence,
+    produce_signed_health_evidence,
     rebuild_projections,
     record_observation,
     register_component,
-    produce_signed_health_evidence,
     summarize_health,
 )
 
