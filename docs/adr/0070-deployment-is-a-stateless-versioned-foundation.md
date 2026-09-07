@@ -366,7 +366,9 @@ no exception to either.
 evidence — the deployment's declared dependencies were healthy at binding time
 — not adoption evidence. It does not, by itself, satisfy the
 `deployment_run`/`live_observation` requirement any package's own adoption
-claim needs (AGENTS.md rule 22/26; `dotmac-platform-health`'s
+claim needs (AGENTS.md rule 24's 2026-08-29 "a pin is installation, not
+adoption" amendment, and rule 30's authoritative-external-oracle requirement;
+`dotmac-platform-health`'s
 `EXTRACTION.toml` still records `contract_consumers = []`). The freeze/
 production-composition gate and the adoption claim remain the two separate
 things they already were.
