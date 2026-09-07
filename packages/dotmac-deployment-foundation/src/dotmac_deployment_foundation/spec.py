@@ -63,9 +63,13 @@ from .recovery_identity import (
     ExternalExecutorV1,
 )
 from .row_count_verification import (
+    ROW_COUNT_OBSERVER_ENTRY_POINT_GROUP,
+    ROW_COUNT_OBSERVER_NOT_DECLARED,
     RowCountExpectationSource,
+    RowCountObserverIdentity,
     RowCountToleranceV1,
     RowCountVerificationSpec,
+    declared_row_count_observer_names,
 )
 from .secrets_guard import require_no_secrets
 
@@ -1580,6 +1584,39 @@ class BackupDataset:
                 "percent", default=-1, minimum=0, maximum=100
             )
             tolerance_table.done()
+            # WHO performs this — named, not merely implied by the block's
+            # existence. A block with the right shape and nobody able to run it
+            # parsed exactly as cleanly as a real one before this identity and
+            # the entry-point check below existed: "a check that answers
+            # without being able to refuse", moved to parse time.
+            observer_table = row_count_table.table("observer") or _Table(
+                {}, row_count_table.path
+            )
+            observer_identity = RowCountObserverIdentity(
+                identifier=observer_table.str_("identifier"),
+                version=observer_table.str_("version"),
+            )
+            observer_table.done()
+            declared_observers = declared_row_count_observer_names()
+            if observer_identity.identifier not in declared_observers:
+                raise SpecError(
+                    f"dataset {code!r} names row_count_verification observer "
+                    f"{observer_identity.identifier!r}, which no installed "
+                    f"distribution declares in the "
+                    f"{ROW_COUNT_OBSERVER_ENTRY_POINT_GROUP!r} entry-point "
+                    "group "
+                    + (
+                        f"(declared: {list(declared_observers)})"
+                        if declared_observers
+                        else "(none declared)"
+                    )
+                    + ". A block naming a performer nothing installed claims to "
+                    "be is not a proof one exists — it is the same shape as "
+                    "the refusal this contract exists to give a second, honest "
+                    "way past",
+                    where=observer_table.path,
+                    code=ROW_COUNT_OBSERVER_NOT_DECLARED,
+                )
             row_count_table.done()
             row_count_verification = RowCountVerificationSpec(
                 tables=rc_tables,
@@ -1588,6 +1625,7 @@ class BackupDataset:
                     absolute=None if tolerance_absolute < 0 else tolerance_absolute,
                     percent=None if tolerance_percent < 0 else tolerance_percent,
                 ),
+                observer=observer_identity,
             )
         if executor_table is not None:
             executor = ExternalExecutorV1(
@@ -1612,6 +1650,16 @@ class BackupDataset:
             DatasetIdentityV1(
                 product="", dataset=code, lineage=lineage
             ).refuse_executor_derived(executor)
+        if executor is not None and row_count_verification is not None:
+            raise SpecError(
+                f"dataset {code!r} declares both an `external_executor` and a "
+                "`row_count_verification`. Two performers for one verification "
+                "is an ambiguous authority: nothing says which one's evidence "
+                "counts, or what a disagreement between them would even mean. "
+                "Declare exactly one",
+                where=table.path,
+                code=ROW_COUNT_DUAL_PERFORMER,
+            )
         if checksum not in cls.CHECKSUMS:
             raise SpecError(
                 f"checksum must be one of {cls.CHECKSUMS}", where=table.path
@@ -1711,6 +1759,7 @@ UNPERFORMABLE_VERIFICATION: Final = "backup.verification.unperformable"
 ROW_COUNT_VERIFICATION_ORPHANED: Final = (
     "backup.verification.row_count_verification_orphaned"
 )
+ROW_COUNT_DUAL_PERFORMER: Final = "backup.verification.row_count_dual_performer"
 
 
 @dataclass(frozen=True, slots=True)

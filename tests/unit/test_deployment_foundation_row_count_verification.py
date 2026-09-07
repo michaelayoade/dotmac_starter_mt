@@ -9,10 +9,24 @@ other row_counts declaration anywhere in the file) — reproduced here as
 `test_platform_shaped_dataset_is_still_refused_without_the_new_block`, which is
 the exact refusal this whole module exists to give a second, honest way past.
 
+A first version of this file (and the module it tests) let a bare
+`[backup.datasets.row_count_verification]` block satisfy `row_counts` at
+parse purely by existing. A review measured what that proved — nothing, since
+`spec.py` never executes anything — and named four findings, each with its own
+section below:
+
+1. Declaration substitutes for a performer → `_OBSERVER_ENTRY_POINTS`, the
+   `observer` sub-block, and the entry-point-existence tests.
+2. Two performers may coexist → `test_declaring_both_performers_is_refused`.
+3. Evidence remains caller-constructible →
+   `test_a_single_caller_controlling_both_sides_still_admits`, kept
+   permanently as the accepted-limit negative control the finding demands.
+4. Snapshot/target provenance is absent → `RowCountSnapshotV1`, `now_epoch`,
+   and the provenance fields on `RowCountEvidence`.
+
 Organised by Michael's six elements (module docstring of
-`row_count_verification.py`), plus the parse-time wiring in `spec.py` that
-makes the new block an alternative to `external_executor` rather than a
-replacement for the existing refusal.
+`row_count_verification.py`) for the parts that predate this revision, plus a
+dedicated section for the four findings above.
 """
 
 from __future__ import annotations
@@ -20,20 +34,26 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from dotmac_deployment_foundation import spec as spec_module
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.row_count_verification import (
     ROW_COUNT_EXPECTATION_INCOMPLETE,
     ROW_COUNT_OBSERVATION_INCOMPLETE,
     ROW_COUNT_OBSERVER_ABSENT,
+    ROW_COUNT_OBSERVER_NOT_DECLARED,
     ROW_COUNT_OUT_OF_TOLERANCE,
+    ROW_COUNT_SNAPSHOT_DATASET_MISMATCH,
     ROW_COUNT_TARGET_UNDECLARED,
     RowCountExpectationSource,
+    RowCountObserverIdentity,
+    RowCountSnapshotV1,
     RowCountToleranceV1,
     RowCountVerificationSpec,
     require_row_counts_within_tolerance,
     verify_row_counts,
 )
 from dotmac_deployment_foundation.spec import (
+    ROW_COUNT_DUAL_PERFORMER,
     ROW_COUNT_VERIFICATION_ORPHANED,
     UNPERFORMABLE_VERIFICATION,
     BackupDataset,
@@ -43,14 +63,47 @@ from dotmac_deployment_foundation.spec import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESCRIPTOR = REPO_ROOT / "deploy" / "product.toml"
 
-ROW_COUNT_BLOCK = """
+#: The observer identity every parse-level TOML fixture below names. Not a
+#: real installed distribution — `_declare_observer` (a fixture) makes
+#: `spec.declared_row_count_observer_names` answer with this name for the
+#: duration of one test, the same `entries=`/monkeypatch shape
+#: `execution_bindings.declared_provider_names` is built to support.
+_OBSERVER_NAME = "acme-restore-counter"
+
+ROW_COUNT_BLOCK = f"""
 [backup.datasets.row_count_verification]
 tables = ["mod_agreements.contract", "public.party"]
 expectation_source = "source_snapshot"
 
 [backup.datasets.row_count_verification.tolerance]
 absolute = 5
+
+[backup.datasets.row_count_verification.observer]
+identifier = "{_OBSERVER_NAME}"
+version = "1.0"
 """
+
+EXECUTOR_TOML = """
+[backup.datasets.external_executor]
+kind = "managed_database_service"
+identifier = "hetzner-managed-pg"
+version = "2026.08"
+key_id = "recovery-signing-01"
+"""
+
+
+@pytest.fixture
+def declare_observer(monkeypatch: pytest.MonkeyPatch):
+    """Makes `spec.py`'s entry-point-existence check see `_OBSERVER_NAME` as
+    installed, without installing anything. Mirrors how
+    `execution_bindings.declared_provider_names` is tested — metadata-only
+    discovery accepts an injected listing precisely so a test never has to
+    build a real distribution."""
+
+    def _declared(*, entries=None):
+        return (_OBSERVER_NAME,)
+
+    monkeypatch.setattr(spec_module, "declared_row_count_observer_names", _declared)
 
 
 def _descriptor_text() -> str:
@@ -96,10 +149,10 @@ def test_platform_shaped_dataset_is_still_refused_without_the_new_block() -> Non
     assert caught.value.code == UNPERFORMABLE_VERIFICATION
 
 
-def test_declaring_row_count_verification_admits_the_dataset() -> None:
+def test_declaring_row_count_verification_admits_the_dataset(declare_observer) -> None:
     """ADMIT CONTROL: a correctly-declared internal contract, over a dataset
-    that names `row_counts`, parses — the property the whole module exists to
-    add."""
+    that names `row_counts` AND a performer entry-point declares it installed,
+    parses — the property the whole module exists to add."""
     spec = ProductDeploymentSpec.loads(
         _with_row_counts_declared(extra_toml=ROW_COUNT_BLOCK), source="admitted"
     )
@@ -110,24 +163,100 @@ def test_declaring_row_count_verification_admits_the_dataset() -> None:
     assert rcv.tables == ("mod_agreements.contract", "public.party")
     assert rcv.expectation_source is RowCountExpectationSource.SOURCE_SNAPSHOT
     assert rcv.tolerance == RowCountToleranceV1(absolute=5, percent=None)
+    assert rcv.observer == RowCountObserverIdentity(
+        identifier=_OBSERVER_NAME, version="1.0"
+    )
 
 
 def test_an_external_executor_still_satisfies_row_counts_with_no_new_block() -> None:
     """The pre-existing path is untouched: an externally executed dataset
-    still needs no `row_count_verification` block at all."""
-    executor_toml = """
-[backup.datasets.external_executor]
-kind = "managed_database_service"
-identifier = "hetzner-managed-pg"
-version = "2026.08"
-key_id = "recovery-signing-01"
-"""
+    still needs no `row_count_verification` block at all, and no observer
+    entry point either — `declare_observer` is deliberately NOT used here."""
     spec = ProductDeploymentSpec.loads(
-        _with_row_counts_declared(extra_toml=executor_toml), source="external"
+        _with_row_counts_declared(extra_toml=EXECUTOR_TOML), source="external"
     )
     dataset = spec.backup_datasets[0]
     assert dataset.external_executor is not None
     assert dataset.row_count_verification is None
+
+
+# ── finding 1: declaration substitutes for a performer ─────────────────────
+
+
+def test_no_declared_observer_is_refused_by_CODE() -> None:
+    """THE FIX FOR FINDING 1. A block with the right shape and nothing
+    installed claiming to be `acme-restore-counter` must not parse — a
+    descriptor cannot manufacture a performer by writing TOML. No
+    `declare_observer` fixture here: this is the real, unpatched discovery
+    seeing an empty entry-point group."""
+    with pytest.raises(SpecError) as caught:
+        ProductDeploymentSpec.loads(
+            _with_row_counts_declared(extra_toml=ROW_COUNT_BLOCK),
+            source="no-performer",
+        )
+    assert caught.value.code == ROW_COUNT_OBSERVER_NOT_DECLARED
+
+
+def test_a_declared_observer_admits_the_identical_block(declare_observer) -> None:
+    """NEAR-MISS NEGATIVE CONTROL for finding 1: the identical block, with the
+    identical name, admits the moment something installed claims that name.
+    Proves the refusal above is about the entry point's absence, not about
+    the block's shape — the shape did not change between this test and the
+    one above."""
+    assert ProductDeploymentSpec.loads(
+        _with_row_counts_declared(extra_toml=ROW_COUNT_BLOCK), source="performer-ok"
+    )
+
+
+def test_a_differently_named_observer_is_still_refused(declare_observer) -> None:
+    """SENSITIVITY: `declare_observer` only declares `_OBSERVER_NAME`. A block
+    naming a DIFFERENT identifier must still refuse, proving the check reads
+    the declared name rather than merely checking 'is the list non-empty'."""
+    block = ROW_COUNT_BLOCK.replace(_OBSERVER_NAME, "someone-elses-counter")
+    with pytest.raises(SpecError) as caught:
+        ProductDeploymentSpec.loads(
+            _with_row_counts_declared(extra_toml=block), source="wrong-name"
+        )
+    assert caught.value.code == ROW_COUNT_OBSERVER_NOT_DECLARED
+
+
+def test_a_blank_observer_identifier_is_refused() -> None:
+    with pytest.raises(SpecError):
+        RowCountObserverIdentity(identifier="   ", version="1.0")
+
+
+def test_a_blank_observer_version_is_refused() -> None:
+    with pytest.raises(SpecError):
+        RowCountObserverIdentity(identifier=_OBSERVER_NAME, version="  ")
+
+
+# ── finding 2: two performers may coexist ───────────────────────────────────
+
+
+def test_declaring_both_performers_is_refused_by_CODE(declare_observer) -> None:
+    """THE FIX FOR FINDING 2. Both `external_executor` and
+    `row_count_verification` declared: an ambiguous authority, refused
+    outright rather than letting one silently win."""
+    both = EXECUTOR_TOML + ROW_COUNT_BLOCK
+    with pytest.raises(SpecError) as caught:
+        ProductDeploymentSpec.loads(
+            _with_row_counts_declared(extra_toml=both), source="dual"
+        )
+    assert caught.value.code == ROW_COUNT_DUAL_PERFORMER
+
+
+def test_either_performer_alone_still_admits(declare_observer) -> None:
+    """NEAR-MISS NEGATIVE CONTROL for finding 2: each performer declared
+    ALONE (already covered by `test_declaring_row_count_verification_admits_
+    the_dataset` and `test_an_external_executor_still_satisfies_row_counts_
+    with_no_new_block` above) must keep parsing — the refusal is about the
+    PAIR, not about either performer individually."""
+    assert ProductDeploymentSpec.loads(
+        _with_row_counts_declared(extra_toml=ROW_COUNT_BLOCK), source="rcv-alone"
+    )
+    assert ProductDeploymentSpec.loads(
+        _with_row_counts_declared(extra_toml=EXECUTOR_TOML), source="executor-alone"
+    )
 
 
 # ── named tables: declared, never discovered or globbed ────────────────────
@@ -141,6 +270,10 @@ expectation_source = "source_snapshot"
 
 [backup.datasets.row_count_verification.tolerance]
 absolute = 1
+
+[backup.datasets.row_count_verification.observer]
+identifier = "acme-restore-counter"
+version = "1.0"
 """
     with pytest.raises(SpecError, match="empty `tables`"):
         ProductDeploymentSpec.loads(
@@ -158,6 +291,10 @@ expectation_source = "source_snapshot"
 
 [backup.datasets.row_count_verification.tolerance]
 absolute = 1
+
+[backup.datasets.row_count_verification.observer]
+identifier = "acme-restore-counter"
+version = "1.0"
 """
     with pytest.raises(SpecError):
         ProductDeploymentSpec.loads(
@@ -176,6 +313,10 @@ expectation_source = "operator_says_so"
 
 [backup.datasets.row_count_verification.tolerance]
 absolute = 1
+
+[backup.datasets.row_count_verification.observer]
+identifier = "acme-restore-counter"
+version = "1.0"
 """
     with pytest.raises(SpecError, match="expectation_source"):
         ProductDeploymentSpec.loads(
@@ -186,7 +327,13 @@ absolute = 1
 # ── the orphan declaration: a contract nothing requires is dead config ─────
 
 
-def test_row_count_verification_without_row_counts_in_verify_is_refused() -> None:
+def test_row_count_verification_without_row_counts_in_verify_is_refused(
+    declare_observer,
+) -> None:
+    """`declare_observer` is active so the entry-point-existence check (finding
+    1) does not fire first and mask the refusal under test — the orphan check
+    and the performer check are independent properties, each proven on its
+    own."""
     text = _descriptor_text().replace(
         "\n[telemetry]", ROW_COUNT_BLOCK + "\n[telemetry]", 1
     )
@@ -229,11 +376,117 @@ def test_a_missing_tolerance_table_is_refused() -> None:
 [backup.datasets.row_count_verification]
 tables = ["public.party"]
 expectation_source = "source_snapshot"
+
+[backup.datasets.row_count_verification.observer]
+identifier = "acme-restore-counter"
+version = "1.0"
 """
     with pytest.raises(SpecError):
         ProductDeploymentSpec.loads(
             _with_row_counts_declared(extra_toml=block), source="no-tolerance"
         )
+
+
+# ── finding 4: snapshot/target provenance ───────────────────────────────────
+
+
+def test_a_blank_snapshot_id_is_refused() -> None:
+    with pytest.raises(SpecError):
+        RowCountSnapshotV1(
+            dataset="primary", snapshot_id="  ", captured_at_epoch=1, counts={}
+        )
+
+
+def test_a_blank_snapshot_dataset_is_refused() -> None:
+    with pytest.raises(SpecError):
+        RowCountSnapshotV1(
+            dataset="  ", snapshot_id="snap-1", captured_at_epoch=1, counts={}
+        )
+
+
+def test_a_negative_captured_at_is_refused() -> None:
+    with pytest.raises(SpecError):
+        RowCountSnapshotV1(
+            dataset="primary", snapshot_id="snap-1", captured_at_epoch=-1, counts={}
+        )
+
+
+def test_evidence_carries_full_provenance() -> None:
+    """THE FIX FOR FINDING 4. The evidence names which snapshot, when it was
+    captured, and when the observation happened — re-derivable after the
+    fact, not just a bare pass/fail."""
+    evidence = verify_row_counts(
+        dataset_code="primary",
+        verification=_SPEC,
+        snapshot=_snapshot(counts={"public.party": 100, "mod_agreements.contract": 40}),
+        restore_target="rehearsal-2026-09-07",
+        observer=_Observes({"public.party": 101, "mod_agreements.contract": 40}),
+        now_epoch=1_800_000_500,
+    )
+    assert evidence.snapshot_id == "snap-001"
+    assert evidence.snapshot_captured_at_epoch == 1_800_000_000
+    assert evidence.observed_at_epoch == 1_800_000_500
+    summary = require_row_counts_within_tolerance(evidence)
+    assert "snap-001" in summary
+    assert "1800000000" in summary
+    assert "1800000500" in summary
+
+
+def test_a_snapshot_for_a_different_dataset_is_refused_by_CODE() -> None:
+    """A snapshot captured for dataset X is not an expectation for dataset Y,
+    even when a table name happens to match — the binding this contract adds
+    that a bare `Mapping[str, int]` could never carry."""
+    with pytest.raises(SpecError) as caught:
+        verify_row_counts(
+            dataset_code="primary",
+            verification=_SPEC,
+            snapshot=_snapshot(dataset="a-different-dataset"),
+            restore_target="rehearsal-2026-09-07",
+            observer=_Observes({"public.party": 100, "mod_agreements.contract": 40}),
+            now_epoch=1_800_000_500,
+        )
+    assert caught.value.code == ROW_COUNT_SNAPSHOT_DATASET_MISMATCH
+
+
+# ── finding 3: evidence remains caller-constructible ────────────────────────
+
+
+def test_a_single_caller_controlling_both_sides_still_admits() -> None:
+    """THE ACCEPTED LIMIT FOR FINDING 3, kept permanently as the negative
+    control the review demanded. `RowCountSnapshotV1` and the observer are
+    both plain, freely constructible values — exactly like
+    `host_source.CandidateReceipt` and `backup.BackupRecord` before this
+    module existed. One caller here fabricates BOTH the expected counts and
+    the observer's counts from the same self-authored numbers, with no
+    connection to any real backup or any real restore, and the verification
+    still reports `ok=True`.
+
+    This is not a defect this module can repair by itself: it performs no
+    I/O, so it has no way to confirm a snapshot came from a real backup step
+    it did not also invoke, or that an observer's counts came from a real
+    disposable target rather than a literal. Closing this needs either the
+    snapshot bound to an audited `backup.BackupRecord` this caller does not
+    control, or the observer discovered and invoked by a caller that does not
+    also hold the expected numbers — both outside this module's stated
+    design (stateless, no I/O) and outside this pass's scope. See the module
+    docstring's "What this module does NOT prove".
+    """
+    fabricated = {"public.party": 999_999, "mod_agreements.contract": 999_999}
+    snapshot = RowCountSnapshotV1(
+        dataset="primary",
+        snapshot_id="self-authored",
+        captured_at_epoch=1,
+        counts=fabricated,
+    )
+    evidence = verify_row_counts(
+        dataset_code="primary",
+        verification=_SPEC,
+        snapshot=snapshot,
+        restore_target="rehearsal-2026-09-07",
+        observer=_Observes(fabricated),
+        now_epoch=2,
+    )
+    assert evidence.ok  # the accepted limit: arithmetic cannot detect self-authorship
 
 
 # ── the pure verification: element 5 (evidence) and element 6 (refusal) ────
@@ -243,9 +496,26 @@ _SPEC = RowCountVerificationSpec(
     tables=("public.party", "mod_agreements.contract"),
     expectation_source=RowCountExpectationSource.SOURCE_SNAPSHOT,
     tolerance=RowCountToleranceV1(absolute=2),
+    observer=RowCountObserverIdentity(identifier=_OBSERVER_NAME, version="1.0"),
 )
 
+
+def _snapshot(
+    *,
+    dataset: str = "primary",
+    counts: dict[str, int] | None = None,
+) -> RowCountSnapshotV1:
+    return RowCountSnapshotV1(
+        dataset=dataset,
+        snapshot_id="snap-001",
+        captured_at_epoch=1_800_000_000,
+        counts=counts if counts is not None else dict(_EXPECTED),
+    )
+
+
 _EXPECTED = {"public.party": 100, "mod_agreements.contract": 40}
+
+_NOW = 1_800_000_500
 
 
 class _Observes:
@@ -265,9 +535,10 @@ def test_admit_control_a_correctly_declared_verification_admits() -> None:
     evidence = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="rehearsal-2026-09-07",
         observer=observer,
+        now_epoch=_NOW,
     )
     assert evidence.ok
     assert evidence.restore_target == "rehearsal-2026-09-07"
@@ -285,9 +556,10 @@ def test_a_delta_exactly_at_the_boundary_stays_silent() -> None:
     evidence = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="rehearsal-2026-09-07",
         observer=observer,
+        now_epoch=_NOW,
     )
     assert evidence.findings[0].delta == 2
     assert evidence.findings[0].allowed_delta == 2
@@ -295,7 +567,9 @@ def test_a_delta_exactly_at_the_boundary_stays_silent() -> None:
     require_row_counts_within_tolerance(evidence)  # must not raise
 
 
-def test_a_legitimately_declared_table_set_stays_silent_at_parse() -> None:
+def test_a_legitimately_declared_table_set_stays_silent_at_parse(
+    declare_observer,
+) -> None:
     """NEAR-MISS NEGATIVE CONTROL 2: a real, well-formed
     `row_count_verification` block must parse without incident — a guard that
     rejects a legitimate declaration would be indistinguishable, from outside,
@@ -313,9 +587,10 @@ def test_non_vacuity_an_out_of_tolerance_observation_is_named() -> None:
     evidence = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="rehearsal-2026-09-07",
         observer=observer,
+        now_epoch=_NOW,
     )
     assert not evidence.ok
     assert evidence.breaches == (evidence.findings[0],)
@@ -334,9 +609,10 @@ def test_the_absent_executor_refusal_is_by_class_and_identity() -> None:
         verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected=_EXPECTED,
+            snapshot=_snapshot(),
             restore_target="rehearsal-2026-09-07",
             observer=None,
+            now_epoch=_NOW,
         )
     assert caught.value.code == ROW_COUNT_OBSERVER_ABSENT
     assert "no observer is installed" in str(caught.value)
@@ -350,9 +626,10 @@ def test_the_absent_executor_refusal_never_returns_a_value() -> None:
         verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected=_EXPECTED,
+            snapshot=_snapshot(),
             restore_target="rehearsal-2026-09-07",
             observer=None,
+            now_epoch=_NOW,
         )
 
 
@@ -363,9 +640,10 @@ def test_a_blank_restore_target_is_refused() -> None:
         verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected=_EXPECTED,
+            snapshot=_snapshot(),
             restore_target="   ",
             observer=_Observes(_EXPECTED),
+            now_epoch=_NOW,
         )
     assert caught.value.code == ROW_COUNT_TARGET_UNDECLARED
 
@@ -379,9 +657,10 @@ def test_a_partial_observation_is_refused_not_scored_on_what_it_has() -> None:
         verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected=_EXPECTED,
+            snapshot=_snapshot(),
             restore_target="rehearsal-2026-09-07",
             observer=observer,
+            now_epoch=_NOW,
         )
     assert caught.value.code == ROW_COUNT_OBSERVATION_INCOMPLETE
     assert "mod_agreements.contract" in str(caught.value)
@@ -394,9 +673,10 @@ def test_an_incomplete_expectation_is_refused() -> None:
         verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected={"public.party": 100},  # missing mod_agreements.contract
+            snapshot=_snapshot(counts={"public.party": 100}),  # incomplete
             restore_target="rehearsal-2026-09-07",
             observer=_Observes(_EXPECTED),
+            now_epoch=_NOW,
         )
     assert caught.value.code == ROW_COUNT_EXPECTATION_INCOMPLETE
 
@@ -422,9 +702,10 @@ def test_sensitivity_a_planted_comparison_defect_is_named_by_symbol() -> None:
     real_evidence = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="plant",
         observer=observer,
+        now_epoch=_NOW,
     )
     assert not real_evidence.ok  # the un-patched behaviour: the defect's absence
 
@@ -435,9 +716,10 @@ def test_sensitivity_a_planted_comparison_defect_is_named_by_symbol() -> None:
         patched_evidence = rcv.verify_row_counts(
             dataset_code="primary",
             verification=_SPEC,
-            expected=_EXPECTED,
+            snapshot=_snapshot(),
             restore_target="plant",
             observer=observer,
+            now_epoch=_NOW,
         )
         assert patched_evidence.ok, (
             "the plant did not take: RowCountFinding.within_tolerance is not "
@@ -454,9 +736,10 @@ def test_sensitivity_a_planted_comparison_defect_is_named_by_symbol() -> None:
     unpatched_again = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="plant",
         observer=observer,
+        now_epoch=_NOW,
     )
     assert not unpatched_again.ok
 
@@ -473,16 +756,18 @@ def test_sensitivity_the_boundary_near_miss_is_exercised_not_assumed() -> None:
     at = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="boundary",
         observer=exactly_at_boundary,
+        now_epoch=_NOW,
     )
     past = verify_row_counts(
         dataset_code="primary",
         verification=_SPEC,
-        expected=_EXPECTED,
+        snapshot=_snapshot(),
         restore_target="boundary",
         observer=one_past_boundary,
+        now_epoch=_NOW,
     )
     assert at.ok
     assert not past.ok
