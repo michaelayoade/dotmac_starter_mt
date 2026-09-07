@@ -306,10 +306,14 @@ def test_build_health_evidence_represents_missing_entries_explicitly(
         requested_components=("api", "registered-empty", "never-registered"),
         evaluated_at=as_of,
     )
+    # Sorted by component_code, NOT requested order: "findings are complete,
+    # deterministic, and sorted — never worst-of" (ADR-0070 amendment). The
+    # roster is still COMPLETE — all three requested codes are present below,
+    # regardless of which order they were requested in.
     assert [c.component_code for c in evidence.components] == [
         "api",
-        "registered-empty",
         "never-registered",
+        "registered-empty",
     ]
     for missing in evidence.components[1:]:
         assert missing.state == HealthState.UNKNOWN.value
@@ -463,7 +467,19 @@ def test_authoritative_signing_uses_durable_observations(db: Session) -> None:
 
         def sign_health_evidence(self, evidence, canonical_bytes: bytes):
             self.seen.append(canonical_bytes)
-            return HealthEvidenceSignature("ed25519", "test-key", canonical_bytes[:8])
+            # A REAL digest of the FULL bytes, not a short prefix slice: every
+            # canonical document here starts with the same
+            # `{"components":[{"component_code":"api"` prefix regardless of
+            # what changes later in the document (state, observation_id,
+            # observed_at), so `canonical_bytes[:8]` is `b'{"compon'` for
+            # BOTH documents below and would make the two "signatures"
+            # collide even though the documents genuinely differ — that
+            # collision, not the implementation, was the earlier failure
+            # here. Hashing the whole payload is what actually proves the
+            # signer's output tracks full-document identity.
+            return HealthEvidenceSignature(
+                "ed25519", "test-key", hashlib.sha256(canonical_bytes).digest()
+            )
 
     signer = _RecordingSigner()
     signed_base = produce_signed_health_evidence(
@@ -550,7 +566,15 @@ def test_determinism_survives_a_hash_seed_change_across_processes() -> None:
 
 
 def test_produce_signed_health_evidence_refuses_without_a_signer(db: Session) -> None:
-    with pytest.raises(HealthEvidenceError, match="signer"):
+    # Matched on "must be supplied" rather than "signer": the actual message
+    # is "a HealthEvidenceSigner must be supplied" — the port's type name is
+    # `HealthEvidenceSigner` (capital S), so a case-sensitive `match="signer"`
+    # never matched it and the test failed on the regex itself, not on the
+    # refusal (the exception class and firing were both correct). "must be
+    # supplied" names the actual refusal condition (nothing was given) and
+    # is stable across a rename or rewording of the port's type name, which
+    # is exactly the kind of drift that broke the previous pattern.
+    with pytest.raises(HealthEvidenceError, match="must be supplied"):
         produce_signed_health_evidence(
             db,
             requested_components=("api",),
