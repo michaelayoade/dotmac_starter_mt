@@ -61,6 +61,9 @@ REPO = Path(__file__).resolve().parents[2]
 
 NOW = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
 PLAN_DIGEST = "sha256:" + "e" * 64
+#: The Foundation wheel digest — a distinct subject from PLAN_DIGEST, in the
+#: same unit `host_source.HostSource.artifact_digest` would carry.
+ARTIFACT_DIGEST = "sha256:" + "a" * 64
 TARGET = "rehearsal-host.dotmac.internal"
 STEP = StepKind.APPLY_EXPOSURE.value
 
@@ -86,6 +89,7 @@ def _statement(**overrides: Any) -> dict[str, Any]:
         "candidate_repository": "michaelayoade/dotmac_starter_mt",
         "candidate_run_id": "33920058598",
         "candidate_artifact_id": "9954731961",
+        "candidate_foundation_artifact_digest": ARTIFACT_DIGEST,
         "execution_plan_digest": PLAN_DIGEST,
         "provocation_refusal": ProvocableRefusal.PLAN_VERIFICATION_REFUSAL.value,
         "provocation_at_step": STEP,
@@ -157,6 +161,7 @@ def _permit(**kw: Any) -> ProvocationPermit:
         "at_step": STEP,
         "target": TARGET,
         "execution_plan_digest": PLAN_DIGEST,
+        "foundation_artifact_digest": ARTIFACT_DIGEST,
         "now": NOW,
     }
     terms.update(kw)
@@ -178,6 +183,7 @@ def test_a_properly_verified_grant_is_accepted() -> None:
     assert permit.at_step == STEP
     assert permit.target == TARGET
     assert permit.execution_plan_digest == PLAN_DIGEST
+    assert permit.foundation_artifact_digest == ARTIFACT_DIGEST
     assert permit.lease_id == "lease-77"
     assert permit.single_use_reference == "rg-0001/attempt-1"
     assert permit.expected_terminal is ProvokedTerminal.ROLLED_BACK
@@ -235,6 +241,7 @@ def test_a_hand_constructed_grant_is_refused_at_the_provocation_path() -> None:
         candidate_repository="michaelayoade/dotmac_starter_mt",
         candidate_run_id="1",
         candidate_artifact_id="1",
+        candidate_foundation_artifact_digest=ARTIFACT_DIGEST,
         execution_plan_digest=PLAN_DIGEST,
         refusal=ProvocableRefusal.PLAN_VERIFICATION_REFUSAL,
         at_step=STEP,
@@ -260,6 +267,7 @@ def test_a_hand_constructed_grant_is_refused_at_the_provocation_path() -> None:
             at_step=STEP,
             target=TARGET,
             execution_plan_digest=PLAN_DIGEST,
+            foundation_artifact_digest=ARTIFACT_DIGEST,
             now=NOW,
         )
 
@@ -282,6 +290,7 @@ def test_neither_witness_can_be_forged() -> None:
             at_step=STEP,
             target=TARGET,
             execution_plan_digest=PLAN_DIGEST,
+            foundation_artifact_digest=ARTIFACT_DIGEST,
             lease_id="lease-77",
             single_use_reference="x",
             grant=_verified().grant,
@@ -381,6 +390,10 @@ def test_a_spent_replay_coordinate_is_refused() -> None:
         ({"target": "production.dotmac.io"}, "authorizes target"),
         ({"at_step": StepKind.MIGRATE.value}, "provocation at"),
         ({"execution_plan_digest": "sha256:" + "1" * 64}, "execution plan"),
+        (
+            {"foundation_artifact_digest": "sha256:" + "b" * 64},
+            "authorizes a rehearsal of Foundation artifact",
+        ),
     ],
 )
 def test_a_grant_that_names_something_else_is_not_a_grant_for_this(
@@ -394,6 +407,27 @@ def test_a_grant_that_names_something_else_is_not_a_grant_for_this(
     """
     with pytest.raises(PreconditionFailed, match=match):
         _permit(**kw)
+
+
+def test_the_artifact_digest_comparison_is_not_vacuous() -> None:
+    """Non-vacuity, named: `foundation_artifact_digest` is COMPARED, not merely
+    carried.
+
+    Without the comparison in `permit_provocation`, a permit for a disagreeing
+    artifact would be issued silently — this asserts both halves: the refusal
+    fires by IDENTITY (the exact exception class and message), and a genuinely
+    agreeing digest — including one spelled in the other valid case or with a
+    bare-hex/`sha256:`-prefixed mismatch in spelling only — stays admitted.
+    """
+    with pytest.raises(PreconditionFailed) as excinfo:
+        _permit(foundation_artifact_digest="sha256:" + "c" * 64)
+    assert "authorizes a rehearsal of Foundation artifact" in str(excinfo.value)
+    assert ARTIFACT_DIGEST in str(excinfo.value)
+
+    # The near-miss that must stay silent: the SAME digest, spelled without the
+    # `sha256:` prefix, normalizes to the same value and must still be admitted.
+    survivor = _permit(foundation_artifact_digest="a" * 64)
+    assert survivor.foundation_artifact_digest == ARTIFACT_DIGEST
 
 
 def test_the_point_of_use_recheck_refuses_a_different_act() -> None:

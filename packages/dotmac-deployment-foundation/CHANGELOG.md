@@ -146,6 +146,51 @@ actually refuses at. That divergence is Control's to repair. And
 rehearsal is not a provocation, and inventing a member here to make the two
 line up is the `recover` mistake from the other direction.
 
+### The rehearsal grant is re-pinned to merged Control, and now carries and compares the artifact digest
+
+`rehearsal_grant.ISSUER_SHAPE_SOURCE` named an unmerged Control branch head
+(`3a06488cd34c42caa93b9d9bac89fd203b738246`, PR #45's `feat/rehearsal-grant`)
+and said so, predicting the exact repair this entry records. Control PR #45
+merged as `2622c3dd894f0802ab9ef179d2ff60754539da2d` on
+`michaelayoade/dotmac_deployment_control` `main`, WITH amendments beyond the
+pinned branch head: `FOUNDATION_STEP_KINDS` grew `apply_exposure` and
+`restore_exposure` (25 → 27 members — this side needed no change, since
+`provocation_at_step` is checked against this facility's own
+`engine.plan.StepKind` and never mirrors Control's copy), and the signed
+statement gained a required `candidate_foundation_artifact_digest` term.
+
+`ISSUER_SHAPE_SOURCE` now names the merge commit, verified an ancestor of (in
+fact identical to) Control's `main` tip rather than a branch that could move
+out from under this pin. `ACCEPTED_STATEMENT_KEYS` and `RehearsalGrantV1` now
+carry `candidate_foundation_artifact_digest`, normalized through the same
+`normalize_digest` boundary `execution_plan_digest` already crosses, and
+`permit_provocation` gained a required keyword-only
+`foundation_artifact_digest` — stated by the caller INDEPENDENTLY of the
+grant, on the identical terms `execution_plan_digest` already is, and compared
+against the grant's carried value before a permit is issued.
+
+**What this closes.** Michael's ruling names four links in the chain:
+Control-verified `CandidateArtifact` → signed grant digest → `HostSource` PEP
+610 digest → candidate receipt digest. The second-to-third link is now bound
+here: a caller holding a verified grant and a real `host_source.HostSource`
+reading (`host_source.require_host_source`, merged in #656) can pass
+`str(reading.artifact_digest)` straight through, and a genuine disagreement
+between what Control signed and what is actually installed refuses before
+anything is armed.
+
+**What this does not close.** This module has no seam that calls
+`host_source.require_host_source` itself and must not grow one — that stays
+an assembly's job, on the same "Python plugins are trusted in-process code,
+verified at build/deploy time" rule every other injection point in this
+facility follows. No assembly in this repository currently wires a
+`HostSource` reading into a `permit_provocation` call at all (there is no call
+site here today, only the test suite), so the actual end-to-end closure of
+every link remains UNMONITORED here, named rather than implied to be covered.
+The fourth link — `RehearsalReceiptV1.foundation_artifact_digest`, checked by
+`rehearsal.require_rehearsed_artifact` — is evidence about a run that already
+happened and is a distinct comparison this module does not perform, on the
+same evidence/permission boundary the module docstring opens by refusing.
+
 ### An absence proof can only prove the concern its inventory belongs to
 
 `IntegrationSurfaceAbsenceProofV1` validated `families` against

@@ -82,14 +82,22 @@ UNAUTHORIZED_EXECUTE_BACKLOG: dict[str, str] = {
     # `RehearsalGrant.v1` and cannot mint one — and this subcommand STILL
     # cannot use it.
     #
-    # Read against `dotmac_deployment_control` PR #45 at
-    # `3a06488cd34c42caa93b9d9bac89fd203b738246`: the grant that PR issues is a
-    # PROVOCATION grant. `ProvocableRefusal` is closed at one member,
+    # PR #45 MERGED as `2622c3dd894f0802ab9ef179d2ff60754539da2d` on
+    # `dotmac_deployment_control` `main` — this comment previously cited the
+    # unmerged branch head (`3a06488cd34c42caa93b9d9bac89fd203b738246`), which
+    # no longer exists as a source of truth for anything. Re-read against the
+    # merged module: the grant it issues is still a PROVOCATION grant.
+    # `ProvocableRefusal` is STILL closed at one member,
     # `plan_verification_refusal`, bound to Lane 3 item 8, and the terminal is
-    # DERIVED from it as `rolled_back`. A restore rehearsal is not that act: it
-    # creates a fresh isolated cluster, restores into it, and destroys it on the
-    # adjudicator's verdict. It is supposed to SUCCEED. There is no member of
-    # Control's vocabulary that names it and no signer purpose issued for it.
+    # still DERIVED from it as `rolled_back` — the merge amended
+    # `FOUNDATION_STEP_KINDS` (added `apply_exposure`/`restore_exposure`) and
+    # the statement shape (added `candidate_foundation_artifact_digest`), and
+    # touched neither the refusal vocabulary nor added anything resembling a
+    # restore-rehearsal act. A restore rehearsal is not that act: it creates a
+    # fresh isolated cluster, restores into it, and destroys it on the
+    # adjudicator's verdict. It is supposed to SUCCEED. There is still no
+    # member of Control's vocabulary that names it and no signer purpose
+    # issued for it.
     #
     # So gating it would mean inventing a refusal member on this side — which is
     # `authorization.OPERATIONS`'s recorded `recover` mistake exactly, arrived at
@@ -106,8 +114,8 @@ UNAUTHORIZED_EXECUTE_BACKLOG: dict[str, str] = {
     # entry should be retired rather than gated. That decision is not this
     # boundary's to take.
     "restore-rehearsal": (
-        "restore rehearsal is not a provocation; Control PR #45's closed "
-        "vocabulary cannot name it"
+        "restore rehearsal is not a provocation; Control's closed "
+        "vocabulary (merged PR #45) cannot name it"
     ),
 }
 

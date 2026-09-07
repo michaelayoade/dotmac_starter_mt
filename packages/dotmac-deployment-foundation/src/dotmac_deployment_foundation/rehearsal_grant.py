@@ -59,25 +59,28 @@ the bare document to the provocation path is refused at the boundary.
 
 ## The step vocabulary is OWNED here, not mirrored
 
-Control's PR #45 mirrors this facility's `StepKind` as a frozen literal set,
-cut at a value because the two are released independently. That is the right
-call on that side and it has already drifted: the mirror was read at
-``98435a0c`` and does not contain `apply_exposure` or `restore_exposure`, which
-`engine/plan.py` has carried since `ExposureTransaction` was retired — and
-`apply_exposure` is precisely where item 8's verification refuses. So a grant
-Control can currently issue cannot name the step the provocation happens at.
+Control's `rehearsal_grant.py` mirrors this facility's `StepKind` as a frozen
+literal set (`FOUNDATION_STEP_KINDS`), cut at a value because the two are
+released independently. Read at merged Control's `main`
+(`2622c3dd894f0802ab9ef179d2ff60754539da2d`), that mirror now carries both
+`apply_exposure` and `restore_exposure` — added there in the same repair this
+side's ISSUER_SHAPE_SOURCE now cites, closing the earlier drift where the
+mirror (frozen at ``98435a0c``) predated both steps and could not name the one
+provocation this module exists for.
 
-This side does not mirror anything: `provocation_at_step` is checked against
-`engine.plan.StepKind`, which this facility owns. A step this executor does not
-perform is refused here, and no transcription can go stale.
+This side does not mirror anything, and did not need this repair to be
+correct: `provocation_at_step` is checked against `engine.plan.StepKind`,
+which this facility owns. A step this executor does not perform is refused
+here, and no transcription can go stale — Control's mirror can drift again in
+either direction and this side's check is untouched by it.
 
 ## What this module does NOT decide
 
 Whether a rehearsal SHOULD be authorized. Same line `provenance.py` draws.
 Control owns the decision; this owns whether the act about to happen is the act
-that was authorized — an equality check over target, plan digest, refusal and
-step. A grant that authorizes a different provocation is not permission; it is
-evidence that two things drifted apart.
+that was authorized — an equality check over target, plan digest, artifact
+digest, refusal and step. A grant that authorizes a different provocation is
+not permission; it is evidence that two things drifted apart.
 
 `single_use_reference` is carried and compared against a set of already-spent
 references the CALLER supplies, for the reason Control states about its own
@@ -85,6 +88,52 @@ half: this facility is pure and holds no store, so it can refuse a coordinate
 it is TOLD was spent and cannot itself know. The durable at-most-once record
 belongs to whoever holds the store, and until one exists that region is
 UNMONITORED rather than covered.
+
+## The digest chain, and the one link this module can actually close
+
+Michael's ruling names four links: Control-verified `CandidateArtifact` ->
+signed grant digest -> `HostSource` PEP 610 digest -> candidate receipt
+digest. Merged Control's statement now carries
+`candidate_foundation_artifact_digest` (`CandidateArtifactRef`'s fourth field,
+parsed there with `FoundationArtifactDigestV1`, which is READ-ONLY — Control
+receives this value, never computes it), and this module now carries and
+COMPARES it: :func:`permit_provocation` takes a caller-supplied
+`foundation_artifact_digest`, on the identical terms `execution_plan_digest`
+already does — stated by the caller INDEPENDENTLY of the grant, never derived
+from it, because deriving it would compare the grant with itself and pass for
+every input.
+
+**What this closes.** The second link (signed grant digest) is now bound
+against whatever the caller presents as the third link. The caller who holds
+both a verified grant and a `host_source.HostSource` reading (from
+`host_source.require_host_source`, merged in #656 with its own four-term
+binding — facility, version, digest, source revision) can pass
+`str(host_source_reading.artifact_digest)` straight through as
+`foundation_artifact_digest`, and a genuine mismatch between what Control
+signed and what is actually installed on this host is refused here, at the
+provocation boundary, before anything is armed.
+
+**What this does NOT close, stated rather than implied.** This module has no
+seam that CALLS `host_source.require_host_source` itself, and must not grow
+one: doing so would make this pure, injectable-only module reach into
+`importlib.metadata` on its own account, which is exactly the kind of
+capability `execution_bindings.py` requires an assembly to inject rather than
+a facility module to assume. So the second-to-third-link comparison is
+REACHABLE only when the caller actually sources `foundation_artifact_digest`
+from a real `HostSource` reading and not from thin air — a caller that instead
+copies the value straight off the grant it is trying to verify satisfies this
+check vacuously, the same honest limit Control's own `CandidateArtifactRef`
+docstring states about itself. No assembly in this repository currently wires
+`host_source` output into a `permit_provocation` call (there is no call site
+here at all — see the module docstring's opening paragraph), so that wiring,
+and therefore the actual end-to-end closure of all four links, is UNMONITORED
+here today. The fourth link (the candidate receipt digest inside
+`RehearsalReceiptV1.foundation_artifact_digest`, `rehearsal.py`'s own field) is
+a distinct comparison this module does not perform at all: it is evidence
+about a run that already happened, checked by
+`rehearsal.require_rehearsed_artifact`, not permission for one about to
+happen, and conflating the two would be exactly the evidence/permission
+collapse this module's docstring opens by refusing.
 """
 
 from __future__ import annotations
@@ -134,15 +183,26 @@ REHEARSAL_PURPOSE: Final = "deployment_rehearsal"
 #: coupling is cut at a VALUE — the same rule `provenance.py` states for the
 #: authorization receipt.
 #:
-#: THE COMMIT IS ON AN UNMERGED BRANCH (`feat/rehearsal-grant`, PR #45). The
-#: object is immutable and this coordinate will always resolve to these bytes;
-#: what it does NOT establish is that this shape is the one Control ships. If
-#: #45 lands with a different statement, this side accepts a document nobody
-#: issues, which is the `recover` vocabulary divergence repeating with the
-#: parties swapped. Agreeing the schema with Control is gated 2026-10-15.
+#: RE-PINNED to Control PR #45's MERGE COMMIT on `main`
+#: (`michaelayoade/dotmac_deployment_control`), superseding the unmerged
+#: branch head this pin used to name
+#: (`3a06488cd34c42caa93b9d9bac89fd203b738246`, `feat/rehearsal-grant`).
+#: Verified against that repository's `main` tip at the time this was read:
+#: `2622c3dd894f0802ab9ef179d2ff60754539da2d` has a single parent,
+#: `18056471d2f6386e3bf03e84cfb20561d86d5525`, and IS that tip — not merely an
+#: ancestor of it.
+#:
+#: Merged Control's statement carries one term this pin's predecessor did not:
+#: `candidate_foundation_artifact_digest`. This module now accepts it, carries
+#: it on `RehearsalGrantV1`, and compares it in `permit_provocation` — see the
+#: module docstring's "the digest chain" section for what that comparison does
+#: and does not close. Merged Control's `FOUNDATION_STEP_KINDS` also grew
+#: `apply_exposure`/`restore_exposure` (25 -> 27 members); this side does not
+#: mirror that set at all (see "the step vocabulary is owned here"), so that
+#: repair on Control's side required no change on this one.
 ISSUER_SHAPE_SOURCE: Final = (
     "michaelayoade/dotmac_deployment_control"
-    "@3a06488cd34c42caa93b9d9bac89fd203b738246"
+    "@2622c3dd894f0802ab9ef179d2ff60754539da2d"
     ":src/dotmac_deployment_control/rehearsal_grant.py"
 )
 
@@ -201,6 +261,7 @@ ACCEPTED_STATEMENT_KEYS: Final[frozenset[str]] = frozenset(
         "candidate_repository",
         "candidate_run_id",
         "candidate_artifact_id",
+        "candidate_foundation_artifact_digest",
         "execution_plan_digest",
         "provocation_refusal",
         "provocation_at_step",
@@ -277,6 +338,14 @@ class RehearsalGrantV1:
     candidate_repository: str
     candidate_run_id: str
     candidate_artifact_id: str
+    #: `FoundationArtifactDigestV1` on Control's side, `sha256:<hex>` here after
+    #: `normalize_digest` — the sha256 of the installed Foundation WHEEL FILE,
+    #: the same unit `host_source.HostSource.artifact_digest` and
+    #: `rehearsal.RehearsalReceiptV1.foundation_artifact_digest` use. Identifies
+    #: the BYTES; `candidate_repository`/`candidate_run_id`/`candidate_artifact_id`
+    #: LOCATE the evidence. Neither substitutes for the other — see the module
+    #: docstring's "the digest chain" section.
+    candidate_foundation_artifact_digest: str
     #: Normalized to this facility's `sha256:<hex>` spelling on the way in, so
     #: a comparison can never fail merely because two owners spell one digest
     #: differently — the digest-format trap `provenance.py` names.
@@ -549,6 +618,10 @@ def verify_rehearsal_grant(
             candidate_repository=_text(statement, "candidate_repository"),
             candidate_run_id=_text(statement, "candidate_run_id"),
             candidate_artifact_id=_text(statement, "candidate_artifact_id"),
+            candidate_foundation_artifact_digest=normalize_digest(
+                _text(statement, "candidate_foundation_artifact_digest"),
+                where="RehearsalGrant.candidate_foundation_artifact_digest",
+            ),
             execution_plan_digest=normalize_digest(
                 _text(statement, "execution_plan_digest"),
                 where="RehearsalGrant.execution_plan_digest",
@@ -582,7 +655,10 @@ class ProvocationPermit:
     approval to break the exposure apply also permits breaking the migration;
     drop `target`, and an approval for a disposable rehearsal host permits the
     same act against production; drop `execution_plan_digest`, and an approval
-    for a reviewed plan permits an edited one.
+    for a reviewed plan permits an edited one; drop
+    `foundation_artifact_digest`, and an approval issued for one build of
+    Foundation permits the act to run under whichever build happens to be
+    installed.
     """
 
     #: Positional and first, with no default, so a hand-built permit cannot be
@@ -592,6 +668,7 @@ class ProvocationPermit:
     at_step: str
     target: str
     execution_plan_digest: str
+    foundation_artifact_digest: str
     lease_id: str
     single_use_reference: str
     grant: RehearsalGrantV1
@@ -647,6 +724,7 @@ def permit_provocation(
     at_step: str,
     target: str,
     execution_plan_digest: str,
+    foundation_artifact_digest: str,
     now: datetime,
     consumed_references: Iterable[str] = (),
 ) -> ProvocationPermit:
@@ -664,10 +742,14 @@ def permit_provocation(
     never a judgement about whether the rehearsal should have been approved,
     which belongs to Control and is not re-litigated here.
 
-    `target` must be stated by the caller INDEPENDENTLY of the grant. Deriving
-    it from `grant.target_ref` would make the comparison compare the grant with
-    itself and pass for every input, which is the shape of a check that has
-    stopped checking.
+    `target` and `foundation_artifact_digest` must be stated by the caller
+    INDEPENDENTLY of the grant — for `foundation_artifact_digest`, from a real
+    `host_source.HostSource` reading of what is actually installed, never from
+    the grant itself. Deriving either from the grant's own fields would make
+    the comparison compare the grant with itself and pass for every input,
+    which is the shape of a check that has stopped checking; see the module
+    docstring's "the digest chain" section for what this comparison closes and
+    what it does not.
 
     `consumed_references` is supplied by the caller because this facility holds
     no store. It refuses a coordinate it is TOLD was spent; it cannot itself
@@ -721,12 +803,25 @@ def permit_provocation(
             "authorization and provocation, and provoking would break a target "
             "under a plan that was not reviewed"
         )
+    wanted_artifact = normalize_digest(
+        foundation_artifact_digest,
+        where="permit_provocation.foundation_artifact_digest",
+    )
+    if grant.candidate_foundation_artifact_digest != wanted_artifact:
+        raise PreconditionFailed(
+            "the grant authorizes a rehearsal of Foundation artifact "
+            f"{grant.candidate_foundation_artifact_digest} and the artifact in "
+            f"hand is {wanted_artifact}. Control signed a grant for one build "
+            "of this facility; provoking under a different one would break a "
+            "target under permission it was never given"
+        )
     return ProvocationPermit(
         _PERMITTED,
         refusal=refusal,
         at_step=at_step,
         target=target,
         execution_plan_digest=wanted,
+        foundation_artifact_digest=wanted_artifact,
         lease_id=grant.lease_id,
         single_use_reference=grant.single_use_reference,
         grant=grant,
