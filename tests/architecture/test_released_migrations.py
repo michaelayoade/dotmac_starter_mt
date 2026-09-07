@@ -6815,7 +6815,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-files": frozenset(),
     "dotmac-forms": frozenset(),
     "dotmac-workflow-runtime": frozenset(),
-    "dotmac-platform-health": frozenset(),
+    # `ph_0002` snapshots each observation's freshness policy at acceptance,
+    # so a later policy change cannot reclassify an unchanged observation.
+    # Still editable: `dotmac-platform-health` has no released tag carrying it.
+    "dotmac-platform-health": frozenset({"ph_0002_observation_freshness_snapshot.py"}),
     "dotmac-support-access": frozenset(),
     "dotmac-remote-access": frozenset(),
     "dotmac-compliance-reporting": frozenset(),
