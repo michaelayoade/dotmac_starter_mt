@@ -62,6 +62,11 @@ from .recovery_identity import (
     DatasetIdentityV1,
     ExternalExecutorV1,
 )
+from .row_count_verification import (
+    RowCountExpectationSource,
+    RowCountToleranceV1,
+    RowCountVerificationSpec,
+)
 from .secrets_guard import require_no_secrets
 
 #: Defined HERE rather than in `backup.py`, which is where it used to live: this
@@ -134,6 +139,10 @@ SCHEMA: Final = SCHEMA_V1
 # come from a truncated edit, not from a real name.
 _CODE = re.compile(r"^[a-z][a-z0-9_-]{0,61}[a-z0-9]$|^[a-z]$")
 _MATERIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+#: A named table for `row_count_verification`, optionally schema-qualified
+#: (`mod_licensing.grant`). Declared, never a wildcard: this pattern has no
+#: `*` or `%` to accept, on purpose — see `row_count_verification.py` element 2.
+_ROW_COUNT_TABLE_NAME = re.compile(r"^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$")
 # A PostgreSQL role name as this facility will accept it. Deliberately
 # narrower than PostgreSQL allows: an unquoted lowercase identifier needs no
 # quoting anywhere, and a role name requiring quotes is one a shell, a DSN or
@@ -1450,6 +1459,13 @@ class BackupDataset:
     verify: tuple[str, ...]
     lineage: str = ""
     external_executor: ExternalExecutorV1 | None = None
+    # The declared internal alternative to `external_executor` for `row_counts`
+    # — see `row_count_verification.py`'s module docstring for the six elements
+    # this satisfies. A dataset may declare this, an `external_executor`, both,
+    # or neither — but declaring `row_counts` in `verify` and neither of these
+    # is refused at parse (`UNPERFORMABLE_VERIFICATION`), same as before this
+    # field existed.
+    row_count_verification: RowCountVerificationSpec | None = None
 
     KINDS: ClassVar[tuple[str, ...]] = ("postgres", "object_store", "volume")
     CHECKSUMS: ClassVar[tuple[str, ...]] = ("sha256", "sha512")
@@ -1522,8 +1538,57 @@ class BackupDataset:
         # `row_counts` is declarable deliberately, by a dataset that names an
         # external executor able to satisfy it.
         verify = table.str_list("verify", default=("schema",))
+        row_count_table = table.table("row_count_verification", optional=True)
         table.done()
         executor: ExternalExecutorV1 | None = None
+        row_count_verification: RowCountVerificationSpec | None = None
+        if row_count_table is not None:
+            rc_tables = row_count_table.str_list(
+                "tables", pattern=_ROW_COUNT_TABLE_NAME
+            )
+            if not rc_tables:
+                raise SpecError(
+                    f"dataset {code!r} declares `row_count_verification` with an "
+                    "empty `tables` list. A verification counting no named table "
+                    "cannot refuse anything",
+                    where=row_count_table.path,
+                )
+            source_raw = row_count_table.str_("expectation_source")
+            try:
+                expectation_source = RowCountExpectationSource(source_raw)
+            except ValueError:
+                allowed = sorted(m.value for m in RowCountExpectationSource)
+                raise SpecError(
+                    f"row_count_verification.expectation_source {source_raw!r} "
+                    f"is not one of {allowed}",
+                    where=row_count_table.path,
+                ) from None
+            tolerance_table = row_count_table.table("tolerance") or _Table(
+                {}, row_count_table.path
+            )
+            # `-1` is a sentinel, not a value: `_Table.int_` treats `default=None`
+            # as "required" rather than "optional", so an optional bound (at
+            # least one of the two must be declared, never both defaulted away
+            # — `RowCountToleranceV1` enforces that) needs a sentinel to mean
+            # "not declared". `minimum=0` is kept, unchanged, so a descriptor
+            # that explicitly writes `absolute = -1` is refused by the bound
+            # check rather than silently read as "not declared" — the default
+            # is returned WITHOUT a bound check (`_Table.int_` above), but an
+            # explicit value is always checked against it.
+            tolerance_absolute = tolerance_table.int_("absolute", default=-1, minimum=0)
+            tolerance_percent = tolerance_table.int_(
+                "percent", default=-1, minimum=0, maximum=100
+            )
+            tolerance_table.done()
+            row_count_table.done()
+            row_count_verification = RowCountVerificationSpec(
+                tables=rc_tables,
+                expectation_source=expectation_source,
+                tolerance=RowCountToleranceV1(
+                    absolute=None if tolerance_absolute < 0 else tolerance_absolute,
+                    percent=None if tolerance_percent < 0 else tolerance_percent,
+                ),
+            )
         if executor_table is not None:
             executor = ExternalExecutorV1(
                 kind=executor_table.str_("kind"),
@@ -1570,16 +1635,23 @@ class BackupDataset:
         # how to compare, regardless of what the descriptor asked for — so on
         # the internally executed path the declaration and the check were never
         # connected at all. `row_counts` is the member that exposes it:
-        # `CatalogEvidence` carries no row counts and nothing in this package
+        # `CatalogEvidence` carries no row counts and nothing in `recovery.py`
         # can observe one, so a descriptor declaring it was asserting a check
         # that could not run.
         #
-        # It stays DECLARABLE for an externally executed dataset, where a
-        # receipt from an executor that can count rows genuinely claims it
-        # (`external_recovery.VERIFICATION_EVIDENCE`). The refusal is therefore
-        # about who will do the verifying, not about the check being worthless.
+        # It stays DECLARABLE two ways: for an externally executed dataset,
+        # where a receipt from an executor that can count rows genuinely
+        # claims it (`external_recovery.VERIFICATION_EVIDENCE`); and for a
+        # dataset that declares `row_count_verification` and asks THIS
+        # facility to observe the counts itself against a disposable restore
+        # target (`row_count_verification.verify_row_counts` — a caller-
+        # supplied `RowCountObserver`, not `recovery.py`'s registry). Declaring
+        # `row_counts` with neither is still refused: the refusal is about who
+        # will do the verifying, never about the check being worthless.
         if executor is None:
             unperformable = sorted(set(verify) & EXTERNAL_ONLY_VERIFICATIONS)
+            if "row_counts" in unperformable and row_count_verification is not None:
+                unperformable = [name for name in unperformable if name != "row_counts"]
             if unperformable:
                 raise SpecError(
                     f"verification(s) {unperformable} cannot be performed by "
@@ -1587,12 +1659,26 @@ class BackupDataset:
                     "executor to perform them. `verify_recovery` compares two "
                     "catalogues, and nothing it can observe carries row counts "
                     "— so declaring this asks for a check that will never run "
-                    "and reports as satisfied. Either remove it, or declare "
-                    "the [backup.datasets.external_executor] whose signed "
-                    "receipt claims it",
+                    "and reports as satisfied. Either remove it, declare the "
+                    "[backup.datasets.external_executor] whose signed receipt "
+                    "claims it, or declare "
+                    "[backup.datasets.row_count_verification] naming the tables, "
+                    "expectation source and tolerance for this facility to "
+                    "observe itself",
                     where=table.path,
                     code=UNPERFORMABLE_VERIFICATION,
                 )
+        if row_count_verification is not None and "row_counts" not in verify:
+            raise SpecError(
+                f"dataset {code!r} declares `row_count_verification` but does "
+                "not declare `row_counts` in `verify`. A verification contract "
+                "nothing requires is dead configuration nobody will notice "
+                "drift from",
+                where=(
+                    row_count_table.path if row_count_table is not None else table.path
+                ),
+                code=ROW_COUNT_VERIFICATION_ORPHANED,
+            )
         if kind == "postgres" and "schema" not in verify:
             raise SpecError(
                 "a postgres dataset must verify 'schema'; a restore that produces "
@@ -1612,6 +1698,7 @@ class BackupDataset:
             verify=verify,
             lineage=lineage,
             external_executor=executor,
+            row_count_verification=row_count_verification,
         )
 
 
@@ -1621,6 +1708,9 @@ class BackupDataset:
 #: the contract.
 UNKNOWN_VERIFICATION: Final = "backup.verification.unknown"
 UNPERFORMABLE_VERIFICATION: Final = "backup.verification.unperformable"
+ROW_COUNT_VERIFICATION_ORPHANED: Final = (
+    "backup.verification.row_count_verification_orphaned"
+)
 
 
 @dataclass(frozen=True, slots=True)
