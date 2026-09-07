@@ -105,18 +105,10 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .errors import PreconditionFailed, StepFailed
-from .host_source import (
-    DEFAULT_CANDIDATE_RECEIPTS_DIR,
-    HostSource,
-    InstalledMetadata,
-    installed_distribution_version,
-    require_host_source,
-    resolve_committed_candidate_receipt,
-)
+from .host_source import HostSource, require_host_source
 from .recovery import (
     RESTORE_PROCEDURE,
     Adjudication,
@@ -303,8 +295,6 @@ class RecoveryExecutor:
         *,
         source_evidence: CatalogEvidence,
         product_image: str,
-        host_source_metadata: InstalledMetadata | None = None,
-        host_source_receipts_dir: str | Path = DEFAULT_CANDIDATE_RECEIPTS_DIR,
     ) -> None:
         self._spec = spec
         self._manifest = manifest
@@ -317,50 +307,36 @@ class RecoveryExecutor:
                 "restore nothing has started the real application against is a "
                 "database that was copied rather than a system that recovered"
             )
-        # THE SAME SEAM `engine.run.Executor` keeps, and nothing wider.
+        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE, for the identical
+        # reason `engine.run.Executor.__init__` accepts none — see that
+        # class's constructor comment for the full account of why a prior
+        # repair (`host_source_metadata` plus a receipt resolved from an
+        # operator-named directory) was itself a live bypass, not a closure
+        # of one: `CandidateReceipt` and `InstalledMetadata` are both
+        # caller-authored data, and a caller supplying mutually agreeing
+        # values for both stated the same digest on both sides of the
+        # comparison exactly as the original `host_source_installed=` did.
         #
-        # `_do_fresh_target` (below) is this class's first effect — creating a
-        # cluster — and Boundary 4's ruling ("the same prerequisite covers
+        # `_do_fresh_target` (below) is this class's first effect — creating
+        # a cluster — and Boundary 4's ruling ("the same prerequisite covers
         # every mutating executor path") applies to it exactly as it applies
-        # to `Executor.run`/`rollback`. The naive way to add that check here
-        # would be a `host_source_receipt`/`host_source_probe` constructor
-        # parameter a caller fills in directly — which is precisely the shape
-        # of the bypass `engine/run.py::Executor.__init__` just had removed:
-        # a caller-supplied value standing in for a digest this class must
-        # instead READ. So there is no such parameter. `host_source_metadata`
-        # is the one test seam, identical in type and purpose to `Executor`'s;
-        # the receipt is never a constructor argument at all — `_verify_host_
-        # source` below resolves it itself, from the installed version, the
-        # same way `cli.py` resolves it for `Executor`.
-        # `host_source_receipts_dir` names WHERE to look for that committed
-        # receipt (see `resolve_committed_candidate_receipt`) — never WHICH
-        # receipt, and never a digest of anything.
-        self._host_source_metadata = host_source_metadata
-        self._host_source_receipts_dir = host_source_receipts_dir
+        # to `Executor.run`/`rollback`. `_verify_host_source` always calls
+        # `require_host_source(receipt=None)`: there is no receipt this class
+        # could have gotten from anywhere authenticated, so it always
+        # refuses, with a typed refusal and zero effects.
         self._host_source: HostSource | None = None
 
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE, called before this class's first effect.
 
-        Same shape as `engine.run.Executor._verify_host_source`: the receipt
-        is RESOLVED, from the installed version, against the committed
-        directory — never handed in — and the installed artifact is always
-        read for real (through `host_source_metadata` when a test supplies
-        one, through the real interpreter otherwise). Nothing here accepts an
-        artifact digest or a launcher digest directly.
+        Same shape as `engine.run.Executor._verify_host_source`, and the same
+        posture: SAFETY-ONLY. There is no seam by which a caller supplies a
+        receipt or an installed-artifact reading, so this always refuses —
+        `NO_RECEIPT` against a genuine installed artifact, `ABSENT`/
+        `WRONG_KIND` otherwise. Trusted provenance is a separate piece of
+        work, not started here.
         """
-        version = installed_distribution_version(metadata=self._host_source_metadata)
-        receipt = (
-            resolve_committed_candidate_receipt(
-                version, receipts_dir=self._host_source_receipts_dir
-            )
-            if version is not None
-            else None
-        )
-        self._host_source = require_host_source(
-            receipt=receipt,
-            metadata=self._host_source_metadata,
-        )
+        self._host_source = require_host_source(receipt=None)
 
     def run(self, bundle: Mapping[str, Any]) -> RecoveryOutcome:
         """Restore, adjudicate, prove — or destroy and say why."""

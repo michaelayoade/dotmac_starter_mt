@@ -117,7 +117,6 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from typing import Any, Final, Protocol, runtime_checkable
 
 from .digest import CANONICAL_ALGORITHM, Digest
@@ -125,7 +124,6 @@ from .errors import PreconditionFailed, SpecError
 
 __all__ = [
     "ABSENT",
-    "DEFAULT_CANDIDATE_RECEIPTS_DIR",
     "DISAGREES",
     "DISTRIBUTION",
     "MALFORMED_SOURCE_REVISION",
@@ -136,10 +134,8 @@ __all__ = [
     "InstalledArtifact",
     "InstalledMetadata",
     "candidate_receipt_from_mapping",
-    "installed_distribution_version",
     "read_installed_artifact",
     "require_host_source",
-    "resolve_committed_candidate_receipt",
 ]
 
 #: The distribution whose artifact this module is about. Its own, by name:
@@ -563,32 +559,6 @@ def read_installed_artifact(
     )
 
 
-def installed_distribution_version(
-    distribution: str = DISTRIBUTION,
-    *,
-    metadata: InstalledMetadata | None = None,
-) -> str | None:
-    """The installed version of `distribution`, or `None` if it is absent.
-
-    A narrower reading than `read_installed_artifact`: it asks only the first
-    of the two questions `InstalledMetadata` can answer, and never raises for
-    any of the reasons the full reading does (no RECORD, no direct_url.json,
-    an editable or directory install). It exists so a caller that needs the
-    version BEFORE it can even ask for an artifact digest — to resolve which
-    committed candidate receipt to look for, see
-    `resolve_committed_candidate_receipt` — does not have to survive or
-    suppress refusals that are not its concern. The authoritative refusal for
-    an uninstalled or unreadable distribution still comes from
-    `read_installed_artifact`/`require_host_source`, called separately; a
-    `None` here changes nothing about what that call will find.
-    """
-    reader = metadata if metadata is not None else _ImportlibMetadata()
-    try:
-        return reader.version(distribution)
-    except LookupError:
-        return None
-
-
 # ── the binding ─────────────────────────────────────────────────────────────
 
 
@@ -728,55 +698,3 @@ def require_host_source(
         artifact_id=receipt.artifact_id,
         read_from=reading.read_from,
     )
-
-
-# ── resolving the receipt from a committed location ─────────────────────────
-
-#: Where the committed `CandidateArtifact.v1` receipts live by default,
-#: relative to wherever this process is invoked from — the same convention
-#: `cli.py`'s `--descriptor` and every other path this facility reads already
-#: use. A caller may point `resolve_committed_candidate_receipt` at a
-#: different directory (an on-host deploy directory that mirrors this one
-#: document, per ADR-0070's rendered-assets model, is not a checkout of this
-#: repository), but WHICH FILE is read for a given installed version is never
-#: a caller choice — only WHERE to look for the file that version derives.
-DEFAULT_CANDIDATE_RECEIPTS_DIR: Final = "docs/inventories"
-
-
-def resolve_committed_candidate_receipt(
-    version: str,
-    *,
-    receipts_dir: str | Path = DEFAULT_CANDIDATE_RECEIPTS_DIR,
-) -> CandidateReceipt | None:
-    """The committed `CandidateArtifact.v1` for `version`, or `None`.
-
-    Replaces a caller-chosen file PATH with a caller-chosen DIRECTORY plus a
-    filename this function derives itself from `version` — a fact read from
-    the interpreter (`read_installed_artifact`'s own `version`), never
-    supplied by whoever is asking for a receipt. Before this, a caller could
-    name ANY file as the candidate receipt; anyone who could read a host's
-    `direct_url.json` could author a document whose `source_sha` and `sha256`
-    matched it and pass `require_host_source`'s transitive-link check with a
-    receipt describing nothing that was ever built. Deriving the filename from
-    the version closes that: producing an admitted receipt for version V now
-    requires committing `foundation-candidate-V.json` to the tree, which is a
-    reviewed change, not a file dropped anywhere a flag can point.
-
-    Returns `None`, exactly like the free-path loader it replaces returned for
-    a missing file, when no receipt is committed for this version —
-    `require_host_source` refuses that absence with `NO_RECEIPT`, unchanged.
-    """
-    path = Path(receipts_dir) / f"foundation-candidate-{version}.json"
-    if not path.is_file():
-        return None
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise PreconditionFailed(
-            f"cannot read the committed host-source receipt {path}: {exc}"
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise PreconditionFailed(
-            f"the committed host-source receipt {path} is not valid JSON: {exc}"
-        ) from exc
-    return candidate_receipt_from_mapping(document, where=str(path))

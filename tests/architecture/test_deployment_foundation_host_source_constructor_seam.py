@@ -1,33 +1,38 @@
 """No parameter of `Executor.__init__` or `RecoveryExecutor.__init__` lets a
-caller state the artifact digest or the launcher digest directly.
+caller state the artifact digest or the launcher digest, by ANY route.
 
-## The defect this closes
+## The defect this closes — twice, now
 
-`Executor.__init__` used to accept `host_source_installed` (a pre-built
+Round 1: `Executor.__init__` accepted `host_source_installed` (a pre-built
 `InstalledArtifact`, carrying the artifact digest itself) and
 `host_source_probe` (a callable standing in for the launcher's source-tree
-digest), and `_verify_host_source` forwarded both straight into
-`require_host_source` as `installed=`/`source_tree_digest=`. A caller passing
-`installed=InstalledArtifact(artifact_digest=X, ...)` alongside a receipt
-naming `sha256=X` was admitted without either value ever being read from the
-running interpreter or launcher — the CHANGELOG called both "test-only
-override hooks", but nothing enforced that: any real caller could supply them.
+digest), forwarded straight into `require_host_source` as `installed=`/
+`source_tree_digest=`.
 
-`tests/architecture/test_deployment_foundation_host_source_coverage.py` proves
-`_verify_host_source` is CALLED from every mutating entry point. It never
-inspected what that call was fed — a gate that fires is not the same claim as
-a gate that cannot be handed its own answer. This file is that second claim,
-proved structurally rather than by exhausting every possible caller: it reads
-`Executor.__init__`'s and `RecoveryExecutor.__init__`'s actual parameter
-lists via `ast` and asserts the forbidden names are simply not there.
+Round 2, found by an independent review at exact head `541cee5d`: removing
+those two and keeping `host_source_receipt`/`host_source_metadata` was the
+SAME bypass respelled. `CandidateReceipt` is a plain frozen dataclass
+carrying `artifact_digest` directly, constructible by anyone; `InstalledMetadata`
+is a Protocol whose `read_text("direct_url.json")` returns a caller-chosen
+string that becomes the offered digest. A caller supplying both, mutually
+agreeing, stated the SAME digest on both sides of `require_host_source`'s one
+comparison — byte-for-byte the round-1 admission, with a `json.dumps` in
+between.
 
-`RecoveryExecutor` never had `host_source_installed`/`host_source_probe` to
-begin with — it is a NEW seam (Boundary 4's ruling extended to this class,
-see `recovery_execution.py::RecoveryExecutor._verify_host_source`) — so its
-half of this guard is a permanent invariant rather than a regression proof:
-nothing here may ever add a parameter that hands over a digest directly, and
-`RecoveryExecutor` additionally takes no `host_source_receipt` constructor
-argument at all — the receipt is resolved internally, never accepted.
+Michael's ruling: BOTH parameters are also removed, from BOTH classes, with
+nothing put in their place. There is no test-only seam left on either
+constructor at all. This file's forbidden set now covers every name that
+has, at some point, let a caller state a digest or its two ingredients
+(receipt, metadata) directly.
+
+`tests/architecture/test_deployment_foundation_host_source_coverage.py` (and
+its `RecoveryExecutor` sibling) prove `_verify_host_source` is CALLED from
+every mutating entry point. Neither ever inspected what that call was fed —
+a gate that fires is not the same claim as a gate that cannot be handed its
+own answer. This file is that second claim, proved structurally rather than
+by exhausting every possible caller: it reads `Executor.__init__`'s and
+`RecoveryExecutor.__init__`'s actual parameter lists via `ast` and asserts
+the forbidden names are simply not there.
 """
 
 from __future__ import annotations
@@ -47,13 +52,20 @@ RECOVERY_EXECUTION_PY = (
     / "recovery_execution.py"
 )
 
-#: Parameters that hand a caller the ability to STATE a digest directly,
-#: rather than have it read. Neither may exist on either constructor, ever.
-_FORBIDDEN_DIGEST_PARAMS = frozenset({"host_source_installed", "host_source_probe"})
-
-#: The one seam that must remain: an `InstalledMetadata` reader, which stands
-#: in for WHERE a digest is read from, never for the digest itself.
-_REQUIRED_TEST_SEAM = "host_source_metadata"
+#: Parameters that let a caller state an artifact/launcher digest, or either
+#: of the two ingredients (`CandidateReceipt`, `InstalledMetadata`) that
+#: combine to state one. NONE of these may exist on either constructor,
+#: ever, until trusted provenance (checked against distinct, non-caller-
+#: controlled trust roots) is built as its own separate piece of work.
+_FORBIDDEN_HOST_SOURCE_PARAMS = frozenset(
+    {
+        "host_source_installed",
+        "host_source_probe",
+        "host_source_receipt",
+        "host_source_metadata",
+        "host_source_receipts_dir",
+    }
+)
 
 
 def _init_param_names(class_name: str, tree: ast.Module, *, path: Path) -> set[str]:
@@ -78,71 +90,56 @@ def _init_param_names(class_name: str, tree: ast.Module, *, path: Path) -> set[s
 # ── the named proof, on the real files ──────────────────────────────────────
 
 
-def test_executor_init_has_no_parameter_that_states_a_digest_directly() -> None:
+def test_executor_init_accepts_no_host_source_parameter_at_all() -> None:
     tree = ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY))
     params = _init_param_names("Executor", tree, path=RUN_PY)
 
-    present_forbidden = params & _FORBIDDEN_DIGEST_PARAMS
+    present_forbidden = params & _FORBIDDEN_HOST_SOURCE_PARAMS
     assert present_forbidden == set(), (
         f"Executor.__init__ still accepts {sorted(present_forbidden)}, which "
-        "hands a caller the ability to state an artifact or launcher digest "
-        "directly instead of having it read — this is the live bypass "
-        "Boundary 4's follow-up ruling closes"
-    )
-    assert _REQUIRED_TEST_SEAM in params, (
-        f"Executor.__init__ no longer accepts {_REQUIRED_TEST_SEAM!r} at all; "
-        "the one legitimate test seam (an InstalledMetadata reader) must "
-        "remain even though the two digest-stating hooks must not"
+        "lets a caller state an artifact/launcher digest, or the two "
+        "ingredients (a CandidateReceipt, an InstalledMetadata) that combine "
+        "to state one, directly instead of having it read"
     )
 
 
-def test_recovery_executor_init_has_no_parameter_that_states_a_digest_directly() -> (
-    None
-):
+def test_recovery_executor_init_accepts_no_host_source_parameter_at_all() -> None:
     tree = ast.parse(
         RECOVERY_EXECUTION_PY.read_text(encoding="utf-8"),
         filename=str(RECOVERY_EXECUTION_PY),
     )
     params = _init_param_names("RecoveryExecutor", tree, path=RECOVERY_EXECUTION_PY)
 
-    present_forbidden = params & _FORBIDDEN_DIGEST_PARAMS
+    present_forbidden = params & _FORBIDDEN_HOST_SOURCE_PARAMS
     assert present_forbidden == set(), (
-        f"RecoveryExecutor.__init__ accepts {sorted(present_forbidden)} — "
-        "the same bypass shape closed on Executor, reintroduced here"
-    )
-    assert "host_source_receipt" not in params, (
-        "RecoveryExecutor.__init__ accepts host_source_receipt: the ruling "
-        "for this class specifically is that the receipt is RESOLVED "
-        "internally, from the installed version, never handed in by a "
-        "caller — a receipt parameter here is the same class of bypass by a "
-        "different name"
-    )
-    assert _REQUIRED_TEST_SEAM in params, (
-        f"RecoveryExecutor.__init__ does not accept {_REQUIRED_TEST_SEAM!r}; "
-        "without it there is no way to admit a genuine install in a test"
+        f"RecoveryExecutor.__init__ still accepts {sorted(present_forbidden)} "
+        "— the same bypass shape closed on Executor, reintroduced here"
     )
 
 
 # ── sensitivity: the plant is NAMED ─────────────────────────────────────────
 
 
-def test_the_guard_names_a_planted_digest_stating_parameter() -> None:
+def test_the_guard_names_a_planted_regrowth_of_the_removed_seam() -> None:
     """PLANTED, in memory. A synthetic `Executor` whose `__init__` regrows
-    exactly the removed shape must be caught, and caught BY NAME rather than
-    merely triggering a generic failure."""
+    the exact "narrowed but still forgeable" shape the independent review
+    found (`host_source_receipt`/`host_source_metadata`, with the two
+    round-1 parameters also present for good measure) must be caught, and
+    caught BY NAME."""
     source = (
         "class Executor:\n"
         "    def __init__(self, spec, effects, grant, *, "
         "host_source_receipt=None, host_source_installed=None, "
-        "host_source_metadata=None, host_source_probe=None):\n"
+        "host_source_metadata=None, host_source_probe=None, "
+        "host_source_receipts_dir=None):\n"
         "        pass\n"
     )
-    tree = ast.parse(source, filename="<plant: regrown digest-stating params>")
+    tree = ast.parse(source, filename="<plant: regrown host-source seam>")
     params = _init_param_names("Executor", tree, path=Path("<plant>"))
 
-    present_forbidden = params & _FORBIDDEN_DIGEST_PARAMS
-    assert present_forbidden == _FORBIDDEN_DIGEST_PARAMS, (
-        "the plant does not exhibit the shape being detected: expected both "
+    present_forbidden = params & _FORBIDDEN_HOST_SOURCE_PARAMS
+    assert present_forbidden == _FORBIDDEN_HOST_SOURCE_PARAMS, (
+        "the plant does not exhibit the shape being detected: expected all "
         f"forbidden params present, found {sorted(present_forbidden)}"
     )
 
@@ -152,22 +149,26 @@ def test_the_guard_names_a_planted_digest_stating_parameter() -> None:
 
 def test_the_guard_stays_silent_on_the_repaired_shape() -> None:
     """NEAR-MISS, MUST BE SILENT, and EXERCISED rather than assumed: a
-    synthetic `__init__` carrying ONLY the legitimate receipt and metadata
-    parameters — the exact post-repair shape — must not be flagged."""
+    synthetic `__init__` carrying only ORDINARY, unrelated parameters — the
+    exact post-repair shape, where NOTHING host-source-related remains at
+    all — must not be flagged."""
     source = (
         "class Executor:\n"
         "    def __init__(self, spec, effects, grant, *, "
-        "host_source_receipt=None, host_source_metadata=None):\n"
+        "sleep=None, evidence_policy=None):\n"
         "        pass\n"
     )
     tree = ast.parse(source, filename="<near-miss: repaired shape>")
     params = _init_param_names("Executor", tree, path=Path("<near-miss>"))
 
-    assert params & _FORBIDDEN_DIGEST_PARAMS == set(), (
-        "the near-miss plant was wrongly flagged: it carries neither "
-        "forbidden parameter"
+    assert params & _FORBIDDEN_HOST_SOURCE_PARAMS == set(), (
+        "the near-miss plant was wrongly flagged: it carries no host-source "
+        "parameter of any kind"
     )
-    assert _REQUIRED_TEST_SEAM in params
+    assert params == {
+        "sleep",
+        "evidence_policy",
+    }, "the near-miss plant was not exercised as the shape it claims to be"
 
 
 def test_the_real_classes_are_actually_found() -> None:

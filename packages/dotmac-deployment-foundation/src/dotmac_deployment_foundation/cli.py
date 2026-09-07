@@ -34,7 +34,6 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to a checker
     from .execution_bindings import ExecutionBindings
     from .execution_plan import HostPrestateV1
     from .exposure import ExposureEffects, VerificationReport
-    from .host_source import CandidateReceipt
 
 from .authorization import OPERATIONS
 from .errors import (
@@ -43,7 +42,6 @@ from .errors import (
     RenderDrift,
     SpecError,
 )
-from .host_source import DEFAULT_CANDIDATE_RECEIPTS_DIR
 from .spec import ProductDeploymentSpec
 
 EXIT_OK = 0
@@ -511,44 +509,6 @@ def _recovery_receipts(pairs: list[str]) -> dict[str, object]:
     return receipts
 
 
-def _resolve_host_source_receipt(receipts_dir: str) -> CandidateReceipt | None:
-    """Resolve the committed `CandidateArtifact.v1` naming THIS build, or `None`.
-
-    Boundary 4's half of the ruling: `cli.py` loads the candidate receipt and
-    hands it to the executor; the executor is what actually calls
-    `require_host_source` (see `engine/run.py::Executor._verify_host_source`).
-    Loading nothing here is not a bypass — it is `receipt=None`, and
-    `require_host_source` refuses that with `NO_RECEIPT` exactly as it refuses
-    every other absent or disagreeing input. There is deliberately no separate
-    "is this flag required" check in the CLI: duplicating that decision here
-    would be a second place the rule could drift from the one the executor
-    actually enforces.
-
-    Previously this read a caller-CHOSEN FILE (`--host-source-receipt PATH`):
-    anyone who could read a host's own `direct_url.json` could author a
-    document naming the SAME `sha256` and pass `require_host_source`'s
-    transitive-link check with a receipt describing bytes nobody built. This
-    instead reads the INSTALLED VERSION from the interpreter (the same fact
-    `require_host_source` itself reads) and derives the filename from it —
-    `receipts_dir` names only WHERE to look, never WHICH file, so admitting a
-    receipt for version V still requires `foundation-candidate-V.json` to be
-    a committed document, not a path handed on the command line.
-    """
-    from .host_source import (
-        installed_distribution_version,
-        resolve_committed_candidate_receipt,
-    )
-
-    version = installed_distribution_version()
-    if version is None:
-        # No installed distribution to resolve a version for. `Executor`'s
-        # own `require_host_source` call will raise the authoritative refusal
-        # a moment later (`ABSENT`); returning `None` here lets that one call
-        # remain the single place this failure is reported.
-        return None
-    return resolve_committed_candidate_receipt(version, receipts_dir=receipts_dir)
-
-
 def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.plan import build_plan, format_plan
 
@@ -570,7 +530,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     bindings = _load_bindings(args)
     grant = _require_grant(args, spec, "deploy", bindings=bindings)
-    host_source_receipt = _resolve_host_source_receipt(args.host_source_receipts_dir)
     effects = _build_effects(spec, args, bindings=bindings)
     # THE MIDDLE TERM, RENDERED AND HANDED OVER. Nothing here chooses the
     # authorized digest -- that rides on the grant, which took it from the
@@ -595,11 +554,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         effects,
         grant,
         execution_plan=execution_plan,
-        # LOADED HERE, VERIFIED IN THE EXECUTOR. `cli.py` only reads the file
-        # off disk; `Executor._verify_host_source` is what actually calls
-        # `require_host_source`, against the installed distribution it reads
-        # for itself — passing a receipt is not passing a verdict.
-        host_source_receipt=host_source_receipt,
         # Receipts are HANDED OVER (one `--recovery-receipt CODE=PATH` per
         # externally executed dataset); the VERIFIERS and the trust policy come
         # from the assembly's discovered bindings, because this facility ships
@@ -1206,7 +1160,6 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     # let a single decision make a change and then erase it.
     bindings = _load_bindings(args)
     grant = _require_grant(args, spec, "rollback", bindings=bindings)
-    host_source_receipt = _resolve_host_source_receipt(args.host_source_receipts_dir)
     effects = _build_effects(spec, args, bindings=bindings)
     # A SEPARATE plan too, and for the same reason: one descriptor yields a
     # different plan per operation, so a deploy's frozen digest must not
@@ -1225,8 +1178,6 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         effects,
         grant,
         execution_plan=execution_plan,
-        # Same rule as `cmd_deploy`: loaded here, verified inside the executor.
-        host_source_receipt=host_source_receipt,
         evidence_policy=bindings.evidence_policy if bindings else None,
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
@@ -1443,20 +1394,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     deploy.add_argument(
-        "--host-source-receipts-dir",
-        default=DEFAULT_CANDIDATE_RECEIPTS_DIR,
-        help=(
-            "directory holding committed CandidateArtifact.v1 receipts, "
-            f"default {DEFAULT_CANDIDATE_RECEIPTS_DIR!r}. The receipt actually "
-            "read is 'foundation-candidate-<installed version>.json' inside "
-            "it -- this flag names WHERE to look, never WHICH file; the "
-            "filename is always derived from the version installed on this "
-            "host, never chosen by a caller. The executor refuses without a "
-            "committed receipt for that version (NO_RECEIPT); this flag does "
-            "not skip the check"
-        ),
-    )
-    deploy.add_argument(
         "--recovery-receipt",
         action="append",
         default=[],
@@ -1572,16 +1509,6 @@ def build_parser() -> argparse.ArgumentParser:
             "path to the Platform CP authorization receipt permitting this "
             "operation on this descriptor and target. REQUIRED with "
             "--execute; the flag alone is intent, not permission"
-        ),
-    )
-    rollback.add_argument(
-        "--host-source-receipts-dir",
-        default=DEFAULT_CANDIDATE_RECEIPTS_DIR,
-        help=(
-            "directory holding committed CandidateArtifact.v1 receipts. Same "
-            "rule as `deploy`: the file actually read is derived from the "
-            "installed version, never named directly, and the executor "
-            "refuses without one"
         ),
     )
     rollback.add_argument(

@@ -19,26 +19,46 @@ assertions are about obedience and ordering, not about judgement:
   restores and cannot run the application is a copy;
 - and the happy path walks all ten steps in the contract's order.
 
-## Deliberately NOT tested here: reachability
+## `RecoveryExecutor.run` now refuses UNCONDITIONALLY — read this before editing
 
-This slice ships the executor and nothing that can call it. There is no CLI
-subcommand and no `recover` member in `authorization.OPERATIONS`, so a test
-asserting "the CLI can recover" would be asserting a thing that must not exist
-yet. The vocabulary widening and the authorization binding are the next slice,
-in that order, because a tuple widened before its executor exists authorizes an
-operation nothing can perform.
+An independent review at `541cee5d` found that the host-source seam this file
+used to admit through (`host_source_metadata=`/`host_source_receipts_dir=`,
+resolving a receipt from an operator-named directory) was the SAME exploit
+shape closed on `engine.run.Executor`, respelled. Michael's ruling removed
+BOTH parameters from `RecoveryExecutor.__init__` entirely — see
+`recovery_execution.py::RecoveryExecutor._verify_host_source`, which now
+always calls `require_host_source(receipt=None)` and therefore always
+refuses, with a typed refusal and zero effects, in every environment.
+
+So `RecoveryExecutor(...).run(...)` can no longer reach `_do_fresh_target` or
+any step after it — not in this sandbox, not anywhere, until trusted
+provenance (a separate piece of work, not started here) lands. Every test
+below that used to assert on `RecoveryExecutor(...).run(bundle=...)`'s
+OUTCOME (the ten-step happy path, the DESTROY-before-inspection proof, the
+catalog-mismatch stop, the unready-image failure) is testing behaviour that
+lives BELOW the gate, inside the ten step handlers `run()` dispatches to.
+Per Michael's guidance ("test post-gate behaviour by exercising the
+underlying steps/pure functions directly rather than through the executor"),
+`_drive_steps` below replicates `run()`'s dispatch loop verbatim MINUS the
+`_verify_host_source()` call, and every such test now calls that instead of
+`.run(...)`.
+
+**This does not touch, patch, subclass or bypass `run()` or
+`_verify_host_source` in ANY way** — `run()` itself is never called by these
+tests any more, and its own unconditional refusal is proved separately, on
+its own, in the "the host-source gate" section below. `_drive_steps` is test
+code that exercises the same private step methods `run()` calls, in the same
+order, from outside the gate `run()` enforces — it is not `run()` with the
+gate removed, because nothing calls it AS `run()`.
 """
 
 from __future__ import annotations
 
-import json
-import tempfile
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
-from dotmac_deployment_foundation.errors import PreconditionFailed
+from dotmac_deployment_foundation.errors import PreconditionFailed, StepFailed
 from dotmac_deployment_foundation.host_source import (
     ABSENT,
     DISAGREES,
@@ -50,6 +70,7 @@ from dotmac_deployment_foundation.recovery import (
     CatalogEvidence,
     Disposition,
     RestoreAttempt,
+    restore_plan,
 )
 from dotmac_deployment_foundation.recovery_execution import (
     RecoveryEffects,
@@ -58,11 +79,6 @@ from dotmac_deployment_foundation.recovery_execution import (
     RestoreTarget,
 )
 
-from tests.unit.test_deployment_foundation_host_source import (
-    VERSION,
-    FakeInstall,
-    _receipt_document,
-)
 from tests.unit.test_deployment_foundation_recovery_bundle import (
     _evidence,
     _manifest,
@@ -70,33 +86,6 @@ from tests.unit.test_deployment_foundation_recovery_bundle import (
 )
 
 HOST_SOURCE_CODES = {ABSENT, WRONG_KIND, DISAGREES, NO_RECEIPT}
-
-#: A committed-shaped receipts directory, built ONCE for this module — the
-#: same genuine-admit shape `host_source_stance.py` builds for `Executor`,
-#: adapted to `RecoveryExecutor`'s seam: it resolves its OWN receipt from a
-#: directory (see `RecoveryExecutor._verify_host_source`), rather than
-#: accepting one as a constructor argument, so a test admits it by pointing
-#: the resolver at a real committed-shaped document, not by injecting an
-#: already-parsed `CandidateReceipt`.
-_HOST_SOURCE_RECEIPTS_DIR = Path(
-    tempfile.mkdtemp(prefix="dotmac-recovery-execution-host-source-")
-)
-(_HOST_SOURCE_RECEIPTS_DIR / f"foundation-candidate-{VERSION}.json").write_text(
-    json.dumps(_receipt_document()), encoding="utf-8"
-)
-
-
-def _valid_host_source_kwargs() -> dict[str, Any]:
-    """Fresh `RecoveryExecutor(...)` keyword arguments, admitted by the real
-    gate — the exact same `require_host_source` code path
-    `test_deployment_foundation_host_source.py::
-    test_a_genuine_artifact_matching_its_receipt_is_accepted` proves, reached
-    through a real on-disk resolve rather than an injected object."""
-    return {
-        "host_source_metadata": FakeInstall(),
-        "host_source_receipts_dir": _HOST_SOURCE_RECEIPTS_DIR,
-    }
-
 
 CLEAN = RestoreAttempt(exit_status=0, tables_present=45, duration_seconds=12)
 
@@ -181,8 +170,34 @@ def _executor(effects: RecordingRecoveryEffects) -> RecoveryExecutor:
         effects,
         source_evidence=_evidence(),
         product_image=IMAGE,
-        **_valid_host_source_kwargs(),
     )
+
+
+def _drive_steps(
+    executor: RecoveryExecutor, bundle: Mapping[str, Any]
+) -> RecoveryOutcome:
+    """Exercise the ten step handlers directly — see the module docstring.
+
+    A byte-for-byte replica of `RecoveryExecutor.run`'s dispatch loop, MINUS
+    the `_verify_host_source()` call at its top. This is TEST code calling
+    `executor`'s own private `_dispatch` method (the same one `run()` calls);
+    it does not modify, patch, or subclass `RecoveryExecutor`, and `run()`
+    itself — the only place the host-source gate lives — is never invoked
+    here and is never made to skip anything.
+    """
+    outcome = RecoveryOutcome()
+    procedure = restore_plan(executor._spec, executor._manifest)
+    completed: list[str] = []
+    try:
+        for spec in procedure:
+            executor._dispatch(spec.step, bundle, outcome, completed)
+            completed.append(spec.step.value)
+    except StepFailed as exc:
+        outcome.failure = str(exc)
+    except PreconditionFailed as exc:
+        outcome.failure = str(exc)
+    outcome.steps_completed = tuple(completed)
+    return outcome
 
 
 # ── the seam is a protocol a product can satisfy ────────────────────────────
@@ -195,11 +210,12 @@ def test_the_recording_effects_satisfies_the_protocol() -> None:
 
 
 # ── the happy path: all ten steps, in the contract's order ──────────────────
+# (below the host-source gate; see `_drive_steps` in the module docstring)
 
 
 def test_a_clean_restore_walks_every_step_of_the_declared_procedure() -> None:
     effects = RecordingRecoveryEffects()
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
     assert outcome.failure == "", outcome.failure
     assert outcome.proved is True
     assert outcome.destroyed is False
@@ -217,7 +233,7 @@ def test_the_procedure_is_read_from_the_contract_not_copied() -> None:
     or this fails — which is the point of driving `restore_plan`'s output rather
     than a list in the executor."""
     effects = RecordingRecoveryEffects()
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
     assert len(outcome.steps_completed) == len(RESTORE_PROCEDURE) == 10
 
 
@@ -233,7 +249,7 @@ def test_a_partial_restore_is_destroyed_before_anything_inspects_it() -> None:
     `adjudicate_restore`'s; performing it is the executor's.
     """
     effects = RecordingRecoveryEffects(attempt=VENDOR_CP_PARTIAL)
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
 
     assert outcome.adjudication is not None
     assert outcome.adjudication.disposition is Disposition.DESTROY
@@ -257,7 +273,7 @@ def test_a_clean_exit_is_not_destroyed() -> None:
     """The positive control. Without it, the refusal above is equally
     consistent with an executor that destroys every target it makes."""
     effects = RecordingRecoveryEffects()
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
     assert outcome.destroyed is False
     assert effects.destroyed == []
     assert outcome.adjudication is not None
@@ -278,7 +294,7 @@ def test_a_catalog_that_differs_from_the_bundle_stops_the_recovery() -> None:
         }
     )
     effects = RecordingRecoveryEffects(restored=lost_roles)
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
     assert outcome.proved is False
     assert outcome.findings, "the findings must be carried, not just the failure"
     assert "prove_catalog" not in outcome.steps_completed
@@ -289,42 +305,22 @@ def test_an_image_that_never_becomes_ready_fails_the_recovery() -> None:
     """A database that restores and cannot run the application is a copy, not a
     recovery."""
     effects = RecordingRecoveryEffects(image_ready=False)
-    outcome = _executor(effects).run(bundle={})
+    outcome = _drive_steps(_executor(effects), bundle={})
     assert outcome.proved is False
     assert "did not become ready" in outcome.failure
     assert "emit_receipt" not in outcome.steps_completed
 
 
-# ── the host-source gate: Boundary 4's ruling extended to this executor ─────
-#
-# `_do_fresh_target` is this class's first EFFECT — creating a cluster — and
-# the same rule that covers `engine.run.Executor.run`/`rollback` covers it:
-# a wrong-artifact host must not reach any mutation, however briefly. Unlike
-# `Executor`, this class accepts no receipt at all as a constructor argument
-# — `_verify_host_source` resolves it itself, from the installed version, so
-# there is no parameter here a caller could use to hand over an already-built
-# claim.
+# ── the host-source gate: SAFETY-ONLY, unconditional, no admit path ─────────
 
 
 def test_a_bare_recovery_executor_refuses_by_default() -> None:
-    """THE HOLE THIS SECTION CLOSES. An executor built with NO host-source
-    kwargs reads the REAL installed distribution and resolves against the
-    REAL default receipts directory — no fake, no override — and refuses,
-    because nothing in this sandbox (nor, per `pyproject.toml`'s
-    `develop = true`, this repository's own CI unit-test job) is a
-    non-editable install with a committed receipt behind it.
-
-    The refusal's CODE is asserted to be one of `host_source`'s own four,
-    which is what proves THIS gate fired rather than some other refusal
-    happening to come first."""
+    """`RecoveryExecutor.run` calls `_verify_host_source` before its first
+    effect, which always calls `require_host_source(receipt=None)` — there is
+    no parameter through which a caller could supply anything else, so this
+    always refuses, in every environment."""
     effects = RecordingRecoveryEffects()
-    executor = RecoveryExecutor(
-        _spec(),
-        _manifest(),
-        effects,
-        source_evidence=_evidence(),
-        product_image=IMAGE,
-    )
+    executor = _executor(effects)
     with pytest.raises(PreconditionFailed) as refusal:
         executor.run(bundle={})
     assert refusal.value.code in HOST_SOURCE_CODES, (
@@ -336,71 +332,28 @@ def test_a_bare_recovery_executor_refuses_by_default() -> None:
     ), f"the gate did not fire before the first effect: {effects.calls}"
 
 
-def test_a_recovery_executor_pointed_at_an_uncommitted_receipts_dir_refuses() -> None:
-    """The other shape of the same hole: a real-shaped `FakeInstall` but an
-    empty receipts directory — `NO_RECEIPT` specifically, so this is "no
-    committed document for this version" rather than "nothing was installed
-    at all"."""
-    effects = RecordingRecoveryEffects()
-    executor = RecoveryExecutor(
-        _spec(),
-        _manifest(),
-        effects,
-        source_evidence=_evidence(),
-        product_image=IMAGE,
-        host_source_metadata=FakeInstall(),
-        host_source_receipts_dir="/nonexistent-dotmac-receipts-dir",
-    )
-    with pytest.raises(PreconditionFailed) as refusal:
-        executor.run(bundle={})
-    assert refusal.value.code == NO_RECEIPT
-    assert effects.calls == []
-
-
-def test_valid_host_source_proceeds_past_the_gate_to_the_first_effect() -> None:
-    """COMPOSITION PROOF. Without this, the refusal tests above could be
-    passing because the gate refuses UNCONDITIONALLY. Proceeding past it is
-    observed as `create_fresh_target` — the first real effect — actually
-    being reached."""
-    effects = RecordingRecoveryEffects()
-    outcome = _executor(effects).run(bundle={})
-    assert "create_fresh_target" in effects.calls
-    assert outcome.proved is True, outcome.failure
-
-
-def test_the_host_source_gate_fires_before_the_first_effect(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Direct call-order proof. `_verify_host_source` calls the unqualified
-    `require_host_source`, resolved from `recovery_execution`'s module
-    globals at call time — monkeypatching that module attribute intercepts
-    every call this class makes, exactly as the `Executor` gate test does for
-    `engine.run`."""
-    import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
-
-    calls: list[str] = []
-    real_require = recovery_execution_module.require_host_source
-
-    def require_spy(**kwargs):  # type: ignore[no-untyped-def]
-        calls.append("host_source")
-        return real_require(**kwargs)
-
-    monkeypatch.setattr(recovery_execution_module, "require_host_source", require_spy)
-
-    effects = RecordingRecoveryEffects()
-    outcome = _executor(effects).run(bundle={})
-
-    assert calls == ["host_source"], calls
-    assert outcome.proved is True, outcome.failure
-    # `effects.calls[0]` is the FIRST effect this executor performs
-    # (`create_fresh_target`, from `_do_fresh_target`). The host-source call
-    # above happened before `run()` reached the dispatch loop at all, so it
-    # necessarily preceded it — asserted directly rather than left implicit.
-    assert effects.calls[0] == "create_fresh_target"
+def test_recovery_executor_init_accepts_no_host_source_parameter() -> None:
+    """THE NEGATIVE CONTROL the independent review demanded, this class's
+    half. There is no `host_source_metadata`/`host_source_receipts_dir`/
+    `host_source_receipt` parameter left on `RecoveryExecutor.__init__` at
+    all — supplying any of them, even ones a caller believes agree with each
+    other, is not silently ignored, it is a `TypeError` at construction."""
+    with pytest.raises(TypeError):
+        RecoveryExecutor(  # type: ignore[call-arg]
+            _spec(),
+            _manifest(),
+            RecordingRecoveryEffects(),
+            source_evidence=_evidence(),
+            product_image=IMAGE,
+            host_source_metadata=object(),
+        )
 
 
 def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """NON-VACUITY. A `require_host_source` that is imported but never
-    CALLED would let every refusal test above fail for an unrelated reason
-    and let this one pass by accident."""
+    """NON-VACUITY, on the refusal path — the only path that exists. A
+    `require_host_source` that is imported but never CALLED would let the
+    refusal test above fail for an unrelated reason and let this one pass by
+    accident."""
     from unittest.mock import MagicMock
 
     import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
@@ -410,11 +363,13 @@ def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # typ
     monkeypatch.setattr(recovery_execution_module, "require_host_source", spy)
 
     effects = RecordingRecoveryEffects()
-    _executor(effects).run(bundle={})
+    with pytest.raises(PreconditionFailed):
+        _executor(effects).run(bundle={})
 
     assert spy.call_count == 1, (
-        f"require_host_source was called {spy.call_count} time(s), not exactly " "once"
+        f"require_host_source was called {spy.call_count} time(s), not " "exactly once"
     )
+    assert effects.calls == []
 
 
 # ── construction-time refusals ──────────────────────────────────────────────
@@ -445,7 +400,7 @@ def test_a_target_with_no_identifier_is_refused() -> None:
 
 def test_the_outcome_records_what_happened_including_a_destruction() -> None:
     effects = RecordingRecoveryEffects(attempt=VENDOR_CP_PARTIAL)
-    evidence = _executor(effects).run(bundle={}).as_evidence()
+    evidence = _drive_steps(_executor(effects), bundle={}).as_evidence()
     assert evidence["schema"] == "RecoveryExecution.v1"
     assert evidence["disposition"] == "destroy"
     assert evidence["destroyed"] is True

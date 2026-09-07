@@ -38,7 +38,6 @@ import base64
 import hashlib
 import json
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -55,10 +54,8 @@ from dotmac_deployment_foundation.host_source import (
     HostSource,
     InstalledArtifact,
     candidate_receipt_from_mapping,
-    installed_distribution_version,
     read_installed_artifact,
     require_host_source,
-    resolve_committed_candidate_receipt,
 )
 
 # ── the genuine article, in the exact shapes measured on a real install ─────
@@ -823,78 +820,20 @@ def test_the_artifact_digest_and_the_source_tree_digest_are_never_equal() -> Non
     assert reading.artifact_digest != reading.installed_content_digest
 
 
-# ── resolving the receipt from a committed location, not a free path ───────
-
-
-def test_installed_distribution_version_reads_the_supplied_metadata() -> None:
-    assert installed_distribution_version(metadata=FakeInstall()) == VERSION
-
-
-def test_installed_distribution_version_is_none_when_nothing_is_installed() -> None:
-    """NEAR-MISS shape check: this must return `None`, never raise — the
-    caller resolving a receipt path has a `read_installed_artifact`/
-    `require_host_source` call downstream that raises the AUTHORITATIVE
-    refusal; duplicating it here would be a second place that rule could
-    drift from the one actually enforced."""
-    assert installed_distribution_version(metadata=FakeInstall(installed=False)) is None
-
-
-def test_resolve_committed_candidate_receipt_reads_the_committed_document(
-    tmp_path,
-) -> None:
-    """PLANTED — the admit control for defect 2's fix. A committed document
-    at the DERIVED path parses exactly like one loaded by a caller-chosen
-    path used to."""
-    (tmp_path / f"foundation-candidate-{VERSION}.json").write_text(
-        json.dumps(_receipt_document()), encoding="utf-8"
-    )
-
-    receipt = resolve_committed_candidate_receipt(VERSION, receipts_dir=tmp_path)
-
-    assert receipt is not None
-    assert receipt.facility == DISTRIBUTION
-    assert receipt.version == VERSION
-    assert receipt.artifact_digest == Digest.parse(WHEEL_SHA256)
-
-
-def test_resolve_committed_candidate_receipt_is_none_for_an_uncommitted_version(
-    tmp_path,
-) -> None:
-    """The exact shape a free-path `--host-source-receipt` COULD have named
-    any file for. Here, no file at the derived path means no receipt — there
-    is no fallback that searches, guesses, or accepts a near-miss filename."""
-    (tmp_path / f"foundation-candidate-{VERSION}.json").write_text(
-        json.dumps(_receipt_document()), encoding="utf-8"
-    )
-
-    assert resolve_committed_candidate_receipt("9.9.9", receipts_dir=tmp_path) is None
-
-
-def test_resolve_committed_candidate_receipt_cannot_be_pointed_at_an_arbitrary_file(
-    tmp_path,
-) -> None:
-    """PLANTED — the exact bypass this replaces. A caller who authors a
-    document for a DIFFERENT version and tries to pass it off as this
-    version's receipt (the free-path attack: name any file, any content)
-    finds it invisible: the filename is derived from `version`, never taken
-    from the document or from a caller-chosen name."""
-    forged = _receipt_document()
-    forged["version"] = "9.9.9"
-    (tmp_path / "anything-i-like.json").write_text(json.dumps(forged), encoding="utf-8")
-
-    assert resolve_committed_candidate_receipt(VERSION, receipts_dir=tmp_path) is None
-
-
-def test_resolve_committed_candidate_receipt_reads_the_real_committed_directory() -> (
-    None
-):
-    """The reader is pointed at the REAL default directory, not only at a
-    fixture — mirroring `test_the_committed_receipts_on_disk_parse` for the
-    resolver rather than the parser."""
-    receipt = resolve_committed_candidate_receipt(
-        "0.3.0a5",
-        receipts_dir=Path(__file__).resolve().parents[2] / "docs" / "inventories",
-    )
-    assert receipt is not None
-    assert receipt.facility == DISTRIBUTION
-    assert len(receipt.source_revision) == 40
+# ── NOTE: the committed-receipt resolver is GONE, not merely untested ───────
+#
+# `resolve_committed_candidate_receipt`/`installed_distribution_version`/
+# `DEFAULT_CANDIDATE_RECEIPTS_DIR` (and their tests, formerly here) were
+# removed from `host_source.py` entirely. An independent review at `541cee5d`
+# found that "name a file" becoming "name a directory containing a file whose
+# name you can derive" narrowed the CALLER'S choice without closing the
+# underlying admission: a caller-authored `CandidateReceipt` paired with a
+# caller-authored `InstalledMetadata` that agrees with it is the same
+# exploit regardless of where the receipt document physically lives. Nothing
+# replaces this mechanism here; `require_host_source(receipt=...)` still
+# takes a receipt as a parameter for ITS OWN direct callers (this file's own
+# tests, below) — that is a legitimate low-level seam for testing the pure
+# function — but neither mutating executor resolves or accepts one any more.
+# See `engine/run.py::Executor.__init__` and
+# `recovery_execution.py::RecoveryExecutor.__init__` for the current,
+# safety-only posture: both always call `require_host_source(receipt=None)`.
