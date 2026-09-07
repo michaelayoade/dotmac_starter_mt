@@ -1,394 +1,454 @@
-"""The fail-closed two-attestation verifier — step 3 of the host-source chain.
-
-## Why every test in this file failed before `trusted_host_source.py` existed
-
-At the commit this file is added, `grep -r verify_trusted_host_source` over the
-whole repository returns nothing outside this file and the module itself, and
-`packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/`
-contains no `trusted_host_source.py`. Every test below fails at COLLECTION
-with `ModuleNotFoundError` — there was no code to pass it.
-
-## What "genuine" means here, honestly
-
-No real production signer for either half exists anywhere reachable in this
-repository (see the package `CHANGELOG.md`'s "Trusted provenance was
-investigated" and "A caller who cannot produce two independent signatures..."
-entries). So the `SignatureVerifier` used below is a REAL keyed-MAC scheme
-(`hmac.new(secret, message, sha256)`, checked with `hmac.compare_digest`) over
-TWO DISTINCT secret keys — not a magic string like the codebase's own
-`"probe-valid"` fixtures. A party without the correct secret genuinely cannot
-produce a signature `HMACVerifier.verify` accepts; this is as real an
-admission and refusal proof as is possible without a production key management
-system, and the module under test never sees the secrets at all — only
-`key_id`, `message` and `signature`, exactly as `evidence.SignatureVerifier`
-already requires of a real caller.
-
-## The one-caller negative control (test 3 below)
-
-Both prior admission attempts on this chain failed because a single caller
-could supply both halves of the comparison from data it authored itself.
-`test_one_key_signing_both_attestations_is_refused_though_each_verifies`
-is the direct analogue here: ONE key signs BOTH documents, EACH signature
-verifies genuinely (the HMAC is correct), and the pair is still refused —
-`SAME_KEY_SIGNED_BOTH`, checked before either envelope's key is even matched
-against a trust root, so the refusal does not depend on `DistinctTrustRoots`
-having been configured correctly.
-"""
+"""V2 custody contract tests; these do not pretend that positive admission exists."""
 
 from __future__ import annotations
 
+import base64
+import dataclasses
 import hashlib
 import hmac
-import json
-from typing import Any
+from datetime import UTC, datetime
+from typing import ClassVar
 
+import dotmac_deployment_foundation.trusted_host_source as trusted_host_source
 import pytest
+from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.trusted_host_source import (
-    ATTESTATIONS_DISAGREE,
     CANDIDATE_ATTESTATION_PURPOSE,
     INSTALLED_OBSERVATION_PURPOSE,
-    KEY_NOT_TRUSTED,
-    OBSERVATION_ABSENT,
-    OBSERVATION_MALFORMED,
-    ROOT_PURPOSE_MISMATCH,
-    SAME_KEY_SIGNED_BOTH,
-    TRUST_ROOTS_NOT_DISTINCT,
-    AttestationTrustRoot,
-    DistinctTrustRoots,
-    SignedAttestationEnvelope,
-    verify_trusted_host_source,
-)
-from dotmac_deployment_foundation.trusted_host_source import (
-    SIGNATURE_INVALID as VERIFY_SIGNATURE_INVALID,
+    AttestationEnvelopeV2,
+    AttestationTrustPolicy,
+    AttestationTrustRootV2,
+    CandidateAttestationSubjectV2,
+    InstalledHostAttestationSubjectV2,
+    verify_attestation_pair,
 )
 
-CANDIDATE_KEY = "release-ci-2026"
-INSTALLED_KEY = "deploy-agent-2026"
-ROGUE_KEY = "rogue-holder"
-
-SECRETS: dict[str, bytes] = {
-    CANDIDATE_KEY: b"candidate-signing-secret",
-    INSTALLED_KEY: b"installed-observation-signing-secret",
-    ROGUE_KEY: b"a-key-no-trust-root-accepts",
-}
+NOW = datetime(2026, 9, 7, tzinfo=UTC)
+CANDIDATE_KEY, HOST_KEY = b"candidate", b"host"
+CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
+HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
+ALGORITHM = "ed25519"
 
 
-class HMACVerifier:
-    """A REAL keyed-MAC `SignatureVerifier` — genuinely unforgeable without
-    the matching secret, unlike the codebase's own `"probe-valid"` doubles.
-    """
+class Verifier:
+    keys: ClassVar[dict[str, bytes]] = {
+        CANDIDATE_FP: CANDIDATE_KEY,
+        HOST_FP: HOST_KEY,
+    }
 
-    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool:
-        secret = SECRETS.get(key_id)
-        if secret is None:
-            return False
-        expected = hmac.new(secret, message, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, signature)
+    def verify(
+        self,
+        *,
+        public_key: bytes,
+        algorithm: str,
+        message: bytes,
+        signature: str,
+    ) -> bool:
+        key = public_key
+        return (
+            algorithm == ALGORITHM
+            and key is not None
+            and hmac.compare_digest(
+                signature, hmac.new(key, message, hashlib.sha256).hexdigest()
+            )
+        )
 
 
-def _sign(key_id: str, document: dict[str, Any]) -> SignedAttestationEnvelope:
-    secret = SECRETS[key_id]
-    message = json.dumps(document, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
+def _root(
+    fp: str, purpose: str, domain: str, **changes: object
+) -> AttestationTrustRootV2:
+    values = {
+        "public_key_fingerprint": fp,
+        "public_key_base64": base64.b64encode(Verifier.keys[fp]).decode(),
+        "purpose": purpose,
+        "custody_domain": domain,
+        "issuer": "test-issuer",
+        "key_id": "rotatable-label",
+        "algorithm": ALGORITHM,
+        "trust_root_version": "control-v3",
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2027-01-01T00:00:00Z",
+    }
+    values.update(changes)
+    return AttestationTrustRootV2(**values)  # type: ignore[arg-type]
+
+
+def _policy() -> AttestationTrustPolicy:
+    return AttestationTrustPolicy(
+        [_root(CANDIDATE_FP, CANDIDATE_ATTESTATION_PURPOSE, "starter-release")],
+        [_root(HOST_FP, INSTALLED_OBSERVATION_PURPOSE, "target-local-host")],
+        "starter-release-workflow",
+        "host:canonical-a",
+    )  # type: ignore[arg-type]
+
+
+def _envelope(
+    *, purpose: str, fp: str, domain: str, subject: dict[str, str], observation_id: str
+) -> AttestationEnvelopeV2:
+    audience = (
+        "starter-release-workflow"
+        if purpose == CANDIDATE_ATTESTATION_PURPOSE
+        else "host:canonical-a"
     )
-    signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
-    return SignedAttestationEnvelope(
-        document=document, signature=signature, key_id=key_id
+    envelope = AttestationEnvelopeV2(
+        "TrustedHostAttestation.v2",
+        purpose,
+        "test-issuer",
+        "rotatable-label",
+        ALGORITHM,
+        fp,
+        domain,
+        "control-v3",
+        "2026-09-07T00:00:00Z",
+        "2026-09-07T00:10:00Z",
+        audience,
+        observation_id,
+        subject,
+        "placeholder",
     )
+    signature = hmac.new(
+        Verifier.keys[fp], envelope.signed_bytes(), hashlib.sha256
+    ).hexdigest()
+    return dataclasses.replace(envelope, signature=signature)
 
 
-CANDIDATE_DOCUMENT: dict[str, Any] = {
-    "schema": "CandidateArtifact.v1",
-    "facility": "dotmac-deployment-foundation",
-    "version": "0.4.0a2",
-    "sha256": "b" * 64,
-    "source_sha": "c" * 40,
-    "repository": "michaelayoade/dotmac_starter_mt",
-    "run_id": "111",
-    "artifact_id": "222",
-}
-
-INSTALLED_DOCUMENT: dict[str, Any] = {
-    "schema": "InstalledHostObservation.v1",
-    "distribution": "dotmac-deployment-foundation",
-    "version": "0.4.0a2",
-    "sha256": "b" * 64,
-    "observed_at": "2026-09-08T00:00:00Z",
-}
-
-
-def _roots() -> DistinctTrustRoots:
-    return DistinctTrustRoots(
-        candidate=AttestationTrustRoot(
+def _pair() -> tuple[AttestationEnvelopeV2, AttestationEnvelopeV2]:
+    candidate = CandidateAttestationSubjectV2(
+        "dotmac-deployment-foundation",
+        "0.4.0a2",
+        Digest.parse("a" * 64, where="test"),
+        "b" * 40,
+        "dotmac/foundation",
+        "123",
+        "456",
+    )
+    digest = Digest.of(
+        __import__("json")
+        .dumps(candidate.canonical_document(), sort_keys=True, separators=(",", ":"))
+        .encode()
+    )
+    host = InstalledHostAttestationSubjectV2(
+        "host:canonical-a",
+        candidate.package,
+        candidate.version,
+        candidate.wheel_sha256,
+        digest,
+    )
+    return (
+        _envelope(
             purpose=CANDIDATE_ATTESTATION_PURPOSE,
-            accepted_key_ids=frozenset({CANDIDATE_KEY}),
+            fp=CANDIDATE_FP,
+            domain="starter-release",
+            subject=candidate.canonical_document(),
+            observation_id="candidate-observation",
         ),
-        installed=AttestationTrustRoot(
+        _envelope(
             purpose=INSTALLED_OBSERVATION_PURPOSE,
-            accepted_key_ids=frozenset({INSTALLED_KEY}),
+            fp=HOST_FP,
+            domain="target-local-host",
+            subject=host.canonical_document(),
+            observation_id="host-observation",
         ),
     )
 
 
-def _genuine_pair() -> tuple[SignedAttestationEnvelope, SignedAttestationEnvelope]:
-    return _sign(CANDIDATE_KEY, dict(CANDIDATE_DOCUMENT)), _sign(
-        INSTALLED_KEY, dict(INSTALLED_DOCUMENT)
-    )
-
-
-# ── admit control ────────────────────────────────────────────────────────────
-
-
-def test_a_genuine_two_authority_pair_is_admitted() -> None:
-    """Two DIFFERENT keys, each accepted only by its OWN trust root, each
-    producing a real HMAC over its own canonical document: this is the first
-    thing this chain has ever been able to prove real rather than
-    fixture-shaped, within the honest limit stated in this file's docstring —
-    the secrets are real, the roots are disjoint, and nothing here is a
-    caller-constructible "already verified" dataclass.
-    """
-    candidate, installed = _genuine_pair()
-    verifier = HMACVerifier()
-
-    binding = verify_trusted_host_source(
-        candidate=candidate,
-        candidate_verifier=verifier,
-        installed=installed,
-        installed_verifier=verifier,
-        trust_roots=_roots(),
-    )
-
-    assert binding.candidate_key_id == CANDIDATE_KEY
-    assert binding.installed_key_id == INSTALLED_KEY
-    assert binding.candidate_receipt.facility == "dotmac-deployment-foundation"
-    assert binding.installed_observation.distribution == "dotmac-deployment-foundation"
-    assert str(binding.candidate_receipt.artifact_digest) == str(
-        binding.installed_observation.artifact_digest
-    )
-
-
-# ── the one-caller negative control — the single most important test here ──
-
-
-def test_one_key_signing_both_attestations_is_refused_though_each_verifies() -> None:
-    """ONE key, held by one party, signs BOTH documents. Each individual
-    signature is genuinely valid HMAC output — `HMACVerifier.verify` would
-    accept either one alone. The pair is still refused, because a candidate
-    attestation and an installed-host observation signed by the same key are
-    one party's word twice, not two independent readings. This is the exact
-    shape both prior admission attempts on this chain had (a caller
-    constructing both halves of the comparison itself) in different clothing,
-    and it is refused BEFORE either key is checked against a trust root, so
-    the refusal does not depend on `DistinctTrustRoots` having been
-    configured correctly elsewhere.
-    """
-    candidate = _sign(CANDIDATE_KEY, dict(CANDIDATE_DOCUMENT))
-    installed = _sign(CANDIDATE_KEY, dict(INSTALLED_DOCUMENT))  # same key, wrong slot
-    verifier = HMACVerifier()
-
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
+def test_pair_binds_complete_candidate_to_expected_host() -> None:
+    candidate, installed = _pair()
+    assert (
+        verify_attestation_pair(
             candidate=candidate,
-            candidate_verifier=verifier,
             installed=installed,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == SAME_KEY_SIGNED_BOTH
-
-
-def test_the_near_miss_of_two_distinct_keys_stays_silent() -> None:
-    """The sensitivity proof's other half: the SAME two documents, signed by
-    the two DIFFERENT keys the trust roots actually name, must NOT trip
-    `SAME_KEY_SIGNED_BOTH` — proving the check discriminates on same-vs-
-    distinct authorship rather than refusing every pair unconditionally.
-    """
-    candidate, installed = _genuine_pair()
-    verifier = HMACVerifier()
-
-    binding = verify_trusted_host_source(
-        candidate=candidate,
-        candidate_verifier=verifier,
-        installed=installed,
-        installed_verifier=verifier,
-        trust_roots=_roots(),
+        is None
     )
-    assert binding.candidate_key_id != binding.installed_key_id
 
 
-# ── distinct trust roots — construction-time, not merely at call time ──────
+def test_subject_snapshot_does_not_change_after_input_mutation() -> None:
+    _, installed = _pair()
+    mutable_subject = dict(installed.subject_mapping())
+    snapshot = dataclasses.replace(installed, subject=mutable_subject)
+    before = snapshot.signed_bytes()
+    mutable_subject["version"] = "caller-mutated"
+    assert snapshot.signed_bytes() == before
+    parsed = InstalledHostAttestationSubjectV2.from_mapping(snapshot.subject_mapping())
+    assert parsed.version == "0.4.0a2"
 
 
-def test_two_trust_roots_that_share_an_accepted_key_refuse_at_construction() -> None:
-    """The PLANT: a candidate root and an installed root that both accept
-    `"shared-key"`. Two policies that could both be satisfied by one signer
-    are one trust root wearing two names, and this is refused before any
-    envelope is even looked at — `verify_trusted_host_source` never runs.
-    """
-    with pytest.raises(SpecError) as excinfo:
-        DistinctTrustRoots(
-            candidate=AttestationTrustRoot(
-                purpose=CANDIDATE_ATTESTATION_PURPOSE,
-                accepted_key_ids=frozenset({"shared-key"}),
-            ),
-            installed=AttestationTrustRoot(
-                purpose=INSTALLED_OBSERVATION_PURPOSE,
-                accepted_key_ids=frozenset({"shared-key"}),
-            ),
+@pytest.mark.parametrize(
+    "candidate, installed, expected",
+    [
+        (None, "installed", "trusted-host-source-attestation-absent"),
+        ("candidate", None, "trusted-host-source-attestation-absent"),
+    ],
+)
+def test_missing_halves_refuse_distinctly_from_all_other_failures(
+    candidate: object, installed: object, expected: str
+) -> None:
+    good_candidate, good_installed = _pair()
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=good_candidate if candidate else None,
+            installed=good_installed if installed else None,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == TRUST_ROOTS_NOT_DISTINCT
+    assert raised.value.code == expected
 
 
-def test_two_trust_roots_with_disjoint_keys_construct_cleanly() -> None:
-    """The NEAR-MISS for the check above: disjoint accepted-key sets
-    construct without incident. Proven, not assumed — `_roots()` is called by
-    every admitting test in this file, so this is exercised, not merely
-    plausible.
-    """
-    roots = _roots()
-    assert roots.candidate.accepted_key_ids.isdisjoint(roots.installed.accepted_key_ids)
-
-
-def test_a_root_declaring_the_wrong_purpose_in_the_candidate_slot_is_refused() -> None:
-    """A root minted for the installed-observation slot must not be usable in
-    the candidate slot, however its accepted keys are configured.
-    """
-    with pytest.raises(SpecError) as excinfo:
-        DistinctTrustRoots(
-            candidate=AttestationTrustRoot(
-                purpose=INSTALLED_OBSERVATION_PURPOSE,  # wrong slot, deliberately
-                accepted_key_ids=frozenset({CANDIDATE_KEY}),
-            ),
-            installed=AttestationTrustRoot(
-                purpose=INSTALLED_OBSERVATION_PURPOSE,
-                accepted_key_ids=frozenset({INSTALLED_KEY}),
-            ),
-        )
-    assert excinfo.value.code == ROOT_PURPOSE_MISMATCH
-
-
-# ── absence — the "gate before the first effect" arm ────────────────────────
-
-
-def test_absent_candidate_attestation_is_refused() -> None:
-    _, installed = _genuine_pair()
-    verifier = HMACVerifier()
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
-            candidate=None,
-            candidate_verifier=verifier,
-            installed=installed,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
-        )
-    assert excinfo.value.code == OBSERVATION_ABSENT
-
-
-def test_absent_installed_observation_is_refused() -> None:
-    candidate, _ = _genuine_pair()
-    verifier = HMACVerifier()
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
-            candidate=candidate,
-            candidate_verifier=verifier,
-            installed=None,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
-        )
-    assert excinfo.value.code == OBSERVATION_ABSENT
-
-
-# ── forged evidence — a valid-shaped document, no valid signature ──────────
-
-
-def test_a_document_edited_after_signing_fails_signature_verification() -> None:
-    """The PLANT: the candidate document is tampered with AFTER signing (the
-    digest field is changed), so the stale signature no longer covers it —
-    this is what "forged evidence" looks like against a real MAC: not a
-    missing signature, a signature over different bytes than are presented.
-    """
-    candidate, installed = _genuine_pair()
-    tampered_document = dict(candidate.document)
-    tampered_document["sha256"] = "f" * 64
-    forged = SignedAttestationEnvelope(
-        document=tampered_document,
-        signature=candidate.signature,
-        key_id=candidate.key_id,
+def test_unknown_material_and_invalid_signature_have_exact_refusals() -> None:
+    candidate, installed = _pair()
+    unknown = dataclasses.replace(
+        candidate, public_key_fingerprint="sha256:" + "e" * 64
     )
-    verifier = HMACVerifier()
-
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
-            candidate=forged,
-            candidate_verifier=verifier,
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=unknown,
             installed=installed,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == VERIFY_SIGNATURE_INVALID
-
-
-def test_a_valid_signature_from_an_untrusted_key_is_refused() -> None:
-    """A key nobody's trust root names can still produce a genuinely valid
-    HMAC over the canonical bytes — `HMACVerifier.verify` returns `True` for
-    it. Refused anyway: a valid signature from a stranger is still a
-    stranger.
-    """
-    _, installed = _genuine_pair()
-    rogue = _sign(ROGUE_KEY, dict(CANDIDATE_DOCUMENT))
-    verifier = HMACVerifier()
-
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
-            candidate=rogue,
-            candidate_verifier=verifier,
+    assert raised.value.code == "trusted-host-source-key-not-trusted"
+    broken = dataclasses.replace(candidate, signature="not-a-signature")
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=broken,
             installed=installed,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == KEY_NOT_TRUSTED
+    assert raised.value.code == "trusted-host-source-signature-invalid"
 
 
-# ── disagreement — two authentic, independently signed, conflicting claims ──
+def test_policy_coerces_collection_and_refuses_same_material_under_other_id() -> None:
+    roots = [_root(CANDIDATE_FP, CANDIDATE_ATTESTATION_PURPOSE, "starter-release")]
+    policy = AttestationTrustPolicy(
+        roots,
+        [_root(HOST_FP, INSTALLED_OBSERVATION_PURPOSE, "target-local-host")],
+        "starter-release-workflow",
+        "host:canonical-a",
+    )  # type: ignore[arg-type]
+    roots.clear()
+    assert len(policy.candidate_roots) == 1 and isinstance(
+        policy.candidate_roots, tuple
+    )
+    with pytest.raises(SpecError, match="public material"):
+        AttestationTrustPolicy(
+            (_root(CANDIDATE_FP, CANDIDATE_ATTESTATION_PURPOSE, "starter-release"),),
+            (_root(CANDIDATE_FP, INSTALLED_OBSERVATION_PURPOSE, "target-local-host"),),
+            "starter-release-workflow",
+            "host:canonical-a",
+        )
 
 
-def test_two_authentically_signed_attestations_about_different_bytes_disagree() -> None:
-    """Both signatures verify, both keys are trusted, both keys differ — and
-    the two authorities describe DIFFERENT artifact digests. Neither prior
-    attempt on this chain ever reached this arm, because neither ever
-    achieved two independently authenticated readings to compare.
-    """
-    candidate = _sign(CANDIDATE_KEY, dict(CANDIDATE_DOCUMENT))
-    disagreeing_document = dict(INSTALLED_DOCUMENT)
-    disagreeing_document["sha256"] = "e" * 64
-    installed = _sign(INSTALLED_KEY, disagreeing_document)
-    verifier = HMACVerifier()
+def test_policy_refuses_shared_custody_even_with_distinct_material() -> None:
+    with pytest.raises(SpecError, match="custody"):
+        AttestationTrustPolicy(
+            (_root(CANDIDATE_FP, CANDIDATE_ATTESTATION_PURPOSE, "shared"),),
+            (_root(HOST_FP, INSTALLED_OBSERVATION_PURPOSE, "shared"),),
+            "starter-release-workflow",
+            "host:canonical-a",
+        )
 
-    with pytest.raises(PreconditionFailed) as excinfo:
-        verify_trusted_host_source(
+
+@pytest.mark.parametrize(
+    "root_changes", [{"revoked": True}, {"not_after": "2026-02-01T00:00:00Z"}]
+)
+def test_revocation_and_validity_refuse(root_changes: dict[str, object]) -> None:
+    candidate, installed = _pair()
+    policy = AttestationTrustPolicy(
+        (
+            _root(
+                CANDIDATE_FP,
+                CANDIDATE_ATTESTATION_PURPOSE,
+                "starter-release",
+                **root_changes,
+            ),
+        ),
+        (_root(HOST_FP, INSTALLED_OBSERVATION_PURPOSE, "target-local-host"),),
+        "starter-release-workflow",
+        "host:canonical-a",
+    )
+    with pytest.raises(PreconditionFailed):
+        verify_attestation_pair(
             candidate=candidate,
-            candidate_verifier=verifier,
             installed=installed,
-            installed_verifier=verifier,
-            trust_roots=_roots(),
+            verifier=Verifier(),
+            trust_policy=policy,
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == ATTESTATIONS_DISAGREE
 
 
-# ── envelope parsing refuses a document that is not a mapping ──────────────
-
-
-def test_a_stringified_document_is_refused_rather_than_silently_restringified() -> None:
-    """The exact corruption `evidence.SignedEvidenceEnvelope`'s own docstring
-    recounts (a document flattened to its Python `repr` between disk and
-    verifier, so a signature ends up checked over a restatement) is refused
-    at construction here for the identical reason.
-    """
-    with pytest.raises(SpecError) as excinfo:
-        SignedAttestationEnvelope(
-            document="{'schema': 'CandidateArtifact.v1'}",  # type: ignore[arg-type]
-            signature="deadbeef",
-            key_id=CANDIDATE_KEY,
+def test_key_id_is_bound_by_the_enrolled_root_not_a_rotation_escape() -> None:
+    candidate, installed = _pair()
+    rotated = dataclasses.replace(candidate, key_id="a-different-label")
+    rotated = dataclasses.replace(
+        rotated,
+        signature=hmac.new(
+            Verifier.keys[CANDIDATE_FP], rotated.signed_bytes(), hashlib.sha256
+        ).hexdigest(),
+    )
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=rotated,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
         )
-    assert excinfo.value.code == OBSERVATION_MALFORMED
+    assert raised.value.code == "trusted-host-source-root-binding-mismatch"
+
+
+@pytest.mark.parametrize(
+    "change, now, expected",
+    [
+        ("audience", NOW, "trusted-host-source-audience-mismatch"),
+        ("issued_at", NOW, "trusted-host-source-future"),
+        ("subject", NOW, "trusted-host-source-attestations-disagree"),
+    ],
+)
+def test_audience_future_and_subject_mismatch_refuse(
+    change: str, now: datetime, expected: str
+) -> None:
+    candidate, installed = _pair()
+    if change == "audience":
+        candidate = dataclasses.replace(candidate, audience="host:other")
+    elif change == "issued_at":
+        candidate = dataclasses.replace(candidate, issued_at="2026-09-08T00:00:00Z")
+    elif change == "subject":
+        installed = dataclasses.replace(
+            installed, subject={**installed.subject, "version": "other"}
+        )
+    candidate = dataclasses.replace(
+        candidate,
+        signature=hmac.new(
+            Verifier.keys[CANDIDATE_FP], candidate.signed_bytes(), hashlib.sha256
+        ).hexdigest(),
+    )
+    if change == "subject":
+        installed = dataclasses.replace(
+            installed,
+            signature=hmac.new(
+                Verifier.keys[HOST_FP], installed.signed_bytes(), hashlib.sha256
+            ).hexdigest(),
+        )
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=now,
+        )
+    assert raised.value.code == expected
+
+
+def test_no_preverified_result_or_v1_binding_is_public() -> None:
+    assert not hasattr(trusted_host_source, "TrustedAttestationBinding")
+    assert verify_attestation_pair.__annotations__["return"] in (None, "None")
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-09-07 00:00:00Z",
+        "2026-09-07T00:00:00+00:00",
+        "2026-09-07t00:00:00Z",
+        "2026-09-07T00:00:00z",
+    ],
+)
+def test_timestamp_aliases_are_refused(timestamp: str) -> None:
+    with pytest.raises(SpecError) as raised:
+        _root(
+            CANDIDATE_FP,
+            CANDIDATE_ATTESTATION_PURPOSE,
+            "starter-release",
+            not_before=timestamp,
+        )
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+def test_fractional_canonical_utc_timestamp_is_accepted() -> None:
+    root = _root(
+        CANDIDATE_FP,
+        CANDIDATE_ATTESTATION_PURPOSE,
+        "starter-release",
+        not_before="2026-01-01T00:00:00.123456Z",
+    )
+    assert root.not_before.endswith(".123456Z")
+
+
+@pytest.mark.parametrize("value", [None, [], "subject", {1: "non-string-key"}])
+def test_external_subject_types_are_malformed(value: object) -> None:
+    with pytest.raises(SpecError) as raised:
+        CandidateAttestationSubjectV2.from_mapping(value)
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+@pytest.mark.parametrize("coordinate", ["repository", "run_id", "artifact_id"])
+def test_candidate_artifact_coordinates_are_required(coordinate: str) -> None:
+    candidate, _ = _pair()
+    subject = dict(candidate.subject_mapping())
+    subject.pop(coordinate)
+    with pytest.raises(SpecError) as raised:
+        CandidateAttestationSubjectV2.from_mapping(subject)
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+@pytest.mark.parametrize("digest", ["a" * 64, "sha256:" + "A" * 64])
+def test_v2_wire_digests_have_one_canonical_spelling(digest: str) -> None:
+    candidate, _ = _pair()
+    subject = dict(candidate.subject_mapping())
+    subject["wheel_sha256"] = digest
+    with pytest.raises(SpecError) as raised:
+        CandidateAttestationSubjectV2.from_mapping(subject)
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+def test_public_key_bytes_must_match_the_declared_fingerprint() -> None:
+    with pytest.raises(SpecError) as raised:
+        _root(
+            CANDIDATE_FP,
+            CANDIDATE_ATTESTATION_PURPOSE,
+            "starter-release",
+            public_key_base64=base64.b64encode(HOST_KEY).decode(),
+        )
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"candidate": "not-an-envelope"},
+        {"trust_policy": "not-a-policy"},
+        {"verifier": object()},
+        {"now": "not-an-instant"},
+    ],
+)
+def test_malformed_verification_inputs_are_named(changes: dict[str, object]) -> None:
+    candidate, installed = _pair()
+    arguments: dict[str, object] = {
+        "candidate": candidate,
+        "installed": installed,
+        "verifier": Verifier(),
+        "trust_policy": _policy(),
+        "expected_host_identity": "host:canonical-a",
+        "now": NOW,
+    }
+    arguments.update(changes)
+    with pytest.raises(SpecError) as raised:
+        verify_attestation_pair(**arguments)  # type: ignore[arg-type]
+    assert raised.value.code == trusted_host_source.OBSERVATION_MALFORMED

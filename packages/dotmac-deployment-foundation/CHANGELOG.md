@@ -2,6 +2,41 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### Correction: the v1 sidecar was held before freeze; v2 is a contract, not admission
+
+The earlier `TrustedAttestationBinding` sidecar is removed.  It let key-id
+labels stand in for public key material and did not bind custody, audience,
+replay identity, root validity or the complete candidate subject.  That shape
+is not extended across an artifact boundary.
+
+`trusted_host_source.py` now defines `TrustedHostAttestation.v2`.  Each signed
+envelope binds schema/purpose, issuer, key id, algorithm, public-key
+fingerprint, custody domain, trust-root version, issued/expiry times,
+role-specific audience, observation identity and a complete immutable subject.
+Candidate subjects bind package/version/final wheel digest/source revision plus
+the CandidateArtifact.v1 `repository`/`run_id`/`artifact_id` coordinates. Host
+subjects bind the expected host identity supplied by Control, installed
+package/version/digest and the digest of that complete candidate subject. The
+authoritative owner and grammar for that host identity remain unresolved;
+caller-selected paths convey no authority. Trust is over immutable
+fingerprints, purposes and distinct custody domains, never labels. The pure
+verifier refuses aliases of the same material, shared custody,
+revocation/invalid roots, wrong purpose/audience, stale/future evidence, bad
+signatures and subject mismatch.
+
+This is only a typed parsing/testing contract. Observation identity is signed,
+but atomic replay consumption belongs to future Control/admission ownership,
+not this stateless verifier. The protected Starter release
+workflow must author candidate evidence and a distinct target-local workload
+must author host evidence; Platform transports only. Foundation holds neither
+private keys nor a network client. Control has not yet installed those bindings.
+There is consequently no positive executor admission before 0.4.0a2, no
+preverified authority result, and both executors retain their unconditional,
+zero-effect refusal. A successful verifier call proves agreement only relative
+to the supplied policy and verifier; trusted composition must source both from
+Control before that result can participate in authority. The 73 skip inventory
+is unchanged.
+
 ### A caller who cannot produce two independently authored signatures cannot pass the host-source gate — the fail-closed verifier and sidecar contract, not yet admission
 
 The entry below this one found no reachable trust root for either half of

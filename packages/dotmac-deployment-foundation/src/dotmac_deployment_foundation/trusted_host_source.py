@@ -1,564 +1,656 @@
-"""The fail-closed verifier for TWO independently authored host-source attestations.
+"""Fail-closed contract for independently-custodied host provenance.
 
-`host_source.py` answers "which Foundation is installed here" from a single
-local reading (PEP 610 `direct_url.json`) bound to a single committed
-document (`CandidateArtifact.v1`). This module is step 3 of the same chain:
-it defines the SIDECAR CONTRACT two genuinely independent authorities must
-each sign, and the verifier that admits only when BOTH sign, BOTH verify
-against their OWN declared trust root, and neither could have produced the
-other's half.
+This module does not admit an executor. Until 0.4.0a2 has independently
+produced candidate and host attestations, mutating executors retain their
+explicit ``require_host_source(receipt=None)`` refusal. These types freeze the
+successor contract; they hold no private key, discover no file, and do no I/O.
 
-## Why this is a separate module, and why it does not touch `Executor`
-
-Two prior attempts at admission both failed the SAME way: a caller could
-supply both halves of the comparison itself — a plain, caller-constructible
-`CandidateReceipt` alongside a caller-authored `InstalledMetadata.read_text`
-return value (attempt 1), or a caller-named directory holding a caller-authored
-file (attempt 2). Neither ever required the caller to possess something they
-could not simply write down. `CandidateReceipt`/`InstalledMetadata` remain, by
-design, PARSING interfaces — useful for turning bytes into a typed value, never
-authority-bearing on their own (see `host_source.py`'s own module docstring).
-
-This module changes what "supplying a value" requires:
-:class:`SignedAttestationEnvelope` is still just a parsed shape — document,
-signature, key id — and still proves nothing by itself. What proves
-something is :func:`verify_trusted_host_source`
-refusing unless EACH envelope's signature verifies against a key its OWN,
-independently declared :class:`AttestationTrustRoot` accepts, AND the two
-trust roots share no accepted key (:class:`DistinctTrustRoots`), AND the two
-envelopes were not signed by the same key. A caller who cannot produce a valid
-signature for a key a trust root accepts cannot pass this gate by writing a
-more convincing JSON document — the exact property neither prior attempt had.
-
-**This module is NOT wired into `Executor` or `RecoveryExecutor`.** Doing so
-today would require the two things a companion investigation (see this
-package's `CHANGELOG.md`, "Trusted provenance was investigated (step 3)...")
-found do not exist yet anywhere reachable by a `pip install`ed consumer: a
-real signer producing a genuine `CandidateArtifactAttestation` for the
-distribution actually being installed, and a real, independent signer
-producing a genuine `InstalledHostObservation` for the actual host. Landing
-this verifier now — fail-closed, with the sidecar contract fixed — is what lets
-those two producers and the rehearsal that composes them (future work) be
-built against a stable target rather than each inventing their own shape.
-
-## The sidecar contract
-
-Two JSON documents, each wrapped in the SAME generic envelope shape:
-
-    {
-      "document": { ... the attested facts, see below ... },
-      "signature": "<opaque, whatever the verifier understands>",
-      "key_id": "<which key signed it>"
-    }
-
-`document` for a **candidate attestation** is exactly a `CandidateArtifact.v1`
-document (`host_source.candidate_receipt_from_mapping`'s schema — unchanged,
-reused rather than duplicated). `document` for an **installed-host
-observation** is `InstalledHostObservation.v1`:
-
-    {
-      "schema": "InstalledHostObservation.v1",
-      "distribution": "dotmac-deployment-foundation",
-      "version": "0.4.0a2",
-      "sha256": "<64 lower-case hex, the wheel artifact digest>",
-      "observed_at": "2026-09-08T00:00:00Z"
-    }
-
-`sha256` is deliberately the same field name and the same subject
-`CandidateReceipt.artifact_digest` is — the wheel FILE's digest, never a
-source-tree or installed-content digest (see `host_source.py`'s `WRONG_KIND`
-discussion; that discrimination is unchanged and still lives there, applied
-by whatever future caller binds this module's result to the live host via
-`require_host_source`).
-
-## What "distinct trust roots" means here, mechanically
-
-`DistinctTrustRoots` refuses at CONSTRUCTION if the candidate root's and the
-installed root's `accepted_key_ids` overlap at all. Two roots that could both
-accept the same key are one root wearing two names — exactly the "two fields
-or two files supplied by one caller remain one reading" failure this module
-exists to close. A caller cannot construct an admitting `DistinctTrustRoots`
-by pointing two policies at the same signer, however the two documents were
-shaped.
+The candidate signer is the protected Starter release-workflow identity; the
+host signer is a distinct target-local host-attestation workload identity.
+Platform transports only. Control will later bind public-key fingerprints,
+purposes and custody domains. A key-id label is never an authority.
 """
 
 from __future__ import annotations
 
+import base64
 import dataclasses
+import hashlib
 import json
 import re
 from collections.abc import Mapping
-from typing import Any, Final
+from datetime import UTC, datetime
+from typing import Any, Final, Protocol, runtime_checkable
 
 from .digest import Digest
 from .errors import PreconditionFailed, SpecError
-from .evidence import SignatureVerifier
-from .host_source import CandidateReceipt, candidate_receipt_from_mapping
 
 __all__ = [
-    "ATTESTATIONS_DISAGREE",
+    "ATTESTATION_SCHEMA",
     "CANDIDATE_ATTESTATION_PURPOSE",
     "INSTALLED_OBSERVATION_PURPOSE",
-    "INSTALLED_OBSERVATION_SCHEMA",
+    "ATTESTATIONS_DISAGREE",
+    "AUDIENCE_MISMATCH",
+    "FUTURE",
     "KEY_NOT_TRUSTED",
     "OBSERVATION_ABSENT",
     "OBSERVATION_MALFORMED",
+    "ROOT_BINDING_MISMATCH",
+    "ROOT_NOT_VALID",
     "ROOT_PURPOSE_MISMATCH",
-    "SAME_KEY_SIGNED_BOTH",
+    "ROOT_REVOKED",
     "SIGNATURE_INVALID",
+    "STALE",
+    "SUBJECT_MISMATCH",
     "TRUST_ROOTS_NOT_DISTINCT",
-    "AttestationTrustRoot",
-    "DistinctTrustRoots",
-    "InstalledObservation",
-    "SignedAttestationEnvelope",
-    "TrustedAttestationBinding",
-    "installed_observation_from_mapping",
-    "verify_trusted_host_source",
+    "AttestationEnvelopeV2",
+    "AttestationTrustPolicy",
+    "AttestationTrustRootV2",
+    "AttestationVerifier",
+    "CandidateAttestationSubjectV2",
+    "InstalledHostAttestationSubjectV2",
+    "verify_attestation_pair",
 ]
 
-#: The ONLY purpose a trust root binding the candidate-attestation slot may
-#: declare. Not interchangeable with :data:`INSTALLED_OBSERVATION_PURPOSE` —
-#: `DistinctTrustRoots.__post_init__` refuses a root in the wrong slot, the
-#: same discipline `evidence.ReleaseEvidenceVerificationIdentity` already
-#: applies to its own single purpose.
-CANDIDATE_ATTESTATION_PURPOSE: Final = (
-    "dotmac_deployment_foundation.host_source.candidate_attestation"
-)
-
-#: The ONLY purpose a trust root binding the installed-observation slot may
-#: declare.
-INSTALLED_OBSERVATION_PURPOSE: Final = (
-    "dotmac_deployment_foundation.host_source.installed_observation"
-)
-
-INSTALLED_OBSERVATION_SCHEMA: Final = "InstalledHostObservation.v1"
-
-# ── stable refusal codes — assert the code, read the prose ─────────────────
-
-#: Either envelope was `None`. The repair names WHICH one, in the message; the
-#: code is shared because the repair family ("go get the missing attestation")
-#: is the same either way.
+ATTESTATION_SCHEMA: Final = "TrustedHostAttestation.v2"
+CANDIDATE_ATTESTATION_PURPOSE: Final = "dotmac.foundation.candidate-artifact.v2"
+INSTALLED_OBSERVATION_PURPOSE: Final = "dotmac.foundation.installed-host.v2"
 OBSERVATION_ABSENT: Final = "trusted-host-source-attestation-absent"
-
-#: An envelope's `document` does not parse as its declared schema.
 OBSERVATION_MALFORMED: Final = "trusted-host-source-attestation-malformed"
-
-#: A `DistinctTrustRoots` was constructed with a root in the wrong slot.
-ROOT_PURPOSE_MISMATCH: Final = "trusted-host-source-root-purpose-mismatch"
-
-#: `DistinctTrustRoots` was constructed with overlapping accepted key sets —
-#: the two roots are not distinct, whatever their `purpose` fields say.
 TRUST_ROOTS_NOT_DISTINCT: Final = "trusted-host-source-trust-roots-not-distinct"
-
-#: An envelope's `key_id` is not in its own slot's `accepted_key_ids`. A valid
-#: signature from a stranger is still a stranger — `evidence.accept_release_
-#: evidence` states the identical rule for the same reason.
 KEY_NOT_TRUSTED: Final = "trusted-host-source-key-not-trusted"
-
-#: The two envelopes named the SAME `key_id`. Checked directly, in addition to
-#: (never instead of) `TRUST_ROOTS_NOT_DISTINCT`: a misconfigured pair of
-#: roots that individually validate but happen to share a signer must not be
-#: rescued by this check alone, but this check still refuses it even if a
-#: caller found some way to construct overlapping roots this module's own
-#: `__post_init__` should already have refused.
-SAME_KEY_SIGNED_BOTH: Final = "trusted-host-source-same-key-signed-both"
-
-#: A signature did not verify over its envelope's canonical bytes.
 SIGNATURE_INVALID: Final = "trusted-host-source-signature-invalid"
-
-#: Both envelopes verified, independently, against distinct roots — and still
-#: describe different bytes. One of the two attestations is stale, forged in
-#: a way its own signature does not detect (an honestly-signed lie), or about
-#: a different Foundation entirely.
 ATTESTATIONS_DISAGREE: Final = "trusted-host-source-attestations-disagree"
+ROOT_PURPOSE_MISMATCH: Final = "trusted-host-source-root-purpose-mismatch"
+ROOT_BINDING_MISMATCH: Final = "trusted-host-source-root-binding-mismatch"
+ROOT_REVOKED: Final = "trusted-host-source-root-revoked"
+ROOT_NOT_VALID: Final = "trusted-host-source-root-not-valid"
+AUDIENCE_MISMATCH: Final = "trusted-host-source-audience-mismatch"
+STALE: Final = "trusted-host-source-stale"
+FUTURE: Final = "trusted-host-source-future"
+SUBJECT_MISMATCH: Final = "trusted-host-source-subject-mismatch"
+_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
+_REVISION = re.compile(r"^[0-9a-f]{40}$")
+_UTC_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
 
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+def _required(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise SpecError(f"{name} is required", code=OBSERVATION_MALFORMED)
+    return value
 
 
-# ── the generic envelope — a parsed shape, never authority-bearing alone ────
+def _instant(value: str, name: str) -> datetime:
+    if not isinstance(value, str) or not _UTC_RFC3339.fullmatch(value):
+        raise SpecError(
+            f"{name} must be canonical UTC RFC3339", code=OBSERVATION_MALFORMED
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SpecError(f"{name} must be RFC3339", code=OBSERVATION_MALFORMED) from exc
+    return parsed.astimezone(UTC)
+
+
+def _mapping(value: object, name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or isinstance(value, str | bytes):
+        raise SpecError(f"{name} must be a mapping", code=OBSERVATION_MALFORMED)
+    if any(not isinstance(key, str) for key in value):
+        raise SpecError(f"{name} keys must be strings", code=OBSERVATION_MALFORMED)
+    return value
+
+
+def _canonical(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+
+
+def _wire_digest(value: object, name: str) -> Digest:
+    text = _required(value, name)
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", text):
+        raise SpecError(
+            f"{name} must use canonical sha256:<lowercase hex> form",
+            code=OBSERVATION_MALFORMED,
+        )
+    return Digest.parse(text, where=name)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class SignedAttestationEnvelope:
-    """``{document, signature, key_id}`` — the ONE shape both attestation kinds
-    share. Mirrors `evidence.SignedEvidenceEnvelope` deliberately: the same
-    corruption that type's docstring recounts (a document silently
-    restringified between disk and verifier, so a signature is checked over a
-    restatement rather than the thing signed) is possible here too, and the
-    fix is the same — hold the parsed mapping, never the caller's string.
+class CandidateAttestationSubjectV2:
+    """Complete release subject, including CandidateArtifact.v1 coordinates."""
 
-    Holding one of these proves NOTHING was verified. It is exactly as
-    authority-free as `host_source.CandidateReceipt` — a value a test or an
-    attacker can construct by hand just as easily as a real signer can. The
-    verification happens only in :func:`verify_trusted_host_source`, against a
-    verifier and a trust root this type never sees.
-    """
-
-    document: Mapping[str, Any]
-    signature: str
-    key_id: str
+    package: str
+    version: str
+    wheel_sha256: Digest
+    source_revision: str
+    repository: str
+    run_id: str
+    artifact_id: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.document, str) or not isinstance(self.document, Mapping):
+        if not isinstance(self.wheel_sha256, Digest):
             raise SpecError(
-                "SignedAttestationEnvelope.document must be the parsed JSON "
-                f"object the signature covers, got {type(self.document).__name__}. "
-                "A stringified document is a restatement, and a signature "
-                "verified over a restatement verifies nothing",
+                "candidate wheel_sha256 must be a Digest",
                 code=OBSERVATION_MALFORMED,
             )
-        if not str(self.signature).strip():
+        for name in (
+            "package",
+            "version",
+            "source_revision",
+            "repository",
+            "run_id",
+            "artifact_id",
+        ):
+            _required(getattr(self, name), f"candidate subject {name}")
+        if not _REVISION.fullmatch(self.source_revision):
             raise SpecError(
-                "SignedAttestationEnvelope.signature is empty. An unsigned "
-                "envelope proves only that somebody could write a file",
-                code=OBSERVATION_MALFORMED,
-            )
-        if not str(self.key_id).strip():
-            raise SpecError(
-                "SignedAttestationEnvelope.key_id is empty, so no trust root "
-                "can accept or refuse it",
+                "candidate source_revision must be a 40-hex commit",
                 code=OBSERVATION_MALFORMED,
             )
 
+    def canonical_document(self) -> dict[str, str]:
+        return {
+            "package": self.package,
+            "version": self.version,
+            "wheel_sha256": str(self.wheel_sha256),
+            "source_revision": self.source_revision,
+            "repository": self.repository,
+            "run_id": self.run_id,
+            "artifact_id": self.artifact_id,
+        }
+
     @classmethod
-    def from_payload(cls, payload: Any, *, where: str) -> SignedAttestationEnvelope:
-        if not isinstance(payload, Mapping):
+    def from_mapping(cls, value: object) -> CandidateAttestationSubjectV2:
+        value = _mapping(value, "candidate subject")
+        if set(value) != {
+            "package",
+            "version",
+            "wheel_sha256",
+            "source_revision",
+            "repository",
+            "run_id",
+            "artifact_id",
+        }:
             raise SpecError(
-                f"{where}: envelope must be a JSON object", code=OBSERVATION_MALFORMED
+                "candidate subject is incomplete or widened", code=OBSERVATION_MALFORMED
             )
-        unknown = sorted(set(payload) - {"document", "signature", "key_id"})
-        if unknown:
+        return cls(
+            _required(value["package"], "candidate package"),
+            _required(value["version"], "candidate version"),
+            _wire_digest(value["wheel_sha256"], "candidate wheel_sha256"),
+            _required(value["source_revision"], "candidate source_revision"),
+            _required(value["repository"], "candidate repository"),
+            _required(value["run_id"], "candidate run_id"),
+            _required(value["artifact_id"], "candidate artifact_id"),
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class InstalledHostAttestationSubjectV2:
+    """Host observation bound to one candidate and an expected host identity."""
+
+    host_identity: str
+    package: str
+    version: str
+    wheel_sha256: Digest
+    candidate_subject_digest: Digest
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.wheel_sha256, Digest) or not isinstance(
+            self.candidate_subject_digest, Digest
+        ):
             raise SpecError(
-                f"{where}: envelope has unknown member(s) {unknown}. An "
-                "envelope carrying more than its document, signature and key "
-                "id may have been produced by something this version cannot "
-                "judge",
+                "installed digests must be Digest values",
+                code=OBSERVATION_MALFORMED,
+            )
+        for name in ("host_identity", "package", "version"):
+            _required(getattr(self, name), f"installed subject {name}")
+
+    def canonical_document(self) -> dict[str, str]:
+        return {
+            "host_identity": self.host_identity,
+            "package": self.package,
+            "version": self.version,
+            "wheel_sha256": str(self.wheel_sha256),
+            "candidate_subject_digest": str(self.candidate_subject_digest),
+        }
+
+    @classmethod
+    def from_mapping(cls, value: object) -> InstalledHostAttestationSubjectV2:
+        value = _mapping(value, "installed subject")
+        expected = {
+            "host_identity",
+            "package",
+            "version",
+            "wheel_sha256",
+            "candidate_subject_digest",
+        }
+        if set(value) != expected:
+            raise SpecError(
+                "installed subject is incomplete or widened", code=OBSERVATION_MALFORMED
+            )
+        candidate_digest = _required(
+            value["candidate_subject_digest"], "installed candidate_subject_digest"
+        )
+        if not candidate_digest.startswith("sha256:"):
+            raise SpecError(
+                "installed candidate_subject_digest must use canonical sha256: form",
                 code=OBSERVATION_MALFORMED,
             )
         return cls(
-            document=payload.get("document"),  # type: ignore[arg-type]
-            signature=str(payload.get("signature") or ""),
-            key_id=str(payload.get("key_id") or ""),
+            _required(value["host_identity"], "installed host_identity"),
+            _required(value["package"], "installed package"),
+            _required(value["version"], "installed version"),
+            _wire_digest(value["wheel_sha256"], "installed wheel_sha256"),
+            _wire_digest(candidate_digest, "installed candidate_subject_digest"),
         )
-
-    def canonical_bytes(self) -> bytes:
-        """The exact bytes a signature covers — sorted keys, tight separators.
-
-        Same rule `evidence.ReleaseEvidenceV1.canonical_bytes` and
-        `document.py`'s descriptor canonicalisation already apply, for the
-        identical reason: a signature over raw file bytes lets a harmless
-        re-serialization look like tampering.
-        """
-        return json.dumps(self.document, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-
-
-# ── the installed-observation half of the contract ──────────────────────────
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class InstalledObservation:
-    """The `InstalledHostObservation.v1` facts, and only those.
+class AttestationEnvelopeV2:
+    """Parsed signed v2 evidence, never an authority or admission result."""
 
-    Deliberately narrow, the same way `host_source.CandidateReceipt` is
-    deliberately narrow: this needs four fields to make the binding, and a
-    type that carried more would invite a later comparison against a field
-    that is not part of it.
-    """
-
-    distribution: str
-    version: str
-    artifact_digest: Digest
-    observed_at: str
-
-
-def installed_observation_from_mapping(
-    document: Mapping[str, Any], *, where: str = "installed-host observation"
-) -> InstalledObservation:
-    """Read a committed-shape `InstalledHostObservation.v1`, refusing anything else.
-
-    `SpecError`, not `PreconditionFailed`: a malformed observation is a
-    document a producer got wrong, the same split
-    `host_source.candidate_receipt_from_mapping` draws for the candidate side.
-    """
-    schema = str(document.get("schema", ""))
-    if schema != INSTALLED_OBSERVATION_SCHEMA:
-        raise SpecError(
-            f"{where}: declares schema {schema!r}, expected "
-            f"{INSTALLED_OBSERVATION_SCHEMA!r}. A mapping with a 'sha256' key "
-            "is not an installed-host observation; accepting one would make "
-            "this half of the gate satisfiable by any JSON file whose keys "
-            "happen to line up",
-            code=OBSERVATION_MALFORMED,
-        )
-    for field in ("distribution", "version", "sha256", "observed_at"):
-        if not str(document.get(field, "")).strip():
-            raise SpecError(
-                f"{where}: carries no {field!r}. Every one of the four is "
-                "load-bearing — without it the observation cannot say which "
-                "distribution, which version, which bytes, or when",
-                code=OBSERVATION_MALFORMED,
-            )
-    return InstalledObservation(
-        distribution=str(document["distribution"]),
-        version=str(document["version"]),
-        artifact_digest=Digest.parse(str(document["sha256"]), where=f"{where}.sha256"),
-        observed_at=str(document["observed_at"]),
-    )
-
-
-# ── trust roots — declared, disjoint, never inferred ────────────────────────
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class AttestationTrustRoot:
-    """Who may sign for ONE slot of this contract, and what purpose they sign for.
-
-    Same shape and same refusal `evidence.TrustPolicy` already applies to
-    `accepted_key_ids`: empty must never mean "any signer accepted", because
-    that is the most permissive setting a missing configuration could produce.
-    """
-
+    schema: str
     purpose: str
-    accepted_key_ids: frozenset[str]
+    issuer: str
+    key_id: str
+    algorithm: str
+    public_key_fingerprint: str
+    custody_domain: str
+    trust_root_version: str
+    issued_at: str
+    expires_at: str
+    audience: str
+    observation_id: str
+    subject: Mapping[str, Any]
+    signature: str
+    _subject_bytes: bytes = dataclasses.field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not str(self.purpose).strip():
+        for name in (
+            "schema",
+            "purpose",
+            "issuer",
+            "key_id",
+            "algorithm",
+            "public_key_fingerprint",
+            "custody_domain",
+            "trust_root_version",
+            "issued_at",
+            "expires_at",
+            "audience",
+            "observation_id",
+            "signature",
+        ):
+            _required(getattr(self, name), f"attestation {name}")
+        if self.schema != ATTESTATION_SCHEMA:
             raise SpecError(
-                "AttestationTrustRoot.purpose is empty", code=OBSERVATION_MALFORMED
-            )
-        if not self.accepted_key_ids:
-            raise SpecError(
-                "AttestationTrustRoot.accepted_key_ids is empty. An empty "
-                "signer set must not mean 'anyone' — configure the signers, "
-                "or this module cannot tell an authority from a stranger",
+                f"attestation schema must be {ATTESTATION_SCHEMA}",
                 code=OBSERVATION_MALFORMED,
+            )
+        if not _FINGERPRINT.fullmatch(self.public_key_fingerprint):
+            raise SpecError(
+                "attestation fingerprint must be sha256:<64 lower-case hex>",
+                code=OBSERVATION_MALFORMED,
+            )
+        if not isinstance(self.subject, Mapping) or isinstance(self.subject, str):
+            raise SpecError(
+                "attestation subject must be parsed object", code=OBSERVATION_MALFORMED
+            )
+        try:
+            subject_bytes = _canonical(dict(self.subject))
+            json.loads(subject_bytes)
+        except (TypeError, ValueError) as exc:
+            raise SpecError(
+                "attestation subject must contain JSON-only values",
+                code=OBSERVATION_MALFORMED,
+            ) from exc
+        object.__setattr__(self, "_subject_bytes", subject_bytes)
+        if _instant(self.expires_at, "expires_at") <= _instant(
+            self.issued_at, "issued_at"
+        ):
+            raise SpecError(
+                "expires_at must follow issued_at", code=OBSERVATION_MALFORMED
+            )
+
+    def signed_bytes(self) -> bytes:
+        fields = (
+            "schema",
+            "purpose",
+            "issuer",
+            "key_id",
+            "algorithm",
+            "public_key_fingerprint",
+            "custody_domain",
+            "trust_root_version",
+            "issued_at",
+            "expires_at",
+            "audience",
+            "observation_id",
+            "subject",
+        )
+        document = {name: getattr(self, name) for name in fields if name != "subject"}
+        document["subject"] = json.loads(self._subject_bytes)
+        return _canonical(document)
+
+    def subject_mapping(self) -> Mapping[str, Any]:
+        value = json.loads(self._subject_bytes)
+        if not isinstance(value, Mapping):
+            raise SpecError(
+                "attestation subject snapshot is malformed", code=OBSERVATION_MALFORMED
+            )
+        return value
+
+    @classmethod
+    def from_mapping(cls, value: object) -> AttestationEnvelopeV2:
+        value = _mapping(value, "attestation envelope")
+        fields = {field.name for field in dataclasses.fields(cls) if field.init}
+        if set(value) != fields:
+            raise SpecError(
+                "attestation envelope has missing or unknown members",
+                code=OBSERVATION_MALFORMED,
+            )
+        return cls(**{name: value[name] for name in fields})
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class AttestationTrustRootV2:
+    """Control-provided public verification identity; labels confer no trust."""
+
+    public_key_fingerprint: str
+    public_key_base64: str
+    issuer: str
+    key_id: str
+    purpose: str
+    custody_domain: str
+    algorithm: str
+    trust_root_version: str
+    not_before: str
+    not_after: str
+    revoked: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.revoked, bool):
+            raise SpecError(
+                "trust root revoked must be boolean", code=OBSERVATION_MALFORMED
+            )
+        for name in (
+            "public_key_fingerprint",
+            "public_key_base64",
+            "issuer",
+            "key_id",
+            "purpose",
+            "custody_domain",
+            "algorithm",
+            "trust_root_version",
+            "not_before",
+            "not_after",
+        ):
+            _required(getattr(self, name), f"trust root {name}")
+        if not _FINGERPRINT.fullmatch(self.public_key_fingerprint):
+            raise SpecError(
+                "trust-root fingerprint must be sha256:<64 lower-case hex>",
+                code=OBSERVATION_MALFORMED,
+            )
+        try:
+            material = base64.b64decode(self.public_key_base64, validate=True)
+        except ValueError as exc:
+            raise SpecError(
+                "trust-root public_key_base64 is not strict base64",
+                code=OBSERVATION_MALFORMED,
+            ) from exc
+        if not material or (
+            f"sha256:{hashlib.sha256(material).hexdigest()}"
+            != self.public_key_fingerprint
+        ):
+            raise SpecError(
+                "trust-root public material does not match its fingerprint",
+                code=OBSERVATION_MALFORMED,
+            )
+        if _instant(self.not_after, "root not_after") <= _instant(
+            self.not_before, "root not_before"
+        ):
+            raise SpecError(
+                "root not_after must follow not_before", code=OBSERVATION_MALFORMED
             )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class DistinctTrustRoots:
-    """The pair of roots :func:`verify_trusted_host_source` checks against.
+class AttestationTrustPolicy:
+    """Immutable roots with disjoint public material and custody domains."""
 
-    Refuses at construction — never at call time — if the two roots are not
-    actually distinct. That is the mechanical meaning of "distinct trust
-    roots, not one root twice" in this module: a `DistinctTrustRoots` that
-    admits construction is, by construction, two roots that share no key.
-    """
-
-    candidate: AttestationTrustRoot
-    installed: AttestationTrustRoot
+    candidate_roots: tuple[AttestationTrustRootV2, ...]
+    installed_roots: tuple[AttestationTrustRootV2, ...]
+    candidate_audience: str
+    installed_audience: str
 
     def __post_init__(self) -> None:
-        if self.candidate.purpose != CANDIDATE_ATTESTATION_PURPOSE:
+        try:
+            candidate_roots = tuple(self.candidate_roots)
+            installed_roots = tuple(self.installed_roots)
+        except TypeError as exc:
             raise SpecError(
-                f"DistinctTrustRoots.candidate declares purpose "
-                f"{self.candidate.purpose!r}, not "
-                f"{CANDIDATE_ATTESTATION_PURPOSE!r}. A root minted for the "
-                "installed-observation slot must not be usable in the "
-                "candidate slot — the only way to make that unrepresentable "
-                "is to refuse it here",
-                code=ROOT_PURPOSE_MISMATCH,
+                "trust-root roles must be collections",
+                code=OBSERVATION_MALFORMED,
+            ) from exc
+        object.__setattr__(self, "candidate_roots", candidate_roots)
+        object.__setattr__(self, "installed_roots", installed_roots)
+        all_roots = (*self.candidate_roots, *self.installed_roots)
+        if any(not isinstance(root, AttestationTrustRootV2) for root in all_roots):
+            raise SpecError(
+                "trust roots must be AttestationTrustRootV2 values",
+                code=OBSERVATION_MALFORMED,
             )
-        if self.installed.purpose != INSTALLED_OBSERVATION_PURPOSE:
+        if not self.candidate_roots or not self.installed_roots:
             raise SpecError(
-                f"DistinctTrustRoots.installed declares purpose "
-                f"{self.installed.purpose!r}, not "
-                f"{INSTALLED_OBSERVATION_PURPOSE!r}",
-                code=ROOT_PURPOSE_MISMATCH,
+                "both trust-root roles are required", code=OBSERVATION_MALFORMED
             )
-        shared = self.candidate.accepted_key_ids & self.installed.accepted_key_ids
-        if shared:
+        _required(self.candidate_audience, "candidate audience")
+        _required(self.installed_audience, "installed audience")
+        candidate_fps = {r.public_key_fingerprint for r in self.candidate_roots}
+        installed_fps = {r.public_key_fingerprint for r in self.installed_roots}
+        candidate_domains = {r.custody_domain for r in self.candidate_roots}
+        installed_domains = {r.custody_domain for r in self.installed_roots}
+        if candidate_fps & installed_fps or candidate_domains & installed_domains:
             raise SpecError(
-                "DistinctTrustRoots.candidate and .installed accept a shared "
-                f"key id {sorted(shared)}. Two policies that can both be "
-                "satisfied by the same signer are one trust root wearing two "
-                "names — a single party holding that key could author both "
-                "attestations, which is exactly the 'one caller, two "
-                "readings' shape this contract exists to refuse",
+                "trust roots overlap in public material or custody",
+                code=TRUST_ROOTS_NOT_DISTINCT,
+            )
+        if len(candidate_fps) != len(self.candidate_roots) or len(installed_fps) != len(
+            self.installed_roots
+        ):
+            raise SpecError(
+                "a custody role declares duplicate public-key material",
                 code=TRUST_ROOTS_NOT_DISTINCT,
             )
 
 
-# ── the result — carries only what was actually checked ─────────────────────
+@runtime_checkable
+class AttestationVerifier(Protocol):
+    """Pure crypto seam; executors must not accept this or preverified evidence."""
+
+    def verify(
+        self,
+        *,
+        public_key: bytes,
+        algorithm: str,
+        message: bytes,
+        signature: str,
+    ) -> bool: ...
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class TrustedAttestationBinding:
-    """Two independently authored, signed attestations that agree.
+def _verify(
+    envelope: AttestationEnvelopeV2,
+    verifier: AttestationVerifier,
+    roots: tuple[AttestationTrustRootV2, ...],
+    purpose: str,
+    audience: str,
+    now: datetime,
+) -> None:
+    matches = [
+        root
+        for root in roots
+        if root.public_key_fingerprint == envelope.public_key_fingerprint
+    ]
+    if not matches:
+        raise PreconditionFailed(
+            "attestation public-key material is unknown", code=KEY_NOT_TRUSTED
+        )
+    root = matches[0]
+    if root.revoked:
+        raise PreconditionFailed("attestation root is revoked", code=ROOT_REVOKED)
+    root_not_before, root_not_after = (
+        _instant(root.not_before, "root not_before"),
+        _instant(root.not_after, "root not_after"),
+    )
+    if not root_not_before <= now < root_not_after:
+        raise PreconditionFailed(
+            "attestation root is not currently valid", code=ROOT_NOT_VALID
+        )
+    if envelope.purpose != purpose or root.purpose != purpose:
+        raise PreconditionFailed(
+            "attestation purpose does not match its trusted role",
+            code=ROOT_PURPOSE_MISMATCH,
+        )
+    mismatches = [
+        name
+        for name in (
+            "issuer",
+            "key_id",
+            "algorithm",
+            "custody_domain",
+            "trust_root_version",
+        )
+        if getattr(envelope, name) != getattr(root, name)
+    ]
+    if mismatches:
+        raise PreconditionFailed(
+            f"attestation root binding differs in {', '.join(mismatches)}",
+            code=ROOT_BINDING_MISMATCH,
+        )
+    if envelope.audience != audience:
+        raise PreconditionFailed(
+            f"attestation audience differs from expected role audience {audience!r}",
+            code=AUDIENCE_MISMATCH,
+        )
+    issued, expires = (
+        _instant(envelope.issued_at, "issued_at"),
+        _instant(envelope.expires_at, "expires_at"),
+    )
+    if issued > now:
+        raise PreconditionFailed("attestation is issued in the future", code=FUTURE)
+    if now >= expires:
+        raise PreconditionFailed("attestation is stale or expired", code=STALE)
+    if not root_not_before <= issued < root_not_after or expires > root_not_after:
+        raise PreconditionFailed(
+            "attestation lifetime is outside its root validity", code=ROOT_NOT_VALID
+        )
+    try:
+        verified = verifier.verify(
+            public_key=base64.b64decode(root.public_key_base64, validate=True),
+            algorithm=envelope.algorithm,
+            message=envelope.signed_bytes(),
+            signature=envelope.signature,
+        )
+    except Exception as exc:
+        raise PreconditionFailed(
+            "attestation signature verification failed", code=SIGNATURE_INVALID
+        ) from exc
+    if not verified:
+        raise PreconditionFailed(
+            "attestation signature is invalid", code=SIGNATURE_INVALID
+        )
 
-    Constructible only through :func:`verify_trusted_host_source` in the same
-    sense `host_source.HostSource` is constructible only through
-    `require_host_source`: every field was checked before this value existed.
 
-    This is NOT a `HostSource` and does not, by itself, prove anything about
-    the process currently running — binding a `candidate_receipt` to the LIVE
-    host remains `host_source.require_host_source`'s job, unchanged, called
-    separately by whatever future caller composes the two (tracked as future
-    work; not done by this module, which owns only the two-attestation
-    agreement).
-    """
-
-    candidate_receipt: CandidateReceipt
-    installed_observation: InstalledObservation
-    candidate_key_id: str
-    installed_key_id: str
-
-
-def verify_trusted_host_source(
+def verify_attestation_pair(
     *,
-    candidate: SignedAttestationEnvelope | None,
-    candidate_verifier: SignatureVerifier,
-    installed: SignedAttestationEnvelope | None,
-    installed_verifier: SignatureVerifier,
-    trust_roots: DistinctTrustRoots,
-) -> TrustedAttestationBinding:
-    """Admit only if both attestations are present, each verifies against its
-    OWN distinct trust root, neither could have produced the other's half, and
-    the two agree — or refuse, naming exactly which property failed.
-
-    Every refusal is `PreconditionFailed`: nothing has changed, and the
-    identical call can be re-run once the stated cause is resolved. Ordering,
-    deliberately: absence, then the same-key (one-caller) check, then each
-    key's trust-root membership, then each signature, then agreement —
-    signature verification never runs on a document whose presence was never
-    established or that already failed a cheaper check, and content is
-    compared only once both signatures are known-good, so a stranger cannot
-    use this function to probe which content it would have accepted.
-    """
+    candidate: AttestationEnvelopeV2 | None,
+    installed: AttestationEnvelopeV2 | None,
+    verifier: AttestationVerifier,
+    trust_policy: AttestationTrustPolicy,
+    expected_host_identity: str,
+    now: datetime,
+) -> None:
+    """Verify v2 evidence; success creates no caller-constructible authority."""
     if candidate is None:
         raise PreconditionFailed(
-            "no candidate attestation was supplied. There is nothing here "
-            "that could bind these bytes to a source revision, signed by "
-            "anyone",
-            code=OBSERVATION_ABSENT,
+            "candidate attestation is missing", code=OBSERVATION_ABSENT
         )
     if installed is None:
         raise PreconditionFailed(
-            "no installed-host observation was supplied. A candidate "
-            "attestation alone says what SHOULD be running somewhere; it "
-            "says nothing about what actually is",
-            code=OBSERVATION_ABSENT,
+            "installed-host attestation is missing", code=OBSERVATION_ABSENT
         )
-
-    # THE ONE-CALLER CHECK, FIRST — before either key is checked against a
-    # trust root, and deliberately not merely a restatement of what
-    # `DistinctTrustRoots` already refuses at construction. That refusal
-    # protects against a MISCONFIGURED pair of roots; this one protects
-    # against a single party presenting two envelopes under one key
-    # regardless of how the roots are configured, so it fires on its own
-    # evidence rather than depending on `trust_roots` having been built
-    # correctly. Checked before signature verification too: a stranger must
-    # not be able to use signature failure output to probe past this one.
-    if candidate.key_id == installed.key_id:
+    if not isinstance(candidate, AttestationEnvelopeV2) or not isinstance(
+        installed, AttestationEnvelopeV2
+    ):
+        raise SpecError(
+            "attestations must be parsed AttestationEnvelopeV2 values",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(trust_policy, AttestationTrustPolicy):
+        raise SpecError(
+            "trust_policy must be an AttestationTrustPolicy",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(verifier, AttestationVerifier):
+        raise SpecError(
+            "verifier must implement AttestationVerifier",
+            code=OBSERVATION_MALFORMED,
+        )
+    expected_host_identity = _required(expected_host_identity, "expected_host_identity")
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise SpecError(
+            "verification now must be timezone-aware", code=OBSERVATION_MALFORMED
+        )
+    if trust_policy.installed_audience != expected_host_identity:
         raise PreconditionFailed(
-            f"both attestations are signed by the same key "
-            f"({candidate.key_id!r}). A candidate attestation and an "
-            "installed-host observation signed by one key are one party's "
-            "word twice, not two independent readings — the exact shape both "
-            "prior attempts at this admission path had, in different "
-            "clothing",
-            code=SAME_KEY_SIGNED_BOTH,
+            "installed role audience does not match expected host identity",
+            code=AUDIENCE_MISMATCH,
         )
-
-    if candidate.key_id not in trust_roots.candidate.accepted_key_ids:
-        raise PreconditionFailed(
-            f"the candidate attestation is signed by {candidate.key_id!r}, "
-            "which is not an accepted candidate-attestation signer "
-            f"{sorted(trust_roots.candidate.accepted_key_ids)}. A valid "
-            "signature from a stranger is still a stranger",
-            code=KEY_NOT_TRUSTED,
-        )
-    if installed.key_id not in trust_roots.installed.accepted_key_ids:
-        raise PreconditionFailed(
-            f"the installed-host observation is signed by "
-            f"{installed.key_id!r}, which is not an accepted "
-            f"installed-observation signer "
-            f"{sorted(trust_roots.installed.accepted_key_ids)}",
-            code=KEY_NOT_TRUSTED,
-        )
-
-    try:
-        candidate_ok = candidate_verifier.verify(
-            key_id=candidate.key_id,
-            message=candidate.canonical_bytes(),
-            signature=candidate.signature,
-        )
-    except Exception as exc:
-        raise PreconditionFailed(
-            f"candidate attestation signature verification failed: {exc}",
-            code=SIGNATURE_INVALID,
-        ) from exc
-    if not candidate_ok:
-        raise PreconditionFailed(
-            "the candidate attestation signature does not verify over its "
-            "canonical bytes. Either the document was edited after signing "
-            "or it was signed by a different key than it claims",
-            code=SIGNATURE_INVALID,
-        )
-
-    try:
-        installed_ok = installed_verifier.verify(
-            key_id=installed.key_id,
-            message=installed.canonical_bytes(),
-            signature=installed.signature,
-        )
-    except Exception as exc:
-        raise PreconditionFailed(
-            f"installed-host observation signature verification failed: {exc}",
-            code=SIGNATURE_INVALID,
-        ) from exc
-    if not installed_ok:
-        raise PreconditionFailed(
-            "the installed-host observation signature does not verify over "
-            "its canonical bytes. Either the document was edited after "
-            "signing or it was signed by a different key than it claims",
-            code=SIGNATURE_INVALID,
-        )
-
-    # Content is parsed and compared only AFTER both signatures verify,
-    # deliberately: refusing on content first would let a caller probe which
-    # values this function accepts using documents they never had to sign —
-    # `evidence.accept_release_evidence` states the identical rule.
-    candidate_receipt = candidate_receipt_from_mapping(
-        candidate.document, where="candidate attestation document"
+    now = now.astimezone(UTC)
+    _verify(
+        candidate,
+        verifier,
+        trust_policy.candidate_roots,
+        CANDIDATE_ATTESTATION_PURPOSE,
+        trust_policy.candidate_audience,
+        now,
     )
-    installed_observation = installed_observation_from_mapping(
-        installed.document, where="installed-host observation document"
+    _verify(
+        installed,
+        verifier,
+        trust_policy.installed_roots,
+        INSTALLED_OBSERVATION_PURPOSE,
+        expected_host_identity,
+        now,
     )
-
-    if candidate_receipt.facility != installed_observation.distribution:
+    candidate_subject = CandidateAttestationSubjectV2.from_mapping(
+        candidate.subject_mapping()
+    )
+    installed_subject = InstalledHostAttestationSubjectV2.from_mapping(
+        installed.subject_mapping()
+    )
+    expected = Digest.of(_canonical(candidate_subject.canonical_document()))
+    if installed_subject.candidate_subject_digest != expected:
         raise PreconditionFailed(
-            f"the candidate attestation is about {candidate_receipt.facility!r} "
-            f"and the installed-host observation is about "
-            f"{installed_observation.distribution!r}. An attestation for "
-            "another facility binds another facility's bytes",
+            "installed host does not bind candidate subject", code=SUBJECT_MISMATCH
+        )
+    if installed_subject.host_identity != expected_host_identity:
+        raise PreconditionFailed(
+            "installed host subject does not match expected host identity",
+            code=SUBJECT_MISMATCH,
+        )
+    if (
+        candidate_subject.package,
+        candidate_subject.version,
+        candidate_subject.wheel_sha256,
+    ) != (
+        installed_subject.package,
+        installed_subject.version,
+        installed_subject.wheel_sha256,
+    ):
+        raise PreconditionFailed(
+            "candidate and host attest different package bytes",
             code=ATTESTATIONS_DISAGREE,
         )
-    if candidate_receipt.version != installed_observation.version:
-        raise PreconditionFailed(
-            f"the candidate attestation is for version "
-            f"{candidate_receipt.version!r} and the installed-host "
-            f"observation is for version {installed_observation.version!r}. "
-            "Two independently signed statements about two different "
-            "versions do not bind each other",
-            code=ATTESTATIONS_DISAGREE,
-        )
-    if candidate_receipt.artifact_digest != installed_observation.artifact_digest:
-        raise PreconditionFailed(
-            f"the candidate attestation binds artifact "
-            f"{candidate_receipt.artifact_digest} and the installed-host "
-            f"observation reports {installed_observation.artifact_digest}. "
-            "One of the two independent authorities is describing bytes the "
-            "other is not, and guessing which would bind a Foundation nobody "
-            "actually attested to these bytes",
-            code=ATTESTATIONS_DISAGREE,
-        )
-
-    return TrustedAttestationBinding(
-        candidate_receipt=candidate_receipt,
-        installed_observation=installed_observation,
-        candidate_key_id=candidate.key_id,
-        installed_key_id=installed.key_id,
-    )
