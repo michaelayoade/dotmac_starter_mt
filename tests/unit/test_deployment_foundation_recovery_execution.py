@@ -31,11 +31,20 @@ operation nothing can perform.
 
 from __future__ import annotations
 
+import json
+import tempfile
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
 from dotmac_deployment_foundation.errors import PreconditionFailed
+from dotmac_deployment_foundation.host_source import (
+    ABSENT,
+    DISAGREES,
+    NO_RECEIPT,
+    WRONG_KIND,
+)
 from dotmac_deployment_foundation.recovery import (
     RESTORE_PROCEDURE,
     CatalogEvidence,
@@ -49,11 +58,45 @@ from dotmac_deployment_foundation.recovery_execution import (
     RestoreTarget,
 )
 
+from tests.unit.test_deployment_foundation_host_source import (
+    VERSION,
+    FakeInstall,
+    _receipt_document,
+)
 from tests.unit.test_deployment_foundation_recovery_bundle import (
     _evidence,
     _manifest,
     _spec,
 )
+
+HOST_SOURCE_CODES = {ABSENT, WRONG_KIND, DISAGREES, NO_RECEIPT}
+
+#: A committed-shaped receipts directory, built ONCE for this module — the
+#: same genuine-admit shape `host_source_stance.py` builds for `Executor`,
+#: adapted to `RecoveryExecutor`'s seam: it resolves its OWN receipt from a
+#: directory (see `RecoveryExecutor._verify_host_source`), rather than
+#: accepting one as a constructor argument, so a test admits it by pointing
+#: the resolver at a real committed-shaped document, not by injecting an
+#: already-parsed `CandidateReceipt`.
+_HOST_SOURCE_RECEIPTS_DIR = Path(
+    tempfile.mkdtemp(prefix="dotmac-recovery-execution-host-source-")
+)
+(_HOST_SOURCE_RECEIPTS_DIR / f"foundation-candidate-{VERSION}.json").write_text(
+    json.dumps(_receipt_document()), encoding="utf-8"
+)
+
+
+def _valid_host_source_kwargs() -> dict[str, Any]:
+    """Fresh `RecoveryExecutor(...)` keyword arguments, admitted by the real
+    gate — the exact same `require_host_source` code path
+    `test_deployment_foundation_host_source.py::
+    test_a_genuine_artifact_matching_its_receipt_is_accepted` proves, reached
+    through a real on-disk resolve rather than an injected object."""
+    return {
+        "host_source_metadata": FakeInstall(),
+        "host_source_receipts_dir": _HOST_SOURCE_RECEIPTS_DIR,
+    }
+
 
 CLEAN = RestoreAttempt(exit_status=0, tables_present=45, duration_seconds=12)
 
@@ -138,6 +181,7 @@ def _executor(effects: RecordingRecoveryEffects) -> RecoveryExecutor:
         effects,
         source_evidence=_evidence(),
         product_image=IMAGE,
+        **_valid_host_source_kwargs(),
     )
 
 
@@ -249,6 +293,128 @@ def test_an_image_that_never_becomes_ready_fails_the_recovery() -> None:
     assert outcome.proved is False
     assert "did not become ready" in outcome.failure
     assert "emit_receipt" not in outcome.steps_completed
+
+
+# ── the host-source gate: Boundary 4's ruling extended to this executor ─────
+#
+# `_do_fresh_target` is this class's first EFFECT — creating a cluster — and
+# the same rule that covers `engine.run.Executor.run`/`rollback` covers it:
+# a wrong-artifact host must not reach any mutation, however briefly. Unlike
+# `Executor`, this class accepts no receipt at all as a constructor argument
+# — `_verify_host_source` resolves it itself, from the installed version, so
+# there is no parameter here a caller could use to hand over an already-built
+# claim.
+
+
+def test_a_bare_recovery_executor_refuses_by_default() -> None:
+    """THE HOLE THIS SECTION CLOSES. An executor built with NO host-source
+    kwargs reads the REAL installed distribution and resolves against the
+    REAL default receipts directory — no fake, no override — and refuses,
+    because nothing in this sandbox (nor, per `pyproject.toml`'s
+    `develop = true`, this repository's own CI unit-test job) is a
+    non-editable install with a committed receipt behind it.
+
+    The refusal's CODE is asserted to be one of `host_source`'s own four,
+    which is what proves THIS gate fired rather than some other refusal
+    happening to come first."""
+    effects = RecordingRecoveryEffects()
+    executor = RecoveryExecutor(
+        _spec(),
+        _manifest(),
+        effects,
+        source_evidence=_evidence(),
+        product_image=IMAGE,
+    )
+    with pytest.raises(PreconditionFailed) as refusal:
+        executor.run(bundle={})
+    assert refusal.value.code in HOST_SOURCE_CODES, (
+        f"refused with {refusal.value.code!r}, not one of the host-source "
+        f"codes {HOST_SOURCE_CODES}"
+    )
+    assert (
+        effects.calls == []
+    ), f"the gate did not fire before the first effect: {effects.calls}"
+
+
+def test_a_recovery_executor_pointed_at_an_uncommitted_receipts_dir_refuses() -> None:
+    """The other shape of the same hole: a real-shaped `FakeInstall` but an
+    empty receipts directory — `NO_RECEIPT` specifically, so this is "no
+    committed document for this version" rather than "nothing was installed
+    at all"."""
+    effects = RecordingRecoveryEffects()
+    executor = RecoveryExecutor(
+        _spec(),
+        _manifest(),
+        effects,
+        source_evidence=_evidence(),
+        product_image=IMAGE,
+        host_source_metadata=FakeInstall(),
+        host_source_receipts_dir="/nonexistent-dotmac-receipts-dir",
+    )
+    with pytest.raises(PreconditionFailed) as refusal:
+        executor.run(bundle={})
+    assert refusal.value.code == NO_RECEIPT
+    assert effects.calls == []
+
+
+def test_valid_host_source_proceeds_past_the_gate_to_the_first_effect() -> None:
+    """COMPOSITION PROOF. Without this, the refusal tests above could be
+    passing because the gate refuses UNCONDITIONALLY. Proceeding past it is
+    observed as `create_fresh_target` — the first real effect — actually
+    being reached."""
+    effects = RecordingRecoveryEffects()
+    outcome = _executor(effects).run(bundle={})
+    assert "create_fresh_target" in effects.calls
+    assert outcome.proved is True, outcome.failure
+
+
+def test_the_host_source_gate_fires_before_the_first_effect(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Direct call-order proof. `_verify_host_source` calls the unqualified
+    `require_host_source`, resolved from `recovery_execution`'s module
+    globals at call time — monkeypatching that module attribute intercepts
+    every call this class makes, exactly as the `Executor` gate test does for
+    `engine.run`."""
+    import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
+
+    calls: list[str] = []
+    real_require = recovery_execution_module.require_host_source
+
+    def require_spy(**kwargs):  # type: ignore[no-untyped-def]
+        calls.append("host_source")
+        return real_require(**kwargs)
+
+    monkeypatch.setattr(recovery_execution_module, "require_host_source", require_spy)
+
+    effects = RecordingRecoveryEffects()
+    outcome = _executor(effects).run(bundle={})
+
+    assert calls == ["host_source"], calls
+    assert outcome.proved is True, outcome.failure
+    # `effects.calls[0]` is the FIRST effect this executor performs
+    # (`create_fresh_target`, from `_do_fresh_target`). The host-source call
+    # above happened before `run()` reached the dispatch loop at all, so it
+    # necessarily preceded it — asserted directly rather than left implicit.
+    assert effects.calls[0] == "create_fresh_target"
+
+
+def test_the_verification_call_happens_exactly_once(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """NON-VACUITY. A `require_host_source` that is imported but never
+    CALLED would let every refusal test above fail for an unrelated reason
+    and let this one pass by accident."""
+    from unittest.mock import MagicMock
+
+    import dotmac_deployment_foundation.recovery_execution as recovery_execution_module
+
+    real = recovery_execution_module.require_host_source
+    spy = MagicMock(side_effect=real)
+    monkeypatch.setattr(recovery_execution_module, "require_host_source", spy)
+
+    effects = RecordingRecoveryEffects()
+    _executor(effects).run(bundle={})
+
+    assert spy.call_count == 1, (
+        f"require_host_source was called {spy.call_count} time(s), not exactly " "once"
+    )
 
 
 # ── construction-time refusals ──────────────────────────────────────────────
