@@ -7,7 +7,7 @@ from dotmac_platform_health.models import PLATFORM_TABLES
 
 module = ModuleManifest(
     code="platform_health",
-    version="0.1.0a1",
+    version="0.2.0a1",
     core=False,
     short_code="health",
     migration_prefix="ph",

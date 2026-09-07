@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "greenfield-after-inventory"
 owner = "Platform general application/runtime-health observation receipts, freshness projections and incident-ready summaries"
-contract = "Ingest a bounded provider-neutral runtime-health observation under an authenticated source identity supplied by the caller; retain immutable observation evidence; project latest component state and fresh/stale/missing classification; build incident-ready summaries with explicit unknowns; and rebuild projections deterministically. NOT raw telemetry, metric/log/trace storage, network monitoring, alert delivery, incident case lifecycle or any deployment/configuration mutation."
+contract = "Ingest a bounded provider-neutral runtime-health observation under an authenticated source identity supplied by the caller; retain immutable observation evidence with acceptance-time freshness provenance; project latest component state and fresh/stale/missing classification; build incident-ready summaries with explicit unknowns; author canonical signed DeploymentHealthEvidence through the authoritative produce_signed_health_evidence service entry point and an assembly-supplied HealthEvidenceSigner; and rebuild projections deterministically, refusing any selected legacy observation whose provenance is unknown until a newer observation arrives. NOT raw telemetry, metric/log/trace storage, network monitoring, alert delivery, incident case lifecycle, key material or cryptography, provider transport, or any deployment/configuration mutation."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt", "dotmac_integrator", "dotmac_vendor_control_plane", "dotmac_workspace", "dotmac_academy_app"]
 source_revisions = [
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
@@ -20,13 +20,13 @@ preserved_tests = ["dotmac_sub:tests/test_task_heartbeat.py", "dotmac_integrator
 contract_consumers = []
 candidate_consumers = ["dotmac_vendor_control_plane"]
 adoption_evidence = []
-composition_boundary = "Authenticated source identity is resolved outside and supplied as a proven value. Observability systems retain raw telemetry; Ticketing/incident owners retain cases; Deployment Control owns desired state. This module emits health/freshness facts and has no mutating consumer, sibling import, product DB read or provider transport."
+composition_boundary = "Authenticated source identity is resolved outside and supplied as a proven value. An assembly supplies the domain-specific HealthEvidenceSigner; key material and cryptography remain outside this module. Observability systems retain raw telemetry; Ticketing/incident owners retain cases; Deployment Control owns desired state. This module emits health/freshness facts and canonical evidence, has no mutating consumer, sibling import, product DB read or provider transport."
 inventory_evidence = ["docs/inventories/sub-vnext-parity-sources.md", "docs/inventories/sub-vnext-parity-dispositions.toml", "docs/adr/0040-sub-vnext-parity-capabilities-have-narrow-independent-owners.md"]
 source_mode_note = "The fleet has internal task heartbeats and domain-specific pipeline health but no general authenticated application/runtime-health projection. Their bounded labels, age/depth separation, freshness and no-consequence behavior are references; the owner is greenfield after inventory."
 first_cutover = "Vendor control plane is cutover 1. One deployment identity sends a bounded application-health envelope through the Integrator; the module projects freshness and summary while the existing deployment owner is proven unchanged."
 shadow_and_drift = "Delete and rebuild projections from retained observations and require byte-identical latest-state/freshness/summary output. A stale/unhealthy input may emit an alert fact but must never start a rollout or change an entitlement."
 local_copy_retirement = "Retire only parallel general fleet/application health projections after composition. Keep Prometheus/OTel/log/trace stores, product-local raw collectors, network monitoring and domain-specific health owners."
-next_action = "Implement the platform-only ph lineage with immutable observations, rebuildable projections, platform grants/tenant revoke and freshness/no-mutation canaries."
+next_action = "Compose the platform-only ph lineage with immutable observations, rebuildable projections, an assembly-supplied evidence signer, platform grants/tenant revoke and freshness/no-mutation canaries; retain the legacy-provenance refusal until a newer observation repairs the selected latest state."
 
 [[product_writers]]
 product = "dotmac_integrator"

@@ -2428,7 +2428,9 @@
           "dotmac_platform_health/py.typed",
           "dotmac_platform_health/manifest.py",
           "dotmac_platform_health/migrations/__init__.py",
-          "dotmac_platform_health/migrations/versions/ph_0001_platform_health.py"
+          "dotmac_platform_health/migrations/versions/ph_0001_platform_health.py",
+          "dotmac_platform_health/evidence.py",
+          "dotmac_platform_health/migrations/versions/ph_0002_observation_freshness_snapshot.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -15,6 +15,9 @@ from dotmac_platform_health.manifest import module
 
 ROOT = Path(inspect.getfile(models)).parent
 MIGRATION = ROOT / "migrations/versions/ph_0001_platform_health.py"
+FRESHNESS_MIGRATION = (
+    ROOT / "migrations/versions/ph_0002_observation_freshness_snapshot.py"
+)
 
 
 def test_platform_health_is_one_declared_platform_lineage() -> None:
@@ -64,3 +67,11 @@ def test_platform_health_migration_states_both_halves_of_platform_isolation() ->
         assert grant in source
         assert f"REVOKE ALL ON mod_health.{table} FROM app_user" in source
     assert "ROW LEVEL SECURITY" not in source
+
+
+def test_freshness_migration_preserves_unknown_legacy_provenance() -> None:
+    source = FRESHNESS_MIGRATION.read_text(encoding="utf-8")
+    assert 'sa.Column("freshness_seconds", sa.Integer(), nullable=True)' in source
+    assert "freshness_seconds IS NULL OR freshness_seconds > 0" in source
+    assert "UPDATE mod_health.health_observations" not in source
+    assert "nullable=False" not in source

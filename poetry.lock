@@ -1590,7 +1590,7 @@ url = "packages/dotmac-people"
 
 [[package]]
 name = "dotmac-platform-health"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "Platform runtime-health observations, freshness projections and summaries"
 optional = false
 python-versions = ">=3.11,<3.14"

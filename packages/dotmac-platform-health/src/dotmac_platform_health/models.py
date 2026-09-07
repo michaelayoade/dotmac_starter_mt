@@ -55,6 +55,14 @@ class HealthObservation(Base):
     observation_key: Mapped[str] = mapped_column(String(200), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
+    # Snapshot of the component's freshness policy AT ACCEPTANCE. A projection's
+    # freshness_deadline is derived from THIS column, never from the component's
+    # current `freshness_seconds` — the latter can change after the observation
+    # was accepted, and a rebuild must reproduce the same classification the
+    # observation was accepted under, not whatever policy happens to be live
+    # when the rebuild runs. See `service.py`'s `record_observation` and
+    # `rebuild_projections`.
+    freshness_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
