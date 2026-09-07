@@ -50,7 +50,6 @@ from .discovery import declared_names, discover_one
 from .errors import SpecError
 from .evidence import SignatureVerifier, TrustPolicy
 from .provenance import AuthorizationVerifier
-from .rehearsal_grant import RehearsalGrantVerifier
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -85,22 +84,6 @@ class ExecutionBindings:
     #: verifiers only and keeps the in-package provider.
     build_effects: Callable[..., Any] | None = None
     authorization_verifier: AuthorizationVerifier | None = None
-    #: Attests a Control-issued ``RehearsalGrant.v1``. None means the
-    #: provocation path REFUSES for want of a verifier — never that a
-    #: provocation proceeds unauthorized.
-    #:
-    #: A SEPARATE field from `authorization_verifier`, and the separation is the
-    #: point rather than tidiness. A rehearsal grant authorizes an act whose
-    #: whole purpose is to fail; a deployment authorization authorizes an act
-    #: that must succeed. One verifier answering both questions could be used to
-    #: contradict itself, which is why the protocol's method is
-    #: `attest_rehearsal` and not `attest`: an `AuthorizationVerifier` supplied
-    #: here fails the isinstance check below rather than passing silently.
-    #:
-    #: This facility ships NO default. It cannot: an issuer on this side is the
-    #: precise act the rehearsal/provocation boundary forbids, and a verifier
-    #: with a built-in fallback is an issuer wearing a different word.
-    rehearsal_grant_verifier: RehearsalGrantVerifier | None = None
     evidence_policy: TrustPolicy | None = None
     evidence_verifier: SignatureVerifier | None = None
     recovery_verifier: SignatureVerifier | None = None
@@ -179,18 +162,6 @@ class ExecutionBindings:
                 "AuthorizationVerifier (an `attest(material)` method); got "
                 f"{type(self.authorization_verifier).__name__}"
             )
-        if self.rehearsal_grant_verifier is not None and not isinstance(
-            self.rehearsal_grant_verifier, RehearsalGrantVerifier
-        ):
-            raise SpecError(
-                "ExecutionBindings.rehearsal_grant_verifier does not implement "
-                "RehearsalGrantVerifier (an `attest_rehearsal(material)` "
-                "method); got "
-                f"{type(self.rehearsal_grant_verifier).__name__}. An "
-                "AuthorizationVerifier is refused here by construction: the key "
-                "that authorizes production is not the key that authorizes an "
-                "act which must fail"
-            )
         if self.evidence_policy is not None and not isinstance(
             self.evidence_policy, TrustPolicy
         ):
@@ -211,7 +182,6 @@ class ExecutionBindings:
             and self.build_exposure_effects is None
             and self.build_recovery_session is None
             and self.authorization_verifier is None
-            and self.rehearsal_grant_verifier is None
             and self.evidence_policy is None
             and self.evidence_verifier is None
             and self.recovery_verifier is None

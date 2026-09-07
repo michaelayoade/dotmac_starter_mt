@@ -74,49 +74,12 @@ UNAUTHORIZED_EXECUTE_BACKLOG: dict[str, str] = {
     # Restores into a target `backup.RestoreRehearsal` requires to be
     # DISPOSABLE and never the product's — a different risk class from a
     # deployment, but still an `--execute` that no Control decision gates.
-    #
-    # THE PREVIOUS RATIONALE HERE WAS WRONG, AND MEASURING IT IS THE REPAIR.
-    # It read: owned by the rehearsal/provocation grant boundary, unrepairable
-    # only because the issuing counterparty did not exist yet. The consumer now
-    # exists — `rehearsal_grant.py`, which verifies a Control-issued
-    # `RehearsalGrant.v1` and cannot mint one — and this subcommand STILL
-    # cannot use it.
-    #
-    # PR #45 MERGED as `2622c3dd894f0802ab9ef179d2ff60754539da2d` on
-    # `dotmac_deployment_control` `main` — this comment previously cited the
-    # unmerged branch head (`3a06488cd34c42caa93b9d9bac89fd203b738246`), which
-    # no longer exists as a source of truth for anything. Re-read against the
-    # merged module: the grant it issues is still a PROVOCATION grant.
-    # `ProvocableRefusal` is STILL closed at one member,
-    # `plan_verification_refusal`, bound to Lane 3 item 8, and the terminal is
-    # still DERIVED from it as `rolled_back` — the merge amended
-    # `FOUNDATION_STEP_KINDS` (added `apply_exposure`/`restore_exposure`) and
-    # the statement shape (added `candidate_foundation_artifact_digest`), and
-    # touched neither the refusal vocabulary nor added anything resembling a
-    # restore-rehearsal act. A restore rehearsal is not that act: it creates a
-    # fresh isolated cluster, restores into it, and destroys it on the
-    # adjudicator's verdict. It is supposed to SUCCEED. There is still no
-    # member of Control's vocabulary that names it and no signer purpose
-    # issued for it.
-    #
-    # So gating it would mean inventing a refusal member on this side — which is
-    # `authorization.OPERATIONS`'s recorded `recover` mistake exactly, arrived at
-    # from the other direction: naming an act because a chain exists to wrap
-    # around it rather than because a counterparty authorizes it. The entry
-    # therefore STAYS, with a measured premise instead of a waiting one, and the
-    # act that WAS repairable — the item 8 provocation in
-    # `scripts/lane3_provocation.py` — now requires a `ProvocationPermit`.
-    #
-    # What would close this: a Control-side grant naming the restore-rehearsal
-    # act, or a decision that `_execute_restore_rehearsal`'s existing structural
-    # premise (it acts only on a target it created itself, and `RecoveryEffects`
-    # has no method that reaches a running deployment) is sufficient and the
-    # entry should be retired rather than gated. That decision is not this
-    # boundary's to take.
-    "restore-rehearsal": (
-        "restore rehearsal is not a provocation; Control's closed "
-        "vocabulary (merged PR #45) cannot name it"
-    ),
+    # Owned by the rehearsal/provocation grant boundary: Foundation must be
+    # able to CONSUME a grant it cannot issue, and the issuing counterparty
+    # (`dotmac_deployment_control` PR #45, unmerged) does not exist yet. Not
+    # repaired here because inventing an issuer on this side is precisely the
+    # act that boundary forbids.
+    "restore-rehearsal": "rehearsal/provocation grant — Control-owned, unmerged",
 }
 
 
