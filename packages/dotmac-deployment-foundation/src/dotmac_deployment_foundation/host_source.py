@@ -265,6 +265,18 @@ class CandidateReceipt:
     version: str
     artifact_digest: Digest
     source_revision: str
+    #: The candidate's LOCATION coordinate — where the evidence for this
+    #: artifact can be found — as distinct from `artifact_digest`, which
+    #: IDENTIFIES the bytes. Every committed `docs/inventories/foundation-
+    #: candidate-*.json` this facility has produced carries all three; they
+    #: are bound here so a `HostSource` carries the full candidate identity
+    #: Control's own subject vocabulary names (repository/run/artifact id),
+    #: not only the digest half of it. `(repository, run_id, artifact_id)`
+    #: locates the workflow artifact; `artifact_digest` identifies the wheel
+    #: it produced. Neither substitutes for the other.
+    repository: str
+    run_id: str
+    artifact_id: str
 
 
 def candidate_receipt_from_mapping(
@@ -284,12 +296,21 @@ def candidate_receipt_from_mapping(
             "by any JSON file whose keys happen to line up",
             where=where,
         )
-    for field in ("facility", "version", "sha256", "source_sha"):
+    for field in (
+        "facility",
+        "version",
+        "sha256",
+        "source_sha",
+        "repository",
+        "run_id",
+        "artifact_id",
+    ):
         if not str(document.get(field, "")).strip():
             raise SpecError(
-                f"{where}: carries no {field!r}. Every one of the four is "
+                f"{where}: carries no {field!r}. Every one of the seven is "
                 "load-bearing — without it the receipt cannot say which "
-                "facility, which bytes, or which tree",
+                "facility, which bytes, which tree, or where the evidence for "
+                "this candidate can be found",
                 where=where,
             )
     source_revision = str(document["source_sha"]).strip().lower()
@@ -312,6 +333,9 @@ def candidate_receipt_from_mapping(
         version=str(document["version"]),
         artifact_digest=Digest.parse(str(document["sha256"]), where=f"{where}.sha256"),
         source_revision=source_revision,
+        repository=str(document["repository"]),
+        run_id=str(document["run_id"]),
+        artifact_id=str(document["artifact_id"]),
     )
 
 
@@ -333,6 +357,14 @@ class HostSource:
     #: The revision the receipt names for that digest. Reached transitively —
     #: no field on the host says this, and no field on the host should.
     source_revision: str
+    #: The candidate's location coordinate, reached the same transitive way as
+    #: `source_revision` — no field on the host says this either. Carried so a
+    #: consumer of a bound `HostSource` (evidence, a future authorization
+    #: binding) has the full candidate identity available, not only its
+    #: digest half.
+    repository: str
+    run_id: str
+    artifact_id: str
     #: Where the host's half came from, for a log line that can be traced.
     read_from: str
 
@@ -661,5 +693,8 @@ def require_host_source(
         version=reading.version,
         artifact_digest=offered,
         source_revision=receipt.source_revision,
+        repository=receipt.repository,
+        run_id=receipt.run_id,
+        artifact_id=receipt.artifact_id,
         read_from=reading.read_from,
     )

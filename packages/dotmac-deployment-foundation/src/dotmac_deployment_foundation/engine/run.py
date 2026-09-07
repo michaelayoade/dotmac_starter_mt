@@ -83,13 +83,7 @@ from ..external_recovery import (
     backup_record_from_receipt,
     require_restore_proof,
 )
-from ..host_source import (
-    CandidateReceipt,
-    HostSource,
-    InstalledArtifact,
-    InstalledMetadata,
-    require_host_source,
-)
+from ..host_source import HostSource, require_host_source
 from ..policy import build_firewall_plan
 from ..spec import ProductDeploymentSpec
 from ..telemetry import Annotation
@@ -477,10 +471,6 @@ class Executor:
         now_epoch: int = 0,
         exposure_effects: ExposureEffects | None = None,
         execution_plan: FoundationExecutionPlanV1,
-        host_source_receipt: CandidateReceipt | None = None,
-        host_source_installed: InstalledArtifact | None = None,
-        host_source_metadata: InstalledMetadata | None = None,
-        host_source_probe: Callable[[], str] | None = None,
     ) -> None:
         """`grant` is positional and required — that is the whole point.
 
@@ -609,26 +599,50 @@ class Executor:
         # rather than Optional-with-a-default-path: a value invented at
         # construction would be a lock path for a lock nobody took.
         self._lock_path: Path | str = ""
-        # THE HOST SOURCE INGREDIENTS, held rather than a `HostSource` itself.
+        # NO HOST SOURCE INGREDIENTS ARE ACCEPTED HERE AT ALL, DELIBERATELY,
+        # and this is the SECOND time this comment has had to say so.
         #
-        # A caller handing in an already-built `HostSource` would prove
-        # nothing: `HostSource` is a plain dataclass, constructible directly by
-        # anyone who imports it, so accepting one here would make "was
-        # verified" indistinguishable from "was asserted". What is accepted
-        # instead is the raw material `require_host_source` itself checks —
-        # the committed candidate receipt Boundary 4's `cli.py` loads from
-        # disk, and (for a test double only) a pre-read `InstalledArtifact`,
-        # an `InstalledMetadata` reader, or a source-tree-digest probe. `run`
-        # and `rollback` call `require_host_source` THEMSELVES, in
-        # `_verify_host_source` below; nothing else in this class can make
-        # that call satisfied by construction.
-        self._host_source_receipt = host_source_receipt
-        self._host_source_installed = host_source_installed
-        self._host_source_metadata = host_source_metadata
-        self._host_source_probe = host_source_probe
+        # The first repair (`host_source_receipt`/`host_source_metadata` as
+        # the only accepted parameters, `host_source_installed`/
+        # `host_source_probe` removed) was itself a live bypass respelled: a
+        # caller supplying BOTH a `CandidateReceipt` (a plain frozen
+        # dataclass, constructible by anyone who imports it, carrying
+        # `artifact_digest` directly) AND an `InstalledMetadata` whose
+        # `read_text("direct_url.json")` returns a caller-chosen JSON string
+        # could still state the SAME digest on both sides of the comparison
+        # `require_host_source` makes — byte-for-byte the admission
+        # `host_source_installed=` produced, with a `json.dumps` in between.
+        # `valid_host_source_kwargs()` (removed from `tests/unit/
+        # host_source_stance.py`) WAS this exploit, shipped as a convenience
+        # fixture every "admitted executor" test used.
+        #
+        # There is no seam left to close it with, because `CandidateReceipt`
+        # and `InstalledMetadata` are PARSING interfaces — either half, alone
+        # or together, is authored data a caller controls, and no
+        # combination of "verify the receipt's shape" and "verify the
+        # metadata's shape" turns caller-authored data into proof of what a
+        # trusted third party attested. Trusted provenance (an externally
+        # committed/signed candidate attestation, an independently signed
+        # installed-host observation, checked inside this method against
+        # DISTINCT trust roots) is a separate piece of work, not started
+        # here and not hooked for here: this class holds no field, accepts
+        # no parameter, and exposes no attribute that a future patch could
+        # quietly wire up to skip the read.
+        #
+        # So: NOTHING is held. `_verify_host_source` always calls
+        # `require_host_source(receipt=None)` — no receipt exists that this
+        # class could have gotten from anywhere authenticated, so it always
+        # refuses, with the exact typed refusal (`NO_RECEIPT`, or `ABSENT` if
+        # the interpreter itself has nothing installed) `require_host_source`
+        # already produces for "no receipt" today. `run` and `rollback` call
+        # it THEMSELVES; nothing else in this class can make that call
+        # satisfied, because there is no longer anything TO supply.
+        #
         # The bound identity, once verified. `None` until `_verify_host_source`
         # runs; held so a caller inspecting a completed run can see which
-        # Foundation performed it, never read before that point.
+        # Foundation performed it, never read before that point. In practice
+        # this is never reached today: every call to `_verify_host_source`
+        # refuses.
         self._host_source: HostSource | None = None
 
     # ── entry point ─────────────────────────────────────────────────────────
@@ -645,25 +659,30 @@ class Executor:
     def _verify_host_source(self) -> None:
         """THE MANDATORY PREREQUISITE every mutating entry point calls.
 
+        This is a SAFETY-ONLY gate today, not an admission path: there is no
+        receipt this class could have gotten from anywhere authenticated
+        (see the constructor's comment for why that is deliberate, not an
+        oversight), so `receipt=None` always, and `require_host_source`
+        always refuses — `NO_RECEIPT` if the interpreter has a genuine
+        installed artifact and no receipt behind it, `ABSENT`/`WRONG_KIND` if
+        it does not even have that. Both are typed refusals with zero
+        effects: nothing between the caller's lock and this call has
+        mutated anything.
+
         Boundary 4's ruling, verbatim: "the executor must call
         `require_host_source` itself" — not be handed a `HostSource`, which
-        proves nothing because anyone can construct one. This method is that
-        call, made with the raw ingredients held since construction, so the
-        one thing every mutating entry point shares in common is that IT, not
-        a caller, performed the verification.
+        proves nothing because anyone can construct one. Ordering is the
+        other half: called after the lock is proven held (so there is
+        something to serialise against) and before EVERYTHING else — grant
+        revalidation, plan-digest recomputation, annotations, principal
+        bootstrap, every step. Preserved from the prior repair because it was
+        correct; what was wrong was what fed the call, not when it ran.
 
-        Ordering is the other half of the ruling: called after the lock is
-        proven held (so there is something to serialise against) and before
-        EVERYTHING else — grant revalidation, plan-digest recomputation,
-        annotations, principal bootstrap, every step. A wrong-artifact host
-        must not reach any of those, however briefly.
+        There is no way to make this admit. That is the point until trusted
+        provenance (see the constructor's comment) lands as its own,
+        separate piece of work.
         """
-        self._host_source = require_host_source(
-            receipt=self._host_source_receipt,
-            installed=self._host_source_installed,
-            metadata=self._host_source_metadata,
-            source_tree_digest=self._host_source_probe,
-        )
+        self._host_source = require_host_source(receipt=None)
 
     def run(
         self, plan: DeploymentPlan, *, lock: DeploymentLockHeld

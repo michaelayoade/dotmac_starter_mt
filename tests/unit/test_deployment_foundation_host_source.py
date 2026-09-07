@@ -169,6 +169,7 @@ def _receipt_document(
         "version": VERSION,
         "sha256": sha256,
         "source_sha": source_sha,
+        "repository": "michaelayoade/dotmac_starter_mt",
         "artifact_id": "9954731961",
         "run_id": "33920058598",
     }
@@ -569,13 +570,48 @@ def test_a_mapping_that_is_not_a_candidate_receipt_is_refused() -> None:
         candidate_receipt_from_mapping(document)
 
 
-@pytest.mark.parametrize("field", ["facility", "version", "sha256", "source_sha"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "facility",
+        "version",
+        "sha256",
+        "source_sha",
+        "repository",
+        "run_id",
+        "artifact_id",
+    ],
+)
 def test_every_receipt_field_the_binding_needs_is_required(field: str) -> None:
+    """PLANTED — extended to the candidate LOCATION coordinate. Before this,
+    `repository`/`run_id`/`artifact_id` were read by nothing: a receipt
+    missing all three parsed cleanly, so a `HostSource` could be bound with no
+    way to trace which workflow run produced it."""
     document = _receipt_document()
     document[field] = ""
 
     with pytest.raises(SpecError, match=field):
         candidate_receipt_from_mapping(document)
+
+
+def test_a_full_candidate_receipt_carries_its_location_coordinate() -> None:
+    """NEAR-MISS, MUST BE SILENT — the admit half of the extension above. A
+    receipt that legitimately carries all three location fields must parse
+    and bind them onto both `CandidateReceipt` and the resulting
+    `HostSource`, not merely tolerate their presence."""
+    receipt = _receipt()
+    assert receipt.repository == "michaelayoade/dotmac_starter_mt"
+    assert receipt.run_id == "33920058598"
+    assert receipt.artifact_id == "9954731961"
+
+    bound = require_host_source(
+        receipt=receipt,
+        metadata=FakeInstall(),
+        source_tree_digest=_source_tree_digest,
+    )
+    assert bound.repository == receipt.repository
+    assert bound.run_id == receipt.run_id
+    assert bound.artifact_id == receipt.artifact_id
 
 
 @pytest.mark.parametrize(
@@ -782,3 +818,22 @@ def test_the_artifact_digest_and_the_source_tree_digest_are_never_equal() -> Non
     assert reading.artifact_digest != tree
     assert reading.installed_content_digest != tree
     assert reading.artifact_digest != reading.installed_content_digest
+
+
+# ── NOTE: the committed-receipt resolver is GONE, not merely untested ───────
+#
+# `resolve_committed_candidate_receipt`/`installed_distribution_version`/
+# `DEFAULT_CANDIDATE_RECEIPTS_DIR` (and their tests, formerly here) were
+# removed from `host_source.py` entirely. An independent review at `541cee5d`
+# found that "name a file" becoming "name a directory containing a file whose
+# name you can derive" narrowed the CALLER'S choice without closing the
+# underlying admission: a caller-authored `CandidateReceipt` paired with a
+# caller-authored `InstalledMetadata` that agrees with it is the same
+# exploit regardless of where the receipt document physically lives. Nothing
+# replaces this mechanism here; `require_host_source(receipt=...)` still
+# takes a receipt as a parameter for ITS OWN direct callers (this file's own
+# tests, below) — that is a legitimate low-level seam for testing the pure
+# function — but neither mutating executor resolves or accepts one any more.
+# See `engine/run.py::Executor.__init__` and
+# `recovery_execution.py::RecoveryExecutor.__init__` for the current,
+# safety-only posture: both always call `require_host_source(receipt=None)`.

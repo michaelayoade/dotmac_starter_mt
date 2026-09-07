@@ -2,6 +2,214 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### The host-source seam was respelled, not closed, and is now GONE entirely — SAFETY-ONLY until trusted provenance exists
+
+An independent review at exact head `541cee5d` found that the entries below
+this one — which removed `host_source_installed`/`host_source_probe` and
+resolved the receipt from a committed, version-derived path — repeated the
+defect they claimed to close, twice over:
+
+1. `Executor.__init__`/`RecoveryExecutor.__init__` still took BOTH halves of
+   the admission decision. `host_source_receipt` (a plain frozen
+   `CandidateReceipt`, constructible by anyone, carrying `artifact_digest`
+   directly) paired with `host_source_metadata` (an `InstalledMetadata`
+   Protocol whose `read_text("direct_url.json")` returns a caller-chosen
+   string that becomes the offered digest) let a caller state the SAME
+   digest on both sides of `require_host_source`'s one comparison —
+   byte-for-byte the admission `host_source_installed=` originally produced,
+   with a `json.dumps` in between. `valid_host_source_kwargs()`
+   (`tests/unit/host_source_stance.py`) WAS that exploit, shipped as a
+   convenience fixture every "admitted executor" test used.
+2. Receipt resolution moved the caller's choice rather than narrowing it out
+   of existence: "name a file" became "name a directory containing a file
+   whose name you can derive", and the recovery test's `tempfile.mkdtemp()`
+   with a self-authored receipt exercised that same shape as a "genuine
+   admit".
+3. The committed-directory default was measured UNREACHABLE even in this
+   repository: `docs/inventories/` held `0.3.0a1`–`0.3.0a5`, the declared
+   version was `0.4.0a1`, and the existing tests globbed `0.3.0a*` /
+   hardcoded `"0.3.0a5"`, so nothing noticed the gap.
+4. `DEFAULT_CANDIDATE_RECEIPTS_DIR` was CWD-relative with no flag on
+   `restore-rehearsal` to redirect it — the lowest-risk mutating path got a
+   permanently unsatisfiable gate, silently.
+
+**Michael's ruling: reshape into a SAFETY-ONLY change.**
+`Executor.__init__`/`RecoveryExecutor.__init__` now accept **no host-source
+parameter of any kind** — no receipt, no metadata, no directory.
+`_verify_host_source` always calls `require_host_source(receipt=None)`,
+which always refuses — a typed refusal (`ABSENT`/`WRONG_KIND`/`NO_RECEIPT`)
+with zero effects, in EVERY environment, including this repository's own
+unit-test job. `resolve_committed_candidate_receipt`,
+`installed_distribution_version` and `DEFAULT_CANDIDATE_RECEIPTS_DIR` are
+removed from `host_source.py` entirely, along with the CLI's
+`--host-source-receipts-dir` option — there is nothing left to configure.
+`CandidateReceipt` and `InstalledMetadata` remain useful PARSING interfaces
+(and `require_host_source` itself remains a general-purpose function, still
+taking `receipt=`/`installed=`/`metadata=`/`source_tree_digest=` for its OWN
+direct unit tests) — they are simply never treated as authority-bearing
+evidence by either mutating executor again.
+
+**Justification for the strong form** (Michael, verbatim): *"An unusable
+production path is currently safe because no production caller exists."*
+`scripts/deploy.sh` drives `docker compose` directly; `deploy --execute` has
+no caller in this repository. A gate that refuses everything costs nothing
+today and stops a forgeable one shipping.
+
+**Coverage lost, named rather than hidden.** Every test that built an
+"admitted" `Executor`/`RecoveryExecutor` to reach past the gate and exercise
+something downstream of it (the authorization cross-matrix, failure
+injection, principal bootstrap, deployment evidence, lock capability,
+external recovery, the ten restore steps) can no longer do so through this
+seam. `valid_host_source_kwargs()` now calls `pytest.skip(...)` rather than
+returning admitting kwargs, naming every remaining caller's lost coverage
+explicitly rather than crashing or silently passing.
+`test_deployment_foundation_recovery_execution.py`'s ten-step behaviour tests
+were reduced to individual step-handler tests rather than copied into a
+second dispatch loop. The complete sequence is therefore UNMONITORED through
+the executor itself until trusted provenance lands; no test-only loop or
+constructor hook recreates reachability merely to keep those tests green.
+
+**Trusted provenance is separate, future work, and nothing here starts it or
+leaves a hook for it:** an externally committed/signed candidate attestation,
+an independently signed installed-host observation, verification inside the
+executor against DISTINCT trust roots, and no public "already verified"
+dataclass an arbitrary caller can construct.
+
+### `host_source_installed`/`host_source_probe` were not test-only — they were a live bypass, and are removed
+
+**SUPERSEDED by the entry above** — the repair this entry describes (keeping
+`host_source_receipt`/`host_source_metadata`) was itself the next round of
+the same defect. Left below for the historical record of what was tried and
+why it was insufficient.
+
+Calling them "test-only override hooks" (see the entry below) never made them
+one: `Executor.__init__` accepted `host_source_installed` (a pre-built
+`InstalledArtifact`) and `host_source_probe` (a callable standing in for the
+launcher digest) from ANY caller, and `_verify_host_source` forwarded both
+straight into `require_host_source` as `installed=`/`source_tree_digest=`.
+A caller passing `installed=InstalledArtifact(artifact_digest=X, ...)`
+alongside a receipt naming `sha256=X` was admitted without a single byte of
+either claim ever being read from the running interpreter or the launcher.
+The architecture coverage guard
+(`test_deployment_foundation_host_source_coverage.py`) only ever asserted
+`_verify_host_source` was CALLED, never what it was fed, so nothing caught
+this.
+
+Both parameters are removed from `Executor.__init__`. `host_source_metadata`
+(typed to the `InstalledMetadata` Protocol) is the ONE remaining seam — it
+still drives the real `RECORD`/`direct_url.json` parse through
+`read_installed_artifact`, never a digest handed over directly. A new
+`tests/architecture/test_deployment_foundation_host_source_constructor_seam.py`
+proves, by AST, that neither forbidden parameter exists on `Executor.__init__`
+or on the new `RecoveryExecutor.__init__` (see below), with a sensitivity
+proof (a planted regrowth of both parameters is named; the repaired shape
+stays silent).
+
+### The committed candidate receipt is resolved by installed version, not a caller-chosen path
+
+**SUPERSEDED by the entry at the top of this section** — the mechanism this
+entry describes (`resolve_committed_candidate_receipt`,
+`DEFAULT_CANDIDATE_RECEIPTS_DIR`) is REMOVED, not merely no longer wired to
+the executors; it narrowed a caller's choice without closing the underlying
+admission. Left below for the historical record.
+
+`--host-source-receipt PATH` took an arbitrary file. `candidate_receipt_from_
+mapping` only checks schema and 40-hex `source_sha`; nothing checked the
+receipt was committed, signed, or named a real commit. Anyone who could read
+a host's own `direct_url.json` could author a document naming the same
+`sha256` and pass `require_host_source`'s transitive-link check with a
+receipt describing bytes nobody built.
+
+`host_source.resolve_committed_candidate_receipt(version, receipts_dir=...)`
+derives the filename itself — `foundation-candidate-<version>.json` — from
+the installed version (the same fact `require_host_source` already reads),
+never from a caller. `--host-source-receipt` is replaced by
+`--host-source-receipts-dir` (default `docs/inventories`, the committed
+directory this repository already uses for `dotmac-deployment-foundation`'s
+own candidates): a NARROWER capability than the path it replaces, since it
+names only WHERE to look, never WHICH file — admitting a receipt for version
+V still requires `foundation-candidate-V.json` to be a committed document.
+
+**Reachability, stated plainly rather than assumed:** the default resolves
+correctly when `dotmac-deploy` is invoked with its working directory inside a
+checkout that carries `docs/inventories/foundation-candidate-<version>.json`
+for the INSTALLED `dotmac-deployment-foundation` version — which is true of
+this repository (`scripts/deploy.sh`'s own `DEPLOY_DIR` defaults to its
+checkout root), but is **not** the general shape this facility documents
+itself as serving ("the one command every product's CI and host runs").
+A different product that only `pip install`s this package as a dependency has
+no reason to carry `dotmac_starter_mt`'s `docs/inventories/` at all — that
+directory holds the FOUNDATION's own candidate records, committed in the
+FOUNDATION's own source repository, not the consuming product's. Such a
+consumer would need its own pipeline to fetch or vendor the matching receipt
+onto the host and point `--host-source-receipts-dir` at it. No search path
+across multiple locations was added to paper over this — a search path is a
+caller-influenceable choice by another name, which is exactly the shape this
+change removes. This is an open operational gap for any consumer other than
+this repository, not something resolved by this change, and it is not fixed
+here: the fix (attaching the matching receipt to the published artifact
+itself, e.g. as package data or a release asset) is a packaging/release
+decision outside this task's boundary.
+
+Separately, and also measured rather than assumed: `dotmac-deploy deploy
+--execute`/`rollback --execute` have no caller anywhere in THIS repository
+today — `scripts/deploy.sh` (this repository's own production deploy path)
+uses `docker compose` directly and never invokes this facility's CLI, and
+`--host-source-receipt`/`--host-source-receipts-dir` appear in no workflow or
+script. The mechanism this and the prior entry describe is exercised by its
+own unit tests; it has no production caller in this repository to observe.
+
+### `RecoveryExecutor` gets the same mandatory prerequisite, through the same seam, never by caller injection
+
+**UPDATED by the entry at the top of this section** — the "same seam" this
+entry built (`host_source_metadata`/`host_source_receipts_dir`, resolving
+internally) is REMOVED; `RecoveryExecutor` now takes no host-source
+parameter at all, exactly like `Executor`. The prerequisite itself (called
+before `_do_fresh_target`) is unchanged and still correct. Left below for
+the historical record of the seam's shape before the second round of repair.
+
+`_do_fresh_target` — this class's first effect, creating a cluster — ran with
+no host-source check at all, and `cli.py`'s `restore-rehearsal --execute`
+constructed it with nothing that could supply one. Boundary 4's ruling ("the
+same prerequisite covers every mutating executor path") applies to it exactly
+as it applies to `Executor.run`/`rollback`.
+
+The naive repair — adding `host_source_receipt`/`host_source_probe`
+constructor parameters a caller fills in directly — would reproduce the exact
+bypass shape the entry above removes. Instead `RecoveryExecutor` accepts
+`host_source_metadata` (the identical test seam `Executor` keeps) and
+`host_source_receipts_dir`, and resolves its OWN receipt internally, from the
+installed version, via the same `resolve_committed_candidate_receipt` the CLI
+uses for `Executor`. There is no `host_source_receipt` constructor parameter
+on this class at all — the receipt is never a caller-supplied value.
+`_verify_host_source()` runs before the plan-drift check and before the
+dispatch loop, so a wrong-artifact host cannot reach `create_fresh_target`.
+
+### `CandidateReceipt`/`HostSource` now carry the candidate's location coordinate
+
+Every committed `docs/inventories/foundation-candidate-*.json` already
+records `repository`/`run_id`/`artifact_id` — the `(repository, run_id,
+artifact_id)` triple that LOCATES the workflow evidence for a candidate, as
+distinct from `sha256`, which IDENTIFIES the wheel it produced. Nothing read
+them. `candidate_receipt_from_mapping` now requires all three (a receipt
+missing them previously parsed cleanly with no way to trace which workflow
+run produced it), and `require_host_source` binds them onto the resulting
+`HostSource` alongside `source_revision`.
+
+This is the scope achievable from this facility alone. The product/target/
+environment/lease/approval-status subject terms Control signs are NOT bound
+here and cannot be: `rehearsal_grant.py`, the module that bound them
+(`product_code`/`target_id`/`environment`/candidate triple/execution-plan
+digest), was reverted from `main` in #661 (`2879b57c`, reverting #655) before
+this change landed, and is deliberately not restored or reimplemented by this
+change. `authorization.py`'s `ExecutionGrant`/`AuthorizationReceipt` binds
+`operation`/`descriptor_digest`/`target`/`execution_plan_digest` plus an
+approval window (`policy_code`/`decision_ref`/`expires_at`) through a wholly
+separate mechanism, and carries no `product` or `environment` field at all —
+so "product" and "environment" are not currently bindable ANYWHERE in this
+facility, by any mechanism, pending that module's repair and Michael's ruling
+on what replaces it.
+
 ### `HostSource` binds facility, VERSION, digest and a full source revision — not two of the four
 
 `require_host_source` compared facility and artifact digest but never the
