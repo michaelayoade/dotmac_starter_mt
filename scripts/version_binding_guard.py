@@ -15,6 +15,30 @@ its bytes. An invalidated candidate now has a `CandidateDisposition.v1`. What wa
 missing was anything that READ them before allocating the next build, so the
 records described the collision instead of preventing it.
 
+## The fourth source: a version spent with no ordinary record at all
+
+`0.4.0a1` is why a fourth source exists. It was built once (run 33920058598,
+artifact 9954731961, from protected-main source `753a004e…`), but the receipt
+stayed in the workflow artifact and never reached this repository, and the
+facility's importable source drifted under the unchanged name before anyone
+committed it. `bindings_for` had a tag oracle, a receipt reader and a
+disposition reader, and none of the three had anything to point at — so it
+answered ADMIT for a coordinate that was already spent, on both purposes.
+`0.3.0a6` is the same shape from the other direction: declared, never built,
+retired unbuilt, spent by documents rather than by bytes.
+
+`spent_identity_bindings` reads `SpentIdentity.v1` entries the same way
+`disposition_bindings` reads `CandidateDisposition.v1` — by SCHEMA, across every
+document under `docs/inventories/`, so a THIRD coordinate of this shape is
+expressible by appending a row rather than by editing this file. A row
+authorizes nothing: not a successor allocation, not a disposition, not
+committing the drifted receipt. See
+`docs/inventories/spent-version-identities.json`'s own `$comment` for the
+transition discipline — a coordinate acquiring a real lifecycle record must
+have its row removed in the SAME change that adds the record, never earlier
+and never left behind, and two tests in
+`tests/architecture/test_version_binding_guard.py` ratchet both directions.
+
 ## The question this answers
 
 *May `<facility> <version>` be built from `<source>` right now?*
@@ -34,6 +58,11 @@ enumerates the real bindings and refuses on any of them:
 * **a disposition** — the version was consumed. An `invalidated` candidate is
   the sharpest case, because its receipt already exists AND it has been ruled
   permanently unpublishable.
+* **a spent identity** — the version is spent with NO ordinary lifecycle
+  record: no tag, no committed receipt, no disposition. `0.3.0a6` (declared,
+  never built, retired) and `0.4.0a1` (built once, never recorded, then
+  drifted) are both this shape. See the module docstring's "fourth source"
+  section and `docs/inventories/spent-version-identities.json`.
 
 ## Why the tag oracle refuses rather than skips
 
@@ -49,7 +78,7 @@ already declares.
 
 ## Two purposes, because a release lane's input is a candidate
 
-`--purpose candidate` refuses all three bindings: a version about to be BUILT
+`--purpose candidate` refuses all four bindings: a version about to be BUILT
 must be untouched.
 
 `--purpose release` deliberately does not refuse on a candidate receipt, because
@@ -87,6 +116,9 @@ FACILITIES: Final = Path(".github") / "release-facilities.json"
 
 CANDIDATE_SCHEMA: Final = "CandidateArtifact.v1"
 DISPOSITION_SCHEMA: Final = "CandidateDisposition.v1"
+#: The fourth binding source: a version spent with no tag, no receipt and no
+#: disposition to point at. See the module docstring's "fourth source" section.
+SPENT_IDENTITY_SCHEMA: Final = "SpentIdentity.v1"
 
 #: Exit code for a REFUSAL — the version is bound and must not be built.
 EXIT_REFUSED: Final = 1
@@ -230,6 +262,45 @@ def disposition_bindings(
     return bindings
 
 
+def spent_identity_bindings(
+    facility: str, *, repo_root: Path = REPO_ROOT
+) -> list[Binding]:
+    """Every version of this facility spent with NO ordinary lifecycle record.
+
+    The fourth binding source. Discovered by SCHEMA, exactly like
+    `disposition_bindings`, so a version of this shape is added by appending a
+    row to `docs/inventories/spent-version-identities.json` (or any other
+    inventory document carrying `SpentIdentity.v1` entries) rather than by
+    editing this function. See that file's `$comment` for what a row means,
+    what it does not authorize, and the transition discipline that applies
+    when a real lifecycle record later assumes ownership of a coordinate
+    recorded here.
+    """
+    bindings: list[Binding] = []
+    for path, document in _inventory_documents(repo_root):
+        if not isinstance(document, dict):
+            continue
+        for entry in document.get("entries", []):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("schema") != SPENT_IDENTITY_SCHEMA:
+                continue
+            if entry.get("facility") != facility:
+                continue
+            bindings.append(
+                Binding(
+                    kind=f"spent identity ({entry.get('kind')})",
+                    version=str(entry.get("version")),
+                    detail=(
+                        f"{path.relative_to(repo_root)} records this version "
+                        "SPENT with no tag, receipt or disposition to point "
+                        f"at ({entry.get('kind')}): {entry.get('reason')}"
+                    ),
+                )
+            )
+    return bindings
+
+
 def tag_bindings(facility: str, *, repo_root: Path = REPO_ROOT) -> list[Binding]:
     """Every version of this facility that has been published.
 
@@ -269,6 +340,7 @@ def all_bindings(facility: str, *, repo_root: Path = REPO_ROOT) -> list[Binding]
         tag_bindings(facility, repo_root=repo_root)
         + candidate_bindings(facility, repo_root=repo_root)
         + disposition_bindings(facility, repo_root=repo_root)
+        + spent_identity_bindings(facility, repo_root=repo_root)
     )
 
 

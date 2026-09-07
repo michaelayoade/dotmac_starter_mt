@@ -135,10 +135,11 @@ jobs:
       # for ten days the repository offered one version name over two
       # contracts. Every fact needed to refuse that was already checked in --
       # a tag for a published version, a CandidateArtifact.v1 receipt for a
-      # built one, a CandidateDisposition.v1 for a consumed one -- and nothing
-      # read them before dispatching the next build.
+      # built one, a CandidateDisposition.v1 for a consumed one, or a
+      # SpentIdentity.v1 record for a spent name without an ordinary lifecycle
+      # record -- and nothing read them before dispatching the next build.
       #
-      # `--purpose candidate` refuses ALL THREE: a version about to be built
+      # `--purpose candidate` refuses ALL FOUR: a version about to be built
       # must be untouched. Needs the tags `fetch-depth: 0` above already
       # fetches; without them the guard refuses to answer rather than admitting
       # a version that is already on the index.

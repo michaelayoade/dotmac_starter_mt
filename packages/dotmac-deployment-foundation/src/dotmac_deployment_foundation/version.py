@@ -129,25 +129,21 @@ from typing import Final
 #: argued: adding ``"0.3.0a6"`` to ``SUPERSEDED`` in
 #: `tests/architecture/test_version_binding_guard.py` FAILS
 #: ``test_a_superseded_candidate_is_still_refused_for_a_second_build``, because
-#: `version_binding_guard.bindings_for` reads tags, receipts and dispositions,
-#: finds no record for a version that was never built, and returns nothing to
-#: refuse with. So ``EXPECTED_ENTRIES`` stays 4, ``SUPERSEDED`` and
+#: `version_binding_guard.bindings_for` reads the ordinary lifecycle records,
+#: finds no disposition record for a version that was never built, and returns
+#: nothing from that source to refuse with. So ``EXPECTED_ENTRIES`` stays 4,
+#: ``SUPERSEDED`` and
 #: ``BUILT_CANDIDATES`` are unchanged, and
 #: `tests/architecture/candidate_source_binding_baseline.json` stays empty —
 #: which is still the healthy state, because the declared version again has no
 #: candidate.
 #:
-#: **The residual gap, stated so it is not mistaken for coverage: NO MACHINE
-#: ORACLE REFUSES ``0.3.0a6``.** The guard has three record sets and this name
-#: is in none of them. `ABANDONED_UNBUILT` in the binding-guard test asserts the
-#: freshness expectation longhand — the same shape ``PUBLISHED`` deliberately
-#: uses, so that a stated expectation can be wrong and get caught rather than
-#: agreeing with the guard for every input — but it is an EXPECTATION, not an
-#: enforcement. A build of ``0.3.0a6`` dispatched today would not be refused by
-#: `version_binding_guard.py`. This is an unmonitored population, recorded as
-#: one (ADR-0018 § "a guard exemption states an enforceable premise, or the
-#: region is unmonitored rather than exempt"), and it is not repaired by
-#: pretending the guard sees it.
+#: **The spent-identity oracle now refuses ``0.3.0a6``.** The guard reads four
+#: binding sources — tags, candidate receipts, dispositions and
+#: ``SpentIdentity.v1`` records — and this name is recorded in the fourth.
+#: Both candidate and release checks therefore refuse it, with the inventory
+#: row naming the historical reason without pretending an artifact or
+#: disposition exists.
 #:
 #: ``0.4.0a1`` is the successor, allocated 2026-09-04. A MINOR bump rather than
 #: a seventh alpha of the ``0.3.0`` line, because the change it names is a new
