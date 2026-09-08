@@ -97,6 +97,16 @@ PROVENANCE_SCHEMA: Final = "DeploymentProvenance.v1"
 AUTHORIZATION_RECEIPT_V2_SCHEMA: Final = "AuthorizationReceipt.v2"
 
 
+def _canonical_provenance_bytes(document: Mapping[str, Any]) -> bytes:
+    """Encode provenance documents through their one canonical byte owner."""
+    return json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
 def _instant(value: str, *, field: str) -> datetime:
     """Parse an ISO-8601 instant, the same way `HostLease` does."""
     text = str(value).strip()
@@ -643,12 +653,7 @@ class AuthorizationReceiptV2:
         return cls.from_document(document)
 
     def canonical_bytes(self) -> bytes:
-        return json.dumps(
-            self.as_document(),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
+        return _canonical_provenance_bytes(self.as_document())
 
     def require_execution_inputs(
         self,
@@ -818,12 +823,7 @@ class DeploymentProvenanceV1:
     content: dict[str, Any]
 
     def canonical_bytes(self) -> bytes:
-        return json.dumps(
-            self.content,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
+        return _canonical_provenance_bytes(self.content)
 
     def sha256_digest(self) -> str:
         return "sha256:" + hashlib.sha256(self.canonical_bytes()).hexdigest()
