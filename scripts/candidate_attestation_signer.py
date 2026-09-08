@@ -68,7 +68,6 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
     load_pem_private_key,
 )
-
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.trusted_host_source import (
     ATTESTATION_SCHEMA,
@@ -136,7 +135,9 @@ def candidate_subject_from_receipt(
     return CandidateAttestationSubjectV2(
         package=str(receipt["facility"]),
         version=str(receipt["version"]),
-        wheel_sha256=Digest.parse(f"sha256:{receipt['sha256']}", where="receipt.sha256"),
+        wheel_sha256=Digest.parse(
+            f"sha256:{receipt['sha256']}", where="receipt.sha256"
+        ),
         source_revision=str(receipt["source_sha"]),
         repository=str(receipt["repository"]),
         run_id=str(receipt["run_id"]),

@@ -51,7 +51,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.errors import PreconditionFailed
 from dotmac_deployment_foundation.trusted_host_source import (
@@ -68,7 +67,9 @@ from dotmac_deployment_foundation.trusted_host_source import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "candidate_attestation_signer.py"
-WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "foundation-candidate-attestation.yml"
+WORKFLOW = (
+    PROJECT_ROOT / ".github" / "workflows" / "foundation-candidate-attestation.yml"
+)
 
 #: The signing-key secret's exact name, restated here rather than imported —
 #: the workflow is data (YAML), not an importable module, so the only way this
@@ -78,7 +79,9 @@ SIGNING_SECRET_NAME = "FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM"
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("_candidate_attestation_signer", SCRIPT)
+    spec = importlib.util.spec_from_file_location(
+        "_candidate_attestation_signer", SCRIPT
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     # Registered before execution — a module that later grows a
@@ -359,14 +362,29 @@ def test_reusing_the_same_key_for_both_roles_is_refused_independent_of_policy() 
         expected_host_identity="test-target-host-01",
         now=now,
     )
+    # A policy built from two UNRELATED keys — deliberately not matching
+    # either envelope's actual fingerprint. `verify_attestation_pair` checks
+    # `candidate.public_key_fingerprint == installed.public_key_fingerprint`
+    # as its very first act, before it ever inspects `trust_policy` at all
+    # (source order in `trusted_host_source.py`), so this policy's roots are
+    # never reached — which is exactly what "independent of policy" means
+    # here, and why this policy is deliberately unrelated to the shared key.
+    other_candidate_key = Ed25519PrivateKey.generate()
+    other_installed_key = Ed25519PrivateKey.generate()
+    dummy_candidate_envelope = _sign_candidate(receipt, other_candidate_key, now=now)
+    dummy_installed_envelope = _sign_installed(
+        dummy_candidate_envelope,
+        candidate_subject,
+        other_installed_key,
+        expected_host_identity="test-target-host-01",
+        now=now,
+    )
     policy = AttestationTrustPolicy(
-        candidate_roots=(_root_for(shared_key, candidate_envelope, now=now),),
+        candidate_roots=(
+            _root_for(other_candidate_key, dummy_candidate_envelope, now=now),
+        ),
         installed_roots=(
-            dataclasses.replace(
-                _root_for(shared_key, installed_envelope, now=now),
-                purpose=INSTALLED_OBSERVATION_PURPOSE,
-                custody_domain="a-distinct-custody-domain",
-            ),
+            _root_for(other_installed_key, dummy_installed_envelope, now=now),
         ),
         candidate_audience="dotmac-deployment-foundation",
         installed_audience="test-target-host-01",
@@ -435,7 +453,8 @@ def test_the_host_reference_sweep_is_observed_failing_on_a_planted_violation() -
 def _workflow_files() -> dict[str, str]:
     directory = PROJECT_ROOT / ".github" / "workflows"
     return {
-        path.name: path.read_text(encoding="utf-8") for path in sorted(directory.glob("*.yml"))
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(directory.glob("*.yml"))
     }
 
 
@@ -545,11 +564,8 @@ def test_candidate_subject_reads_every_field_from_the_receipt_verbatim() -> None
 def test_refuses_a_receipt_that_is_not_candidate_artifact_v1() -> None:
     receipt = _receipt()
     receipt["schema"] = "SomethingElse.v1"
-    import json as _json
-    import tempfile
-
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
-        _json.dump(receipt, handle)
+        json.dump(receipt, handle)
         path = Path(handle.name)
     try:
         with pytest.raises(SystemExit):
