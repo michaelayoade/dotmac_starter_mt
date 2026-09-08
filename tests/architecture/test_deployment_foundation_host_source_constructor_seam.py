@@ -52,7 +52,9 @@ from tests.architecture.host_source_skip_inventory import (
     RETIRE_WHEN,
     SKIP_INVENTORY,
     SKIP_INVENTORY_SCOPE,
-    tests_reaching,
+)
+from tests.architecture.host_source_skip_inventory import (
+    tests_reaching as _tests_reaching,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -126,7 +128,7 @@ def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
     executor_tests = {
         (relative_path, name)
         for relative_path in paths
-        for name in tests_reaching(
+        for name in _tests_reaching(
             REPO / relative_path,
             target="Executor",
             target_module="dotmac_deployment_foundation.engine.run",
@@ -135,7 +137,7 @@ def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
     recovery_tests = {
         (relative_path, name)
         for relative_path in paths
-        for name in tests_reaching(
+        for name in _tests_reaching(
             REPO / relative_path,
             target="RecoveryExecutor",
             target_module="dotmac_deployment_foundation.recovery_execution",
@@ -154,8 +156,8 @@ def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
         "    Executor(None, None, None)\n",
         encoding="utf-8",
     )
-    assert tests_reaching(split_subjects) == {"test_fixture"}
-    assert tests_reaching(
+    assert _tests_reaching(split_subjects) == {"test_fixture"}
+    assert _tests_reaching(
         split_subjects,
         target="Executor",
         target_module="dotmac_deployment_foundation.engine.run",
@@ -170,8 +172,8 @@ def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
         "    valid_host_source_kwargs()\n",
         encoding="utf-8",
     )
-    assert tests_reaching(same_subject) == {"test_both"}
-    assert tests_reaching(
+    assert _tests_reaching(same_subject) == {"test_both"}
+    assert _tests_reaching(
         same_subject,
         target="Executor",
         target_module="dotmac_deployment_foundation.engine.run",
@@ -189,7 +191,7 @@ def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
         "    label = 'RecoveryExecutor'\n",
         encoding="utf-8",
     )
-    assert tests_reaching(
+    assert _tests_reaching(
         recovery_subject,
         target="RecoveryExecutor",
         target_module="dotmac_deployment_foundation.recovery_execution",
