@@ -3,8 +3,11 @@
 The host-side half of ADR-0070's 2026-09-08 amendment, decision 3: "the
 installer must download the specific wheel file, verify its digest against
 the committed `CandidateArtifact.v1`, and install that exact file" — and only
-THEN let `dotmac_deployment_foundation.host_attester` sign what was actually
-installed.
+THEN let the sibling `host_attester.py` sign what was actually installed.
+`host_attester.py` is deliberately NOT part of `dotmac_deployment_foundation`
+— see its own module docstring for why the signing-capable code must not ship
+inside the Foundation wheel (Michael, 2026-09-08: "Foundation verifies; it
+does not sign").
 
 ## The trust root this module refuses to let its caller choose
 
@@ -64,10 +67,6 @@ from typing import Final
 
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.errors import PreconditionFailed
-from dotmac_deployment_foundation.host_attester import (
-    HostAttesterSigner,
-    build_installed_attestation,
-)
 from dotmac_deployment_foundation.host_source import (
     CandidateReceipt,
     InstalledArtifact,
@@ -75,6 +74,13 @@ from dotmac_deployment_foundation.host_source import (
     require_host_source,
 )
 from dotmac_deployment_foundation.trusted_host_source import AttestationEnvelopeV2
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from host_attester import (
+    HostAttesterSigner,
+    build_installed_attestation,
+)
 
 __all__ = [
     "DOWNLOAD_DIGEST_MISMATCH",
@@ -214,6 +220,7 @@ def install_exact_wheel(
         "--force-reinstall",
         str(wheel),
     ]
+
     def _default_runner(argv: list[str]) -> None:
         subprocess.run(argv, check=True)
 
