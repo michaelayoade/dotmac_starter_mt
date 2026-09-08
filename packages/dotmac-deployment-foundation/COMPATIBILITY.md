@@ -25,13 +25,18 @@
 - The rendered output of every renderer, treated as bytes: `render --check` is
   a byte comparison, so a whitespace change is a breaking change for every
   consumer that has committed the previous output.
-- `DeploymentProvenance.v1`: `AuthorizationReceipt`, `DeploymentProvenanceV1`,
+- `DeploymentProvenance.v1`: `AuthorizationReceipt`, `AuthorizationReceiptV2`,
+  `DeploymentProvenanceV1`,
   `build_provenance()`, `normalize_digest()` and the `PROVENANCE_SCHEMA`
   string. The canonical BYTES are public contract on the same terms as the
   descriptor document's. `AuthorizationReceipt` is a typed INPUT this facility
   never produces: `dotmac-deployment-control` owns authorization, and the
   receipt is bound by VALUE so a zero-dependency build runner never acquires a
   stateful module and never reaches into another owner's state.
+  The successor is a minimal Foundation consumer value: Platform's verified-pair
+  adapter supplies it after Control verification, while Foundation preserves
+  envelope digests and distinct signer identities without parsing, mirroring or
+  re-canonicalizing either Control document.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather

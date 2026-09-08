@@ -82,7 +82,9 @@ from .version import VERSION
 
 __all__ = [
     "PROVENANCE_SCHEMA",
+    "AUTHORIZATION_RECEIPT_V2_SCHEMA",
     "AuthorizationReceipt",
+    "AuthorizationReceiptV2",
     "AuthorizationVerifier",
     "DeploymentProvenanceV1",
     "VerifiedAuthorization",
@@ -92,6 +94,17 @@ __all__ = [
 ]
 
 PROVENANCE_SCHEMA: Final = "DeploymentProvenance.v1"
+AUTHORIZATION_RECEIPT_V2_SCHEMA: Final = "AuthorizationReceipt.v2"
+
+
+def _canonical_provenance_bytes(document: Mapping[str, Any]) -> bytes:
+    """Encode provenance documents through their one canonical byte owner."""
+    return json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
 
 
 def _instant(value: str, *, field: str) -> datetime:
@@ -436,6 +449,277 @@ class AuthorizationReceipt:
         }
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class AuthorizationReceiptV2:
+    """Foundation's minimal, verified-pair consumer value.
+
+    Platform's verified-pair adapter owns parsing, signature verification and
+    authorization/dispatch cross-validation.  This value retains only what
+    Foundation needs to bind an independently supplied execution subject; it
+    does not copy Control's envelope grammar or confer admission by itself.
+    """
+
+    authorization_envelope_digest: str
+    dispatch_envelope_digest: str
+    authorization_id: str
+    dispatch_id: str
+    authorization_signer_key_id: str
+    authorization_signer_algorithm: str
+    authorization_signer_public_key_fingerprint: str
+    dispatch_signer_key_id: str
+    dispatch_signer_algorithm: str
+    dispatch_signer_public_key_fingerprint: str
+    product_code: str
+    environment: str
+    target_id: str
+    target_ref: str
+    operation: str
+    release_ref: str
+    rollout_ref: str
+    plan_id: str
+    approval_decision_ref: str
+    authorization_issued_at: str
+    authorization_expires_at: str
+    dispatch_issued_at: str
+    execution_sequence: int
+    attempt_no: int
+    descriptor_digest: str
+    execution_plan_digest: str
+    control_plan_digest: str
+
+    def __post_init__(self) -> None:
+        for field_info in dataclasses.fields(self):
+            value = getattr(self, field_info.name)
+            if field_info.name in {"execution_sequence", "attempt_no"}:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise SpecError(
+                        f"AuthorizationReceiptV2.{field_info.name} must be a positive "
+                        "integer"
+                    )
+            elif not isinstance(value, str) or not value.strip():
+                raise SpecError(
+                    f"AuthorizationReceiptV2.{field_info.name} must be a non-empty "
+                    "string"
+                )
+        for field_name in (
+            "authorization_envelope_digest",
+            "dispatch_envelope_digest",
+            "descriptor_digest",
+            "execution_plan_digest",
+            "control_plan_digest",
+        ):
+            normalize_digest(
+                getattr(self, field_name),
+                where=f"AuthorizationReceiptV2.{field_name}",
+            )
+        for field_name in (
+            "authorization_signer_public_key_fingerprint",
+            "dispatch_signer_public_key_fingerprint",
+        ):
+            normalize_digest(
+                getattr(self, field_name),
+                where=f"AuthorizationReceiptV2.{field_name}",
+            )
+        if normalize_digest(
+            self.authorization_envelope_digest, where="authorization envelope"
+        ) == normalize_digest(self.dispatch_envelope_digest, where="dispatch envelope"):
+            raise SpecError("AuthorizationReceiptV2 requires distinct envelope digests")
+        if normalize_digest(
+            self.authorization_signer_public_key_fingerprint,
+            where="authorization signer",
+        ) == normalize_digest(
+            self.dispatch_signer_public_key_fingerprint, where="dispatch signer"
+        ):
+            raise SpecError(
+                "AuthorizationReceiptV2 requires distinct signer fingerprints"
+            )
+        authorization_issued = self._aware_instant(
+            self.authorization_issued_at, field="authorization_issued_at"
+        )
+        authorization_expires = self._aware_instant(
+            self.authorization_expires_at, field="authorization_expires_at"
+        )
+        dispatch_issued = self._aware_instant(
+            self.dispatch_issued_at, field="dispatch_issued_at"
+        )
+        if not authorization_issued <= dispatch_issued < authorization_expires:
+            raise SpecError(
+                "AuthorizationReceiptV2 requires authorization_issued_at <= "
+                "dispatch_issued_at < authorization_expires_at"
+            )
+        from .authorization import OPERATIONS
+
+        if self.operation not in OPERATIONS:
+            raise SpecError(
+                f"AuthorizationReceiptV2.operation must be one of {list(OPERATIONS)}"
+            )
+
+    @staticmethod
+    def _aware_instant(value: str, *, field: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise SpecError(f"AuthorizationReceiptV2.{field} is not ISO-8601") from exc
+        if parsed.tzinfo is None:
+            raise SpecError(f"AuthorizationReceiptV2.{field} must be timezone-aware")
+        return parsed
+
+    def require_live(self, *, now: datetime) -> None:
+        if now.tzinfo is None:
+            raise SpecError(
+                "AuthorizationReceiptV2.require_live now must be timezone-aware"
+            )
+        issued = self._aware_instant(
+            self.authorization_issued_at, field="authorization_issued_at"
+        )
+        expires = self._aware_instant(
+            self.authorization_expires_at, field="authorization_expires_at"
+        )
+        if now < issued:
+            raise PreconditionFailed("AuthorizationReceiptV2 is not yet valid")
+        if now >= expires:
+            raise PreconditionFailed("AuthorizationReceiptV2 has expired")
+
+    def as_document(self) -> dict[str, Any]:
+        document = {
+            field.name: getattr(self, field.name) for field in dataclasses.fields(self)
+        }
+        for field in (
+            "authorization_envelope_digest",
+            "dispatch_envelope_digest",
+            "authorization_signer_public_key_fingerprint",
+            "dispatch_signer_public_key_fingerprint",
+            "descriptor_digest",
+            "execution_plan_digest",
+            "control_plan_digest",
+        ):
+            document[field] = normalize_digest(
+                document[field], where=f"AuthorizationReceiptV2.{field}"
+            )
+        for field in (
+            "authorization_issued_at",
+            "authorization_expires_at",
+            "dispatch_issued_at",
+        ):
+            document[field] = (
+                self._aware_instant(document[field], field=field)
+                .astimezone(UTC)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+        return {"schema": AUTHORIZATION_RECEIPT_V2_SCHEMA, **document}
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, Any]) -> AuthorizationReceiptV2:
+        if not isinstance(document, Mapping):
+            raise SpecError("AuthorizationReceiptV2 document must be a mapping")
+        known = {field.name for field in dataclasses.fields(cls)} | {"schema"}
+        unknown = sorted(set(document) - known)
+        missing = sorted(known - set(document))
+        if unknown:
+            raise UnknownFieldError(
+                f"AuthorizationReceiptV2 has unknown field(s) {unknown}"
+            )
+        if missing:
+            raise SpecError(
+                f"AuthorizationReceiptV2 is missing required field(s) {missing}"
+            )
+        if document["schema"] != AUTHORIZATION_RECEIPT_V2_SCHEMA:
+            raise SpecError("AuthorizationReceiptV2 has an unsupported schema")
+        return cls(
+            **{field.name: document[field.name] for field in dataclasses.fields(cls)}
+        )
+
+    @classmethod
+    def from_json(cls, payload: str | bytes) -> AuthorizationReceiptV2:
+        """Parse this receipt's JSON bytes, refusing duplicate keys explicitly."""
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise SpecError(f"AuthorizationReceiptV2 JSON repeats key {key!r}")
+                result[key] = value
+            return result
+
+        try:
+            document = json.loads(payload, object_pairs_hook=reject_duplicates)
+        except SpecError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise SpecError("AuthorizationReceiptV2 is not valid JSON") from exc
+        if not isinstance(document, dict):
+            raise SpecError("AuthorizationReceiptV2 JSON must be an object")
+        return cls.from_document(document)
+
+    def canonical_bytes(self) -> bytes:
+        return _canonical_provenance_bytes(self.as_document())
+
+    def require_execution_inputs(
+        self,
+        *,
+        product_code: str,
+        environment: str,
+        target_id: str,
+        target_ref: str,
+        operation: str,
+        release_ref: str,
+        rollout_ref: str,
+        plan_id: str,
+        control_plan_digest: str,
+        descriptor_digest: str,
+        execution_plan_digest: str,
+        execution_sequence: int,
+        attempt_no: int,
+    ) -> None:
+        """Compare independently supplied execution values; this is not admission.
+
+        A trusted policy must invoke this check before any future executor can
+        treat the receipt as authority.
+        """
+        supplied: dict[str, object] = {
+            "product_code": product_code,
+            "environment": environment,
+            "target_id": target_id,
+            "target_ref": target_ref,
+            "operation": operation,
+            "release_ref": release_ref,
+            "rollout_ref": rollout_ref,
+            "plan_id": plan_id,
+            "control_plan_digest": control_plan_digest,
+            "descriptor_digest": descriptor_digest,
+            "execution_plan_digest": execution_plan_digest,
+            "execution_sequence": execution_sequence,
+            "attempt_no": attempt_no,
+        }
+        for field, value in supplied.items():
+            expected = getattr(self, field)
+            actual: object = value
+            if field.endswith("digest"):
+                if not isinstance(value, str):
+                    raise SpecError(f"execution input {field} must be a string")
+                actual = normalize_digest(value, where=f"execution input {field}")
+                expected = normalize_digest(
+                    expected, where=f"AuthorizationReceiptV2.{field}"
+                )
+            elif field in {"execution_sequence", "attempt_no"}:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                    raise SpecError(
+                        f"execution input {field} must be a positive integer"
+                    )
+            else:
+                if not isinstance(value, str) or not value.strip():
+                    raise SpecError(
+                        f"execution input {field} must be a non-empty string"
+                    )
+                actual = value
+            if actual != expected:
+                raise PreconditionFailed(
+                    f"receipt {field} {expected!r} does not match Foundation "
+                    f"execution input {actual!r}"
+                )
+
+
 class _Attestation:
     """Proof that :func:`verify_authorization` produced this value."""
 
@@ -539,12 +823,7 @@ class DeploymentProvenanceV1:
     content: dict[str, Any]
 
     def canonical_bytes(self) -> bytes:
-        return json.dumps(
-            self.content,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
+        return _canonical_provenance_bytes(self.content)
 
     def sha256_digest(self) -> str:
         return "sha256:" + hashlib.sha256(self.canonical_bytes()).hexdigest()
