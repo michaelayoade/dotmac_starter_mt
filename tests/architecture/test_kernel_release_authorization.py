@@ -419,6 +419,35 @@ def test_a100_does_not_claim_credential_lifecycle_bytes_already_in_a99() -> None
     assert "already in a99" in a99
 
 
+def _current_kernel_changelog_heading(text: str) -> str:
+    headings = [line for line in text.splitlines() if line.startswith("## 0.1.0a")]
+    assert headings, "kernel CHANGELOG has no versioned release heading"
+    return headings[0]
+
+
+def _require_status_neutral_kernel_heading(text: str) -> None:
+    heading = _current_kernel_changelog_heading(text)
+    if "unreleased" in heading.casefold():
+        raise AssertionError(
+            "the current kernel heading is frozen before allocation and ships in "
+            "the tag; a heading that says 'Unreleased' becomes false when "
+            "publication succeeds"
+        )
+
+
+def test_current_kernel_changelog_heading_survives_the_release_transition() -> None:
+    """Allocation cannot edit this bound input, so its status must not expire."""
+
+    _require_status_neutral_kernel_heading(KERNEL_CHANGELOG.read_text(encoding="utf-8"))
+
+
+def test_the_status_neutral_heading_guard_rejects_the_previous_shape() -> None:
+    planted = "## 0.1.0a999 — Unreleased\n\n- future bytes\n"
+
+    with pytest.raises(AssertionError, match="becomes false"):
+        _require_status_neutral_kernel_heading(planted)
+
+
 def test_current_tree_is_in_its_declared_release_lifecycle_state() -> None:
     contract = _load_contract()
     package = tomllib.loads(KERNEL_PYPROJECT.read_text(encoding="utf-8"))
