@@ -245,7 +245,10 @@ def _source_exports(source: Path) -> tuple[str, ...] | None:
             for target in targets
         ):
             continue
-        assert candidate is not None
+        if candidate is None:
+            raise PublicExportsFormatError(
+                f"module {source.stem!r} has an unreadable __all__ declaration"
+            )
         if declaration is not None:
             raise PublicExportsFormatError(
                 f"module {source.stem!r} declares __all__ more than once"
