@@ -353,6 +353,27 @@ not trying to be this.
    Convergence is evidence the design is right. It is **not** a qualifying
    source, and none of the three is recorded as one.
 
+## Pre-release injectivity correction — 2026-09-08
+
+The initial byte-parity corpus did not exercise a `bytes` value shaped like an
+encoded frame inside `encode_ordered`. Adversarial review supplied the missing
+counterexample: `encode_ordered(["abc"])` and
+`encode_ordered([b"s3:abc"])` produced the same bytes because the second value
+was spliced into the collection body without its `x` frame. That is an
+injectivity defect in the property this inventory exists to establish.
+
+The kernel owner corrected it before this facility's first publication.
+`encode_ordered` now encodes every public input as a value, including `bytes`;
+a private helper separately composes already-encoded frames for the
+migration-owner ledger. The regression pins the two formerly-colliding byte
+strings, while the committed migration-owner-ledger digest proves that the one
+existing frame-composition caller did not move.
+
+This does not turn either incubation slice into a production source. Their
+recorded AST and parity digests remain evidence of the implementation initially
+carried into the kernel, not a claim that an unshipped local copy remains the
+authority after the kernel owner repaired it.
+
 ## The pin question, refused
 
 Nothing in this file is a pin, and no pin is recorded anywhere in the dossier

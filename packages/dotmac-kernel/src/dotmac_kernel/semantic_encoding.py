@@ -63,9 +63,13 @@ them reusably, which is the same finding from the other direction.
 That convergence is evidence the DESIGN below is right rather than invented. It
 is NOT a qualifying source: the two slices are local incubation branches that
 nothing composes and nothing runs, and rule 24 requires a production
-implementation. The code below is the Orders slice's implementation carried
-over unchanged rather than rewritten, because rewriting bytes two callers
-already depend on would be a change disguised as a port.
+implementation. The initial implementation was carried from the Orders slice
+without rewriting its bytes. Before the first kernel release that could contain
+it, review found that ``encode_ordered`` confused caller-supplied bytes with an
+already-encoded frame. The kernel owner corrected that injectivity defect while
+preserving every byte its migration-owner-ledger caller had produced; the dated
+inventory amendment records why the old incubation copies are design evidence,
+not the current byte authority.
 
 Stateless by construction: no models, no lineage, no session, no I/O. It imports
 `dotmac_kernel.money` (pure value objects) and the standard library, nothing
@@ -171,10 +175,27 @@ def encode_fields(fields: Sequence[tuple[str, object]]) -> bytes:
     return _frame("o", body)
 
 
+def _encode_ordered_frames(items: Iterable[bytes]) -> bytes:
+    """Join already-encoded frames into an ordered collection.
+
+    This is deliberately private.  A public caller supplies VALUES to
+    :func:`encode_ordered`, including a value whose type is ``bytes``; it must
+    never be able to make those bytes impersonate a frame produced by
+    :func:`encode`.  Kernel composition code that already holds canonical
+    frames uses this helper explicitly, so that distinction is visible at the
+    call site rather than inferred from the runtime type.
+    """
+    return _frame("l", b"".join(items))
+
+
 def encode_ordered(items: Iterable[object]) -> bytes:
-    """Encode a sequence whose order is meaningful."""
-    parts = [encode(item) if not isinstance(item, bytes) else item for item in items]
-    return _frame("l", b"".join(parts))
+    """Encode a sequence of VALUES whose order is meaningful.
+
+    Bytes are values here and receive their ``x`` frame.  Treating them as
+    already-encoded frames makes ``["abc"]`` collide with ``[b"s3:abc"]`` —
+    two different typed inputs producing the same canonical bytes.
+    """
+    return _encode_ordered_frames(encode(item) for item in items)
 
 
 def encode_unordered(items: Iterable[bytes]) -> bytes:

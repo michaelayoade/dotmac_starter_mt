@@ -6,18 +6,15 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a103 — Unreleased
+## 0.1.0a103 — Release inventory
 
-This heading records what the next separately authorized kernel release will
-bind. It does not allocate, publish or tag `0.1.0a103`.
-
-`main` declares `0.1.0a102+dev` while these entries sit here, and that is the
-point: they add importable kernel source, and a bare `0.1.0a102` would make one
-published version name two different byte sets. **A103 IS NOW OWED.** Nothing
-can consume `dotmac_kernel.semantic_encoding` FROM AN ARTIFACT until it is
-released — the source is complete and the wheel does not exist, which is the
-exact trap a102 was cut to escape. The difference this time is that a guard
-catches it rather than a person noticing.
+This section inventories the source intended to ship first in `0.1.0a103`.
+Its presence is not allocation, publication or tag evidence: before a verified
+artifact exists, consumers cannot obtain these capabilities from the registry;
+after publication, the annotated tag and permanent release-verification record
+establish which exact bytes shipped. That distinction prevents this changelog,
+which is itself included in the wheel and tag, from becoming false when the
+release transition it describes completes.
 
 ### Added
 
@@ -56,9 +53,10 @@ catches it rather than a person noticing.
   Ledger unchanged: 84 rows. This introduces the digest over TODAY'S ledger and
   allocates nothing — the one-time transition below is why it lands alone.
 
-- `dotmac_kernel.semantic_encoding` (also on the package-root public surface) —
-  `encode`, `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`,
-  `ABSENT`, `CANONICAL_ALGORITHM`. One encoder for values that get digested:
+- The supported submodule `dotmac_kernel.semantic_encoding` — `encode`,
+  `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`, `ABSENT`,
+  `CANONICAL_ALGORITHM`, `CanonicalEncodingError`, `canonical_decimal` and
+  `canonical_instant`. One encoder for values that get digested:
   every value goes into a length-prefixed, self-describing frame, so no two
   adjacent field values can reassociate into a different field split; `ABSENT`
   is a TYPED sentinel, so a missing value cannot collide with `""` or the text
@@ -69,6 +67,13 @@ catches it rather than a person noticing.
   qualifying properties. It sits BESIDE `fingerprint_of`, not instead of it.
 
 ### Fixed
+
+- `encode_ordered` no longer treats a caller's `bytes` value as an already-
+  encoded frame. That made `encode_ordered(["abc"])` and
+  `encode_ordered([b"s3:abc"])` produce identical bytes in the facility whose
+  contract is injectivity. Public inputs are now always encoded as values;
+  the migration-owner ledger uses a private, explicit frame-composition helper
+  and retains its existing `cv1` bytes and committed digest.
 
 - `scripts/check_allocation_serialized.py` checks the ONE-TIME TRANSITION into
   a digested ledger instead of skipping it. It returned early whenever the row

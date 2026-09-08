@@ -207,6 +207,22 @@ def test_an_ordered_sequence_is_order_dependent() -> None:
     assert encode_ordered(["a", "b"]) != encode_ordered(["b", "a"])
 
 
+def test_bytes_in_an_ordered_sequence_are_values_not_pre_encoded_frames() -> None:
+    """A caller cannot make bytes impersonate another value's encoded frame.
+
+    Before this regression, ``encode_ordered`` spliced bytes directly into
+    its body.  The right-hand input therefore impersonated the string frame on
+    the left and both produced ``b"l6:s3:abc"``.
+    """
+
+    encoded_text = encode_ordered(["abc"])
+    encoded_bytes_that_look_like_text = encode_ordered([b"s3:abc"])
+
+    assert encoded_text == b"l6:s3:abc"
+    assert encoded_bytes_that_look_like_text == b"l9:x6:s3:abc"
+    assert encoded_text != encoded_bytes_that_look_like_text
+
+
 def test_every_field_is_load_bearing() -> None:
     base = (("a", "1"), ("b", "2"))
     assert encode_fields(base) != encode_fields((("a", "1"), ("b", "3")))

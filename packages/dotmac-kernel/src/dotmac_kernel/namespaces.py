@@ -97,10 +97,10 @@ from dotmac_kernel.prerequisites import (
 from dotmac_kernel.semantic_encoding import (
     ABSENT,
     CANONICAL_ALGORITHM,
+    _encode_ordered_frames,
     digest_of,
     encode,
     encode_fields,
-    encode_ordered,
     encode_unordered,
 )
 
@@ -1541,7 +1541,7 @@ def encode_migration_owner_ledger(ledger: Sequence[MigrationOwner]) -> bytes:
     one. `owner` is unique across the ledger (`NamespaceRegistry` refuses a
     duplicate), so the sort is total and the ordering never depends on a tie.
     """
-    return encode_ordered(
+    return _encode_ordered_frames(
         encode_migration_owner(owner)
         for owner in sorted(ledger, key=lambda row: row.owner)
     )
