@@ -468,6 +468,106 @@ one. That contract lands only with its custody/enrollment owner and Control's
 atomic dispatch consumption; a formatted incarnation field alone would close
 nothing.
 
+### Amendment, 2026-09-08: six admission decisions, none of them implemented yet
+
+Michael rules six decisions that shape how genuine trusted-provenance
+admission is eventually built. None of the six is implemented by this
+amendment: no version is allocated, no artifact is built or signed, no
+executor stops refusing, and the 73-entry skip inventory is untouched.
+
+**1. Evidence subject is Foundation's own `CandidateArtifact.v1`, never a
+kernel record.** Admission for `dotmac-deployment-foundation` binds against a
+`CandidateArtifact.v1` receipt authored for the Foundation's own future
+`0.4.0a2`, never against the kernel's `0.1.0a103` release record. `0.1.0a103`
+is the PATTERN to copy — a committed, CI-authored, branch-protected record
+binding version, tag object, peeled commit, artifact digests and publisher
+run coordinates (`docs/inventories/kernel-release-verifications/0.1.0a103.json`)
+— not the record to bind against. The Foundation's own subject is the
+distribution `dotmac-deployment-foundation` (`host_source.py`'s `DISTRIBUTION`
+constant), it declares zero runtime dependencies, and an import-linter
+contract ("The deployment foundation must not import the kernel, the UI or
+the assembly") forbids it from importing the kernel at all. Admitting the
+Foundation on a kernel record would let a Foundation whose own bytes nobody
+vouched for mutate a host on the strength of a different package's provenance.
+
+**2. Ordering is fixed: freeze source, allocate, build once, sign the exact
+bytes, commit the receipt, rehearse, then publish.** Freeze the source
+revision first. Allocate `0.4.0a2` only against that frozen revision. Build
+the artifact once from it. Sign the exact resulting wheel bytes — not a
+recomputed hash, not a rebuild. Commit the `CandidateArtifact.v1` receipt
+before any rehearsal consumes it. Rehearse the full admission path against
+the committed receipt. Publish only after rehearsal passes. Reordering any
+step (for example, signing before the build is final, or publishing before
+the receipt is committed) reopens the exact gap this ADR's `NO_RECEIPT`
+refusal exists to close.
+
+**3. Installation must fetch and verify the exact artifact, never resolve by
+name.** The installer must download the specific wheel file, verify its
+digest against the committed `CandidateArtifact.v1`, and install that exact
+file. `pip install dotmac-deployment-foundation==0.4.0a2` is explicitly NOT
+identity evidence: an index-resolved install writes no PEP 610
+`direct_url.json` `archive_info` at all, so `read_installed_artifact`
+(`host_source.py`) has nothing to read a digest out of and is structurally
+inadmissible by the same `ABSENT` path an editable install already hits —
+not a gap to close later, a shape that can never produce evidence.
+
+**4. Editable CI remains refusal-only.** This repository installs
+`dotmac-deployment-foundation` with `develop = true`
+(root `pyproject.toml`), which is precisely the EDITABLE branch
+`read_installed_artifact` refuses (`host_source.py`, the `dir_info.editable`
+check) before a receipt is ever consulted — `require_host_source` reads the
+installed artifact first and only reaches the `receipt is None` check
+afterward. That refusal is correct and this amendment does not soften it,
+special-case it, or let a receipt or preverified result bypass it for an
+editable checkout. CI here continues to prove refusal, not admission.
+
+**5. First positive admission occurs only inside the protected
+artifact-rehearsal workflow.** No admission is exercised on `main`'s ordinary
+CI, on a developer's editable checkout, or on any workflow lacking branch
+protection and the artifact-install shape decision 3 requires. The first time
+`require_host_source` is expected to return a `HostSource` rather than raise
+`PreconditionFailed` is inside a dedicated, protected rehearsal workflow that
+has built, signed and installed the exact artifact per decisions 2 and 3.
+Both mutating executors (`recovery_execution.py` and `engine/run.py`, each
+calling `require_host_source(receipt=None)` today) keep refusing everywhere
+else.
+
+**6. Platform's dependency on this seam stays in a thin deployment adapter.**
+Whatever component in Platform CP eventually supplies a receipt, a verifier
+or an installed-artifact reading to Foundation stays confined to a
+deployment-specific adapter, outside Platform's core application runtime.
+This restates, for Platform's own composition, the same shape the 2026-09-07
+"trusted host provenance v2" amendment already requires of Foundation itself:
+Platform is transport, never authority, and the adapter that carries evidence
+across the boundary must not become a second copy of the decision logic on
+either side of it.
+
+**Refusal ownership.** The four documented v2 refusal families are not
+interchangeable and are not all Foundation's to fix. A same-author or
+mismatched-artifact refusal belongs to the Foundation verifier itself. A
+wrong-host refusal belongs to the Foundation verifier operating on
+Control-resolved host identity — Foundation never resolves host identity on
+its own. A revoked-key refusal belongs to Control's enrolment/trust-root
+state, not to anything Foundation holds. A replay refusal belongs to
+Control's atomic challenge consumption. Foundation's verifier is
+INTENTIONALLY stateless (this ADR's amendment of 2026-09-07,
+"trusted host provenance v2 custody contract is held, not admitted" — atomic
+replay consumption is future Control/admission ownership, not this stateless
+verifier), so it must never be expected to refuse a replay on a second call:
+a verifier that held consumption state would become a second, weaker copy of
+the cut-off that Control alone owns.
+
+**Admission produces evidence, and that evidence is an output only.** A
+successful admission adds non-secret coordinates to the deployment outcome —
+the candidate-subject digest, the host observation identity, the host
+identity, and signer fingerprints/root versions — without that report
+becoming another authorization input for a later admission. Today
+`self._host_source` is written by both executors and read by nothing
+(`recovery_execution.py`, `engine/run.py`), so the gate currently leaves no
+trace of its own decision. Closing that gap — wiring the admission report
+into whatever consumes deployment evidence — is a separate obligation this
+amendment records and does not implement.
+
 - It does not authorize a production deployment, a host, or an SSH session.
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a
