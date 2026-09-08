@@ -60,11 +60,22 @@ SKIP_REASON = (
 )
 
 #: What retires this entry: a genuine trusted-provenance admission path
-#: landing for either executor (see the CHANGELOG's "Trusted provenance is
-#: separate, future work" note). Not a count, not a date, not "someone
-#: rewrote the test a different way" — the CAPABILITY this whole PR
-#: withheld.
+#: landing for ``Executor`` (see the CHANGELOG's "Trusted provenance is
+#: separate, future work" note). Recovery admission cannot retire an
+#: Executor test. Not a count, not a date, not "someone rewrote the test a
+#: different way" — the CAPABILITY this whole PR withheld.
 RETIRE_WHEN = "trusted-provenance-admission"
+
+# This inventory is intentionally about deployment Executor tests only.
+# RecoveryExecutor's real ten-step run is a separate behavioral gap;
+# conflating the two would make 73 look like recovery coverage.
+SKIP_INVENTORY_SCOPE = "Executor tests only"
+RECOVERY_BEHAVIOR_GAP_INVENTORY: tuple[str, ...] = (
+    "RecoveryExecutor.run::real-ten-step-sequence",
+)
+RECOVERY_BEHAVIOR_GAP_RETIRE_WHEN = (
+    "trusted-provenance-admission-and-real-RecoveryExecutor.run-coverage"
+)
 
 
 def _binding_path(node: ast.expr) -> tuple[str, ...] | None:
@@ -96,6 +107,8 @@ def _scope_nodes(scope: ast.AST) -> list[ast.AST]:
 def _target_bindings(
     scope: ast.AST,
     *,
+    target: str = TARGET_CALL,
+    target_module: str = TARGET_MODULE,
     inherited_direct: set[str] | None = None,
     inherited_modules: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[set[str], dict[str, tuple[str, ...]]]:
@@ -115,10 +128,10 @@ def _target_bindings(
             module = node.module or ""
             for alias in node.names:
                 local = alias.asname or alias.name
-                if module == TARGET_MODULE and alias.name == TARGET_CALL:
+                if module == target_module and alias.name == target:
                     local_direct.add(local)
                 elif alias.name == "*" and (
-                    module == TARGET_MODULE or TARGET_MODULE.startswith(f"{module}.")
+                    module == target_module or target_module.startswith(f"{module}.")
                 ):
                     raise ValueError(
                         f"wildcard import from {module!r} makes the host-source "
@@ -126,13 +139,13 @@ def _target_bindings(
                     )
                 else:
                     qualified = f"{module}.{alias.name}" if module else alias.name
-                    if qualified == TARGET_MODULE or TARGET_MODULE.startswith(
+                    if qualified == target_module or target_module.startswith(
                         f"{qualified}."
                     ):
                         local_modules[local] = tuple(qualified.split("."))
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == TARGET_MODULE or TARGET_MODULE.startswith(
+                if alias.name == target_module or target_module.startswith(
                     f"{alias.name}."
                 ):
                     local = alias.asname or alias.name.split(".")[0]
@@ -167,6 +180,7 @@ def _called_target_names(
     node: ast.AST,
     *,
     target: str,
+    target_module: str,
     direct_bindings: set[str],
     module_bindings: dict[str, tuple[str, ...]],
 ) -> bool:
@@ -183,7 +197,7 @@ def _called_target_names(
                     for root, module_path in module_bindings.items():
                         if parts[0] == root:
                             resolved = (*module_path, *parts[1:])
-                            if resolved == (*TARGET_MODULE.split("."), target):
+                            if resolved == (*target_module.split("."), target):
                                 return True
     return False
 
@@ -192,6 +206,7 @@ def _scope_call_facts(
     scope: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     target: str,
+    target_module: str,
     inherited_direct: set[str],
     inherited_modules: dict[str, tuple[str, ...]],
     seen: set[int] | None = None,
@@ -209,6 +224,8 @@ def _scope_call_facts(
 
     direct_bindings, module_bindings = _target_bindings(
         scope,
+        target=target,
+        target_module=target_module,
         inherited_direct=inherited_direct,
         inherited_modules=inherited_modules,
     )
@@ -229,6 +246,7 @@ def _scope_call_facts(
     hit = _called_target_names(
         scope,
         target=target,
+        target_module=target_module,
         direct_bindings=direct_bindings,
         module_bindings=module_bindings,
     )
@@ -247,6 +265,7 @@ def _scope_call_facts(
         nested_hit, nested_calls, nested_method_calls = _scope_call_facts(
             nested[name],
             target=target,
+            target_module=target_module,
             inherited_direct=direct_bindings,
             inherited_modules=module_bindings,
             seen=visited,
@@ -258,7 +277,11 @@ def _scope_call_facts(
     return hit, called - nested.keys(), called_methods
 
 
-def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
+def tests_reaching(
+    path: Path,
+    target: str = TARGET_CALL,
+    target_module: str = TARGET_MODULE,
+) -> set[str]:
     """Every `test_*` function in `path` that transitively calls `target`,
     through any chain of same-file, top-level helper functions.
 
@@ -269,7 +292,9 @@ def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
     per file, while helper calls remain inside the same file.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    module_direct, module_bindings = _target_bindings(tree)
+    module_direct, module_bindings = _target_bindings(
+        tree, target=target, target_module=target_module
+    )
     funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {
         node.name: node
         for node in tree.body
@@ -281,6 +306,7 @@ def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
         hit, called_names, _ = _scope_call_facts(
             node,
             target=target,
+            target_module=target_module,
             inherited_direct=module_direct,
             inherited_modules=module_bindings,
         )
@@ -303,6 +329,7 @@ def tests_reaching(path: Path, target: str = TARGET_CALL) -> set[str]:
             hit, called_names, called_methods = _scope_call_facts(
                 method_node,
                 target=target,
+                target_module=target_module,
                 inherited_direct=module_direct,
                 inherited_modules=module_bindings,
             )

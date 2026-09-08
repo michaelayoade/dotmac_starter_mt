@@ -43,6 +43,15 @@
   accepts the wrapper in this contract revision: a caller-selected attester is
   not production authority, and product-vocabulary mapping remains a later
   Platform adapter responsibility.
+- `TrustedHostAttestation.v2`: `AttestationEnvelopeV2`,
+  `AttestationTrustPolicy`, `AttestationTrustRootV2`,
+  `CandidateAttestationSubjectV2`, `InstalledHostAttestationSubjectV2`,
+  `AttestationVerifier`, `verify_attestation_pair()` and the exported schema,
+  purpose and refusal-code constants, including `SAME_KEY_SIGNED_BOTH`. The
+  signed canonical bytes and refusal codes are public contract. The verifier
+  identifies a signing key by `public_key_fingerprint`, never by the reusable
+  `key_id` label, and remains a non-admitting composition seam: neither
+  executor accepts these values in this contract revision.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather

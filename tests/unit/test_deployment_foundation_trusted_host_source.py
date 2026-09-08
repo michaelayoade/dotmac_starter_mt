@@ -16,6 +16,7 @@ from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
 from dotmac_deployment_foundation.trusted_host_source import (
     CANDIDATE_ATTESTATION_PURPOSE,
     INSTALLED_OBSERVATION_PURPOSE,
+    SAME_KEY_SIGNED_BOTH,
     AttestationEnvelopeV2,
     AttestationTrustPolicy,
     AttestationTrustRootV2,
@@ -228,6 +229,44 @@ def test_unknown_material_and_invalid_signature_have_exact_refusals() -> None:
             now=NOW,
         )
     assert raised.value.code == "trusted-host-source-signature-invalid"
+
+
+def test_same_fingerprint_refuses_before_even_invalid_policy_evaluation() -> None:
+    candidate, installed = _pair()
+    installed = dataclasses.replace(
+        installed,
+        public_key_fingerprint=CANDIDATE_FP,
+        signature=hmac.new(
+            CANDIDATE_KEY, installed.signed_bytes(), hashlib.sha256
+        ).hexdigest(),
+    )
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=None,  # type: ignore[arg-type]
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+    assert raised.value.code == SAME_KEY_SIGNED_BOTH
+
+
+def test_distinct_fingerprints_with_same_key_id_are_admitted() -> None:
+    candidate, installed = _pair()
+    assert candidate.key_id == installed.key_id
+    assert candidate.public_key_fingerprint != installed.public_key_fingerprint
+    assert (
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=Verifier(),
+            trust_policy=_policy(),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+        is None
+    )
 
 
 def test_policy_coerces_collection_and_refuses_same_material_under_other_id() -> None:
