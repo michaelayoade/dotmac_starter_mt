@@ -420,6 +420,38 @@ replace either signer, or admit an executor in this amendment. The 73-item
 trusted-provenance skip inventory and executor `receipt=None` seam remain a
 paired non-admission ratchet.
 
+### Amendment, 2026-09-08: pair attestation precedes future admission
+
+The plain v2 receipt remains parseable evidence but no longer exposes the
+execution-input gate. Platform supplies both opaque Control documents to
+Foundation's `attest_authorization_receipt_v2()` composition seam; an injected
+`AuthorizationReceiptV2Attester` attests the pair, and only the resulting
+opaque `AttestedAuthorizationReceiptV2` may compare execution inputs. It
+exposes neither its parsed receipt nor a reusable witness, and its public
+constructor refuses. This is a Python convention boundary, not protection from
+malicious code in the same process.
+
+The attester parameter is not an authority selector. A request-selected
+implementation can attest invented material, so no Foundation executor accepts
+the resulting type in this contract revision. Trusted Platform composition
+must eventually own which implementation is installed and prove that a
+request cannot replace it before this value may participate in admission.
+
+`approval_decision_ref` is now an independent execution input, and the combined
+gate always checks liveness first. Liveness includes `dispatch_issued_at`: a
+future-dated dispatch refuses even when its authorization interval and every
+equality term otherwise agree. Product vocabulary mapping remains Platform's
+future adapter responsibility; this amendment does not rewrite the existing
+`AuthorizationReceipt.v2` wire schema under the spent `0.4.0a1` identity.
+
+This amendment deliberately does not invent host enrollment, key material,
+replay consumption or an executor admission path. Fleet currently owns only a
+string `host_id` and no provisioning epoch. Incarnation will be the enrolled
+host-attester key identity: a rebuild must issue a new key and revoke the old
+one. That contract lands only with its custody/enrollment owner and Control's
+atomic dispatch consumption; a formatted incarnation field alone would close
+nothing.
+
 - It does not authorize a production deployment, a host, or an SSH session.
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a

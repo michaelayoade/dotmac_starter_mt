@@ -271,9 +271,12 @@ from .policy import (
 from .provenance import (
     AUTHORIZATION_RECEIPT_V2_SCHEMA,
     PROVENANCE_SCHEMA,
+    AttestedAuthorizationReceiptV2,
     AuthorizationReceipt,
     AuthorizationReceiptV2,
+    AuthorizationReceiptV2Attester,
     DeploymentProvenanceV1,
+    attest_authorization_receipt_v2,
     build_provenance,
     normalize_digest,
 )
@@ -421,6 +424,8 @@ __all__ = [
     "AUTHORIZATION_RECEIPT_V2_SCHEMA",
     "AuthorizationReceipt",
     "AuthorizationReceiptV2",
+    "AuthorizationReceiptV2Attester",
+    "AttestedAuthorizationReceiptV2",
     "BackupHealth",
     "BackupRecord",
     "BundleComponent",
@@ -728,4 +733,5 @@ __all__ = [
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
     "verify_attestation_pair",
+    "attest_authorization_receipt_v2",
 ]
