@@ -269,8 +269,10 @@ from .policy import (
     public_endpoint_tokens,
 )
 from .provenance import (
+    AUTHORIZATION_RECEIPT_V2_SCHEMA,
     PROVENANCE_SCHEMA,
     AuthorizationReceipt,
+    AuthorizationReceiptV2,
     DeploymentProvenanceV1,
     build_provenance,
     normalize_digest,
@@ -416,7 +418,9 @@ __all__ = [
     "ArtefactClass",
     "Assurance",
     "AuditReport",
+    "AUTHORIZATION_RECEIPT_V2_SCHEMA",
     "AuthorizationReceipt",
+    "AuthorizationReceiptV2",
     "BackupHealth",
     "BackupRecord",
     "BundleComponent",

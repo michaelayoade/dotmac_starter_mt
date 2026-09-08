@@ -405,6 +405,21 @@ composition sources them from Control.
 
 ## What this ADR does not decide
 
+### Amendment — 2026-09-07: successor Control receipt is a Foundation value, not admission
+
+Foundation may retain one minimal, import-free consumer receipt after Platform's
+verified-pair adapter has parsed, verified and cross-validated Control's
+separately signed documents, including their standing and signer purposes. It
+preserves each original envelope digest and
+signer identity, requires distinct fingerprints, encodes the two consumer roles
+structurally rather than copying Control's purpose vocabulary, and compares the
+Foundation execution subject independently. Control's `plan_digest` maps to
+Foundation's explicitly named `control_plan_digest`; `attempt_no` remains
+dispatch-owned. Foundation does not parse or canonicalize Control documents,
+replace either signer, or admit an executor in this amendment. The 73-item
+trusted-provenance skip inventory and executor `receipt=None` seam remain a
+paired non-admission ratchet.
+
 - It does not authorize a production deployment, a host, or an SSH session.
 - It does not name a target for any environment.
 - It does not retire any product's existing deployment path. Retirement is a

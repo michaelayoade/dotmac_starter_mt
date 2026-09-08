@@ -46,6 +46,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+from tests.architecture.host_source_skip_inventory import RETIRE_WHEN, SKIP_INVENTORY
+
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
     REPO
@@ -81,6 +85,31 @@ _ALLOWED_POSITIONAL = {
     "Executor": ("spec", "effects", "grant"),
     "RecoveryExecutor": ("spec", "manifest", "effects"),
 }
+
+
+def test_trusted_provenance_admission_ratchet_is_bidirectional() -> None:
+    """The temporary non-admission seam and its skipped reach are one state.
+
+    While the recorded reach remains, constructors and their host-source calls
+    must be incapable of receiving non-``None`` evidence.  Conversely, when
+    that reach is genuinely retired this refusal must be rewritten in the same
+    change; leaving it behind would misdescribe a permanently non-admitting
+    executor as a transition gate.
+    """
+    _require_non_admission_while_inventory_remains(
+        ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY)),
+        class_name="Executor",
+        path=RUN_PY,
+    )
+    plant = ast.parse(
+        "class Executor:\n"
+        "    def _verify_host_source(self):\n"
+        "        return require_host_source(receipt=self._trusted_evidence)\n"
+    )
+    with pytest.raises(AssertionError, match="non-admitting"):
+        _require_non_admission_while_inventory_remains(
+            plant, class_name="Executor", path=Path("<plant>")
+        )
 
 
 def _find_class(class_name: str, tree: ast.Module, *, path: Path) -> ast.ClassDef:
@@ -231,6 +260,21 @@ def _is_receipt_none_only(call: ast.Call) -> bool:
     if keyword.arg != "receipt":
         return False
     return isinstance(keyword.value, ast.Constant) and keyword.value.value is None
+
+
+def _require_non_admission_while_inventory_remains(
+    tree: ast.Module, *, class_name: str, path: Path
+) -> None:
+    """The compound transitional rule, usable against source and a plant."""
+    assert RETIRE_WHEN == "trusted-provenance-admission"
+    assert len(SKIP_INVENTORY) == 73, "the retirement inventory changed"
+    method = _find_method(
+        _find_class(class_name, tree, path=path), "_verify_host_source"
+    )
+    calls = _require_host_source_calls(method)
+    assert len(calls) == 1 and _is_receipt_none_only(
+        calls[0]
+    ), "the executor is not non-admitting while trusted-provenance skips remain"
 
 
 def test_executor_verify_host_source_calls_exactly_require_host_source_of_none() -> (

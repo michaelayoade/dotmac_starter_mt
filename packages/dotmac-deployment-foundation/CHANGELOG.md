@@ -2,6 +2,22 @@
 
 ## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
+### Authorization receipt successor remains non-admitting
+
+`AuthorizationReceiptV2` is a minimal Foundation consumer value supplied by
+Platform's verified-pair adapter. It retains the two original
+signed-document digests, distinct positional signer identities, authorization
+and dispatch identifiers, decision reference, authorization/dispatch timing,
+product, environment, target, operation, Control `plan_digest`, descriptor
+digest, Foundation execution-plan digest, execution sequence and
+dispatch-owned attempt number. It has strict schema-tagged canonical bytes. The old
+`AuthorizationReceipt` remains readable unchanged. Platform constructs this
+plain value only after Control verifies standing and signatures; Foundation
+does not re-decide standing. It is not authority, and post-issuance revocation
+needs a future online or signed observation. Foundation compares the successor
+against independently supplied execution inputs but does not import Control,
+make a second canonicalizer, or introduce a positive executor admission path.
+
 ### Correction: the v1 sidecar was held before freeze; v2 is a contract, not admission
 
 The earlier `TrustedAttestationBinding` sidecar is removed.  It let key-id
