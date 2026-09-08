@@ -2,6 +2,7 @@
   "internal_modules": [
     "dotmac_kernel._transactions",
     "dotmac_kernel.display",
+    "dotmac_kernel.middleware",
     "dotmac_kernel.route_metadata",
     "dotmac_kernel.web_runtime"
   ],
@@ -724,6 +725,11 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.middleware": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
     "dotmac_kernel.middleware.csrf": {
       "classification": "supported",
       "exports": [
@@ -1214,6 +1220,25 @@
       "exports": [
         "apply_pagination",
         "escape_like"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.request_evidence": {
+      "classification": "supported",
+      "exports": [
+        "ANONYMOUS",
+        "ANONYMOUS_KIND",
+        "EVIDENCE_ACTOR_KINDS",
+        "RequestActor",
+        "RequestActorError",
+        "RequestEvidence",
+        "RequestEvidenceContextV1",
+        "TrustedProxyConfigurationError",
+        "TrustedProxyPolicy",
+        "UNSET_EVIDENCE",
+        "bind_actor",
+        "current_evidence",
+        "parse_trusted_proxy_networks"
       ],
       "status": "declared"
     },
@@ -1956,6 +1981,7 @@
     "dotmac_kernel.providers.provisioning",
     "dotmac_kernel.public_exports",
     "dotmac_kernel.query",
+    "dotmac_kernel.request_evidence",
     "dotmac_kernel.secret_sources",
     "dotmac_kernel.security",
     "dotmac_kernel.semantic_encoding",

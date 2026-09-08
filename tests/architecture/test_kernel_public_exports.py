@@ -66,8 +66,43 @@ def test_source_derivation_sensitivity_plants(tmp_path: Path) -> None:
         derive_public_exports(planted)
 
     identity.unlink()
-    with pytest.raises(PublicExportsFormatError, match="has no source file"):
+    with pytest.raises(
+        PublicExportsFormatError,
+        match=r"missing source modules: \['dotmac_kernel\.identity'\]",
+    ):
         derive_public_exports(planted)
+
+
+def test_source_derivation_rejects_unclassified_importable_module_and_package(
+    tmp_path: Path,
+) -> None:
+    planted = tmp_path / "dotmac_kernel"
+    shutil.copytree(SOURCE_ROOT, planted)
+    (planted / "planted_module.py").write_text("__all__ = []\n")
+    with pytest.raises(
+        PublicExportsFormatError,
+        match=r"omit importable modules: \['dotmac_kernel\.planted_module'\]",
+    ):
+        derive_public_exports(planted)
+
+    (planted / "planted_module.py").unlink()
+    package = planted / "planted_package"
+    package.mkdir()
+    (package / "__init__.py").write_text("__all__ = []\n")
+    with pytest.raises(
+        PublicExportsFormatError,
+        match=r"omit importable modules: \['dotmac_kernel\.planted_package'\]",
+    ):
+        derive_public_exports(planted)
+
+
+def test_source_derivation_ignores_non_package_near_miss(tmp_path: Path) -> None:
+    planted = tmp_path / "dotmac_kernel"
+    shutil.copytree(SOURCE_ROOT, planted)
+    versions = planted / "migrations" / "versions"
+    (versions / "near_miss.py").write_text("__all__ = []\n")
+
+    derive_public_exports(planted)
 
 
 def test_parser_rejects_unknown_and_duplicate_fields() -> None:

@@ -328,6 +328,37 @@ def derive_public_exports(source_root: Path) -> bytes:
             )
         )
     classified = classifications["supported"] | classifications["internal"]
+    discovered: set[str] = set()
+
+    def importable(path: Path) -> bool:
+        """Return whether ``path`` belongs to a regular package tree."""
+        directory = path.parent
+        while True:
+            if not (directory / "__init__.py").is_file():
+                return False
+            if directory == source_root:
+                return True
+            directory = directory.parent
+
+    for path in source_root.rglob("*.py"):
+        if not importable(path):
+            continue
+        relative = path.relative_to(source_root)
+        if relative.name == "__init__.py":
+            if relative.parent != Path("."):
+                discovered.add("dotmac_kernel." + ".".join(relative.parent.parts))
+        else:
+            discovered.add("dotmac_kernel." + ".".join(relative.with_suffix("").parts))
+    missing = discovered - classified
+    stale = classified - discovered
+    if missing:
+        raise PublicExportsFormatError(
+            "catalogue classifications omit importable modules: " f"{sorted(missing)}"
+        )
+    if stale:
+        raise PublicExportsFormatError(
+            "catalogue classifications name missing source modules: " f"{sorted(stale)}"
+        )
     root_exports = _source_exports(init)
     if root_exports is None:
         raise PublicExportsFormatError("kernel root must declare __all__")

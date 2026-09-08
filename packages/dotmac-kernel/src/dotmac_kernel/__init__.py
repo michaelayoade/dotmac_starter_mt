@@ -449,6 +449,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.public_exports",
         "dotmac_kernel.query",
+        "dotmac_kernel.request_evidence",
         "dotmac_kernel.security",
         "dotmac_kernel.semantic_encoding",
         "dotmac_kernel.session_runtime",
@@ -486,6 +487,7 @@ INTERNAL_MODULES: frozenset[str] = frozenset(
     {
         "dotmac_kernel._transactions",
         "dotmac_kernel.display",
+        "dotmac_kernel.middleware",
         "dotmac_kernel.route_metadata",
         "dotmac_kernel.web_runtime",
     }
