@@ -136,7 +136,13 @@ def test_parser_rejects_empty_catalogue_and_near_miss_module_name() -> None:
         parse_public_exports(json.dumps(empty_document).encode())
 
     evil_document = json.loads(valid)
-    evil_document["internal_modules"][0] = "dotmac_kernel_evil"
+    # Keep the classification list sorted and aligned with the modules mapping
+    # so validation reaches the module-name refusal rather than an earlier
+    # shape or consistency check.
+    evil_document["internal_modules"] = sorted(
+        "dotmac_kernel_evil" if module == "dotmac_kernel._transactions" else module
+        for module in evil_document["internal_modules"]
+    )
     evil_document["modules"]["dotmac_kernel_evil"] = evil_document["modules"].pop(
         "dotmac_kernel._transactions"
     )
