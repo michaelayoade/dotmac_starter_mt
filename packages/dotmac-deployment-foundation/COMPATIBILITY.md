@@ -26,7 +26,8 @@
   a byte comparison, so a whitespace change is a breaking change for every
   consumer that has committed the previous output.
 - `DeploymentProvenance.v1`: `AuthorizationReceipt`, `AuthorizationReceiptV2`,
-  `DeploymentProvenanceV1`,
+  `AuthorizationReceiptV2Attester`, `AttestedAuthorizationReceiptV2`,
+  `attest_authorization_receipt_v2()`, `DeploymentProvenanceV1`,
   `build_provenance()`, `normalize_digest()` and the `PROVENANCE_SCHEMA`
   string. The canonical BYTES are public contract on the same terms as the
   descriptor document's. `AuthorizationReceipt` is a typed INPUT this facility
@@ -34,9 +35,14 @@
   receipt is bound by VALUE so a zero-dependency build runner never acquires a
   stateful module and never reaches into another owner's state.
   The successor is a minimal Foundation consumer value: Platform's verified-pair
-  adapter supplies it after Control verification, while Foundation preserves
-  envelope digests and distinct signer identities without parsing, mirroring or
-  re-canonicalizing either Control document.
+  adapter attests both Control documents through the typed attester port, while
+  Foundation alone constructs the opaque wrapper. Only that wrapper exposes
+  the combined liveness/execution-input gate. Foundation preserves envelope
+  digests, distinct signer identities and Control's product code without
+  parsing, mirroring or re-canonicalizing either Control document. No executor
+  accepts the wrapper in this contract revision: a caller-selected attester is
+  not production authority, and product-vocabulary mapping remains a later
+  Platform adapter responsibility.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather

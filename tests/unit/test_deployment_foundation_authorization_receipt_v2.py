@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from dotmac_deployment_foundation.errors import PreconditionFailed, SpecError
-from dotmac_deployment_foundation.provenance import AuthorizationReceiptV2
+from dotmac_deployment_foundation.provenance import (
+    AttestedAuthorizationReceiptV2,
+    AuthorizationReceiptV2,
+    attest_authorization_receipt_v2,
+)
 
 
 def _receipt(**overrides: object) -> AuthorizationReceiptV2:
@@ -44,30 +51,60 @@ def _receipt(**overrides: object) -> AuthorizationReceiptV2:
 
 
 def _inputs() -> dict[str, object]:
-    receipt = _receipt()
+    # These are independently authored execution inputs.  Do not derive them
+    # from _receipt(): doing so would make the test unable to detect a reflected
+    # receipt-only implementation.
     return {
-        name: getattr(receipt, name)
-        for name in (
-            "product_code",
-            "environment",
-            "target_id",
-            "target_ref",
-            "operation",
-            "release_ref",
-            "rollout_ref",
-            "plan_id",
-            "execution_sequence",
-            "attempt_no",
-            "descriptor_digest",
-            "execution_plan_digest",
-            "control_plan_digest",
-        )
+        "now": datetime(2026, 9, 7, 12, 30, tzinfo=UTC),
+        "product_code": "starter",
+        "environment": "staging",
+        "target_id": "target-1",
+        "target_ref": "staging-1",
+        "operation": "deploy",
+        "release_ref": "release-1",
+        "rollout_ref": "rollout-1",
+        "plan_id": "plan-1",
+        "approval_decision_ref": "decision-1",
+        "execution_sequence": 4,
+        "attempt_no": 2,
+        "descriptor_digest": "sha256:" + "e" * 64,
+        "execution_plan_digest": "sha256:" + "f" * 64,
+        "control_plan_digest": "sha256:" + "0" * 64,
     }
 
 
-def test_accepts_verified_pair_consumer_values_and_matches_execution_subject() -> None:
+class PairVerifier:
+    def __init__(self, receipt: AuthorizationReceiptV2) -> None:
+        self.receipt = receipt
+
+    def attest_pair(
+        self,
+        *,
+        authorization_material: Mapping[str, Any],
+        dispatch_material: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        if authorization_material != {"authorization": "signed"}:
+            raise PreconditionFailed("authorization material was not attested")
+        if dispatch_material != {"dispatch": "signed"}:
+            raise PreconditionFailed("dispatch material was not attested")
+        return self.receipt.as_document()
+
+
+def _verified(
+    receipt: AuthorizationReceiptV2 | None = None,
+) -> AttestedAuthorizationReceiptV2:
+    receipt = receipt or _receipt()
+    return attest_authorization_receipt_v2(
+        {"authorization": "signed"},
+        {"dispatch": "signed"},
+        attester=PairVerifier(receipt),
+    )
+
+
+def test_accepts_attested_pair_consumer_values_and_matches_execution_subject() -> None:
     receipt = _receipt()
-    receipt.require_execution_inputs(**_inputs())
+    _verified(receipt).require_execution_inputs(**_inputs())
+    assert receipt.product_code == "starter"
 
 
 @pytest.mark.parametrize(
@@ -105,13 +142,60 @@ def test_document_round_trip_is_canonical_and_unknown_keys_refuse() -> None:
         )
 
 
-def test_expiry_boundary_uses_the_injected_clock() -> None:
+def test_liveness_includes_the_dispatch_boundary_and_injected_clock() -> None:
     receipt = _receipt()
-    receipt.require_live(now=datetime(2026, 9, 7, 12, 0, tzinfo=UTC))
+    inputs = _inputs()
+    _verified(receipt).require_execution_inputs(**inputs)
     with pytest.raises(PreconditionFailed):
-        receipt.require_live(now=datetime(2026, 9, 7, 11, 59, tzinfo=UTC))
+        _verified(receipt).require_execution_inputs(
+            **{**inputs, "now": datetime(2026, 9, 7, 12, 29, 59, tzinfo=UTC)}
+        )
     with pytest.raises(PreconditionFailed):
-        receipt.require_live(now=datetime(2026, 9, 7, 13, 0, tzinfo=UTC))
+        _verified(receipt).require_execution_inputs(
+            **{**inputs, "now": datetime(2026, 9, 7, 13, 0, tzinfo=UTC)}
+        )
+
+
+def test_liveness_refuses_before_an_execution_input_mismatch() -> None:
+    inputs = {
+        **_inputs(),
+        "now": datetime(2026, 9, 7, 13, 0, tzinfo=UTC),
+        "approval_decision_ref": "wrong-decision",
+    }
+    with pytest.raises(PreconditionFailed, match="expired"):
+        _verified().require_execution_inputs(**inputs)
+
+
+def test_raw_v2_receipt_cannot_invoke_the_execution_gate() -> None:
+    receipt = _receipt()
+    assert not hasattr(receipt, "require_execution_inputs")
+    with pytest.raises(PreconditionFailed):
+        AttestedAuthorizationReceiptV2(object(), receipt)
+
+
+def test_attested_wrapper_exposes_neither_receipt_nor_reusable_witness() -> None:
+    attested = _verified()
+    assert not dataclasses.is_dataclass(attested)
+    assert not hasattr(attested, "receipt")
+    assert not hasattr(attested, "witness")
+    with pytest.raises(TypeError):
+        dataclasses.replace(attested)  # type: ignore[type-var]
+
+
+def test_both_control_documents_must_pass_through_the_pair_verifier() -> None:
+    verifier = PairVerifier(_receipt())
+    with pytest.raises(PreconditionFailed):
+        attest_authorization_receipt_v2(
+            {"authorization": "forged"},
+            {"dispatch": "signed"},
+            attester=verifier,
+        )
+    with pytest.raises(PreconditionFailed):
+        attest_authorization_receipt_v2(
+            {"authorization": "signed"},
+            {"dispatch": "forged"},
+            attester=verifier,
+        )
 
 
 @pytest.mark.parametrize(
@@ -129,7 +213,7 @@ def test_refuses_invalid_authorization_window_or_unknown_operation(
         _receipt(**{field: value})
 
 
-@pytest.mark.parametrize("field", tuple(_inputs()))
+@pytest.mark.parametrize("field", tuple(name for name in _inputs() if name != "now"))
 def test_refuses_each_independent_execution_subject_mismatch(field: str) -> None:
     values = _inputs()
     values[field] = (
@@ -140,4 +224,4 @@ def test_refuses_each_independent_execution_subject_mismatch(field: str) -> None
         else "different"
     )
     with pytest.raises(PreconditionFailed):
-        _receipt().require_execution_inputs(**values)  # type: ignore[arg-type]
+        _verified().require_execution_inputs(**values)  # type: ignore[arg-type]

@@ -85,12 +85,15 @@ __all__ = [
     "AUTHORIZATION_RECEIPT_V2_SCHEMA",
     "AuthorizationReceipt",
     "AuthorizationReceiptV2",
+    "AuthorizationReceiptV2Attester",
     "AuthorizationVerifier",
     "DeploymentProvenanceV1",
     "VerifiedAuthorization",
+    "AttestedAuthorizationReceiptV2",
     "build_provenance",
     "normalize_digest",
     "verify_authorization",
+    "attest_authorization_receipt_v2",
 ]
 
 PROVENANCE_SCHEMA: Final = "DeploymentProvenance.v1"
@@ -564,10 +567,10 @@ class AuthorizationReceiptV2:
             raise SpecError(f"AuthorizationReceiptV2.{field} must be timezone-aware")
         return parsed
 
-    def require_live(self, *, now: datetime) -> None:
+    def _require_live(self, *, now: datetime) -> None:
         if now.tzinfo is None:
             raise SpecError(
-                "AuthorizationReceiptV2.require_live now must be timezone-aware"
+                "AuthorizationReceiptV2 execution time must be timezone-aware"
             )
         issued = self._aware_instant(
             self.authorization_issued_at, field="authorization_issued_at"
@@ -575,8 +578,13 @@ class AuthorizationReceiptV2:
         expires = self._aware_instant(
             self.authorization_expires_at, field="authorization_expires_at"
         )
+        dispatch_issued = self._aware_instant(
+            self.dispatch_issued_at, field="dispatch_issued_at"
+        )
         if now < issued:
             raise PreconditionFailed("AuthorizationReceiptV2 is not yet valid")
+        if now < dispatch_issued:
+            raise PreconditionFailed("AuthorizationReceiptV2 dispatch is not yet valid")
         if now >= expires:
             raise PreconditionFailed("AuthorizationReceiptV2 has expired")
 
@@ -655,7 +663,7 @@ class AuthorizationReceiptV2:
     def canonical_bytes(self) -> bytes:
         return _canonical_provenance_bytes(self.as_document())
 
-    def require_execution_inputs(
+    def _require_execution_inputs(
         self,
         *,
         product_code: str,
@@ -666,17 +674,14 @@ class AuthorizationReceiptV2:
         release_ref: str,
         rollout_ref: str,
         plan_id: str,
+        approval_decision_ref: str,
         control_plan_digest: str,
         descriptor_digest: str,
         execution_plan_digest: str,
         execution_sequence: int,
         attempt_no: int,
     ) -> None:
-        """Compare independently supplied execution values; this is not admission.
-
-        A trusted policy must invoke this check before any future executor can
-        treat the receipt as authority.
-        """
+        """Compare values for the verified wrapper; never exposed on raw input."""
         supplied: dict[str, object] = {
             "product_code": product_code,
             "environment": environment,
@@ -686,6 +691,7 @@ class AuthorizationReceiptV2:
             "release_ref": release_ref,
             "rollout_ref": rollout_ref,
             "plan_id": plan_id,
+            "approval_decision_ref": approval_decision_ref,
             "control_plan_digest": control_plan_digest,
             "descriptor_digest": descriptor_digest,
             "execution_plan_digest": execution_plan_digest,
@@ -721,12 +727,131 @@ class AuthorizationReceiptV2:
 
 
 class _Attestation:
-    """Proof that :func:`verify_authorization` produced this value."""
+    """Proof that this module's mandatory attestation route produced a value."""
 
     __slots__ = ()
 
 
 _ATTESTED: Final = _Attestation()
+
+
+@runtime_checkable
+class AuthorizationReceiptV2Attester(Protocol):
+    """Attest Control's independently signed authorization/dispatch pair.
+
+    Platform implements this port with Control's public verifiers. Foundation
+    deliberately receives opaque mappings: it neither imports Control nor
+    grows a second parser for Control-owned envelopes. This port is a
+    composition seam, not an authority selector: a caller-supplied
+    implementation has no production authority while no executor accepts the
+    resulting value.
+    """
+
+    def attest_pair(
+        self,
+        *,
+        authorization_material: Mapping[str, Any],
+        dispatch_material: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+
+class AttestedAuthorizationReceiptV2:
+    """Opaque v2 terms produced by this module's pair-attestation route.
+
+    The constructor always refuses.  The factory installs the parsed receipt
+    in a private slot and exposes neither it nor a reusable witness.  This is a
+    Python convention boundary, not protection against malicious code in the
+    same process; its purpose is to make ordinary public-field reconstruction
+    and ``dataclasses.replace`` structurally unavailable.
+
+    The value is deliberately non-admitting.  No Foundation executor accepts
+    it until trusted verifier composition and host enrolment are implemented.
+    """
+
+    __slots__ = ("__receipt",)
+
+    def __new__(
+        cls, *_args: object, **_kwargs: object
+    ) -> AttestedAuthorizationReceiptV2:
+        raise PreconditionFailed(
+            "an AttestedAuthorizationReceiptV2 may only be produced by "
+            "attest_authorization_receipt_v2()"
+        )
+
+    def require_execution_inputs(
+        self,
+        *,
+        now: datetime,
+        product_code: str,
+        environment: str,
+        target_id: str,
+        target_ref: str,
+        operation: str,
+        release_ref: str,
+        rollout_ref: str,
+        plan_id: str,
+        approval_decision_ref: str,
+        control_plan_digest: str,
+        descriptor_digest: str,
+        execution_plan_digest: str,
+        execution_sequence: int,
+        attempt_no: int,
+    ) -> None:
+        """Require liveness and exact independent execution inputs together."""
+
+        self.__receipt._require_live(now=now)
+        self.__receipt._require_execution_inputs(
+            product_code=product_code,
+            environment=environment,
+            target_id=target_id,
+            target_ref=target_ref,
+            operation=operation,
+            release_ref=release_ref,
+            rollout_ref=rollout_ref,
+            plan_id=plan_id,
+            approval_decision_ref=approval_decision_ref,
+            control_plan_digest=control_plan_digest,
+            descriptor_digest=descriptor_digest,
+            execution_plan_digest=execution_plan_digest,
+            execution_sequence=execution_sequence,
+            attempt_no=attempt_no,
+        )
+
+
+def attest_authorization_receipt_v2(
+    authorization_material: Mapping[str, Any],
+    dispatch_material: Mapping[str, Any],
+    *,
+    attester: AuthorizationReceiptV2Attester,
+) -> AttestedAuthorizationReceiptV2:
+    """Attest a raw Control pair without granting executor admission.
+
+    Trusted composition must choose the attester.  Accepting an implementation
+    here does not make a request-selected implementation authoritative; no
+    executor consumes the returned type in this contract revision.
+    """
+
+    if not isinstance(attester, AuthorizationReceiptV2Attester):
+        raise PreconditionFailed(
+            "attest_authorization_receipt_v2 requires an "
+            "AuthorizationReceiptV2Attester"
+        )
+    document = attester.attest_pair(
+        authorization_material=authorization_material,
+        dispatch_material=dispatch_material,
+    )
+    if not isinstance(document, Mapping):
+        raise SpecError(
+            "AuthorizationReceiptV2Attester.attest_pair must return the receipt "
+            f"document it vouches for, got {type(document).__name__}"
+        )
+    value = object.__new__(AttestedAuthorizationReceiptV2)
+    object.__setattr__(
+        value,
+        "_AttestedAuthorizationReceiptV2__receipt",
+        AuthorizationReceiptV2.from_document(document),
+    )
+    return value
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

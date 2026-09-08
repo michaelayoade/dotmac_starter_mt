@@ -1,22 +1,38 @@
 # Changelog — dotmac-deployment-foundation
 
-## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
+## Unreleased — successor not allocated
 
 ### Authorization receipt successor remains non-admitting
 
-`AuthorizationReceiptV2` is a minimal Foundation consumer value supplied by
-Platform's verified-pair adapter. It retains the two original
+`AuthorizationReceiptV2` is a minimal Foundation consumer value consumed
+through the typed `attest_authorization_receipt_v2()` composition seam after an
+injected attester has checked both Control documents. The raw value has no
+public execution-input gate; opaque `AttestedAuthorizationReceiptV2` owns the
+combined liveness and equality check and exposes neither its parsed receipt nor
+a reusable witness. It retains the two original
 signed-document digests, distinct positional signer identities, authorization
 and dispatch identifiers, decision reference, authorization/dispatch timing,
-product, environment, target, operation, Control `plan_digest`, descriptor
+Control product code, environment, target, operation, Control `plan_digest`, descriptor
 digest, Foundation execution-plan digest, execution sequence and
 dispatch-owned attempt number. It has strict schema-tagged canonical bytes. The old
 `AuthorizationReceipt` remains readable unchanged. Platform constructs this
 plain value only after Control verifies standing and signatures; Foundation
 does not re-decide standing. It is not authority, and post-issuance revocation
 needs a future online or signed observation. Foundation compares the successor
-against independently supplied execution inputs but does not import Control,
+against separately supplied execution inputs, including the approval
+decision reference, and refuses before the signed dispatch issue time as well
+as after authorization expiry. It does not import Control,
 make a second canonicalizer, or introduce a positive executor admission path.
+The injected attester is explicitly not an authority selector: no executor
+accepts the returned type until trusted Platform composition and host
+enrolment exist. Product-vocabulary mapping stays in that later Platform
+adapter, avoiding a rewrite of the existing v2 wire schema here.
+
+No version is allocated by this heading. `0.4.0a1` was built once from older
+bytes and is spent; the successor coordinate is allocated only after the trust
+composition freezes.
+
+## 0.4.0a1 — unreleased, BUILT ONCE; UNRECORDED AND DRIFTED
 
 ### Correction: the v1 sidecar was held before freeze; v2 is a contract, not admission
 
