@@ -32,6 +32,7 @@ real verifier.
 
 from __future__ import annotations
 
+import ast
 import base64
 import dataclasses
 import importlib.util
@@ -417,7 +418,27 @@ FORBIDDEN_HOST_REFERENCES = (
 
 
 def _host_reference_violations(source: str) -> list[str]:
-    return [name for name in FORBIDDEN_HOST_REFERENCES if name in source]
+    """AST-based, deliberately: a raw substring search would also flag this
+    module's OWN docstring, which names these identifiers in prose to explain
+    their absence, and it would treat `expected_host_identity_v2` as a hit on
+    `expected_host_identity` when it is a different name entirely. Only
+    actual `Name`/`Attribute`/import identifiers count — a docstring's string
+    contents produce no such nodes."""
+    tree = ast.parse(source)
+    identifiers: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            identifiers.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            identifiers.add(node.attr)
+        elif isinstance(node, ast.arg):
+            identifiers.add(node.arg)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                identifiers.add(alias.name.rsplit(".", 1)[-1])
+                if alias.asname:
+                    identifiers.add(alias.asname)
+    return [name for name in FORBIDDEN_HOST_REFERENCES if name in identifiers]
 
 
 def test_the_signer_script_contains_no_installed_host_reference() -> None:
@@ -426,7 +447,9 @@ def test_the_signer_script_contains_no_installed_host_reference() -> None:
     assert not violations, (
         f"{SCRIPT.name} references installed-host-role names {violations} — "
         "the candidate signer must be structurally incapable of emitting a "
-        "host-role envelope, not merely undocumented for doing so"
+        "host-role envelope, not merely undocumented for doing so. (The "
+        "module docstring is allowed to NAME these identifiers in prose; "
+        "this sweep is AST-based and only counts real code references.)"
     )
 
 
@@ -436,14 +459,18 @@ def test_the_host_reference_sweep_is_observed_failing_on_a_planted_violation() -
     real_source = SCRIPT.read_text(encoding="utf-8")
     assert not _host_reference_violations(real_source)
 
-    planted = real_source + "\n# planted: verify_attestation_pair(...)\n"
+    # The plant is real CODE (a bare name reference), not prose — a text-only
+    # plant would not distinguish this AST sweep from the substring search it
+    # deliberately replaced.
+    planted = real_source + "\nverify_attestation_pair\n"
     violations = _host_reference_violations(planted)
     assert violations == ["verify_attestation_pair"]
 
-    # A near-miss must NOT be flagged: a comment naming the general concept
-    # without using any of the forbidden identifiers is legitimate prose (this
-    # very module's docstring does exactly that) and must not trip the sweep.
-    near_miss = real_source + "\n# this script never touches the host role\n"
+    # Near-miss: a DIFFERENT identifier that merely contains one of the
+    # forbidden names as a substring must not be flagged — this is exactly
+    # the false positive a plain substring search would have produced, and is
+    # why the sweep is AST-based and matches whole identifiers only.
+    near_miss = real_source + "\nexpected_host_identity_v2 = 1\n"
     assert not _host_reference_violations(near_miss)
 
 
