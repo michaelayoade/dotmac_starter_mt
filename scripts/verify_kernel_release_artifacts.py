@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 
 from release_artifact_verification import (
@@ -26,6 +30,9 @@ CANONICAL_WORKFLOW_PATH = ".github/workflows/release-kernel.yml"
 CANONICAL_ARTIFACT_NAME = "dotmac-kernel-dist"
 CANONICAL_REGISTRY_ORIGIN = "https://registry.dotmac.io"
 CANONICAL_REGISTRY_LOGIN = "ci-reader"
+PUBLIC_EXPORTS_MEMBER = "dotmac_kernel/public_exports.json"
+PUBLIC_EXPORTS_SCHEMA = "dotmac.kernel-public-exports.v1"
+HISTORICAL_WITHOUT_PUBLIC_EXPORTS = frozenset({"0.1.0a101", "0.1.0a102"})
 
 
 def required(name: str) -> str:
@@ -155,6 +162,251 @@ print(json.dumps({
             and result["distribution_in_venv"] is True
         ),
     )
+
+
+def _strict_catalogue(payload: bytes, *, label: str) -> dict[str, object]:
+    """Parse the shipped catalogue without importing the package being verified."""
+
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in items:
+            if key in result:
+                raise SystemExit(
+                    f"kernel verification refused: duplicate catalogue key in {label}"
+                )
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(payload, object_pairs_hook=pairs)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"kernel verification refused: catalogue {label} is invalid JSON"
+        ) from exc
+    if (
+        not isinstance(document, dict)
+        or document.get("schema") != PUBLIC_EXPORTS_SCHEMA
+    ):
+        raise SystemExit(
+            f"kernel verification refused: catalogue {label} schema differs"
+        )
+    if set(document) != {
+        "schema",
+        "supported_modules",
+        "internal_modules",
+        "root_exports",
+        "modules",
+    } or not isinstance(document["modules"], dict):
+        raise SystemExit(
+            f"kernel verification refused: catalogue {label} fields differ"
+        )
+    if (
+        not document["modules"]
+        or not isinstance(document["supported_modules"], list)
+        or not isinstance(document["internal_modules"], list)
+        or not isinstance(document["root_exports"], list)
+        or set(document["supported_modules"]) & set(document["internal_modules"])
+        or document["supported_modules"] != sorted(set(document["supported_modules"]))
+        or document["internal_modules"] != sorted(set(document["internal_modules"]))
+        or document["root_exports"] != sorted(set(document["root_exports"]))
+        or any(
+            not isinstance(name, str)
+            for name in (
+                *document["supported_modules"],
+                *document["internal_modules"],
+                *document["root_exports"],
+            )
+        )
+        or set(document["modules"])
+        != set(document["supported_modules"]) | set(document["internal_modules"])
+    ):
+        raise SystemExit(
+            f"kernel verification refused: catalogue {label} has no modules"
+        )
+    for module, entry in document["modules"].items():
+        if not isinstance(module, str) or (
+            module != "dotmac_kernel" and not module.startswith("dotmac_kernel.")
+        ):
+            raise SystemExit(
+                f"kernel verification refused: catalogue {label} module is invalid"
+            )
+        if not isinstance(entry, dict) or set(entry) != {
+            "classification",
+            "exports",
+            "status",
+        }:
+            raise SystemExit(
+                f"kernel verification refused: catalogue {label} entry fields differ"
+            )
+        status = entry["status"]
+        exports = entry["exports"]
+        classification = entry["classification"]
+        if classification not in {"supported", "internal"} or (
+            classification == "supported"
+        ) != (module in document["supported_modules"]):
+            raise SystemExit(
+                f"kernel verification refused: catalogue {label} classification differs"
+            )
+        if status == "unavailable":
+            if exports is not None:
+                raise SystemExit(
+                    "kernel verification refused: "
+                    f"catalogue {label} unavailable exports differ"
+                )
+        elif status == "declared":
+            if (
+                not isinstance(exports, list)
+                or any(not isinstance(name, str) for name in exports)
+                or exports != sorted(set(exports))
+            ):
+                raise SystemExit(
+                    f"kernel verification refused: catalogue {label} exports differ"
+                )
+        else:
+            raise SystemExit(
+                f"kernel verification refused: catalogue {label} status differs"
+            )
+    if json.dumps(document, sort_keys=True, indent=2).encode() + b"\n" != payload:
+        raise SystemExit(
+            f"kernel verification refused: catalogue {label} is not canonical"
+        )
+    return document
+
+
+def _catalogue_member(path: Path, *, label: str) -> bytes | None:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            wheel_matches = [
+                info
+                for info in archive.infolist()
+                if info.filename == PUBLIC_EXPORTS_MEMBER
+            ]
+            if not wheel_matches:
+                return None
+            if (
+                len(wheel_matches) != 1
+                or wheel_matches[0].is_dir()
+                or wheel_matches[0].filename.startswith("/")
+                or stat.S_ISLNK(wheel_matches[0].external_attr >> 16)
+            ):
+                raise SystemExit(
+                    "kernel verification refused: "
+                    f"catalogue member in {label} is unsafe"
+                )
+            return archive.read(wheel_matches[0])
+    with tarfile.open(path, "r:*") as archive:
+        tar_matches = [
+            member
+            for member in archive.getmembers()
+            if not Path(member.name).is_absolute()
+            and len(Path(member.name).parts) == 4
+            and Path(member.name).parts[1:]
+            == (
+                "src",
+                "dotmac_kernel",
+                "public_exports.json",
+            )
+        ]
+        if not tar_matches:
+            return None
+        if (
+            len(tar_matches) != 1
+            or not tar_matches[0].isreg()
+            or ".." in Path(tar_matches[0].name).parts
+        ):
+            raise SystemExit(
+                f"kernel verification refused: catalogue member in {label} is unsafe"
+            )
+        extracted = archive.extractfile(tar_matches[0])
+        if extracted is None:
+            raise SystemExit(
+                "kernel verification refused: "
+                f"catalogue member in {label} is unreadable"
+            )
+        return extracted.read()
+
+
+def public_exports_evidence(
+    *,
+    version: str,
+    wheel: Path,
+    sdist: Path,
+    source: Path | None,
+    source_payload: bytes | None = None,
+    source_present: bool | None = None,
+) -> dict[str, object] | None:
+    """Bind successor archive members to the exact source-tree bytes.
+
+    A successor source tree carrying the catalogue requires it in both
+    artifacts. A missing or partial member is never interpreted as historical;
+    historical V1 records remain valid in the record writer.
+    """
+
+    wheel_bytes = _catalogue_member(wheel, label=wheel.name)
+    sdist_bytes = _catalogue_member(sdist, label=sdist.name)
+    if source_present is None:
+        source_present = source_payload is not None or (
+            source is not None and source.is_file()
+        )
+    if not source_present:
+        if wheel_bytes is not None or sdist_bytes is not None:
+            raise SystemExit(
+                "kernel verification refused: catalogue exists only in an artifact"
+            )
+        if version not in HISTORICAL_WITHOUT_PUBLIC_EXPORTS:
+            raise SystemExit(
+                "kernel verification refused: successor source catalogue is absent"
+            )
+        return None
+    if wheel_bytes is None or sdist_bytes is None:
+        raise SystemExit(
+            "kernel verification refused: catalogue member is missing from an artifact"
+        )
+    if source_payload is None and source is not None and source.is_file():
+        source_payload = source.read_bytes()
+    if source_payload is None:
+        if source is None or not source.is_file():
+            raise SystemExit(
+                "kernel verification refused: source catalogue is unavailable"
+            )
+        source_payload = source.read_bytes()
+    if source_payload is None:
+        raise SystemExit("kernel verification refused: source catalogue is unavailable")
+    source_bytes = source_payload
+    _strict_catalogue(source_bytes, label="source")
+    _strict_catalogue(wheel_bytes, label=wheel.name)
+    _strict_catalogue(sdist_bytes, label=sdist.name)
+    if wheel_bytes != sdist_bytes or wheel_bytes != source_bytes:
+        raise SystemExit(
+            "kernel verification refused: catalogue bytes differ between "
+            "source and artifacts"
+        )
+    return {
+        "name": PUBLIC_EXPORTS_MEMBER,
+        "size": len(source_bytes),
+        "sha256": hashlib.sha256(source_bytes).hexdigest(),
+        "schema": PUBLIC_EXPORTS_SCHEMA,
+    }
+
+
+def source_catalogue_at_commit(source_sha: str) -> tuple[bool, bytes | None]:
+    path = "packages/dotmac-kernel/src/dotmac_kernel/public_exports.json"
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{source_sha}^{{commit}}"],
+        check=True,
+    )
+    listing = subprocess.run(
+        ["git", "ls-tree", "--name-only", source_sha, "--", path],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if listing.stdout.strip() != path:
+        return False, None
+    completed = subprocess.run(
+        ["git", "show", f"{source_sha}:{path}"], check=True, capture_output=True
+    )
+    return True, completed.stdout
 
 
 def main() -> int:
@@ -288,6 +540,17 @@ def main() -> int:
         distribution="dotmac-kernel",
         version=version,
     )
+    source_has_catalogue, source_catalogue = source_catalogue_at_commit(source_sha)
+    public_exports = public_exports_evidence(
+        version=version,
+        wheel=next(path for path in retained_paths if path.suffix == ".whl"),
+        sdist=next(path for path in retained_paths if path.name.endswith(".tar.gz")),
+        source=None,
+        source_payload=source_catalogue,
+        source_present=source_has_catalogue,
+    )
+    if public_exports is not None:
+        decision["public_exports"] = public_exports
     facility_run_id = required("FACILITY_RUN_ID")
     facility_attempt = required("FACILITY_RUN_ATTEMPT")
     if re.fullmatch(r"[1-9][0-9]*", facility_run_id) is None or facility_attempt != "1":
@@ -295,7 +558,11 @@ def main() -> int:
             "kernel verification refused: facility coordinates are invalid"
         )
     receipt = {
-        "schema": "KernelReleaseVerificationReceipt.v1",
+        "schema": (
+            "KernelReleaseVerificationReceipt.v2"
+            if public_exports is not None
+            else "KernelReleaseVerificationReceipt.v1"
+        ),
         "authorization": source_binding,
         "facility": {
             "repository": required("FACILITY_REPOSITORY"),

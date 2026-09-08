@@ -16,6 +16,7 @@ from tag_kernel_release_once import validate_receipt
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = ROOT / "docs/inventories/kernel-release-verifications"
 SCHEMA = "KernelReleaseEvidence.v1"
+SCHEMA_V2 = "KernelReleaseEvidence.v2"
 
 
 class RecordRefused(ValueError):
@@ -23,7 +24,7 @@ class RecordRefused(ValueError):
 
 
 def validate_persisted_record(record: object, *, version: str) -> None:
-    expected_fields = {
+    base_fields = {
         "schema",
         "version",
         "tag",
@@ -40,12 +41,20 @@ def validate_persisted_record(record: object, *, version: str) -> None:
         "registry",
         "files",
     }
-    if not isinstance(record, dict) or set(record) != expected_fields:
+    if not isinstance(record, dict) or record.get("schema") not in {
+        SCHEMA,
+        SCHEMA_V2,
+    }:
+        raise RecordRefused("persisted kernel evidence fields differ")
+    expected_fields = base_fields | (
+        {"public_exports"} if record["schema"] == SCHEMA_V2 else set()
+    )
+    if set(record) != expected_fields:
         raise RecordRefused("persisted kernel evidence fields differ")
     canonical_kernel_filenames(version)
     if any(
         (
-            record["schema"] != SCHEMA,
+            record["schema"] not in {SCHEMA, SCHEMA_V2},
             record["version"] != version,
             record["tag"] != f"dotmac-kernel-v{version}",
             record["tag_disposition"] not in {"CREATE", "ALREADY"},
@@ -163,6 +172,18 @@ def validate_persisted_record(record: object, *, version: str) -> None:
         )
     ):
         raise RecordRefused("persisted file evidence differs")
+    if record["schema"] == SCHEMA_V2:
+        catalogue = record["public_exports"]
+        if (
+            not isinstance(catalogue, dict)
+            or set(catalogue) != {"name", "size", "sha256", "schema"}
+            or catalogue["name"] != "dotmac_kernel/public_exports.json"
+            or catalogue["schema"] != "dotmac.kernel-public-exports.v1"
+            or not isinstance(catalogue["size"], int)
+            or catalogue["size"] <= 0
+            or re.fullmatch(r"[0-9a-f]{64}", str(catalogue["sha256"])) is None
+        ):
+            raise RecordRefused("persisted public-export catalogue evidence differs")
 
 
 def canonical_document(path: Path) -> tuple[dict[str, object], bytes]:
@@ -182,17 +203,35 @@ def build_record(
 ) -> tuple[str, dict[str, object]]:
     verification, verification_bytes = canonical_document(verification_path)
     decision, decision_bytes = canonical_document(tag_path)
-    if set(verification) != {
-        "schema",
-        "authorization",
-        "facility",
-        "release",
-        "verdict",
-        "files",
-    }:
+    if set(verification) not in (
+        {
+            "schema",
+            "authorization",
+            "facility",
+            "release",
+            "verdict",
+            "files",
+        },
+        {
+            "schema",
+            "authorization",
+            "facility",
+            "release",
+            "verdict",
+            "files",
+            "public_exports",
+        },
+    ):
         raise RecordRefused("verification receipt fields differ")
-    if verification["schema"] != "KernelReleaseVerificationReceipt.v1":
+    if verification["schema"] not in {
+        "KernelReleaseVerificationReceipt.v1",
+        "KernelReleaseVerificationReceipt.v2",
+    }:
         raise RecordRefused("verification schema differs")
+    if ("public_exports" in verification) != (
+        verification["schema"] == "KernelReleaseVerificationReceipt.v2"
+    ):
+        raise RecordRefused("verification catalogue schema differs")
     if verification["verdict"] != "verified":
         raise RecordRefused("verification verdict differs")
     if set(decision) != {
@@ -264,7 +303,7 @@ def build_record(
     ):
         raise RecordRefused("tag and release coordinates differ")
     record = {
-        "schema": SCHEMA,
+        "schema": SCHEMA_V2 if "public_exports" in verification else SCHEMA,
         "version": version,
         "tag": tag,
         "tag_object": decision["tag_object"],
@@ -299,6 +338,8 @@ def build_record(
         },
         "files": compact_files,
     }
+    if "public_exports" in verification:
+        record["public_exports"] = verification["public_exports"]
     validate_persisted_record(record, version=version)
     return version, record
 
@@ -341,7 +382,9 @@ def immutable_release_facts(record: dict[str, object]) -> dict[str, object]:
             "publisher",
             "registry",
             "files",
+            "public_exports",
         )
+        if key in record
     }
     verifier = record["verifier"]
     if not isinstance(verifier, dict):

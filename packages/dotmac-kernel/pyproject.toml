@@ -19,6 +19,8 @@ include = [
     # assembly composes them via version_locations. The versions/ dir has no
     # __init__ (Alembic convention), so declare it explicitly as package data.
     { path = "src/dotmac_kernel/migrations/**/*", format = ["sdist", "wheel"] },
+    # Release-verifiable public surface data, read without importing modules.
+    { path = "src/dotmac_kernel/public_exports.json", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
