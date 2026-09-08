@@ -769,6 +769,7 @@ class AttestedAuthorizationReceiptV2:
     """
 
     __slots__ = ("__receipt",)
+    __receipt: AuthorizationReceiptV2
 
     def __new__(
         cls, *_args: object, **_kwargs: object
