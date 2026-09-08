@@ -48,7 +48,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.architecture.host_source_skip_inventory import RETIRE_WHEN, SKIP_INVENTORY
+from tests.architecture.host_source_skip_inventory import (
+    RETIRE_WHEN,
+    SKIP_INVENTORY,
+    SKIP_INVENTORY_SCOPE,
+)
+from tests.architecture.host_source_skip_inventory import (
+    tests_reaching as _tests_reaching,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 RUN_PY = (
@@ -96,6 +103,8 @@ def test_trusted_provenance_admission_ratchet_is_bidirectional() -> None:
     change; leaving it behind would misdescribe a permanently non-admitting
     executor as a transition gate.
     """
+    assert SKIP_INVENTORY_SCOPE == "Executor tests only"
+    assert len(SKIP_INVENTORY) == 73
     _require_non_admission_while_inventory_remains(
         ast.parse(RUN_PY.read_text(encoding="utf-8"), filename=str(RUN_PY)),
         class_name="Executor",
@@ -110,6 +119,83 @@ def test_trusted_provenance_admission_ratchet_is_bidirectional() -> None:
         _require_non_admission_while_inventory_remains(
             plant, class_name="Executor", path=Path("<plant>")
         )
+
+
+def test_skip_inventory_is_machine_checked_as_executor_only_per_test_identity(
+    tmp_path: Path,
+) -> None:
+    paths = {relative_path for relative_path, _ in SKIP_INVENTORY}
+    executor_tests = {
+        (relative_path, name)
+        for relative_path in paths
+        for name in _tests_reaching(
+            REPO / relative_path,
+            target="Executor",
+            target_module="dotmac_deployment_foundation.engine.run",
+        )
+    }
+    recovery_tests = {
+        (relative_path, name)
+        for relative_path in paths
+        for name in _tests_reaching(
+            REPO / relative_path,
+            target="RecoveryExecutor",
+            target_module="dotmac_deployment_foundation.recovery_execution",
+        )
+    }
+    assert SKIP_INVENTORY <= executor_tests
+    assert not SKIP_INVENTORY & recovery_tests
+
+    split_subjects = tmp_path / "split_subjects.py"
+    split_subjects.write_text(
+        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
+        "from dotmac_deployment_foundation.engine.run import Executor\n"
+        "def test_fixture():\n"
+        "    valid_host_source_kwargs()\n"
+        "def test_executor_only():\n"
+        "    Executor(None, None, None)\n",
+        encoding="utf-8",
+    )
+    assert _tests_reaching(split_subjects) == {"test_fixture"}
+    assert _tests_reaching(
+        split_subjects,
+        target="Executor",
+        target_module="dotmac_deployment_foundation.engine.run",
+    ) == {"test_executor_only"}
+
+    same_subject = tmp_path / "same_subject.py"
+    same_subject.write_text(
+        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
+        "from dotmac_deployment_foundation.engine.run import Executor\n"
+        "def test_both():\n"
+        "    Executor(None, None, None)\n"
+        "    valid_host_source_kwargs()\n",
+        encoding="utf-8",
+    )
+    assert _tests_reaching(same_subject) == {"test_both"}
+    assert _tests_reaching(
+        same_subject,
+        target="Executor",
+        target_module="dotmac_deployment_foundation.engine.run",
+    ) == {"test_both"}
+
+    recovery_subject = tmp_path / "recovery_subject.py"
+    recovery_subject.write_text(
+        "from tests.unit.host_source_stance import valid_host_source_kwargs\n"
+        "from dotmac_deployment_foundation.recovery_execution import "
+        "RecoveryExecutor\n"
+        "def test_recovery():\n"
+        "    RecoveryExecutor(None, None, None)\n"
+        "    valid_host_source_kwargs()\n"
+        "def test_prose_near_miss():\n"
+        "    label = 'RecoveryExecutor'\n",
+        encoding="utf-8",
+    )
+    assert _tests_reaching(
+        recovery_subject,
+        target="RecoveryExecutor",
+        target_module="dotmac_deployment_foundation.recovery_execution",
+    ) == {"test_recovery"}
 
 
 def _find_class(class_name: str, tree: ast.Module, *, path: Path) -> ast.ClassDef:
@@ -265,16 +351,23 @@ def _is_receipt_none_only(call: ast.Call) -> bool:
 def _require_non_admission_while_inventory_remains(
     tree: ast.Module, *, class_name: str, path: Path
 ) -> None:
-    """The compound transitional rule, usable against source and a plant."""
+    """The compound Executor transitional rule, usable against source/plants."""
     assert RETIRE_WHEN == "trusted-provenance-admission"
     assert len(SKIP_INVENTORY) == 73, "the retirement inventory changed"
+    _require_non_admission_call_shape(tree, class_name=class_name, path=path)
+
+
+def _require_non_admission_call_shape(
+    tree: ast.Module, *, class_name: str, path: Path
+) -> None:
+    """Assert a class's host-source helper can only request ``None``."""
     method = _find_method(
         _find_class(class_name, tree, path=path), "_verify_host_source"
     )
     calls = _require_host_source_calls(method)
     assert len(calls) == 1 and _is_receipt_none_only(
         calls[0]
-    ), "the executor is not non-admitting while trusted-provenance skips remain"
+    ), "the executor is not non-admitting while its recorded gap remains"
 
 
 def test_executor_verify_host_source_calls_exactly_require_host_source_of_none() -> (

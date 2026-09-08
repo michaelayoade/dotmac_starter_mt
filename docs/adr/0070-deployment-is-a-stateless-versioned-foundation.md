@@ -420,6 +420,22 @@ replace either signer, or admit an executor in this amendment. The 73-item
 trusted-provenance skip inventory and executor `receipt=None` seam remain a
 paired non-admission ratchet.
 
+### Amendment, 2026-09-08: restore the independent v2 same-key refusal
+
+The v2 contract retained its split-roots construction check but had lost the
+independent verifier check. `verify_attestation_pair` now refuses candidate
+and installed envelopes with the same `public_key_fingerprint` before any
+trust-policy, root, or signature evaluation (`trusted-host-source-same-key-
+signed-both`). `key_id` is only a bound label: distinct fingerprints using the
+same label remain a deliberately admitted near-miss under a supplied policy.
+
+The 73-entry host-source skip inventory is Executor tests only. It never
+represented behavioral coverage of the real `RecoveryExecutor.run` ten-step
+sequence, which remains separately UNMONITORED while that executor is
+non-admitting. This recovery behavior gap has an exact named inventory and
+retires only when genuine trusted-provenance admission exists and the real
+`RecoveryExecutor.run` sequence is covered; no skip retirement occurs here.
+
 ### Amendment, 2026-09-08: pair attestation precedes future admission
 
 The plain v2 receipt remains parseable evidence but no longer exposes the

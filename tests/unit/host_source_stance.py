@@ -35,7 +35,7 @@ its own separate piece of work.
 
 ## What this means for every test that used to call this module
 
-Every test that built an `Executor`/`RecoveryExecutor` via
+Every recorded test that built an `Executor` via
 `valid_host_source_kwargs()` in order to reach PAST the host-source gate and
 exercise something downstream of it (lock capability, the authorization
 cross-matrix, failure injection, principal bootstrap, deployment evidence,
@@ -54,14 +54,15 @@ FAILING for an unrelated reason or silently reporting a false pass. A
 skipped test is visible lost coverage; a test that raises `TypeError` on an
 unexpected keyword is a maintenance fire that obscures the real finding.
 
-The behaviours those tests exercised — the pieces of `Executor`/
-`RecoveryExecutor` beyond the host-source gate — are UNMONITORED by this
-suite until trusted provenance lands and a genuine admission path exists to
-drive them through again. `test_deployment_foundation_host_source_gate.py`
-and `test_deployment_foundation_recovery_execution.py` are NOT quarantined
-this way — those files are host_source's OWN test suites and have been
-rewritten directly to assert the new posture (unconditional refusal), not
-routed through this stub.
+The behaviours those tests exercised — the pieces of `Executor` beyond the
+host-source gate — are UNMONITORED by this suite until trusted provenance
+lands and a genuine admission path exists to drive them through again.
+`RecoveryExecutor.run` has a different gap: its full ten-step behavioral tests
+were deleted rather than routed through this helper, so it is tracked by the
+separate `RECOVERY_BEHAVIOR_GAP_INVENTORY` architecture obligation.
+`test_deployment_foundation_host_source_gate.py` and the remaining direct
+handler tests in `test_deployment_foundation_recovery_execution.py` are not
+quarantined through this stub.
 """
 
 from __future__ import annotations
@@ -80,9 +81,11 @@ def valid_host_source_kwargs() -> dict[str, Any]:
     """
     pytest.skip(
         "unreachable since the host-source gate accepts no caller-suppliable "
-        "receipt or metadata at all (Executor/RecoveryExecutor always refuse "
-        "require_host_source(receipt=None)); this test's subject is beyond "
-        "the gate and is unmonitored until trusted provenance lands — see "
+        "receipt or metadata at all (Executor always refuses "
+        "require_host_source(receipt=None)); this Executor test's subject is "
+        "beyond the gate and is unmonitored until trusted provenance lands. "
+        "RecoveryExecutor's integrated ten-step run is a separate named gap — "
+        "see "
         "host_source_stance.py"
     )
     raise AssertionError("unreachable")  # pragma: no cover

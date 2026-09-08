@@ -43,6 +43,7 @@ __all__ = [
     "STALE",
     "SUBJECT_MISMATCH",
     "TRUST_ROOTS_NOT_DISTINCT",
+    "SAME_KEY_SIGNED_BOTH",
     "AttestationEnvelopeV2",
     "AttestationTrustPolicy",
     "AttestationTrustRootV2",
@@ -58,6 +59,7 @@ INSTALLED_OBSERVATION_PURPOSE: Final = "dotmac.foundation.installed-host.v2"
 OBSERVATION_ABSENT: Final = "trusted-host-source-attestation-absent"
 OBSERVATION_MALFORMED: Final = "trusted-host-source-attestation-malformed"
 TRUST_ROOTS_NOT_DISTINCT: Final = "trusted-host-source-trust-roots-not-distinct"
+SAME_KEY_SIGNED_BOTH: Final = "trusted-host-source-same-key-signed-both"
 KEY_NOT_TRUSTED: Final = "trusted-host-source-key-not-trusted"
 SIGNATURE_INVALID: Final = "trusted-host-source-signature-invalid"
 ATTESTATIONS_DISAGREE: Final = "trusted-host-source-attestations-disagree"
@@ -587,6 +589,14 @@ def verify_attestation_pair(
         raise SpecError(
             "attestations must be parsed AttestationEnvelopeV2 values",
             code=OBSERVATION_MALFORMED,
+        )
+    # This verifier-level refusal is deliberately independent of the supplied
+    # policy: a single signing key can never author both custody roles.  Use
+    # the authenticated public-key fingerprint, not the advisory key label.
+    if candidate.public_key_fingerprint == installed.public_key_fingerprint:
+        raise PreconditionFailed(
+            "candidate and installed attestations use the same signing key",
+            code=SAME_KEY_SIGNED_BOTH,
         )
     if not isinstance(trust_policy, AttestationTrustPolicy):
         raise SpecError(

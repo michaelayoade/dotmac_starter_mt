@@ -2,6 +2,23 @@
 
 ## Unreleased — successor not allocated
 
+### Correction — 2026-09-08: verifier same-key refusal and recovery coverage gap
+
+The v2 verifier retained the split-roots construction check but had lost the
+independent verifier-level refusal for candidate and installed attestations
+signed by the same key. `verify_attestation_pair` now refuses that pair before
+trust-policy, root, or signature evaluation, using `public_key_fingerprint`
+(`trusted-host-source-same-key-signed-both`), never the `key_id` label. Distinct
+fingerprints carrying the same label remain an admitted near-miss under the
+supplied policy.
+
+The recorded 73-entry skip inventory is explicitly Executor tests only. It is
+not RecoveryExecutor behavioral coverage: the real `RecoveryExecutor.run` ten-
+step sequence remains separately UNMONITORED while the executor is
+non-admitting. That named gap retires only with genuine trusted-provenance
+admission AND coverage of the real `RecoveryExecutor.run` sequence; no skip is
+retired here.
+
 ### Authorization receipt successor remains non-admitting
 
 `AuthorizationReceiptV2` is a minimal Foundation consumer value consumed
