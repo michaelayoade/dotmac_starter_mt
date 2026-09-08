@@ -14,7 +14,9 @@ import write_kernel_release_verification_record as writer  # noqa: E402
 from release_artifact_verification import canonical_json  # noqa: E402
 
 
-def receipts(tmp_path: Path) -> tuple[Path, Path]:
+def receipts(
+    tmp_path: Path, *, public_exports: dict[str, object] | None = None
+) -> tuple[Path, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     version = "0.1.0a101"
     source = "a" * 40
@@ -99,6 +101,9 @@ def receipts(tmp_path: Path) -> tuple[Path, Path]:
         "verdict": "verified",
         "files": files,
     }
+    if public_exports is not None:
+        verification["public_exports"] = public_exports
+        verification["schema"] = "KernelReleaseVerificationReceipt.v2"
     verification_bytes = canonical_json(verification)
     compact = [{"name": item["name"], "size": 1, "sha256": "c" * 64} for item in files]
     decision = {
@@ -255,6 +260,32 @@ def test_noncanonical_receipt_bytes_are_refused(tmp_path: Path) -> None:
     verification.write_bytes(verification.read_bytes().replace(b"{", b"{ ", 1))
     with pytest.raises(writer.RecordRefused, match="not canonical"):
         build(verification, decision)
+
+
+def test_successor_record_binds_public_export_catalogue_bytes(tmp_path: Path) -> None:
+    catalogue = ROOT / "packages/dotmac-kernel/src/dotmac_kernel/public_exports.json"
+    verification, decision = receipts(
+        tmp_path,
+        public_exports={
+            "name": "dotmac_kernel/public_exports.json",
+            "size": catalogue.stat().st_size,
+            "sha256": hashlib.sha256(catalogue.read_bytes()).hexdigest(),
+            "schema": "dotmac.kernel-public-exports.v1",
+        },
+    )
+
+    version, record = build(verification, decision)
+    assert version == "0.1.0a101"
+    assert record["schema"] == "KernelReleaseEvidence.v2"
+    assert record["public_exports"]["size"] == catalogue.stat().st_size
+    writer.validate_persisted_record(record, version=version)
+
+    tampered = {
+        **record,
+        "public_exports": {**record["public_exports"], "sha256": "e" * 63},
+    }
+    with pytest.raises(writer.RecordRefused, match="public-export catalogue"):
+        writer.validate_persisted_record(tampered, version=version)
 
 
 def test_version_cannot_select_a_path_outside_the_record_directory(

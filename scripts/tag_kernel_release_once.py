@@ -45,19 +45,49 @@ def validate_receipt(
     facility_sha: str,
     run_id: int,
 ) -> None:
-    if not isinstance(receipt, dict) or set(receipt) != {
-        "schema",
-        "authorization",
-        "facility",
-        "release",
-        "verdict",
-        "files",
-    }:
+    if not isinstance(receipt, dict) or set(receipt) not in (
+        {
+            "schema",
+            "authorization",
+            "facility",
+            "release",
+            "verdict",
+            "files",
+        },
+        {
+            "schema",
+            "authorization",
+            "facility",
+            "release",
+            "verdict",
+            "files",
+            "public_exports",
+        },
+    ):
         raise TagRefused("verification receipt fields differ")
-    if receipt["schema"] != "KernelReleaseVerificationReceipt.v1":
+    if receipt["schema"] not in {
+        "KernelReleaseVerificationReceipt.v1",
+        "KernelReleaseVerificationReceipt.v2",
+    }:
         raise TagRefused("verification receipt schema differs")
+    if ("public_exports" in receipt) != (
+        receipt["schema"] == "KernelReleaseVerificationReceipt.v2"
+    ):
+        raise TagRefused("verification catalogue schema differs")
     if receipt["verdict"] != "verified":
         raise TagRefused("verification receipt is not verified")
+    if "public_exports" in receipt:
+        catalogue = receipt["public_exports"]
+        if (
+            not isinstance(catalogue, dict)
+            or set(catalogue) != {"name", "size", "sha256", "schema"}
+            or catalogue["name"] != "dotmac_kernel/public_exports.json"
+            or catalogue["schema"] != "dotmac.kernel-public-exports.v1"
+            or not isinstance(catalogue["size"], int)
+            or catalogue["size"] <= 0
+            or re.fullmatch(r"[0-9a-f]{64}", str(catalogue["sha256"])) is None
+        ):
+            raise TagRefused("verification public-export catalogue differs")
     authorization = receipt["authorization"]
     if not isinstance(authorization, dict) or set(authorization) != {
         "schema",

@@ -589,27 +589,9 @@ def require_kernel_evidence(
         )
     payload = path.read_bytes()
     record = json.loads(payload)
+    evidence = _local_script("write_kernel_release_verification_record")
     if (
         not isinstance(record, dict)
-        or set(record)
-        != {
-            "schema",
-            "version",
-            "tag",
-            "tag_object",
-            "tag_disposition",
-            "source_sha",
-            "authorization",
-            "publisher",
-            "verifier",
-            "verification_receipt_sha256",
-            "verification_receipt_artifact",
-            "tag_decision_receipt_sha256",
-            "tag_decision_receipt_artifact",
-            "registry",
-            "files",
-        }
-        or record.get("schema") != "KernelReleaseEvidence.v1"
         or record.get("version") != version
         or record.get("tag") != tag
         or record.get("source_sha") != commit
@@ -617,7 +599,6 @@ def require_kernel_evidence(
         != payload
     ):
         raise ReleaseRecordError("durable kernel verification record differs")
-    evidence = _local_script("write_kernel_release_verification_record")
     try:
         evidence.validate_persisted_record(record, version=version)
     except evidence.RecordRefused as failure:

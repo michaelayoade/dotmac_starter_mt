@@ -1,0 +1,2010 @@
+{
+  "internal_modules": [
+    "dotmac_kernel._transactions",
+    "dotmac_kernel.display",
+    "dotmac_kernel.middleware",
+    "dotmac_kernel.route_metadata",
+    "dotmac_kernel.web_runtime"
+  ],
+  "modules": {
+    "dotmac_kernel._transactions": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
+    "dotmac_kernel.api_documentation": {
+      "classification": "supported",
+      "exports": [
+        "ApiDocumentationPolicy",
+        "ApiDocumentationPolicyError",
+        "ApiDocumentationPolicyViolation",
+        "BEARER_PLANE_GUARD",
+        "COOKIE_PLANE_GUARDS",
+        "DEFAULT_PATH_BY_ATTRIBUTE",
+        "DEVELOPMENT",
+        "DocumentationExposure",
+        "DocumentationPlane",
+        "DocumentationRoute",
+        "ENVIRONMENT_ENV_VAR",
+        "OPENAPI_PATH",
+        "PLANE_BY_ATTRIBUTE",
+        "POLICIES",
+        "PRODUCTION",
+        "REDOC_PATH",
+        "SWAGGER_OAUTH2_REDIRECT_PATH",
+        "SWAGGER_PATH",
+        "TEST",
+        "api_documentation_policy",
+        "audit_api_documentation",
+        "classify_environment",
+        "documentation_arguments",
+        "documentation_routes",
+        "environment_api_documentation_policy",
+        "mount_bearer_protected_document"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.app_factory": {
+      "classification": "supported",
+      "exports": [
+        "LayeredStaticFiles",
+        "create_app"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.assembly": {
+      "classification": "supported",
+      "exports": [
+        "ModulePlaneSelection",
+        "ProductAssemblySpec",
+        "ProductSecurityPolicy",
+        "StartupCheck",
+        "StartupHook"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.audit": {
+      "classification": "supported",
+      "exports": [
+        "ACTOR_TYPES",
+        "AuditEvent",
+        "MissingAuditActorError",
+        "PlatformAuditEvent",
+        "UnattributedAuditEventError",
+        "UnknownAuditActorTypeError",
+        "resolve_audit_actor",
+        "resolve_event_attribution",
+        "write_audit_event",
+        "write_platform_audit_event"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.audit_actions": {
+      "classification": "supported",
+      "exports": [
+        "AuditActionRegistry",
+        "AuditActionsNotInstalledError",
+        "DuplicateAuditActionError",
+        "UndeclaredAuditActionError",
+        "active_audit_actions",
+        "install_audit_actions"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.branding": {
+      "classification": "supported",
+      "exports": [
+        "RETIRED_BRAND_KEYS",
+        "get_brand",
+        "get_request_branding",
+        "load_branding",
+        "reject_retired_brand_keys",
+        "reset_brand_cache"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.cache": {
+      "classification": "supported",
+      "exports": [
+        "CacheStore",
+        "MemoryCache",
+        "PlatformScope",
+        "Scope",
+        "TenantScope",
+        "cache_key",
+        "scope_segment"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.capabilities": {
+      "classification": "supported",
+      "exports": [
+        "CAPABILITY_CODE_ATTR",
+        "CapabilityCatalogue",
+        "CapabilitySpec",
+        "DuplicateCapabilityError",
+        "UndeclaredCapabilityError",
+        "active_capabilities",
+        "install_capabilities"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.capability_composition": {
+      "classification": "supported",
+      "exports": [
+        "CAPABILITY_COMPOSITION_SCHEMA",
+        "CapabilityCompositionDigestMismatchError",
+        "CapabilityCompositionError",
+        "CapabilityCompositionSnapshot",
+        "CapabilityEvidenceBinding"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.capability_contract": {
+      "classification": "supported",
+      "exports": [
+        "CAPABILITY_CONTRACT_SCHEMA",
+        "CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY",
+        "CAPABILITY_SCHEMA_DIALECT",
+        "CapabilityCheck",
+        "CapabilityCheckStage",
+        "CapabilityConfigField",
+        "CapabilityConfigValueFormat",
+        "CapabilityConfigValueType",
+        "CapabilityContractDigestMismatchError",
+        "CapabilityContractError",
+        "CapabilityContractSnapshot",
+        "CapabilityEndpointRequirement",
+        "CapabilityEndpointType",
+        "CapabilityEvidenceType",
+        "CapabilityOperation",
+        "CapabilitySchemaDataClassification",
+        "CapabilitySchemaDigestMismatchError",
+        "CapabilitySchemaDocument"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.channel_policy": {
+      "classification": "supported",
+      "exports": [
+        "CHANNEL_POLICY_KEY",
+        "ChannelPolicyError",
+        "make_spec",
+        "resolve_channels",
+        "validate_policy_document"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.config": {
+      "classification": "supported",
+      "exports": [
+        "Settings",
+        "settings",
+        "validate_settings"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.consent": {
+      "classification": "supported",
+      "exports": [
+        "ConsentError",
+        "filter_eligible",
+        "is_marketing",
+        "list_suppressions",
+        "may_send",
+        "normalize_address",
+        "normalize_channel",
+        "register_marketing_categories",
+        "register_numeric_channels",
+        "registered_marketing_categories",
+        "suppress",
+        "suppression_reason",
+        "suppression_reasons_for_addresses",
+        "unsuppress",
+        "unsuppress_marketing"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.consent_models": {
+      "classification": "supported",
+      "exports": [
+        "CommunicationSuppression",
+        "REASON_BOUNCE",
+        "REASON_COMPLAINT",
+        "REASON_ERASURE",
+        "REASON_MANUAL",
+        "REASON_UNSUBSCRIBE",
+        "SCOPE_ALL",
+        "SCOPE_MARKETING",
+        "SUPPRESSION_REASONS",
+        "SUPPRESSION_SCOPES"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.credential_lifecycle": {
+      "classification": "supported",
+      "exports": [
+        "CREDENTIAL_LIFECYCLE_SCHEMA_VERSION",
+        "CredentialAuditEntryV1",
+        "CredentialAuditPort",
+        "CredentialAuthorizationError",
+        "CredentialCohortDrift",
+        "CredentialEffectNotRecorded",
+        "CredentialLifecycle",
+        "CredentialLifecycleError",
+        "CredentialPlanError",
+        "CredentialPolicyViolation",
+        "CredentialProvisioningReceiptV1",
+        "CredentialRecoveryAuthorizationV1",
+        "CredentialRecoveryIntentV1",
+        "CredentialResetAuthorizationV1",
+        "CredentialResetCompletionReceiptV1",
+        "CredentialResetOutcomeV1",
+        "CredentialResetPlanDigestV1",
+        "CredentialResetPlanV1",
+        "CredentialResetReceiptV1",
+        "CredentialResetTargetV1",
+        "CredentialSessionRevocationIntentV1",
+        "CredentialSnapshot",
+        "CredentialStorePort",
+        "CredentialSubjectRef",
+        "CredentialVerificationResult",
+        "CredentialVerificationVerdict",
+        "PasswordPolicyPort",
+        "REDACTED",
+        "RecoveryIntentPort",
+        "SecretSource",
+        "SessionRevocationPort",
+        "default_secret_source"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.crud": {
+      "classification": "supported",
+      "exports": [
+        "CRUDManager"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.database_catalog_comparator": {
+      "classification": "supported",
+      "exports": [
+        "DATABASE_CATALOG_COMPARATOR_ID",
+        "DatabaseCatalogComparisonV1",
+        "DatabaseCatalogDeclarationScope",
+        "DatabaseCatalogDriftV1",
+        "DatabaseCatalogFactAttribute",
+        "DatabaseCatalogFactDimension",
+        "DatabaseCatalogFactDirection",
+        "ObservedDatabaseTableV1",
+        "POSTGRES_TABLES_COLUMNS_OBSERVATION_SCHEMA",
+        "PostgresTablesColumnsObservationV1",
+        "compare_module_database_catalog",
+        "compare_product_database_catalog",
+        "observe_postgres_tables_columns",
+        "verify_module_database_catalog",
+        "verify_product_database_catalog"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.db": {
+      "classification": "supported",
+      "exports": [
+        "conflict_savepoint",
+        "engine",
+        "get_db",
+        "get_platform_db",
+        "platform_engine",
+        "platform_session",
+        "resolver_session",
+        "runtime",
+        "set_tenant",
+        "tenant_scope",
+        "tenant_session",
+        "tenant_session_by_slug"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery": {
+      "classification": "supported",
+      "exports": [
+        "DeliveryError",
+        "latest_receipt_for_dispatch",
+        "receipts_for_address",
+        "record_receipt"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery_models": {
+      "classification": "supported",
+      "exports": [
+        "CommunicationDelivery",
+        "DELIVERY_ACCEPTED",
+        "DELIVERY_BOUNCED",
+        "DELIVERY_COMPLAINT",
+        "DELIVERY_DELIVERED",
+        "DELIVERY_FAILED",
+        "DELIVERY_REJECTED",
+        "DELIVERY_STATUSES",
+        "SUPPRESSING_STATUSES"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery_providers": {
+      "classification": "supported",
+      "exports": [
+        "DeliveryProvider",
+        "OutboundMessage",
+        "ProviderResult",
+        "Sent",
+        "Suppressed",
+        "send"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.deps": {
+      "classification": "supported",
+      "exports": [
+        "Depends",
+        "authenticate_request",
+        "authorize_party",
+        "get_db",
+        "get_platform_db",
+        "idempotency_key",
+        "permission_guard",
+        "require_capability",
+        "require_permission",
+        "require_role",
+        "require_tenant",
+        "require_user_auth"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.display": {
+      "classification": "internal",
+      "exports": [
+        "DisplaySettings",
+        "default_display",
+        "get_request_display",
+        "load_display"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.entitlements": {
+      "classification": "supported",
+      "exports": [
+        "EntitlementDecision",
+        "TenantEntitlementGrant",
+        "grant_entitlement",
+        "is_entitled"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.errors": {
+      "classification": "supported",
+      "exports": [
+        "register_error_handlers"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.exceptions": {
+      "classification": "supported",
+      "exports": [
+        "BadRequestError",
+        "ConflictError",
+        "DomainError",
+        "ForbiddenError",
+        "NotFoundError",
+        "UnauthorizedError"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.external_identity": {
+      "classification": "supported",
+      "exports": [
+        "ResolvedExternalIdentity",
+        "bind_external_identity",
+        "disable_external_identity_binding",
+        "finalize_external_login",
+        "record_external_authentication",
+        "resolve_external_identity"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.facet_principal": {
+      "classification": "supported",
+      "exports": [
+        "FacetPrincipal",
+        "FacetPrincipalError",
+        "FacetPrincipalPlaneMismatchError",
+        "FacetPrincipalUnavailableError",
+        "facet_principal",
+        "record_facet_principal",
+        "require_facet_principal"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.features": {
+      "classification": "supported",
+      "exports": [
+        "FeatureManifest",
+        "NavItem",
+        "load_manifests",
+        "mount_features"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.fingerprints": {
+      "classification": "supported",
+      "exports": [
+        "fingerprint_of"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.flag_models": {
+      "classification": "supported",
+      "exports": [
+        "FeatureFlagOverride",
+        "flag_cache",
+        "install_flag_cache",
+        "load_overrides",
+        "override_version",
+        "resolve_flag"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.flags": {
+      "classification": "supported",
+      "exports": [
+        "DEPLOYMENT_SCOPE",
+        "DuplicateFlagError",
+        "FeatureFlagSpec",
+        "FlagCatalogue",
+        "FlagError",
+        "FlagEvaluation",
+        "FlagOverrideRecord",
+        "FlagValue",
+        "TENANT_SCOPE",
+        "UndeclaredFlagError",
+        "VALID_SCOPES",
+        "active_flags",
+        "cached_evaluate",
+        "evaluate",
+        "evaluation_cache_key",
+        "install_flags",
+        "rollout_bucket"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.idempotency": {
+      "classification": "supported",
+      "exports": [
+        "IdempotencyConflict",
+        "IdempotentOutcome",
+        "MAX_KEY_LENGTH",
+        "MAX_SCOPE_LENGTH",
+        "Operation",
+        "execute_once",
+        "execute_once_platform",
+        "fingerprint_of",
+        "purge_expired"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.idempotency_models": {
+      "classification": "supported",
+      "exports": [
+        "INBOX_SCOPE",
+        "IdempotencyRecord",
+        "IdempotencyStatus",
+        "PlatformIdempotencyRecord"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.identity": {
+      "classification": "supported",
+      "exports": [
+        "normalize_email",
+        "person_display_name"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.licensing": {
+      "classification": "supported",
+      "exports": [
+        "APPLIED_STATE_DOMAIN",
+        "APPLIED_STATE_ENVELOPE_SCHEMA",
+        "APPLIED_STATE_SCHEMA",
+        "AppliedLicence",
+        "AppliedStateEnvelope",
+        "BadSignatureError",
+        "CapabilityGrant",
+        "DEPLOYMENT_CHALLENGE_DOMAIN",
+        "DEPLOYMENT_CHALLENGE_SCHEMA",
+        "DEPLOYMENT_RESPONSE_SCHEMA",
+        "DeploymentMismatchError",
+        "DeploymentPossessionChallenge",
+        "DeploymentPossessionResponse",
+        "DeploymentSigner",
+        "DeploymentVerificationKey",
+        "DuplicateKeyError",
+        "ENVELOPE_SCHEMA",
+        "KeyStatus",
+        "LICENCE_SCHEMA",
+        "LicenceAcknowledgement",
+        "LicenceConflictError",
+        "LicenceDocument",
+        "LicenceError",
+        "LicenceExpiredError",
+        "LicenceKey",
+        "LicenceKeyRing",
+        "LicenceNotYetValidError",
+        "LicenceSubject",
+        "MalformedAppliedStateError",
+        "MalformedLicenceError",
+        "REVOCATION_SCHEMA",
+        "ReceiverAppliedState",
+        "RevocationList",
+        "RevokedKeyError",
+        "RevokedLicenceError",
+        "StaleLicenceError",
+        "StaleRevocationListError",
+        "UNKNOWN_DIGEST",
+        "UnknownKeyError",
+        "VerificationUnavailableError",
+        "VerifiedAppliedState",
+        "VerifiedDeploymentPossession",
+        "VerifiedLicence",
+        "answer_possession_challenge",
+        "applied_state_payload",
+        "applied_state_signing_input",
+        "parse_applied_state",
+        "payload_digest",
+        "seal_applied_state",
+        "verify_applied_state",
+        "verify_licence",
+        "verify_possession",
+        "verify_revocation_list"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.logging": {
+      "classification": "supported",
+      "exports": [
+        "setup_logging"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.machine_auth": {
+      "classification": "supported",
+      "exports": [
+        "API_KEY_HEADER",
+        "MACHINE_KEY_SECRET_NAME",
+        "MachineKeyUnavailableError",
+        "MachinePrincipal",
+        "authenticate_machine",
+        "hash_machine_key",
+        "require_machine_scope"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.machine_models": {
+      "classification": "supported",
+      "exports": [
+        "MachineCredential"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.machine_rotation": {
+      "classification": "supported",
+      "exports": [
+        "RotationStateError",
+        "begin_rotation",
+        "cancel_rotation",
+        "complete_rotation",
+        "issue_credential",
+        "revoke_credential"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging": {
+      "classification": "supported",
+      "exports": [
+        "ClaimedEvent",
+        "ClaimedPlatformEvent",
+        "CommandEnvelope",
+        "CommandHandler",
+        "DeliveryTransport",
+        "FailureOutcome",
+        "LoggingPlatformTransport",
+        "LoggingTransport",
+        "OutboxEvent",
+        "OutboxStatus",
+        "PlatformCommandHandler",
+        "PlatformDeliveryTransport",
+        "PlatformOutboxEvent",
+        "ProcessOutcome",
+        "RelayPolicy",
+        "UnattributedCommandError",
+        "claim_batch",
+        "claim_platform_batch",
+        "enqueue_event",
+        "enqueue_platform_event",
+        "process_once",
+        "process_once_platform",
+        "record_failure",
+        "record_success",
+        "run_forever",
+        "run_once"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.envelope": {
+      "classification": "supported",
+      "exports": [
+        "CommandEnvelope",
+        "UnattributedCommandError"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.inbox": {
+      "classification": "supported",
+      "exports": [
+        "CommandHandler",
+        "ProcessOutcome",
+        "process_once"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.models": {
+      "classification": "supported",
+      "exports": [
+        "OutboxEvent",
+        "OutboxStatus",
+        "PlatformOutboxEvent"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.outbox": {
+      "classification": "supported",
+      "exports": [
+        "enqueue_event",
+        "enqueue_platform_event"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.platform": {
+      "classification": "supported",
+      "exports": [
+        "PlatformCommandHandler",
+        "process_once_platform"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.platform_relay": {
+      "classification": "supported",
+      "exports": [
+        "ClaimedPlatformEvent",
+        "claim_platform_batch",
+        "record_failure",
+        "record_success"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.platform_worker": {
+      "classification": "supported",
+      "exports": [
+        "LoggingPlatformTransport",
+        "PlatformDeliveryTransport",
+        "SessionFactory",
+        "run_forever",
+        "run_once"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.relay": {
+      "classification": "supported",
+      "exports": [
+        "ClaimedEvent",
+        "FailureOutcome",
+        "RelayPolicy",
+        "claim_batch",
+        "record_failure",
+        "record_success"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.messaging.worker": {
+      "classification": "supported",
+      "exports": [
+        "DeliveryTransport",
+        "LoggingTransport",
+        "SessionFactory",
+        "run_forever",
+        "run_once"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.middleware": {
+      "classification": "internal",
+      "exports": null,
+      "status": "unavailable"
+    },
+    "dotmac_kernel.middleware.csrf": {
+      "classification": "supported",
+      "exports": [
+        "CSRFMiddleware",
+        "CSRFTokenSigner",
+        "CSRFValidationError",
+        "CSRF_COOKIE",
+        "CSRF_FORM_FIELD",
+        "CSRF_HEADER",
+        "CSRF_HOST_COOKIE",
+        "CSRF_PROTECTED_ATTR",
+        "require_csrf"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.middleware.observability": {
+      "classification": "supported",
+      "exports": [
+        "ObservabilityMiddleware"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.middleware.rate_limit": {
+      "classification": "supported",
+      "exports": [
+        "MemoryStore",
+        "RateLimitMiddleware",
+        "RateLimitStore"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.middleware.security_headers": {
+      "classification": "supported",
+      "exports": [
+        "SecurityHeadersMiddleware",
+        "compose_content_security_policy"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.middleware.tenant": {
+      "classification": "supported",
+      "exports": [
+        "TenantResolverMiddleware"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations": {
+      "classification": "supported",
+      "exports": [
+        "versions_dir"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations.catalog": {
+      "classification": "supported",
+      "exports": [
+        "DEFAULT_APP_ROLE",
+        "DEFAULT_PLATFORM_ROLE",
+        "ForeignKeyFacts",
+        "PolicyFacts",
+        "SchemaSnapshot",
+        "TABLE_PRIVILEGES",
+        "TENANT_COLUMN",
+        "TableFacts",
+        "audit_live_schemas",
+        "audit_snapshot",
+        "audited_schemas",
+        "catalog_queries",
+        "fetch_snapshot"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations.gate": {
+      "classification": "supported",
+      "exports": [
+        "GateReport",
+        "RevisionRecord",
+        "SCHEMA_QUALIFIED_OPS",
+        "run_gate",
+        "scan_location",
+        "scan_revision_file",
+        "version_locations_from_ini"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.migrations.verify": {
+      "classification": "supported",
+      "exports": [
+        "PrerequisiteNotSatisfiedError",
+        "PrerequisiteVerifierMissingError",
+        "Verifier",
+        "register_verifier",
+        "registered_verifiers",
+        "require_prerequisites",
+        "role_violations",
+        "verify_idempotency_ledger",
+        "verify_module_database_roles",
+        "verify_outbox_relay",
+        "verify_party_person_catalog",
+        "verify_platform_audit_log",
+        "verify_tenant_scope_catalog"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.models": {
+      "classification": "supported",
+      "exports": [
+        "AuthSession",
+        "Base",
+        "ExternalIdentityBinding",
+        "Party",
+        "PartyOrganization",
+        "PartyPerson",
+        "PartyRoleGrant",
+        "PartyType",
+        "Role",
+        "Tenant",
+        "TenantDomain",
+        "TimestampMixin",
+        "UserCredential",
+        "uuid_pk"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.models_platform": {
+      "classification": "supported",
+      "exports": [
+        "PlatformAdmin",
+        "PlatformAuditEvent",
+        "PlatformSession"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.modules": {
+      "classification": "supported",
+      "exports": [
+        "AnyManifest",
+        "DuplicateModuleError",
+        "KERNEL_MODULE_CONTRACT_VERSION",
+        "MissingModuleDependencyError",
+        "ModuleContractVersionError",
+        "ModuleDependencyCycleError",
+        "ModuleInventoryEntry",
+        "ModuleManifest",
+        "ModuleRegistry",
+        "ModuleRegistryError",
+        "SUPPORTED_MODULE_CONTRACT_VERSIONS",
+        "UNVERSIONED",
+        "UnknownModuleError"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.money": {
+      "classification": "supported",
+      "exports": [
+        "Amountable",
+        "Currency",
+        "CurrencyMismatchError",
+        "DEFAULT_ROUNDING",
+        "ExchangeRate",
+        "Money",
+        "MoneyError",
+        "currency"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.namespaces": {
+      "classification": "supported",
+      "exports": [
+        "AI_OPERATIONS_MIGRATION_OWNER",
+        "APPLICATION_DIRECTORY_MIGRATION_OWNER",
+        "APPROVALS_MIGRATION_OWNER",
+        "ASSEMBLY_MIGRATION_OWNER",
+        "BILLING_MIGRATION_OWNER",
+        "CAMPAIGNS_MIGRATION_OWNER",
+        "COLLECTIONS_MIGRATION_OWNER",
+        "COMPLIANCE_REPORTING_MIGRATION_OWNER",
+        "CUSTOMERS_MIGRATION_OWNER",
+        "DOMAINS_MIGRATION_OWNER",
+        "DURABLE_TIMERS_MIGRATION_OWNER",
+        "DuplicateBranchLabelError",
+        "DuplicateMigrationPrefixError",
+        "DuplicateSchemaError",
+        "DuplicateTableOwnerError",
+        "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
+        "FILES_MIGRATION_OWNER",
+        "FORMS_MIGRATION_OWNER",
+        "FULFILLMENT_MIGRATION_OWNER",
+        "FX_POLICY_MIGRATION_OWNER",
+        "HOSTING_MIGRATION_OWNER",
+        "HOST_MIGRATION_OWNERS",
+        "HOST_SCHEMA",
+        "HostSchemaClaimError",
+        "IMPORTS_MIGRATION_OWNER",
+        "INBOX_OPERATIONS_MIGRATION_OWNER",
+        "INTEGRATION_MIGRATION_OWNER",
+        "InvalidMigrationPrefixError",
+        "InvalidRevisionIdError",
+        "InvalidSchemaError",
+        "KERNEL_MIGRATION_OWNER",
+        "LedgerDigestError",
+        "MAX_IDENTIFIER_LENGTH",
+        "MAX_MIGRATION_PREFIX_LENGTH",
+        "MAX_REVISION_ID_LENGTH",
+        "MIGRATION_OWNER_LEDGER",
+        "MIGRATION_OWNER_LEDGER_DIGEST",
+        "MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN",
+        "MODULE_SCHEMA_PREFIX",
+        "MigrationOwner",
+        "NamespaceAllocationError",
+        "NamespaceError",
+        "NamespaceRegistry",
+        "OPERATIONAL_ESCALATIONS_MIGRATION_OWNER",
+        "ORDERS_MIGRATION_OWNER",
+        "PAYMENTS_MIGRATION_OWNER",
+        "PEOPLE_MIGRATION_OWNER",
+        "PLATFORM_HEALTH_MIGRATION_OWNER",
+        "QUALIFICATION_MIGRATION_OWNER",
+        "REFERRALS_MIGRATION_OWNER",
+        "RELEASE_CATALOG_MIGRATION_OWNER",
+        "REMOTE_ACCESS_MIGRATION_OWNER",
+        "RESELLER_MANAGEMENT_MIGRATION_OWNER",
+        "RESERVED_SCHEMAS",
+        "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
+        "REVISION_SEQUENCE_DIGITS",
+        "SALES_MIGRATION_OWNER",
+        "SERVICES_MIGRATION_OWNER",
+        "SERVICE_ACCESS_POLICY_MIGRATION_OWNER",
+        "SERVICE_CATALOG_MIGRATION_OWNER",
+        "SERVICE_CHANGES_MIGRATION_OWNER",
+        "SERVICE_ORDERS_MIGRATION_OWNER",
+        "SUBSCRIPTIONS_MIGRATION_OWNER",
+        "SUPPORT_ACCESS_MIGRATION_OWNER",
+        "TICKETING_MIGRATION_OWNER",
+        "USAGE_MIGRATION_OWNER",
+        "USAGE_RATING_MIGRATION_OWNER",
+        "UnallocatedNamespaceError",
+        "WEB_ANALYTICS_MIGRATION_OWNER",
+        "WORKFLOW_RUNTIME_MIGRATION_OWNER",
+        "WORKFORCE_MIGRATION_OWNER",
+        "encode_migration_owner",
+        "encode_migration_owner_ledger",
+        "migration_owner_ledger_digest",
+        "module_schema",
+        "qualified",
+        "revision_id",
+        "revision_id_pattern",
+        "schema_table_args",
+        "validate_branch_label",
+        "validate_migration_prefix",
+        "validate_schema",
+        "validate_short_code",
+        "verify_migration_owner_ledger_digest"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.outbox_event_types": {
+      "classification": "supported",
+      "exports": [
+        "DuplicateOutboxEventTypeError",
+        "OutboxEventTypeRegistry",
+        "OutboxEventTypesNotInstalledError",
+        "UndeclaredOutboxEventTypeError",
+        "active_outbox_event_types",
+        "install_outbox_event_types"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.permission_provisioning": {
+      "classification": "supported",
+      "exports": [
+        "PERMISSION_PLAN_SCHEMA_VERSION",
+        "PermissionDefinition",
+        "PermissionPlan",
+        "PermissionPlanConflict",
+        "PermissionPlanDiff",
+        "PermissionPlanError",
+        "PermissionState",
+        "RoleDefinition",
+        "RoleGrant",
+        "RoleGrantProfile"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.permissions": {
+      "classification": "supported",
+      "exports": [
+        "DuplicatePermissionError",
+        "PERMISSION_CODE_ATTR",
+        "PermissionCatalogue",
+        "PermissionSpec",
+        "UndeclaredPermissionError",
+        "active_permissions",
+        "install_permissions"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.planes": {
+      "classification": "supported",
+      "exports": [
+        "MODULE_PLANES_ENV_VAR",
+        "ModulePlane",
+        "ModulePlaneSelection",
+        "ModulePlaneSelectionError",
+        "autoload_module_plane_selections",
+        "declared_planes",
+        "install_module_plane_selections",
+        "installed_module_plane_selections",
+        "selected_module_planes",
+        "supported_plane_sets",
+        "validate_module_plane_selections"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.platform_auth": {
+      "classification": "supported",
+      "exports": [
+        "PLATFORM_AUDIENCE",
+        "PLATFORM_COOKIE",
+        "PLATFORM_COOKIE_AUTHENTICATION",
+        "PLATFORM_LOGIN_PATH",
+        "platform_auth_router",
+        "require_platform_admin",
+        "require_platform_web_auth"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.platform_web": {
+      "classification": "supported",
+      "exports": [
+        "PLATFORM_COOKIE",
+        "PLATFORM_COOKIE_AUTHENTICATION",
+        "PLATFORM_WEB_SURFACE",
+        "require_platform_web_auth",
+        "router"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.prerequisites": {
+      "classification": "supported",
+      "exports": [
+        "BINDINGS_ENV_VAR",
+        "DuplicateBindingError",
+        "DuplicatePrerequisiteError",
+        "IDEMPOTENCY_LEDGER_V1",
+        "InvalidPrerequisiteNameError",
+        "InvalidRevisionReferenceError",
+        "KERNEL_PREREQUISITES",
+        "MODULE_DATABASE_ROLES_V1",
+        "OUTBOX_RELAY_V1",
+        "PARTY_PERSON_CATALOG_V1",
+        "PLATFORM_AUDIT_LOG_V1",
+        "PrerequisiteBinding",
+        "PrerequisiteError",
+        "PrerequisiteSpec",
+        "TENANT_SCOPE_CATALOG_V1",
+        "UnboundPrerequisiteError",
+        "UnknownPrerequisiteError",
+        "all_bound",
+        "autoload_bindings",
+        "binding_for",
+        "binding_map",
+        "install_prerequisite_bindings",
+        "installed_bindings",
+        "is_bound",
+        "prerequisite",
+        "register_prerequisites",
+        "registered_prerequisites",
+        "resolve_depends_on",
+        "validate_prerequisite_name",
+        "validate_prerequisites",
+        "validate_revision_reference"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.product_database_catalog": {
+      "classification": "supported",
+      "exports": [
+        "ComposedDatabaseLineageHeadV1",
+        "DATABASE_CATALOG_SCOPE",
+        "DatabaseCatalogOwnerKind",
+        "DatabaseCatalogOwnerV1",
+        "DatabaseColumnContractV1",
+        "DatabaseColumnGeneration",
+        "DatabasePersistencePlane",
+        "DatabaseRelationKind",
+        "DatabaseTableContractV1",
+        "HostDatabaseCatalogFragmentV1",
+        "MODULE_DATABASE_CATALOG_SCHEMA",
+        "ModuleDatabaseCatalogContributionV1",
+        "ModuleDatabaseCatalogSnapshot",
+        "ModuleDatabaseTableContractV1",
+        "PRODUCT_DATABASE_CATALOG_SCHEMA",
+        "PostgresCollationContractV1",
+        "PostgresTypeContractV1",
+        "PostgresTypeKind",
+        "ProductDatabaseCatalogDigestMismatchError",
+        "ProductDatabaseCatalogError",
+        "ProductDatabaseCatalogFragmentV1",
+        "ProductDatabaseCatalogSnapshot"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.product_manifest": {
+      "classification": "supported",
+      "exports": [
+        "PRODUCT_MANIFEST_SCHEMA",
+        "ProductManifestDigestMismatchError",
+        "ProductManifestError",
+        "ProductManifestSnapshot"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.profiles": {
+      "classification": "supported",
+      "exports": [
+        "DeploymentProfileRegistry",
+        "DeploymentProfileSpec",
+        "DuplicateProfileError",
+        "ProfileValidationReport",
+        "UnknownProfileError"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.providers": {
+      "classification": "supported",
+      "exports": [
+        "ApplyResult",
+        "CompensationDisposition",
+        "CompensationResult",
+        "ObserveResult",
+        "PlanResult",
+        "ProvisioningApplyError",
+        "ProvisioningCancelled",
+        "ProvisioningError",
+        "ProvisioningOutcomeClass",
+        "ProvisioningOutcomeEnvelope",
+        "ProvisioningPlanError",
+        "ProvisioningProvider",
+        "ProvisioningRequest",
+        "ProvisioningRetryableError",
+        "ProvisioningStatus",
+        "ProvisioningStep",
+        "ProvisioningTerminalError",
+        "StepStatus"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.providers.provisioning": {
+      "classification": "supported",
+      "exports": [
+        "ApplyResult",
+        "CompensationDisposition",
+        "CompensationResult",
+        "ObserveResult",
+        "PlanResult",
+        "ProvisioningApplyError",
+        "ProvisioningCancelled",
+        "ProvisioningError",
+        "ProvisioningOutcomeClass",
+        "ProvisioningOutcomeEnvelope",
+        "ProvisioningPlanError",
+        "ProvisioningProvider",
+        "ProvisioningRequest",
+        "ProvisioningRetryableError",
+        "ProvisioningStatus",
+        "ProvisioningStep",
+        "ProvisioningTerminalError",
+        "StepStatus"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.public_exports": {
+      "classification": "supported",
+      "exports": [
+        "CATALOGUE_RESOURCE",
+        "CATALOGUE_SCHEMA",
+        "PublicExportCatalogue",
+        "PublicExportsFormatError",
+        "derive_public_exports",
+        "load_public_exports",
+        "parse_public_exports"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.query": {
+      "classification": "supported",
+      "exports": [
+        "apply_pagination",
+        "escape_like"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.request_evidence": {
+      "classification": "supported",
+      "exports": [
+        "ANONYMOUS",
+        "ANONYMOUS_KIND",
+        "EVIDENCE_ACTOR_KINDS",
+        "RequestActor",
+        "RequestActorError",
+        "RequestEvidence",
+        "RequestEvidenceContextV1",
+        "TrustedProxyConfigurationError",
+        "TrustedProxyPolicy",
+        "UNSET_EVIDENCE",
+        "bind_actor",
+        "current_evidence",
+        "parse_trusted_proxy_networks"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.route_metadata": {
+      "classification": "internal",
+      "exports": [
+        "CAPABILITY_CODE_ATTR",
+        "PERMISSION_CODE_ATTR"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.secret_sources": {
+      "classification": "supported",
+      "exports": [
+        "MissingSecretError",
+        "SecretError",
+        "SecretSource",
+        "SecretSourceError",
+        "clear_secret_source",
+        "get_secret",
+        "install_secret_source",
+        "refresh_secrets",
+        "require_secret",
+        "secret_names",
+        "secret_source_installed"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.security": {
+      "classification": "supported",
+      "exports": [
+        "decode_access_token",
+        "hash_password",
+        "hash_token",
+        "issue_access_token",
+        "password_needs_rehash",
+        "verify_password"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.semantic_encoding": {
+      "classification": "supported",
+      "exports": [
+        "ABSENT",
+        "CANONICAL_ALGORITHM",
+        "CanonicalEncodingError",
+        "canonical_decimal",
+        "canonical_instant",
+        "digest_of",
+        "encode",
+        "encode_fields",
+        "encode_ordered",
+        "encode_unordered"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.session_runtime": {
+      "classification": "supported",
+      "exports": [
+        "CANONICAL_TENANT_SETTING",
+        "DatabaseRuntime",
+        "TenantLookup"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.setting_domains": {
+      "classification": "supported",
+      "exports": [
+        "DuplicateSettingDomainError",
+        "SettingDomainRegistry",
+        "SettingDomainsNotInstalledError",
+        "UndeclaredSettingDomainError",
+        "active_setting_domains",
+        "install_setting_domains"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.setting_scopes": {
+      "classification": "supported",
+      "exports": [
+        "DuplicateScopeKindError",
+        "KERNEL_SCOPE_KINDS",
+        "PLATFORM",
+        "PLATFORM_RANK",
+        "ScopeError",
+        "ScopeKindRegistry",
+        "ScopeKindSpec",
+        "SettingScope",
+        "TENANT",
+        "TENANT_RANK",
+        "UndeclaredScopeKindError",
+        "active_scope_kinds",
+        "install_scope_kinds",
+        "resolution_chain"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.setting_value_types": {
+      "classification": "supported",
+      "exports": [
+        "DuplicateValueTypeError",
+        "KERNEL_VALUE_TYPES",
+        "SettingValueType",
+        "SettingValueTypeRegistry",
+        "Storage",
+        "UndeclaredValueTypeError",
+        "ValueTypeError",
+        "ValueTypeSpec",
+        "active_setting_value_types",
+        "install_setting_value_types"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_admin": {
+      "classification": "supported",
+      "exports": [
+        "all_specs",
+        "ensure_by_key",
+        "get_spec",
+        "resolve_with_source",
+        "upsert_by_key",
+        "validate_spec_value"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_cache": {
+      "classification": "supported",
+      "exports": [
+        "MISS",
+        "active_settings_cache",
+        "cached",
+        "install_settings_cache",
+        "invalidate",
+        "setting_cache_key",
+        "setting_key_prefix",
+        "store_resolved"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_crypto": {
+      "classification": "supported",
+      "exports": [
+        "DEFAULT_KEY_ID",
+        "ENCRYPTED_PREFIX",
+        "EncryptionKey",
+        "KEYRING_ENV_VAR",
+        "KEY_ENV_VAR",
+        "KEY_FILE_ENV_VAR",
+        "KeyProvider",
+        "KeyProviderError",
+        "KeyStatus",
+        "Keyring",
+        "KeyringError",
+        "SettingsEncryptionError",
+        "clear_key_provider",
+        "decrypt_value",
+        "encrypt_value",
+        "encrypted_key_id",
+        "encryption_configured",
+        "install_key_provider",
+        "is_encrypted",
+        "keyring",
+        "reencrypt_secrets",
+        "refresh_keys"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_models": {
+      "classification": "supported",
+      "exports": [
+        "DomainSetting",
+        "DomainSettingHistory",
+        "KERNEL_SETTING_DOMAINS",
+        "SettingChangeAction",
+        "SettingDomain",
+        "SettingValueType"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_resolver": {
+      "classification": "supported",
+      "exports": [
+        "BOOTSTRAP_PROVENANCE",
+        "SETTING_CHANGED_EVENT",
+        "SettingChangeContext",
+        "SettingSpec",
+        "StoredSetting",
+        "active_setting_defaults",
+        "bootstrap_change_context",
+        "clear_by_key",
+        "install_setting_defaults",
+        "missing_required_settings",
+        "prune_setting_history",
+        "register_specs",
+        "resolve",
+        "resolve_many",
+        "resolve_value",
+        "seed_settings_from_env",
+        "stored_at",
+        "validate_required_settings"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.settings_shadow": {
+      "classification": "supported",
+      "exports": [
+        "Divergence",
+        "LegacyRead",
+        "ShadowPhase",
+        "ShadowReport",
+        "compare_one",
+        "resolve_shadowed",
+        "sweep",
+        "sweep_scopes"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.source_applications": {
+      "classification": "supported",
+      "exports": [
+        "HostApplicationNotInstalledError",
+        "InvalidSourceApplicationError",
+        "SOURCE_APPLICATION_MAX_LENGTH",
+        "SourceApplicationRegistry",
+        "SourceApplicationsNotInstalledError",
+        "UndeclaredSourceApplicationError",
+        "active_host_application",
+        "active_source_applications",
+        "clear_host_application",
+        "host_application_or_none",
+        "install_host_application",
+        "install_source_applications",
+        "validate_source_application"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.templating": {
+      "classification": "supported",
+      "exports": [
+        "compose_templates",
+        "install_stylesheets",
+        "install_surface_globals",
+        "render",
+        "static_dir",
+        "use_assembly_templates",
+        "validate_template_names"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.tenancy": {
+      "classification": "supported",
+      "exports": [
+        "bind_single_tenant",
+        "clear_single_tenant_binding",
+        "single_tenant_binding"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing": {
+      "classification": "supported",
+      "exports": [
+        "FakeClock",
+        "FakeDeploymentSigner",
+        "FakeLicenceSigner",
+        "FakeProvisioningProvider",
+        "FakeSeeder",
+        "InMemoryRateLimitStore",
+        "assembly_test_client",
+        "check_provisioning_provider_contract",
+        "create_test_engine",
+        "fake_branding",
+        "isolated_session"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.fakes": {
+      "classification": "supported",
+      "exports": [
+        "FakeClock",
+        "FakeSeeder",
+        "InMemoryRateLimitStore",
+        "fake_branding"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.harness": {
+      "classification": "supported",
+      "exports": [
+        "assembly_test_client",
+        "create_test_engine",
+        "isolated_session"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.licensing": {
+      "classification": "supported",
+      "exports": [
+        "FakeDeploymentSigner",
+        "FakeLicenceSigner"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.provisioning": {
+      "classification": "supported",
+      "exports": [
+        "FakeProvisioningProvider",
+        "check_provisioning_provider_contract"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.transactions": {
+      "classification": "supported",
+      "exports": [
+        "conflict_savepoint"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.web_deps": {
+      "classification": "supported",
+      "exports": [
+        "TENANT_COOKIE_AUTHENTICATION",
+        "TenantCookieAuthenticationProvider",
+        "WebAuthRedirect",
+        "is_secure_request",
+        "require_web_auth",
+        "require_web_party",
+        "require_web_permission",
+        "safe_next_url"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.web_runtime": {
+      "classification": "internal",
+      "exports": [
+        "mount_web_surfaces"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.web_surfaces": {
+      "classification": "supported",
+      "exports": [
+        "AuthenticationProfileBinding",
+        "BrowserAuthenticationProvider",
+        "BrowserCapabilityProvision",
+        "BrowserCapabilityRequirement",
+        "BrowserCredentialTransport",
+        "BrowserSecurityPlane",
+        "BrowserSecurityRequirement",
+        "BrowserSessionPolicy",
+        "DuplicateFacetError",
+        "DuplicateNavigationItemError",
+        "DuplicateSurfaceError",
+        "LocalizedText",
+        "NamespaceCollisionError",
+        "NavigationRegion",
+        "RegisteredWebNavItem",
+        "RegisteredWebSurface",
+        "ResolvedWebNavItem",
+        "RouteCompositionError",
+        "StaticPackage",
+        "SurfaceContext",
+        "TemplatePackage",
+        "TemplateRef",
+        "UIContractCompatibilityError",
+        "UnknownAuthenticationProfileError",
+        "UnknownBrowserCapabilityError",
+        "UnknownFacetError",
+        "WebFacetMount",
+        "WebNavItem",
+        "WebRouteRef",
+        "WebSurfaceContribution",
+        "WebSurfaceError",
+        "WebSurfaceRegistry",
+        "current_session_policy",
+        "qualified_route_name",
+        "surface_path",
+        "surface_route_name"
+      ],
+      "status": "declared"
+    }
+  },
+  "root_exports": [
+    "ACTOR_TYPES",
+    "API_KEY_HEADER",
+    "AnyManifest",
+    "ApiDocumentationPolicy",
+    "ApiDocumentationPolicyError",
+    "ApiDocumentationPolicyViolation",
+    "AuditActionRegistry",
+    "AuditActionsNotInstalledError",
+    "AuditEvent",
+    "AuthSession",
+    "AuthenticationProfileBinding",
+    "BadRequestError",
+    "Base",
+    "BrowserAuthenticationProvider",
+    "BrowserCapabilityProvision",
+    "BrowserCapabilityRequirement",
+    "BrowserCredentialTransport",
+    "BrowserSecurityPlane",
+    "BrowserSecurityRequirement",
+    "BrowserSessionPolicy",
+    "CAPABILITY_COMPOSITION_SCHEMA",
+    "CAPABILITY_CONTRACT_SCHEMA",
+    "CAPABILITY_SCHEMA_DATA_CLASSIFICATION_KEY",
+    "CAPABILITY_SCHEMA_DIALECT",
+    "CacheStore",
+    "CapabilityCatalogue",
+    "CapabilityCheck",
+    "CapabilityCheckStage",
+    "CapabilityCompositionDigestMismatchError",
+    "CapabilityCompositionError",
+    "CapabilityCompositionSnapshot",
+    "CapabilityConfigField",
+    "CapabilityConfigValueFormat",
+    "CapabilityConfigValueType",
+    "CapabilityContractDigestMismatchError",
+    "CapabilityContractError",
+    "CapabilityContractSnapshot",
+    "CapabilityEndpointRequirement",
+    "CapabilityEndpointType",
+    "CapabilityEvidenceBinding",
+    "CapabilityEvidenceType",
+    "CapabilityOperation",
+    "CapabilitySchemaDataClassification",
+    "CapabilitySchemaDigestMismatchError",
+    "CapabilitySchemaDocument",
+    "ComposedDatabaseLineageHeadV1",
+    "ConflictError",
+    "Currency",
+    "CurrencyMismatchError",
+    "DATABASE_CATALOG_COMPARATOR_ID",
+    "DATABASE_CATALOG_SCOPE",
+    "DURABLE_TIMERS_MIGRATION_OWNER",
+    "DatabaseCatalogComparisonV1",
+    "DatabaseCatalogDeclarationScope",
+    "DatabaseCatalogDriftV1",
+    "DatabaseCatalogFactAttribute",
+    "DatabaseCatalogFactDimension",
+    "DatabaseCatalogFactDirection",
+    "DatabaseCatalogOwnerKind",
+    "DatabaseCatalogOwnerV1",
+    "DatabaseColumnContractV1",
+    "DatabaseColumnGeneration",
+    "DatabasePersistencePlane",
+    "DatabaseRelationKind",
+    "DatabaseTableContractV1",
+    "DeploymentProfileRegistry",
+    "DeploymentProfileSpec",
+    "DocumentationExposure",
+    "DocumentationPlane",
+    "DomainError",
+    "DuplicateAuditActionError",
+    "DuplicateBranchLabelError",
+    "DuplicateCapabilityError",
+    "DuplicateMigrationPrefixError",
+    "DuplicateModuleError",
+    "DuplicateOutboxEventTypeError",
+    "DuplicatePermissionError",
+    "DuplicateProfileError",
+    "DuplicateSchemaError",
+    "DuplicateTableOwnerError",
+    "EntitlementDecision",
+    "ExchangeRate",
+    "ExternalIdentityBinding",
+    "FacetPrincipal",
+    "FacetPrincipalError",
+    "FacetPrincipalPlaneMismatchError",
+    "FacetPrincipalUnavailableError",
+    "FeatureFlagSpec",
+    "FeatureManifest",
+    "FlagCatalogue",
+    "FlagEvaluation",
+    "ForbiddenError",
+    "HOST_SCHEMA",
+    "HostApplicationNotInstalledError",
+    "HostDatabaseCatalogFragmentV1",
+    "HostSchemaClaimError",
+    "INTERNAL_MODULES",
+    "InvalidMigrationPrefixError",
+    "InvalidRevisionIdError",
+    "InvalidSchemaError",
+    "InvalidSourceApplicationError",
+    "KERNEL_MODULE_CONTRACT_VERSION",
+    "LocalizedText",
+    "MACHINE_KEY_SECRET_NAME",
+    "MAX_REVISION_ID_LENGTH",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
+    "MIGRATION_OWNER_LEDGER",
+    "MODULE_DATABASE_CATALOG_SCHEMA",
+    "MachineCredential",
+    "MachineKeyUnavailableError",
+    "MachinePrincipal",
+    "MemoryCache",
+    "MigrationOwner",
+    "MissingAuditActorError",
+    "MissingModuleDependencyError",
+    "ModuleContractVersionError",
+    "ModuleDatabaseCatalogContributionV1",
+    "ModuleDatabaseCatalogSnapshot",
+    "ModuleDatabaseTableContractV1",
+    "ModuleDependencyCycleError",
+    "ModuleInventoryEntry",
+    "ModuleManifest",
+    "ModulePlane",
+    "ModulePlaneSelection",
+    "ModuleRegistry",
+    "ModuleRegistryError",
+    "Money",
+    "MoneyError",
+    "NamespaceAllocationError",
+    "NamespaceError",
+    "NamespaceRegistry",
+    "NavItem",
+    "NavigationRegion",
+    "NotFoundError",
+    "ObservedDatabaseTableV1",
+    "OutboxEventTypeRegistry",
+    "OutboxEventTypesNotInstalledError",
+    "PEOPLE_MIGRATION_OWNER",
+    "PERMISSION_PLAN_SCHEMA_VERSION",
+    "POSTGRES_TABLES_COLUMNS_OBSERVATION_SCHEMA",
+    "PRODUCT_DATABASE_CATALOG_SCHEMA",
+    "PRODUCT_MANIFEST_SCHEMA",
+    "Party",
+    "PartyOrganization",
+    "PartyPerson",
+    "PartyRoleGrant",
+    "PartyType",
+    "PermissionCatalogue",
+    "PermissionDefinition",
+    "PermissionPlan",
+    "PermissionPlanConflict",
+    "PermissionPlanDiff",
+    "PermissionPlanError",
+    "PermissionSpec",
+    "PermissionState",
+    "PlatformAdmin",
+    "PlatformAuditEvent",
+    "PlatformScope",
+    "PlatformSession",
+    "PostgresCollationContractV1",
+    "PostgresTablesColumnsObservationV1",
+    "PostgresTypeContractV1",
+    "PostgresTypeKind",
+    "ProductAssemblySpec",
+    "ProductDatabaseCatalogDigestMismatchError",
+    "ProductDatabaseCatalogError",
+    "ProductDatabaseCatalogFragmentV1",
+    "ProductDatabaseCatalogSnapshot",
+    "ProductManifestDigestMismatchError",
+    "ProductManifestError",
+    "ProductManifestSnapshot",
+    "ProductSecurityPolicy",
+    "ProfileValidationReport",
+    "ResolvedExternalIdentity",
+    "Role",
+    "RoleDefinition",
+    "RoleGrant",
+    "RoleGrantProfile",
+    "RotationStateError",
+    "SUPPORTED_MODULES",
+    "SUPPORTED_MODULE_CONTRACT_VERSIONS",
+    "SettingDomain",
+    "SettingSpec",
+    "SettingValueType",
+    "Settings",
+    "SourceApplicationRegistry",
+    "SourceApplicationsNotInstalledError",
+    "StaticPackage",
+    "SurfaceContext",
+    "TemplatePackage",
+    "TemplateRef",
+    "Tenant",
+    "TenantDomain",
+    "TenantEntitlementGrant",
+    "TenantScope",
+    "TimestampMixin",
+    "UNVERSIONED",
+    "UnallocatedNamespaceError",
+    "UnauthorizedError",
+    "UndeclaredAuditActionError",
+    "UndeclaredCapabilityError",
+    "UndeclaredFlagError",
+    "UndeclaredOutboxEventTypeError",
+    "UndeclaredPermissionError",
+    "UndeclaredSourceApplicationError",
+    "UnknownAuditActorTypeError",
+    "UnknownModuleError",
+    "UnknownProfileError",
+    "UserCredential",
+    "WebFacetMount",
+    "WebNavItem",
+    "WebRouteRef",
+    "WebSurfaceContribution",
+    "WebSurfaceRegistry",
+    "__version__",
+    "active_audit_actions",
+    "active_capabilities",
+    "active_flags",
+    "active_host_application",
+    "active_outbox_event_types",
+    "active_permissions",
+    "active_source_applications",
+    "api_documentation_policy",
+    "apply_pagination",
+    "audit_api_documentation",
+    "authenticate_machine",
+    "begin_rotation",
+    "cache_key",
+    "cancel_rotation",
+    "classify_environment",
+    "compare_module_database_catalog",
+    "compare_product_database_catalog",
+    "complete_rotation",
+    "create_app",
+    "currency",
+    "environment_api_documentation_policy",
+    "escape_like",
+    "evaluate",
+    "facet_principal",
+    "grant_entitlement",
+    "hash_machine_key",
+    "hash_password",
+    "hash_token",
+    "install_audit_actions",
+    "install_capabilities",
+    "install_flags",
+    "install_host_application",
+    "install_outbox_event_types",
+    "install_permissions",
+    "install_source_applications",
+    "is_entitled",
+    "issue_access_token",
+    "issue_credential",
+    "load_manifests",
+    "module_schema",
+    "mount_features",
+    "normalize_email",
+    "observe_postgres_tables_columns",
+    "password_needs_rehash",
+    "person_display_name",
+    "qualified",
+    "qualified_route_name",
+    "register_specs",
+    "require_facet_principal",
+    "require_machine_scope",
+    "resolve_audit_actor",
+    "resolve_value",
+    "revision_id",
+    "revoke_credential",
+    "schema_table_args",
+    "settings",
+    "surface_path",
+    "uuid_pk",
+    "validate_settings",
+    "validate_source_application",
+    "verify_module_database_catalog",
+    "verify_password",
+    "verify_product_database_catalog",
+    "write_audit_event",
+    "write_platform_audit_event"
+  ],
+  "schema": "dotmac.kernel-public-exports.v1",
+  "supported_modules": [
+    "dotmac_kernel.api_documentation",
+    "dotmac_kernel.app_factory",
+    "dotmac_kernel.assembly",
+    "dotmac_kernel.audit",
+    "dotmac_kernel.audit_actions",
+    "dotmac_kernel.branding",
+    "dotmac_kernel.cache",
+    "dotmac_kernel.capabilities",
+    "dotmac_kernel.capability_composition",
+    "dotmac_kernel.capability_contract",
+    "dotmac_kernel.channel_policy",
+    "dotmac_kernel.config",
+    "dotmac_kernel.consent",
+    "dotmac_kernel.consent_models",
+    "dotmac_kernel.credential_lifecycle",
+    "dotmac_kernel.crud",
+    "dotmac_kernel.database_catalog_comparator",
+    "dotmac_kernel.db",
+    "dotmac_kernel.delivery",
+    "dotmac_kernel.delivery_models",
+    "dotmac_kernel.delivery_providers",
+    "dotmac_kernel.deps",
+    "dotmac_kernel.entitlements",
+    "dotmac_kernel.errors",
+    "dotmac_kernel.exceptions",
+    "dotmac_kernel.external_identity",
+    "dotmac_kernel.facet_principal",
+    "dotmac_kernel.features",
+    "dotmac_kernel.fingerprints",
+    "dotmac_kernel.flag_models",
+    "dotmac_kernel.flags",
+    "dotmac_kernel.idempotency",
+    "dotmac_kernel.idempotency_models",
+    "dotmac_kernel.identity",
+    "dotmac_kernel.licensing",
+    "dotmac_kernel.logging",
+    "dotmac_kernel.machine_auth",
+    "dotmac_kernel.machine_models",
+    "dotmac_kernel.machine_rotation",
+    "dotmac_kernel.messaging",
+    "dotmac_kernel.messaging.envelope",
+    "dotmac_kernel.messaging.inbox",
+    "dotmac_kernel.messaging.models",
+    "dotmac_kernel.messaging.outbox",
+    "dotmac_kernel.messaging.platform",
+    "dotmac_kernel.messaging.platform_relay",
+    "dotmac_kernel.messaging.platform_worker",
+    "dotmac_kernel.messaging.relay",
+    "dotmac_kernel.messaging.worker",
+    "dotmac_kernel.middleware.csrf",
+    "dotmac_kernel.middleware.observability",
+    "dotmac_kernel.middleware.rate_limit",
+    "dotmac_kernel.middleware.security_headers",
+    "dotmac_kernel.middleware.tenant",
+    "dotmac_kernel.migrations",
+    "dotmac_kernel.migrations.catalog",
+    "dotmac_kernel.migrations.gate",
+    "dotmac_kernel.migrations.verify",
+    "dotmac_kernel.models",
+    "dotmac_kernel.models_platform",
+    "dotmac_kernel.modules",
+    "dotmac_kernel.money",
+    "dotmac_kernel.namespaces",
+    "dotmac_kernel.outbox_event_types",
+    "dotmac_kernel.permission_provisioning",
+    "dotmac_kernel.permissions",
+    "dotmac_kernel.planes",
+    "dotmac_kernel.platform_auth",
+    "dotmac_kernel.platform_web",
+    "dotmac_kernel.prerequisites",
+    "dotmac_kernel.product_database_catalog",
+    "dotmac_kernel.product_manifest",
+    "dotmac_kernel.profiles",
+    "dotmac_kernel.providers",
+    "dotmac_kernel.providers.provisioning",
+    "dotmac_kernel.public_exports",
+    "dotmac_kernel.query",
+    "dotmac_kernel.request_evidence",
+    "dotmac_kernel.secret_sources",
+    "dotmac_kernel.security",
+    "dotmac_kernel.semantic_encoding",
+    "dotmac_kernel.session_runtime",
+    "dotmac_kernel.setting_domains",
+    "dotmac_kernel.setting_scopes",
+    "dotmac_kernel.setting_value_types",
+    "dotmac_kernel.settings_admin",
+    "dotmac_kernel.settings_cache",
+    "dotmac_kernel.settings_crypto",
+    "dotmac_kernel.settings_models",
+    "dotmac_kernel.settings_resolver",
+    "dotmac_kernel.settings_shadow",
+    "dotmac_kernel.source_applications",
+    "dotmac_kernel.templating",
+    "dotmac_kernel.tenancy",
+    "dotmac_kernel.testing",
+    "dotmac_kernel.testing.fakes",
+    "dotmac_kernel.testing.harness",
+    "dotmac_kernel.testing.licensing",
+    "dotmac_kernel.testing.provisioning",
+    "dotmac_kernel.transactions",
+    "dotmac_kernel.web_deps",
+    "dotmac_kernel.web_surfaces"
+  ]
+}

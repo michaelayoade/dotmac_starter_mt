@@ -136,5 +136,14 @@ def verify_release_artifacts(
     return {"verdict": "verified", "files": files}
 
 
-def canonical_json(value: object) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+def canonical_json(value: object, *, indent: int | None = None) -> bytes:
+    """Encode release evidence through the tooling's one JSON byte owner."""
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            indent=indent,
+            separators=(",", ":") if indent is None else None,
+        )
+        + "\n"
+    ).encode()

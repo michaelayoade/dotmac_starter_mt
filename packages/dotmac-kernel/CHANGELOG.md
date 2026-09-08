@@ -21,6 +21,14 @@ catches it rather than a person noticing.
 
 ### Added
 
+- The canonical kernel public-export catalogue is now shipped as
+  `dotmac_kernel/public_exports.json`, with all supported and internal modules
+  classified and modules without a literal `__all__` represented explicitly as
+  unavailable. Source-derived bytes are checked without importing modules, and
+  successor `KernelReleaseEvidence.v2` records require and bind the exact
+  catalogue size, digest and schema. Existing a101/a102 v1 records remain
+  unchanged.
+
 - `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER_DIGEST` and its verifier —
   `migration_owner_ledger_digest`, `verify_migration_owner_ledger_digest`,
   `encode_migration_owner`, `encode_migration_owner_ledger`,
