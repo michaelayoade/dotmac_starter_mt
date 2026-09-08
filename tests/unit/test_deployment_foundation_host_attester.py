@@ -1,0 +1,369 @@
+"""`host_attester.py`: the target-host attester's pure, crypto-free core.
+
+Every guard below is shown refusing on a planted defect as well as accepting
+correct input — a check that has never been observed refusing is
+indistinguishable from one that cannot refuse (the same rule
+`test_release_facility_candidate_bytes.py` already states for this
+repository's other producer-side guards).
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import hmac
+import inspect
+from datetime import UTC, datetime
+from typing import ClassVar
+
+import pytest
+from dotmac_deployment_foundation.digest import Digest
+from dotmac_deployment_foundation.errors import SpecError
+from dotmac_deployment_foundation.host_attester import (
+    build_installed_attestation,
+    candidate_subject_from_host_source,
+)
+from dotmac_deployment_foundation.host_source import (
+    CandidateReceipt,
+    InstalledArtifact,
+    require_host_source,
+)
+from dotmac_deployment_foundation.trusted_host_source import (
+    CANDIDATE_ATTESTATION_PURPOSE,
+    AttestationTrustPolicy,
+    AttestationTrustRootV2,
+    verify_attestation_pair,
+)
+
+@dataclasses.dataclass(frozen=True)
+class _HostSourceLookalike:
+    """PLANT: every attribute `HostSource` has, but never proven by
+    `require_host_source`. Reused by both refusal tests below so the shape of
+    the plant stays in exactly one place."""
+
+    distribution: str = "dotmac-deployment-foundation"
+    version: str = "0.4.0a2"
+    artifact_digest: Digest = dataclasses.field(
+        default_factory=lambda: Digest.parse("a" * 64, where="test")
+    )
+    source_revision: str = "c" * 40
+    repository: str = "dotmac/foundation"
+    run_id: str = "123"
+    artifact_id: str = "456"
+    read_from: str = "fabricated"
+
+
+NOW = datetime(2026, 9, 8, tzinfo=UTC)
+HOST_KEY = b"host-attester-incarnation-key"
+CANDIDATE_KEY = b"starter-release-workflow-key"
+HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
+CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
+ALGORITHM = "ed25519"
+
+
+class _HmacSigner:
+    """A stand-in `HostAttesterSigner`. Not real Ed25519 — this test proves
+    the ENVELOPE SHAPE and the pipeline wiring, never a specific algorithm's
+    cryptography (`AttestationVerifier`/`HostAttesterSigner` are pure seams;
+    the real implementation is provisioned outside Foundation, see the
+    module's own docstring)."""
+
+    def __init__(self, key: bytes) -> None:
+        self._key = key
+
+    def sign(self, *, algorithm: str, message: bytes) -> str:
+        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+
+
+class _HmacVerifier:
+    keys: ClassVar[dict[str, bytes]] = {HOST_FP: HOST_KEY, CANDIDATE_FP: CANDIDATE_KEY}
+
+    def verify(
+        self, *, public_key: bytes, algorithm: str, message: bytes, signature: str
+    ) -> bool:
+        return hmac.compare_digest(
+            signature, hmac.new(public_key, message, hashlib.sha256).hexdigest()
+        )
+
+
+def _root(fp: str, purpose: str, domain: str) -> AttestationTrustRootV2:
+    import base64
+
+    key = _HmacVerifier.keys[fp]
+    return AttestationTrustRootV2(
+        public_key_fingerprint=fp,
+        public_key_base64=base64.b64encode(key).decode(),
+        issuer="test-issuer",
+        key_id="rotatable-label",
+        purpose=purpose,
+        custody_domain=domain,
+        algorithm=ALGORITHM,
+        trust_root_version="control-v1",
+        not_before="2026-01-01T00:00:00Z",
+        not_after="2027-01-01T00:00:00Z",
+    )
+
+
+def _policy(host_identity: str) -> AttestationTrustPolicy:
+    from dotmac_deployment_foundation.trusted_host_source import (
+        INSTALLED_OBSERVATION_PURPOSE,
+    )
+
+    return AttestationTrustPolicy(
+        (_root(CANDIDATE_FP, CANDIDATE_ATTESTATION_PURPOSE, "starter-release"),),
+        (_root(HOST_FP, INSTALLED_OBSERVATION_PURPOSE, "target-local-host"),),
+        "starter-release-workflow",
+        host_identity,
+    )
+
+
+def _host_source(
+    *, distribution: str = "dotmac-deployment-foundation", version: str = "0.4.0a2"
+):
+    receipt = CandidateReceipt(
+        facility=distribution,
+        version=version,
+        artifact_digest=Digest.parse("a" * 64, where="test"),
+        source_revision="c" * 40,
+        repository="dotmac/foundation",
+        run_id="123",
+        artifact_id="456",
+    )
+    installed = InstalledArtifact(
+        distribution=distribution,
+        version=version,
+        artifact_digest=Digest.parse("a" * 64, where="test"),
+        installed_content_digest=Digest.parse("b" * 64, where="test"),
+        read_from="test direct_url.json archive_info.hashes.sha256",
+    )
+    return require_host_source(
+        receipt=receipt,
+        installed=installed,
+        distribution=distribution,
+        source_tree_digest=lambda: "d" * 64,
+    )
+
+
+def _candidate_envelope(host_source, *, host_identity: str):
+    from dotmac_deployment_foundation.trusted_host_source import AttestationEnvelopeV2
+
+    subject = candidate_subject_from_host_source(host_source)
+    envelope = AttestationEnvelopeV2(
+        "TrustedHostAttestation.v2",
+        CANDIDATE_ATTESTATION_PURPOSE,
+        "test-issuer",
+        "rotatable-label",
+        ALGORITHM,
+        CANDIDATE_FP,
+        "starter-release",
+        "control-v1",
+        "2026-09-08T00:00:00Z",
+        "2026-09-08T00:10:00Z",
+        "starter-release-workflow",
+        "candidate-observation",
+        subject.canonical_document(),
+        "placeholder",
+    )
+    signature = hmac.new(
+        CANDIDATE_KEY, envelope.signed_bytes(), hashlib.sha256
+    ).hexdigest()
+    return dataclasses.replace(envelope, signature=signature)
+
+
+# ── candidate_subject_from_host_source ──────────────────────────────────────
+
+
+def test_candidate_subject_from_host_source_reflects_every_bound_field() -> None:
+    host_source = _host_source()
+    subject = candidate_subject_from_host_source(host_source)
+    assert subject.package == host_source.distribution
+    assert subject.version == host_source.version
+    assert subject.wheel_sha256 == host_source.artifact_digest
+    assert subject.source_revision == host_source.source_revision
+    assert subject.repository == host_source.repository
+    assert subject.run_id == host_source.run_id
+    assert subject.artifact_id == host_source.artifact_id
+
+
+def test_candidate_subject_from_host_source_refuses_a_lookalike_object() -> None:
+    """PLANT: an object with every attribute `HostSource` has, but that never
+    passed through `require_host_source`. If this were accepted, a caller
+    could hand-build the exact fields of a `HostSource` without ever proving
+    an installed artifact matched a receipt — the same substitution
+    `host_source.py` refuses at its own layer, reopened one function later."""
+
+    @dataclasses.dataclass(frozen=True)
+    class _Lookalike:
+        distribution: str = "dotmac-deployment-foundation"
+        version: str = "0.4.0a2"
+        artifact_digest: Digest = Digest.parse("a" * 64, where="test")
+        source_revision: str = "c" * 40
+        repository: str = "dotmac/foundation"
+        run_id: str = "123"
+        artifact_id: str = "456"
+        read_from: str = "fabricated"
+
+    with pytest.raises(SpecError, match="HostSource"):
+        candidate_subject_from_host_source(_Lookalike())  # type: ignore[arg-type]
+
+
+# ── build_installed_attestation: the full pipeline ──────────────────────────
+
+
+def _build(host_source, *, signer=None) -> object:
+    return build_installed_attestation(
+        host_source=host_source,
+        expected_host_identity="host:canonical-a",
+        signer=signer if signer is not None else _HmacSigner(HOST_KEY),
+        issuer="test-issuer",
+        key_id="rotatable-label",
+        algorithm=ALGORITHM,
+        public_key_fingerprint=HOST_FP,
+        custody_domain="target-local-host",
+        trust_root_version="control-v1",
+        observation_id="host-observation",
+        issued_at=datetime(2026, 9, 8, tzinfo=UTC),
+        expires_at=datetime(2026, 9, 8, 0, 10, tzinfo=UTC),
+    )
+
+
+def test_build_installed_attestation_pairs_with_a_genuine_candidate_attestation() -> None:
+    host_source = _host_source()
+    installed = _build(host_source)
+    candidate = _candidate_envelope(host_source, host_identity="host:canonical-a")
+
+    assert (
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=installed,
+            verifier=_HmacVerifier(),
+            trust_policy=_policy("host:canonical-a"),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+        is None
+    )
+
+
+def test_mutated_subject_field_makes_verify_attestation_pair_refuse() -> None:
+    """NEGATIVE CONTROL: tamper with one field of the emitted envelope's
+    subject WITHOUT re-signing, and confirm the pair is genuinely checked —
+    not merely accepted because the shapes line up."""
+    host_source = _host_source()
+    installed = _build(host_source)
+    candidate = _candidate_envelope(host_source, host_identity="host:canonical-a")
+
+    tampered_subject = dict(installed.subject_mapping())
+    tampered_subject["version"] = "9.9.9-tampered"
+    tampered = dataclasses.replace(installed, subject=tampered_subject)
+
+    with pytest.raises(Exception):  # noqa: B017 -- PreconditionFailed, code asserted below
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=tampered,
+            verifier=_HmacVerifier(),
+            trust_policy=_policy("host:canonical-a"),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+
+
+def test_mutated_subject_refusal_carries_the_signature_invalid_code() -> None:
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+
+    host_source = _host_source()
+    installed = _build(host_source)
+    candidate = _candidate_envelope(host_source, host_identity="host:canonical-a")
+
+    tampered_subject = dict(installed.subject_mapping())
+    tampered_subject["version"] = "9.9.9-tampered"
+    tampered = dataclasses.replace(installed, subject=tampered_subject)
+
+    with pytest.raises(PreconditionFailed) as raised:
+        verify_attestation_pair(
+            candidate=candidate,
+            installed=tampered,
+            verifier=_HmacVerifier(),
+            trust_policy=_policy("host:canonical-a"),
+            expected_host_identity="host:canonical-a",
+            now=NOW,
+        )
+    assert raised.value.code == "trusted-host-source-signature-invalid"
+
+
+# ── refusals are independent of one another ─────────────────────────────────
+
+
+def test_non_host_source_refuses_regardless_of_signer_validity() -> None:
+    """PLANT: a caller hands a HostSource lookalike AND a perfectly-working
+    signer. The refusal must fire from the `host_source` type check alone —
+    proving it does not depend on the signer being broken to be reached."""
+
+    @dataclasses.dataclass(frozen=True)
+    class _Lookalike:
+        distribution: str = "dotmac-deployment-foundation"
+        version: str = "0.4.0a2"
+        artifact_digest: Digest = Digest.parse("a" * 64, where="test")
+        source_revision: str = "c" * 40
+        repository: str = "dotmac/foundation"
+        run_id: str = "123"
+        artifact_id: str = "456"
+        read_from: str = "fabricated"
+
+    with pytest.raises(SpecError, match="HostSource"):
+        build_installed_attestation(
+            host_source=_Lookalike(),  # type: ignore[arg-type]
+            expected_host_identity="host:canonical-a",
+            signer=_HmacSigner(HOST_KEY),  # a genuinely working signer
+            issuer="test-issuer",
+            key_id="rotatable-label",
+            algorithm=ALGORITHM,
+            public_key_fingerprint=HOST_FP,
+            custody_domain="target-local-host",
+            trust_root_version="control-v1",
+            observation_id="host-observation",
+            issued_at=datetime(2026, 9, 8, tzinfo=UTC),
+            expires_at=datetime(2026, 9, 8, 0, 10, tzinfo=UTC),
+        )
+
+
+def test_non_conforming_signer_refuses() -> None:
+    host_source = _host_source()
+    with pytest.raises(SpecError, match="HostAttesterSigner"):
+        _build(host_source, signer=object())
+
+
+# ── sensitivity proof: no parameter can carry an installed digest ──────────
+
+
+def _signature_names(func) -> set[str]:
+    return set(inspect.signature(func).parameters)
+
+
+def _names_leak_an_installed_digest(names: set[str]) -> bool:
+    """The check both the plant and the real function are run through."""
+    forbidden_tokens = ("digest", "sha256", "wheel_sha", "artifact_digest")
+    return any(
+        token in name.lower()
+        for name in names
+        if name != "host_source"
+        for token in forbidden_tokens
+    )
+
+
+def test_no_parameter_of_build_installed_attestation_can_carry_an_installed_digest() -> None:
+    real_names = _signature_names(build_installed_attestation)
+    assert "host_source" in real_names
+    assert not _names_leak_an_installed_digest(real_names)
+
+
+def test_the_leak_detector_itself_flags_a_planted_digest_parameter() -> None:
+    """SENSITIVITY PLANT for the check above: a decoy function that DOES take
+    an installed digest directly must be caught by the same detector, or the
+    detector proves nothing about the real function passing."""
+
+    def _decoy(*, host_source, installed_digest: str) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+    decoy_names = _signature_names(_decoy)
+    assert _names_leak_an_installed_digest(decoy_names)
