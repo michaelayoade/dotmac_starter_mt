@@ -123,7 +123,7 @@
       "state": "declared-unpublished"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a102+dev",
+      "declared": "0.1.0a103",
       "reason": "RELEASE LIFECYCLE RECORD; THIS ROW NEVER PROVES PUBLICATION. 0.1.0a102 IS published and tagged (dotmac-kernel-v0.1.0a102, peeled 7a3c128b06eaba09784a9d8409d036169b3caa68), and main's packages/dotmac-kernel/src was byte-identical to that tag until this successor work began. The complete changed source population is five files: dotmac_kernel.semantic_encoding and dotmac_kernel.public_exports are new; dotmac_kernel.public_exports.json is new package data derived from the public surface; and dotmac_kernel.namespaces plus dotmac_kernel.__init__ are extended. Continuing to declare a bare 0.1.0a102 would therefore make one released version name two different byte sets. That is the same defect, from the other side, that a102 was cut to repair: a101 did not contain request_evidence.py while main said it did. While the package declares 0.1.0a102+dev, its PEP 440 local segment allocates no successor and cannot be published by an index. After a separately authorized allocation replaces that marker with bare 0.1.0a103, this same row records an allocated release awaiting permanent external publication evidence; the row itself still proves no upload, installation or tag. A103 IS NOW OWED -- nothing consumes semantic_encoding or the public-export catalogue from an artifact until the protected release ships and verifies them. Remove this row only in the permanent release-record transition after those external facts exist. Never edit it away merely to quiet a gate.",
       "state": "declared-unpublished"
     },
