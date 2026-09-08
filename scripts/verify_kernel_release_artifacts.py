@@ -266,7 +266,7 @@ def _strict_catalogue(payload: bytes, *, label: str) -> dict[str, object]:
             raise SystemExit(
                 f"kernel verification refused: catalogue {label} status differs"
             )
-    if json.dumps(document, sort_keys=True, indent=2).encode() + b"\n" != payload:
+    if canonical_json(document, indent=2) != payload:
         raise SystemExit(
             f"kernel verification refused: catalogue {label} is not canonical"
         )

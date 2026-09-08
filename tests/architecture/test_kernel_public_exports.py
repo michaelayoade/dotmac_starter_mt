@@ -135,9 +135,13 @@ def test_parser_rejects_empty_catalogue_and_near_miss_module_name() -> None:
     with pytest.raises(PublicExportsFormatError, match="modules must be"):
         parse_public_exports(json.dumps(empty_document).encode())
 
-    evil = valid.replace("dotmac_kernel._transactions", "dotmac_kernel_evil", 1)
+    evil_document = json.loads(valid)
+    evil_document["internal_modules"][0] = "dotmac_kernel_evil"
+    evil_document["modules"]["dotmac_kernel_evil"] = evil_document["modules"].pop(
+        "dotmac_kernel._transactions"
+    )
     with pytest.raises(PublicExportsFormatError, match="must be kernel names"):
-        parse_public_exports(evil.encode())
+        parse_public_exports(json.dumps(evil_document).encode())
 
 
 def test_source_derivation_rejects_malformed_all(tmp_path: Path) -> None:
