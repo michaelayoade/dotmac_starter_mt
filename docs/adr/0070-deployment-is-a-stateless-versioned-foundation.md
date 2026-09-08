@@ -504,12 +504,16 @@ refusal exists to close.
 **3. Installation must fetch and verify the exact artifact, never resolve by
 name.** The installer must download the specific wheel file, verify its
 digest against the committed `CandidateArtifact.v1`, and install that exact
-file. `pip install dotmac-deployment-foundation==0.4.0a2` is explicitly NOT
-identity evidence: an index-resolved install writes no PEP 610
-`direct_url.json` `archive_info` at all, so `read_installed_artifact`
-(`host_source.py`) has nothing to read a digest out of and is structurally
-inadmissible by the same `ABSENT` path an editable install already hits —
-not a gap to close later, a shape that can never produce evidence.
+file. A plain `pip install dotmac-deployment-foundation==0.4.0a2` is
+explicitly NOT identity evidence: resolving by name retains no wheel identity,
+writing no PEP 610 `direct_url.json` `archive_info`, so
+`read_installed_artifact` (`host_source.py`) has nothing to read a digest out
+of and refuses by the same `ABSENT` path an editable install already hits.
+This is a statement about that INSTALL SHAPE, not about registries: the
+approved replacement still obtains the wheel from the registry, but downloads
+and verifies the exact file against the committed receipt FIRST, installs that
+local file, and only then lets the trusted host workload attest what it
+installed.
 
 **4. Editable CI remains refusal-only.** This repository installs
 `dotmac-deployment-foundation` with `develop = true`
@@ -557,8 +561,11 @@ verifier), so it must never be expected to refuse a replay on a second call:
 a verifier that held consumption state would become a second, weaker copy of
 the cut-off that Control alone owns.
 
-**Admission produces evidence, and that evidence is an output only.** A
-successful admission adds non-secret coordinates to the deployment outcome —
+**Attestations are verifier inputs; the resulting admission trace is output
+only.** The candidate and host attestations are INPUTS to verification — that
+is what they are for. What must never become a second authorization input is
+the verified admission TRACE: a successful admission adds non-secret
+coordinates to the deployment outcome —
 the candidate-subject digest, the host observation identity, the host
 identity, and signer fingerprints/root versions — without that report
 becoming another authorization input for a later admission. Today
