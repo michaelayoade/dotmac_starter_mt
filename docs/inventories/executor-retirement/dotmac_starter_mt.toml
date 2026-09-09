@@ -256,6 +256,23 @@ disposition = "not_an_executor"
 premise = "commands no deployment verb, directly or through any in-tree callee"
 
 [[entrypoint]]
+name = "workflow:foundation-candidate-attestation"
+family = "workflow"
+path = ".github/workflows/foundation-candidate-attestation.yml"
+trigger = "workflow_dispatch"
+credential = "FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM (environment: foundation-candidate-signing)"
+disposition = "not_an_executor"
+premise = """
+Signs an already-committed CandidateArtifact.v1 receipt into a
+TrustedHostAttestation.v2 envelope and uploads it as a build artifact; commands
+no deployment verb, directly or through any in-tree callee. The credential it
+reaches is a signing key, not a deployment or publish credential: it never
+touches a host, never calls docker/kubectl/ssh/rsync/alembic/pg_restore/etc.,
+and declares no `contents: write` — checked by
+tests/architecture/test_candidate_attestation_signer.py.
+"""
+
+[[entrypoint]]
 name = "workflow:recover-module-release"
 family = "workflow"
 path = ".github/workflows/recover-module-release.yml"
