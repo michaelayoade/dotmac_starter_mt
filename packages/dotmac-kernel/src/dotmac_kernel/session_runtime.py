@@ -82,11 +82,11 @@ __all__ = [
     "CANONICAL_TENANT_SETTING",
     "DatabaseRuntime",
     "NoDatabaseRuntimeError",
+    "RuntimeBindingError",
     "TenantLookup",
-    "clear_database_runtime",
-    "get_database_runtime",
-    "install_database_runtime",
-    "set_database_runtime_required",
+    "bind_database_runtime",
+    "is_binding_sealed_strict",
+    "resolve_database_runtime",
 ]
 
 #: The one Postgres setting every composed module's RLS policy reads, via
@@ -546,7 +546,7 @@ class DatabaseRuntime:
             db.close()
 
 
-# ── product-owned runtime composition ───────────────────────────────────────
+# ── the process's one sealed runtime binding ────────────────────────────────
 #
 # `dotmac_kernel.db` is one INSTANCE of `DatabaseRuntime` — the reference
 # assembly's, eager, built from the kernel's own `Settings` at import. Kernel
@@ -555,135 +555,143 @@ class DatabaseRuntime:
 # directly: doing so makes the kernel's OWN behaviour depend on the reference
 # assembly's configuration even for a product that supplied its own.
 #
-# This registry is the seam. `install_database_runtime` is how a product
-# states, once, "requests and background work run through THIS instance, not
-# the reference one" — the same "installed once, explicit swap, no per-call
-# rebuild" shape as `secret_sources.install_secret_source` and
-# `settings_crypto.install_key_provider`. `get_database_runtime` is the one
-# place every kernel-owned path reads from. Absent an installation, it falls
-# back to the reference runtime — imported LAZILY, inside the function, so
-# importing this module (or anything that imports it) never requires a
-# `DATABASE_URL`. A product that never sets
-# `ProductAssemblySpec.database_runtime` sees no behavioural change: it is
-# still the reference runtime, reached through one more indirection.
-_installed_runtime: DatabaseRuntime | None = None
-
-# Whether falling back to the reference runtime is a REFUSAL rather than a
-# default. Independent of `_installed_runtime`: a deployment states this once
-# (typically via `ProductAssemblySpec.require_database_runtime`, applied by
-# `create_app`) to make "nobody installed a runtime" a loud boot-time defect
-# instead of a silent slide onto `dotmac_kernel.db`. See
-# `set_database_runtime_required`.
-_required: bool = False
+# ONE process supports ONE binding — not a per-application slot, and not a
+# freely-mutable global either. `bind_database_runtime` seals it:
+#
+# * reinstalling the IDENTICAL runtime, at the same or a STRONGER policy, is
+#   idempotent (a second `create_app` call composing the same spec must not
+#   fail on that alone);
+# * a DIFFERENT runtime, or WEAKENING an already-required binding, refuses —
+#   a second application in this process binding something else is a
+#   configuration conflict, never a silent clobber of the first;
+# * there is no public function that clears a binding or downgrades its
+#   strictness. The only way a binding's policy gets stronger is a caller
+#   asking for that explicitly, and nothing ever asks for weaker.
+#
+# `required=True` additionally REFUSES if `dotmac_kernel.db` is already in
+# `sys.modules` at bind time — a strict binding is a claim that the reference
+# runtime was never constructed, and a module already imported means it may
+# already have been. `dotmac_kernel.db` itself checks the mirror image at ITS
+# OWN import time (`is_binding_sealed_strict`), before constructing any
+# engine — so the refusal is symmetric regardless of which side happens to
+# run first.
+_binding: "_Binding | None" = None
 
 
 class NoDatabaseRuntimeError(RuntimeError):
-    """`get_database_runtime` could not produce a runtime.
+    """`resolve_database_runtime` could not produce a runtime.
 
     Raised in two distinct cases, both meaning "there is no runtime to hand
     back":
 
-    * No product runtime is installed and this deployment declared
-      `require_database_runtime` (`set_database_runtime_required(True)`) —
-      falling back to the reference runtime is REFUSED, not attempted. This is
-      the case a deployment proving the reference runtime is genuinely
-      unreachable depends on: without it, a missed
-      `ProductAssemblySpec.database_runtime` binding silently succeeds against
-      `dotmac_kernel.db` instead of failing loudly.
-    * No product runtime is installed, nothing declared it required, AND the
-      reference runtime's own import fails — e.g. a test that made
-      `dotmac_kernel.db` unimportable without installing a replacement. A real
-      deployment that never opts into strictness always has one or the other.
+    * this process's binding is `required` and carries no runtime because it
+      was never bound (there is no such state reachable through
+      `bind_database_runtime`, which always takes a real runtime — this is
+      the reference assembly's own `dotmac_kernel.db` refusing to construct
+      one after a strict binding sealed elsewhere, or a test that made
+      `dotmac_kernel.db` unimportable without ever calling
+      `bind_database_runtime`);
+    * nothing is bound, nothing declared strictness, AND the reference
+      runtime's own import fails. A real deployment that never opts into
+      strictness always has one or the other.
     """
 
 
-def install_database_runtime(runtime: DatabaseRuntime) -> None:
-    """Install `runtime` as the ONE instance every kernel-owned path resolves
-    through from now on.
+class RuntimeBindingError(RuntimeError):
+    """`bind_database_runtime` refused: a different runtime, a weaker policy,
+    or `dotmac_kernel.db` already imported ahead of a strict bind."""
+
+
+@dataclass(frozen=True)
+class _Binding:
+    runtime: DatabaseRuntime
+    required: bool
+
+
+def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -> None:
+    """Seal THE process's one runtime binding.
 
     A product calls this from its own assembly composition (typically via
-    `ProductAssemblySpec.database_runtime`, applied by `create_app`) with a
-    `DatabaseRuntime` it built from its own DSNs, credentials and tenant
-    lookup. There is no partial install: the whole runtime is swapped in one
-    assignment, so a reader never observes half of a new configuration next to
-    half of an old one.
+    `ProductAssemblySpec.database_runtime`/`require_database_runtime`, applied
+    by `create_app`) with a `DatabaseRuntime` it built from its own DSNs,
+    credentials and tenant lookup.
+
+    * First call: seals `(runtime, required)`.
+    * Reinstalling the IDENTICAL `runtime` object, at the same policy or
+      asking for MORE strictness (`required=True` over an existing
+      non-required binding), is idempotent — the binding becomes (or stays)
+      required.
+    * A DIFFERENT `runtime` object refuses, always.
+    * The SAME `runtime` but WEAKENING an already-`required` binding
+      (`required=False` over an existing `required=True`) refuses — there is
+      no public way to downgrade strictness once sealed.
+    * `required=True` refuses if `dotmac_kernel.db` is already imported in
+      this process: the reference runtime it constructs may already exist,
+      which is exactly what a strict binding exists to rule out.
     """
     if not isinstance(runtime, DatabaseRuntime):
         raise TypeError(
-            f"install_database_runtime() requires a DatabaseRuntime, got "
+            f"bind_database_runtime() requires a DatabaseRuntime, got "
             f"{type(runtime).__name__}"
         )
-    global _installed_runtime
-    _installed_runtime = runtime
+    global _binding
+    if required and "dotmac_kernel.db" in sys.modules:
+        raise RuntimeBindingError(
+            "cannot bind a REQUIRED runtime: dotmac_kernel.db is already "
+            "imported in this process, so the reference runtime it "
+            "constructs may already exist. Bind before anything imports "
+            "dotmac_kernel.db — commonly an eager module-scope import "
+            "reached during manifest/feature discovery, before create_app "
+            "ever ran."
+        )
+    if _binding is None:
+        _binding = _Binding(runtime=runtime, required=required)
+        return
+    if runtime is not _binding.runtime:
+        raise RuntimeBindingError(
+            "a different DatabaseRuntime is already bound in this process — "
+            "one process supports one runtime binding; a second application "
+            "or caller binding another instance is a configuration conflict, "
+            "not a switch"
+        )
+    if _binding.required and not required:
+        raise RuntimeBindingError(
+            "the bound runtime is already required (strict); a later call "
+            "asking for required=False would downgrade it, which is refused "
+            "— strictness is monotonic and has no public way back down"
+        )
+    if required and not _binding.required:
+        _binding = _Binding(runtime=runtime, required=True)
+    # else: identical (runtime, required) — idempotent, nothing to do.
 
 
-def clear_database_runtime() -> None:
-    """Uninstall the product runtime, reverting `get_database_runtime` to the
-    reference assembly's instance (or to a refusal — see
-    `set_database_runtime_required`).
+def is_binding_sealed_strict() -> bool:
+    """Whether this process's binding (if any) is `required`.
 
-    `create_app` calls this whenever a spec declares no `database_runtime`, so
-    a second app built in the same process cannot inherit a previous spec's
-    installed runtime — the same reset discipline as
-    `install_surface_globals`/`install_stylesheets` for the other per-process
-    globals `create_app` owns. It does NOT touch `_required`: strictness is a
-    deployment's own declared policy, not a side effect of which runtime
-    happens to be installed.
+    `dotmac_kernel.db` calls this at ITS OWN import time, before constructing
+    any engine, and refuses to proceed if so — the mirror image of
+    `bind_database_runtime`'s own `sys.modules` check, so the refusal holds
+    regardless of which side happens to run first.
     """
-    global _installed_runtime
-    _installed_runtime = None
+    return _binding is not None and _binding.required
 
 
-def set_database_runtime_required(required: bool) -> None:
-    """Declare whether an absent installed runtime is a REFUSAL or a fallback.
-
-    `create_app` calls this with `spec.require_database_runtime` on every
-    build, so it resets the same way `clear_database_runtime` does for a
-    second app in one process. A CLI or worker entry point that never calls
-    `create_app` at all may call this directly — strictness is a property of
-    the process's declared intent, not of `create_app` specifically.
-
-    `True` makes `get_database_runtime()` raise `NoDatabaseRuntimeError`
-    instead of importing `dotmac_kernel.db` when nothing is installed. This is
-    the seam's own answer to "the seam exists, but nothing forces its use": a
-    product that forgets to set `ProductAssemblySpec.database_runtime` gets a
-    boot-time refusal naming the gap, not a silent slide onto the reference
-    assembly's runtime.
-    """
-    global _required
-    _required = required
-
-
-def get_database_runtime() -> DatabaseRuntime:
+def resolve_database_runtime() -> DatabaseRuntime:
     """The runtime every kernel-owned request, middleware, startup-check,
     CLI and worker path resolves through.
 
-    An installed product runtime always wins. Absent one:
-
-    * if this deployment declared `require_database_runtime`
-      (`set_database_runtime_required(True)`), this raises
-      `NoDatabaseRuntimeError` WITHOUT ever importing `dotmac_kernel.db` — the
-      whole point of strict mode is that a missed binding fails loudly instead
-      of silently reaching the reference runtime;
-    * otherwise this is the reference assembly's `dotmac_kernel.db.runtime` —
-      imported HERE, lazily, which is what keeps this module (and everything
-      that calls this function at module scope) importable without a
-      `DATABASE_URL`.
+    A sealed binding always wins. Absent one, this is the reference
+    assembly's `dotmac_kernel.db.runtime` — imported HERE, lazily, which is
+    what keeps this module (and everything that calls this function at
+    module scope) importable without a `DATABASE_URL`.
     """
-    if _installed_runtime is not None:
-        return _installed_runtime
-    if _required:
-        raise NoDatabaseRuntimeError(
-            "no product DatabaseRuntime is installed and this deployment "
-            "declared require_database_runtime — falling back to the "
-            "reference assembly's dotmac_kernel.db.runtime is refused, not "
-            "defaulted. Set ProductAssemblySpec.database_runtime."
-        )
+    if _binding is not None:
+        return _binding.runtime
     try:
         from dotmac_kernel.db import runtime as _reference_runtime
     except Exception as exc:  # pragma: no cover - exercised by the seam test
         raise NoDatabaseRuntimeError(
-            "no product DatabaseRuntime is installed and the reference "
-            f"runtime could not be imported: {type(exc).__name__}: {exc}"
+            "no runtime is bound in this process and the reference runtime "
+            f"could not be imported: {type(exc).__name__}: {exc}"
         ) from exc
     return _reference_runtime
