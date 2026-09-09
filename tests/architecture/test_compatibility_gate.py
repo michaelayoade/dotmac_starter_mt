@@ -235,6 +235,19 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
         )
     )
     assert satisfied.compatibility_satisfied is True
+    # Wrapping GateResult.explain()'s satisfied branch in `if self.findings:`
+    # would not break the empty-evaluations test above (which takes the
+    # OTHER branch); this asserts the SATISFIED branch specifically still
+    # carries the fixed marker.
+    assert "ADOPTION NOT EVALUATED" in satisfied.explain()
+
+
+def test_evaluation_result_explain_always_names_adoption_not_evaluated() -> None:
+    """The per-product half of the same marker, independent of
+    `GateResult.explain()` -- only the empty-`GateResult` branch was ever
+    asserted before; this closes the `EvaluationResult.explain()` gap."""
+    result = gate.EvaluationResult("academy", "a" * 40, "satisfied", ())
+    assert "ADOPTION NOT EVALUATED (academy)" in result.explain()
 
 
 def test_the_gate_refuses_without_a_configured_clone_even_with_a_real_binding(
@@ -469,6 +482,11 @@ def test_two_satisfied_and_one_refusing_still_refuses_and_names_it(
     assert result.refusing[0].compatibility_status == "unbound"
     explanation = result.explain()
     assert "sub" in explanation
+    # The refusing branch of GateResult.explain() -- the other half of the
+    # same marker asserted for the satisfied branch above and the
+    # empty-evaluations branch in test_gate_result_cannot_pass_on_an_empty_
+    # evaluation_set.
+    assert "ADOPTION NOT EVALUATED" in explanation
 
 
 def test_unknown_product_in_bindings_is_refused_by_construction() -> None:

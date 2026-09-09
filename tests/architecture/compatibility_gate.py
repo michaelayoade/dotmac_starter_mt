@@ -201,9 +201,19 @@ alone (never by parsing `findings`), which of these applies:
    because no CI runner is wired up), but the readiness record could not be
    fetched, parsed, matched to the fixed spec, or is missing a required
    requirement id.
-5. **`evaluation_refused`** — a complete, verified, matching record whose
-   product-authored `satisfied` booleans themselves show the product does
-   not meet the property.
+5. **`evaluation_refused`** — a complete, verified, matching record was read,
+   and the product is refused anyway. Usually this means the record's own
+   product-authored `satisfied` booleans show the property unmet. The three
+   evaluators are NOT symmetric here: Academy's and ERP's KERNEL-SIDE
+   findings (`SessionLocal` publication, `DatabaseRuntime`'s async method
+   count) are reported unconditionally but never change the verdict on
+   their own, while Sub's `evaluate_sub` folds its two kernel-side
+   structural findings (the required boundary methods `readonly_session` /
+   `serializable_session` / `tenant_scope`, and whether `_isolated_session`
+   orders `execution_options` before its `yield`) directly into
+   `satisfied`, alongside the record's own booleans — so `evaluation_refused`
+   for Sub can also mean a KERNEL-side regression this repository itself
+   introduced, with a verified, fully-satisfied record.
 6. **`satisfied`** — every check passed.
 
 The absence-is-refusal rule
@@ -308,8 +318,12 @@ PRODUCTS: Final = ("academy", "erp", "sub")
 #: `evidence_incomplete` — ancestry could not be checked (no CI runner wired
 #:   up) or was verified, but the record could not be fetched, parsed,
 #:   matched to the fixed spec, or is missing a required requirement id.
-#: `evaluation_refused` — a complete, verified record whose product-authored
-#:   `satisfied` booleans show the product does not meet the property.
+#: `evaluation_refused` — a complete, verified record was read and the
+#:   product is refused anyway: usually its own product-authored `satisfied`
+#:   booleans show the property unmet, but for Sub it can ALSO mean a
+#:   kernel-side structural regression (see `evaluate_sub`'s docstring and
+#:   the module docstring's "Three distinct refusal reasons" section) — the
+#:   three evaluators are not symmetric in what feeds this status.
 #: `satisfied` — every check passed.
 EVALUATION_STATUSES: Final = frozenset(
     {
@@ -588,12 +602,16 @@ def _class_async_method_names(path: Path, class_name: str) -> tuple[str, ...]:
 
 
 def _isolated_session_orders_execution_options_before_yield(path: Path) -> bool:
-    """MEASURED, structurally: does `DatabaseRuntime._isolated_session` apply
-    `execution_options` (the isolation-mode statement) strictly BEFORE its own
-    `yield`? That ordering is the exact property Sub's evaluation depends on —
-    the isolation mode must be set ahead of the transaction's BEGIN and ahead
-    of any `after_begin` listener (a tenant-GUC hook among them), and nothing
-    can run inside the block before the `yield` hands the session back."""
+    """MEASURED, structurally: does the line carrying `DatabaseRuntime
+    ._isolated_session`'s `.connection(execution_options=...)` call precede
+    the line carrying its `yield`? This proves ORDERING between those two
+    lines, never EXCLUSIVITY — it does not prove nothing else executes
+    between them, only that the call this function found comes textually
+    before the yield this function found (see `_connection_call_precedes_yield`
+    for exactly what "found" means and its reliance on `ast.walk` order).
+    That ordering is the property Sub's evaluation depends on: the isolation
+    mode must be set ahead of the transaction's BEGIN and ahead of any
+    `after_begin` listener (a tenant-GUC hook among them)."""
     tree = _parse(path)
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == "DatabaseRuntime":
@@ -607,6 +625,15 @@ def _isolated_session_orders_execution_options_before_yield(path: Path) -> bool:
 
 
 def _connection_call_precedes_yield(func: ast.FunctionDef) -> bool:
+    """Captures the FIRST matching call and FIRST `yield` `ast.walk(func)`
+    encounters (`ast.walk` is breadth-first, so for a function with nested
+    control flow "first encountered" is not guaranteed to equal "first in
+    source text" -- a call nested one level deeper than a later, shallower
+    yield could in principle be visited after it). The two `.lineno` values
+    captured are compared directly once found, so this proves the specific
+    call-line/yield-line pair it captured is correctly ordered; it does not
+    independently re-derive that those are THE textually-first occurrences,
+    and it proves nothing about what else runs between them."""
     connection_line: int | None = None
     yield_line: int | None = None
     for node in ast.walk(func):
@@ -1498,13 +1525,28 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
 
     sync_methods = _class_public_method_names(_SESSION_RUNTIME_PATH, "DatabaseRuntime")
     async_methods = _class_async_method_names(_SESSION_RUNTIME_PATH, "DatabaseRuntime")
+    # "Sync-only" is a claim ABOUT the measured async count, not a fixed
+    # narrative beside it — stated only when the measurement actually shows
+    # zero `async def` methods, so a future `DatabaseRuntime` that grows one
+    # cannot leave a stale "sync-only" sentence sitting next to a nonzero
+    # count that falsifies it.
+    sync_only_claim = (
+        "DatabaseRuntime is sync-only today, as ADR-0066 states; async "
+        "support for ERP is explicitly transitional, not satisfied by this "
+        "surface."
+        if not async_methods
+        else (
+            "DatabaseRuntime is NOT sync-only: the `async def` method(s) "
+            "above contradict ADR-0066's sync-only statement and this "
+            "finding must be re-examined."
+        )
+    )
     findings.append(
         "MEASURED (kernel-side, dotmac_kernel/session_runtime.py, this "
         f"repository): DatabaseRuntime publishes {len(sync_methods)} public "
         f"boundary method(s) ({list(sync_methods)!r}) and "
         f"{len(async_methods)} `async def` method(s) ({list(async_methods)!r}). "
-        "The Kernel is sync-only today, as ADR-0066 states; async support "
-        "for ERP is explicitly transitional, not satisfied by this surface."
+        f"{sync_only_claim}"
     )
 
     revision_problem = _revision_problem("erp", binding.revision)
@@ -1573,6 +1615,17 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
     PRODUCT-SIDE: fetches and verifies Sub's typed readiness record and reads
     every requirement id `PRODUCT_SPECS["sub"].requirements` selects — all
     eight `role="compatibility"`, required `true`.
+
+    ASYMMETRY WITH `evaluate_academy` / `evaluate_erp`: those two evaluators
+    report their kernel-side finding unconditionally but never let it alone
+    move `compatibility_status` away from `satisfied` — only the product's
+    own record booleans do that. Here, the two kernel-side structural
+    findings (`missing` boundary methods, `ordering_holds`) feed `satisfied`
+    DIRECTLY, alongside the record's own booleans. So `evaluation_refused`
+    for Sub can mean either a `satisfied: false` in Sub's own record, or a
+    regression in THIS repository's `DatabaseRuntime` shape — a verified,
+    fully-satisfied Sub record does not by itself guarantee `satisfied`
+    here.
     """
     findings: list[str] = []
 
