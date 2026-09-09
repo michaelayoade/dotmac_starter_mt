@@ -16,14 +16,34 @@ is why `_isolated_session` calls `db.connection(execution_options=...)` as the
 FIRST operation on a fresh session, before the caller (or a nested
 `tenant_scope`) can touch it.
 
-This is not merely disciplined ordering. `isolation_level` and
-`postgresql_readonly` are both "transactional" SQLAlchemy connection
-characteristics (`sqlalchemy.engine.characteristics.IsolationLevelCharacteristic`,
-`sqlalchemy.dialects.postgresql.base.PGReadOnlyConnectionCharacteristic`, both
-`transactional = True`): the dialect itself raises `InvalidRequestError` if
-either is set on a connection that has already begun a transaction. The
-near-miss test below plants exactly that mistake and shows it is refused
-loudly, not applied "late" and silently.
+`isolation_level` and `postgresql_readonly` are both "transactional"
+SQLAlchemy connection characteristics
+(`sqlalchemy.engine.characteristics.IsolationLevelCharacteristic`,
+`sqlalchemy.dialects.postgresql.base.PGReadOnlyConnectionCharacteristic`,
+both `transactional = True`) — but that does NOT mean SQLAlchemy refuses a
+late application. MEASURED against the pinned `sqlalchemy==2.0.51`
+(`site-packages/sqlalchemy/orm/session.py`,
+`SessionTransaction._connection_for_bind`, lines 1157-1168): when a bind
+already has a connection established, late execution options are WARNED
+about (`SAWarning`, "Connection is already established for the given bind;
+execution_options ignored") and then silently discarded — the existing
+connection is returned unchanged. There is no "late but still correct"
+outcome, and there is no raise either.
+`test_sqlalchemy_ignores_late_execution_options_it_does_not_raise` below
+pins that measured behaviour directly, bypassing the Kernel's guard, so a
+future SQLAlchemy upgrade that changes this to a hard raise is noticed
+here.
+
+Because SQLAlchemy cannot be relied on to refuse, `_isolated_session` (the
+private implementation behind both `readonly_session` and
+`serializable_session`) refuses ON ITS OWN BEHALF: before calling
+`Session.connection(execution_options=...)`, it checks `db.in_transaction()`
+and raises `dotmac_kernel.session_runtime.IsolationModeTooLateError` if a
+transaction has already begun on that session.
+`test_readonly_session_refuses_a_session_that_already_has_a_transaction`
+below plants exactly the situation `_isolated_session`'s docstring warns
+about — a session handed to it that already began a transaction — and shows
+the KERNEL refuses loudly, not SQLAlchemy.
 
 Requires a real Postgres (isolation levels and write refusal are not
 observable under SQLite) — `make test-db-up` +
@@ -34,12 +54,14 @@ in this directory.
 from __future__ import annotations
 
 import uuid
+import warnings
 
 import pytest
 from dotmac_kernel.db import runtime
 from dotmac_kernel.models import Role
+from dotmac_kernel.session_runtime import IsolationModeTooLateError
 from sqlalchemy import event, select, text
-from sqlalchemy.exc import DBAPIError, InvalidRequestError
+from sqlalchemy.exc import DBAPIError, SAWarning
 from sqlalchemy.orm import Session
 
 
@@ -161,18 +183,68 @@ def test_serializable_mode_is_already_set_when_the_after_begin_hook_fires() -> N
     assert observed == ["serializable"]
 
 
-def test_setting_isolation_level_after_the_first_statement_is_refused() -> None:
-    """The near-miss the ordering guarantee rules out MECHANICALLY, not just
-    by convention: applying execution options AFTER a connection has already
-    begun a transaction is refused outright by SQLAlchemy — there is no
-    "late but still correct" outcome, which is exactly why
-    `_isolated_session` must call `Session.connection(execution_options=...)`
-    as its very first operation and nowhere else."""
+def test_readonly_session_refuses_a_session_that_already_has_a_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proves the KERNEL's own refusal, not SQLAlchemy's.
+
+    `_isolated_session`'s docstring warns about a future caller that reuses
+    or otherwise pre-touches a session before reaching it. There is no such
+    caller today — `_isolated_session` always constructs a fresh session —
+    so this plants that exact situation directly: `_session_factory` is
+    patched to hand back a session that has already executed a statement
+    (autobegun a transaction), then the PUBLIC `readonly_session()` is
+    exercised exactly as a real caller would use it.
+
+    Sensitivity: if the Kernel's own `db.in_transaction()` check in
+    `_isolated_session` were removed, this would not raise at all —
+    `test_sqlalchemy_ignores_late_execution_options_it_does_not_raise` below
+    measures that SQLAlchemy silently discards the late options rather than
+    raising — so `readonly_session()` would silently hand back a session
+    running at the DEFAULT isolation, not REPEATABLE READ + read-only. That
+    silent-default outcome, not an exception of any kind, is the actual
+    defect this test exists to catch; `IsolationModeTooLateError` is the
+    Kernel's replacement for the raise SQLAlchemy does not provide.
+    """
+    pre_transacted = runtime.session_factory()
+    pre_transacted.execute(text("SELECT 1"))  # begins the transaction, unscoped
+    monkeypatch.setattr(runtime, "_session_factory", lambda: pre_transacted)
+
+    with pytest.raises(IsolationModeTooLateError, match="already begun a transaction"):
+        with runtime.readonly_session():
+            pass
+
+    assert not pre_transacted.in_transaction()
+
+
+def test_sqlalchemy_ignores_late_execution_options_it_does_not_raise() -> None:
+    """Companion pin for the MEASURED SQLAlchemy 2.0.51 behaviour the whole
+    guarantee above depends on NOT being available from SQLAlchemy itself:
+    `SessionTransaction._connection_for_bind` (`sqlalchemy/orm/session.py`,
+    lines 1157-1168) warns and silently discards execution options applied
+    to a bind that already has a connection established — it does not
+    raise. This deliberately bypasses the Kernel's own guard (calls
+    `Session.connection(execution_options=...)` directly, not through
+    `_isolated_session`) so it exercises SQLAlchemy's raw behaviour. If a
+    future SQLAlchemy upgrade turns this into a hard raise, this test starts
+    failing here — the place to find out, not in production.
+    """
     db = runtime.session_factory()
     try:
         db.execute(text("SELECT 1"))  # begins the transaction, unscoped
-        with pytest.raises(InvalidRequestError):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             db.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+
+        assert any(
+            issubclass(w.category, SAWarning)
+            and "execution_options ignored" in str(w.message)
+            for w in caught
+        )
+        isolation = db.execute(
+            text("SELECT current_setting('transaction_isolation')")
+        ).scalar()
+        assert isolation != "serializable"
     finally:
         db.rollback()
         db.close()

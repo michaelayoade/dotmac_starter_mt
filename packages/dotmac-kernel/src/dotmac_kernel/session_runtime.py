@@ -84,6 +84,7 @@ from sqlalchemy.orm import Session, sessionmaker
 __all__ = [
     "CANONICAL_TENANT_SETTING",
     "DatabaseRuntime",
+    "IsolationModeTooLateError",
     "NoDatabaseRuntimeError",
     "RuntimeBindingError",
     "TenantLookup",
@@ -127,11 +128,20 @@ class _TransactionMode(Enum):
 #: `readonly_session`'s docstring). Both are "transactional" SQLAlchemy
 #: connection characteristics (`sqlalchemy.engine.characteristics
 #: .IsolationLevelCharacteristic`/`dialects.postgresql.base
-#: .PGReadOnlyConnectionCharacteristic`, both `transactional = True`), which
-#: is the mechanism that makes the ordering guarantee below load-bearing
-#: rather than a matter of caller discipline: SQLAlchemy raises
-#: `InvalidRequestError` outright if either is set on a connection that has
-#: already begun a transaction.
+#: .PGReadOnlyConnectionCharacteristic`, both `transactional = True`).
+#:
+#: MEASURED (pinned `sqlalchemy==2.0.51`,
+#: `site-packages/sqlalchemy/orm/session.py`
+#: `SessionTransaction._connection_for_bind`, lines 1157-1168): applying
+#: execution options to a bind that already has a connection established
+#: does NOT raise. It emits an `SAWarning` ("Connection is already
+#: established for the given bind; execution_options ignored") and returns
+#: the existing connection UNCHANGED — a late call is silently discarded,
+#: not refused. So the ordering guarantee below cannot be delegated to
+#: SQLAlchemy; `_isolated_session` checks the session's own state itself,
+#: before calling `Session.connection(execution_options=...)`, and raises
+#: `IsolationModeTooLateError` on its own behalf if a connection/transaction
+#: is already established for the bind.
 _EXECUTION_OPTIONS: dict[_TransactionMode, dict[str, Any]] = {
     _TransactionMode.READ_ONLY: {
         "isolation_level": "REPEATABLE READ",
@@ -484,12 +494,29 @@ class DatabaseRuntime:
         (Sub's tenant-GUC hook among them; `tenant_scope`'s own listener
         follows the identical composition — see its docstring below).
 
-        This is not merely convention: `isolation_level` and
-        `postgresql_readonly` are both "transactional" SQLAlchemy connection
-        characteristics, so the DIALECT ITSELF refuses to change either one
-        once `connection.in_transaction()` is already true — a caller that
-        tried to apply a mode after issuing even one statement would get a
-        loud `InvalidRequestError`, not a silently-late isolation level.
+        THIS GUARANTEE IS NOT SQLALCHEMY'S TO KEEP. `isolation_level` and
+        `postgresql_readonly` are both "transactional" connection
+        characteristics, but SQLAlchemy 2.0.51's
+        `SessionTransaction._connection_for_bind` does not raise when
+        execution options are applied to a bind that already has a
+        connection established — it warns (`SAWarning`) and returns the
+        existing connection with the options silently discarded (measured;
+        see `_EXECUTION_OPTIONS`'s comment for the exact file/line). A
+        caller that reached this method with an already-transacted `db`
+        would therefore get a session that silently runs at the DEFAULT
+        isolation, not the one its name promises — the dominant failure
+        shape this ordering guarantee exists to rule out.
+
+        So the refusal is the Kernel's own, checked BEFORE the first
+        statement this method issues: `db.in_transaction()` is `True` only
+        once a transaction has begun on this session (autobegin included),
+        which is also the precondition under which SQLAlchemy would have
+        silently discarded the options above. `_isolated_session` always
+        constructs a fresh session immediately above, so this branch is not
+        reachable through today's only two callers — it exists so a FUTURE
+        caller that reuses or otherwise pre-touches a session before
+        reaching this method fails loudly instead of inheriting the
+        default isolation under a name that promises otherwise.
 
         Same disposal contract as `platform_session`/`tenant_session`:
         commit on success, rollback on error, close always — no second
@@ -497,6 +524,18 @@ class DatabaseRuntime:
         """
         db = self._session_factory()
         try:
+            if db.in_transaction():
+                raise IsolationModeTooLateError(
+                    f"Cannot apply isolation mode {mode.value!r}: this "
+                    "session has already begun a transaction (a statement "
+                    "ran, or a connection was already established, before "
+                    "the mode could be applied). SQLAlchemy does not raise "
+                    "in this situation -- it silently discards the late "
+                    "execution options and keeps running at the DEFAULT "
+                    "isolation, so the Kernel refuses here instead of "
+                    "handing back a session whose isolation contradicts its "
+                    "name."
+                )
             db.connection(execution_options=_EXECUTION_OPTIONS[mode])
             yield db
             db.commit()
@@ -741,6 +780,21 @@ class RuntimeBindingError(RuntimeError):
     """`bind_database_runtime` refused: a different runtime, a weaker policy,
     or the reference-runtime import already claimed the slot a strict bind
     needs."""
+
+
+class IsolationModeTooLateError(RuntimeError):
+    """`_isolated_session` refused: the session it was handed had already
+    begun a transaction, so applying a per-transaction isolation mode now
+    would be too late to be trustworthy.
+
+    Raised BY THE KERNEL, not by SQLAlchemy: SQLAlchemy 2.0.51 does not
+    raise in this situation (measured — see `_EXECUTION_OPTIONS`'s comment
+    and `_isolated_session`'s docstring for the file/line and the exact
+    silently-ignored behaviour). Without this check, `readonly_session()`/
+    `serializable_session()` could hand back a session that silently runs at
+    the DEFAULT isolation while its name promises REPEATABLE READ + read-only
+    or SERIALIZABLE.
+    """
 
 
 @dataclass(frozen=True)
