@@ -256,6 +256,34 @@ disposition = "not_an_executor"
 premise = "commands no deployment verb, directly or through any in-tree callee"
 
 [[entrypoint]]
+name = "workflow:foundation-candidate-attestation"
+family = "workflow"
+path = ".github/workflows/foundation-candidate-attestation.yml"
+trigger = "workflow_dispatch (inputs: facility, version; no pull_request trigger, so no fork can reach it)"
+credential = """
+FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM, a protected GitHub
+Environment secret scoped to the foundation-candidate-signing environment.
+Purpose: the candidate-signing identity's Ed25519 private key, used to sign
+exactly one TrustedHostAttestation.v2 candidate envelope per run. It is not a
+deployment, host, or registry-publish credential, and is a distinct custody
+principal from both registry-release (the publish credential) and the
+separate target-host attestation workload's own key. Canonical source, as a
+pointer only, no key material held here or anywhere in this repository:
+bao://secret/dotmac/github/foundation-candidate-signer#ed25519_private_key.
+"""
+disposition = "not_an_executor"
+premise = """
+Signs an already-committed CandidateArtifact.v1 receipt into a
+TrustedHostAttestation.v2 envelope and publishes it as a build artifact via
+the package-owned attestation_store.write_attestation_record; commands no
+deployment verb, directly or through any in-tree callee. The credential it
+reaches is a signing key, not a deployment or publish credential: it never
+touches a host, never calls docker/kubectl/ssh/rsync/alembic/pg_restore/etc.,
+and declares no `contents: write` — checked by
+tests/architecture/test_candidate_attestation_signer.py.
+"""
+
+[[entrypoint]]
 name = "workflow:recover-module-release"
 family = "workflow"
 path = ".github/workflows/recover-module-release.yml"

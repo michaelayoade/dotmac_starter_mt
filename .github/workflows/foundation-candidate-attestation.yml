@@ -1,0 +1,235 @@
+# Sign a COMMITTED Foundation candidate receipt into a `TrustedHostAttestation.v2`
+# candidate envelope. It builds nothing and publishes nothing.
+#
+# ## Why this is a separate workflow from `foundation-candidate.yml`
+#
+# `foundation-candidate.yml` is proved, by
+# `tests/architecture/test_candidate_lane_cannot_publish.py`, to be structurally
+# incapable of publishing: NO job in that file may declare `environment:`,
+# because `environment:` is the only thing in this repository that reaches a
+# protected credential. This lane's whole reason to exist is to reach exactly
+# one protected credential — the candidate-attestation signing key — so it
+# cannot live in that file without breaking the property the other guard
+# proves. Two lanes, two credential boundaries, matches the same split
+# `release-kernel.yml`/`verify-kernel-release.yml` already use for build vs.
+# publish vs. verify.
+#
+# ## What this lane consumes, and what it does not build
+#
+# It consumes an ALREADY-COMMITTED `CandidateArtifact.v1` receipt —
+# `docs/inventories/foundation-candidate-<version>.json`, resolved the same way
+# `release-facility.yml`'s publish job resolves one, through
+# `scripts/release_facility.py resolve-candidate`. It then fetches the exact
+# artifact by run + artifact id (never by "latest", never by name) and refuses
+# with `verify-candidate` unless the fetched bytes are byte-identical to the
+# receipt — the same digest gate `release-facility.yml` runs before its own
+# publish step, reused rather than re-implemented. Only after that refusal
+# passes does it sign. ADR-0070's 2026-09-08 amendment, decision 2: sign the
+# exact built bytes, never a rebuild, never a recomputed hash of a re-derived
+# artifact — this lane rebuilds NOTHING; `poetry build` does not appear here.
+#
+# ## What this lane produces, and what it does not do with it
+#
+# One signed `TrustedHostAttestation.v2` envelope
+# (`packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/
+# trusted_host_source.py`), uploaded as a workflow artifact — `NOT` committed
+# by this workflow. This job declares `contents: read`, never `contents:
+# write`, and contains no `git commit`, `git push`, `gh pr create` or
+# equivalent: turning a signed envelope into a committed, reviewable record
+# under `docs/inventories/` is a SEPARATE, reviewed change, the same split
+# `release-kernel.yml` (builds, publishes) and a human-reviewed record commit
+# already use for the kernel — this lane self-commits nothing.
+#
+# Signing this envelope does not admit anything. ADR-0070's 2026-09-08
+# amendment, decision 5: the first time `require_host_source` is expected to
+# return a `HostSource` rather than raise `PreconditionFailed` is inside a
+# dedicated, protected rehearsal workflow — not here, and not by virtue of this
+# envelope existing. Both mutating executors keep their explicit
+# `require_host_source(receipt=None)` refusal untouched by this change.
+#
+# ## Custody — a DISTINCT principal from the target-host attestation workload
+#
+# `trusted_host_source.py`'s module docstring: "The candidate signer is the
+# protected Starter release-workflow identity; the host signer is a distinct
+# target-local host-attestation workload identity." This job is that candidate
+# identity. Its private key is read from exactly ONE protected GitHub
+# Environment secret,
+# `FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM`, scoped to the
+# `foundation-candidate-signing` environment — a DIFFERENT environment from
+# `registry-release` (the publish credential) and from whatever environment the
+# separate host-attestation lane declares. Its canonical source is an OpenBao
+# pointer, `bao://secret/dotmac/github/foundation-candidate-signer#ed25519_
+# private_key` — record only, no value lives here.
+# `tests/architecture/test_candidate_attestation_custody.py` proves this
+# secret name is referenced by exactly this one workflow file, and that
+# `scripts/candidate_attestation_signer.py` contains no code path that could
+# read, construct, or emit an installed-host role envelope — the purpose
+# string this script signs under is hardcoded, never a parameter.
+#
+# **Provisioning the actual key is explicitly NOT done by this change.** The
+# environment and the secret NAME are declared; the key material must be
+# generated and stored at the named OpenBao path, and the GitHub Environment
+# `foundation-candidate-signing` must be created with that secret populated,
+# before this workflow can run. Until then, dispatching it fails at the
+# "materialise the signing key" step with a clear absent-secret error rather
+# than silently producing an unsigned or falsely-signed envelope.
+
+name: Foundation candidate attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      facility:
+        description: >-
+          Which allowlisted universal facility's committed candidate receipt
+          to sign. Enforced by `scripts/release_facility.py resolve`.
+        required: true
+        type: choice
+        options:
+          - dotmac-deployment-foundation
+      version:
+        description: >-
+          Exact candidate version. Must name an already-committed
+          CandidateArtifact.v1 receipt under docs/inventories/.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment: foundation-candidate-signing
+    permissions:
+      actions: read # read another run's artifact metadata and bytes
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Signing a candidate attestation is itself a protected-main-only act,
+      # the same discipline `foundation-candidate.yml` applies to building one.
+      - name: Assert this run is the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - uses: ./.github/actions/setup-poetry
+
+      # dotmac-deployment-foundation is a path dependency (develop = true) —
+      # this is a build-runner CI job importing its typed contract classes
+      # directly, exactly the consumer ADR-0070 § 1 names ("consumed by CI,
+      # build runners, provisioning workers and deployment hosts"). It is NOT
+      # the editable-install shape `trusted_host_source.py`'s decision 4
+      # refuses: nothing here calls `require_host_source`, and this job
+      # installs the facility to construct typed values, not to claim it is
+      # the installed artifact on a deployment host.
+      - name: Install the facility from source
+        run: poetry install --with dev --no-interaction
+
+      - name: Resolve the allowlisted facility
+        run: |
+          python scripts/release_facility.py resolve "${{ inputs.facility }}"
+
+      # THE CANDIDATE'S COORDINATES, READ FROM THE COMMITTED RECEIPT — never
+      # from a dispatch input naming a run or artifact id directly. Identical
+      # idiom to `release-facility.yml`'s publish job.
+      - name: Resolve the committed candidate receipt
+        id: candidate
+        run: |
+          python scripts/release_facility.py resolve-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # Fetch by run + artifact ID, never by "latest".
+      - name: Fetch the candidate artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ steps.candidate.outputs.candidate_repository }}
+          ARTIFACT_ID: ${{ steps.candidate.outputs.candidate_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-dist
+          gh api "/repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > candidate.zip
+          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            candidate.zip candidate-dist
+          ls -l candidate-dist
+
+      # THE DIGEST GATE, before the signing credential is ever reached. A
+      # mismatched artifact must fail here, not after a signature over the
+      # wrong bytes exists.
+      - name: Refuse anything that is not the recorded candidate
+        run: |
+          python scripts/release_facility.py verify-candidate \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --dist candidate-dist
+
+      # The key lives ONLY in this file, for the duration of one signature.
+      # `umask 177` plus an explicit `chmod 600` before writing: the file is
+      # created with owner-only permissions from the first byte written, not
+      # merely restricted afterward.
+      - name: Materialise the signing key from the protected environment secret
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIGNING_KEY_PEM}" ]; then
+            echo "::error::FOUNDATION_CANDIDATE_SIGNING_ED25519_PRIVATE_KEY_PEM is unset in the foundation-candidate-signing environment. Provisioning this secret is an explicit prerequisite this workflow does not perform." >&2
+            exit 1
+          fi
+          umask 177
+          printf '%s' "${SIGNING_KEY_PEM}" > "${RUNNER_TEMP}/candidate-signing-key.pem"
+
+      - name: Sign the candidate attestation
+        env:
+          ISSUER: https://github.com/${{ github.repository }}/.github/workflows/foundation-candidate-attestation.yml
+          KEY_ID: ${{ vars.FOUNDATION_CANDIDATE_SIGNING_KEY_ID }}
+          CUSTODY_DOMAIN: dotmac.foundation.candidate
+          TRUST_ROOT_VERSION: ${{ vars.FOUNDATION_CANDIDATE_TRUST_ROOT_VERSION }}
+          AUDIENCE: dotmac-deployment-foundation
+        run: |
+          set -euo pipefail
+          python scripts/candidate_attestation_signer.py sign \
+            --receipt "${{ steps.candidate.outputs.candidate_receipt }}" \
+            --private-key-file "${RUNNER_TEMP}/candidate-signing-key.pem" \
+            --issuer "${ISSUER}" \
+            --key-id "${KEY_ID}" \
+            --custody-domain "${CUSTODY_DOMAIN}" \
+            --trust-root-version "${TRUST_ROOT_VERSION}" \
+            --audience "${AUDIENCE}" \
+            --out candidate-attestation.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      # Removed unconditionally, success or failure, so a re-run never inherits
+      # a stale key file left by an earlier failed step in the same job.
+      - name: Remove the signing key material
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/candidate-signing-key.pem"
+
+      # Uploaded, NOT committed. A separate, reviewed change moves this into
+      # `docs/inventories/` under a name a human chose, exactly as every
+      # existing `foundation-candidate-<version>.json` got there.
+      - name: Upload the signed candidate attestation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.facility }}-candidate-attestation
+          path: candidate-attestation.json
+          retention-days: 90
+          if-no-files-found: error
+
+      # The exact CandidateArtifact.v1 receipt this attestation's subject was
+      # built from, re-emitted byte-for-byte alongside the signed envelope —
+      # so the later record change can bind "this attestation" to "this
+      # receipt" without re-deriving either from run history.
+      - name: Upload the bound candidate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.facility }}-candidate-attestation-receipt
+          path: ${{ steps.candidate.outputs.candidate_receipt }}
+          retention-days: 90
+          if-no-files-found: error
