@@ -22,28 +22,32 @@ from dotmac_kernel.models import (
 )
 from dotmac_kernel.permissions import PERMISSION_CODE_ATTR, active_permissions
 from dotmac_kernel.security import decode_access_token, hash_token
+from dotmac_kernel.session_runtime import resolve_database_runtime
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
     """Thin FastAPI adapter over the database transaction owner.
 
-    The function-local import is load-bearing. Route manifests are imported to
-    discover and register modules before an assembly has resolved deployment
-    configuration; importing ``dotmac_kernel.db`` here at module scope would
-    construct an engine and make package discovery require ``DATABASE_URL``.
-    The request still enters the one owner unchanged when FastAPI resolves this
-    dependency.
+    Resolves the runtime through `resolve_database_runtime` rather than
+    importing `dotmac_kernel.db` directly — a product that sealed its own
+    `DatabaseRuntime` binding (`ProductAssemblySpec.database_runtime`) is
+    served here unchanged; the reference assembly, which binds none, still
+    reaches its own instance through the same call. Route manifests are
+    imported to discover and register modules before an assembly has
+    resolved deployment configuration, so importing `dotmac_kernel.db`
+    eagerly here — even indirectly, through the fallback inside
+    `resolve_database_runtime` — would make package discovery require
+    `DATABASE_URL`; that fallback import is itself deferred to call time for
+    the same reason.
     """
-    from dotmac_kernel.db import get_db as transaction_owner
-
-    yield from transaction_owner(request)
+    runtime = resolve_database_runtime()
+    tenant = getattr(request.state, "tenant", None)
+    yield from runtime.request_session(None if tenant is None else tenant.id)
 
 
 def get_platform_db() -> Generator[Session, None, None]:
     """Thin FastAPI adapter over the platform database transaction owner."""
-    from dotmac_kernel.db import get_platform_db as transaction_owner
-
-    yield from transaction_owner()
+    yield from resolve_database_runtime().platform_request_session()
 
 
 def require_tenant(request: Request) -> Tenant:

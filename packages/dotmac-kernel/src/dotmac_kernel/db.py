@@ -46,7 +46,10 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.config import settings
-from dotmac_kernel.session_runtime import DatabaseRuntime
+from dotmac_kernel.session_runtime import (
+    DatabaseRuntime,
+    _claim_reference_runtime_import,
+)
 
 __all__ = [
     "conflict_savepoint",
@@ -62,6 +65,19 @@ __all__ = [
     "tenant_session",
     "tenant_session_by_slug",
 ]
+
+# The reference-runtime half of `session_runtime`'s atomic claim
+# (`bind_database_runtime` is the other half). A boolean read-then-act here
+# would leave a TOCTOU window against a strict bind racing to seal at the
+# same moment — see that module's comment for the exact interleaving that
+# defeats two independent checks. This call and a strict
+# `bind_database_runtime` contend for the SAME lock, so whichever runs first
+# atomically wins and the other refuses; there is no gap between deciding
+# and recording. Checked BEFORE `create_engine` runs (inside
+# `DatabaseRuntime.from_urls`) — a refusal that raised only after already
+# opening a connection pool would have already done the thing a strict
+# binding exists to rule out.
+_claim_reference_runtime_import()
 
 #: The reference assembly's instance. Public so a consumer that already depends
 #: on this module's configuration can pass the runtime where one is wanted,

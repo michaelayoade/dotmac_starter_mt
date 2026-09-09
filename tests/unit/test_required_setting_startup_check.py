@@ -54,20 +54,34 @@ def _raise(exc: BaseException):
     return _resolver, _seed
 
 
+class _FakeRuntime:
+    """A stand-in `DatabaseRuntime`, resolved through `resolve_database_runtime`
+    (kernel-runtime-composition-seam) rather than `dotmac_kernel.db` directly
+    — `_required_setting_errors` no longer imports `dotmac_kernel.db` itself."""
+
+    def __init__(self, platform_session) -> None:
+        self.platform_session = platform_session
+
+
 @pytest.fixture
 def patched(monkeypatch):
     """Drive `_required_setting_errors` with an injected failure.
 
-    Patches the two names the function imports lazily, via their real modules,
-    so the production import path is exercised rather than bypassed.
+    Patches the names the function imports lazily, via their real modules, so
+    the production import path is exercised rather than bypassed.
     """
 
     def _install(exc: BaseException):
         resolver, seed = _raise(exc)
-        import dotmac_kernel.db as db_mod
+        import dotmac_kernel.session_runtime as session_runtime
         import dotmac_kernel.settings_resolver as sr
 
-        monkeypatch.setattr(db_mod, "platform_session", resolver, raising=True)
+        monkeypatch.setattr(
+            session_runtime,
+            "resolve_database_runtime",
+            lambda: _FakeRuntime(resolver),
+            raising=True,
+        )
         monkeypatch.setattr(sr, "seed_settings_from_env", seed, raising=True)
         monkeypatch.setattr(
             sr, "validate_required_settings", lambda _db: [], raising=True
@@ -162,10 +176,15 @@ def test_a_clean_run_returns_the_validators_findings(monkeypatch) -> None:
     def _resolver():
         yield _Session()
 
-    import dotmac_kernel.db as db_mod
+    import dotmac_kernel.session_runtime as session_runtime
     import dotmac_kernel.settings_resolver as sr
 
-    monkeypatch.setattr(db_mod, "platform_session", _resolver, raising=True)
+    monkeypatch.setattr(
+        session_runtime,
+        "resolve_database_runtime",
+        lambda: _FakeRuntime(_resolver),
+        raising=True,
+    )
     monkeypatch.setattr(
         sr, "seed_settings_from_env", lambda _db: order.append("seed"), raising=True
     )

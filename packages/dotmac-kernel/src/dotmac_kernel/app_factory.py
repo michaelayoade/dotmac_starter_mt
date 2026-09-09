@@ -167,9 +167,14 @@ async def _run_enabled_seeds(
 def _tenancy_errors() -> list[str]:
     """Enforce `TENANCY=single`: exactly one tenant row, and bind to it.
 
-    Imported inside the function for the same reason `_required_setting_errors`
-    does it — importing `dotmac_kernel.db` builds the engine from DATABASE_URL,
-    and `create_app` must stay importable without a database.
+    Resolved through `resolve_database_runtime()` (kernel-runtime-composition
+    -seam) rather than importing `dotmac_kernel.db` directly, so a product
+    that sealed its own `DatabaseRuntime` binding is checked against ITS
+    tenant table. Absent a binding this falls back to the reference
+    assembly's, which is why the import stays function-local for the same
+    reason `_required_setting_errors` gives it: the fallback imports
+    `dotmac_kernel.db`, which builds the engine from DATABASE_URL, and
+    `create_app` must stay importable without a database.
 
     An unreachable database returns no errors rather than a false one: it says
     nothing about how many tenants exist, and `validate_settings` already covers
@@ -180,12 +185,12 @@ def _tenancy_errors() -> list[str]:
     if _settings.tenancy != "single":
         return []
 
-    from dotmac_kernel.db import resolver_session
     from dotmac_kernel.models import Tenant
+    from dotmac_kernel.session_runtime import resolve_database_runtime
     from dotmac_kernel.tenancy import bind_single_tenant
 
     try:
-        with resolver_session() as db:
+        with resolve_database_runtime().resolver_session() as db:
             slugs = [t.slug for t in db.query(Tenant).order_by(Tenant.slug).all()]
     except Exception as exc:  # unreachable store: not a tenancy verdict
         logger.warning("Tenancy check skipped: %s", exc)
@@ -226,10 +231,16 @@ def _defect_summary(exc: BaseException) -> str:
 def _required_setting_errors() -> list[str]:
     """Required-setting failures, or an empty list when the store is unreachable.
 
-    Imports `dotmac_kernel.db` HERE, not at module scope: importing it builds
-    the SQLAlchemy engine from `DATABASE_URL`, and `create_app` must stay
-    importable without a database (the same reason those APIs are submodule-only
-    in the public surface).
+    Resolved through `resolve_database_runtime()` (kernel-runtime-composition
+    -seam) rather than importing `dotmac_kernel.db` directly, so a product
+    that sealed its own `DatabaseRuntime` binding is checked against ITS
+    platform store. Absent a binding this falls back to the reference
+    assembly's; the import of `resolve_database_runtime` (and, inside it, of
+    `dotmac_kernel.db` for that fallback) stays function-local for the same
+    reason it always did: importing `dotmac_kernel.db` builds the SQLAlchemy
+    engine from `DATABASE_URL`, and `create_app` must stay importable without
+    a database (the same reason those APIs are submodule-only in the public
+    surface).
 
     Two failure modes, deliberately not conflated (ADR-0011, amended
     2026-08-20):
@@ -254,14 +265,14 @@ def _required_setting_errors() -> list[str]:
     from sqlalchemy.exc import InterfaceError, OperationalError
     from sqlalchemy.exc import TimeoutError as SQLTimeoutError
 
-    from dotmac_kernel.db import platform_session
+    from dotmac_kernel.session_runtime import resolve_database_runtime
     from dotmac_kernel.settings_resolver import (
         seed_settings_from_env,
         validate_required_settings,
     )
 
     try:
-        with platform_session() as db:
+        with resolve_database_runtime().platform_session() as db:
             # Bootstrap first: a setting configured by environment variable is
             # turned into a real row here, so the check below sees it as
             # configured — and so it behaves like every other value from then
@@ -507,6 +518,44 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     Raises `dotmac_kernel.modules.ModuleRegistryError` (a `ValueError`) if the
     module set is incoherent."""
+    # FIRST, before anything else can read it: seal this process's database
+    # runtime binding (kernel-runtime-composition-seam). A spec declaring
+    # `database_runtime` makes every kernel-owned path — the startup checks
+    # below, `dotmac_kernel.deps`, `middleware.tenant`, a machine-key
+    # dependency — resolve through THAT instance instead of the reference
+    # assembly's `dotmac_kernel.db.runtime`. A spec declaring none binds
+    # nothing: `resolve_database_runtime()` then falls back to the reference
+    # assembly, unchanged from before this seam existed.
+    #
+    # `require_database_runtime=True` with no `database_runtime` set is a
+    # MISSED BINDING, not "use the reference runtime" — refuse here, before
+    # `dotmac_kernel.db` could ever be imported for this deployment, naming
+    # exactly what is missing rather than silently defaulting around it. This
+    # is a plain attribute check on `spec`, not a bind attempt, so it costs
+    # nothing and touches no database either way.
+    #
+    # `bind_database_runtime` itself is ONE PROCESS, ONE BINDING: reinstalling
+    # the identical runtime (the common case — a test harness or a WSGI
+    # pre-fork worker calling `create_app` more than once with the same spec)
+    # is idempotent; a DIFFERENT runtime, or weakening an already-required
+    # binding, refuses rather than silently clobbering whatever the process
+    # already sealed. There is no per-`create_app`-call reset: a second,
+    # genuinely different application in this process is a configuration
+    # conflict this seam surfaces, not a switch it performs quietly.
+    from dotmac_kernel.session_runtime import bind_database_runtime
+
+    if spec.database_runtime is None and spec.require_database_runtime:
+        raise RuntimeError(
+            f"product assembly {spec.name!r} declares require_database_runtime=True "
+            "but supplies no database_runtime. Falling back to the reference "
+            "assembly's dotmac_kernel.db.runtime is refused for this deployment "
+            "— set ProductAssemblySpec.database_runtime."
+        )
+    if spec.database_runtime is not None:
+        bind_database_runtime(
+            spec.database_runtime, required=spec.require_database_runtime
+        )
+
     setup_logging()
 
     disabled = set(spec.disabled_modules)

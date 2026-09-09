@@ -71,8 +71,10 @@ to reset, so there is no reset that can be skipped.
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event, text
@@ -81,7 +83,11 @@ from sqlalchemy.orm import Session, sessionmaker
 __all__ = [
     "CANONICAL_TENANT_SETTING",
     "DatabaseRuntime",
+    "NoDatabaseRuntimeError",
+    "RuntimeBindingError",
     "TenantLookup",
+    "bind_database_runtime",
+    "resolve_database_runtime",
 ]
 
 #: The one Postgres setting every composed module's RLS policy reads, via
@@ -539,3 +545,207 @@ class DatabaseRuntime:
             db.expunge_all()
             db.rollback()
             db.close()
+
+
+# ── the process's one sealed runtime binding ────────────────────────────────
+#
+# `dotmac_kernel.db` is one INSTANCE of `DatabaseRuntime` — the reference
+# assembly's, eager, built from the kernel's own `Settings` at import. Kernel
+# code that needs a runtime (auth, middleware, startup checks, a machine-key
+# dependency, a CLI/worker entry point) must not import that instance
+# directly: doing so makes the kernel's OWN behaviour depend on the reference
+# assembly's configuration even for a product that supplied its own.
+#
+# ONE process supports ONE binding — not a per-application slot, and not a
+# freely-mutable global either. `bind_database_runtime` seals it through
+# exactly THREE named transitions, kept separate on purpose (see that
+# function's own docstring for why filing one under another is the exact
+# defect this seam exists to close):
+#
+# * IDEMPOTENCE — the IDENTICAL runtime, at the IDENTICAL policy, changes
+#   nothing (a second `create_app` call composing the same spec must not
+#   fail on that alone);
+# * MONOTONIC PROMOTION — the SAME runtime, `required` going False -> True.
+#   The binding DOES change; permitted only because strictness tightens;
+# * REFUSAL — everything else: a DIFFERENT runtime (any policy), or the SAME
+#   runtime with `required` going True -> False (a downgrade). A second
+#   application in this process binding something else is a configuration
+#   conflict, never a silent clobber of the first, and there is no public
+#   function that clears a binding or downgrades its strictness.
+#
+# ## Why a boolean check is not enough
+#
+# An earlier version of this checked `"dotmac_kernel.db" in sys.modules` in
+# `bind_database_runtime` and a plain `is_binding_sealed_strict()` boolean in
+# `dotmac_kernel.db` — two INDEPENDENT reads, which has a real TOCTOU window:
+# a binder can see `dotmac_kernel.db` absent, `db.py` can begin importing and
+# observe strict mode as still false, THEN the binder seals strict mode,
+# and THEN `db.py` finishes constructing the reference engines anyway. Module
+# import is not atomic, so both checks pass and the invariant is violated.
+#
+# `_claim_lock` + `_reference_claimed` replace both booleans with ONE
+# mutually-exclusive state transition, guarded by a real lock (not the GIL,
+# not import-lock semantics): `_claim_reference_runtime_import` (called by
+# `dotmac_kernel.db`, before it constructs any engine) and
+# `bind_database_runtime` (`required=True`) both contend for the SAME lock.
+# Whichever acquires it first wins — either the reference import is claimed
+# first and a later strict bind refuses against that recorded claim, or a
+# strict bind seals first and the reference import refuses against THAT.
+# There is no gap between deciding and recording: both happen inside the same
+# critical section.
+_claim_lock = threading.Lock()
+_reference_claimed = False
+_binding: _Binding | None = None
+
+
+class NoDatabaseRuntimeError(RuntimeError):
+    """`resolve_database_runtime` could not produce a runtime.
+
+    Raised in two distinct cases, both meaning "there is no runtime to hand
+    back":
+
+    * this process's binding is `required` and carries no runtime because it
+      was never bound (there is no such state reachable through
+      `bind_database_runtime`, which always takes a real runtime — this is
+      the reference assembly's own `dotmac_kernel.db` refusing to construct
+      one after a strict binding claimed the reference-runtime slot first, or
+      a test that made `dotmac_kernel.db` unimportable without ever calling
+      `bind_database_runtime`);
+    * nothing is bound, nothing declared strictness, AND the reference
+      runtime's own import fails. A real deployment that never opts into
+      strictness always has one or the other.
+    """
+
+
+class RuntimeBindingError(RuntimeError):
+    """`bind_database_runtime` refused: a different runtime, a weaker policy,
+    or the reference-runtime import already claimed the slot a strict bind
+    needs."""
+
+
+@dataclass(frozen=True)
+class _Binding:
+    runtime: DatabaseRuntime
+    required: bool
+
+
+def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -> None:
+    """Seal THE process's one runtime binding.
+
+    A product calls this from its own assembly composition (typically via
+    `ProductAssemblySpec.database_runtime`/`require_database_runtime`, applied
+    by `create_app`) with a `DatabaseRuntime` it built from its own DSNs,
+    credentials and tenant lookup.
+
+    THREE DIFFERENT transitions, named separately and DELIBERATELY not
+    collapsed into one "idempotent" bucket — filing a change under
+    idempotence is how a seal quietly loosens the next time someone adds a
+    field and calls varying IT idempotent too:
+
+    * First call, or a call whose `(runtime, required)` are BOTH IDENTICAL to
+      what is already sealed: **IDEMPOTENCE**. Nothing changes; calling
+      twice with the same arguments is exactly as safe as calling once (a
+      second `create_app` composing the identical spec, for instance).
+    * The SAME `runtime` object, `required` going `False` -> `True`:
+      **MONOTONIC PROMOTION**. The binding DOES change — strictness only
+      ever tightens, and this is the one permitted way it does.
+    * ANYTHING ELSE — a DIFFERENT `runtime` object (regardless of policy), or
+      the SAME `runtime` with `required` going `True` -> `False` (a
+      downgrade): **REFUSAL**. There is no public way to switch runtimes or
+      loosen strictness once sealed.
+    * `required=True` additionally REFUSES if `dotmac_kernel.db` has already
+      CLAIMED the reference-runtime slot (`_claim_reference_runtime_import`,
+      called at its own import, before constructing any engine) —
+      atomically, under the same lock that import uses, so there is no
+      window between a boolean read and this call in which the two could
+      disagree.
+    """
+    if not isinstance(runtime, DatabaseRuntime):
+        raise TypeError(
+            f"bind_database_runtime() requires a DatabaseRuntime, got "
+            f"{type(runtime).__name__}"
+        )
+    global _binding
+    with _claim_lock:
+        if required and _reference_claimed:
+            raise RuntimeBindingError(
+                "REFUSAL: cannot bind a REQUIRED runtime — the "
+                "reference-runtime import already claimed this process's "
+                "slot, so the reference runtime it constructs may already "
+                "exist. Bind before anything imports dotmac_kernel.db — "
+                "commonly an eager module-scope import reached during "
+                "manifest/feature discovery, before create_app ever ran."
+            )
+        if _binding is None:
+            _binding = _Binding(runtime=runtime, required=required)
+            return
+        if runtime is not _binding.runtime:
+            raise RuntimeBindingError(
+                "REFUSAL: a different DatabaseRuntime is already bound in "
+                "this process — one process supports one runtime binding; "
+                "a second application or caller binding another instance "
+                "is a configuration conflict, not a switch"
+            )
+        if _binding.required and not required:
+            raise RuntimeBindingError(
+                "REFUSAL: the bound runtime is already required (strict); "
+                "a later call asking for required=False would DOWNGRADE "
+                "it, which is refused — strictness is monotonic and has no "
+                "public way back down"
+            )
+        if required and not _binding.required:
+            # MONOTONIC PROMOTION: same runtime, optional -> required. The
+            # binding changes; permitted because strictness only tightens.
+            _binding = _Binding(runtime=runtime, required=True)
+        # else: IDEMPOTENCE — identical (runtime, required), nothing to do.
+
+
+def _claim_reference_runtime_import() -> None:
+    """The reference-runtime import's half of the atomic claim.
+
+    `dotmac_kernel.db` calls this ONCE, at its own module scope, BEFORE
+    constructing any engine. Under the SAME lock `bind_database_runtime`
+    uses: refuses if a strict binding is already sealed (the mirror image of
+    that function's own check), otherwise records that the reference-runtime
+    slot is claimed, so a strict bind arriving AFTER this point refuses
+    too — closing the TOCTOU window a pair of independent boolean reads left
+    open (see the module comment above).
+    """
+    global _reference_claimed
+    with _claim_lock:
+        if _binding is not None and _binding.required:
+            raise RuntimeError(
+                "dotmac_kernel.db refuses to construct the reference "
+                "runtime: this process already sealed a REQUIRED "
+                "database-runtime binding (typically "
+                "ProductAssemblySpec.require_database_runtime). Importing "
+                "this module now would build an engine the deployment "
+                "explicitly refused to fall back to -- find what imported "
+                "dotmac_kernel.db (a module-scope import reached during "
+                "manifest/feature discovery is the usual cause) and make it "
+                "resolve through "
+                "dotmac_kernel.session_runtime.resolve_database_runtime() "
+                "instead."
+            )
+        _reference_claimed = True
+
+
+def resolve_database_runtime() -> DatabaseRuntime:
+    """The runtime every kernel-owned request, middleware, startup-check,
+    CLI and worker path resolves through.
+
+    A sealed binding always wins. Absent one, this is the reference
+    assembly's `dotmac_kernel.db.runtime` — imported HERE, lazily, which is
+    what keeps this module (and everything that calls this function at
+    module scope) importable without a `DATABASE_URL`.
+    """
+    if _binding is not None:
+        return _binding.runtime
+    try:
+        from dotmac_kernel.db import runtime as _reference_runtime
+    except Exception as exc:  # pragma: no cover - exercised by the seam test
+        raise NoDatabaseRuntimeError(
+            "no runtime is bound in this process and the reference runtime "
+            f"could not be imported: {type(exc).__name__}: {exc}"
+        ) from exc
+    return _reference_runtime
