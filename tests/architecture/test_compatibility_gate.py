@@ -22,6 +22,7 @@ that accepts a boolean, a digest, or an ancestry claim as INPUT.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -51,6 +52,31 @@ def _git_output(repo: Path, args: list[str]) -> str:
     )
     assert result.returncode == 0, f"git {args} failed: {result.stderr}"
     return result.stdout
+
+
+def _git_output_bytes(repo: Path, args: list[str]) -> bytes:
+    """Byte-exact `git` stdout -- used to independently recompute a blob's
+    digest, since `fetch_readiness_record` hashes the raw bytes `git show`
+    returns, not a decoded string (which could silently normalize them)."""
+    command = ["git", *args]
+    result = subprocess.run(  # noqa: S603
+        command, cwd=repo, capture_output=True, check=False
+    )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr!r}"
+    return result.stdout
+
+
+def _is_git_repository(path: Path) -> bool:
+    """A real, usable local git repository -- not merely a directory that
+    happens to exist. Used to turn a broken or missing `COMPAT_GATE_CLONE_*`
+    checkout into a hard test FAILURE rather than a silent skip."""
+    if not path.is_dir():
+        return False
+    command = ["git", "-C", str(path), "rev-parse", "--git-dir"]
+    result = subprocess.run(  # noqa: S603
+        command, capture_output=True, text=True, check=False
+    )
+    return result.returncode == 0
 
 
 def _init_repo(tmp_path: Path, name: str) -> Path:
@@ -241,26 +267,46 @@ def test_the_gate_refuses_without_a_configured_clone_even_with_a_real_binding(
 def test_real_coordinates_report_compatibility_with_no_adoption_fraction() -> None:
     """Runs the checked-in bindings file's three REAL protected-`main`
     coordinates (Academy #134, ERP #523, Sub #3041) end to end, exactly as
-    CI's checkout step configures `COMPAT_GATE_CLONE_*` (see the module
-    docstring, "CI access this runner requires"). Skips outright, rather
-    than silently asserting nothing, when no clone is configured — the
-    ordinary state on a workstation.
+    CI's `compatibility-gate` job (`.github/workflows/ci.yml`) configures
+    `COMPAT_GATE_CLONE_*` (see the module docstring, "CI access this runner
+    requires").
 
-    Proves the four things the ruled result contract requires of this exact
+    Acquisition failure is a hard FAILURE here, never a skip: a skip on
+    missing evidence is absence-of-signal read as a positive signal — the
+    exact defect this gate exists to refuse. Before this fix, an unset or
+    broken `COMPAT_GATE_CLONE_*` made this test skip silently, which means
+    the assertions below had never actually run in any environment that
+    existed (no CI job configured the variables). A workstation run of this
+    specific test is now expected to FAIL loudly, not pass by skipping.
+
+    Proves the five things the ruled result contract requires of this exact
     run: (1) compatibility is 3-of-3 satisfied; (2) every product AND the
     aggregate report the fixed, structured `adoption_status ==
     "not_evaluated"`; (3) Academy's five real adoption-debt observations —
-    all `satisfied=False` in its own record — remain visible; and (4) no
+    all `satisfied=False` in its own record — remain visible; (4) no
     adoption numerator or denominator (an "N/3"-shaped fraction) is emitted
     anywhere in the rendered output — asserted as an explicit absence, not
-    merely left unchecked."""
-    if not all(
-        os.environ.get(spec.clone_env_var) for spec in gate.PRODUCT_SPECS.values()
-    ):
-        pytest.skip(
-            "no COMPAT_GATE_CLONE_* configured in this environment — this "
-            "assertion runs against CI's real product checkouts"
+    merely left unchecked; and (5) each product's reported
+    `artefact_digest` equals the SHA-256 of the exact bytes `git show
+    <revision>:<path>` returns, computed INDEPENDENTLY here rather than
+    read back from `fetch_readiness_record` — the check that makes the
+    digest evidence rather than decoration."""
+    acquisition_problems = [
+        f"{spec.clone_env_var} is unset"
+        if not os.environ.get(spec.clone_env_var)
+        else (
+            f"{spec.clone_env_var}={os.environ[spec.clone_env_var]!r} is set "
+            "but is not a usable git repository"
         )
+        for spec in gate.PRODUCT_SPECS.values()
+        if not os.environ.get(spec.clone_env_var)
+        or not _is_git_repository(Path(os.environ[spec.clone_env_var]))
+    ]
+    assert not acquisition_problems, (
+        "COMPAT_GATE_CLONE_* acquisition failed -- this is a hard test "
+        "failure, never a skip, because a skip on missing evidence is "
+        f"absence-of-signal read as a positive signal: {acquisition_problems!r}"
+    )
 
     bindings = gate.load_default_bindings()
     result = gate.evaluate_gate(bindings)
@@ -293,6 +339,27 @@ def test_real_coordinates_report_compatibility_with_no_adoption_fraction() -> No
         + "\n".join(finding for e in result.evaluations for finding in e.findings)
     )
     assert _adoption_fraction_problems(rendered) == []
+
+    # (5) The reported digest equals the independently-recomputed SHA-256 of
+    # the exact blob `git show <revision>:<path>` returns for each product
+    # -- never taken from `fetch_readiness_record`'s own computation, which
+    # would prove nothing (the same code path cannot certify itself).
+    for spec in gate.PRODUCT_SPECS.values():
+        evaluation = next(e for e in result.evaluations if e.product == spec.product)
+        assert evaluation.revision is not None
+        assert evaluation.artefact_digest is not None
+        clone = Path(os.environ[spec.clone_env_var])
+        blob = _git_output_bytes(
+            clone,
+            ["show", f"{evaluation.revision}:{gate.READINESS_RECORD_PATH}"],
+        )
+        independently_computed_digest = hashlib.sha256(blob).hexdigest()
+        assert evaluation.artefact_digest == independently_computed_digest, (
+            f"{spec.product}: EvaluationResult.artefact_digest "
+            f"{evaluation.artefact_digest!r} does not match the SHA-256 "
+            f"{independently_computed_digest!r} of the blob `git show` "
+            "itself returns for the same revision and path"
+        )
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
