@@ -89,6 +89,12 @@ CANDIDATE_KEY = b"starter-release-workflow-key"
 CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
 OUTSIDE_KEY = b"an-attacker-controlled-key"
 OUTSIDE_FP = "sha256:" + hashlib.sha256(OUTSIDE_KEY).hexdigest()
+#: The host incarnation key `_call` signs with — its trust-root fingerprint
+#: below is DERIVED from these same bytes, never hand-written, so the two
+#: values can never again be authored independently, which is exactly what
+#: `AttestationTrustRootV2.__post_init__` refuses.
+HOST_KEY = b"host-attester-incarnation-key"
+HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
 ALGORITHM = "ed25519"
 
 FACILITY = "dotmac-deployment-foundation"
@@ -153,8 +159,8 @@ def _policy() -> AttestationTrustPolicy:
         ),
         (
             _root(
-                "sha256:" + "e" * 64,
-                b"unused-host-key",
+                HOST_FP,
+                HOST_KEY,
                 INSTALLED_OBSERVATION_PURPOSE,
                 "target-local-host",
             ),
@@ -219,11 +225,11 @@ def _call(
         download_url=download_url,
         workdir=workdir,
         expected_host_identity="host:canonical-a",
-        signer=_HmacSigner(b"host-attester-incarnation-key"),
+        signer=_HmacSigner(HOST_KEY),
         issuer="test-issuer",
         key_id="rotatable-label",
         algorithm=ALGORITHM,
-        public_key_fingerprint="sha256:" + "e" * 64,
+        public_key_fingerprint=HOST_FP,
         custody_domain="target-local-host",
         trust_root_version="control-v1",
         observation_id="host-observation",
