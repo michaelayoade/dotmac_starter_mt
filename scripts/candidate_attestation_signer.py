@@ -27,13 +27,23 @@ imported from the package, not a CLI input. It performs no trust-root
 registration: Control owns binding fingerprints, purposes and custody domains
 (module docstring; ADR-0070's 2026-09-07 amendment).
 
-It does not commit its own output to the repository. Precedent
-(``scripts/foundation_candidate.py``) writes ``candidate-receipt.json`` as a
-workflow artifact; a human commits the frozen file under
-``docs/inventories/`` in a follow-up change, the same shape every existing
+It does not commit its own output to the repository. A human commits the
+signed envelope (and the bound receipt) under ``docs/inventories/`` in a
+follow-up, reviewed change, the same shape every existing
 ``foundation-candidate-<version>.json`` file already went through. This
-script's ``sign`` command follows the identical shape: it writes one JSON
-file and nothing else touches version control.
+script's ``sign`` command writes one file for a workflow-local path that
+becomes a build artifact; nothing here touches version control.
+
+## Writing the envelope: a thin adapter, not a second writer
+
+This script does not canonicalize or atomically write the envelope itself.
+``dotmac_deployment_foundation.attestation_store.write_attestation_record``
+does — the package's own writer for ``TrustedHostAttestation.v2`` records,
+which reuses ``lease.write_store_record_once``'s atomic-once mechanism rather
+than a second, independently hand-rolled ``json.dumps(..., sort_keys=True)``.
+`trusted_host_source.py` stays I/O-free by its own stated design; the writer
+therefore lives in a sibling module, not there. This script's only remaining
+job after signing is to hand the package the finished envelope.
 
 ## Custody
 
@@ -68,6 +78,7 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
     load_pem_private_key,
 )
+from dotmac_deployment_foundation.attestation_store import write_attestation_record
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.trusted_host_source import (
     ATTESTATION_SCHEMA,
@@ -77,27 +88,6 @@ from dotmac_deployment_foundation.trusted_host_source import (
 )
 
 CANDIDATE_ARTIFACT_SCHEMA = "CandidateArtifact.v1"
-
-#: The envelope field order this module writes JSON in, matching
-#: `AttestationEnvelopeV2.from_mapping`'s exact expected member set — kept as
-#: an explicit tuple so a reader sees the whole wire shape in one place rather
-#: than reconstructing it from dataclass introspection.
-_ENVELOPE_FIELDS = (
-    "schema",
-    "purpose",
-    "issuer",
-    "key_id",
-    "algorithm",
-    "public_key_fingerprint",
-    "custody_domain",
-    "trust_root_version",
-    "issued_at",
-    "expires_at",
-    "audience",
-    "observation_id",
-    "subject",
-    "signature",
-)
 
 
 def _canonical_instant(value: datetime) -> str:
@@ -197,10 +187,6 @@ def sign_candidate_attestation(
     return dataclasses.replace(unsigned, signature=signature)
 
 
-def envelope_to_mapping(envelope: AttestationEnvelopeV2) -> dict[str, Any]:
-    return {name: getattr(envelope, name) for name in _ENVELOPE_FIELDS}
-
-
 def cmd_sign(args: argparse.Namespace) -> int:
     receipt = load_candidate_artifact_receipt(Path(args.receipt))
     key_bytes = Path(args.private_key_file).read_bytes()
@@ -224,8 +210,10 @@ def cmd_sign(args: argparse.Namespace) -> int:
         issued_at=issued_at,
         expires_at=expires_at,
     )
-    mapping = envelope_to_mapping(envelope)
-    Path(args.out).write_text(json.dumps(mapping, indent=2, sort_keys=True) + "\n")
+    # The package owns this document's wire form and its atomic-once write —
+    # see `attestation_store.py`. This script is a thin adapter over it: it
+    # signs, and hands the package the exact envelope to publish.
+    write_attestation_record(Path(args.out), envelope)
     print(
         f"signed {envelope.purpose} for {receipt['facility']} "
         f"{receipt['version']} (fingerprint {envelope.public_key_fingerprint})"

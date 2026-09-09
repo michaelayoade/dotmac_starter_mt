@@ -677,24 +677,27 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: one; the pairing to watch for is a THIRD call encoding either document,
 #: which is what would signal a hand-rolled second writer for the same rows.
 #:
-#: `candidate_attestation_signer.py: 1` — checked against the same question
-#: this baseline exists to ask: does the package already own a writer for this
-#: document? `trusted_host_source.py` (`TrustedHostAttestation.v2`) does zero
-#: I/O by declared design — its own module docstring: "These types freeze the
-#: successor contract; they hold no private key, discover no file, and do no
-#: I/O" — and `grep -n "def write_\|def record_\|def store_"` over that module
-#: returns nothing. There is no package-owned writer to call. `lease.
-#: write_store_record_once` is a HOST-side atomic exactly-once primitive for
-#: `HostLease`/`HostLeaseRelease.v1` records the package uses to hold and
-#: release compute it created; a signed candidate attestation is neither —
-#: it names bytes already built elsewhere and is destined to become a
-#: human-committed repository record, exactly the shape
-#: `foundation_candidate.py: 1` (this same list) already established for
-#: `CandidateArtifact.v1` and is not itself routed through any package writer
-#: either. This entry follows that precedent rather than inventing a new one.
+#: `candidate_attestation_signer.py` is deliberately ABSENT, not recorded at 1.
+#: It signs a `TrustedHostAttestation.v2` envelope and previously wrote it with
+#: its own `json.dumps(..., sort_keys=True)` call — the exact shape this
+#: baseline exists to ask about. `trusted_host_source.py` does zero I/O by
+#: declared design (its own docstring: "these types ... hold no private key,
+#: discover no file, and do no I/O"), so the write could not go THERE. It also
+#: is not the same document `lease.write_store_record_once` already writes
+#: (`HostLease`/`HostLeaseRelease.v1` — a host-side compute-lifecycle record,
+#: not a signed-artifact attestation), so calling that function AS-IS would
+#: have been reuse of a mechanism wearing the wrong document's name. The
+#: correct owner is a NEW package module,
+#: `dotmac_deployment_foundation.attestation_store` (`write_attestation_record`
+#: / `attestation_envelope_document`), which reuses
+#: `lease.write_store_record_once`'s atomic-once mechanism internally rather
+#: than re-implementing it, and gives `TrustedHostAttestation.v2` its own
+#: declared writer. The script now calls it and carries no canonicalizing
+#: `json.dumps` of its own —
+#: `test_cmd_sign_writes_through_the_package_owned_writer_not_its_own_json_dumps`
+#: in `test_candidate_attestation_signer.py` asserts the AST contains none.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
-    "candidate_attestation_signer.py": 1,
     "candidate_source_binding.py": 4,
     "collect_github_release_artifact.py": 1,
     "collect_private_registry_files.py": 1,

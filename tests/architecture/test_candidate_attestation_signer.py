@@ -52,6 +52,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from dotmac_deployment_foundation.attestation_store import (
+    attestation_envelope_document,
+    write_attestation_record,
+)
 from dotmac_deployment_foundation.digest import Digest
 from dotmac_deployment_foundation.errors import PreconditionFailed
 from dotmac_deployment_foundation.trusted_host_source import (
@@ -268,18 +272,58 @@ def test_verify_attestation_pair_accepts_the_signed_candidate_envelope() -> None
     )
 
 
-def test_the_signed_envelope_round_trips_through_from_mapping() -> None:
+def test_the_signed_envelope_round_trips_through_the_package_writer() -> None:
     receipt = _receipt()
     now = datetime.now(UTC)
     candidate_key = Ed25519PrivateKey.generate()
     envelope = _sign_candidate(receipt, candidate_key, now=now)
-    mapping = SIGNER.envelope_to_mapping(envelope)
-    # Round-trips through JSON exactly as the workflow writes and a later
-    # consumer would parse it back.
+    mapping = attestation_envelope_document(envelope)
+    # Round-trips through JSON exactly as the package writer publishes it and
+    # a later consumer would parse it back.
     reparsed = AttestationEnvelopeV2.from_mapping(json.loads(json.dumps(mapping)))
     assert reparsed.signature == envelope.signature
     assert reparsed.subject_mapping() == envelope.subject_mapping()
     assert reparsed.purpose == "dotmac.foundation.candidate-artifact.v2"
+
+
+def test_cmd_sign_writes_through_the_package_owned_writer_not_its_own_json_dumps(
+    tmp_path: Path,
+) -> None:
+    """The thin-adapter proof: the script's own source contains no
+    ``json.dumps(..., sort_keys=True)`` call, and ``sign`` publishes bytes
+    ``attestation_store.write_attestation_record`` actually produced."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    own_canonicalizing_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "attr", None) or getattr(node.func, "id", None))
+        == "dumps"
+        and any(kw.arg == "sort_keys" for kw in node.keywords)
+    ]
+    assert not own_canonicalizing_calls, (
+        "candidate_attestation_signer.py hand-rolls its own canonicalizing "
+        "json.dumps(..., sort_keys=True) call — it must publish through "
+        "attestation_store.write_attestation_record instead, the package's "
+        "own writer for this document type"
+    )
+
+    receipt = _receipt()
+    now = datetime.now(UTC)
+    candidate_key = Ed25519PrivateKey.generate()
+    envelope = _sign_candidate(receipt, candidate_key, now=now)
+    out = tmp_path / "candidate-attestation.json"
+
+    written = write_attestation_record(out, envelope)
+    assert written == out
+    on_disk = json.loads(out.read_text(encoding="utf-8"))
+    assert on_disk == attestation_envelope_document(envelope)
+
+    # The package writer's own exactly-once guarantee: a second publish to
+    # the SAME path is refused rather than silently overwritten.
+    with pytest.raises(FileExistsError):
+        write_attestation_record(out, envelope)
 
 
 # ── required negative control: mutate one subject field, verifier refuses ──
