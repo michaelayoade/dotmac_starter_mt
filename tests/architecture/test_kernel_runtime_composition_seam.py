@@ -461,6 +461,13 @@ def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
         "PASS real assembly, strict: composing app.assembly's real feature "
         "manifests under a strict binding requested no import of "
         "dotmac_kernel.db",
+        # Isolates a genuine resolve_database_runtime()/seed defect (this
+        # marker missing, with a "CATEGORY 1" assertion instead) from a
+        # fixture-only problem specific to the lifespan's asyncio.to_thread
+        # dispatch (this marker present, but the marker below missing) — see
+        # main_real_assembly_strict()'s own comment for the full reasoning.
+        "PASS real assembly, strict, direct seed call: "
+        "seed_platform_defaults() called directly",
         "PASS real assembly, strict, through seeding: the settings "
         "feature's startup seed wrote into the PRODUCT runtime, and "
         "dotmac_kernel.db was never requested through the whole lifespan",

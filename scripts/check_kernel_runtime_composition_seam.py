@@ -716,10 +716,90 @@ def main_real_assembly_strict() -> None:
         "dotmac_kernel.db"
     )
 
+    # ── DIAGNOSTIC ISOLATION, before the lifespan-driven check below ────────
+    #
+    # If the lifespan-driven check finds no seeded row, that is ONE symptom
+    # with (at least) three different causes, only one of which is a seam
+    # defect: (1) seed_platform_defaults() genuinely does not resolve the
+    # bound runtime; (2) it resolves and writes, but the write is not
+    # visible to the later read (a fixture/pooling problem); (3) it
+    # resolves, writes, and something rolls it back. These checks isolate
+    # (1) from (2)/(3) BEFORE the lifespan is ever entered, by calling the
+    # exact same production code directly, synchronously, on THIS thread —
+    # bypassing `_run_enabled_seeds`' `asyncio.to_thread` dispatch and its
+    # own exception-swallowing (`except Exception: logger.warning(...)`,
+    # which would otherwise turn a real defect into silence).
+    from dotmac_kernel.session_runtime import resolve_database_runtime
+    from dotmac_kernel.settings_admin import all_specs
+
+    from app.features.settings.seed import seed_platform_defaults
+
+    # (a) the spec registry itself — a seed hook with nothing registered to
+    # seed would also write no row, with NO runtime-binding defect at all.
+    registered = all_specs()
+    assert registered, (
+        "the setting-spec registry is EMPTY at this point -- "
+        "seed_platform_defaults() would have nothing to write regardless of "
+        "which runtime it resolves; this is a spec-registration gap (check "
+        "app/features/settings/__init__.py's `from app.features.settings "
+        "import spec` import), not evidence about resolve_database_runtime()"
+    )
+
+    # (b) resolve_database_runtime(), called directly, right after
+    # create_app sealed the binding — confirms the binding itself is
+    # correct before blaming the seed hook for a binding problem it does
+    # not have.
+    assert resolve_database_runtime() is product_runtime, (
+        "resolve_database_runtime() does not answer the PRODUCT runtime "
+        "immediately after create_app(spec) sealed it -- a defect in the "
+        "binding itself, upstream of seed_platform_defaults() entirely"
+    )
+
+    # (c) THE ISOLATING CALL: seed_platform_defaults() invoked directly,
+    # synchronously, on this thread — the same resolve_database_runtime()
+    # global state (a)/(b) just confirmed, with NO asyncio.to_thread
+    # dispatch and NO exception-swallowing layer between this call and its
+    # result.
+    seed_platform_defaults()
+    with product_runtime.platform_session() as direct_check:
+        direct_seeded = direct_check.scalars(select(DomainSetting)).first()
+    assert direct_seeded is not None, (
+        "CATEGORY 1 -- a genuine defect: seed_platform_defaults() called "
+        "DIRECTLY (same thread, same process, the SAME resolve_database_"
+        "runtime() binding just confirmed above) still wrote nothing. This "
+        "rules out the lifespan's async/threaded dispatch and its "
+        "exception-swallowing as the cause -- the defect is in "
+        "seed_platform_defaults()/resolve_database_runtime() itself, not in "
+        "how the lifespan reaches it."
+    )
+    print(
+        "PASS real assembly, strict, direct seed call: "
+        "seed_platform_defaults() called directly (bypassing the lifespan's "
+        "asyncio.to_thread dispatch) wrote through resolve_database_runtime()"
+    )
+
+    # (d) The lifespan's OWN gate: `if settings.seed_on_startup:` around the
+    # `_run_enabled_seeds` call. If this is False (e.g. an inherited
+    # SEED_ON_STARTUP=false from the environment), the lifespan never calls
+    # the seed hook AT ALL — a distinct, cheaply-ruled-out sub-cause of
+    # "resolved and wrote, but the later read sees nothing" that is neither
+    # a threading/pooling gap nor a rollback.
+    from dotmac_kernel.config import settings as _kernel_settings
+
+    assert _kernel_settings.seed_on_startup, (
+        "settings.seed_on_startup is False in this process, so the "
+        "lifespan's `if settings.seed_on_startup:` gate would skip "
+        "_run_enabled_seeds entirely -- the seed hook is never called "
+        "through the lifespan at all, independent of any runtime-binding "
+        "or threading question"
+    )
+
     with TestClient(app) as client:
         # Entering the lifespan runs _run_enabled_seeds -> the settings
-        # feature's seed_platform_defaults() -- a REAL write, through
-        # resolve_database_runtime(), while dotmac_kernel.db stays unrequested.
+        # feature's seed_platform_defaults() AGAIN (idempotent — see that
+        # function's own docstring) -- a REAL write reached through the
+        # actual asyncio.to_thread dispatch this time, while
+        # dotmac_kernel.db stays unrequested.
         health = client.get("/health")
         assert health.status_code == 200, health.text
 
@@ -730,9 +810,13 @@ def main_real_assembly_strict() -> None:
     with product_runtime.platform_session() as verify_db:
         seeded = verify_db.scalars(select(DomainSetting)).first()
         assert seeded is not None, (
-            "seed_platform_defaults() ran (the lifespan completed) but wrote "
-            "no row into the PRODUCT runtime's own database -- it did not "
-            "actually resolve the bound runtime"
+            "CATEGORY 2 or 3 -- a fixture problem, not a seam defect: the "
+            "direct call above (bypassing the lifespan) already proved "
+            "seed_platform_defaults() resolves the bound runtime and writes "
+            "successfully, so this row's absence after going through the "
+            "REAL lifespan's asyncio.to_thread dispatch points at a "
+            "threading/pooling visibility gap or a rollback specific to "
+            "that dispatch path, not at resolve_database_runtime() itself"
         )
     print(
         "PASS real assembly, strict, through seeding: the settings feature's "
