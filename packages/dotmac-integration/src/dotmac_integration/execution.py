@@ -349,7 +349,7 @@ def enqueue_delivery(
         state="pending",
         next_attempt_at=datetime.now(UTC),
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
     from sqlalchemy.exc import IntegrityError
 
     try:

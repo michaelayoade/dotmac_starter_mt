@@ -471,7 +471,7 @@ def submit_form(
         status="submitted",
         submitted_at=request.submitted_at,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

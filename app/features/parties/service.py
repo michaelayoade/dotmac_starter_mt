@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from uuid import UUID
 
 from dotmac_kernel.crud import CRUDManager
-from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.transactions import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.identity import normalize_email, person_display_name

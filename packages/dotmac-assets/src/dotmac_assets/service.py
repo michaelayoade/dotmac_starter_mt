@@ -269,7 +269,7 @@ def create_asset(db: Session, *, tenant_id: UUID, request: AssetCreate) -> Asset
         created_by_id=request.actor_id,
     )
     # Lazy by design: package discovery must not construct configured engines.
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -421,7 +421,7 @@ def assign_asset(
         notes=_optional_clean(request.notes),
         created_by_id=request.actor_id,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -550,7 +550,7 @@ def transfer_asset(
         notes=_optional_clean(request.notes),
         created_by_id=request.actor_id,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -799,7 +799,7 @@ def request_disposal(
         external_authorization_ref=_optional_clean(request.external_authorization_ref),
         notes=_optional_clean(request.notes),
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

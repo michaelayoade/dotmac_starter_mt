@@ -264,7 +264,7 @@ def start_clock(
         ),
         total_paused_seconds=0,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

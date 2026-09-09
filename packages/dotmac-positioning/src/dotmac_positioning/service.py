@@ -132,7 +132,7 @@ def create_tracked_unit(
     if existing is not None:
         return existing
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     unit = TrackedUnit(
         id=tracked_unit_id,
@@ -208,7 +208,7 @@ def _get_or_create_source_identity(
         source_unit_ref=source_unit_ref,
     )
     if existing is None:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         candidate = SourceIdentity(
             tenant_id=tenant_id,
@@ -321,7 +321,7 @@ def assign_source(
             unassigned_at=unassigned_at,
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -545,7 +545,7 @@ def grant_collection(
         granted_at=granted_at,
         expires_at=expires_at,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -847,7 +847,7 @@ def _record_one(
             detail="source identity was not assigned to the tracked unit",
         )
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     row = PositionObservation(
         tenant_id=tenant_id,
@@ -1210,7 +1210,7 @@ def create_geofence(
         updated_at=created_at,
         **values,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

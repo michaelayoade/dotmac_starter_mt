@@ -122,7 +122,7 @@ def declare_link(db: Session, *, tenant_id: UUID, command: DeclareLink) -> LinkS
     )
     if row.cost < 0:
         raise TopologyError("link cost cannot be negative")
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -166,7 +166,7 @@ def record_observed_link(
         observed_at=command.observed_at,
         created_at=command.observed_at,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

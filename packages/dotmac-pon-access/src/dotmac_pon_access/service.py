@@ -187,7 +187,7 @@ def register_olt(db: Session, *, tenant_id: UUID, command: RegisterOlt) -> OltSn
         created_at=now,
     )
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             db.add(row)
@@ -234,7 +234,7 @@ def register_pon_port(
         created_at=datetime.now(UTC),
     )
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             db.add(row)
@@ -279,7 +279,7 @@ def admit_ont(db: Session, *, tenant_id: UUID, command: AdmitOnt) -> OntSnapshot
         admitted_at=command.observed_at,
     )
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             db.add(row)
@@ -473,7 +473,7 @@ def record_pon_observation(
         fingerprint=fingerprint,
     )
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             db.add(row)
@@ -571,7 +571,7 @@ def record_backup_evidence(
         source_ref=_clean(command.source_ref, "source reference"),
     )
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             db.add(row)

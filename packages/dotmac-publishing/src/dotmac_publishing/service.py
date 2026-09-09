@@ -421,7 +421,7 @@ def record_delivery_observation(
     check_delivery_transition(attempt.state, desired)
     check_delivery_transition(delivery.state, desired)
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     observation = PublicationObservation(
         tenant_id=tenant_id,

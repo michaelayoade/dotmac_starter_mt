@@ -128,7 +128,7 @@ def record_observation(
             fingerprint=fingerprint,
             attributes=[list(pair) for pair in command.attributes],
         )
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         try:
             with conflict_savepoint(db):
@@ -181,7 +181,7 @@ def record_measurement(
             fingerprint=fingerprint,
             dimensions=[list(pair) for pair in command.dimensions],
         )
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         try:
             with conflict_savepoint(db):
@@ -229,7 +229,7 @@ def record_availability(
         if command.reason_code
         else None,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -331,7 +331,7 @@ def open_alert_evidence(
             latest_evidence_ref=evidence_ref,
         )
         try:
-            from dotmac_kernel.db import conflict_savepoint
+            from dotmac_kernel.transactions import conflict_savepoint
 
             with conflict_savepoint(db):
                 db.add(row)
@@ -361,7 +361,7 @@ def open_alert_evidence(
         if duplicate is not None:
             return _alert_snapshot(row)
         try:
-            from dotmac_kernel.db import conflict_savepoint
+            from dotmac_kernel.transactions import conflict_savepoint
 
             with conflict_savepoint(db):
                 row.latest_evidence_ref = evidence_ref
@@ -399,7 +399,7 @@ def resolve_alert_evidence(
     if current is not command.expected or current is not AlertState.OPEN:
         raise NetworkObservationConflict("alert state changed")
     try:
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         with conflict_savepoint(db):
             row.state = AlertState.RESOLVED.value

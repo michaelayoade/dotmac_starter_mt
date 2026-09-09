@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.transactions import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, ForbiddenError, UnauthorizedError
 from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (

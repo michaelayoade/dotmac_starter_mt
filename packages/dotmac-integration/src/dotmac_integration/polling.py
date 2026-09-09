@@ -288,7 +288,7 @@ def ensure_polling_checkpoint(
     an explicit cursor is refused and an omitted one retrieves current state.
     """
 
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
     from sqlalchemy import select
     from sqlalchemy.exc import IntegrityError
 

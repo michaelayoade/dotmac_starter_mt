@@ -74,7 +74,7 @@ def get_account(
 def create_account(
     db: Session, *, scope: TenantScope, command: CreateCustomerAccount
 ) -> CustomerAccount:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     tenant_id = _tenant(scope)
     number = _required(command.account_number, "account number").upper()
@@ -123,7 +123,7 @@ def set_profile(
 def link_party_reference(
     db: Session, *, scope: TenantScope, command: LinkPartyReference
 ) -> CustomerPartyReference:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     tenant_id = _tenant(scope)
     get_account(db, scope=scope, account_id=command.account_id)

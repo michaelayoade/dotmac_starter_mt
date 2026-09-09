@@ -98,7 +98,7 @@ def _specification(db: Session, tenant_id: UUID, row_id: UUID) -> ServiceSpecifi
 
 
 def _flush_new(db: Session, row: _Model, detail: str) -> _Model:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -294,7 +294,7 @@ def publish_plan_family_version(
         command_id=command.command_id,
         content_digest=digest,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -474,7 +474,7 @@ def publish_service_specification_version(
         command_id=command.command_id,
         content_digest=digest,
     )
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

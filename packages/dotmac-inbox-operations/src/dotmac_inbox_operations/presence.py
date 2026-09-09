@@ -146,7 +146,7 @@ def set_agent_presence(
             assignment_capacity=command.assignment_capacity,
             observed_at=observed_at,
         )
-        from dotmac_kernel.db import conflict_savepoint
+        from dotmac_kernel.transactions import conflict_savepoint
 
         try:
             with conflict_savepoint(db):

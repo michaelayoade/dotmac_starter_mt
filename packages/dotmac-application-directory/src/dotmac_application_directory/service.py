@@ -259,7 +259,7 @@ def attach_application(
     # the wheel into a clean venv and imports it with no database configured.
     # The kernel's own `external_identity` module carries the same comment for
     # the same reason.
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
