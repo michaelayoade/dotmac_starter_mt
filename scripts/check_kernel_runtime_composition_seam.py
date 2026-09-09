@@ -77,17 +77,35 @@ import sys
 
 # THE FIRST THING THIS PROCESS DOES, before any `dotmac_kernel` import: make
 # `dotmac_kernel.db` unimportable -- UNLESS this run needs it GENUINELY
-# reachable to prove something about reaching it: the fallback sensitivity
-# control (`argv[1] == "fallback"`, proving the authenticated-request stage
-# fails without a bound runtime) and the paired plant proving a reference
-# IMPORT arriving AFTER a strict bind refuses
-# (`argv[1] == "after-strict-bind"` — it needs to actually ATTEMPT the
-# import to prove the refusal, not have it pre-empted by this block).
+# reachable to prove something about reaching it:
+#
+# * the fallback sensitivity control (`argv[1] == "fallback"`), proving the
+#   authenticated-request stage fails without a bound runtime;
+# * the paired plant proving a reference IMPORT arriving AFTER a strict bind
+#   refuses (`argv[1] == "after-strict-bind"`) — it needs to actually ATTEMPT
+#   the import to prove the refusal, not have it pre-empted by this block;
+# * real-assembly composition (`argv[1] == "real-assembly"`). This one is
+#   easy to get backwards, and an earlier version of this probe did: with
+#   the block ACTIVE, `sys.modules["dotmac_kernel.db"]` already contains the
+#   key (mapped to `None`) before `import app.assembly` ever runs, so a
+#   check written as `"dotmac_kernel.db" not in sys.modules` is FALSE
+#   immediately — not because anything imported it, but because the block's
+#   OWN sentinel put the key there. Worse, in the PLANTED (eager-import)
+#   case it meant the planted import crashed via `ModuleNotFoundError`
+#   *inside* `import app.assembly` — never reaching
+#   `bind_database_runtime`'s own atomic-claim refusal at all, so the plant
+#   "passed" by hitting the wrong mechanism entirely. Leaving
+#   `dotmac_kernel.db` genuinely reachable here is what lets the CLEAN case
+#   prove "nothing tried" (checked via `sys.modules.get(...) is None`, which
+#   reads true precisely because nothing tried) and the PLANTED case prove
+#   the REAL refusal — the eager import genuinely claims the reference slot,
+#   and `bind_database_runtime` then genuinely refuses against that claim.
+#
 # `sys.modules[name] = None` is Python's own mechanism for the block (import
 # machinery raises `ImportError: import of {name} halted; None in
 # sys.modules` for any later `import dotmac_kernel.db` or
 # `from dotmac_kernel.db import ...`, anywhere in the process).
-_NEEDS_REFERENCE_REACHABLE = {"fallback", "after-strict-bind"}
+_NEEDS_REFERENCE_REACHABLE = {"fallback", "after-strict-bind", "real-assembly"}
 if not (len(sys.argv) > 1 and sys.argv[1] in _NEEDS_REFERENCE_REACHABLE):
     sys.modules["dotmac_kernel.db"] = None  # type: ignore[assignment]
 
@@ -559,27 +577,22 @@ def main_real_assembly_strict() -> None:
     real `app.assembly` composes `FEATURE_MODULES` via `load_manifests` at
     IMPORT TIME (`app/assembly.py`'s module-level `ProductAssemblySpec(...)`
     call), well before `create_app` ever runs, and several feature services
-    import `dotmac_kernel.db` at module scope to reach `conflict_savepoint`.
+    used to import `dotmac_kernel.db` at module scope to reach
+    `conflict_savepoint` (fixed on `main` by the
+    `refactor/conflict-savepoint-engine-free-owner` predecessor, which moved
+    those onto the already-public, engine-free
+    `dotmac_kernel.transactions.conflict_savepoint`).
 
-    THIS TEST DEPENDS ON THAT EAGER IMPORT BEING FIXED ELSEWHERE (the
-    `refactor/conflict-savepoint-engine-free-owner` predecessor, which moves
-    those imports onto the already-public, engine-free
-    `dotmac_kernel.transactions.conflict_savepoint`). Until this branch is
-    rebased onto that fix, importing `app.assembly` imports `dotmac_kernel.db`
-    unconditionally and this test FAILS — correctly: it is testing the
-    post-migration world, not working around the pre-migration one.
-
-    Not just import-time silence: entering the ASGI lifespan
-    (`with TestClient(app) as client`) drives the REAL boot sequence,
-    including `_run_enabled_seeds` -> `seed_platform_defaults` (the
-    `settings` feature's seed hook, which now resolves
-    `resolve_database_runtime()` rather than a deferred
-    `dotmac_kernel.db.platform_session` import — see `app/features/settings
-    /seed.py`). This proves strict composition resolves through the bound
-    runtime along MORE than one path: composing the manifests (no import),
-    AND running the startup seed against the product engine — verified by
-    querying `product_runtime`'s own database directly afterwards for the
-    rows the seed should have written there, not the reference assembly's.
+    MEASURED, not asserted from a cause: this runs in its OWN fresh
+    interpreter (the isolated-subprocess harness), so `sys.modules` cannot
+    carry an entry left behind by some unrelated earlier import the way it
+    could inside a shared pytest process — but a bare `"dotmac_kernel.db" in
+    sys.modules` check still only answers "is it present", never "who put it
+    there". `sys.addaudithook`'s `"import"` event is the instrument that
+    answers the second question: it fires for every import ATTEMPT, with the
+    importing frame's stack captured at the moment of the attempt, so a
+    failure here reports the OBSERVED CHAIN — not a hypothesis about which
+    branch or PR is or is not present.
     """
     import os
 
@@ -589,6 +602,7 @@ def main_real_assembly_strict() -> None:
     )
 
     import dataclasses
+    import traceback
 
     from dotmac_kernel import create_app
     from dotmac_kernel.models import Base
@@ -598,11 +612,51 @@ def main_real_assembly_strict() -> None:
     from sqlalchemy import create_engine, select
     from sqlalchemy.pool import StaticPool
 
+    # Assert ABSENCE before the import under test — this is the baseline the
+    # audit hook's later findings are compared against, and it is itself
+    # meaningful in a fresh interpreter: nothing has requested
+    # dotmac_kernel.db yet.
+    assert "dotmac_kernel.db" not in sys.modules, (
+        "dotmac_kernel.db was already present before this probe imported "
+        "anything of its own — a fresh-interpreter precondition failure, "
+        "not a claim about app.assembly"
+    )
+
+    # The instrument: records the first `import dotmac_kernel.db` REQUEST
+    # (not merely its eventual presence in sys.modules) and the stack at the
+    # moment it happened. Audit hooks cannot be removed once added, which is
+    # fine here — this process exists for exactly one measurement.
+    _reached: list[str] = []
+
+    def _record_dotmac_kernel_db_import(event: str, args: object) -> None:
+        if event != "import":
+            return
+        module_name = args[0] if isinstance(args, tuple) and args else None
+        if module_name == "dotmac_kernel.db":
+            _reached.append("".join(traceback.format_stack()))
+
+    sys.addaudithook(_record_dotmac_kernel_db_import)
+
+    def _report_if_reached(phase: str) -> None:
+        if not _reached:
+            return
+        raise AssertionError(
+            f"dotmac_kernel.db was requested during {phase} — OBSERVED "
+            f"import chain (first request's stack):\n{_reached[0]}"
+        )
+
     import app.assembly
 
+    _report_if_reached("`import app.assembly`")
     assert "dotmac_kernel.db" not in sys.modules, (
-        "importing app.assembly ALONE already reached dotmac_kernel.db — "
-        "the eager-import predecessor has not landed on this branch"
+        "dotmac_kernel.db is present in sys.modules after `import "
+        "app.assembly`, but the audit hook recorded no import event for "
+        "it — report this discrepancy rather than guessing at it"
+    )
+    print(
+        "PASS real assembly: import app.assembly requested no import of "
+        "dotmac_kernel.db (measured via sys.addaudithook, not inferred "
+        "from sys.modules membership alone)"
     )
 
     # StaticPool (like main()'s own engine): the ASGI lifespan's seed hook
@@ -624,27 +678,25 @@ def main_real_assembly_strict() -> None:
     )
     app = create_app(spec)
 
-    assert "dotmac_kernel.db" not in sys.modules, (
-        "create_app(spec) on the REAL assembly, under a strict binding, "
-        "still imported dotmac_kernel.db"
-    )
+    _report_if_reached("create_app(spec) under a strict binding")
+    assert "dotmac_kernel.db" not in sys.modules
     print(
         "PASS real assembly, strict: composing app.assembly's real feature "
-        "manifests under a strict binding left dotmac_kernel.db unloaded"
+        "manifests under a strict binding requested no import of "
+        "dotmac_kernel.db"
     )
 
     with TestClient(app) as client:
         # Entering the lifespan runs _run_enabled_seeds -> the settings
         # feature's seed_platform_defaults() -- a REAL write, through
-        # resolve_database_runtime(), while dotmac_kernel.db stays unloaded.
+        # resolve_database_runtime(), while dotmac_kernel.db stays unrequested.
         health = client.get("/health")
         assert health.status_code == 200, health.text
 
-    assert "dotmac_kernel.db" not in sys.modules, (
-        "running the real assembly's lifespan (including the settings "
-        "feature's seed hook) under a strict binding still imported "
-        "dotmac_kernel.db"
+    _report_if_reached(
+        "the real assembly's lifespan (including the settings feature's seed hook)"
     )
+    assert "dotmac_kernel.db" not in sys.modules
     with product_runtime.platform_session() as verify_db:
         seeded = verify_db.scalars(select(DomainSetting)).first()
         assert seeded is not None, (
@@ -655,7 +707,7 @@ def main_real_assembly_strict() -> None:
     print(
         "PASS real assembly, strict, through seeding: the settings feature's "
         "startup seed wrote into the PRODUCT runtime, and dotmac_kernel.db "
-        "stayed unloaded through the whole lifespan"
+        "was never requested through the whole lifespan"
     )
 
 
