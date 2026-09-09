@@ -35,6 +35,14 @@ directly instead is the one mistake this module cannot catch for you: RLS fails
 the caller cannot tell an empty tenant from an invisible one. A
 `dotmac_academy_app` audit command did exactly this and reported a clean estate
 against a database holding 333 banks.
+
+`readonly_session`/`serializable_session` are the same non-request shape as
+`tenant_session`/`platform_session`, but each runs its one transaction under a
+typed PostgreSQL isolation mode instead of the pool's default — see
+`dotmac_kernel.session_runtime.DatabaseRuntime._isolated_session` for the
+ordering guarantee (execution options land before the transaction's BEGIN and
+before any `after_begin` GUC hook) and for how to compose either with
+`tenant_scope` when the caller also needs tenant context.
 """
 
 from __future__ import annotations
@@ -58,8 +66,10 @@ __all__ = [
     "get_platform_db",
     "platform_engine",
     "platform_session",
+    "readonly_session",
     "resolver_session",
     "runtime",
+    "serializable_session",
     "set_tenant",
     "tenant_scope",
     "tenant_session",
@@ -106,6 +116,8 @@ platform_session = runtime.platform_session
 tenant_session = runtime.tenant_session
 tenant_session_by_slug = runtime.tenant_session_by_slug
 resolver_session = runtime.resolver_session
+readonly_session = runtime.readonly_session
+serializable_session = runtime.serializable_session
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
