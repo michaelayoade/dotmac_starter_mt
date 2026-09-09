@@ -659,16 +659,46 @@ def main_real_assembly_strict() -> None:
         "from sys.modules membership alone)"
     )
 
-    # StaticPool (like main()'s own engine): the ASGI lifespan's seed hook
-    # runs off the event loop via asyncio.to_thread, a different thread than
-    # this one, and an unshared `:memory:` connection per thread would
-    # silently see an empty database.
+    # NARROWED, not the full composed schema (option 2 of the three the
+    # fixture failure named, in preference order — see below for why option
+    # 1, this repo's own `dotmac_kernel.testing.create_test_engine`, does
+    # not fit this specific caller).
+    #
+    # The real assembly composes `dotmac_ticketing`/`dotmac_template_studio`,
+    # whose tables are declared in module schemas (`mod_tkt`/`mod_tstudio`)
+    # that plain SQLite has no concept of; a bare `Base.metadata.create_all`
+    # against every table registered on the shared `Base.metadata` (which
+    # `import app.assembly` populates in full) fails with `unknown database
+    # mod_tkt` before this function's own assertions ever run — a FIXTURE
+    # defect, not a finding about the seam. The property under test is
+    # about IMPORTS AND BINDING, and the only runtime consumer this function
+    # actually drives is the settings feature's seed hook, which touches
+    # exactly one table (`domain_settings`) — so the fix is to create only
+    # that table, which also means no module schema is ever selected and
+    # there is nothing to ATTACH.
+    #
+    # `create_test_engine()` (the repo's existing fixture,
+    # `tests/unit/conftest.py` and `dotmac_kernel.testing.harness` use it
+    # fleet-wide) was tried first and DOES solve the schema problem via its
+    # own `tables=` parameter — but it hardcodes its pool to SQLAlchemy's
+    # default for `sqlite:///:memory:` (`SingletonThreadPool`, confirmed by
+    # inspection: one connection PER THREAD, so each thread sees its own
+    # independent in-memory database) with no override. This function's
+    # seed hook runs off the event loop via `asyncio.to_thread` — genuinely
+    # a different thread than the one that builds `product_engine` and later
+    # verifies the seeded row — so a `SingletonThreadPool` engine would make
+    # the write and the read land on two different, unconnected databases
+    # regardless of the schema fix. `StaticPool` (one shared connection for
+    # the whole engine, used elsewhere in this same probe) is what makes the
+    # write visible across threads; `create_test_engine()` does not expose
+    # that knob, so this narrowed case builds its own engine rather than
+    # reusing a fixture that cannot satisfy both constraints at once.
     product_engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(product_engine)
+    Base.metadata.create_all(product_engine, tables=[DomainSetting.__table__])
     product_runtime = DatabaseRuntime(engine=product_engine)
 
     spec = dataclasses.replace(
