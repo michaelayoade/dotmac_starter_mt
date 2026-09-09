@@ -323,6 +323,49 @@ jobs:
           /tmp/uiartifact/bin/pip install --quiet "jinja2==3.1.6"
           /tmp/uiartifact/bin/python scripts/verify_ui_release_artifact.py
 
+  host-attester-install-artifact:
+    runs-on: ubuntu-latest
+    # `scripts/host_attester_install.py::download_verify_install_and_attest`
+    # names a wheel filename it reads from its download location and never
+    # regenerates — the prior shape reconstructed `{facility}-{version}.whl`,
+    # silently dropping the mandatory python/abi/platform tags, and real pip
+    # refuses that filename outright (`InvalidWheelFilename`) before looking
+    # at a single byte. `tests/unit/test_host_attester_install.py` injects a
+    # FAKE installer, by design (no test in that suite may shell out to pip
+    # or create a venv) — which is exactly the shape that let the original
+    # defect ship undetected: nothing ever asked real pip to parse the name.
+    #
+    # So this job is the second, independent oracle: build the real wheel,
+    # install it into a CLEAN virtualenv (never the repo's own EDITABLE
+    # checkout — `host_source.py` itself refuses to read an artifact digest
+    # from one), and run `scripts/verify_host_attester_install_artifact.py`
+    # from THAT venv's own python. It proves two things real pip must agree
+    # with, not just this repository's own validator: a filename missing the
+    # tags is refused by pip itself, and a genuine `pip install` followed by
+    # a genuine re-read of that SAME interpreter's PEP 610 metadata produces
+    # a signed observation naming the wheel's real sha256 — through a
+    # function with no `metadata`/`installed` parameter for a caller to
+    # substitute an answer.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - name: Build the dotmac-deployment-foundation wheel
+        working-directory: packages/dotmac-deployment-foundation
+        run: poetry build
+      - name: Install the wheel into a clean, non-editable virtualenv
+        run: |
+          python -m venv /tmp/hostattester
+          /tmp/hostattester/bin/pip install --quiet --no-deps \
+            "$(ls packages/dotmac-deployment-foundation/dist/*.whl)"
+      - name: Prove install-and-observe against real pip, from that venv
+        run: |
+          /tmp/hostattester/bin/python \
+            scripts/verify_host_attester_install_artifact.py \
+            "$(ls packages/dotmac-deployment-foundation/dist/*.whl)"
+
   kernel-floors:
     runs-on: ubuntu-latest
     # BOTH interpreters, because the products declare >=3.11 and the kernel now
