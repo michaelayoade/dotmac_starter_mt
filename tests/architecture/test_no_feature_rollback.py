@@ -8,10 +8,14 @@ tenant context, and FORCE ROW LEVEL SECURITY fails closed (see finding F3,
 `docs/superpowers/plans/2026-07-18-phase2b1-sot-composability.md` Task 2,
 and the canaries in `tests/test_conflict_rls_context.py`).
 
-`dotmac_kernel.db.conflict_savepoint` is the one sanctioned pattern for an
-expected conflict (`with conflict_savepoint(db): db.flush()` inside a
+`dotmac_kernel.transactions.conflict_savepoint` is the one sanctioned pattern
+for an expected conflict (`with conflict_savepoint(db): db.flush()` inside a
 `try/except IntegrityError`): it rolls back only a SAVEPOINT, leaving the
-outer transaction + its `SET LOCAL` intact.
+outer transaction + its `SET LOCAL` intact. It is the engine-free public
+owner of the helper — `dotmac_kernel.db` also re-exports the same function,
+but importing it from there drags in that module's eager, import-time engine
+construction, so feature services import from `dotmac_kernel.transactions`
+instead.
 """
 
 from __future__ import annotations
@@ -56,6 +60,7 @@ def test_no_bare_rollback_in_feature_services() -> None:
             line = text.count("\n", 0, match.start()) + 1
             violations.append(f"{rel}:{line} -> bare db.rollback()")
     assert not violations, (
-        "feature services must use dotmac_kernel.db.conflict_savepoint for "
-        "expected conflicts, never a bare db.rollback() (F3):\n" + "\n".join(violations)
+        "feature services must use dotmac_kernel.transactions.conflict_savepoint "
+        "for expected conflicts, never a bare db.rollback() (F3):\n"
+        + "\n".join(violations)
     )

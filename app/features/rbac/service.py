@@ -14,11 +14,11 @@ from typing import NamedTuple
 from uuid import UUID
 
 from dotmac_kernel.audit import AuditEvent
-from dotmac_kernel.transactions import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.models import Party, PartyRoleGrant, Role, Tenant
 from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.settings_resolver import resolve
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session

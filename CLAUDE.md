@@ -421,9 +421,11 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
    configuration, credentials and tenant identity by constructing its own —
    never by growing a third session factory
    (`test_session_authority.py`; ARCHITECTURE.md § "Transaction authority").
-9. Feature services never call `db.rollback()` — use `conflict_savepoint`,
-   mutation INSIDE the `with` block (`test_no_feature_rollback.py`;
-   ARCHITECTURE.md § "Conflict handling" for the full F3 rationale).
+9. Feature services never call `db.rollback()` — use
+   `dotmac_kernel.transactions.conflict_savepoint` (the engine-free public
+   owner, not the eager `dotmac_kernel.db` re-export), mutation INSIDE the
+   `with` block (`test_no_feature_rollback.py`; ARCHITECTURE.md § "Conflict
+   handling" for the full F3 rationale).
 10. Every registered `SettingSpec` has a real reader; the unwired allowlist
     is empty and only shrinks (`test_no_orphan_settings.py`).
 11. Tenant-scoped tables: `tenant_id NOT NULL` + composite uniques + RLS in
