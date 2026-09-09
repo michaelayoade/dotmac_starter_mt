@@ -131,6 +131,9 @@ class _HmacSigner:
     def sign(self, *, algorithm: str, message: bytes) -> str:
         return hmac.new(self._key, message, hashlib.sha256).hexdigest()
 
+    def public_key_material(self) -> bytes:
+        return self._key
+
 
 def _root(fp: str, key: bytes, purpose: str, domain: str) -> AttestationTrustRootV2:
     return AttestationTrustRootV2(
@@ -229,7 +232,6 @@ def _call(
         issuer="test-issuer",
         key_id="rotatable-label",
         algorithm=ALGORITHM,
-        public_key_fingerprint=HOST_FP,
         custody_domain="target-local-host",
         trust_root_version="control-v1",
         observation_id="host-observation",

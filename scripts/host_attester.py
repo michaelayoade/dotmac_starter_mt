@@ -92,6 +92,7 @@ you were never given twice.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from datetime import UTC, datetime
 from typing import Final, Protocol, runtime_checkable
 
@@ -162,9 +163,21 @@ def candidate_subject_from_host_source(
 class HostAttesterSigner(Protocol):
     """The enrolled per-incarnation host key. A pure crypto seam, the producer
     mirror of `trusted_host_source.AttestationVerifier`: this module holds no
-    key material and performs no signing itself."""
+    key material and performs no signing itself.
+
+    `public_key_material` returns the SAME canonical bytes
+    `AttestationTrustRootV2.__post_init__` decodes from `public_key_base64`
+    and hashes to derive `public_key_fingerprint` (`trusted_host_source.py`:
+    `material = base64.b64decode(self.public_key_base64, validate=True)`,
+    then `f"sha256:{hashlib.sha256(material).hexdigest()}"`). This is the
+    ONLY way a fingerprint enters an emitted envelope — `build_installed_
+    attestation` takes no `public_key_fingerprint` parameter of its own, so
+    there is structurally no way for a caller to declare a fingerprint that
+    disagrees with the key `sign()` actually used."""
 
     def sign(self, *, algorithm: str, message: bytes) -> str: ...
+
+    def public_key_material(self) -> bytes: ...
 
 
 def _format_instant(value: datetime, *, where: str) -> str:
@@ -183,7 +196,6 @@ def build_installed_attestation(
     issuer: str,
     key_id: str,
     algorithm: str,
-    public_key_fingerprint: str,
     custody_domain: str,
     trust_root_version: str,
     observation_id: str,
@@ -198,6 +210,12 @@ def build_installed_attestation(
     Control-resolved and supplied by the caller; this module does not resolve
     a Fleet `host_id` or an attester incarnation itself (ADR-0070's amendment,
     2026-09-08: "Foundation must never resolve host identity itself").
+
+    There is deliberately no `public_key_fingerprint` parameter. The
+    fingerprint placed in the emitted envelope is always
+    `sha256:<hex digest of signer.public_key_material()>` — derived from the
+    same signer that produces the signature, never a second value a caller
+    could hand in disagreeing with it (see `HostAttesterSigner`'s docstring).
     """
     if not isinstance(host_source, HostSource):
         raise SpecError(
@@ -209,6 +227,14 @@ def build_installed_attestation(
         raise SpecError(
             "signer must implement HostAttesterSigner", code=OBSERVATION_MALFORMED
         )
+
+    public_key_material = signer.public_key_material()
+    if not isinstance(public_key_material, bytes) or not public_key_material:
+        raise SpecError(
+            "signer.public_key_material() must return non-empty bytes",
+            code=OBSERVATION_MALFORMED,
+        )
+    public_key_fingerprint = f"sha256:{hashlib.sha256(public_key_material).hexdigest()}"
 
     candidate_subject = candidate_subject_from_host_source(host_source)
     installed_subject = InstalledHostAttestationSubjectV2(

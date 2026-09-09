@@ -97,6 +97,9 @@ class _HmacSigner:
     def sign(self, *, algorithm: str, message: bytes) -> str:
         return hmac.new(self._key, message, hashlib.sha256).hexdigest()
 
+    def public_key_material(self) -> bytes:
+        return self._key
+
 
 class _HmacVerifier:
     keys: ClassVar[dict[str, bytes]] = {HOST_FP: HOST_KEY, CANDIDATE_FP: CANDIDATE_KEY}
@@ -195,7 +198,6 @@ def _build(host_source, *, signer=None):
         issuer="test-issuer",
         key_id="rotatable-label",
         algorithm=ALGORITHM,
-        public_key_fingerprint=HOST_FP,
         custody_domain="target-local-host",
         trust_root_version="control-v1",
         observation_id="host-observation",
@@ -287,7 +289,6 @@ def test_non_host_source_refuses_regardless_of_signer_validity() -> None:
             issuer="test-issuer",
             key_id="rotatable-label",
             algorithm=ALGORITHM,
-            public_key_fingerprint=HOST_FP,
             custody_domain="target-local-host",
             trust_root_version="control-v1",
             observation_id="host-observation",
@@ -300,6 +301,53 @@ def test_non_conforming_signer_refuses() -> None:
     host_source = _host_source()
     with pytest.raises(SpecError, match="HostAttesterSigner"):
         _build(host_source, signer=object())
+
+
+# ── the declared fingerprint cannot disagree with the signing key ──────────
+
+
+def test_the_declared_fingerprint_is_derived_from_the_signers_own_material() -> None:
+    """`build_installed_attestation` takes no `public_key_fingerprint`
+    parameter at all — there is no expression that could hand this function
+    a fingerprint disagreeing with the key `signer.sign()` actually used, the
+    same way there is no way to disagree with a value you were never given
+    twice (see the module's `candidate_subject_from_host_source` docstring
+    for the identical shape applied to the candidate subject).
+
+    This proves the property BEHAVIOURALLY rather than merely by absence of
+    a parameter: a signer holding a DIFFERENT key than the fixture default
+    (`HOST_KEY`/`HOST_FP` used everywhere else in this file) still produces
+    an envelope whose `public_key_fingerprint` is the sha256 of THAT
+    signer's own `public_key_material()` — never `HOST_FP`, and never any
+    other caller-supplied string, because there is nowhere for one to enter.
+    A future refactor that reintroduced an independent
+    `public_key_fingerprint` parameter (even one that merely shadowed the
+    derived value with an unused default) would break this assertion the
+    moment the two keys diverge, which is exactly what this test arranges."""
+    host_source = _host_source()
+    other_key = b"a-completely-different-incarnation-key-yzyz"
+    other_fp = "sha256:" + hashlib.sha256(other_key).hexdigest()
+
+    installed = _build(host_source, signer=_HmacSigner(other_key))
+
+    assert installed.public_key_fingerprint == other_fp
+    assert installed.public_key_fingerprint != HOST_FP
+
+
+def test_a_signer_returning_non_bytes_material_is_refused() -> None:
+    """PLANT: a signer whose `public_key_material()` cannot be hashed at
+    all — proves the derivation is actually exercised, not skipped."""
+
+    class _BrokenMaterialSigner:
+        def sign(self, *, algorithm: str, message: bytes) -> str:
+            return hmac.new(HOST_KEY, message, hashlib.sha256).hexdigest()
+
+        def public_key_material(self) -> bytes:
+            return "not-bytes"  # type: ignore[return-value]
+
+    host_source = _host_source()
+    with pytest.raises(SpecError, match="public_key_material"):
+        _build(host_source, signer=_BrokenMaterialSigner())
 
 
 # ── sensitivity proof: no parameter can carry an installed digest ──────────

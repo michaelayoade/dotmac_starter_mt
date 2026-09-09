@@ -177,6 +177,9 @@ def assert_install_and_observe_round_trips_through_real_pip(
         def sign(self, *, algorithm: str, message: bytes) -> str:
             return hmac.new(key, message, hashlib.sha256).hexdigest()
 
+        def public_key_material(self) -> bytes:
+            return key
+
     def _root(
         purpose: str, domain: str, root_fp: str, root_key: bytes
     ) -> AttestationTrustRootV2:
@@ -266,7 +269,6 @@ def assert_install_and_observe_round_trips_through_real_pip(
         issuer="artifact-rehearsal",
         key_id="rehearsal-key",
         algorithm=algorithm,
-        public_key_fingerprint=unused_host_fp,
         custody_domain="target-local-host",
         trust_root_version="rehearsal-v1",
         observation_id="artifact-rehearsal-installed",
