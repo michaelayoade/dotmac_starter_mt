@@ -43,9 +43,9 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
     pass — the empty-set refusal must not become a refusal of everything."""
     satisfied = gate.GateResult(
         evaluations=(
-            gate.EvaluationResult("academy", "a" * 40, True, ()),
-            gate.EvaluationResult("erp", "b" * 40, True, ()),
-            gate.EvaluationResult("sub", "c" * 40, True, ()),
+            gate.EvaluationResult("academy", "a" * 40, "satisfied", ()),
+            gate.EvaluationResult("erp", "b" * 40, "satisfied", ()),
+            gate.EvaluationResult("sub", "c" * 40, "satisfied", ()),
         )
     )
     assert satisfied.satisfied is True
@@ -61,6 +61,12 @@ def test_the_gate_refuses_today_with_the_default_bindings() -> None:
     assert len(result.refusing) == 3
     refusing_products = {evaluation.product for evaluation in result.refusing}
     assert refusing_products == set(gate.PRODUCTS)
+    # Structured, not just prose: every refusal today is UNBOUND, not a
+    # product that produced evidence and was found lacking — the exact
+    # ABSENT-versus-REGISTRY_DISAGREEMENT distinction a reader must be able
+    # to make from `status` alone, never by parsing `findings`.
+    for evaluation in result.refusing:
+        assert evaluation.status == "unbound"
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
@@ -73,6 +79,7 @@ def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
     assert tuple(e.product for e in result.evaluations) == gate.PRODUCTS
     for evaluation in result.evaluations:
         assert evaluation.satisfied is False
+        assert evaluation.status == "unbound"
         assert evaluation.revision is None
 
 
@@ -82,17 +89,67 @@ def test_each_refusal_names_the_product_and_the_observed_reason() -> None:
         joined = " ".join(evaluation.findings)
         assert "no revision is bound for" in joined
         assert evaluation.product in joined
+        assert evaluation.status == "unbound"
+
+
+# ── Structured status: unbound is distinct from refused-after-evaluation ───
+
+
+def test_satisfied_is_derived_from_status_not_stored() -> None:
+    """`satisfied` cannot be constructed to disagree with `status` — there is
+    no `satisfied=` keyword any more, only `status=`, so a caller cannot
+    accidentally build a "satisfied" result carrying a refusal status."""
+    unbound = gate.EvaluationResult("academy", None, "unbound", ())
+    assert unbound.satisfied is False
+    satisfied = gate.EvaluationResult("academy", "a" * 40, "satisfied", ())
+    assert satisfied.satisfied is True
+
+
+def test_an_unknown_status_is_refused_at_construction() -> None:
+    with pytest.raises(ValueError, match="unknown EvaluationResult.status"):
+        gate.EvaluationResult("academy", None, "incompatible", ())
+
+
+def test_unbound_and_evaluation_refused_are_distinct_statuses_for_academy() -> None:
+    """The exact distinction this section exists for: a product with no
+    revision at all (`unbound`) must never carry the same status as a
+    product that DID produce complete, well-formed evidence and whose
+    captured facts simply failed the check (`evaluation_refused`)."""
+    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
+    assert unbound.status == "unbound"
+
+    revision = "5" * 40
+    evaluated_and_refused = gate.evaluate_academy(
+        gate.ProductBinding(
+            product="academy",
+            revision=revision,
+            evidence={
+                "protected_main_row": _protected_main_row(
+                    "dotmac_academy_app", revision
+                ),
+                "unpublished_session_local_usage_sites": (),
+                "strict_bind_without_reference_import": False,
+            },
+        )
+    )
+    assert evaluated_and_refused.status == "evaluation_refused"
+    assert unbound.status != evaluated_and_refused.status
 
 
 # ── All-of semantics: two satisfied, one refusing must still refuse ────────
 
 
-def _protected_main_row(repository: str, commit: str) -> dict[str, str]:
+def _protected_main_row(
+    repository: str,
+    commit: str,
+    artefact: str = "docs/<readiness-artefact>.md (test fixture placeholder)",
+) -> dict[str, str]:
     return {
         "kind": "pinned_at",
         "repository": repository,
         "commit": commit,
         "expected": f"git merge-base --is-ancestor {commit} origin/main succeeded",
+        "artefact": artefact,
     }
 
 
@@ -162,6 +219,7 @@ def test_two_satisfied_and_one_refusing_still_refuses_and_names_it() -> None:
     assert result.satisfied is False
     assert len(result.refusing) == 1
     assert result.refusing[0].product == "sub"
+    assert result.refusing[0].status == "unbound"
     assert "no revision is bound for 'sub'" in " ".join(result.refusing[0].findings)
     explanation = result.explain()
     assert "sub" in explanation
@@ -333,10 +391,80 @@ def test_protected_main_row_missing_expected_is_refused() -> None:
     )
     result = gate.evaluate_academy(binding)
     assert result.satisfied is False
+    assert result.status == "not_on_protected_main"
     assert any(
         "protected_main_row.expected` must record" in finding
         for finding in result.findings
     )
+
+
+def test_protected_main_row_missing_artefact_is_refused() -> None:
+    """Guards the "plausible-but-wrong SHA" hazard: ancestry alone does not
+    distinguish the RIGHT commit from any other commit also on protected
+    `main`. A row with `kind`/`repository`/`commit`/`expected` all well-formed
+    but no `artefact` must still refuse — naming what the commit is supposed
+    to carry is required, not optional."""
+    revision = "4" * 40
+    binding = gate.ProductBinding(
+        product="erp",
+        revision=revision,
+        evidence={
+            "protected_main_row": {
+                "kind": "pinned_at",
+                "repository": "dotmac_erp",
+                "commit": revision,
+                "expected": f"git merge-base --is-ancestor {revision} origin/main "
+                "succeeded",
+            },
+            "sync_requirements_satisfied": True,
+            "async_status": gate.ASYNC_TRANSITIONAL,
+        },
+    )
+    result = gate.evaluate_erp(binding)
+    assert result.satisfied is False
+    assert result.status == "not_on_protected_main"
+    assert any("protected_main_row.artefact` must record" in f for f in result.findings)
+
+
+def test_the_real_erp_readiness_revision_is_distinguishable_from_the_excluded_one() -> (
+    None
+):
+    """Grounded in the actual coordination record: ERP's readiness revision
+    is `b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f` (#510, carrying the
+    runtime/async/PID-fork contract) — `1d82a4d2...` (#509, customer
+    import-parity work) was explicitly ruled OUT as the wrong commit.  Both
+    are plausible 40-hex-shaped ancestors of ERP's protected `main`; this
+    gate's `artefact` field is what forces a binder to name which one they
+    mean, so a reviewer has something concrete to check rather than a bare,
+    equally-plausible-looking SHA.
+
+    This module has no access to the `dotmac_erp` repository and cannot
+    itself verify either commit's ancestry or contents — that is explicitly
+    UNMONITORED (see the module docstring). What this test proves is
+    narrower and mechanical: naming the CORRECT artefact for the CORRECT
+    commit satisfies the row-shape check, and the two commits remain
+    textually distinguishable in any bound evidence."""
+    correct_revision = "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
+    excluded_revision_prefix = "1d82a4d2"
+    assert correct_revision != excluded_revision_prefix
+    assert gate.IMMUTABLE_COMMIT.fullmatch(correct_revision)
+
+    binding = gate.ProductBinding(
+        product="erp",
+        revision=correct_revision,
+        evidence={
+            "protected_main_row": _protected_main_row(
+                "dotmac_erp",
+                correct_revision,
+                artefact="docs/architecture/erp-runtime-async-pid-fork-contract.md",
+            ),
+            "sync_requirements_satisfied": True,
+            "async_status": gate.ASYNC_TRANSITIONAL,
+        },
+    )
+    result = gate.evaluate_erp(binding)
+    assert result.revision == correct_revision
+    assert result.satisfied is True, result.explain()
 
 
 def test_protected_main_proof_kinds_reuse_adoption_evidences_vocabulary() -> None:

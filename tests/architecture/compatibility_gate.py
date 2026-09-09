@@ -22,12 +22,17 @@ The evidence-binding seam
 --------------------------
 
 ``load_default_bindings()`` reads ``compatibility_gate_bindings.json``, the
-ONE file that changes when a real revision becomes available. Every
-``ProductBinding`` in it is unbound (``revision: null``) today, and
-``evaluate_gate(load_default_bindings())`` therefore refuses. When Governance
-#87 is decided, Academy #130 is re-derived and merged, and exact immutable
-ERP/Sub readiness revisions exist, binding them is editing that JSON file's
-three ``revision``/``evidence`` fields — nothing in this module changes shape.
+ONE file that changes when a real revision's evidence has been captured.
+Every ``ProductBinding`` in it is unbound (``revision: null``) today, and
+``evaluate_gate(load_default_bindings())`` therefore refuses. Governance #87
+has merged (``6fbeffca``); named, protected-`main`-ancestor readiness
+revisions now exist for ERP and Sub (see "The absence-is-refusal rule"
+below); Academy #130 is still being re-derived under the merged classifier,
+blocked on a prerequisite migration, in a separate lane this slice does not
+touch. Binding a revision, once its ``protected_main_row``/``expected``/
+``artefact`` evidence has actually been captured against that tree, is
+editing this JSON file's ``revision``/``evidence`` fields — nothing in this
+module changes shape.
 
 Vocabulary reused, verbatim, from ``adoption_evidence.py``
 ------------------------------------------------------------
@@ -86,12 +91,24 @@ that read that as "nothing to refuse" would be the identical defect this
 whole programme has been chasing — a check over no files, passing for having
 nothing to check). See ``test_the_gate_cannot_pass_on_an_empty_evaluation_set``.
 
-**None of the three products has a protected-`main` revision carrying final
-readiness evidence today** (Academy #130 is being re-derived under Governance
-#87, merged as ``6fbeffca``, in a separate lane this slice does not touch;
-ERP and Sub have no readiness revision named yet). A run today therefore
-refuses on reason 3 (or reason 1, for a product with no revision named at
-all) for all three products — never a pass on an empty evidence set.
+**No product is bound in the checked-in seam file today.** ERP
+(``b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f``, #510) and Sub
+(``288b68cf0ba4196b36641801093b501a75e80a0d``, #3015) have named,
+protected-`main`-ancestor readiness revisions as of this writing, but binding
+them into ``compatibility_gate_bindings.json`` requires the ``protected_main
+_row``/``expected``/``artefact`` evidence this module cannot itself measure
+(no access to those repositories, no network fetch) — a task this slice
+leaves to whoever CAN capture that evidence, not something this module
+fabricates. Academy is different in kind, not degree: it is not "found
+incompatible" — it is EVIDENCE-INELIGIBLE, blocked on a Governance-pin
+`schema_version` 9→10→11 migration prerequisite that has not landed, so it
+cannot yet produce a revision to bind at all. `EvaluationResult.status`
+distinguishes exactly this: an unbound product's status is ``"unbound"``,
+never the same status a product that DID produce evidence and failed
+evaluation would carry (``"evaluation_refused"``) — collapsing the two into
+one boolean is how "not yet eligible" gets misread as "incompatible". A run
+today therefore refuses with every product at status ``"unbound"`` — never a
+pass on an empty evidence set.
 
 What this module does NOT establish (unmonitored, stated per ADR-0018)
 --------------------------------------------------------------------------
@@ -105,6 +122,14 @@ What this module does NOT establish (unmonitored, stated per ADR-0018)
   compatibility (the Kernel surface CAN satisfy the need), never adoption
   (the product DOES rely on it) — see ADR-0006 § 5, "reference proof is not
   adoption", which is exactly the shape this module refuses to blur.
+- Whether a `protected_main_row`'s `artefact` is genuinely present at the
+  named commit. This module requires the field to be RECORDED (a binder
+  must name what they believe the commit carries, giving a reviewer
+  something concrete to check) and requires it to name the SAME commit as
+  the bound revision — it does not fetch the product repository to confirm
+  the artefact actually exists there. Binding the wrong-but-plausible commit
+  with a truthfully-recorded WRONG artefact name is still refused by a
+  careful reviewer reading the row, never by this module alone.
 """
 
 from __future__ import annotations
@@ -161,6 +186,42 @@ if not PROTECTED_MAIN_PROOF_KINDS <= (ASSERTION_KINDS | AST_ASSERTION_KINDS):
         ".py's own closed vocabulary — this constant reuses those names, it "
         "does not invent a parallel one"
     )
+
+#: The closed, structured verdict vocabulary for `EvaluationResult.status`.
+#: Distinguishes "no evidence exists yet" from "evidence exists and was
+#: refused" — the ABSENT-versus-REGISTRY_DISAGREEMENT split, restated here
+#: because collapsing both into one `satisfied=False` is how a product that
+#: is merely UNBOUND (blocked on a prerequisite it has not cleared yet, e.g.
+#: a pending schema migration) gets misread as a product FOUND incompatible.
+#:
+#: `unbound` — reason 1: no revision named at all.
+#: `moving_ref` — reason 2: the named revision is a branch/HEAD/main, not a
+#:   coordinate.
+#: `invalid_revision` — a named revision that is neither `None` nor a
+#:   recognised moving ref, but also not a well-formed 40-hex commit (e.g. an
+#:   abbreviated SHA). A fourth bucket beyond the three the ruling names,
+#:   kept distinct rather than folded into `moving_ref` for the same reason
+#:   this whole field exists: a reader should not have to guess.
+#: `not_on_protected_main` — reason 3: a well-formed 40-hex commit with no
+#:   (or an invalid) `protected_main_row` proving it is an ancestor of
+#:   protected `main`.
+#: `evidence_incomplete` — a real, protected-main-proven commit whose
+#:   product-side evidence is missing or malformed required keys.
+#: `evaluation_refused` — evidence is complete and well-formed, and the
+#:   CAPTURED FACTS themselves show the product does not meet the property
+#:   (e.g. a strict bind observed to fail, or an unresolved usage site).
+#: `satisfied` — every check passed.
+EVALUATION_STATUSES: Final = frozenset(
+    {
+        "unbound",
+        "moving_ref",
+        "invalid_revision",
+        "not_on_protected_main",
+        "evidence_incomplete",
+        "evaluation_refused",
+        "satisfied",
+    }
+)
 
 
 # ── AST reads of the Kernel's own tree (pure, offline, deterministic) ──────
@@ -304,6 +365,31 @@ def _revision_problem(product: str, revision: object) -> str | None:
     )
 
 
+def _revision_status(revision: object) -> str:
+    """The `EVALUATION_STATUSES` bucket matching `_revision_problem`'s
+    message for the same `revision` — companion function, single source of
+    the classification, so the two can never silently disagree about which
+    of reasons 1/2/(a fourth, `invalid_revision`, for a malformed-but-not-a-
+    recognised-moving-ref string) applies. Only called once `_revision_problem`
+    has already returned non-`None` for the same `revision`."""
+    if revision is None:
+        return "unbound"
+    if not isinstance(revision, str) or not revision.strip():
+        return "invalid_revision"
+    text = revision.strip()
+    if IMMUTABLE_COMMIT.fullmatch(text):
+        raise ValueError(
+            "_revision_status called on a well-formed commit; only call it "
+            "after _revision_problem returned non-None for the same input"
+        )
+    head, _, tail = text.partition("@")
+    if tail and head.lower() in MOVING_REFS:
+        return "moving_ref"
+    if text.lower() in MOVING_REFS:
+        return "moving_ref"
+    return "invalid_revision"
+
+
 def _protected_main_problem(
     product: str, revision: str | None, evidence: Mapping[str, object]
 ) -> str | None:
@@ -320,12 +406,24 @@ def _protected_main_problem(
     module's own `pinned_at`/`composed_at` kinds, never a gate-local kind),
     naming the SAME commit, with a non-empty `expected` recording what a
     protected-`main` ancestry check (e.g. `git merge-base --is-ancestor`)
-    actually found. This module does not run that check itself — same
-    "NOT BUILT, the coordinates are the fetch instruction" limitation
+    actually found, AND a non-empty `artefact` naming the specific readiness
+    document/contract this exact commit is expected to carry. `artefact`
+    exists because ancestry alone cannot distinguish the RIGHT commit from
+    any other commit also on protected `main` — two real, valid ancestors
+    can both look "bindable" while only one is the readiness revision (the
+    exact hazard a plausible-but-wrong SHA presents: a real commit, on
+    protected main, that is simply the WRONG one).
+
+    This module does not run the ancestry check itself, and does not verify
+    `artefact`'s CONTENT against the product's actual tree — same "NOT
+    BUILT, the coordinates are the fetch instruction" limitation
     `adoption_evidence.py`'s own `UNMONITORED_BY_THIS_GATE` already states
-    for `assertion_resolution` — it verifies the CLAIM is well-formed and
-    coherent with the bound revision, not that the ancestry check was run
-    correctly.
+    for `assertion_resolution`. It verifies the CLAIM is well-formed,
+    coherent with the bound revision, and that a specific artefact was
+    actually NAMED (forcing whoever binds a revision to record what they
+    believe it carries, so a reviewer has something concrete to check) —
+    not that the ancestry check was run correctly or that the artefact is
+    genuinely present at that commit.
     """
     if revision is None:  # pragma: no cover - callers gate on _revision_problem first
         return f"no revision is bound for {product!r}"
@@ -367,6 +465,19 @@ def _protected_main_problem(
             f"{product}'s `protected_main_row.expected` must record what "
             "the protected-`main` ancestry check actually found"
         )
+    artefact = row.get("artefact")
+    if not isinstance(artefact, str) or not artefact.strip():
+        return (
+            f"{product}'s `protected_main_row.artefact` must record the "
+            "specific readiness artefact this revision is expected to "
+            "carry (e.g. the path of the readiness document or contract it "
+            "introduces). Ancestry alone does not distinguish THIS commit "
+            "from any other commit on protected `main` -- a plausible-but-"
+            "wrong SHA (a real ancestor, but the wrong readiness commit, "
+            "such as a customer-import-parity commit standing in for a "
+            "runtime-readiness one) would be invisible without naming what "
+            "the bound commit is supposed to contain"
+        )
     return None
 
 
@@ -386,15 +497,41 @@ class ProductBinding:
 class EvaluationResult:
     """One product's evaluation. `revision` is always the exact value that
     was evaluated (possibly `None`) — never a resolved or defaulted one, so a
-    reader can see exactly what was and was not checked."""
+    reader can see exactly what was and was not checked.
+
+    `status` is the STRUCTURED verdict, not just prose in `findings` — a
+    reader (or a downstream consumer) must be able to tell "this product has
+    not yet produced evidence" apart from "this product produced evidence and
+    the evaluation refused it" WITHOUT parsing free text, the same
+    ABSENT-versus-REGISTRY_DISAGREEMENT distinction Control's own vocabulary
+    already draws. Collapsing those two into one `satisfied=False` boolean is
+    exactly how "Academy: unbound, pending a prerequisite migration" gets
+    misread as "Academy: found incompatible" — a false and misdirecting
+    reading this field exists to rule out structurally, not just by writing
+    careful prose beside it.
+
+    `satisfied` is DERIVED from `status`, never stored — there is no way to
+    construct a coherent-looking but self-contradicting result (a "satisfied"
+    status with `satisfied=False`, or vice versa)."""
 
     product: str
     revision: str | None
-    satisfied: bool
+    status: str
     findings: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        if self.status not in EVALUATION_STATUSES:
+            raise ValueError(
+                f"{self.product}: unknown EvaluationResult.status {self.status!r}; "
+                f"known statuses are {sorted(EVALUATION_STATUSES)!r}"
+            )
+
+    @property
+    def satisfied(self) -> bool:
+        return self.status == "satisfied"
+
     def explain(self) -> str:
-        verdict = "SATISFIED" if self.satisfied else "REFUSED"
+        verdict = "SATISFIED" if self.satisfied else f"REFUSED ({self.status})"
         revision_text = self.revision or "<unbound>"
         lines = [f"{verdict} ({self.product}@{revision_text})"]
         lines.extend(f"  - {finding}" for finding in self.findings)
@@ -499,7 +636,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            satisfied=False,
+            status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -514,7 +651,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -526,7 +663,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            satisfied=False,
+            status="not_on_protected_main",
             findings=tuple(findings),
         )
 
@@ -551,7 +688,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -573,7 +710,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="academy",
         revision=binding.revision,
-        satisfied=satisfied,
+        status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
     )
 
@@ -622,7 +759,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            satisfied=False,
+            status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -637,7 +774,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -647,7 +784,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            satisfied=False,
+            status="not_on_protected_main",
             findings=tuple(findings),
         )
 
@@ -670,7 +807,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -694,7 +831,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="erp",
         revision=binding.revision,
-        satisfied=satisfied,
+        status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
     )
 
@@ -753,7 +890,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            satisfied=False,
+            status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -768,7 +905,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -778,7 +915,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            satisfied=False,
+            status="not_on_protected_main",
             findings=tuple(findings),
         )
 
@@ -804,7 +941,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            satisfied=False,
+            status="evidence_incomplete",
             findings=tuple(findings),
         )
 
@@ -829,7 +966,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="sub",
         revision=binding.revision,
-        satisfied=satisfied,
+        status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
     )
 
