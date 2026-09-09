@@ -2,6 +2,19 @@
 
 ## Unreleased — successor not allocated
 
+### A trusted host workload authenticates a candidate instead of trusting a parsed value
+
+`verify_candidate_attestation()` is the one seam that turns a signed
+`AttestationEnvelopeV2` into an authenticated `CandidateAttestationSubjectV2`,
+checked against Control-resolved candidate trust roots. Its signature carries
+no parameter for a subject, receipt, digest, or ad hoc root, so a caller
+cannot hand in the fact it is supposed to prove. `verify_attestation_pair`
+now calls this exact function for its candidate half rather than repeating
+the check inline — there is exactly one candidate-verification code path in
+this module. `CandidateReceipt` (`host_source.py`) is unchanged and remains a
+plain parser value with no authority; this seam is what a host uses instead
+of trusting it.
+
 ### Correction — 2026-09-08: verifier same-key refusal and recovery coverage gap
 
 The v2 verifier retained the split-roots construction check but had lost the

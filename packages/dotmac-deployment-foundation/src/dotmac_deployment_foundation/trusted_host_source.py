@@ -51,6 +51,7 @@ __all__ = [
     "CandidateAttestationSubjectV2",
     "InstalledHostAttestationSubjectV2",
     "verify_attestation_pair",
+    "verify_candidate_attestation",
 ]
 
 ATTESTATION_SCHEMA: Final = "TrustedHostAttestation.v2"
@@ -565,6 +566,64 @@ def _verify(
         )
 
 
+def verify_candidate_attestation(
+    *,
+    candidate: AttestationEnvelopeV2,
+    verifier: AttestationVerifier,
+    trust_policy: AttestationTrustPolicy,
+    now: datetime,
+) -> CandidateAttestationSubjectV2:
+    """The one seam that turns a candidate envelope into an authenticated subject.
+
+    A trusted host workload does not get to trust a parsed
+    ``CandidateReceipt`` — that type is a plain, publicly-constructible
+    dataclass and carries no authority (see ``host_source.py``'s
+    ``CandidateReceipt``, which stays that way). This function is what a host
+    calls INSTEAD: it authenticates the signed ``AttestationEnvelopeV2``
+    against Control-resolved candidate trust roots and returns the subject
+    that survived that check — never a subject the caller supplied.
+
+    The signature makes the bypass inexpressible rather than merely
+    discouraged: there is no parameter for a subject, a digest, a receipt, or
+    an ad hoc root. The only inputs are the envelope to authenticate and the
+    trust configuration Control already resolved (``verifier`` stays
+    injected, per this facility's zero-runtime-dependency crypto seam;
+    ``trust_policy`` is the whole immutable, internally-validated root set,
+    not a caller-editable list). ``verify_attestation_pair`` calls this exact
+    function for its candidate half — there is exactly one candidate
+    verification code path in this module, not two that could drift apart.
+    """
+    if not isinstance(candidate, AttestationEnvelopeV2):
+        raise SpecError(
+            "candidate attestation must be a parsed AttestationEnvelopeV2",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(trust_policy, AttestationTrustPolicy):
+        raise SpecError(
+            "trust_policy must be an AttestationTrustPolicy",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(verifier, AttestationVerifier):
+        raise SpecError(
+            "verifier must implement AttestationVerifier",
+            code=OBSERVATION_MALFORMED,
+        )
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise SpecError(
+            "verification now must be timezone-aware", code=OBSERVATION_MALFORMED
+        )
+    now = now.astimezone(UTC)
+    _verify(
+        candidate,
+        verifier,
+        trust_policy.candidate_roots,
+        CANDIDATE_ATTESTATION_PURPOSE,
+        trust_policy.candidate_audience,
+        now,
+    )
+    return CandidateAttestationSubjectV2.from_mapping(candidate.subject_mapping())
+
+
 def verify_attestation_pair(
     *,
     candidate: AttestationEnvelopeV2 | None,
@@ -598,35 +657,20 @@ def verify_attestation_pair(
             "candidate and installed attestations use the same signing key",
             code=SAME_KEY_SIGNED_BOTH,
         )
-    if not isinstance(trust_policy, AttestationTrustPolicy):
-        raise SpecError(
-            "trust_policy must be an AttestationTrustPolicy",
-            code=OBSERVATION_MALFORMED,
-        )
-    if not isinstance(verifier, AttestationVerifier):
-        raise SpecError(
-            "verifier must implement AttestationVerifier",
-            code=OBSERVATION_MALFORMED,
-        )
+    # The candidate half is authenticated through the one shared seam: this
+    # is what makes it impossible for this function to drift from what a
+    # trusted host workload gets when it calls verify_candidate_attestation
+    # directly.
+    candidate_subject = verify_candidate_attestation(
+        candidate=candidate, verifier=verifier, trust_policy=trust_policy, now=now
+    )
     expected_host_identity = _required(expected_host_identity, "expected_host_identity")
-    if not isinstance(now, datetime) or now.tzinfo is None:
-        raise SpecError(
-            "verification now must be timezone-aware", code=OBSERVATION_MALFORMED
-        )
+    now = now.astimezone(UTC)
     if trust_policy.installed_audience != expected_host_identity:
         raise PreconditionFailed(
             "installed role audience does not match expected host identity",
             code=AUDIENCE_MISMATCH,
         )
-    now = now.astimezone(UTC)
-    _verify(
-        candidate,
-        verifier,
-        trust_policy.candidate_roots,
-        CANDIDATE_ATTESTATION_PURPOSE,
-        trust_policy.candidate_audience,
-        now,
-    )
     _verify(
         installed,
         verifier,
@@ -634,9 +678,6 @@ def verify_attestation_pair(
         INSTALLED_OBSERVATION_PURPOSE,
         expected_host_identity,
         now,
-    )
-    candidate_subject = CandidateAttestationSubjectV2.from_mapping(
-        candidate.subject_mapping()
     )
     installed_subject = InstalledHostAttestationSubjectV2.from_mapping(
         installed.subject_mapping()

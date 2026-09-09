@@ -46,12 +46,21 @@
 - `TrustedHostAttestation.v2`: `AttestationEnvelopeV2`,
   `AttestationTrustPolicy`, `AttestationTrustRootV2`,
   `CandidateAttestationSubjectV2`, `InstalledHostAttestationSubjectV2`,
-  `AttestationVerifier`, `verify_attestation_pair()` and the exported schema,
-  purpose and refusal-code constants, including `SAME_KEY_SIGNED_BOTH`. The
-  signed canonical bytes and refusal codes are public contract. The verifier
+  `AttestationVerifier`, `verify_attestation_pair()`,
+  `verify_candidate_attestation()` and the exported schema, purpose and
+  refusal-code constants, including `SAME_KEY_SIGNED_BOTH`. The signed
+  canonical bytes and refusal codes are public contract. The verifier
   identifies a signing key by `public_key_fingerprint`, never by the reusable
   `key_id` label, and remains a non-admitting composition seam: neither
   executor accepts these values in this contract revision.
+  `verify_candidate_attestation()` is the single candidate-authentication
+  code path — a trusted host workload calls it to obtain an authenticated
+  `CandidateAttestationSubjectV2` instead of trusting a parsed value, and
+  `verify_attestation_pair()` calls this exact function for its candidate
+  half rather than a parallel implementation. Its signature accepts only the
+  envelope to authenticate plus Control-resolved trust configuration
+  (`verifier`, `trust_policy`, `now`); there is no parameter for a
+  preconstructed subject, receipt, digest, or ad hoc root.
 - `ExposureEffects`, plus `OWNERSHIP_PREFIX`, `ownership_comment()`,
   `foreign_rules()`, `foreign_rule_arguments()`, `managed_ports()` and
   `require_preserved_foreign_rules()`. Ownership is part of the CONTRACT rather
