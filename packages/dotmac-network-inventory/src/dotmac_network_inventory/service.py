@@ -179,7 +179,7 @@ def register_site(
         if command.location_ref
         else None,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -228,7 +228,7 @@ def admit_node(db: Session, *, tenant_id: UUID, command: AdmitNode) -> Admission
         else None,
         admitted_at=now,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -268,7 +268,7 @@ def register_interface(
         if command.source_ref
         else None,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -311,7 +311,7 @@ def register_port(
         if command.source_ref
         else None,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -334,7 +334,7 @@ def define_vlan(db: Session, *, tenant_id: UUID, command: DefineVlan) -> VlanSna
         if command.site_ref
         else None,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -381,7 +381,7 @@ def attach_vlan(db: Session, *, tenant_id: UUID, command: AttachVlan) -> UUID:
         tagged=command.tagged,
         source_ref=command.source_ref,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -425,7 +425,7 @@ def record_configuration_snapshot(
             source_ref=_clean(command.source_ref, "source reference"),
             observed_at=command.observed_at,
         )
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(db):

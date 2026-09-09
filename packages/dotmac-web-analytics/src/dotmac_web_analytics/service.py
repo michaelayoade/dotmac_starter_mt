@@ -300,7 +300,7 @@ def _replay_or_conflict(
         source_reference=command.provenance.source_reference,
         delivery_id=command.provenance.delivery_id,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -435,7 +435,7 @@ def record_event(
         source_reference=command.provenance.source_reference,
         delivery_id=command.provenance.delivery_id,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -488,7 +488,7 @@ def record_event_batch(
     command: RecordEventBatchCommand,
     received_at: datetime,
 ) -> BatchIngestResult:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     results: list[IngestResult] = []
     for event in command.events:

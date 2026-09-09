@@ -78,7 +78,7 @@ class _EvaluationLine:
 def _conflict_scope(db: Session) -> AbstractContextManager[None]:
     """Load the database boundary lazily so package imports need no DB config."""
 
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     return conflict_savepoint(db)
 

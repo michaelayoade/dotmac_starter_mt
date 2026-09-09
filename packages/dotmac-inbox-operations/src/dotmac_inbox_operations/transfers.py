@@ -808,7 +808,7 @@ def escalate_conversation(
         requested_at=requested_at,
         due_at=due_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

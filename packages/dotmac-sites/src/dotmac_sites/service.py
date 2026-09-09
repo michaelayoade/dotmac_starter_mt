@@ -51,7 +51,7 @@ def _one(db: Session, statement: Select[tuple[_Model]], *, detail: str) -> _Mode
 
 
 def _flush_new(db: Session, record: _Model, *, detail: str) -> _Model:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -257,7 +257,7 @@ def create_site_revision(
         snapshot_digest=release.digest,
         created_by_ref=command.created_by_ref,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

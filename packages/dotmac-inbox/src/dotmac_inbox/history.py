@@ -182,7 +182,7 @@ def import_message_transport_ref(
                 "historical transport ref was reused differently"
             )
         return existing
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -349,7 +349,7 @@ def import_conversation(
     if existing is not None:
         return existing
     row = Conversation(**expected)
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -430,7 +430,7 @@ def import_message(db: Session, *, tenant_id: UUID, command: ImportMessage) -> M
     if existing is not None:
         return existing
     row = Message(**expected)
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -511,7 +511,7 @@ def import_read_state(
     if existing is not None:
         return existing
     row = ConversationReadState(**expected)
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

@@ -181,7 +181,7 @@ def route_conversation(
     decision: InboxRoutingDecision | None = None
     # Lazy by design: importing the package manifest must not construct the
     # configured database runtime.
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -281,7 +281,7 @@ def insert_assignment(
         status=AssignmentStatus.ASSIGNED,
         assigned_at=assigned_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -422,7 +422,7 @@ def admit_to_queue(
             else datetime.now(UTC)
         ),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

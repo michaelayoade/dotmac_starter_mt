@@ -167,7 +167,7 @@ def register_structure(
         source_ref=command.source_ref,
         created_at=datetime.now(UTC),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -210,7 +210,7 @@ def register_cable(
         asset_ref=command.asset_ref,
         created_at=datetime.now(UTC),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -239,7 +239,7 @@ def register_strand(
         state=StrandState.AVAILABLE.value,
         created_at=datetime.now(UTC),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -296,7 +296,7 @@ def record_splice(db: Session, *, tenant_id: UUID, command: RecordSplice) -> UUI
         evidence_ref=_clean(command.evidence_ref, "evidence reference"),
         occurred_at=command.occurred_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -349,7 +349,7 @@ def record_termination(
         evidence_ref=_clean(command.evidence_ref, "evidence reference"),
         occurred_at=command.occurred_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -383,7 +383,7 @@ def record_field_observation(
         observed_at=command.observed_at,
         actor_ref=command.actor_ref,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -415,7 +415,7 @@ def propose_change(
         desired_fingerprint=_clean(command.desired_fingerprint, "desired fingerprint"),
         requested_by_ref=_clean(command.requested_by_ref, "requester reference"),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

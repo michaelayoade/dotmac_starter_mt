@@ -140,7 +140,7 @@ def request_command(
         requested_at=now,
         approved_at=now if state is CommandState.APPROVED else None,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -217,7 +217,7 @@ def mark_dispatched(
         plugin_capability=_clean(command.plugin_capability, "plugin capability"),
         dispatched_at=command.dispatched_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -281,7 +281,7 @@ def record_execution_observation(
             result_fingerprint=_clean(command.result_fingerprint, "result fingerprint"),
             error_code=command.error_code,
         )
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(db):

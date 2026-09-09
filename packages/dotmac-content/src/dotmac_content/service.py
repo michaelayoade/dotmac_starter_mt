@@ -73,7 +73,7 @@ def _one(db: Session, statement: Select[tuple[_Model]], *, detail: str) -> _Mode
 
 
 def _flush_new(db: Session, record: _Model, *, detail: str) -> _Model:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

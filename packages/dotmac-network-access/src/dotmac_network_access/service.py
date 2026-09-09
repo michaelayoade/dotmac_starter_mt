@@ -157,7 +157,7 @@ def register_nas_attachment(
         capability_code=_clean(command.capability_code, "capability code"),
         source_ref=_clean(command.source_ref, "source reference"),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -196,7 +196,7 @@ def project_access_policy(
             valid_until=command.valid_until,
             projected_at=now,
         )
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(db):
@@ -250,7 +250,7 @@ def record_authentication(
             observed_at=command.observed_at,
             fingerprint=_clean(command.fingerprint, "fingerprint"),
         )
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(db):
@@ -319,7 +319,7 @@ def record_accounting(
             observed_at=command.observed_at,
             fingerprint=_clean(command.fingerprint, "fingerprint"),
         )
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(db):

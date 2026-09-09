@@ -118,7 +118,7 @@ def create_survey(
         total_invited=0,
         total_responses=0,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -148,7 +148,7 @@ def update_draft_survey(
     if current is not SurveyStatus.DRAFT:
         raise SurveyUnavailable("only a draft survey definition may be edited")
 
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -251,7 +251,7 @@ def issue_invitation(
         status=InvitationStatus.PENDING.value,
         expires_at=_effective_invitation_expiry(survey.expires_at, request.expires_at),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -346,7 +346,7 @@ def _record_response(
         nps_value=reviewed.nps_value,
         submitted_at=submission.submitted_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

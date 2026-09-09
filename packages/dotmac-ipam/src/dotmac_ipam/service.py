@@ -226,7 +226,7 @@ def create_address_space(
             else None
         ),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -279,7 +279,7 @@ def create_pool(db: Session, *, tenant_id: UUID, command: CreatePool) -> PoolSna
         allocation_prefix_length=command.allocation_prefix_length,
         purpose=_clean(command.purpose, "pool purpose"),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -418,7 +418,7 @@ def assign_address(
         assigned_at=now,
         valid_until=command.valid_until,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -492,7 +492,7 @@ def record_utilization(
         assigned=command.assigned,
         source_ref=_clean(command.source_ref, "source reference"),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

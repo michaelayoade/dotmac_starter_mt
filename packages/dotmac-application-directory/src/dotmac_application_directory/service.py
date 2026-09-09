@@ -251,15 +251,15 @@ def attach_application(
         reconciliation_status=str(ReconciliationStatus.UNKNOWN),
         reconciliation_error=None,
     )
-    # Imported HERE, not at module scope, kept as a matter of local style even
-    # though `dotmac_kernel.transactions` is engine-free: a module-level import
-    # of an unrelated kernel name has, in the past, made `import
-    # dotmac_application_directory` require a parseable DATABASE_URL and failed
-    # the release wheel smoke on this module's first-ever publish attempt,
-    # because that smoke installs the wheel into a clean venv and imports it
-    # with no database configured. The kernel's own `external_identity` module
-    # carries the same comment for the same reason.
-    from dotmac_kernel.transactions import conflict_savepoint
+    # Imported HERE, not at module scope. `dotmac_kernel.db` builds the engine
+    # from `settings.database_url` when it is imported, so a module-level import
+    # makes `import dotmac_application_directory` itself require a parseable
+    # DATABASE_URL. That is not hypothetical: it failed the release wheel smoke
+    # on this module's first-ever publish attempt, because that smoke installs
+    # the wheel into a clean venv and imports it with no database configured.
+    # The kernel's own `external_identity` module carries the same comment for
+    # the same reason.
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

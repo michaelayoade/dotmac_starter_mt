@@ -1504,7 +1504,7 @@ def record_observation(
         #
         # Imported at use-time so importing this independently releasable module
         # does not construct the kernel's configured database runtime.
-        from dotmac_kernel.transactions import conflict_savepoint
+        from dotmac_kernel.db import conflict_savepoint
 
         try:
             with conflict_savepoint(session):

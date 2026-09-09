@@ -150,7 +150,7 @@ def _membership(db: Session, tenant_id: UUID, membership_id: UUID) -> PartyMembe
 
 
 def _flush_new(db: Session, row: _Model, *, detail: str) -> _Model:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -447,7 +447,7 @@ def add_contact_point(
     vocabulary: PartyVocabularyRegistry,
     command: AddContactPoint,
 ) -> PartyContactPoint:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     tenant_id = _tenant(scope)
     _party(db, tenant_id, command.party_id)
@@ -548,7 +548,7 @@ def set_primary_contact(
     scope: TenantScope,
     contact_point_id: UUID,
 ) -> PartyContactPoint:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     tenant_id = _tenant(scope)
     point = _contact_point(db, tenant_id, contact_point_id)

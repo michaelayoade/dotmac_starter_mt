@@ -138,7 +138,7 @@ def open_incident(
         source_observation_refs=list(command.source_observation_refs),
         detected_at=command.detected_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -276,7 +276,7 @@ def schedule_maintenance(
         scope_refs=list(command.scope_refs),
         change_ref=command.change_ref,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -309,7 +309,7 @@ def record_notification_evidence(
         delivery_ref=_clean(command.delivery_ref, "delivery reference"),
         delivered_at=command.delivered_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -339,7 +339,7 @@ def record_sla_evidence(
         availability_ratio=ratio,
         source_ref=_clean(command.source_ref, "source reference"),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

@@ -71,7 +71,7 @@ def _fingerprint(value: str, label: str) -> str:
 
 
 def _flush_unique(db: Session, row: object, *, label: str) -> None:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

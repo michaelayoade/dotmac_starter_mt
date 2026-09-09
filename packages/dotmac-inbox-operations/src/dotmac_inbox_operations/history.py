@@ -112,7 +112,7 @@ def _insert_or_replay(
     replay: Callable[[], _Row | None],
     conflict_label: str,
 ) -> _Row:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

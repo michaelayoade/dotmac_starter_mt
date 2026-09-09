@@ -192,11 +192,9 @@ def create_conversation(
         subject=subject or identity.subject,
         tags=list(tags) or None,
     )
-    # Lazy by design, as a matter of local style: reading this package's
-    # manifest/version must require no database, even though
-    # `dotmac_kernel.transactions` (unlike `dotmac_kernel.db`) is itself
-    # engine-free.
-    from dotmac_kernel.transactions import conflict_savepoint
+    # Lazy by design: importing dotmac_kernel.db constructs configured engines,
+    # while reading this package's manifest/version must require no database.
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -293,7 +291,7 @@ def record_message(
         occurred_at=occurred,
     )
 
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -398,7 +396,7 @@ def bind_message_transport_ref(
         account_scope=transport_identity.account_scope,
         transport_key=key,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

@@ -244,7 +244,7 @@ def create_requisition(
         created_at=recorded_at,
         updated_at=recorded_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -716,7 +716,7 @@ def create_sourcing_event(
         created_at=recorded_at,
         updated_at=recorded_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -820,7 +820,7 @@ def invite_supplier(
         invited_at=invited_at,
         invited_by_ref=invited_by_ref,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -958,7 +958,7 @@ def receive_bid(
         source_event_id=command.source_event_id,
         content_sha256=digest_document(content_document),
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1454,7 +1454,7 @@ def create_purchase_order(
         created_at=recorded_at,
         updated_at=recorded_at,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):

@@ -362,7 +362,7 @@ def create_item(db: Session, *, tenant_id: UUID, command: ItemCreate) -> Item:
         track_serials=command.track_serials,
         is_active=True,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -384,7 +384,7 @@ def create_warehouse(
         allows_issues=command.allows_issues,
         is_active=True,
     )
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -518,7 +518,7 @@ def _receive_stock(
 def receive_stock(
     db: Session, *, tenant_id: UUID, command: ReceiptCommand
 ) -> StockMovement:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -725,7 +725,7 @@ def _issue_stock(
 def issue_stock(
     db: Session, *, tenant_id: UUID, command: IssueCommand
 ) -> StockMovement:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -833,7 +833,7 @@ def _adjust_stock(
 def adjust_stock(
     db: Session, *, tenant_id: UUID, command: AdjustmentCommand
 ) -> StockMovement:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -978,7 +978,7 @@ def _transfer_stock(
 def transfer_stock(
     db: Session, *, tenant_id: UUID, command: TransferCommand
 ) -> TransferResult:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1058,7 +1058,7 @@ def _reserve_stock(
 def reserve_stock(
     db: Session, *, tenant_id: UUID, command: ReservationCreate
 ) -> StockReservation:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1237,7 +1237,7 @@ def rebuild_balance(
     item_id: UUID,
     warehouse_id: UUID,
 ) -> StockBalance:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
@@ -1323,7 +1323,7 @@ def record_valuation_snapshot(
     tenant_id: UUID,
     command: ValuationSnapshotCreate,
 ) -> ValuationSnapshot:
-    from dotmac_kernel.transactions import conflict_savepoint
+    from dotmac_kernel.db import conflict_savepoint
 
     try:
         with conflict_savepoint(db):
