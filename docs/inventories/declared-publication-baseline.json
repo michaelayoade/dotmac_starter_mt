@@ -117,14 +117,19 @@
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a6 IS published and tagged (dotmac-entitlement-allocation-v0.1.0a6). Wave 2 added the public typed read contracts (a new facts module holding AllocationRecord/AllocationFilter/AllocationPage/AllocationReconciliation and the status vocabulary, plus get_allocation, allocations_for_contract, list_allocations and reconciliation), so src/ no longer matches the bytes that tag names and a bare 0.1.0a6 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet.",
       "state": "declared-unpublished"
     },
+    "dotmac-inbox": {
+      "declared": "0.1.0a2+dev",
+      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox-operations": {
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
-    "dotmac-inbox": {
-      "declared": "0.1.0a2+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
+    "dotmac-kernel": {
+      "declared": "0.1.0a103+dev",
+      "reason": "DEVELOPMENT MARKER OVER A PUBLISHED VERSION, NOT A PENDING RELEASE CLAIM. 0.1.0a103 IS published and tagged (dotmac-kernel-v0.1.0a103); main has since changed kernel src/ (a runtime-composition seam letting a product supply, and optionally require, its own DatabaseRuntime instead of always reaching the reference assembly's), so continuing to declare bare 0.1.0a103 would make one released version name two different sets of importable bytes -- the exact defect a102 existed to repair. The local segment allocates no successor, cannot be published to any index, and needs no release authorization on its own. This row clears only when a real successor version is allocated and tagged at release time, a decision Michael makes separately from this change; do not remove the marker merely to quiet this sweep.",
       "state": "declared-unpublished"
     },
     "dotmac-licensing": {
@@ -132,14 +137,14 @@
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a1 IS published and tagged (dotmac-licensing-v0.1.0a1). Wave 2 added the public typed read contracts (LicenceFilter/LicencePage/LicenceSummary/SigningKeyView/RevocationView/IssuanceHandoff plus list_licences, signing_keys, revocations, revocation_lists, latest_revocation_list and issuance_handoff), so src/ no longer matches the bytes that tag names and a bare 0.1.0a1 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. This SUPERSEDES the accepted-debt drift row that recorded the earlier docstring-only divergence; the row disappears because the marker takes this distribution out of the released set entirely. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet.",
       "state": "declared-unpublished"
     },
-    "dotmac-release-catalog": {
-      "declared": "0.1.0a4+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a4 IS published and tagged (dotmac-release-catalog-v0.1.0a4). Wave 2 added the public typed read contracts (dotmac_release_catalog.facts, plus list_artifacts / get_artifact / artifact_attestations / preview_publication), so src/ no longer matches the bytes that tag names and a bare 0.1.0a4 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet, which would restore the false claim.",
-      "state": "declared-unpublished"
-    },
     "dotmac-platform-health": {
       "declared": "0.2.0a1",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.2.0a1 moves off the published 0.1.0a1 identity because it changes the importable contract: ph_0002 preserves unknown legacy freshness provenance, rebuild and signed-evidence selection refuse unknown provenance, and the public evidence surface and ph_0002 migration are now release contents. Remove this row only after an authorized 0.2.0a1 publication is tagged from the exact protected revision; allocation is not publication.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-release-catalog": {
+      "declared": "0.1.0a4+dev",
+      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a4 IS published and tagged (dotmac-release-catalog-v0.1.0a4). Wave 2 added the public typed read contracts (dotmac_release_catalog.facts, plus list_artifacts / get_artifact / artifact_attestations / preview_publication), so src/ no longer matches the bytes that tag names and a bare 0.1.0a4 would make one version name two importable surfaces -- structurally the defect that let dotmac-ui 0.1.0a7 reach the registry without map_frame. The local segment is a PEP 440 local version: no index accepts it, so it allocates nothing, cannot be published, and needs no release authorization. Michael authorizes release versions; nothing authorizes main to claim a version it is not. Remove this row by ALLOCATING the next version at release time -- never by editing the marker off to make this sweep quiet, which would restore the false claim.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
