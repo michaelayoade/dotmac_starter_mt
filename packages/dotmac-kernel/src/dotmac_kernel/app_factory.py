@@ -167,9 +167,14 @@ async def _run_enabled_seeds(
 def _tenancy_errors() -> list[str]:
     """Enforce `TENANCY=single`: exactly one tenant row, and bind to it.
 
-    Imported inside the function for the same reason `_required_setting_errors`
-    does it — importing `dotmac_kernel.db` builds the engine from DATABASE_URL,
-    and `create_app` must stay importable without a database.
+    Resolved through `get_database_runtime()` (kernel-runtime-composition-seam)
+    rather than importing `dotmac_kernel.db` directly, so a product that
+    installed its own `DatabaseRuntime` is checked against ITS tenant table.
+    Absent an installed runtime this falls back to the reference assembly's,
+    which is why the import stays function-local for the same reason
+    `_required_setting_errors` gives it: the fallback imports
+    `dotmac_kernel.db`, which builds the engine from DATABASE_URL, and
+    `create_app` must stay importable without a database.
 
     An unreachable database returns no errors rather than a false one: it says
     nothing about how many tenants exist, and `validate_settings` already covers
@@ -180,12 +185,12 @@ def _tenancy_errors() -> list[str]:
     if _settings.tenancy != "single":
         return []
 
-    from dotmac_kernel.db import resolver_session
     from dotmac_kernel.models import Tenant
+    from dotmac_kernel.session_runtime import get_database_runtime
     from dotmac_kernel.tenancy import bind_single_tenant
 
     try:
-        with resolver_session() as db:
+        with get_database_runtime().resolver_session() as db:
             slugs = [t.slug for t in db.query(Tenant).order_by(Tenant.slug).all()]
     except Exception as exc:  # unreachable store: not a tenancy verdict
         logger.warning("Tenancy check skipped: %s", exc)
@@ -226,10 +231,15 @@ def _defect_summary(exc: BaseException) -> str:
 def _required_setting_errors() -> list[str]:
     """Required-setting failures, or an empty list when the store is unreachable.
 
-    Imports `dotmac_kernel.db` HERE, not at module scope: importing it builds
-    the SQLAlchemy engine from `DATABASE_URL`, and `create_app` must stay
-    importable without a database (the same reason those APIs are submodule-only
-    in the public surface).
+    Resolved through `get_database_runtime()` (kernel-runtime-composition-seam)
+    rather than importing `dotmac_kernel.db` directly, so a product that
+    installed its own `DatabaseRuntime` is checked against ITS platform store.
+    Absent an installed runtime this falls back to the reference assembly's;
+    the import of `get_database_runtime` (and, inside it, of `dotmac_kernel.db`
+    for that fallback) stays function-local for the same reason it always
+    did: importing `dotmac_kernel.db` builds the SQLAlchemy engine from
+    `DATABASE_URL`, and `create_app` must stay importable without a database
+    (the same reason those APIs are submodule-only in the public surface).
 
     Two failure modes, deliberately not conflated (ADR-0011, amended
     2026-08-20):
@@ -254,14 +264,14 @@ def _required_setting_errors() -> list[str]:
     from sqlalchemy.exc import InterfaceError, OperationalError
     from sqlalchemy.exc import TimeoutError as SQLTimeoutError
 
-    from dotmac_kernel.db import platform_session
+    from dotmac_kernel.session_runtime import get_database_runtime
     from dotmac_kernel.settings_resolver import (
         seed_settings_from_env,
         validate_required_settings,
     )
 
     try:
-        with platform_session() as db:
+        with get_database_runtime().platform_session() as db:
             # Bootstrap first: a setting configured by environment variable is
             # turned into a real row here, so the check below sees it as
             # configured — and so it behaves like every other value from then

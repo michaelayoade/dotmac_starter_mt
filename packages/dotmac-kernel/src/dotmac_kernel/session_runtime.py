@@ -81,7 +81,11 @@ from sqlalchemy.orm import Session, sessionmaker
 __all__ = [
     "CANONICAL_TENANT_SETTING",
     "DatabaseRuntime",
+    "NoDatabaseRuntimeError",
     "TenantLookup",
+    "clear_database_runtime",
+    "get_database_runtime",
+    "install_database_runtime",
 ]
 
 #: The one Postgres setting every composed module's RLS policy reads, via
@@ -539,3 +543,91 @@ class DatabaseRuntime:
             db.expunge_all()
             db.rollback()
             db.close()
+
+
+# ── product-owned runtime composition ───────────────────────────────────────
+#
+# `dotmac_kernel.db` is one INSTANCE of `DatabaseRuntime` — the reference
+# assembly's, eager, built from the kernel's own `Settings` at import. Kernel
+# code that needs a runtime (auth, middleware, startup checks, a machine-key
+# dependency, a CLI/worker entry point) must not import that instance
+# directly: doing so makes the kernel's OWN behaviour depend on the reference
+# assembly's configuration even for a product that supplied its own.
+#
+# This registry is the seam. `install_database_runtime` is how a product
+# states, once, "requests and background work run through THIS instance, not
+# the reference one" — the same "installed once, explicit swap, no per-call
+# rebuild" shape as `secret_sources.install_secret_source` and
+# `settings_crypto.install_key_provider`. `get_database_runtime` is the one
+# place every kernel-owned path reads from. Absent an installation, it falls
+# back to the reference runtime — imported LAZILY, inside the function, so
+# importing this module (or anything that imports it) never requires a
+# `DATABASE_URL`. A product that never sets
+# `ProductAssemblySpec.database_runtime` sees no behavioural change: it is
+# still the reference runtime, reached through one more indirection.
+_installed_runtime: DatabaseRuntime | None = None
+
+
+class NoDatabaseRuntimeError(RuntimeError):
+    """`get_database_runtime` could not produce a runtime.
+
+    Only raised when no product runtime is installed AND the reference
+    runtime's own import fails — e.g. a test that made `dotmac_kernel.db`
+    unimportable without installing a replacement. A real deployment always
+    has one or the other.
+    """
+
+
+def install_database_runtime(runtime: DatabaseRuntime) -> None:
+    """Install `runtime` as the ONE instance every kernel-owned path resolves
+    through from now on.
+
+    A product calls this from its own assembly composition (typically via
+    `ProductAssemblySpec.database_runtime`, applied by `create_app`) with a
+    `DatabaseRuntime` it built from its own DSNs, credentials and tenant
+    lookup. There is no partial install: the whole runtime is swapped in one
+    assignment, so a reader never observes half of a new configuration next to
+    half of an old one.
+    """
+    if not isinstance(runtime, DatabaseRuntime):
+        raise TypeError(
+            f"install_database_runtime() requires a DatabaseRuntime, got "
+            f"{type(runtime).__name__}"
+        )
+    global _installed_runtime
+    _installed_runtime = runtime
+
+
+def clear_database_runtime() -> None:
+    """Uninstall the product runtime, reverting `get_database_runtime` to the
+    reference assembly's instance.
+
+    `create_app` calls this whenever a spec declares no `database_runtime`, so
+    a second app built in the same process cannot inherit a previous spec's
+    installed runtime — the same reset discipline as
+    `install_surface_globals`/`install_stylesheets` for the other per-process
+    globals `create_app` owns.
+    """
+    global _installed_runtime
+    _installed_runtime = None
+
+
+def get_database_runtime() -> DatabaseRuntime:
+    """The runtime every kernel-owned request, middleware, startup-check,
+    CLI and worker path resolves through.
+
+    An installed product runtime always wins. Absent one, this is the
+    reference assembly's `dotmac_kernel.db.runtime` — imported HERE, lazily,
+    which is what keeps this module (and everything that calls this function
+    at module scope) importable without a `DATABASE_URL`.
+    """
+    if _installed_runtime is not None:
+        return _installed_runtime
+    try:
+        from dotmac_kernel.db import runtime as _reference_runtime
+    except Exception as exc:  # pragma: no cover - exercised by the seam test
+        raise NoDatabaseRuntimeError(
+            "no product DatabaseRuntime is installed and the reference "
+            f"runtime could not be imported: {type(exc).__name__}: {exc}"
+        ) from exc
+    return _reference_runtime
