@@ -22,7 +22,7 @@ import hmac
 import importlib.util
 import inspect
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -63,6 +63,28 @@ def _load_host_attester():
 HOST_ATTESTER = _load_host_attester()
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
+
+#: Every signed envelope this file builds shares ONE named validity window,
+#: measured from a base instant, rather than an issued_at/expires_at pair
+#: authored as two independent literals — `AttestationEnvelopeV2.
+#: __post_init__` (`trusted_host_source.py`) refuses `expires_at <=
+#: issued_at`; a window constant plus one base instant cannot be edited into
+#: a disagreeing pair by touching only one of the two.
+ENVELOPE_VALIDITY = timedelta(minutes=10)
+#: Same reasoning for a trust root's not_before/not_after
+#: (`AttestationTrustRootV2.__post_init__`'s `not_after must follow
+#: not_before` check).
+ROOT_VALIDITY = timedelta(days=365)
+ROOT_VALID_FROM = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _rfc3339(instant: datetime) -> str:
+    """The canonical UTC RFC3339 form `trusted_host_source._instant` parses
+    (`%Y-%m-%dT%H:%M:%SZ`, no fractional seconds) — the same formatting
+    `host_attester.py::_format_instant` applies in production."""
+    return instant.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 HOST_KEY = b"host-attester-incarnation-key"
 CANDIDATE_KEY = b"starter-release-workflow-key"
 HOST_FP = "sha256:" + hashlib.sha256(HOST_KEY).hexdigest()
@@ -125,8 +147,8 @@ def _root(fp: str, purpose: str, domain: str) -> AttestationTrustRootV2:
         custody_domain=domain,
         algorithm=ALGORITHM,
         trust_root_version="control-v1",
-        not_before="2026-01-01T00:00:00Z",
-        not_after="2027-01-01T00:00:00Z",
+        not_before=_rfc3339(ROOT_VALID_FROM),
+        not_after=_rfc3339(ROOT_VALID_FROM + ROOT_VALIDITY),
     )
 
 
@@ -177,8 +199,8 @@ def _candidate_envelope(host_source, *, host_identity: str):
         CANDIDATE_FP,
         "starter-release",
         "control-v1",
-        "2026-09-08T00:00:00Z",
-        "2026-09-08T00:10:00Z",
+        _rfc3339(NOW),
+        _rfc3339(NOW + ENVELOPE_VALIDITY),
         "starter-release-workflow",
         "candidate-observation",
         subject.canonical_document(),
@@ -201,8 +223,8 @@ def _build(host_source, *, signer=None):
         custody_domain="target-local-host",
         trust_root_version="control-v1",
         observation_id="host-observation",
-        issued_at=datetime(2026, 9, 8, tzinfo=UTC),
-        expires_at=datetime(2026, 9, 8, 0, 10, tzinfo=UTC),
+        issued_at=NOW,
+        expires_at=NOW + ENVELOPE_VALIDITY,
     )
 
 
@@ -292,8 +314,8 @@ def test_non_host_source_refuses_regardless_of_signer_validity() -> None:
             custody_domain="target-local-host",
             trust_root_version="control-v1",
             observation_id="host-observation",
-            issued_at=datetime(2026, 9, 8, tzinfo=UTC),
-            expires_at=datetime(2026, 9, 8, 0, 10, tzinfo=UTC),
+            issued_at=NOW,
+            expires_at=NOW + ENVELOPE_VALIDITY,
         )
 
 

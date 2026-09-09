@@ -65,6 +65,23 @@ _INVALID_WHEEL_FILENAME_TOKENS = (
     "invalidwheelfilename",
 )
 
+#: The rehearsal's trust root and both envelopes it signs share ONE base
+#: instant and ONE far-future boundary, rather than each date pair being
+#: authored as two independent literals — `AttestationTrustRootV2.
+#: __post_init__` refuses `not_after <= not_before` and
+#: `AttestationEnvelopeV2.__post_init__` refuses `expires_at <= issued_at`
+#: (`trusted_host_source.py`). Every envelope's `expires_at` below is this
+#: SAME constant, so it can never drift past the root's own `not_after` by
+#: an edit to only one of the two.
+_REHEARSAL_ROOT_NOT_BEFORE = datetime(2020, 1, 1, tzinfo=UTC)
+_REHEARSAL_FAR_FUTURE = datetime(2100, 1, 1, tzinfo=UTC)
+
+
+def _rfc3339(instant: datetime) -> str:
+    """The canonical UTC RFC3339 form `trusted_host_source._instant` parses
+    (`%Y-%m-%dT%H:%M:%SZ`, no fractional seconds)."""
+    return instant.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 def _fail(message: str) -> None:
     raise SystemExit(f"host-attester install-and-observe proof FAILED: {message}")
@@ -192,8 +209,8 @@ def assert_install_and_observe_round_trips_through_real_pip(
             custody_domain=domain,
             algorithm=algorithm,
             trust_root_version="rehearsal-v1",
-            not_before="2020-01-01T00:00:00Z",
-            not_after="2100-01-01T00:00:00Z",
+            not_before=_rfc3339(_REHEARSAL_ROOT_NOT_BEFORE),
+            not_after=_rfc3339(_REHEARSAL_FAR_FUTURE),
         )
 
     #: `AttestationTrustPolicy` requires a non-empty `installed_roots`
@@ -233,8 +250,8 @@ def assert_install_and_observe_round_trips_through_real_pip(
         fp,
         "starter-release",
         "rehearsal-v1",
-        "2026-01-01T00:00:00Z",
-        "2100-01-01T00:00:00Z",
+        _rfc3339(datetime(2026, 1, 1, tzinfo=UTC)),
+        _rfc3339(_REHEARSAL_FAR_FUTURE),
         "starter-release-workflow",
         "artifact-rehearsal-observation",
         subject.canonical_document(),
@@ -273,7 +290,7 @@ def assert_install_and_observe_round_trips_through_real_pip(
         trust_root_version="rehearsal-v1",
         observation_id="artifact-rehearsal-installed",
         issued_at=now,
-        expires_at=datetime(2100, 1, 1, tzinfo=UTC),
+        expires_at=_REHEARSAL_FAR_FUTURE,
     )
 
     installed_subject = result.subject_mapping()

@@ -46,7 +46,7 @@ import hmac
 import importlib.util
 import inspect
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -85,6 +85,30 @@ _load("host_attester")
 INSTALL = _load("host_attester_install")
 
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
+
+#: Every signed envelope this file builds shares ONE named validity window,
+#: measured from a base instant, rather than an issued_at/expires_at pair
+#: authored as two independent literals — the exact shape that shipped
+#: `issued_at=NOW, expires_at=NOW` (equal, so `AttestationEnvelopeV2.
+#: __post_init__`'s `expires_at must follow issued_at` strictly refuses it;
+#: trusted_host_source.py's `AttestationEnvelopeV2.__post_init__`, the
+#: `expires_at <= issued_at` check). A window constant plus one base instant
+#: cannot be edited into a disagreeing pair by touching only one of the two.
+ENVELOPE_VALIDITY = timedelta(minutes=10)
+#: Same reasoning for a trust root's not_before/not_after
+#: (`AttestationTrustRootV2.__post_init__`'s `not_after must follow
+#: not_before` check).
+ROOT_VALIDITY = timedelta(days=365)
+ROOT_VALID_FROM = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _rfc3339(instant: datetime) -> str:
+    """The canonical UTC RFC3339 form `trusted_host_source._instant` parses
+    (`%Y-%m-%dT%H:%M:%SZ`, no fractional seconds) — the same formatting
+    `host_attester.py::_format_instant` applies in production."""
+    return instant.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 CANDIDATE_KEY = b"starter-release-workflow-key"
 CANDIDATE_FP = "sha256:" + hashlib.sha256(CANDIDATE_KEY).hexdigest()
 OUTSIDE_KEY = b"an-attacker-controlled-key"
@@ -145,8 +169,8 @@ def _root(fp: str, key: bytes, purpose: str, domain: str) -> AttestationTrustRoo
         custody_domain=domain,
         algorithm=ALGORITHM,
         trust_root_version="control-v1",
-        not_before="2026-01-01T00:00:00Z",
-        not_after="2027-01-01T00:00:00Z",
+        not_before=_rfc3339(ROOT_VALID_FROM),
+        not_after=_rfc3339(ROOT_VALID_FROM + ROOT_VALIDITY),
     )
 
 
@@ -190,6 +214,7 @@ def _candidate_envelope(
     fp: str = CANDIDATE_FP,
     key: bytes = CANDIDATE_KEY,
     subject: CandidateAttestationSubjectV2 | None = None,
+    issued: datetime = NOW,
 ) -> AttestationEnvelopeV2:
     subject = subject if subject is not None else _subject()
     envelope = AttestationEnvelopeV2(
@@ -201,8 +226,8 @@ def _candidate_envelope(
         fp,
         "starter-release",
         "control-v1",
-        "2026-09-09T00:00:00Z",
-        "2026-09-09T00:10:00Z",
+        _rfc3339(issued),
+        _rfc3339(issued + ENVELOPE_VALIDITY),
         "starter-release-workflow",
         "candidate-observation",
         subject.canonical_document(),
@@ -236,7 +261,7 @@ def _call(
         trust_root_version="control-v1",
         observation_id="host-observation",
         issued_at=NOW,
-        expires_at=NOW,
+        expires_at=NOW + ENVELOPE_VALIDITY,
         downloader=downloader,
         installer=installer,
     )
