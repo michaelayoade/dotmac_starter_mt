@@ -24,7 +24,7 @@ class _FakeTenant:
 
 
 class _FakeRuntime:
-    """A stand-in `DatabaseRuntime`, resolved through `get_database_runtime`
+    """A stand-in `DatabaseRuntime`, resolved through `resolve_database_runtime`
     (kernel-runtime-composition-seam) rather than `dotmac_kernel.db` directly
     — `_tenancy_errors` no longer imports `dotmac_kernel.db` itself."""
 
@@ -64,7 +64,7 @@ def _run(
     monkeypatch.setattr(app_factory.settings, "tenancy", tenancy, raising=False)
     monkeypatch.setattr(
         session_runtime,
-        "get_database_runtime",
+        "resolve_database_runtime",
         lambda: _FakeRuntime(_fake_db(slugs)),
     )
     return app_factory._tenancy_errors()
@@ -115,7 +115,7 @@ def test_an_unreachable_store_is_not_a_tenancy_verdict(
         yield  # pragma: no cover
 
     monkeypatch.setattr(
-        session_runtime, "get_database_runtime", lambda: _FakeRuntime(_boom)
+        session_runtime, "resolve_database_runtime", lambda: _FakeRuntime(_boom)
     )
     assert app_factory._tenancy_errors() == []
     assert single_tenant_binding() is None

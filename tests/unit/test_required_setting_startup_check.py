@@ -55,7 +55,7 @@ def _raise(exc: BaseException):
 
 
 class _FakeRuntime:
-    """A stand-in `DatabaseRuntime`, resolved through `get_database_runtime`
+    """A stand-in `DatabaseRuntime`, resolved through `resolve_database_runtime`
     (kernel-runtime-composition-seam) rather than `dotmac_kernel.db` directly
     — `_required_setting_errors` no longer imports `dotmac_kernel.db` itself."""
 
@@ -78,7 +78,7 @@ def patched(monkeypatch):
 
         monkeypatch.setattr(
             session_runtime,
-            "get_database_runtime",
+            "resolve_database_runtime",
             lambda: _FakeRuntime(resolver),
             raising=True,
         )
@@ -181,7 +181,7 @@ def test_a_clean_run_returns_the_validators_findings(monkeypatch) -> None:
 
     monkeypatch.setattr(
         session_runtime,
-        "get_database_runtime",
+        "resolve_database_runtime",
         lambda: _FakeRuntime(_resolver),
         raising=True,
     )

@@ -1,7 +1,7 @@
 """Route dependencies defer DB construction without taking transaction ownership.
 
 `deps.get_db`/`deps.get_platform_db` resolve the runtime through
-`get_database_runtime()` (kernel-runtime-composition-seam), not by importing
+`resolve_database_runtime()` (kernel-runtime-composition-seam), not by importing
 `dotmac_kernel.db` directly. That is what lets a product install its own
 `DatabaseRuntime` and have these two adapters serve it unchanged; a fake
 runtime here proves the delegation without needing a real engine.
@@ -38,7 +38,7 @@ def test_tenant_dependency_delegates_when_the_request_resolves(monkeypatch) -> N
         events.append("closed")
 
     monkeypatch.setattr(
-        deps, "get_database_runtime", lambda: _FakeRuntime(request_session=owned)
+        deps, "resolve_database_runtime", lambda: _FakeRuntime(request_session=owned)
     )
 
     dependency = deps.get_db(request)
@@ -61,7 +61,7 @@ def test_tenant_dependency_passes_the_resolved_tenant_id(monkeypatch) -> None:
         yield session
 
     monkeypatch.setattr(
-        deps, "get_database_runtime", lambda: _FakeRuntime(request_session=owned)
+        deps, "resolve_database_runtime", lambda: _FakeRuntime(request_session=owned)
     )
 
     dependency = deps.get_db(request)
@@ -80,7 +80,7 @@ def test_platform_dependency_delegates_when_the_request_resolves(monkeypatch) ->
 
     monkeypatch.setattr(
         deps,
-        "get_database_runtime",
+        "resolve_database_runtime",
         lambda: _FakeRuntime(platform_request_session=owned),
     )
 
