@@ -14,7 +14,15 @@ asserting it works. Whether a product HAS adopted that surface is a fact
 about the product's own tree, established by fetching, verifying and parsing
 a fixed, typed readiness record from that product's own repository (see
 "The runner" below). A verified record proves compatibility, never adoption
-— ADR-0006 § 5, "reference proof is not adoption" — and adoption stays 0/3.
+— ADR-0006 § 5, "reference proof is not adoption". `EvaluationResult` and
+`GateResult` report this as the fixed, non-caller-selectable
+`adoption_status = "not_evaluated"` (see "Which requirement ids Starter
+reads, and the verdict rule" below) — this module deliberately computes NO
+fleet adoption fraction: Academy's adoption-debt facts are
+`false`-means-not-adopted, ERP's `sync-runtime-not-yet-composed` is
+`true`-means-not-adopted, and Sub selects no adoption-role requirement at
+all, so a numerator over those three signals would be arithmetic on
+incommensurable polarities, not a measurement.
 
 Corrected shape, second ruling (2026-09-09)
 ------------------------------------------------
@@ -179,8 +187,8 @@ installation, not adoption.
 Three distinct refusal reasons
 ---------------------------------
 
-A reviewer must be able to tell, from `EvaluationResult.status` alone (never
-by parsing `findings`), which of these applies:
+A reviewer must be able to tell, from `EvaluationResult.compatibility_status`
+alone (never by parsing `findings`), which of these applies:
 
 1. **`unbound`** — no revision named at all.
 2. **`moving_ref`** / **`invalid_revision`** — the named revision is not an
@@ -201,7 +209,7 @@ The absence-is-refusal rule
 
 **A missing product revision is a REFUSAL, never a skip and never a pass.**
 `evaluate_gate` always evaluates exactly the three names in `PRODUCTS`, never
-fewer. `GateResult.satisfied` additionally refuses an EMPTY `evaluations`
+fewer. `GateResult.compatibility_satisfied` additionally refuses an EMPTY `evaluations`
 tuple outright (`all(())` is `True` in Python, and a gate that read that as
 "nothing to refuse" would be the identical defect this whole programme has
 been chasing).
@@ -282,7 +290,8 @@ ALLOWED_BINDING_ROW_KEYS: Final = frozenset({"revision", "_note"})
 #: it is refused rather than silently accepted or silently skipped.
 PRODUCTS: Final = ("academy", "erp", "sub")
 
-#: The closed, structured verdict vocabulary for `EvaluationResult.status`.
+#: The closed, structured verdict vocabulary for
+#: `EvaluationResult.compatibility_status`.
 #: Distinguishes "no evidence exists yet" from "evidence exists and was
 #: refused" — the ABSENT-versus-REGISTRY_DISAGREEMENT split. Unchanged by
 #: either ruling: no new public status was added for the runner's refusals.
@@ -1040,11 +1049,25 @@ class EvaluationResult:
     """One product's evaluation. `revision` is always the exact value that
     was evaluated (possibly `None`).
 
-    `status` is the STRUCTURED verdict, not just prose in `findings` — a
-    reader must be able to tell "this product has not yet produced evidence"
-    apart from "this product produced evidence and the evaluation refused
-    it" WITHOUT parsing free text. `satisfied` is DERIVED from `status`,
-    never stored.
+    `compatibility_status` is the STRUCTURED verdict, not just prose in
+    `findings` — a reader must be able to tell "this product has not yet
+    produced evidence" apart from "this product produced evidence and the
+    evaluation refused it" WITHOUT parsing free text.
+    `compatibility_satisfied` is DERIVED from `compatibility_status`, never
+    stored.
+
+    `adoption_status` is ALWAYS the fixed literal `"not_evaluated"` — this
+    module deliberately does not compute a fleet adoption fraction (see the
+    module docstring, "Compatibility only, never adoption"): Academy's
+    adoption-debt facts are `false`-means-not-adopted, ERP's
+    `sync-runtime-not-yet-composed` is `true`-means-not-adopted, and Sub
+    selects no adoption-role requirement at all — a numerator over those
+    three signals would be arithmetic on incommensurable polarities, a
+    number that LOOKS like a measurement and is not one. `adoption_status`
+    is a property, not a stored field — there is no constructor parameter
+    for it, so no accepted input can set or override it, the identical
+    discipline `artefact_digest` and `compatibility_satisfied` already use
+    (see `test_evaluation_result_has_no_adoption_status_input_seam`).
 
     `artefact_digest` is OUTPUT ONLY: the SHA-256 this module itself computed
     from the fetched readiness-record blob's bytes, or `None` when no blob
@@ -1053,64 +1076,94 @@ class EvaluationResult:
 
     product: str
     revision: str | None
-    status: str
+    compatibility_status: str
     findings: tuple[str, ...]
     artefact_digest: str | None = None
 
     def __post_init__(self) -> None:
-        if self.status not in EVALUATION_STATUSES:
+        if self.compatibility_status not in EVALUATION_STATUSES:
             raise ValueError(
-                f"{self.product}: unknown EvaluationResult.status {self.status!r}; "
-                f"known statuses are {sorted(EVALUATION_STATUSES)!r}"
+                f"{self.product}: unknown EvaluationResult.compatibility_status "
+                f"{self.compatibility_status!r}; known statuses are "
+                f"{sorted(EVALUATION_STATUSES)!r}"
             )
 
     @property
-    def satisfied(self) -> bool:
-        return self.status == "satisfied"
+    def compatibility_satisfied(self) -> bool:
+        return self.compatibility_status == "satisfied"
+
+    @property
+    def adoption_status(self) -> str:
+        return "not_evaluated"
 
     def explain(self) -> str:
-        verdict = "SATISFIED" if self.satisfied else f"REFUSED ({self.status})"
+        verdict = (
+            "SATISFIED"
+            if self.compatibility_satisfied
+            else f"REFUSED ({self.compatibility_status})"
+        )
         revision_text = self.revision or "<unbound>"
-        lines = [f"{verdict} ({self.product}@{revision_text})"]
+        lines = [f"COMPATIBILITY {verdict} ({self.product}@{revision_text})"]
         if self.artefact_digest is not None:
             lines.append(f"  digest: sha256:{self.artefact_digest}")
+        lines.append(f"  ADOPTION NOT EVALUATED ({self.product})")
         lines.extend(f"  - {finding}" for finding in self.findings)
         return "\n".join(lines)
 
 
 @dataclass(frozen=True)
 class GateResult:
-    """The all-of combination. `satisfied` is a hard-refusal on an empty
-    `evaluations` tuple — see module docstring, "the absence-is-refusal
-    rule" — so this gate cannot pass on mechanism alone: it needs at least
-    one evaluation, and every one of them must be satisfied."""
+    """The all-of combination. `compatibility_satisfied` is a hard-refusal on
+    an empty `evaluations` tuple — see module docstring, "the
+    absence-is-refusal rule" — so this gate cannot pass on mechanism alone:
+    it needs at least one evaluation, and every one of them must be
+    compatibility-satisfied.
+
+    `adoption_status` mirrors `EvaluationResult.adoption_status`: always the
+    fixed literal `"not_evaluated"`, a property with no constructor seam, for
+    the identical reason — this gate never aggregates a fleet adoption
+    fraction."""
 
     evaluations: tuple[EvaluationResult, ...]
 
     @property
-    def satisfied(self) -> bool:
+    def compatibility_satisfied(self) -> bool:
         if not self.evaluations:
             return False
-        return all(evaluation.satisfied for evaluation in self.evaluations)
+        return all(
+            evaluation.compatibility_satisfied for evaluation in self.evaluations
+        )
+
+    @property
+    def adoption_status(self) -> str:
+        return "not_evaluated"
 
     @property
     def refusing(self) -> tuple[EvaluationResult, ...]:
         return tuple(
-            evaluation for evaluation in self.evaluations if not evaluation.satisfied
+            evaluation
+            for evaluation in self.evaluations
+            if not evaluation.compatibility_satisfied
         )
 
     def explain(self) -> str:
         if not self.evaluations:
-            return "REFUSED: no product was evaluated (empty evaluation set)"
-        if self.satisfied:
+            return (
+                "COMPATIBILITY REFUSED: no product was evaluated (empty "
+                "evaluation set)\nADOPTION NOT EVALUATED"
+            )
+        if self.compatibility_satisfied:
             names = ", ".join(evaluation.product for evaluation in self.evaluations)
-            return f"SATISFIED: all-of gate passed for {names}"
-        lines = [
-            f"REFUSED: {len(self.refusing)} of {len(self.evaluations)} product "
-            "evaluation(s) refused (all-of: any single refusal blocks freeze)"
-        ]
-        for evaluation in self.refusing:
-            lines.append(evaluation.explain())
+            lines = [f"COMPATIBILITY SATISFIED: all-of gate passed for {names}"]
+        else:
+            lines = [
+                f"COMPATIBILITY REFUSED: {len(self.refusing)} of "
+                f"{len(self.evaluations)} product evaluation(s) refused (all-of: "
+                "any single refusal blocks freeze)"
+            ]
+            for evaluation in self.refusing:
+                lines.append(evaluation.explain())
+        lines.append("ADOPTION NOT EVALUATED")
         return "\n".join(lines)
 
 
@@ -1168,7 +1221,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            status=_revision_status(binding.revision),
+            compatibility_status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -1179,7 +1232,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            status=outcome.problem_status,
+            compatibility_status=outcome.problem_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1193,7 +1246,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            status=requirements.shape_status,
+            compatibility_status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1204,7 +1257,7 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="academy",
         revision=binding.revision,
-        status=academy_status,
+        compatibility_status=academy_status,
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -1247,7 +1300,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            status=_revision_status(binding.revision),
+            compatibility_status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -1258,7 +1311,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            status=outcome.problem_status,
+            compatibility_status=outcome.problem_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1272,7 +1325,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            status=requirements.shape_status,
+            compatibility_status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1283,7 +1336,7 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="erp",
         revision=binding.revision,
-        status=erp_status,
+        compatibility_status=erp_status,
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -1338,7 +1391,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            status=_revision_status(binding.revision),
+            compatibility_status=_revision_status(binding.revision),
             findings=tuple(findings),
         )
 
@@ -1349,7 +1402,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            status=outcome.problem_status,
+            compatibility_status=outcome.problem_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1363,7 +1416,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            status=requirements.shape_status,
+            compatibility_status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
@@ -1372,7 +1425,7 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
     return EvaluationResult(
         product="sub",
         revision=binding.revision,
-        status="satisfied" if satisfied else "evaluation_refused",
+        compatibility_status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )

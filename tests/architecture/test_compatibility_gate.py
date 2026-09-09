@@ -4,8 +4,9 @@ Two properties this file exists to prove, per the ruling that this gate must
 be UNABLE to pass on mechanism alone:
 
 1. **Non-vacuity.** With no product evidence bound, the gate refuses, and the
-   refusal names which product and why. `GateResult.satisfied` must not read
-   an empty evaluation set as "nothing to refuse".
+   refusal names which product and why.
+   `GateResult.compatibility_satisfied` must not read an empty evaluation
+   set as "nothing to refuse".
 2. **All-of semantics.** Two products satisfied and one refusing must still
    refuse, and the refusal must name the refusing product specifically.
 
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -140,11 +142,13 @@ def _bind_satisfied(
 
 def test_gate_result_cannot_pass_on_an_empty_evaluation_set() -> None:
     """Plant: construct a `GateResult` directly with zero evaluations —
-    `all(())` is `True`, so a `satisfied` implemented as a bare `all(...)`
-    would pass here for having nothing to check."""
+    `all(())` is `True`, so a `compatibility_satisfied` implemented as a bare
+    `all(...)` would pass here for having nothing to check."""
     empty = gate.GateResult(evaluations=())
-    assert empty.satisfied is False
+    assert empty.compatibility_satisfied is False
     assert "no product was evaluated" in empty.explain()
+    assert empty.adoption_status == "not_evaluated"
+    assert "ADOPTION NOT EVALUATED" in empty.explain()
 
 
 def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
@@ -155,7 +159,7 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
             gate.EvaluationResult("sub", "c" * 40, "satisfied", ()),
         )
     )
-    assert satisfied.satisfied is True
+    assert satisfied.compatibility_satisfied is True
 
 
 def test_the_gate_refuses_without_a_configured_clone_even_with_a_real_binding(
@@ -178,20 +182,80 @@ def test_the_gate_refuses_without_a_configured_clone_even_with_a_real_binding(
         assert gate.IMMUTABLE_COMMIT.fullmatch(bindings[product].revision)
 
     result = gate.evaluate_gate(bindings)
-    assert result.satisfied is False
+    assert result.compatibility_satisfied is False
     assert len(result.refusing) == 3
     for evaluation in result.evaluations:
-        assert evaluation.status == "evidence_incomplete"
+        assert evaluation.compatibility_status == "evidence_incomplete"
         assert evaluation.revision is not None
+
+
+def test_real_coordinates_report_compatibility_with_no_adoption_fraction() -> None:
+    """Runs the checked-in bindings file's three REAL protected-`main`
+    coordinates (Academy #134, ERP #523, Sub #3041) end to end, exactly as
+    CI's checkout step configures `COMPAT_GATE_CLONE_*` (see the module
+    docstring, "CI access this runner requires"). Skips outright, rather
+    than silently asserting nothing, when no clone is configured — the
+    ordinary state on a workstation.
+
+    Proves the four things the ruled result contract requires of this exact
+    run: (1) compatibility is 3-of-3 satisfied; (2) every product AND the
+    aggregate report the fixed, structured `adoption_status ==
+    "not_evaluated"`; (3) Academy's five real adoption-debt observations —
+    all `satisfied=False` in its own record — remain visible; and (4) no
+    adoption numerator or denominator (an "N/3"-shaped fraction) is emitted
+    anywhere in the rendered output — asserted as an explicit absence, not
+    merely left unchecked."""
+    if not all(
+        os.environ.get(spec.clone_env_var) for spec in gate.PRODUCT_SPECS.values()
+    ):
+        pytest.skip(
+            "no COMPAT_GATE_CLONE_* configured in this environment — this "
+            "assertion runs against CI's real product checkouts"
+        )
+
+    bindings = gate.load_default_bindings()
+    result = gate.evaluate_gate(bindings)
+
+    # (1) Compatibility is 3-of-3 satisfied.
+    assert result.compatibility_satisfied is True, result.explain()
+    assert all(e.compatibility_satisfied for e in result.evaluations)
+
+    # (2) Every product AND the aggregate report the structured, fixed
+    # adoption_status -- never a computed fraction.
+    assert result.adoption_status == "not_evaluated"
+    for evaluation in result.evaluations:
+        assert evaluation.adoption_status == "not_evaluated"
+
+    # (3) Academy's five real adoption-debt observations remain visible.
+    academy = next(e for e in result.evaluations if e.product == "academy")
+    adoption_findings = [f for f in academy.findings if f.startswith("ADOPTION STATE")]
+    assert len(adoption_findings) == 5
+    assert all("satisfied=False" in f for f in adoption_findings)
+
+    # (4) No adoption numerator or denominator is emitted anywhere in the
+    # rendered output -- assert the ABSENCE explicitly.
+    rendered = (
+        result.explain()
+        + "\n"
+        + "\n".join(finding for e in result.evaluations for finding in e.findings)
+    )
+    fraction_near_adoption = re.search(
+        r"adoption[^\n]{0,60}\d+\s*/\s*\d+", rendered, re.IGNORECASE
+    )
+    assert fraction_near_adoption is None, fraction_near_adoption
+    assert "0/3" not in rendered
+    assert "3/3" not in rendered
+    assert "0 of 3" not in rendered
+    assert "3 of 3" not in rendered
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
     result = gate.evaluate_gate({})
-    assert result.satisfied is False
+    assert result.compatibility_satisfied is False
     assert tuple(e.product for e in result.evaluations) == gate.PRODUCTS
     for evaluation in result.evaluations:
-        assert evaluation.satisfied is False
-        assert evaluation.status == "unbound"
+        assert evaluation.compatibility_satisfied is False
+        assert evaluation.compatibility_status == "unbound"
         assert evaluation.revision is None
 
 
@@ -201,21 +265,23 @@ def test_each_refusal_names_the_product_and_the_observed_reason() -> None:
         joined = " ".join(evaluation.findings)
         assert "no revision is bound for" in joined
         assert evaluation.product in joined
-        assert evaluation.status == "unbound"
+        assert evaluation.compatibility_status == "unbound"
 
 
 # ── Structured status: unbound is distinct from refused-after-evaluation ───
 
 
-def test_satisfied_is_derived_from_status_not_stored() -> None:
+def test_compatibility_satisfied_is_derived_from_status_not_stored() -> None:
     unbound = gate.EvaluationResult("academy", None, "unbound", ())
-    assert unbound.satisfied is False
+    assert unbound.compatibility_satisfied is False
     satisfied = gate.EvaluationResult("academy", "a" * 40, "satisfied", ())
-    assert satisfied.satisfied is True
+    assert satisfied.compatibility_satisfied is True
 
 
 def test_an_unknown_status_is_refused_at_construction() -> None:
-    with pytest.raises(ValueError, match="unknown EvaluationResult.status"):
+    with pytest.raises(
+        ValueError, match="unknown EvaluationResult.compatibility_status"
+    ):
         gate.EvaluationResult("academy", None, "incompatible", ())
 
 
@@ -228,6 +294,27 @@ def test_evaluation_result_has_no_digest_input_seam() -> None:
         gate.ProductBinding(  # type: ignore[call-arg]
             product="erp", revision="a" * 40, digest="x" * 64
         )
+
+
+def test_evaluation_result_has_no_adoption_status_input_seam() -> None:
+    """Structural proof, the identical discipline as the digest seam above:
+    `adoption_status` is a property, not a dataclass field, so there is no
+    `__init__` parameter for it at all — a caller cannot supply or override
+    it, and the fixed literal `"not_evaluated"` is the only value it can
+    ever report."""
+    with pytest.raises(TypeError):
+        gate.EvaluationResult(  # type: ignore[call-arg]
+            "academy", "a" * 40, "satisfied", (), adoption_status="satisfied"
+        )
+    result = gate.EvaluationResult("academy", "a" * 40, "satisfied", ())
+    assert result.adoption_status == "not_evaluated"
+
+
+def test_gate_result_has_no_adoption_status_input_seam() -> None:
+    with pytest.raises(TypeError):
+        gate.GateResult(evaluations=(), adoption_status="satisfied")  # type: ignore[call-arg]
+    result = gate.GateResult(evaluations=())
+    assert result.adoption_status == "not_evaluated"
 
 
 # ── All-of semantics: two satisfied, one refusing must still refuse ────────
@@ -245,7 +332,7 @@ def test_all_three_satisfied_bindings_pass_the_gate(
         for product in gate.PRODUCTS
     }
     result = gate.evaluate_gate(bindings)
-    assert result.satisfied is True, result.explain()
+    assert result.compatibility_satisfied is True, result.explain()
     assert result.refusing == ()
     for evaluation in result.evaluations:
         assert evaluation.artefact_digest is not None
@@ -260,10 +347,10 @@ def test_two_satisfied_and_one_refusing_still_refuses_and_names_it(
         # sub omitted entirely — unbound.
     }
     result = gate.evaluate_gate(bindings)
-    assert result.satisfied is False
+    assert result.compatibility_satisfied is False
     assert len(result.refusing) == 1
     assert result.refusing[0].product == "sub"
-    assert result.refusing[0].status == "unbound"
+    assert result.refusing[0].compatibility_status == "unbound"
     explanation = result.explain()
     assert "sub" in explanation
 
@@ -279,22 +366,22 @@ def test_unknown_product_in_bindings_is_refused_by_construction() -> None:
 def test_a_moving_ref_revision_is_refused_by_construction() -> None:
     binding = gate.ProductBinding(product="academy", revision="main")
     result = gate.evaluate_academy(binding)
-    assert result.satisfied is False
-    assert result.status == "moving_ref"
+    assert result.compatibility_satisfied is False
+    assert result.compatibility_status == "moving_ref"
 
 
 def test_an_embedded_moving_ref_after_at_is_refused() -> None:
     binding = gate.ProductBinding(product="erp", revision="main@e1402902")
     result = gate.evaluate_erp(binding)
-    assert result.satisfied is False
-    assert result.status == "moving_ref"
+    assert result.compatibility_satisfied is False
+    assert result.compatibility_status == "moving_ref"
 
 
 def test_an_abbreviated_commit_is_refused() -> None:
     binding = gate.ProductBinding(product="sub", revision="abc1234")
     result = gate.evaluate_sub(binding)
-    assert result.satisfied is False
-    assert result.status == "invalid_revision"
+    assert result.compatibility_satisfied is False
+    assert result.compatibility_status == "invalid_revision"
 
 
 # ── The runner: ancestry, blob, parse — each a real refusal point ─────────
@@ -472,7 +559,7 @@ def test_missing_requirement_id_refuses_as_evidence_incomplete(
     monkeypatch.setenv(spec.clone_env_var, str(repo))
 
     result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
-    assert result.status == "evidence_incomplete"
+    assert result.compatibility_status == "evidence_incomplete"
     assert any("no requirement with id" in f for f in result.findings)
     missing_ids = {r.requirement_id for r in spec.requirements[1:]}
     joined = " ".join(result.findings)
@@ -503,7 +590,7 @@ def test_a_requirement_present_but_not_satisfied_refuses_as_evaluation_refused(
     monkeypatch.setenv(spec.clone_env_var, str(repo))
 
     result = gate.evaluate_erp(gate.ProductBinding(product="erp", revision=revision))
-    assert result.status == "evaluation_refused"
+    assert result.compatibility_status == "evaluation_refused"
     assert any("OBSERVED" in f and failing_id in f for f in result.findings)
 
 
@@ -528,7 +615,7 @@ def test_a_false_sub_compatibility_fact_also_refuses(
     monkeypatch.setenv(spec.clone_env_var, str(repo))
 
     result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
-    assert result.status == "evaluation_refused"
+    assert result.compatibility_status == "evaluation_refused"
     assert any("OBSERVED" in f and failing_id in f for f in result.findings)
 
 
@@ -555,7 +642,7 @@ def test_academy_adoption_debt_is_reported_but_never_refuses_compatibility(
     result = gate.evaluate_academy(
         gate.ProductBinding(product="academy", revision=revision)
     )
-    assert result.status == "satisfied", result.explain()
+    assert result.compatibility_status == "satisfied", result.explain()
     joined = " ".join(result.findings)
     for r in spec.requirements:
         assert r.requirement_id in joined
@@ -585,7 +672,7 @@ def test_extra_product_owned_requirements_are_permitted_and_ignored(
     monkeypatch.setenv(spec.clone_env_var, str(repo))
 
     result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
-    assert result.status == "satisfied", result.explain()
+    assert result.compatibility_status == "satisfied", result.explain()
 
 
 def test_duplicate_selected_requirement_ids_refuse() -> None:
