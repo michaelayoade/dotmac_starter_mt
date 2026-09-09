@@ -143,6 +143,39 @@ otherwise treated as authoritative, which is exactly why a caller-supplied
 digest would have been as weak as the claim it replaces (see the identical-
 digest measurement above).
 
+Which requirement ids Starter reads, and the verdict rule
+-------------------------------------------------------------
+
+A product's readiness record is free to carry any requirement ids it likes
+— products keep their own granular, descriptive ids, and a record may carry
+more than Starter consumes (guard 7). `PRODUCT_SPECS[product].requirements`
+is the ONE place Starter names which of those product-owned ids it reads,
+each as a `RequirementSpec(requirement_id, role)`. No evaluator function
+spells a requirement-id string itself; every lookup goes through
+`_evaluate_readiness_requirements`, which walks exactly this table (guard 4,
+`test_no_evaluator_local_requirement_id_literals`).
+
+`role` is closed to two values:
+
+- `"compatibility"` — the record's `satisfied` boolean feeds the verdict
+  directly. `False` (or the id being absent from the record) refuses the
+  product.
+- `"adoption_state"` — an OBSERVATION about whether the product has cut
+  over yet. Always reported in `findings`, but its `satisfied` value never
+  by itself refuses compatibility.
+
+**The verdict rule.** Academy's five selected ids are ALL
+`"adoption_state"`: its four eager reference imports and its absent runtime
+binding are current adoption debt, not proof the Kernel successor's API is
+inexpressible for Academy. Requiring them `true` before publication would
+turn this compatibility gate into an adoption gate while adoption is 0/3 —
+so Academy's evaluation reports every `false` value plainly and does not
+refuse compatibility because of them. ERP and Sub's selected compatibility
+ids still refuse the product the moment one is `false`; ERP additionally
+carries one `"adoption_state"` id (`sync-runtime-not-yet-composed`) that is
+informational only, for the identical reason: a pin in `pyproject.toml` is
+installation, not adoption.
+
 Three distinct refusal reasons
 ---------------------------------
 
@@ -249,11 +282,6 @@ ALLOWED_BINDING_ROW_KEYS: Final = frozenset({"revision", "_note"})
 #: it is refused rather than silently accepted or silently skipped.
 PRODUCTS: Final = ("academy", "erp", "sub")
 
-#: The one accepted value for the ERP async-transitional requirement's
-#: `statement`/id semantics — see `evaluate_erp`. Closed for the same reason
-#: `HISTORICAL_ADOPTION_STATES` in `adoption_evidence.py` is closed.
-ASYNC_TRANSITIONAL_REQUIREMENT_ID: Final = "async_support_explicitly_transitional"
-
 #: The closed, structured verdict vocabulary for `EvaluationResult.status`.
 #: Distinguishes "no evidence exists yet" from "evidence exists and was
 #: refused" — the ABSENT-versus-REGISTRY_DISAGREEMENT split. Unchanged by
@@ -298,6 +326,38 @@ READINESS_RECORD_PATH: Final = "docs/kernel-runtime-readiness.json"
 
 # ── The fixed product specification (Starter-owned, closed) ────────────────
 
+#: `RequirementSpec.role` — the closed, two-value vocabulary a selected
+#: requirement id is classified under. `"compatibility"`: the record's
+#: `satisfied` boolean feeds the verdict directly — `False` refuses the
+#: product (`evaluation_refused`). `"adoption_state"`: an OBSERVATION about
+#: whether a product has cut over yet, always reported, but its `satisfied`
+#: value never by itself refuses compatibility — see the module docstring,
+#: "The verdict rule": adoption debt is not proof the successor API is
+#: inexpressible, and must never masquerade as incompatibility.
+REQUIREMENT_ROLES: Final = frozenset({"compatibility", "adoption_state"})
+
+
+@dataclass(frozen=True)
+class RequirementSpec:
+    """ONE product-owned requirement id Starter has chosen to consume from a
+    verified readiness record, plus Starter's classification of it —
+    `requirement_id` names the product-authored id verbatim (products keep
+    their own granular ids; Starter names, and only names, which of them it
+    reads), `role` is `REQUIREMENT_ROLES`. This is the ONLY place a
+    requirement-id string may be spelled: evaluator functions look an entry
+    up through this table, never by writing the id literal themselves (see
+    `test_no_evaluator_local_requirement_id_literals`)."""
+
+    requirement_id: str
+    role: str
+
+    def __post_init__(self) -> None:
+        if self.role not in REQUIREMENT_ROLES:
+            raise ValueError(
+                f"RequirementSpec({self.requirement_id!r}): unknown role "
+                f"{self.role!r}; known roles are {sorted(REQUIREMENT_ROLES)!r}"
+            )
+
 
 @dataclass(frozen=True)
 class ProductSpec:
@@ -305,39 +365,145 @@ class ProductSpec:
     a binding. `repository` doubles as the exact value the record's own
     `product` field must equal (`"dotmac_erp"`, not `"erp"`). `subject` is
     the exact string the record must self-declare, so a record copied from
-    another product's repository or subject is refused."""
+    another product's repository or subject is refused. `requirements` is
+    the closed, ordered set of that product's own requirement ids Starter
+    consumes — a record may carry additional ids Starter does not select;
+    those are simply not looked up."""
 
     product: str
     repository: str
     subject: str
     clone_env_var: str
+    requirements: tuple[RequirementSpec, ...] = ()
 
 
 #: Closed and Starter-owned. A product cannot redefine its own repository,
-#: path, subject, or clone coordinate from the bindings file — see
-#: `ALLOWED_BINDING_ROW_KEYS`.
+#: path, subject, clone coordinate, or SELECTED requirement ids from the
+#: bindings file — see `ALLOWED_BINDING_ROW_KEYS`. Products keep their own
+#: granular, descriptive ids; this table is the one place Starter names
+#: which of them it consumes and how each affects the verdict.
 PRODUCT_SPECS: Final[Mapping[str, ProductSpec]] = {
     "academy": ProductSpec(
         product="academy",
         repository="dotmac_academy_app",
         subject="academy-kernel-successor-readiness",
         clone_env_var="COMPAT_GATE_CLONE_DOTMAC_ACADEMY_APP",
+        # All five are adoption-state observations, not compatibility
+        # requirements — Academy's eager reference imports and absent
+        # runtime binding are current adoption debt, not proof the
+        # successor API is inexpressible (see "The verdict rule").
+        requirements=(
+            RequirementSpec(
+                "no-module-scope-kernel-db-import-in-api-deps", "adoption_state"
+            ),
+            RequirementSpec(
+                "no-module-scope-kernel-db-import-in-cli", "adoption_state"
+            ),
+            RequirementSpec(
+                "no-module-scope-kernel-db-import-in-web-context", "adoption_state"
+            ),
+            RequirementSpec(
+                "no-module-scope-kernel-db-import-in-web-labs", "adoption_state"
+            ),
+            RequirementSpec(
+                "product-owned-runtime-bound-before-any-kernel-db-import",
+                "adoption_state",
+            ),
+        ),
     ),
     "erp": ProductSpec(
         product="erp",
         repository="dotmac_erp",
         subject="erp-kernel-successor-readiness",
         clone_env_var="COMPAT_GATE_CLONE_DOTMAC_ERP",
+        requirements=(
+            RequirementSpec("single-sync-engine-construction-site", "compatibility"),
+            RequirementSpec(
+                "async-database-paths-isolated-from-kernel", "compatibility"
+            ),
+            RequirementSpec("fork-safety-hooks-owned-by-product", "compatibility"),
+            RequirementSpec(
+                "no-runtime-bypassrls-credential-or-per-call-flag", "compatibility"
+            ),
+            RequirementSpec(
+                "statement-timeout-and-pool-tuning-set-at-construction",
+                "compatibility",
+            ),
+            RequirementSpec("legacy-tenant-guc-is-a-single-named-value", "compatibility"),
+            RequirementSpec(
+                "no-runtime-bypass-rls-guc-writer-remains", "compatibility"
+            ),
+            # Informational adoption state, not a compatibility failure — ERP
+            # has not yet composed the sync DatabaseRuntime successor; a
+            # pin is installation, not adoption.
+            RequirementSpec("sync-runtime-not-yet-composed", "adoption_state"),
+        ),
     ),
     "sub": ProductSpec(
         product="sub",
         repository="dotmac_sub",
         subject="sub-kernel-successor-readiness",
         clone_env_var="COMPAT_GATE_CLONE_DOTMAC_SUB",
+        # All eight are compatibility requirements, required true.
+        requirements=(
+            RequirementSpec(
+                "tenant-guc-is-a-class-scoped-after-begin-listener", "compatibility"
+            ),
+            RequirementSpec(
+                "tenant-guc-fires-only-on-root-transactions", "compatibility"
+            ),
+            RequirementSpec(
+                "tenant-guc-value-is-transaction-local-set-config", "compatibility"
+            ),
+            RequirementSpec(
+                "isolation-modes-apply-via-connection-execution-options-not-a-new-session-factory",
+                "compatibility",
+            ),
+            RequirementSpec(
+                "read-only-mode-is-repeatable-read-plus-postgresql-readonly-true",
+                "compatibility",
+            ),
+            RequirementSpec(
+                "serializable-write-mode-is-serializable-plus-postgresql-readonly-false",
+                "compatibility",
+            ),
+            RequirementSpec(
+                "no-set-transaction-sql-is-issued-for-isolation-mode", "compatibility"
+            ),
+            RequirementSpec(
+                "tenant-guc-ordering-is-compatible-with-a-pre-begin-kernel-isolation-pin",
+                "compatibility",
+            ),
+        ),
     ),
 }
 if set(PRODUCT_SPECS) != set(PRODUCTS):
     raise RuntimeError("PRODUCT_SPECS must declare exactly the names in PRODUCTS")
+
+def _duplicate_requirement_ids(specs: Mapping[str, ProductSpec]) -> dict[str, list[str]]:
+    """Guard 1: for each product, the requirement ids its `ProductSpec`
+    selects, if any id is selected more than once — a duplicate would make
+    one product-authored `satisfied` boolean silently shadow another,
+    undetected. Returns an empty dict when every product's selection is
+    duplicate-free."""
+    problems: dict[str, list[str]] = {}
+    for product_name, spec in specs.items():
+        seen_ids = [requirement.requirement_id for requirement in spec.requirements]
+        if len(seen_ids) != len(set(seen_ids)):
+            problems[product_name] = sorted(
+                {rid for rid in seen_ids if seen_ids.count(rid) > 1}
+            )
+    return problems
+
+
+#: Guard 1, applied eagerly at import time to the fixed table itself, rather
+#: than deferred to a per-evaluation check.
+_duplicate_problems = _duplicate_requirement_ids(PRODUCT_SPECS)
+if _duplicate_problems:
+    raise RuntimeError(
+        f"PRODUCT_SPECS selects duplicate requirement id(s): {_duplicate_problems!r}"
+    )
+del _duplicate_problems
 
 
 # ── AST reads of the Kernel's own tree (pure, offline, deterministic) ──────
@@ -785,6 +951,75 @@ def _requirement_problem(
 
 
 @dataclass(frozen=True)
+class RequirementsEvaluation:
+    """The outcome of walking one product's `PRODUCT_SPECS[...].requirements`
+    against a verified record. `shape_status` is set (and `findings` holds
+    only the shape problem(s)) when any SELECTED id is absent from the
+    record — guard 2's `evidence_incomplete`. Otherwise `shape_status` is
+    `None` and `compatibility_satisfied` is the verdict-bearing half: `True`
+    unless some `role="compatibility"` entry's `satisfied` is not `True`. A
+    `role="adoption_state"` entry's `satisfied` value is reported in
+    `findings` but never changes `compatibility_satisfied` — see
+    `RequirementSpec.role`."""
+
+    findings: tuple[str, ...]
+    compatibility_satisfied: bool
+    shape_status: str | None
+
+
+def _evaluate_readiness_requirements(
+    product: str, revision: str, record: ReadinessRecord
+) -> RequirementsEvaluation:
+    """The ONE place a verified record's requirements are read against
+    `PRODUCT_SPECS` — every evaluator below calls this instead of looking up
+    a requirement id itself, so no evaluator function's own source ever
+    spells a requirement-id literal (see
+    `test_no_evaluator_local_requirement_id_literals`)."""
+    specs = PRODUCT_SPECS[product].requirements
+    entries: dict[str, Mapping[str, object]] = {}
+    shape_problems: list[str] = []
+    for spec in specs:
+        entry, problem = _requirement_problem(record, spec.requirement_id)
+        if problem is not None:
+            shape_problems.append(problem)
+        else:
+            assert entry is not None
+            entries[spec.requirement_id] = entry
+    if shape_problems:
+        return RequirementsEvaluation(
+            findings=tuple(f"MEASURED: {problem}" for problem in shape_problems),
+            compatibility_satisfied=False,
+            shape_status="evidence_incomplete",
+        )
+
+    findings: list[str] = []
+    compatibility_satisfied = True
+    for spec in specs:
+        entry = entries[spec.requirement_id]
+        satisfied_value = entry.get("satisfied")
+        if spec.role == "compatibility":
+            if satisfied_value is not True:
+                compatibility_satisfied = False
+                findings.append(
+                    f"OBSERVED at {product}@{revision}: requirement "
+                    f"{spec.requirement_id!r} is satisfied={satisfied_value!r} "
+                    f"({entry.get('source_reference')!r})"
+                )
+        else:  # "adoption_state" — always reported, never gates compatibility
+            findings.append(
+                f"ADOPTION STATE at {product}@{revision} (adoption debt, "
+                "not a compatibility failure): requirement "
+                f"{spec.requirement_id!r} is satisfied={satisfied_value!r} "
+                f"({entry.get('source_reference')!r})"
+            )
+    return RequirementsEvaluation(
+        findings=tuple(findings),
+        compatibility_satisfied=compatibility_satisfied,
+        shape_status=None,
+    )
+
+
+@dataclass(frozen=True)
 class ProductBinding:
     """The evidence-binding seam's unit. `revision` is the ONLY thing a
     binding supplies — repository, path, schema and subject are fixed in
@@ -889,10 +1124,13 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     as a finding about the SUCCESSOR's sufficiency.
 
     PRODUCT-SIDE: fetches and verifies Academy's typed readiness record (see
-    module docstring, "The runner") and reads the
-    `strict_bind_without_reference_import` and
-    `no_unpublished_session_local_usage` requirements' product-authored
-    `satisfied` booleans.
+    module docstring, "The runner") and reads every requirement id
+    `PRODUCT_SPECS["academy"].requirements` selects. Every one of those ids
+    is classified `role="adoption_state"` — Academy's eager reference
+    imports and absent runtime binding are current adoption debt, never
+    proof the successor API is inexpressible (see the module docstring,
+    "The verdict rule") — so their `satisfied` values are reported but
+    never refuse compatibility on their own.
     """
     findings: list[str] = []
 
@@ -942,46 +1180,23 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
         )
 
     assert outcome.record is not None
-    record = outcome.record
-    strict_bind, strict_bind_problem = _requirement_problem(
-        record, "strict_bind_without_reference_import"
+    requirements = _evaluate_readiness_requirements(
+        "academy", binding.revision, outcome.record
     )
-    no_usage, no_usage_problem = _requirement_problem(
-        record, "no_unpublished_session_local_usage"
-    )
-    shape_problems = [p for p in (strict_bind_problem, no_usage_problem) if p]
-    if shape_problems:
-        findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
+    findings.extend(requirements.findings)
+    if requirements.shape_status is not None:
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
 
-    assert strict_bind is not None and no_usage is not None
-    if strict_bind.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at academy@{binding.revision}: requirement "
-            f"'strict_bind_without_reference_import' is satisfied="
-            f"{strict_bind.get('satisfied')!r} "
-            f"({strict_bind.get('source_reference')!r})"
-        )
-    if no_usage.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at academy@{binding.revision}: requirement "
-            f"'no_unpublished_session_local_usage' is satisfied="
-            f"{no_usage.get('satisfied')!r} ({no_usage.get('source_reference')!r})"
-        )
-
-    satisfied = (
-        strict_bind.get("satisfied") is True and no_usage.get("satisfied") is True
-    )
     return EvaluationResult(
         product="academy",
         revision=binding.revision,
-        status="satisfied" if satisfied else "evaluation_refused",
+        status="satisfied" if requirements.compatibility_satisfied else "evaluation_refused",
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -989,17 +1204,17 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
 
 def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
     """ERP — synchronous session requirements are expressible against
-    `dotmac_kernel.session_runtime.DatabaseRuntime`. Asynchronous support
-    stays EXPLICITLY TRANSITIONAL, recorded as such, never silently omitted
-    and never silently satisfied by a claim the Kernel side cannot back.
+    `dotmac_kernel.session_runtime.DatabaseRuntime`.
 
     KERNEL-SIDE (measured here): the successor's public boundary methods,
     and confirmation that NONE is `async def`.
 
     PRODUCT-SIDE: fetches and verifies ERP's typed readiness record and reads
-    the `sync_requirements_satisfied` and
-    `async_support_explicitly_transitional` requirements' product-authored
-    `satisfied` booleans.
+    every requirement id `PRODUCT_SPECS["erp"].requirements` selects — seven
+    `role="compatibility"` requirements (required `true`) plus one
+    informational `role="adoption_state"` id about sync-runtime composition
+    that is reported but never refuses compatibility on its own: a pin in
+    `pyproject.toml` is installation, not adoption.
     """
     findings: list[str] = []
 
@@ -1041,43 +1256,23 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
         )
 
     assert outcome.record is not None
-    record = outcome.record
-    sync_req, sync_problem = _requirement_problem(record, "sync_requirements_satisfied")
-    async_req, async_problem = _requirement_problem(
-        record, ASYNC_TRANSITIONAL_REQUIREMENT_ID
+    requirements = _evaluate_readiness_requirements(
+        "erp", binding.revision, outcome.record
     )
-    shape_problems = [p for p in (sync_problem, async_problem) if p]
-    if shape_problems:
-        findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
+    findings.extend(requirements.findings)
+    if requirements.shape_status is not None:
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
 
-    assert sync_req is not None and async_req is not None
-    if sync_req.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at erp@{binding.revision}: requirement "
-            f"'sync_requirements_satisfied' is satisfied="
-            f"{sync_req.get('satisfied')!r} ({sync_req.get('source_reference')!r})"
-        )
-    if async_req.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at erp@{binding.revision}: requirement "
-            f"{ASYNC_TRANSITIONAL_REQUIREMENT_ID!r} is satisfied="
-            f"{async_req.get('satisfied')!r} — the Kernel publishes no async "
-            "DatabaseRuntime boundary, so ERP must explicitly record async "
-            f"support as transitional ({async_req.get('source_reference')!r})"
-        )
-
-    satisfied = sync_req.get("satisfied") is True and async_req.get("satisfied") is True
     return EvaluationResult(
         product="erp",
         revision=binding.revision,
-        status="satisfied" if satisfied else "evaluation_refused",
+        status="satisfied" if requirements.compatibility_satisfied else "evaluation_refused",
         findings=tuple(findings),
         artefact_digest=outcome.digest,
     )
@@ -1095,9 +1290,8 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
     `yield`.
 
     PRODUCT-SIDE: fetches and verifies Sub's typed readiness record and reads
-    the `guc_hook_ordered_after_isolation_mode` and
-    `tenant_scope_composed_with_readonly_or_serializable` requirements'
-    product-authored `satisfied` booleans.
+    every requirement id `PRODUCT_SPECS["sub"].requirements` selects — all
+    eight `role="compatibility"`, required `true`.
     """
     findings: list[str] = []
 
@@ -1150,44 +1344,21 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
         )
 
     assert outcome.record is not None
-    record = outcome.record
-    guc_req, guc_problem = _requirement_problem(
-        record, "guc_hook_ordered_after_isolation_mode"
+    requirements = _evaluate_readiness_requirements(
+        "sub", binding.revision, outcome.record
     )
-    scope_req, scope_problem = _requirement_problem(
-        record, "tenant_scope_composed_with_readonly_or_serializable"
-    )
-    shape_problems = [p for p in (guc_problem, scope_problem) if p]
-    if shape_problems:
-        findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
+    findings.extend(requirements.findings)
+    if requirements.shape_status is not None:
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=requirements.shape_status,
             findings=tuple(findings),
             artefact_digest=outcome.digest,
         )
 
-    assert guc_req is not None and scope_req is not None
-    if guc_req.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at sub@{binding.revision}: requirement "
-            f"'guc_hook_ordered_after_isolation_mode' is satisfied="
-            f"{guc_req.get('satisfied')!r} ({guc_req.get('source_reference')!r})"
-        )
-    if scope_req.get("satisfied") is not True:
-        findings.append(
-            f"OBSERVED at sub@{binding.revision}: requirement "
-            f"'tenant_scope_composed_with_readonly_or_serializable' is "
-            f"satisfied={scope_req.get('satisfied')!r} "
-            f"({scope_req.get('source_reference')!r})"
-        )
-
     satisfied = (
-        not missing
-        and ordering_holds
-        and guc_req.get("satisfied") is True
-        and scope_req.get("satisfied") is True
+        not missing and ordering_holds and requirements.compatibility_satisfied
     )
     return EvaluationResult(
         product="sub",

@@ -2,16 +2,16 @@
   "schema": "compatibility_gate_bindings_v1",
   "bindings": {
     "academy": {
-      "revision": null,
-      "_note": "EVIDENCE-UNBOUND / not yet eligible -- never incompatible. Academy #130 is being re-derived under Governance #87 (merged as 6fbeffca) in a separate lane, blocked on a Governance-pin schema_version 9->10->11 migration prerequisite that has not landed; Academy is mid-adoption of the Foundation deployment contract in that same separate lane. Nothing about the Kernel successor has failed for it -- it cannot yet produce a revision to bind at all. status stays 'unbound', never 'evaluation_refused'."
+      "revision": "61092e7efaee69b6110523827947f18f9ffb892e",
+      "_note": "dotmac_academy_app #134 on protected main. Its five requirements are all satisfied:false -- Academy imports dotmac_kernel.db at module scope in four places and never calls bind_database_runtime, so it has not opted into the strict-binding seam. A truthful record with false requirements is the correct evidence; the gate refuses Academy on its merits, not for want of a binding."
     },
     "erp": {
-      "revision": null,
-      "_note": "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f (#510) is SOURCE MATERIAL for the typed-record PR, not a final binding -- commit narrative is irrelevant under the corrected ruling, and the typed-record PR will create its own replacement coordinate once dotmac_erp publishes docs/kernel-runtime-readiness.json. Do not bind this SHA as if it were the answer. status stays 'unbound' until a real coordinate exists."
+      "revision": "952618b9f05c17d91de230349e0cbdb425bf8f3d",
+      "_note": "dotmac_erp #523 on protected main. INFORMATIONAL ONLY, no bearing on admission: the earlier record commit b934cf23 reached main through consolidation branch consolidate/open-prs-20260909 rather than its own PR merge -- a process deviation, not an evidence defect. This coordinate is a normal PR merge."
     },
     "sub": {
-      "revision": null,
-      "_note": "288b68cf0ba4196b36641801093b501a75e80a0d (#3015) is SOURCE MATERIAL for the typed-record PR, not a final binding -- same reasoning as erp's note. status stays 'unbound' until dotmac_sub publishes docs/kernel-runtime-readiness.json and a real coordinate exists."
+      "revision": "b3c65f7e5cc72a2ad6c471c773f0a52c33d099d4",
+      "_note": "dotmac_sub #3041 on protected main. Its record carries eight requirements, seven measured and one declared-not-measured in its own statement text, because that requirement's other half is a fact about Starter's tree which Sub cannot sweep."
     }
   }
 }
