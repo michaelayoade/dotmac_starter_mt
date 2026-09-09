@@ -161,7 +161,7 @@ is the ONE place Starter names which of those product-owned ids it reads,
 each as a `RequirementSpec(requirement_id, role)`. No evaluator function
 spells a requirement-id string itself; every lookup goes through
 `_evaluate_readiness_requirements`, which walks exactly this table (guard 4,
-`test_no_evaluator_local_requirement_id_literals`).
+`test_every_requirement_lookup_key_is_the_centralized_attribute`).
 
 `role` is closed to two values:
 
@@ -176,10 +176,12 @@ spells a requirement-id string itself; every lookup goes through
 `"adoption_state"`: its four eager reference imports and its absent runtime
 binding are current adoption debt, not proof the Kernel successor's API is
 inexpressible for Academy. Requiring them `true` before publication would
-turn this compatibility gate into an adoption gate while adoption is 0/3 —
-so Academy's evaluation reports every `false` value plainly and does not
-refuse compatibility because of them. ERP and Sub's selected compatibility
-ids still refuse the product the moment one is `false`; ERP additionally
+turn this compatibility gate into an adoption gate, and this module
+deliberately computes no such fraction (see "Compatibility only, never
+adoption" above) — so Academy's evaluation reports every `false` value
+plainly and does not refuse compatibility because of them. ERP and Sub's
+selected compatibility ids still refuse the product the moment one is
+`false`; ERP additionally
 carries one `"adoption_state"` id (`sync-runtime-not-yet-composed`) that is
 informational only, for the identical reason: a pin in `pyproject.toml` is
 installation, not adoption.
@@ -214,17 +216,17 @@ tuple outright (`all(())` is `True` in Python, and a gate that read that as
 "nothing to refuse" would be the identical defect this whole programme has
 been chasing).
 
-**No product has a typed readiness record yet, so the gate still refuses on
-all three today.** Sub (`288b68cf…`, #3015) and ERP (`b3b191cc…`, #510) are
-SOURCE MATERIAL for the typed-record PRs now being built, not final
-bindings — the record PRs will create their own replacement coordinates,
-and this module does not hard-code today's SHAs as if they were the answer.
-`compatibility_gate_bindings.json` therefore binds no revision for any
-product today; all three refuse at `unbound`. Academy additionally has a
-distinct, named reason it cannot yet be bound at all: it is mid-adoption of
-the Foundation deployment contract, blocked on a Governance-pin
-`schema_version` 9→10→11 migration prerequisite — an EVIDENCE-ELIGIBILITY
-blocker, never a Kernel-incompatibility finding.
+**All three products are bound today.** `compatibility_gate_bindings.json`
+binds Academy (`61092e7e…`, `dotmac_academy_app` #134), ERP
+(`952618b9…`, `dotmac_erp` #523), and Sub (`b3c65f7e…`, `dotmac_sub` #3041)
+— each an immutable, protected-`main` commit carrying a typed readiness
+record. `#3015` (Sub) and `#510` (ERP) were EARLIER source-material PRs for
+the typed-record work and are superseded by #3041 and #523 respectively;
+this module does not bind them. Being bound is not the same as being
+satisfied: Academy's record is bound, verified, and truthfully reports all
+five of its selected requirements `satisfied: false` — it refuses on its
+own merits (`evaluation_refused`), not for want of a binding
+(`unbound`).
 
 CI access this runner requires (reported, not provisioned)
 ------------------------------------------------------------
@@ -355,7 +357,7 @@ class RequirementSpec:
     reads), `role` is `REQUIREMENT_ROLES`. This is the ONLY place a
     requirement-id string may be spelled: evaluator functions look an entry
     up through this table, never by writing the id literal themselves (see
-    `test_no_evaluator_local_requirement_id_literals`)."""
+    `test_every_requirement_lookup_key_is_the_centralized_attribute`)."""
 
     requirement_id: str
     role: str
@@ -988,7 +990,7 @@ def _evaluate_readiness_requirements(
     `PRODUCT_SPECS` — every evaluator below calls this instead of looking up
     a requirement id itself, so no evaluator function's own source ever
     spells a requirement-id literal (see
-    `test_no_evaluator_local_requirement_id_literals`)."""
+    `test_every_requirement_lookup_key_is_the_centralized_attribute`)."""
     specs = PRODUCT_SPECS[product].requirements
     entries: dict[str, Mapping[str, object]] = {}
     shape_problems: list[str] = []
@@ -1033,6 +1035,214 @@ def _evaluate_readiness_requirements(
     )
 
 
+# ── Guard 4: every requirement lookup is keyed by `requirement.requirement_id`
+#
+# STRUCTURAL, not textual. The only place a requirement id is permitted to be
+# read is `ReadinessRecord.requirement(...)` -- the one lookup method that
+# shape defines -- called with a key expression that is (transitively) an
+# `ast.Attribute` chain ending in `.requirement_id`, sourced from iterating
+# `ProductSpec.requirements`. Earlier guard 4 pattern-matched hyphenated
+# 3+-token string literals inside functions named `evaluate_*`; that scan
+# was evadable (a module constant, string concatenation, an f-string with a
+# variable head, or an underscore-joined id all produce a literal the regex
+# never saw as hyphenated) and, worse, MISSED THE REAL LOOKUP SITE:
+# `_evaluate_readiness_requirements` performs the dereference and is
+# `_`-prefixed, so `"_evaluate_readiness_requirements".startswith("evaluate_")`
+# is `False` and the old scan walked past it entirely. This scan instead
+# walks the WHOLE MODULE -- every function, `_`-prefixed or not, plus module
+# scope -- and resolves every `.requirement(...)` call's argument
+# structurally, tracing at most one hop through a local variable or a
+# function parameter (matching this module's actual one-hop shape:
+# `_evaluate_readiness_requirements` calls `_requirement_problem(record,
+# spec.requirement_id)`, which calls `record.requirement(requirement_id)`).
+# A key that does not resolve to a `.requirement_id` attribute chain is a
+# problem, whatever literal, constant, concatenation, or f-string produced
+# it.
+
+
+def _attribute_ends_in_requirement_id(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "requirement_id"
+
+
+def _function_defs_by_name(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    by_name: dict[str, ast.FunctionDef] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            by_name.setdefault(node.name, node)
+    return by_name
+
+
+def _enclosing_function_map(
+    tree: ast.Module,
+) -> dict[int, ast.FunctionDef | None]:
+    """`id(node) -> the nearest enclosing FunctionDef` (or `None` at module
+    scope), for every node in the tree."""
+    enclosing: dict[int, ast.FunctionDef | None] = {}
+
+    def visit(node: ast.AST, current: ast.FunctionDef | None) -> None:
+        enclosing[id(node)] = current
+        next_current = node if isinstance(node, ast.FunctionDef) else current
+        for child in ast.iter_child_nodes(node):
+            visit(child, next_current)
+
+    visit(tree, None)
+    return enclosing
+
+
+def _sole_local_assignment(func: ast.FunctionDef, name: str) -> ast.expr | None:
+    """The RHS of `name = <expr>` inside `func`'s own body, if there is
+    EXACTLY ONE such plain assignment; `None` otherwise (no assignment, more
+    than one, or the name is never reassigned -- e.g. it is a parameter)."""
+    values = [
+        node.value
+        for node in ast.walk(func)
+        for target in (node.targets if isinstance(node, ast.Assign) else ())
+        if isinstance(target, ast.Name) and target.id == name
+    ]
+    return values[0] if len(values) == 1 else None
+
+
+def _calls_to_function_by_name(
+    tree: ast.Module, enclosing_map: dict[int, ast.FunctionDef | None]
+) -> dict[str, list[tuple[ast.Call, ast.FunctionDef | None]]]:
+    """Every plain-name call `f(...)` anywhere in the module, keyed by `f`,
+    paired with the FunctionDef the call itself sits inside (for resolving
+    its arguments in the CALLER's scope)."""
+    calls: dict[str, list[tuple[ast.Call, ast.FunctionDef | None]]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.setdefault(node.func.id, []).append(
+                (node, enclosing_map.get(id(node)))
+            )
+    return calls
+
+
+def _resolves_to_requirement_id(
+    expr: ast.expr,
+    enclosing: ast.FunctionDef | None,
+    acceptable_params: dict[tuple[str, str], bool],
+    depth: int = 0,
+) -> bool:
+    """Does `expr` (evaluated in the scope of `enclosing`) transitively
+    resolve to a `requirement.requirement_id`-shaped attribute chain? The
+    ONLY base case that resolves `True` is a literal `X.requirement_id`
+    attribute access. A `Name` resolves by tracing, at most, ONE further
+    hop: either a single local assignment in the same function, or -- if
+    the name is a parameter -- whether `acceptable_params` has already
+    proven every call site of the enclosing function supplies an acceptable
+    expression for that parameter. Anything else (a string literal, a
+    module-level constant with no local rebinding, string concatenation, an
+    f-string, a method call such as `.replace(...)`) resolves `False`."""
+    if depth > 20:
+        return False
+    if _attribute_ends_in_requirement_id(expr):
+        return True
+    if isinstance(expr, ast.Name) and enclosing is not None:
+        assigned = _sole_local_assignment(enclosing, expr.id)
+        if assigned is not None:
+            return _resolves_to_requirement_id(
+                assigned, enclosing, acceptable_params, depth + 1
+            )
+        param_names = {arg.arg for arg in enclosing.args.args}
+        if expr.id in param_names:
+            return acceptable_params.get((enclosing.name, expr.id), False)
+    return False
+
+
+def _compute_acceptable_params(
+    tree: ast.Module,
+) -> dict[tuple[str, str], bool]:
+    """Fixed-point closure: `(function_name, parameter_name) -> True` once
+    EVERY call site to that function (anywhere in the module) supplies, for
+    that parameter position, an expression that itself resolves to
+    `requirement.requirement_id` (directly, or via an already-proven
+    parameter one hop further out). A function with no call sites, or any
+    call site supplying an unresolved expression, stays `False`."""
+    enclosing_map = _enclosing_function_map(tree)
+    function_defs = _function_defs_by_name(tree)
+    calls_by_name = _calls_to_function_by_name(tree, enclosing_map)
+
+    acceptable: dict[tuple[str, str], bool] = {
+        (name, arg.arg): False
+        for name, fdef in function_defs.items()
+        for arg in fdef.args.args
+    }
+
+    changed = True
+    iterations = 0
+    while changed and iterations < 10:
+        changed = False
+        iterations += 1
+        for name, fdef in function_defs.items():
+            calls = calls_by_name.get(name)
+            if not calls:
+                continue
+            for position, arg in enumerate(fdef.args.args):
+                key = (name, arg.arg)
+                if acceptable[key]:
+                    continue
+                resolved_everywhere = True
+                for call_node, caller_enclosing in calls:
+                    call_arg: ast.expr | None = None
+                    if position < len(call_node.args):
+                        call_arg = call_node.args[position]
+                    else:
+                        keyword = next(
+                            (kw for kw in call_node.keywords if kw.arg == arg.arg),
+                            None,
+                        )
+                        if keyword is not None:
+                            call_arg = keyword.value
+                    if call_arg is None or not _resolves_to_requirement_id(
+                        call_arg, caller_enclosing, acceptable
+                    ):
+                        resolved_everywhere = False
+                        break
+                if resolved_everywhere:
+                    acceptable[key] = True
+                    changed = True
+    return acceptable
+
+
+def requirement_id_lookup_key_problems(source: str) -> list[str]:
+    """Guard 4, applied to `source` (any Python module text, including a
+    planted fragment in a test). Walks the ENTIRE parsed module -- every
+    function and module scope, never restricted to a name prefix -- for
+    every call to `.requirement(...)` (the one lookup method
+    `ReadinessRecord.requirement` defines) and reports one problem string
+    per call whose single argument does not structurally resolve to a
+    `requirement.requirement_id` attribute chain. An empty list means every
+    requirement lookup in `source` is the one permitted form."""
+    tree = ast.parse(source)
+    enclosing_map = _enclosing_function_map(tree)
+    acceptable_params = _compute_acceptable_params(tree)
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "requirement"
+        ):
+            continue
+        if len(node.args) != 1 or node.keywords:
+            problems.append(
+                f"line {node.lineno}: `.requirement(...)` call has an "
+                "unexpected argument shape (expected exactly one "
+                "positional argument)"
+            )
+            continue
+        enclosing = enclosing_map.get(id(node))
+        key_expr = node.args[0]
+        if not _resolves_to_requirement_id(key_expr, enclosing, acceptable_params):
+            problems.append(
+                f"line {node.lineno}: `.requirement(...)` is keyed by "
+                f"{ast.unparse(key_expr)!r}, which does not resolve to a "
+                "`requirement.requirement_id` attribute chain sourced from "
+                "ProductSpec.requirements -- the only permitted lookup key"
+            )
+    return problems
+
+
 @dataclass(frozen=True)
 class ProductBinding:
     """The evidence-binding seam's unit. `revision` is the ONLY thing a
@@ -1065,14 +1275,21 @@ class EvaluationResult:
     three signals would be arithmetic on incommensurable polarities, a
     number that LOOKS like a measurement and is not one. `adoption_status`
     is a property, not a stored field — there is no constructor parameter
-    for it, so no accepted input can set or override it, the identical
-    discipline `artefact_digest` and `compatibility_satisfied` already use
-    (see `test_evaluation_result_has_no_adoption_status_input_seam`).
+    for it, so no accepted input can set or override it (see
+    `test_evaluation_result_has_no_adoption_status_input_seam`).
+    `compatibility_satisfied` is likewise a derived property with no
+    constructor seam (see above).
 
-    `artefact_digest` is OUTPUT ONLY: the SHA-256 this module itself computed
-    from the fetched readiness-record blob's bytes, or `None` when no blob
-    was ever successfully read. No accepted input can set this field — see
-    the module docstring, "The digest is output, never input"."""
+    `artefact_digest`, by contrast, IS an ordinary dataclass field — it has
+    a constructor slot (defaulting to `None`), unlike `adoption_status` and
+    `compatibility_satisfied`. What makes it output-only is not its shape
+    but discipline: it is populated ONLY by `fetch_readiness_record`, from
+    bytes THIS module itself read and hashed via SHA-256 (see the module
+    docstring, "The digest is output, never input"), and no accepted input
+    (`ProductBinding`, `compatibility_gate_bindings.json`, or any other) has
+    a `digest` field a caller could supply — see
+    `test_product_binding_has_no_digest_input_seam`, which proves the
+    absence on `ProductBinding`, the only caller-facing input."""
 
     product: str
     revision: str | None

@@ -3,7 +3,7 @@
   "bindings": {
     "academy": {
       "revision": "61092e7efaee69b6110523827947f18f9ffb892e",
-      "_note": "dotmac_academy_app #134 on protected main. Its five requirements are all satisfied:false -- Academy imports dotmac_kernel.db at module scope in four places and never calls bind_database_runtime, so it has not opted into the strict-binding seam. A truthful record with false requirements is the correct evidence; the gate refuses Academy on its merits, not for want of a binding."
+      "_note": "dotmac_academy_app #134 on protected main. Its five requirements are all satisfied:false -- Academy imports dotmac_kernel.db at module scope in four places and never calls bind_database_runtime, so it has not opted into the strict-binding seam. A truthful record with false requirements is the correct evidence, but every one of Academy's five selected ids is role=adoption_state (PRODUCT_SPECS['academy'].requirements), so per the verdict rule these false values are current adoption debt, reported in full, and do not refuse compatibility on their own -- Academy's evaluation is compatibility_status='satisfied' with five visible ADOPTION STATE findings, not 'evaluation_refused'."
     },
     "erp": {
       "revision": "952618b9f05c17d91de230349e0cbdb425bf8f3d",

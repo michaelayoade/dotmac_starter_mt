@@ -137,6 +137,55 @@ def _bind_satisfied(
     return gate.ProductBinding(product=product, revision=revision)
 
 
+# ── No adoption fraction, anywhere: source text or rendered output ─────────
+#
+# Keyed on PROXIMITY to the word "adoption", never on a blacklist of bare
+# fraction strings such as "3 of 3" -- `GateResult.explain()` legitimately
+# emits a COMPATIBILITY fraction ("N of M product evaluation(s) refused",
+# which reads "3 of 3" when every product refuses) and a bare-string
+# blacklist would false-trip on it. The forbidden shape is an ADOPTION
+# fraction specifically.
+_ADOPTION_FRACTION_NEAR = re.compile(
+    r"adoption[^\n]{0,60}\d+\s*(?:/|of)\s*\d+", re.IGNORECASE
+)
+
+
+def _adoption_fraction_problems(text: str) -> list[str]:
+    return [match.group(0) for match in _ADOPTION_FRACTION_NEAR.finditer(text)]
+
+
+def test_the_module_source_computes_no_adoption_fraction() -> None:
+    """Static half: `compatibility_gate.py`'s own text -- docstrings,
+    comments, code alike -- never states an adoption numerator/denominator
+    near the word "adoption", even one that is never reached by any test at
+    runtime. (The literal "adoption is 0/3" this guard exists to catch lived
+    only in a docstring; nothing in `test_real_coordinates_report_
+    compatibility_with_no_adoption_fraction` below would ever have rendered
+    it, so a purely dynamic check could not have found it.)"""
+    source = (Path(__file__).parent / "compatibility_gate.py").read_text()
+    problems = _adoption_fraction_problems(source)
+    assert problems == [], problems
+
+
+def test_the_adoption_fraction_scan_bites_a_planted_fraction() -> None:
+    """Sensitivity, defect half: plant the exact defect this guard exists to
+    catch and confirm the scan names it."""
+    planted = "# a stray comment: adoption is 0/3 today\n"
+    assert _adoption_fraction_problems(planted) == ["adoption is 0/3"]
+
+
+def test_the_adoption_fraction_scan_does_not_bite_a_compatibility_fraction() -> None:
+    """Sensitivity, near-miss half: `GateResult.explain()`'s legitimate
+    COMPATIBILITY fraction -- "3 of 3 product evaluation(s) refused", the
+    exact rendering when every product refuses -- has no "adoption" anywhere
+    near it and must not be flagged."""
+    near_miss = (
+        "COMPATIBILITY REFUSED: 3 of 3 product evaluation(s) refused "
+        "(all-of: any single refusal blocks freeze)"
+    )
+    assert _adoption_fraction_problems(near_miss) == []
+
+
 # ── Non-vacuity: the gate must be unable to pass on mechanism alone ────────
 
 
@@ -233,20 +282,17 @@ def test_real_coordinates_report_compatibility_with_no_adoption_fraction() -> No
     assert all("satisfied=False" in f for f in adoption_findings)
 
     # (4) No adoption numerator or denominator is emitted anywhere in the
-    # rendered output -- assert the ABSENCE explicitly.
+    # rendered output -- assert the ABSENCE explicitly, keyed on proximity
+    # to "adoption" (see `_adoption_fraction_problems` above) rather than a
+    # blacklist of bare fraction strings, so a legitimate COMPATIBILITY
+    # fraction in `result.explain()` is never mistaken for the forbidden
+    # ADOPTION fraction.
     rendered = (
         result.explain()
         + "\n"
         + "\n".join(finding for e in result.evaluations for finding in e.findings)
     )
-    fraction_near_adoption = re.search(
-        r"adoption[^\n]{0,60}\d+\s*/\s*\d+", rendered, re.IGNORECASE
-    )
-    assert fraction_near_adoption is None, fraction_near_adoption
-    assert "0/3" not in rendered
-    assert "3/3" not in rendered
-    assert "0 of 3" not in rendered
-    assert "3 of 3" not in rendered
+    assert _adoption_fraction_problems(rendered) == []
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
@@ -285,11 +331,14 @@ def test_an_unknown_status_is_refused_at_construction() -> None:
         gate.EvaluationResult("academy", None, "incompatible", ())
 
 
-def test_evaluation_result_has_no_digest_input_seam() -> None:
-    """Structural proof of "the digest is output, never input": neither
-    `ProductBinding` nor any accepted input carries a `digest` field a
-    caller could set. Constructing one with an unexpected `digest` kwarg
-    raises `TypeError` — the dataclass itself has no such slot."""
+def test_product_binding_has_no_digest_input_seam() -> None:
+    """Structural proof of "the digest is output, never input": the boundary
+    this actually exercises is `ProductBinding` (the one caller-facing input
+    type), not `EvaluationResult` (whose `artefact_digest` field is a
+    genuine dataclass slot -- see the module docstring for `EvaluationResult`
+    -- populated only by `fetch_readiness_record`, never by a caller).
+    Constructing a `ProductBinding` with an unexpected `digest` kwarg raises
+    `TypeError` — the dataclass itself has no such slot."""
     with pytest.raises(TypeError):
         gate.ProductBinding(  # type: ignore[call-arg]
             product="erp", revision="a" * 40, digest="x" * 64
@@ -754,72 +803,107 @@ def test_bindings_loader_refuses_a_role_or_disposition_field(tmp_path: Path) -> 
             gate.load_default_bindings(bad)
 
 
-# ── Guard 4: no evaluator function may spell a requirement-id literal ──────
-
-_REQUIREMENT_ID_SHAPE = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b")
-
-
-def _requirement_id_shaped_literals_in_evaluators(source: str) -> list[tuple[str, str]]:
-    """Parses `source`, walks every module-level function named
-    `evaluate_*`, and returns `(function_name, literal)` for every string
-    constant anywhere in that function's body (including nested f-string
-    literal segments) that contains a hyphen-joined, 3+-token lowercase slug
-    — the shape every real product requirement id uses. `PRODUCT_SPECS`
-    itself lives outside any `evaluate_*` function, so a legitimate id
-    declared there is never scanned; only a literal an evaluator spells
-    itself is caught."""
-    tree = ast.parse(source)
-    hits: list[tuple[str, str]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name.startswith("evaluate_"):
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-                    for match in _REQUIREMENT_ID_SHAPE.finditer(sub.value):
-                        hits.append((node.name, match.group(0)))
-    return hits
+# ── Guard 4: every requirement lookup is keyed by requirement.requirement_id
+#
+# STRUCTURAL, not textual — see the module docstring above
+# `requirement_id_lookup_key_problems` for why the earlier
+# evaluate_*-prefix, hyphenated-literal regex scan was replaced outright:
+# it was evadable four ways, and it MISSED the real lookup site
+# (`_evaluate_readiness_requirements` is `_`-prefixed, so
+# `"_evaluate_readiness_requirements".startswith("evaluate_")` is `False`)
+# while dutifully scanning three delegators that never perform a lookup at
+# all.
 
 
-def test_no_evaluator_local_requirement_id_literals() -> None:
-    """The real, checked-in `compatibility_gate.py`: zero requirement-id-
-    shaped literals inside any `evaluate_*` function body. Every lookup goes
-    through `_evaluate_readiness_requirements`, which reads
-    `PRODUCT_SPECS[...].requirements` — a table declared OUTSIDE every
-    evaluator function."""
+def test_every_requirement_lookup_key_is_the_centralized_attribute() -> None:
+    """The real, checked-in `compatibility_gate.py`: every `.requirement(...)`
+    call anywhere in the module — not just inside `evaluate_*`-prefixed
+    functions — is keyed by an expression that structurally resolves to
+    `requirement.requirement_id`, sourced from iterating
+    `ProductSpec.requirements`."""
     source = (Path(__file__).parent / "compatibility_gate.py").read_text()
-    hits = _requirement_id_shaped_literals_in_evaluators(source)
-    assert hits == [], (
-        f"found requirement-id-shaped literal(s) inside an evaluate_* "
-        f"function body, outside PRODUCT_SPECS: {hits!r}"
-    )
+    problems = gate.requirement_id_lookup_key_problems(source)
+    assert problems == [], problems
 
 
-def test_the_scan_bites_a_planted_hardcoded_requirement_id() -> None:
-    """Sensitivity, defect half: plant a fresh `evaluate_*` function whose
-    body hardcodes a requirement-id-shaped literal (exactly the third-layer
-    regression guard 4 exists to catch) and confirm the scan names it."""
+def test_the_scan_reaches_an_underscore_prefixed_helper_the_old_scan_missed() -> None:
+    """Sensitivity, defect half, matched to the actual regression: a
+    `_`-prefixed helper — the exact shape `_evaluate_readiness_requirements`
+    itself has, which the old `evaluate_*`-prefix scan silently skipped —
+    hardcoding a requirement-id literal must still be caught."""
     planted = (
-        "def evaluate_planted(binding):\n"
-        "    entry = record.requirement('a-planted-hardcoded-requirement-id')\n"
-        "    return entry\n"
+        "def _evaluate_readiness_requirements_evil_twin(record):\n"
+        "    return record.requirement('a-planted-hardcoded-requirement-id')\n"
     )
-    hits = _requirement_id_shaped_literals_in_evaluators(planted)
-    assert hits == [("evaluate_planted", "a-planted-hardcoded-requirement-id")]
+    problems = gate.requirement_id_lookup_key_problems(planted)
+    assert len(problems) == 1
+    assert "a-planted-hardcoded-requirement-id" in problems[0]
 
 
-def test_the_scan_does_not_bite_an_unrelated_short_or_underscored_literal() -> None:
-    """Sensitivity, near-miss half: a two-token hyphenated phrase (below the
-    3-token minimum any real requirement id has), a single status word, and
-    an underscore-joined Python-symbol-shaped docstring mention must NOT be
-    flagged — the scan targets the hyphenated, 3+-token requirement-id
-    shape specifically, not every multi-word string in an evaluator."""
-    near_miss = (
-        "def evaluate_near_miss(binding):\n"
-        "    '''Mentions bind_database_runtime and resolve_database_runtime.'''\n"
-        "    status = 'evidence_incomplete'\n"
-        "    note = 'kernel-side'\n"
-        "    return status, note\n"
+def test_the_scan_bites_module_constant_indirection() -> None:
+    """Sensitivity, defect half, evasion 1: a module-level constant the old
+    regex would never have flagged as a local literal."""
+    planted = (
+        "_PLANTED_ID = 'a-planted-hardcoded-requirement-id'\n"
+        "def _planted_helper(record):\n"
+        "    return record.requirement(_PLANTED_ID)\n"
     )
-    assert _requirement_id_shaped_literals_in_evaluators(near_miss) == []
+    problems = gate.requirement_id_lookup_key_problems(planted)
+    assert len(problems) == 1
+    assert "_PLANTED_ID" in problems[0]
+
+
+def test_the_scan_bites_string_concatenation() -> None:
+    """Sensitivity, defect half, evasion 2: a `+`-built key never appears as
+    one hyphenated literal to a text-based scan."""
+    planted = (
+        "def _planted_helper(record):\n"
+        "    return record.requirement('a-planted-' + 'hardcoded-requirement-id')\n"
+    )
+    problems = gate.requirement_id_lookup_key_problems(planted)
+    assert len(problems) == 1
+
+
+def test_the_scan_bites_an_fstring_with_a_variable_head() -> None:
+    """Sensitivity, defect half, evasion 3: an f-string whose head is a
+    variable never matches a literal-string regex at all."""
+    planted = (
+        "def _planted_helper(record, prefix):\n"
+        "    return record.requirement(f'{prefix}-hardcoded-requirement-id')\n"
+    )
+    problems = gate.requirement_id_lookup_key_problems(planted)
+    assert len(problems) == 1
+
+
+def test_the_scan_bites_an_underscore_joined_id_rewritten_at_call_time() -> None:
+    """Sensitivity, defect half, evasion 4: an underscore-joined id that is
+    rewritten to hyphens only at call time never appears hyphenated in the
+    source text a regex scans."""
+    planted = (
+        "def _planted_helper(record):\n"
+        "    return record.requirement("
+        "'a_planted_hardcoded_requirement_id'.replace('_', '-'))\n"
+    )
+    problems = gate.requirement_id_lookup_key_problems(planted)
+    assert len(problems) == 1
+
+
+def test_the_scan_does_not_bite_the_real_module_two_hop_lookup() -> None:
+    """Admits control / near-miss: the real module's ONE `.requirement(...)`
+    call site sits inside `_requirement_problem`, whose `requirement_id`
+    parameter is a plain `Name`, not a direct attribute access — it is fed,
+    at its one call site inside `_evaluate_readiness_requirements`, by
+    `spec.requirement_id`. The scan must trace that one hop and accept it,
+    not merely accept a direct `spec.requirement_id` argument."""
+    planted = (
+        "def _requirement_problem(record, requirement_id):\n"
+        "    return record.requirement(requirement_id)\n"
+        "\n"
+        "def _evaluate_readiness_requirements(specs, record):\n"
+        "    for spec in specs:\n"
+        "        _requirement_problem(record, spec.requirement_id)\n"
+    )
+    assert gate.requirement_id_lookup_key_problems(planted) == []
 
 
 # ── The digest: reproducible, and never authoritative as input ─────────────
