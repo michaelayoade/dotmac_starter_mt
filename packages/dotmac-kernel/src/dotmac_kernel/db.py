@@ -46,7 +46,10 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.config import settings
-from dotmac_kernel.session_runtime import DatabaseRuntime, is_binding_sealed_strict
+from dotmac_kernel.session_runtime import (
+    DatabaseRuntime,
+    _claim_reference_runtime_import,
+)
 
 __all__ = [
     "conflict_savepoint",
@@ -63,25 +66,18 @@ __all__ = [
     "tenant_session_by_slug",
 ]
 
-# The mirror image of `session_runtime.bind_database_runtime`'s own
-# `sys.modules` check, so the refusal holds regardless of which side happens
-# to run first: a STRICT process binding is a claim that the reference
-# runtime was never constructed, and importing this module builds one on the
-# very next statement. Checked BEFORE `create_engine` runs (inside
+# The reference-runtime half of `session_runtime`'s atomic claim
+# (`bind_database_runtime` is the other half). A boolean read-then-act here
+# would leave a TOCTOU window against a strict bind racing to seal at the
+# same moment — see that module's comment for the exact interleaving that
+# defeats two independent checks. This call and a strict
+# `bind_database_runtime` contend for the SAME lock, so whichever runs first
+# atomically wins and the other refuses; there is no gap between deciding
+# and recording. Checked BEFORE `create_engine` runs (inside
 # `DatabaseRuntime.from_urls`) — a refusal that raised only after already
-# opening a connection pool would have already done the thing the strict
+# opening a connection pool would have already done the thing a strict
 # binding exists to rule out.
-if is_binding_sealed_strict():
-    raise RuntimeError(
-        "dotmac_kernel.db refuses to construct the reference runtime: this "
-        "process already sealed a REQUIRED database-runtime binding "
-        "(typically ProductAssemblySpec.require_database_runtime). Importing "
-        "this module now would build an engine the deployment explicitly "
-        "refused to fall back to -- find what imported dotmac_kernel.db (a "
-        "module-scope import reached during manifest/feature discovery is "
-        "the usual cause) and make it lazy, or resolve through "
-        "dotmac_kernel.session_runtime.resolve_database_runtime() instead."
-    )
+_claim_reference_runtime_import()
 
 #: The reference assembly's instance. Public so a consumer that already depends
 #: on this module's configuration can pass the runtime where one is wanted,

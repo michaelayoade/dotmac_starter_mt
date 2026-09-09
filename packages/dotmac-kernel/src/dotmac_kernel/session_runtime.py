@@ -71,7 +71,7 @@ to reset, so there is no reset that can be skipped.
 from __future__ import annotations
 
 import re
-import sys
+import threading
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -87,7 +87,6 @@ __all__ = [
     "RuntimeBindingError",
     "TenantLookup",
     "bind_database_runtime",
-    "is_binding_sealed_strict",
     "resolve_database_runtime",
 ]
 
@@ -570,13 +569,28 @@ class DatabaseRuntime:
 #   strictness. The only way a binding's policy gets stronger is a caller
 #   asking for that explicitly, and nothing ever asks for weaker.
 #
-# `required=True` additionally REFUSES if `dotmac_kernel.db` is already in
-# `sys.modules` at bind time — a strict binding is a claim that the reference
-# runtime was never constructed, and a module already imported means it may
-# already have been. `dotmac_kernel.db` itself checks the mirror image at ITS
-# OWN import time (`is_binding_sealed_strict`), before constructing any
-# engine — so the refusal is symmetric regardless of which side happens to
-# run first.
+# ## Why a boolean check is not enough
+#
+# An earlier version of this checked `"dotmac_kernel.db" in sys.modules` in
+# `bind_database_runtime` and a plain `is_binding_sealed_strict()` boolean in
+# `dotmac_kernel.db` — two INDEPENDENT reads, which has a real TOCTOU window:
+# a binder can see `dotmac_kernel.db` absent, `db.py` can begin importing and
+# observe strict mode as still false, THEN the binder seals strict mode,
+# and THEN `db.py` finishes constructing the reference engines anyway. Module
+# import is not atomic, so both checks pass and the invariant is violated.
+#
+# `_claim_lock` + `_reference_claimed` replace both booleans with ONE
+# mutually-exclusive state transition, guarded by a real lock (not the GIL,
+# not import-lock semantics): `_claim_reference_runtime_import` (called by
+# `dotmac_kernel.db`, before it constructs any engine) and
+# `bind_database_runtime` (`required=True`) both contend for the SAME lock.
+# Whichever acquires it first wins — either the reference import is claimed
+# first and a later strict bind refuses against that recorded claim, or a
+# strict bind seals first and the reference import refuses against THAT.
+# There is no gap between deciding and recording: both happen inside the same
+# critical section.
+_claim_lock = threading.Lock()
+_reference_claimed = False
 _binding: _Binding | None = None
 
 
@@ -590,8 +604,8 @@ class NoDatabaseRuntimeError(RuntimeError):
       was never bound (there is no such state reachable through
       `bind_database_runtime`, which always takes a real runtime — this is
       the reference assembly's own `dotmac_kernel.db` refusing to construct
-      one after a strict binding sealed elsewhere, or a test that made
-      `dotmac_kernel.db` unimportable without ever calling
+      one after a strict binding claimed the reference-runtime slot first, or
+      a test that made `dotmac_kernel.db` unimportable without ever calling
       `bind_database_runtime`);
     * nothing is bound, nothing declared strictness, AND the reference
       runtime's own import fails. A real deployment that never opts into
@@ -601,7 +615,8 @@ class NoDatabaseRuntimeError(RuntimeError):
 
 class RuntimeBindingError(RuntimeError):
     """`bind_database_runtime` refused: a different runtime, a weaker policy,
-    or `dotmac_kernel.db` already imported ahead of a strict bind."""
+    or the reference-runtime import already claimed the slot a strict bind
+    needs."""
 
 
 @dataclass(frozen=True)
@@ -627,9 +642,11 @@ def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -
     * The SAME `runtime` but WEAKENING an already-`required` binding
       (`required=False` over an existing `required=True`) refuses — there is
       no public way to downgrade strictness once sealed.
-    * `required=True` refuses if `dotmac_kernel.db` is already imported in
-      this process: the reference runtime it constructs may already exist,
-      which is exactly what a strict binding exists to rule out.
+    * `required=True` refuses if `dotmac_kernel.db` has already CLAIMED the
+      reference-runtime slot (`_claim_reference_runtime_import`, called at
+      its own import, before constructing any engine) — atomically, under
+      the same lock that import uses, so there is no window between a
+      boolean read and this call in which the two could disagree.
     """
     if not isinstance(runtime, DatabaseRuntime):
         raise TypeError(
@@ -637,45 +654,66 @@ def bind_database_runtime(runtime: DatabaseRuntime, *, required: bool = False) -
             f"{type(runtime).__name__}"
         )
     global _binding
-    if required and "dotmac_kernel.db" in sys.modules:
-        raise RuntimeBindingError(
-            "cannot bind a REQUIRED runtime: dotmac_kernel.db is already "
-            "imported in this process, so the reference runtime it "
-            "constructs may already exist. Bind before anything imports "
-            "dotmac_kernel.db — commonly an eager module-scope import "
-            "reached during manifest/feature discovery, before create_app "
-            "ever ran."
-        )
-    if _binding is None:
-        _binding = _Binding(runtime=runtime, required=required)
-        return
-    if runtime is not _binding.runtime:
-        raise RuntimeBindingError(
-            "a different DatabaseRuntime is already bound in this process — "
-            "one process supports one runtime binding; a second application "
-            "or caller binding another instance is a configuration conflict, "
-            "not a switch"
-        )
-    if _binding.required and not required:
-        raise RuntimeBindingError(
-            "the bound runtime is already required (strict); a later call "
-            "asking for required=False would downgrade it, which is refused "
-            "— strictness is monotonic and has no public way back down"
-        )
-    if required and not _binding.required:
-        _binding = _Binding(runtime=runtime, required=True)
-    # else: identical (runtime, required) — idempotent, nothing to do.
+    with _claim_lock:
+        if required and _reference_claimed:
+            raise RuntimeBindingError(
+                "cannot bind a REQUIRED runtime: the reference-runtime "
+                "import already claimed this process's slot, so the "
+                "reference runtime it constructs may already exist. Bind "
+                "before anything imports dotmac_kernel.db — commonly an "
+                "eager module-scope import reached during manifest/feature "
+                "discovery, before create_app ever ran."
+            )
+        if _binding is None:
+            _binding = _Binding(runtime=runtime, required=required)
+            return
+        if runtime is not _binding.runtime:
+            raise RuntimeBindingError(
+                "a different DatabaseRuntime is already bound in this "
+                "process — one process supports one runtime binding; a "
+                "second application or caller binding another instance is "
+                "a configuration conflict, not a switch"
+            )
+        if _binding.required and not required:
+            raise RuntimeBindingError(
+                "the bound runtime is already required (strict); a later "
+                "call asking for required=False would downgrade it, which "
+                "is refused — strictness is monotonic and has no public "
+                "way back down"
+            )
+        if required and not _binding.required:
+            _binding = _Binding(runtime=runtime, required=True)
+        # else: identical (runtime, required) — idempotent, nothing to do.
 
 
-def is_binding_sealed_strict() -> bool:
-    """Whether this process's binding (if any) is `required`.
+def _claim_reference_runtime_import() -> None:
+    """The reference-runtime import's half of the atomic claim.
 
-    `dotmac_kernel.db` calls this at ITS OWN import time, before constructing
-    any engine, and refuses to proceed if so — the mirror image of
-    `bind_database_runtime`'s own `sys.modules` check, so the refusal holds
-    regardless of which side happens to run first.
+    `dotmac_kernel.db` calls this ONCE, at its own module scope, BEFORE
+    constructing any engine. Under the SAME lock `bind_database_runtime`
+    uses: refuses if a strict binding is already sealed (the mirror image of
+    that function's own check), otherwise records that the reference-runtime
+    slot is claimed, so a strict bind arriving AFTER this point refuses
+    too — closing the TOCTOU window a pair of independent boolean reads left
+    open (see the module comment above).
     """
-    return _binding is not None and _binding.required
+    global _reference_claimed
+    with _claim_lock:
+        if _binding is not None and _binding.required:
+            raise RuntimeError(
+                "dotmac_kernel.db refuses to construct the reference "
+                "runtime: this process already sealed a REQUIRED "
+                "database-runtime binding (typically "
+                "ProductAssemblySpec.require_database_runtime). Importing "
+                "this module now would build an engine the deployment "
+                "explicitly refused to fall back to -- find what imported "
+                "dotmac_kernel.db (a module-scope import reached during "
+                "manifest/feature discovery is the usual cause) and make it "
+                "resolve through "
+                "dotmac_kernel.session_runtime.resolve_database_runtime() "
+                "instead."
+            )
+        _reference_claimed = True
 
 
 def resolve_database_runtime() -> DatabaseRuntime:

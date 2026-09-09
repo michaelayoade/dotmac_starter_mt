@@ -24,7 +24,7 @@ against:
 * **Boot** — `create_app(spec)` with `spec.database_runtime` set, entered as an
   ASGI lifespan (`with TestClient(app) as client`), runs
   `_required_setting_errors()` (a startup check) through
-  `get_database_runtime().platform_session()` and serves `/health`.
+  `resolve_database_runtime().platform_session()` and serves `/health`.
 * **An authenticated request** — `POST /platform/auth/logout` against
   `platform_auth_router` mounted with no other machinery, driven by a
   PRE-SEEDED `PlatformSession` row rather than a minted password: this probe
@@ -33,13 +33,13 @@ against:
   one owner, `dotmac_kernel.credential_lifecycle`, and a probe with no real
   credential to verify has no business calling it either). `require_platform_admin`
   resolves its session through `dotmac_kernel.deps.get_platform_db`, which
-  resolves the runtime through `get_database_runtime()`.
+  resolves the runtime through `resolve_database_runtime()`.
 * **A CLI-shaped entry point** — a tenant-provisioning command (no credential
   material involved at all) reached through
-  `get_database_runtime().platform_session()` instead of building its own
+  `resolve_database_runtime().platform_session()` instead of building its own
   engine.
 * **A worker path** — `dotmac_kernel.messaging.worker.run_once` is handed
-  `get_database_runtime().platform_session_factory`/`.session_factory`
+  `resolve_database_runtime().platform_session_factory`/`.session_factory`
   directly (its documented contract: it "NEVER constructs an engine or a
   sessionmaker — it RECEIVES session factories"). It reaches a real `execute()`
   against the product engine and fails ONLY on `claim_outbox_batch` — a
@@ -63,7 +63,7 @@ seam works, and would keep passing if the seam were deleted. `argv[1] ==
 the IDENTICAL admin/session into the PRODUCT's own runtime, but never installs
 it (`ProductAssemblySpec.database_runtime` absent, no strict mode,
 `dotmac_kernel.db` genuinely importable this time — the fallback is
-deliberately live). `get_database_runtime()` then falls back to the
+deliberately live). `resolve_database_runtime()` then falls back to the
 reference runtime, a DIFFERENT, empty database the seeded session was never
 written to, and the same `POST /platform/auth/logout` call must therefore
 REFUSE (401) rather than succeed (204). If it still returned 204, the
@@ -106,7 +106,7 @@ def main() -> None:
     from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
     from dotmac_kernel.platform_auth import issue_platform_token
     from dotmac_kernel.security import hash_token
-    from dotmac_kernel.session_runtime import DatabaseRuntime, get_database_runtime
+    from dotmac_kernel.session_runtime import DatabaseRuntime, resolve_database_runtime
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine
     from sqlalchemy.pool import StaticPool
@@ -164,15 +164,15 @@ def main() -> None:
 
     # ── BOOT ─────────────────────────────────────────────────────────────────
     app = create_app(spec)
-    # `get_database_runtime()` must already resolve to the installed runtime
+    # `resolve_database_runtime()` must already resolve to the installed runtime
     # the instant `create_app` returns — before any request, before lifespan.
     assert (
-        get_database_runtime() is runtime
+        resolve_database_runtime() is runtime
     ), "create_app(spec) did not install spec.database_runtime"
     with TestClient(app) as client:
         # Entering the context manager runs the ASGI lifespan, which is where
         # `_required_setting_errors()` calls
-        # `get_database_runtime().platform_session()` — a REAL query against
+        # `resolve_database_runtime().platform_session()` — a REAL query against
         # the product engine, executed while `dotmac_kernel.db` is blocked.
         health = client.get("/health")
         assert health.status_code == 200, health.text
@@ -193,7 +193,7 @@ def main() -> None:
     with TestClient(platform_app, base_url="http://localhost") as platform_client:
         # No `login()` call: the session was pre-seeded above. This is exactly
         # `require_platform_admin` (the authenticated-request guard) resolving
-        # `deps.get_platform_db` -> `get_database_runtime()` against the
+        # `deps.get_platform_db` -> `resolve_database_runtime()` against the
         # product runtime, on a real bearer token this probe never hashed a
         # password to obtain.
         logout = platform_client.post(
@@ -209,10 +209,10 @@ def main() -> None:
     # ── A CLI-SHAPED ENTRY POINT ──────────────────────────────────────────────
     #
     # A tenant-provisioning command — no credential material involved —
-    # reached through `get_database_runtime()` instead of building its own
+    # reached through `resolve_database_runtime()` instead of building its own
     # engine, the way a real CLI script would.
     def cli_create_tenant(slug: str, name: str) -> None:
-        with get_database_runtime().platform_session() as db:
+        with resolve_database_runtime().platform_session() as db:
             db.add(Tenant(slug=slug, name=name))
 
     cli_create_tenant("probe-cli-tenant", "Probe CLI Tenant")
@@ -223,7 +223,7 @@ def main() -> None:
             select(Tenant).where(Tenant.slug == "probe-cli-tenant")
         ).first()
         assert found is not None, "the CLI-shaped entry point did not persist"
-    print("PASS CLI entry point: upsert ran through get_database_runtime()")
+    print("PASS CLI entry point: upsert ran through resolve_database_runtime()")
 
     # ── A WORKER PATH ─────────────────────────────────────────────────────────
     #
@@ -235,11 +235,11 @@ def main() -> None:
     from dotmac_kernel.messaging.worker import LoggingTransport, run_once
     from sqlalchemy.exc import OperationalError
 
-    dispatcher_db = get_database_runtime().platform_session_factory()
+    dispatcher_db = resolve_database_runtime().platform_session_factory()
     try:
         run_once(
             dispatcher_db=dispatcher_db,
-            tenant_session_factory=get_database_runtime().session_factory,
+            tenant_session_factory=resolve_database_runtime().session_factory,
             transport=LoggingTransport(),
             worker_id="probe-worker",
         )
@@ -277,7 +277,7 @@ def main() -> None:
 def main_strict_refusal() -> None:
     """The other half of the seam: nothing forces a product to USE it.
 
-    `get_database_runtime()`'s fallback is correct for the reference
+    `resolve_database_runtime()`'s fallback is correct for the reference
     assembly, but it means a product that simply forgets to set
     `ProductAssemblySpec.database_runtime` silently gets the eager reference
     runtime — the same defect shape this whole seam exists to close, one
@@ -339,7 +339,7 @@ def main_fallback_sensitivity() -> None:
     (no `ProductAssemblySpec.database_runtime`, no strict mode,
     `dotmac_kernel.db` genuinely importable) and shows the IDENTICAL stage
     then FAILS: the seeded session was written to the product's own runtime,
-    never installed, so `get_database_runtime()` falls back to the reference
+    never installed, so `resolve_database_runtime()` falls back to the reference
     runtime — a different, empty database — and the logout call must be
     refused rather than accepted.
     """
@@ -362,7 +362,7 @@ def main_fallback_sensitivity() -> None:
     from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
     from dotmac_kernel.platform_auth import issue_platform_token, platform_auth_router
     from dotmac_kernel.security import hash_token
-    from dotmac_kernel.session_runtime import DatabaseRuntime, get_database_runtime
+    from dotmac_kernel.session_runtime import DatabaseRuntime, resolve_database_runtime
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from sqlalchemy import create_engine
@@ -397,7 +397,7 @@ def main_fallback_sensitivity() -> None:
 
     # Prove the premise: nothing installed the product runtime, so resolution
     # falls back to the reference assembly's own instance.
-    fallback = get_database_runtime()
+    fallback = resolve_database_runtime()
     assert fallback is not product_runtime, (
         "the product runtime is still installed from an earlier stage — "
         "this control requires a genuinely empty fallback"
@@ -420,7 +420,7 @@ def main_fallback_sensitivity() -> None:
             "the authenticated-request stage accepted a session that was "
             "only ever written to the PRODUCT runtime while nothing "
             "installed it — the stage does not actually exercise "
-            "get_database_runtime() and proves nothing about the seam"
+            "resolve_database_runtime() and proves nothing about the seam"
         )
     print(
         "PASS fallback sensitivity: the authenticated-request stage genuinely "
@@ -429,10 +429,141 @@ def main_fallback_sensitivity() -> None:
     )
 
 
+def main_second_binding_conflict() -> None:
+    """One process supports one runtime binding — a second, DIFFERENT one
+    cannot clobber the first.
+
+    Binds runtime `R1` as `required=True`, then attempts to bind a different
+    runtime `R2`. The second call must refuse (`RuntimeBindingError`), and
+    `resolve_database_runtime()` must still answer `R1` afterwards — a
+    second application (or a careless second `create_app` call with a
+    genuinely different spec) in the same process cannot silently take over
+    what the first one sealed.
+
+    Also proves the other direction of idempotence: reinstalling `R1` itself,
+    identically, succeeds (no-op) rather than refusing — "one binding" does
+    not mean "one call".
+    """
+    from dotmac_kernel.session_runtime import (
+        DatabaseRuntime,
+        RuntimeBindingError,
+        bind_database_runtime,
+        resolve_database_runtime,
+    )
+    from sqlalchemy import create_engine
+
+    runtime_one = DatabaseRuntime(engine=create_engine("sqlite://"))
+    runtime_two = DatabaseRuntime(engine=create_engine("sqlite://"))
+
+    bind_database_runtime(runtime_one, required=True)
+    assert resolve_database_runtime() is runtime_one
+
+    # Idempotent: reinstalling the IDENTICAL runtime, at the same policy,
+    # succeeds rather than refusing.
+    bind_database_runtime(runtime_one, required=True)
+    assert resolve_database_runtime() is runtime_one
+    print("PASS idempotence: reinstalling the identical binding succeeded")
+
+    # A DIFFERENT runtime refuses outright.
+    try:
+        bind_database_runtime(runtime_two, required=True)
+    except RuntimeBindingError:
+        pass
+    else:
+        raise AssertionError(
+            "bind_database_runtime accepted a second, DIFFERENT runtime — "
+            "the first application's binding was silently clobbered"
+        )
+    assert resolve_database_runtime() is runtime_one, (
+        "the refused second bind changed what resolve_database_runtime() "
+        "answers — a refusal must leave the sealed binding untouched"
+    )
+    print(
+        "PASS second-binding conflict: a different runtime was refused and "
+        "the original binding is still authoritative"
+    )
+
+    # The SAME runtime but a WEAKER policy (required True -> False) also
+    # refuses — no public way to downgrade strictness once sealed.
+    try:
+        bind_database_runtime(runtime_one, required=False)
+    except RuntimeBindingError:
+        pass
+    else:
+        raise AssertionError(
+            "bind_database_runtime accepted downgrading an already-required "
+            "binding to required=False — strictness is supposed to be "
+            "monotonic with no public way back down"
+        )
+    print("PASS strictness is monotonic: weakening an already-required binding refused")
+
+
+def main_real_assembly_strict() -> None:
+    """Acceptance against the REAL Starter assembly, not a zero-feature
+    surrogate.
+
+    A bespoke, feature-free `ProductAssemblySpec` (as `main()` above builds)
+    cannot see the transitive-reach hazard this seam exists to close: the
+    real `app.assembly` composes `FEATURE_MODULES` via `load_manifests` at
+    IMPORT TIME (`app/assembly.py`'s module-level `ProductAssemblySpec(...)`
+    call), well before `create_app` ever runs, and several feature services
+    import `dotmac_kernel.db` at module scope to reach `conflict_savepoint`.
+
+    THIS TEST DEPENDS ON THAT EAGER IMPORT BEING FIXED ELSEWHERE (the
+    `refactor/conflict-savepoint-engine-free-owner` predecessor, which moves
+    those imports onto the already-public, engine-free
+    `dotmac_kernel.transactions.conflict_savepoint`). Until this branch is
+    rebased onto that fix, importing `app.assembly` imports `dotmac_kernel.db`
+    unconditionally and this test FAILS — correctly: it is testing the
+    post-migration world, not working around the pre-migration one.
+    """
+    import os
+
+    os.environ.setdefault(
+        "DATABASE_URL", "sqlite:///./real-assembly-strict.sqlite3"
+    )
+    os.environ.setdefault(
+        "PLATFORM_DATABASE_URL", "sqlite:///./real-assembly-strict.sqlite3"
+    )
+
+    import dataclasses
+
+    import app.assembly
+    from dotmac_kernel import create_app
+    from dotmac_kernel.session_runtime import DatabaseRuntime
+    from sqlalchemy import create_engine
+
+    assert "dotmac_kernel.db" not in sys.modules, (
+        "importing app.assembly ALONE already reached dotmac_kernel.db — "
+        "the eager-import predecessor has not landed on this branch"
+    )
+
+    product_runtime = DatabaseRuntime(engine=create_engine("sqlite://"))
+    spec = dataclasses.replace(
+        app.assembly.assembly,
+        database_runtime=product_runtime,
+        require_database_runtime=True,
+    )
+    create_app(spec)
+
+    assert "dotmac_kernel.db" not in sys.modules, (
+        "create_app(spec) on the REAL assembly, under a strict binding, "
+        "still imported dotmac_kernel.db"
+    )
+    print(
+        "PASS real assembly, strict: composing app.assembly's real feature "
+        "manifests under a strict binding left dotmac_kernel.db unloaded"
+    )
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "strict":
         main_strict_refusal()
     elif len(sys.argv) > 1 and sys.argv[1] == "fallback":
         main_fallback_sensitivity()
+    elif len(sys.argv) > 1 and sys.argv[1] == "second-binding":
+        main_second_binding_conflict()
+    elif len(sys.argv) > 1 and sys.argv[1] == "real-assembly":
+        main_real_assembly_strict()
     else:
         main()

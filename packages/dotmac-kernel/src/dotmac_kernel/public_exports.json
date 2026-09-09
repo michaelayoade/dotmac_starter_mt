@@ -1304,7 +1304,6 @@
         "RuntimeBindingError",
         "TenantLookup",
         "bind_database_runtime",
-        "is_binding_sealed_strict",
         "resolve_database_runtime"
       ],
       "status": "declared"

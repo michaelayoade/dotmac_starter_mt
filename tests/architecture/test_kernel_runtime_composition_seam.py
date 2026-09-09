@@ -9,14 +9,24 @@ the `app_factory` startup checks. "No direct import" cannot detect that — the
 only proof that means anything blocks the reference runtime from ever being
 importable and then drives real work through the seam
 (`ProductAssemblySpec.database_runtime` -> `session_runtime
-.install_database_runtime` -> `session_runtime.get_database_runtime`).
+.bind_database_runtime` -> `session_runtime.resolve_database_runtime`).
 
 `scripts/check_kernel_runtime_composition_seam.py` is that probe: it sets
 ``sys.modules["dotmac_kernel.db"] = None`` before importing anything else (so
 any later import of it anywhere in the process raises `ImportError`), then
 drives boot, an authenticated request (`platform_auth` + `deps`), a
 CLI-shaped entry point, and a worker path (`messaging.worker.run_once`)
-through a `DatabaseRuntime` it constructs and installs itself.
+through a `DatabaseRuntime` it constructs and binds itself.
+
+A bespoke, feature-free `ProductAssemblySpec` cannot see the sharpest hazard:
+the real `app.assembly` composes `FEATURE_MODULES` via `load_manifests` at
+IMPORT TIME, before `create_app` ever runs, and several feature services
+import `dotmac_kernel.db` at module scope to reach `conflict_savepoint` — an
+eager chain no zero-feature probe exercises.
+`test_real_assembly_strict_composition_leaves_the_reference_unloaded` and
+`test_one_eager_feature_import_defeats_a_strict_binding` below acceptance-test
+that directly, against `app.assembly` (or a copy of it with one import
+planted back).
 """
 
 from __future__ import annotations
@@ -34,7 +44,7 @@ _EXPECTED_STAGES = (
     "PASS boot: create_app + startup validation ran on the product runtime",
     "PASS authenticated request: platform logout resolved "
     "deps.get_platform_db through the product runtime",
-    "PASS CLI entry point: upsert ran through get_database_runtime()",
+    "PASS CLI entry point: upsert ran through resolve_database_runtime()",
     "PASS worker path: run_once reached the product runtime's session",
     "PASS dotmac_kernel.db stayed unimported for the whole probe",
 )
@@ -182,14 +192,31 @@ def test_the_probe_genuinely_blocks_the_reference_runtime(tmp_path: Path) -> Non
         check=False,
     )
     assert result.returncode != 0
-    assert "ImportError" in result.stderr
+    # `sys.modules[name] = None` raises `ModuleNotFoundError` (a subclass of
+    # `ImportError`) — the exception CLASS printed in the traceback, not the
+    # base-class name. Assert the stable substring the actual message
+    # carries, not a name that only sometimes appears literally.
+    assert "halted; None in sys.modules" in result.stderr
 
 
 def test_the_seam_bites_a_reintroduced_transitive_reach(tmp_path: Path) -> None:
     """Plant half: reintroduce the exact regression this seam retired
-    (`dotmac_kernel.deps.get_db` importing `dotmac_kernel.db` directly again)
+    (`dotmac_kernel.deps` importing `dotmac_kernel.db` at MODULE SCOPE again)
     in a copied source tree, and observe the probe fail against it — proving
     the guard is the LIVE BEHAVIOUR, not the absence of a grep hit.
+
+    An earlier version of this plant inserted the import as the first line
+    INSIDE `get_db`'s function body, keyed off the `runtime =
+    resolve_database_runtime()` line found there — which only executes when
+    `get_db` itself is CALLED. This probe's routes never call plain `get_db`
+    (only `get_platform_db`, via `/platform/auth/logout`), so that plant
+    never fired and the probe passed for the wrong reason — exactly the
+    "test named for a property but not exercising it" failure mode this
+    file's whole design exists to avoid (CI caught it: `test_the_seam_bites
+    _a_reintroduced_transitive_reach` reported the probe passing after the
+    plant). The fix is a genuine MODULE-SCOPE import — inserted right after
+    `deps.py`'s own real imports, so it fires the instant `deps` is
+    imported, regardless of which function anything later calls.
     """
     import shutil
 
@@ -197,12 +224,12 @@ def test_the_seam_bites_a_reintroduced_transitive_reach(tmp_path: Path) -> None:
     shutil.copytree(KERNEL_SOURCE, planted_root)
     deps_path = planted_root / "dotmac_kernel" / "deps.py"
     source = deps_path.read_text()
-    anchor = "    runtime = get_database_runtime()\n"
-    assert source.count(anchor) == 1, "deps.get_db no longer has the expected shape"
+    anchor = "from dotmac_kernel.session_runtime import resolve_database_runtime\n"
+    assert source.count(anchor) == 1, "deps.py's own import block has changed shape"
     deps_path.write_text(
         source.replace(
             anchor,
-            "    from dotmac_kernel.db import get_db as _ref  # noqa: F401\n" + anchor,
+            anchor + "from dotmac_kernel.db import get_db as _ref  # noqa: F401\n",
             1,
         )
     )
@@ -233,7 +260,11 @@ def test_the_seam_bites_a_reintroduced_transitive_reach(tmp_path: Path) -> None:
         "the probe passed after deps.get_db was made to import dotmac_kernel.db "
         "again — the guard did not bite a real transitive reach"
     )
-    assert "ImportError" in result.stderr or "ImportError" in result.stdout
+    # Same reasoning as `test_the_probe_genuinely_blocks_the_reference_runtime`:
+    # `sys.modules[name] = None` raises `ModuleNotFoundError`, whose printed
+    # message carries this exact stable substring, not the literal string
+    # "ImportError".
+    assert "halted; None in sys.modules" in result.stderr
 
 
 def test_a_docstring_mention_of_the_reference_module_is_not_flagged(
@@ -248,7 +279,7 @@ def test_a_docstring_mention_of_the_reference_module_is_not_flagged(
     shutil.copytree(KERNEL_SOURCE, planted_root)
     deps_path = planted_root / "dotmac_kernel" / "deps.py"
     source = deps_path.read_text()
-    anchor = "    runtime = get_database_runtime()\n"
+    anchor = "    runtime = resolve_database_runtime()\n"
     assert source.count(anchor) == 1
     deps_path.write_text(
         source.replace(
