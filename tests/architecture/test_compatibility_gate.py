@@ -5,42 +5,147 @@ be UNABLE to pass on mechanism alone:
 
 1. **Non-vacuity.** With no product evidence bound, the gate refuses, and the
    refusal names which product and why. `GateResult.satisfied` must not read
-   an empty evaluation set as "nothing to refuse" — `all(())` is `True` in
-   Python, which is the identical shape as a check over no files.
+   an empty evaluation set as "nothing to refuse".
 2. **All-of semantics.** Two products satisfied and one refusing must still
    refuse, and the refusal must name the refusing product specifically.
 
-Everything else here (per-product findings, revision-shape refusal, the
-kernel-side structural facts) is the sensitivity proof each of those two
-properties needs to mean anything.
+A third property, added by the second ruling: **the evaluator must be
+CAPABLE of refusing a wrong commit, not merely make it visible.** Every
+"satisfied" path below is built through `fetch_readiness_record` against a
+REAL local git repository this file constructs (the same technique
+`test_allocation_serialized_gate.py` already uses) — never through a
+caller-supplied claim. There is no code path left in `compatibility_gate.py`
+that accepts a boolean, a digest, or an ancestry claim as INPUT.
 """
 
 from __future__ import annotations
 
 import ast
+import json
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from tests.architecture import compatibility_gate as gate
 
+# ── Git fixture helpers: real local repositories, no network ───────────────
+
+
+def _git(repo: Path, args: list[str]) -> None:
+    command = ["git", *args]
+    result = subprocess.run(  # noqa: S603
+        command, cwd=repo, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+
+
+def _git_output(repo: Path, args: list[str]) -> str:
+    command = ["git", *args]
+    result = subprocess.run(  # noqa: S603
+        command, cwd=repo, capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+    return result.stdout
+
+
+def _init_repo(tmp_path: Path, name: str) -> Path:
+    repo = tmp_path / name
+    repo.mkdir(parents=True)
+    _git(repo, ["init", "-q"])
+    _git(repo, ["config", "user.email", "test@example.com"])
+    _git(repo, ["config", "user.name", "Test"])
+    _git(repo, ["config", "commit.gpgsign", "false"])
+    (repo / "README.md").write_text("placeholder\n")
+    _git(repo, ["add", "."])
+    _git(repo, ["commit", "-q", "-m", "init"])
+    return repo
+
+
+def _commit_readiness_record(repo: Path, record: dict) -> str:
+    record_path = repo / "docs" / "kernel-runtime-readiness.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text(json.dumps(record))
+    _git(repo, ["add", "."])
+    _git(repo, ["commit", "-q", "-m", "add readiness record"])
+    return _git_output(repo, ["rev-parse", "HEAD"]).strip()
+
+
+def _mark_as_protected_main(repo: Path, revision: str) -> None:
+    _git(repo, ["update-ref", "refs/remotes/origin/main", revision])
+
+
+def _requirement(
+    requirement_id: str, *, satisfied: bool, source_reference: str = "app/x.py:1"
+) -> dict:
+    return {
+        "id": requirement_id,
+        "statement": f"{requirement_id} holds",
+        "satisfied": satisfied,
+        "source_reference": source_reference,
+    }
+
+
+def _record(*, repository: str, subject: str, requirements: list[dict]) -> dict:
+    return {
+        "schema": gate.READINESS_SCHEMA_MARKER,
+        "product": repository,
+        "subject": subject,
+        "requirements": requirements,
+        "composition": [],
+        "source_references": ["README.md"],
+    }
+
+
+_ACADEMY_SATISFIED_REQUIREMENTS = [
+    _requirement("strict_bind_without_reference_import", satisfied=True),
+    _requirement("no_unpublished_session_local_usage", satisfied=True),
+]
+_ERP_SATISFIED_REQUIREMENTS = [
+    _requirement("sync_requirements_satisfied", satisfied=True),
+    _requirement(gate.ASYNC_TRANSITIONAL_REQUIREMENT_ID, satisfied=True),
+]
+_SUB_SATISFIED_REQUIREMENTS = [
+    _requirement("guc_hook_ordered_after_isolation_mode", satisfied=True),
+    _requirement("tenant_scope_composed_with_readonly_or_serializable", satisfied=True),
+]
+_SATISFIED_REQUIREMENTS = {
+    "academy": _ACADEMY_SATISFIED_REQUIREMENTS,
+    "erp": _ERP_SATISFIED_REQUIREMENTS,
+    "sub": _SUB_SATISFIED_REQUIREMENTS,
+}
+
+
+def _bind_satisfied(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, product: str
+) -> gate.ProductBinding:
+    spec = gate.PRODUCT_SPECS[product]
+    repo = _init_repo(tmp_path, f"{spec.repository}-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=_SATISFIED_REQUIREMENTS[product],
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+    return gate.ProductBinding(product=product, revision=revision)
+
+
 # ── Non-vacuity: the gate must be unable to pass on mechanism alone ────────
 
 
 def test_gate_result_cannot_pass_on_an_empty_evaluation_set() -> None:
-    """Plant: construct a `GateResult` directly with zero evaluations — the
-    shape a defective `evaluate_gate` could produce if it ever let the
-    per-product loop come out empty. `all(())` is `True`, so a `satisfied`
-    implemented as a bare `all(...)` would pass here for having nothing to
-    check. This is the exact defect this whole slice exists to refuse."""
+    """Plant: construct a `GateResult` directly with zero evaluations —
+    `all(())` is `True`, so a `satisfied` implemented as a bare `all(...)`
+    would pass here for having nothing to check."""
     empty = gate.GateResult(evaluations=())
     assert empty.satisfied is False
     assert "no product was evaluated" in empty.explain()
 
 
 def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
-    """Near-miss half of the above: a non-empty, fully-satisfied set DOES
-    pass — the empty-set refusal must not become a refusal of everything."""
     satisfied = gate.GateResult(
         evaluations=(
             gate.EvaluationResult("academy", "a" * 40, "satisfied", ()),
@@ -52,40 +157,20 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
 
 
 def test_the_gate_refuses_today_with_the_default_bindings() -> None:
-    """The default, checked-in bindings file: ERP and Sub carry named,
-    protected-main-ancestor revisions with a `protected_main_row` but no
-    product-specific facts yet (`evidence_incomplete`); Academy has no
-    revision at all (`unbound`). Running the gate against it today must
-    refuse regardless — not skip, not pass over an incomplete evidence set."""
+    """The checked-in bindings file binds no revision for any product today
+    — the two source-material SHAs are explicitly NOT final bindings.
+    Running the gate must refuse, and every product's status must be
+    `unbound`, not a status implying a wrong or incompatible commit."""
     bindings = gate.load_default_bindings()
     result = gate.evaluate_gate(bindings)
     assert result.satisfied is False
     assert len(result.refusing) == 3
-    refusing_products = {evaluation.product for evaluation in result.refusing}
-    assert refusing_products == set(gate.PRODUCTS)
-    # Structured, not just prose: Academy's refusal is UNBOUND -- not yet
-    # eligible, never "found incompatible" -- and it is DISTINCT from ERP's
-    # and Sub's status, which have a real revision and a proven
-    # protected-main ancestry but incomplete product-side facts. A reader
-    # must be able to make this ABSENT-versus-REGISTRY_DISAGREEMENT
-    # distinction from `status` alone, never by parsing `findings`.
-    statuses = {e.product: e.status for e in result.refusing}
-    assert statuses["academy"] == "unbound"
-    assert statuses["erp"] == "evidence_incomplete"
-    assert statuses["sub"] == "evidence_incomplete"
-    academy_result = next(e for e in result.evaluations if e.product == "academy")
-    assert academy_result.revision is None
-    erp_result = next(e for e in result.evaluations if e.product == "erp")
-    assert erp_result.revision == "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
-    sub_result = next(e for e in result.evaluations if e.product == "sub")
-    assert sub_result.revision == "288b68cf0ba4196b36641801093b501a75e80a0d"
+    for evaluation in result.evaluations:
+        assert evaluation.status == "unbound"
+        assert evaluation.revision is None
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
-    """`evaluate_gate({})` — no bindings dict at all, not even the unbound
-    placeholders. Proves absence is refusal by construction: the three
-    products are still evaluated (as unbound), never silently dropped from
-    the set the all-of combination looks at."""
     result = gate.evaluate_gate({})
     assert result.satisfied is False
     assert tuple(e.product for e in result.evaluations) == gate.PRODUCTS
@@ -108,9 +193,6 @@ def test_each_refusal_names_the_product_and_the_observed_reason() -> None:
 
 
 def test_satisfied_is_derived_from_status_not_stored() -> None:
-    """`satisfied` cannot be constructed to disagree with `status` — there is
-    no `satisfied=` keyword any more, only `status=`, so a caller cannot
-    accidentally build a "satisfied" result carrying a refusal status."""
     unbound = gate.EvaluationResult("academy", None, "unbound", ())
     assert unbound.satisfied is False
     satisfied = gate.EvaluationResult("academy", "a" * 40, "satisfied", ())
@@ -122,109 +204,44 @@ def test_an_unknown_status_is_refused_at_construction() -> None:
         gate.EvaluationResult("academy", None, "incompatible", ())
 
 
-def test_unbound_and_evaluation_refused_are_distinct_statuses_for_academy() -> None:
-    """The exact distinction this section exists for: a product with no
-    revision at all (`unbound`) must never carry the same status as a
-    product that DID produce complete, well-formed evidence and whose
-    captured facts simply failed the check (`evaluation_refused`)."""
-    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
-    assert unbound.status == "unbound"
-
-    revision = "5" * 40
-    evaluated_and_refused = gate.evaluate_academy(
-        gate.ProductBinding(
-            product="academy",
-            revision=revision,
-            evidence={
-                "protected_main_row": _protected_main_row(
-                    "dotmac_academy_app", revision
-                ),
-                "unpublished_session_local_usage_sites": (),
-                "strict_bind_without_reference_import": False,
-            },
+def test_evaluation_result_has_no_digest_input_seam() -> None:
+    """Structural proof of "the digest is output, never input": neither
+    `ProductBinding` nor any accepted input carries a `digest` field a
+    caller could set. Constructing one with an unexpected `digest` kwarg
+    raises `TypeError` — the dataclass itself has no such slot."""
+    with pytest.raises(TypeError):
+        gate.ProductBinding(  # type: ignore[call-arg]
+            product="erp", revision="a" * 40, digest="x" * 64
         )
-    )
-    assert evaluated_and_refused.status == "evaluation_refused"
-    assert unbound.status != evaluated_and_refused.status
 
 
 # ── All-of semantics: two satisfied, one refusing must still refuse ────────
 
 
-def _protected_main_row(
-    repository: str,
-    commit: str,
-    artefact: str = "docs/<readiness-artefact>.md (test fixture placeholder)",
-) -> dict[str, str]:
-    return {
-        "kind": "pinned_at",
-        "repository": repository,
-        "commit": commit,
-        "expected": f"git merge-base --is-ancestor {commit} origin/main succeeded",
-        "artefact": artefact,
-    }
-
-
-def _satisfied_academy_binding() -> gate.ProductBinding:
-    revision = "a" * 40
-    return gate.ProductBinding(
-        product="academy",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_academy_app", revision),
-            "unpublished_session_local_usage_sites": (),
-            "strict_bind_without_reference_import": True,
-        },
-    )
-
-
-def _satisfied_erp_binding() -> gate.ProductBinding:
-    revision = "b" * 40
-    return gate.ProductBinding(
-        product="erp",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_erp", revision),
-            "sync_requirements_satisfied": True,
-            "async_status": gate.ASYNC_TRANSITIONAL,
-        },
-    )
-
-
-def _satisfied_sub_binding() -> gate.ProductBinding:
-    revision = "c" * 40
-    return gate.ProductBinding(
-        product="sub",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_sub", revision),
-            "guc_hook_ordered_after_isolation_mode": True,
-            "tenant_scope_composed_with_readonly_or_serializable": True,
-        },
-    )
-
-
-def test_all_three_satisfied_bindings_pass_the_gate() -> None:
-    """Admits control: the fully-satisfied fixtures above really do pass —
-    otherwise the refusal test below would refuse for the wrong reason."""
+def test_all_three_satisfied_bindings_pass_the_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Admits control: three REAL local repositories, each carrying a fully
+    satisfied readiness record, verified end to end through
+    `fetch_readiness_record` (real `git merge-base --is-ancestor`, real
+    `git show`, real JSON parse) — never through a caller-supplied claim."""
     bindings = {
-        "academy": _satisfied_academy_binding(),
-        "erp": _satisfied_erp_binding(),
-        "sub": _satisfied_sub_binding(),
+        product: _bind_satisfied(monkeypatch, tmp_path / product, product)
+        for product in gate.PRODUCTS
     }
     result = gate.evaluate_gate(bindings)
     assert result.satisfied is True, result.explain()
     assert result.refusing == ()
+    for evaluation in result.evaluations:
+        assert evaluation.artefact_digest is not None
 
 
-def test_two_satisfied_and_one_refusing_still_refuses_and_names_it() -> None:
-    """The all-of semantics this gate exists to enforce: Academy and ERP
-    fully satisfied, Sub left unbound. The gate must refuse as a whole, and
-    the refusal must name Sub specifically — not report a vague partial
-    pass."""
+def test_two_satisfied_and_one_refusing_still_refuses_and_names_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     bindings = {
-        "academy": _satisfied_academy_binding(),
-        "erp": _satisfied_erp_binding(),
+        "academy": _bind_satisfied(monkeypatch, tmp_path / "academy", "academy"),
+        "erp": _bind_satisfied(monkeypatch, tmp_path / "erp", "erp"),
         # sub omitted entirely — unbound.
     }
     result = gate.evaluate_gate(bindings)
@@ -232,10 +249,8 @@ def test_two_satisfied_and_one_refusing_still_refuses_and_names_it() -> None:
     assert len(result.refusing) == 1
     assert result.refusing[0].product == "sub"
     assert result.refusing[0].status == "unbound"
-    assert "no revision is bound for 'sub'" in " ".join(result.refusing[0].findings)
     explanation = result.explain()
     assert "sub" in explanation
-    assert "academy" not in explanation.split("\n")[0]  # header names counts, not names
 
 
 def test_unknown_product_in_bindings_is_refused_by_construction() -> None:
@@ -250,261 +265,259 @@ def test_a_moving_ref_revision_is_refused_by_construction() -> None:
     binding = gate.ProductBinding(product="academy", revision="main")
     result = gate.evaluate_academy(binding)
     assert result.satisfied is False
-    assert any("moving ref" in finding for finding in result.findings)
+    assert result.status == "moving_ref"
 
 
 def test_an_embedded_moving_ref_after_at_is_refused() -> None:
-    """`adoption_evidence.py`'s own defect catalogue names this exact shape:
-    `main@e1402902` — a moving ref followed by an eight-hex-digit
-    abbreviation. `_revision_problem` refuses it for naming the ref, not
-    (only) for the abbreviation."""
     binding = gate.ProductBinding(product="erp", revision="main@e1402902")
     result = gate.evaluate_erp(binding)
     assert result.satisfied is False
-    assert any("moving ref" in finding for finding in result.findings)
+    assert result.status == "moving_ref"
 
 
 def test_an_abbreviated_commit_is_refused() -> None:
     binding = gate.ProductBinding(product="sub", revision="abc1234")
     result = gate.evaluate_sub(binding)
     assert result.satisfied is False
+    assert result.status == "invalid_revision"
+
+
+# ── The runner: ancestry, blob, parse — each a real refusal point ─────────
+
+
+def test_ancestry_failure_refuses_as_not_on_protected_main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Plant: a commit that is never merged into `origin/main` — the real
+    `git merge-base --is-ancestor` genuinely refuses it, not a claimed row."""
+    spec = gate.PRODUCT_SPECS["erp"]
+    repo = _init_repo(tmp_path, "erp-clone")
+    base = _git_output(repo, ["rev-parse", "HEAD"]).strip()
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=_ERP_SATISFIED_REQUIREMENTS,
+    )
+    revision = _commit_readiness_record(repo, record)
+    # origin/main stays at the FIRST commit — `revision` is never merged.
+    _mark_as_protected_main(repo, base)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "not_on_protected_main"
+    assert outcome.record is None
+    assert outcome.problem is not None
+    assert "NOT to be an ancestor" in outcome.problem
+
+
+def test_no_clone_configured_refuses_as_evidence_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = gate.PRODUCT_SPECS["sub"]
+    monkeypatch.delenv(spec.clone_env_var, raising=False)
+    outcome = gate.fetch_readiness_record(spec, "a" * 40)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "no local clone is configured" in outcome.problem
+
+
+def test_a_configured_but_missing_clone_is_an_infrastructure_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The corrected rule: a checkout failure must FAIL the CI job, never
+    read as a gate refusal. A configured-but-nonexistent clone path raises,
+    it does not return a soft `FetchOutcome`."""
+    spec = gate.PRODUCT_SPECS["academy"]
+    monkeypatch.setenv(spec.clone_env_var, str(tmp_path / "does-not-exist"))
+    with pytest.raises(RuntimeError, match="infrastructure failure"):
+        gate.fetch_readiness_record(spec, "a" * 40)
+
+
+def test_blob_missing_at_path_refuses_as_evidence_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    spec = gate.PRODUCT_SPECS["sub"]
+    repo = _init_repo(tmp_path, "sub-clone")
+    revision = _git_output(repo, ["rev-parse", "HEAD"]).strip()
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "no blob found" in outcome.problem
+    assert outcome.digest is None
+
+
+def test_invalid_json_refuses_but_still_reports_a_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    spec = gate.PRODUCT_SPECS["erp"]
+    repo = _init_repo(tmp_path, "erp-clone")
+    record_path = repo / "docs" / "kernel-runtime-readiness.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_text("{not valid json")
+    _git(repo, ["add", "."])
+    _git(repo, ["commit", "-q", "-m", "bad record"])
+    revision = _git_output(repo, ["rev-parse", "HEAD"]).strip()
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "not valid JSON" in outcome.problem
+    assert outcome.digest is not None  # the blob WAS read and hashed
+
+
+def test_schema_mismatch_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    spec = gate.PRODUCT_SPECS["sub"]
+    repo = _init_repo(tmp_path, "sub-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=_SUB_SATISFIED_REQUIREMENTS,
+    )
+    record["schema"] = "some-other-schema.v1"
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "`schema`" in outcome.problem
+
+
+def test_product_mismatch_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A record whose `product` names a DIFFERENT repository (e.g. copied
+    from another product) is refused — `product` must equal the fixed
+    repository name, not the short internal product name."""
+    spec = gate.PRODUCT_SPECS["erp"]
+    repo = _init_repo(tmp_path, "erp-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=_ERP_SATISFIED_REQUIREMENTS,
+    )
+    record["product"] = "dotmac_sub"
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "`product`" in outcome.problem
+
+
+def test_subject_mismatch_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    spec = gate.PRODUCT_SPECS["academy"]
+    repo = _init_repo(tmp_path, "academy-clone")
+    record = _record(
+        repository=spec.repository,
+        subject="a-different-subject",
+        requirements=_ACADEMY_SATISFIED_REQUIREMENTS,
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    outcome = gate.fetch_readiness_record(spec, revision)
+    assert outcome.problem_status == "evidence_incomplete"
+    assert outcome.problem is not None
+    assert "`subject`" in outcome.problem
+
+
+def test_missing_requirement_id_refuses_as_evidence_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    spec = gate.PRODUCT_SPECS["sub"]
+    repo = _init_repo(tmp_path, "sub-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=[
+            _requirement("guc_hook_ordered_after_isolation_mode", satisfied=True)
+        ],
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    result = gate.evaluate_sub(gate.ProductBinding(product="sub", revision=revision))
+    assert result.status == "evidence_incomplete"
+    assert any("no requirement with id" in f for f in result.findings)
+
+
+def test_a_requirement_present_but_not_satisfied_refuses_as_evaluation_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The product-authored `satisfied: false` is read and trusted — this is
+    exactly what "legitimate here, and only here" means: ERP's own CI wrote
+    this false, and the gate reports it, never overrides it."""
+    spec = gate.PRODUCT_SPECS["erp"]
+    repo = _init_repo(tmp_path, "erp-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=[
+            _requirement("sync_requirements_satisfied", satisfied=False),
+            _requirement(gate.ASYNC_TRANSITIONAL_REQUIREMENT_ID, satisfied=True),
+        ],
+    )
+    revision = _commit_readiness_record(repo, record)
+    _mark_as_protected_main(repo, revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    result = gate.evaluate_erp(gate.ProductBinding(product="erp", revision=revision))
+    assert result.status == "evaluation_refused"
     assert any(
-        "40-character lowercase hex commit" in finding for finding in result.findings
+        "OBSERVED" in f and "sync_requirements_satisfied" in f for f in result.findings
     )
 
 
-def test_a_bound_revision_with_no_evidence_still_refuses() -> None:
-    """A well-formed 40-hex commit alone is a coordinate with nothing to
-    check — it must refuse exactly as a missing revision does, not pass on
-    the strength of the commit shape being valid."""
-    binding = gate.ProductBinding(product="academy", revision="d" * 40, evidence=None)
-    result = gate.evaluate_academy(binding)
-    assert result.satisfied is False
-    assert any("no product-side evidence" in finding for finding in result.findings)
+# ── The digest: reproducible, and never authoritative as input ─────────────
 
 
-# ── Reason 3: a real commit that is not proven an ancestor of protected main ─
-
-
-def test_a_well_formed_commit_with_no_protected_main_proof_is_refused() -> None:
-    """A valid-looking 40-hex commit with no `protected_main_row` at all —
-    the exact shape a branch-only SHA takes. Must be refused, and the
-    refusal text must be reason 3 (protected `main`), not reason 1 (no
-    revision bound) or reason 2 (moving ref)."""
-    binding = gate.ProductBinding(
-        product="academy",
-        revision="7" * 40,
-        evidence={
-            "unpublished_session_local_usage_sites": (),
-            "strict_bind_without_reference_import": True,
-        },
+def test_the_digest_is_reproducible_for_identical_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mirrors the real measurement that motivated this shape: two DIFFERENT
+    commits carrying the IDENTICAL record bytes hash to the IDENTICAL
+    digest. This is not a bug to guard against — it is exactly why the
+    digest is reported as OUTPUT and never compared as authoritative input;
+    see the module docstring."""
+    spec = gate.PRODUCT_SPECS["sub"]
+    repo = _init_repo(tmp_path, "sub-clone")
+    record = _record(
+        repository=spec.repository,
+        subject=spec.subject,
+        requirements=_SUB_SATISFIED_REQUIREMENTS,
     )
-    result = gate.evaluate_academy(binding)
-    assert result.satisfied is False
-    joined = " ".join(result.findings)
-    assert "protected `main`" in joined
-    assert "no revision is bound" not in joined
-    assert "moving ref" not in joined
+    first_revision = _commit_readiness_record(repo, record)
+    # A second, unrelated commit that touches nothing in the record path.
+    (repo / "unrelated.txt").write_text("noise\n")
+    _git(repo, ["add", "."])
+    _git(repo, ["commit", "-q", "-m", "unrelated change"])
+    second_revision = _git_output(repo, ["rev-parse", "HEAD"]).strip()
+    _mark_as_protected_main(repo, second_revision)
+    monkeypatch.setenv(spec.clone_env_var, str(repo))
+
+    first_outcome = gate.fetch_readiness_record(spec, first_revision)
+    second_outcome = gate.fetch_readiness_record(spec, second_revision)
+    assert first_revision != second_revision
+    assert first_outcome.digest == second_outcome.digest
+    assert first_outcome.digest is not None
 
 
-def test_the_three_refusal_reasons_are_textually_distinguishable() -> None:
-    """Reason 1 (unbound), reason 2 (moving ref) and reason 3 (real commit,
-    unproven protected-main ancestry) each carry a distinguishing phrase
-    absent from the other two — a reviewer must be able to tell them apart
-    from the finding text alone."""
-    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
-    moving_ref = gate.evaluate_academy(
-        gate.ProductBinding(product="academy", revision="main")
-    )
-    unproven = gate.evaluate_academy(
-        gate.ProductBinding(
-            product="academy",
-            revision="8" * 40,
-            evidence={
-                "unpublished_session_local_usage_sites": (),
-                "strict_bind_without_reference_import": True,
-            },
-        )
-    )
-
-    unbound_text = " ".join(unbound.findings)
-    moving_ref_text = " ".join(moving_ref.findings)
-    unproven_text = " ".join(unproven.findings)
-
-    assert "no revision is bound" in unbound_text
-    assert "no revision is bound" not in moving_ref_text
-    assert "no revision is bound" not in unproven_text
-
-    assert "moving ref" in moving_ref_text
-    assert "moving ref" not in unbound_text
-    assert "moving ref" not in unproven_text
-
-    assert "protected `main`" in unproven_text
-    assert "protected `main`" not in unbound_text
-    assert "protected `main`" not in moving_ref_text
-
-
-def test_protected_main_row_with_an_unknown_kind_is_refused() -> None:
-    revision = "9" * 40
-    binding = gate.ProductBinding(
-        product="erp",
-        revision=revision,
-        evidence={
-            "protected_main_row": {
-                "kind": "workflow_run",  # an attestation kind, not reused here
-                "repository": "dotmac_erp",
-                "commit": revision,
-                "expected": "ran",
-            },
-            "sync_requirements_satisfied": True,
-            "async_status": gate.ASYNC_TRANSITIONAL,
-        },
-    )
-    result = gate.evaluate_erp(binding)
-    assert result.satisfied is False
-    joined = " ".join(result.findings)
-    assert "accepted kinds are" in joined
-    assert "pinned_at" in joined and "composed_at" in joined
-
-
-def test_protected_main_row_with_a_mismatched_commit_is_refused() -> None:
-    revision = "1" * 40
-    other_commit = "2" * 40
-    binding = gate.ProductBinding(
-        product="sub",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_sub", other_commit),
-            "guc_hook_ordered_after_isolation_mode": True,
-            "tenant_scope_composed_with_readonly_or_serializable": True,
-        },
-    )
-    result = gate.evaluate_sub(binding)
-    assert result.satisfied is False
-    assert any(
-        "does not match the bound revision" in finding for finding in result.findings
-    )
-
-
-def test_protected_main_row_missing_expected_is_refused() -> None:
-    revision = "3" * 40
-    binding = gate.ProductBinding(
-        product="academy",
-        revision=revision,
-        evidence={
-            "protected_main_row": {
-                "kind": "pinned_at",
-                "repository": "dotmac_academy_app",
-                "commit": revision,
-            },
-            "unpublished_session_local_usage_sites": (),
-            "strict_bind_without_reference_import": True,
-        },
-    )
-    result = gate.evaluate_academy(binding)
-    assert result.satisfied is False
-    assert result.status == "not_on_protected_main"
-    assert any(
-        "protected_main_row.expected` must record" in finding
-        for finding in result.findings
-    )
-
-
-def test_protected_main_row_missing_artefact_is_refused() -> None:
-    """Guards the "plausible-but-wrong SHA" hazard: ancestry alone does not
-    distinguish the RIGHT commit from any other commit also on protected
-    `main`. A row with `kind`/`repository`/`commit`/`expected` all well-formed
-    but no `artefact` must still refuse — naming what the commit is supposed
-    to carry is required, not optional."""
-    revision = "4" * 40
-    binding = gate.ProductBinding(
-        product="erp",
-        revision=revision,
-        evidence={
-            "protected_main_row": {
-                "kind": "pinned_at",
-                "repository": "dotmac_erp",
-                "commit": revision,
-                "expected": f"git merge-base --is-ancestor {revision} origin/main "
-                "succeeded",
-            },
-            "sync_requirements_satisfied": True,
-            "async_status": gate.ASYNC_TRANSITIONAL,
-        },
-    )
-    result = gate.evaluate_erp(binding)
-    assert result.satisfied is False
-    assert result.status == "not_on_protected_main"
-    assert any("protected_main_row.artefact` must record" in f for f in result.findings)
-
-
-def test_the_real_erp_readiness_revision_is_distinguishable_from_the_excluded_one() -> (
-    None
-):
-    """Grounded in the actual coordination record: ERP's readiness revision
-    is `b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f` (#510, carrying the
-    runtime/async/PID-fork contract) — `1d82a4d2...` (#509, customer
-    import-parity work) was explicitly ruled OUT as the wrong commit.  Both
-    are plausible 40-hex-shaped ancestors of ERP's protected `main`; this
-    gate's `artefact` field is what forces a binder to name which one they
-    mean, so a reviewer has something concrete to check rather than a bare,
-    equally-plausible-looking SHA.
-
-    This module has no access to the `dotmac_erp` repository and cannot
-    itself verify either commit's ancestry or contents — that is explicitly
-    UNMONITORED (see the module docstring). What this test proves is
-    narrower and mechanical: naming the CORRECT artefact for the CORRECT
-    commit satisfies the row-shape check, and the two commits remain
-    textually distinguishable in any bound evidence."""
-    correct_revision = "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
-    excluded_revision_prefix = "1d82a4d2"
-    assert correct_revision != excluded_revision_prefix
-    assert gate.IMMUTABLE_COMMIT.fullmatch(correct_revision)
-
-    binding = gate.ProductBinding(
-        product="erp",
-        revision=correct_revision,
-        evidence={
-            "protected_main_row": _protected_main_row(
-                "dotmac_erp",
-                correct_revision,
-                artefact="docs/architecture/erp-runtime-async-pid-fork-contract.md",
-            ),
-            "sync_requirements_satisfied": True,
-            "async_status": gate.ASYNC_TRANSITIONAL,
-        },
-    )
-    result = gate.evaluate_erp(binding)
-    assert result.revision == correct_revision
-    assert result.satisfied is True, result.explain()
-
-
-def test_protected_main_proof_kinds_reuse_adoption_evidences_vocabulary() -> None:
-    """`PROTECTED_MAIN_PROOF_KINDS` reuses `adoption_evidence.py`'s own
-    closed vocabulary rather than inventing a parallel one — proven by
-    membership, not by comment."""
-    from tests.architecture import adoption_evidence
-
-    assert gate.PROTECTED_MAIN_PROOF_KINDS == {"pinned_at", "composed_at"}
-    assert gate.PROTECTED_MAIN_PROOF_KINDS <= (
-        adoption_evidence.ASSERTION_KINDS | adoption_evidence.AST_ASSERTION_KINDS
-    )
-
-
-# ── Each evaluation names the exact revision it evaluated ──────────────────
-
-
-def test_evaluation_result_records_the_exact_revision_evaluated() -> None:
-    unbound = gate.evaluate_academy(gate.ProductBinding(product="academy"))
-    assert unbound.revision is None
-    assert "<unbound>" in unbound.explain()
-
-    bound = gate.evaluate_academy(_satisfied_academy_binding())
-    assert bound.revision == "a" * 40
-    assert ("a" * 40) in bound.explain()
-
-
-# ── Academy: the SessionLocal / __all__ finding, and its sensitivity ──────
+# ── Kernel-side structural facts (unchanged by either ruling) ──────────────
 
 
 def test_academy_reports_the_unpublished_session_local_finding_today() -> None:
@@ -518,9 +531,7 @@ def test_the_session_local_finding_disappears_if_it_were_published(
     tmp_path: Path,
 ) -> None:
     """Sensitivity, near-miss half: plant a copy of `db.py` with
-    `SessionLocal` added to `__all__` and confirm the finding is absent —
-    proving the check reads the real `__all__` rather than always emitting
-    the finding regardless of content."""
+    `SessionLocal` added to `__all__` and confirm the finding is absent."""
     planted = tmp_path / "db.py"
     source = gate._DB_PATH.read_text()
     anchor = '    "tenant_session_by_slug",\n]'
@@ -535,9 +546,6 @@ def test_the_session_local_finding_disappears_if_it_were_published(
 def test_the_bare_assignment_check_stops_reporting_a_removed_attribute(
     tmp_path: Path,
 ) -> None:
-    """Sensitivity, plant half in the other direction: if `SessionLocal`
-    were removed from `db.py` entirely, the bare-assignment check must stop
-    reporting it as present (there is nothing left to be unpublished)."""
     planted = tmp_path / "db.py"
     source = gate._DB_PATH.read_text()
     anchor = "SessionLocal = runtime.session_factory\n"
@@ -550,56 +558,11 @@ def test_the_bare_assignment_check_stops_reporting_a_removed_attribute(
     assert "SessionLocal" not in bare_names
 
 
-# ── ERP: async stays explicitly transitional, never silently satisfied ────
-
-
 def test_erp_reports_the_kernel_is_sync_only_today() -> None:
     result = gate.evaluate_erp(gate.ProductBinding(product="erp"))
     joined = " ".join(result.findings)
     assert "sync-only" in joined
     assert "0 `async def`" in joined
-
-
-def test_erp_async_status_satisfied_is_refused_not_silently_accepted() -> None:
-    revision = "e" * 40
-    binding = gate.ProductBinding(
-        product="erp",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_erp", revision),
-            "sync_requirements_satisfied": True,
-            "async_status": "satisfied",
-        },
-    )
-    result = gate.evaluate_erp(binding)
-    assert result.satisfied is False
-    assert any(
-        "publishes no async DatabaseRuntime boundary" in finding
-        for finding in result.findings
-    )
-
-
-def test_erp_async_status_transitional_with_sync_satisfied_passes() -> None:
-    result = gate.evaluate_erp(_satisfied_erp_binding())
-    assert result.satisfied is True, result.explain()
-
-
-def test_erp_missing_async_status_is_refused_as_a_shape_problem() -> None:
-    revision = "f" * 40
-    binding = gate.ProductBinding(
-        product="erp",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_erp", revision),
-            "sync_requirements_satisfied": True,
-        },
-    )
-    result = gate.evaluate_erp(binding)
-    assert result.satisfied is False
-    assert any("must carry a non-empty `async_status`" in f for f in result.findings)
-
-
-# ── Sub: the GUC ordering guarantee, measured structurally, with sensitivity ─
 
 
 def test_sub_reports_the_isolation_ordering_guarantee_holds_today() -> None:
@@ -610,10 +573,7 @@ def test_sub_reports_the_isolation_ordering_guarantee_holds_today() -> None:
 
 def test_the_ordering_check_bites_a_reordered_isolated_session(tmp_path: Path) -> None:
     """Plant: reorder `_isolated_session` so `yield db` precedes the
-    `execution_options` connection call, and confirm the structural check
-    reports the ordering as broken. Admits control first (the unmutated
-    source reports True) so the plant is proven against a working baseline,
-    not a broken fixture."""
+    `execution_options` connection call. Admits control first."""
     source = gate._SESSION_RUNTIME_PATH.read_text()
     control_path = tmp_path / "control_session_runtime.py"
     control_path.write_text(source)
@@ -641,9 +601,6 @@ def test_the_ordering_check_bites_a_reordered_isolated_session(tmp_path: Path) -
 
 
 def test_sub_missing_boundary_method_is_reported(tmp_path: Path) -> None:
-    """Plant: rename `readonly_session` out of existence in a copied source
-    tree and confirm `_class_public_method_names` no longer reports it —
-    the fact `evaluate_sub`'s `missing` computation depends on."""
     source = gate._SESSION_RUNTIME_PATH.read_text()
     anchor = "def readonly_session(self)"
     assert source.count(anchor) == 1, "readonly_session's def line has changed shape"
@@ -655,43 +612,6 @@ def test_sub_missing_boundary_method_is_reported(tmp_path: Path) -> None:
     assert "readonly_session" not in methods
 
 
-def test_sub_guc_ordering_shape_refusals_are_reported() -> None:
-    revision = "1" * 40
-    binding = gate.ProductBinding(
-        product="sub",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_sub", revision),
-            "guc_hook_ordered_after_isolation_mode": True,
-        },
-    )
-    result = gate.evaluate_sub(binding)
-    assert result.satisfied is False
-    assert any(
-        "tenant_scope_composed_with_readonly_or_serializable" in f
-        for f in result.findings
-    )
-
-
-def test_sub_observed_false_values_are_reported_as_observed_not_presumed() -> None:
-    revision = "2" * 40
-    binding = gate.ProductBinding(
-        product="sub",
-        revision=revision,
-        evidence={
-            "protected_main_row": _protected_main_row("dotmac_sub", revision),
-            "guc_hook_ordered_after_isolation_mode": False,
-            "tenant_scope_composed_with_readonly_or_serializable": True,
-        },
-    )
-    result = gate.evaluate_sub(binding)
-    assert result.satisfied is False
-    assert any(
-        finding.startswith("OBSERVED at sub@") and "NOT ordered" in finding
-        for finding in result.findings
-    )
-
-
 # ── The bindings-file loader: shape refusals ────────────────────────────────
 
 
@@ -700,13 +620,7 @@ def test_load_default_bindings_reads_the_checked_in_seam_file() -> None:
     assert set(bindings) == set(gate.PRODUCTS)
     for product, binding in bindings.items():
         assert binding.product == product
-    # Academy is not yet eligible to bind at all (see its recorded note).
-    assert bindings["academy"].revision is None
-    # ERP and Sub carry named, protected-main-ancestor revisions -- distinct,
-    # real 40-hex commits, never each other's and never the excluded #509.
-    assert bindings["erp"].revision == "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
-    assert bindings["sub"].revision == "288b68cf0ba4196b36641801093b501a75e80a0d"
-    assert bindings["erp"].revision != bindings["sub"].revision
+        assert binding.revision is None
 
 
 def test_bindings_loader_refuses_an_undeclared_schema(tmp_path: Path) -> None:
@@ -726,49 +640,55 @@ def test_bindings_loader_refuses_an_unknown_product_key(tmp_path: Path) -> None:
         gate.load_default_bindings(bad)
 
 
-def test_bindings_loader_accepts_a_real_bound_revision(tmp_path: Path) -> None:
-    """Proves the seam: editing only the JSON data file, with zero code
-    changes, produces a bound evaluation."""
-    import json as _json
+def test_bindings_loader_refuses_an_evidence_field() -> None:
+    """The defect this replaces: a binding row could once carry an
+    `evidence` object with caller-authored booleans that evaluated as
+    satisfied. That field no longer exists in the schema; the loader refuses
+    it outright rather than silently ignoring it."""
+    payload = {
+        "schema": "compatibility_gate_bindings_v1",
+        "bindings": {
+            "erp": {
+                "revision": "a" * 40,
+                "evidence": {"sync_requirements_satisfied": True},
+            }
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "bindings.json"
+        bad.write_text(json.dumps(payload))
+        with pytest.raises(ValueError, match="unrecognised"):
+            gate.load_default_bindings(bad)
 
-    revision = "a" * 40
+
+def test_bindings_loader_accepts_a_revision_only_row(tmp_path: Path) -> None:
+    """The seam: editing only the JSON data file's `revision` field, with
+    zero code changes, produces a bound (though not necessarily satisfied)
+    evaluation — a real revision alone is not enough without a fetched
+    record, and that is the point."""
     real = tmp_path / "bindings.json"
     real.write_text(
-        _json.dumps(
+        json.dumps(
             {
                 "schema": "compatibility_gate_bindings_v1",
-                "bindings": {
-                    "academy": {
-                        "revision": revision,
-                        "evidence": {
-                            "protected_main_row": _protected_main_row(
-                                "dotmac_academy_app", revision
-                            ),
-                            "unpublished_session_local_usage_sites": [],
-                            "strict_bind_without_reference_import": True,
-                        },
-                    }
-                },
+                "bindings": {"academy": {"revision": "a" * 40}},
             }
         )
     )
     bindings = gate.load_default_bindings(real)
-    result = gate.evaluate_academy(bindings["academy"])
-    assert result.revision == "a" * 40
-    assert result.satisfied is True, result.explain()
+    assert bindings["academy"].revision == "a" * 40
+    assert bindings["erp"].revision is None
+    assert bindings["sub"].revision is None
 
 
 # ── Docstring naming discipline: no dotted product-path strings ────────────
 
 
 def test_the_module_names_no_literal_product_import_paths() -> None:
-    """This module and its docstrings discuss Academy/ERP/Sub file
-    locations in prose (backtick-quoted, human-readable), never as
-    dotted-import-looking string literals a content-scanning classifier
+    """This module discusses Academy/ERP/Sub file locations in prose, never
+    as dotted-import-looking string literals a content-scanning classifier
     could misread as this repository importing or depending on another
-    product's module. `app.api.deps`-style dotted paths (the shape a
-    Python import or a dependency scanner keys on) must not appear as
-    string literals in the source."""
+    product's module."""
     source = (Path(__file__).parent / "compatibility_gate.py").read_text()
     tree = ast.parse(source)
     suspicious = []

@@ -7,155 +7,227 @@ time, and nothing here samples or guesses.
 
 **Compatibility only, never adoption.** Every evaluation below answers "is the
 Kernel's published successor surface (``dotmac_kernel.session_runtime``,
-``dotmac_kernel.db``) sufficient for this product's stated need", by reading
-KERNEL SOURCE in THIS repository via ``ast`` — never by importing, executing,
-cloning or fetching anything, and never by constructing a runtime and
-asserting it works. Whether a product HAS adopted that surface is a fact about
-the product's own tree, established the same way
-``tests/architecture/adoption_evidence.py``'s ``composed_at`` kind already
-requires: a bound immutable revision plus product-side evidence captured
-against that exact tree. Nobody has captured any yet (see "The evidence-
-binding seam" below), so every product-side half of every evaluation below
-refuses today, by construction, not by omission.
+``dotmac_kernel.db``) sufficient for this product's stated need". The
+Kernel-side half is answered by reading KERNEL SOURCE in THIS repository via
+``ast`` — never by importing, executing, or constructing a runtime and
+asserting it works. Whether a product HAS adopted that surface is a fact
+about the product's own tree, established by fetching, verifying and parsing
+a fixed, typed readiness record from that product's own repository (see
+"The runner" below). A verified record proves compatibility, never adoption
+— ADR-0006 § 5, "reference proof is not adoption" — and adoption stays 0/3.
 
-The evidence-binding seam
---------------------------
+Corrected shape, second ruling (2026-09-09)
+------------------------------------------------
 
-``load_default_bindings()`` reads ``compatibility_gate_bindings.json``, the
-ONE file that changes when a real revision's evidence has been captured.
-Today ERP and Sub carry named, protected-`main`-ancestor revisions with a
-``protected_main_row`` but no product-specific facts yet, so both refuse at
-``"evidence_incomplete"``; Academy carries no revision at all (``revision:
-null``) and refuses at ``"unbound"``. ``evaluate_gate(load_default_bindings
-())`` therefore still refuses, for three separately-labelled reasons.
-Governance #87 has merged (``6fbeffca``); Academy #130 is still being
-re-derived under the merged classifier, blocked on a prerequisite migration,
-in a separate lane this slice does not touch. Completing ERP's or Sub's
-binding — capturing the product-specific facts against that exact tree — is
-editing this JSON file's ``evidence`` field; nothing in this module changes
-shape.
+An earlier shape asked a BINDER to supply a free-form claim (an ancestry
+statement, an ``artefact`` path, caller-authored booleans) alongside the
+bound revision. That shape made a wrong commit VISIBLE to a reviewer; it did
+not make the evaluator CAPABLE of refusing it — nothing verified ancestry,
+fetched the repository, or read the named artefact. `"a" * 40` plus a
+fabricated claim evaluated as satisfied: the dominant defect class this
+whole programme exists to close, sitting inside the gate built to enforce
+it.
 
-Vocabulary reused, verbatim, from ``adoption_evidence.py``
-------------------------------------------------------------
+A further measurement sharpened the target past "verify the claim harder":
+two different real ERP commits — the correct readiness commit and an
+explicitly excluded, wrong one — hash to the IDENTICAL SHA-256 at the same
+artefact path, because the file was unchanged between them. A digest alone
+cannot separate the right commit from the wrong one either. In Michael's own
+words, this is why commit identity stopped being the question at all:
 
-``IMMUTABLE_COMMIT`` and ``MOVING_REFS``: a revision is an exact 40-character
-lowercase hex commit or it is refused by construction, including a moving ref
-embedded after ``@`` (``adoption_evidence._revision_problem`` handles that
-identical case). This module does not invent a second revision-shape grammar.
+    "commit narrative and 'where this first landed' are irrelevant. A
+    protected-main revision is acceptable when it carries a valid
+    product-owned record for the correct subject."
 
-``pinned_at`` / ``composed_at`` (members of ``adoption_evidence
-.ASSERTION_KINDS`` / ``.AST_ASSERTION_KINDS``) are reused as the only two
-accepted ``kind`` values for a ``protected_main_row`` — the row proving a
-bound revision is an ancestor of the product repository's protected ``main``
-(see "Three distinct refusal reasons" below). No third, gate-local kind name
-is invented for this.
+The fix is not a sharper claim shape; it is removing the claim and having
+the gate VERIFY, and moving the pass/fail booleans to the only party that
+can actually check them — the product's own CI, validating its own record
+against its own tree, not Starter guessing about a tree it cannot see.
 
-``INSTALLATION_KINDS``' own lesson — a pin is installation, never adoption —
-is why a well-formed, protected-main-anchored commit is still only
-COMPATIBILITY evidence here, never adoption evidence: this gate answers "can
-the Kernel satisfy this", not "has the product composed it". Adoption stays
-0/3 and nothing in this slice changes that (see "Compatibility only" above).
+The fixed product specification
+-----------------------------------
+
+`PRODUCT_SPECS` is STARTER-OWNED and closed: for each product, the exact
+repository, the exact repository-relative path of a TYPED (JSON) readiness
+record (`docs/kernel-runtime-readiness.json`, uniform across all three), and
+the exact `subject` string that record must self-declare. None of this is
+selectable from `compatibility_gate_bindings.json` — a binding supplies a
+`revision` and nothing else (`load_default_bindings` refuses any other
+field). Existing product Markdown/prose documentation stays explanatory; it
+is never parsed as a machine contract — only this fixed-path JSON record is.
+
+The fixed record envelope (owned by Michael; raise a correction rather than
+diverging)
+-------------------------------------------------------------------------------
+
+::
+
+    {
+      "schema": "kernel-runtime-readiness.v1",
+      "product": "<dotmac_sub | dotmac_erp | dotmac_academy_app>",
+      "subject": "<the fixed subject Starter specifies for that product>",
+      "requirements": [
+        {"id": "<stable slug>", "statement": "<what must hold>",
+         "satisfied": true, "source_reference": "<path:line in this product's tree>"}
+      ],
+      "composition": [
+        {"declaration": "<what this product composes>",
+         "source_reference": "<path:line>"}
+      ],
+      "source_references": ["<path>", "..."]
+    }
+
+`satisfied` booleans are legitimate HERE, and only here: authored by the
+product's own CI, in the tree they describe, validated against that tree by
+that product's own pipeline — the inversion of the earlier defect, where the
+boolean was authored by the party (Starter) that could not check it.
+
+The runner
+--------------
+
+`fetch_readiness_record(spec, revision)` is the verifying half the earlier
+shape was missing:
+
+1. Locates a LOCAL clone of `spec.repository` via the fixed
+   `spec.clone_env_var` — an infrastructure coordinate, never a per-binding
+   one. **Absent** (the env var is simply unset) is the ordinary, expected
+   "no CI runner wired up yet" state → refuses (`evidence_incomplete`).
+   **Set but broken** (the directory does not exist, or `git` fails in a way
+   that is not a legitimate "not an ancestor" answer) is an INFRASTRUCTURE
+   FAILURE, not evidence about the revision, and `fetch_readiness_record`
+   RAISES rather than returning a soft refusal — see "Infrastructure
+   failure is not a status" below.
+2. Verifies `revision` is an ancestor of that clone's `origin/main` via
+   `git merge-base --is-ancestor` — an ACTUAL check. Refuses on a genuine
+   negative answer (`not_on_protected_main`).
+3. Reads the exact blob at `<revision>:<READINESS_RECORD_PATH>` via `git
+   show`. Missing → refuses (`evidence_incomplete`).
+4. Computes the blob's SHA-256 (see "The digest is output, never input"),
+   parses it as JSON, and requires `schema`, `product` (== `spec.repository`)
+   and `subject` (== `spec.subject`) to match exactly, and `requirements` /
+   `composition` / `source_references` to be structurally well-formed. Any
+   mismatch or malformed shape refuses (`evidence_incomplete`).
+5. Product-specific facts come from the verified record's `requirements` —
+   each evaluation looks up its own fixed requirement ids and reads their
+   product-authored `satisfied` booleans. Never from caller-supplied input.
+
+**No new public status vocabulary.** Every refusal above lands on one of the
+two existing statuses, `not_on_protected_main` or `evidence_incomplete`.
+
+Infrastructure failure is not a status
+-------------------------------------------
+
+The same lesson Control's `resolve_current_root` correction already drew: an
+infrastructure failure reported as a deliberate state is a conflation, not a
+convenience. A network or checkout failure must FAIL THE REQUIRED CI JOB,
+never read as `evidence_incomplete` (which means "nobody has produced
+evidence yet", a legitimate, expected, waiting state) or as `unbound` (which
+means "no revision was named at all", reserved for an INTENTIONALLY absent
+binding). `_clone_path_for` therefore returns `None` only when the env var is
+genuinely unset; if it is set but the directory is missing, or if `git
+merge-base` exits with anything other than the two codes that legitimately
+mean "is" or "is not" an ancestor, this module raises `RuntimeError` instead
+of returning a `FetchOutcome` — the caller (a required CI job) then fails
+loudly, exactly as an infrastructure failure should.
+
+The digest is output, never input
+--------------------------------------
+
+`EvaluationResult.artefact_digest` reports the SHA-256 this module itself
+computed from the fetched blob's bytes. It is populated ONLY by
+`fetch_readiness_record` from bytes THIS module read; nothing in
+`ProductBinding`, `compatibility_gate_bindings.json`, or any other accepted
+input can set or influence it — there is no `digest` field anywhere on the
+input side. A caller cannot supply a digest and have it compared, trusted, or
+otherwise treated as authoritative, which is exactly why a caller-supplied
+digest would have been as weak as the claim it replaces (see the identical-
+digest measurement above).
 
 Three distinct refusal reasons
 ---------------------------------
 
-**Ruling, 2026-09-09: bind only protected-`main` revisions that already
-carry the final readiness evidence — never a branch head.** A branch head is
-a moving target (force-pushable, rebasable away, abandonable), so binding one
-would make the gate's evidence unreproducible — exactly the failure mode
-"exact immutable revision" already exists to rule out one level up. A
-reviewer must be able to tell, from the finding text alone, which of three
-distinct things is wrong:
+A reviewer must be able to tell, from `EvaluationResult.status` alone (never
+by parsing `findings`), which of these applies:
 
-1. **No revision bound at all** (``revision is None``) — "no revision is
-   bound for ``'<product>'``".
-2. **A moving ref** (a branch name, ``HEAD``, ``main``, or one embedded after
-   ``@``) — "... is a moving ref ..." / "... names the moving ref ...".
-3. **Not confirmed as an ancestor of protected `main`** — a well-formed,
-   40-hex commit with no (or an invalid) ``protected_main_row`` in its
-   evidence — "... carries no `protected_main_row` proving it is an ancestor
-   of the product repository's protected `main`". A valid-looking SHA that
-   exists only on a branch lands HERE, not in reason 1 or 2: it is a real
-   coordinate shape, just not one this gate accepts without proof of
-   reachability from protected `main`.
+1. **`unbound`** — no revision named at all.
+2. **`moving_ref`** / **`invalid_revision`** — the named revision is not an
+   immutable 40-hex commit.
+3. **`not_on_protected_main`** — a well-formed commit the runner verified is
+   NOT an ancestor of the product's protected `main`.
+4. **`evidence_incomplete`** — ancestry verified (or not yet checkable
+   because no CI runner is wired up), but the readiness record could not be
+   fetched, parsed, matched to the fixed spec, or is missing a required
+   requirement id.
+5. **`evaluation_refused`** — a complete, verified, matching record whose
+   product-authored `satisfied` booleans themselves show the product does
+   not meet the property.
+6. **`satisfied`** — every check passed.
 
 The absence-is-refusal rule
 -----------------------------
 
 **A missing product revision is a REFUSAL, never a skip and never a pass.**
-``evaluate_gate`` always evaluates exactly the three names in ``PRODUCTS``,
-never fewer — a caller cannot make the gate "pass" by omitting a product from
-the bindings mapping, because an omitted product is simply evaluated unbound,
-which refuses. ``GateResult.satisfied`` additionally refuses an EMPTY
-``evaluations`` tuple outright (``all(())`` is ``True`` in Python, and a gate
-that read that as "nothing to refuse" would be the identical defect this
-whole programme has been chasing — a check over no files, passing for having
-nothing to check). See ``test_the_gate_cannot_pass_on_an_empty_evaluation_set``.
+`evaluate_gate` always evaluates exactly the three names in `PRODUCTS`, never
+fewer. `GateResult.satisfied` additionally refuses an EMPTY `evaluations`
+tuple outright (`all(())` is `True` in Python, and a gate that read that as
+"nothing to refuse" would be the identical defect this whole programme has
+been chasing).
 
-**ERP and Sub are revision-bound in the checked-in seam file today; Academy
-is not.** ERP (``b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f``, #510) and Sub
-(``288b68cf0ba4196b36641801093b501a75e80a0d``, #3015) have named,
-protected-`main`-ancestor readiness revisions, reported by the orchestrating
-coordinator and recorded honestly as such (``protected_main_row.expected``
-says plainly that this module did not independently re-derive the ancestry —
-no access to those repositories, no network fetch). Their PRODUCT-SPECIFIC
-facts (``sync_requirements_satisfied``, ``async_status``,
-``guc_hook_ordered_after_isolation_mode``,
-``tenant_scope_composed_with_readonly_or_serializable``) have not been
-captured by anyone with access to those trees, so both stay at status
-``"evidence_incomplete"`` rather than a fabricated ``"satisfied"`` — this
-module records what it has been told and refuses to invent the rest.
+**No product has a typed readiness record yet, so the gate still refuses on
+all three today.** Sub (`288b68cf…`, #3015) and ERP (`b3b191cc…`, #510) are
+SOURCE MATERIAL for the typed-record PRs now being built, not final
+bindings — the record PRs will create their own replacement coordinates,
+and this module does not hard-code today's SHAs as if they were the answer.
+`compatibility_gate_bindings.json` therefore binds no revision for any
+product today; all three refuse at `unbound`. Academy additionally has a
+distinct, named reason it cannot yet be bound at all: it is mid-adoption of
+the Foundation deployment contract, blocked on a Governance-pin
+`schema_version` 9→10→11 migration prerequisite — an EVIDENCE-ELIGIBILITY
+blocker, never a Kernel-incompatibility finding.
 
-Academy is different IN KIND, not degree: it is not "found incompatible" —
-it is EVIDENCE-UNBOUND / not yet eligible, mid-adoption of the Foundation
-deployment contract and blocked on a Governance-pin ``schema_version``
-9→10→11 migration prerequisite that has not landed, so it cannot yet produce
-a revision to bind at all. `EvaluationResult.status` distinguishes exactly
-this: Academy's status is ``"unbound"``, never the same status ERP/Sub carry
-(``"evidence_incomplete"``) and never the status a product that DID produce
-complete evidence and failed evaluation would carry
-(``"evaluation_refused"``) — collapsing all of these into one boolean is how
-"not yet eligible" gets misread as "incompatible". A run today therefore
-refuses on all three products, each for its own distinct, correctly-labelled
-reason — never a pass on an empty or fabricated evidence set.
+CI access this runner requires (reported, not provisioned)
+------------------------------------------------------------
+
+Starter, Sub, ERP and Academy are all PUBLIC repositories — **no credential,
+GitHub App, or secret is required**. A required CI job checks out
+`dotmac_erp`, `dotmac_sub`, and `dotmac_academy_app` alongside this
+repository (`actions/checkout`, pinned by commit SHA, `fetch-depth: 0`,
+`persist-credentials: false`) and exports `COMPAT_GATE_CLONE_DOTMAC_ERP`,
+`COMPAT_GATE_CLONE_DOTMAC_SUB`, and `COMPAT_GATE_CLONE_DOTMAC_ACADEMY_APP`
+pointing at those checkouts. A checkout or network failure in that job must
+fail the job — see "Infrastructure failure is not a status" above. No
+workflow file, secret, or credential is provisioned by this slice; this
+paragraph is the report, not an implementation.
 
 What this module does NOT establish (unmonitored, stated per ADR-0018)
 --------------------------------------------------------------------------
 
-- Whether a bound revision's captured ``evidence`` still describes that
-  product's CURRENT tree. Every revision is immutable, so this is the same
-  "assertion_resolution" gap ``adoption_evidence.py`` already names: a
-  scheduled external re-derivation against the cited repository, not built
-  here.
-- Whether ANY product has actually adopted anything. This gate proves
-  compatibility (the Kernel surface CAN satisfy the need), never adoption
-  (the product DOES rely on it) — see ADR-0006 § 5, "reference proof is not
-  adoption", which is exactly the shape this module refuses to blur.
-- Whether a `protected_main_row`'s `artefact` is genuinely present at the
-  named commit. This module requires the field to be RECORDED (a binder
-  must name what they believe the commit carries, giving a reviewer
-  something concrete to check) and requires it to name the SAME commit as
-  the bound revision — it does not fetch the product repository to confirm
-  the artefact actually exists there. Binding the wrong-but-plausible commit
-  with a truthfully-recorded WRONG artefact name is still refused by a
-  careful reviewer reading the row, never by this module alone.
+- Whether a bound revision's fetched record still describes that product's
+  CURRENT tree. Every revision is immutable; re-fetching at a later revision
+  is the product's own next binding, not a re-derivation this module
+  performs automatically.
+- Whether ANY product has actually adopted anything (see "Compatibility
+  only" above).
+- Whether a `requirements[].satisfied` boolean is actually TRUE of the
+  product's tree. That verification is EXPLICITLY the product's own CI's
+  job, per the fixed envelope's design — this module checks that the claim
+  is well-formed, present, and authored in the right record; it does not
+  re-derive it.
 """
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import os
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from tests.architecture.adoption_evidence import (
-    ASSERTION_KINDS,
-    AST_ASSERTION_KINDS,
-    IMMUTABLE_COMMIT,
-    MOVING_REFS,
-)
+from tests.architecture.adoption_evidence import IMMUTABLE_COMMIT, MOVING_REFS
 
 _HERE: Final = Path(__file__).resolve().parent
 _REPO_ROOT: Final = _HERE.parents[1]
@@ -167,58 +239,38 @@ _SESSION_RUNTIME_PATH: Final = _KERNEL_SRC / "session_runtime.py"
 DEFAULT_BINDINGS_PATH: Final = _HERE / "compatibility_gate_bindings.json"
 BINDINGS_SCHEMA_VALUE: Final = "compatibility_gate_bindings_v1"
 
+#: A binding row supplies a revision and nothing else that could redefine
+#: what is being checked — repository, path, schema and subject are fixed in
+#: `PRODUCT_SPECS`. `_note` is a free human comment, read by nobody.
+ALLOWED_BINDING_ROW_KEYS: Final = frozenset({"revision", "_note"})
+
 #: Closed. Three products, three evaluations below, one procedure each — an
 #: unknown product name is a claim no procedure below knows how to check, so
 #: it is refused rather than silently accepted or silently skipped.
 PRODUCTS: Final = ("academy", "erp", "sub")
 
-#: The one accepted value for `evidence["async_status"]` short of a real
-#: async DatabaseRuntime existing in the Kernel. Closed for the same reason
-#: `HISTORICAL_ADOPTION_STATES` in `adoption_evidence.py` is closed: adding a
-#: second accepted value is a schema decision with a reviewer, not something
-#: a bound revision's evidence gets to assert into existence.
-ASYNC_TRANSITIONAL: Final = "transitional"
-
-#: The only accepted `kind` values for a `protected_main_row` — reused
-#: VERBATIM from `adoption_evidence.py`'s own closed vocabulary rather than a
-#: gate-local invention. `pinned_at` is an assertion that a file's field held
-#: a value at an immutable commit; `composed_at` is an assertion about a
-#: syntax tree at an immutable commit. Either shape can carry "this exact
-#: commit is part of protected `main`'s history" (a CI-recorded merge-base or
-#: fast-forward check, addressed the same way any other tree fact is
-#: addressed here). Asserted a proper subset of the union below, so a rename
-#: on either side is caught rather than silently drifting apart.
-PROTECTED_MAIN_PROOF_KINDS: Final = frozenset({"pinned_at", "composed_at"})
-if not PROTECTED_MAIN_PROOF_KINDS <= (ASSERTION_KINDS | AST_ASSERTION_KINDS):
-    raise RuntimeError(
-        "PROTECTED_MAIN_PROOF_KINDS must stay a subset of adoption_evidence"
-        ".py's own closed vocabulary — this constant reuses those names, it "
-        "does not invent a parallel one"
-    )
+#: The one accepted value for the ERP async-transitional requirement's
+#: `statement`/id semantics — see `evaluate_erp`. Closed for the same reason
+#: `HISTORICAL_ADOPTION_STATES` in `adoption_evidence.py` is closed.
+ASYNC_TRANSITIONAL_REQUIREMENT_ID: Final = "async_support_explicitly_transitional"
 
 #: The closed, structured verdict vocabulary for `EvaluationResult.status`.
 #: Distinguishes "no evidence exists yet" from "evidence exists and was
-#: refused" — the ABSENT-versus-REGISTRY_DISAGREEMENT split, restated here
-#: because collapsing both into one `satisfied=False` is how a product that
-#: is merely UNBOUND (blocked on a prerequisite it has not cleared yet, e.g.
-#: a pending schema migration) gets misread as a product FOUND incompatible.
+#: refused" — the ABSENT-versus-REGISTRY_DISAGREEMENT split. Unchanged by
+#: either ruling: no new public status was added for the runner's refusals.
 #:
 #: `unbound` — reason 1: no revision named at all.
 #: `moving_ref` — reason 2: the named revision is a branch/HEAD/main, not a
 #:   coordinate.
 #: `invalid_revision` — a named revision that is neither `None` nor a
-#:   recognised moving ref, but also not a well-formed 40-hex commit (e.g. an
-#:   abbreviated SHA). A fourth bucket beyond the three the ruling names,
-#:   kept distinct rather than folded into `moving_ref` for the same reason
-#:   this whole field exists: a reader should not have to guess.
-#: `not_on_protected_main` — reason 3: a well-formed 40-hex commit with no
-#:   (or an invalid) `protected_main_row` proving it is an ancestor of
-#:   protected `main`.
-#: `evidence_incomplete` — a real, protected-main-proven commit whose
-#:   product-side evidence is missing or malformed required keys.
-#: `evaluation_refused` — evidence is complete and well-formed, and the
-#:   CAPTURED FACTS themselves show the product does not meet the property
-#:   (e.g. a strict bind observed to fail, or an unresolved usage site).
+#:   recognised moving ref, but also not a well-formed 40-hex commit.
+#: `not_on_protected_main` — reason 3: the runner verified the revision is
+#:   NOT an ancestor of the product's protected `main`.
+#: `evidence_incomplete` — ancestry could not be checked (no CI runner wired
+#:   up) or was verified, but the record could not be fetched, parsed,
+#:   matched to the fixed spec, or is missing a required requirement id.
+#: `evaluation_refused` — a complete, verified record whose product-authored
+#:   `satisfied` booleans show the product does not meet the property.
 #: `satisfied` — every check passed.
 EVALUATION_STATUSES: Final = frozenset(
     {
@@ -231,6 +283,61 @@ EVALUATION_STATUSES: Final = frozenset(
         "satisfied",
     }
 )
+
+#: The one accepted `schema` value for a product's typed readiness record —
+#: Michael's fixed envelope, reproduced verbatim. Raise a correction to him
+#: rather than diverging from this literal string.
+READINESS_SCHEMA_MARKER: Final = "kernel-runtime-readiness.v1"
+
+#: The one canonical, repository-relative path of the typed readiness
+#: record, uniform across all three products. No product-specific override
+#: exists — a different path per product would itself be a selectable
+#: knob, which the ruling forbids.
+READINESS_RECORD_PATH: Final = "docs/kernel-runtime-readiness.json"
+
+
+# ── The fixed product specification (Starter-owned, closed) ────────────────
+
+
+@dataclass(frozen=True)
+class ProductSpec:
+    """WHAT is being checked for one product — fixed by the Kernel, never by
+    a binding. `repository` doubles as the exact value the record's own
+    `product` field must equal (`"dotmac_erp"`, not `"erp"`). `subject` is
+    the exact string the record must self-declare, so a record copied from
+    another product's repository or subject is refused."""
+
+    product: str
+    repository: str
+    subject: str
+    clone_env_var: str
+
+
+#: Closed and Starter-owned. A product cannot redefine its own repository,
+#: path, subject, or clone coordinate from the bindings file — see
+#: `ALLOWED_BINDING_ROW_KEYS`.
+PRODUCT_SPECS: Final[Mapping[str, ProductSpec]] = {
+    "academy": ProductSpec(
+        product="academy",
+        repository="dotmac_academy_app",
+        subject="academy-kernel-successor-readiness",
+        clone_env_var="COMPAT_GATE_CLONE_DOTMAC_ACADEMY_APP",
+    ),
+    "erp": ProductSpec(
+        product="erp",
+        repository="dotmac_erp",
+        subject="erp-kernel-successor-readiness",
+        clone_env_var="COMPAT_GATE_CLONE_DOTMAC_ERP",
+    ),
+    "sub": ProductSpec(
+        product="sub",
+        repository="dotmac_sub",
+        subject="sub-kernel-successor-readiness",
+        clone_env_var="COMPAT_GATE_CLONE_DOTMAC_SUB",
+    ),
+}
+if set(PRODUCT_SPECS) != set(PRODUCTS):
+    raise RuntimeError("PRODUCT_SPECS must declare exactly the names in PRODUCTS")
 
 
 # ── AST reads of the Kernel's own tree (pure, offline, deterministic) ──────
@@ -337,7 +444,7 @@ def _connection_call_precedes_yield(func: ast.FunctionDef) -> bool:
     return connection_line < yield_line
 
 
-# ── Revision/evidence shape (reuses adoption_evidence.py's vocabulary) ─────
+# ── Revision shape (reuses adoption_evidence.py's vocabulary) ──────────────
 
 
 def _revision_problem(product: str, revision: object) -> str | None:
@@ -377,10 +484,8 @@ def _revision_problem(product: str, revision: object) -> str | None:
 def _revision_status(revision: object) -> str:
     """The `EVALUATION_STATUSES` bucket matching `_revision_problem`'s
     message for the same `revision` — companion function, single source of
-    the classification, so the two can never silently disagree about which
-    of reasons 1/2/(a fourth, `invalid_revision`, for a malformed-but-not-a-
-    recognised-moving-ref string) applies. Only called once `_revision_problem`
-    has already returned non-`None` for the same `revision`."""
+    the classification. Only called once `_revision_problem` has already
+    returned non-`None` for the same `revision`."""
     if revision is None:
         return "unbound"
     if not isinstance(revision, str) or not revision.strip():
@@ -399,134 +504,318 @@ def _revision_status(revision: object) -> str:
     return "invalid_revision"
 
 
-def _protected_main_problem(
-    product: str, revision: str | None, evidence: Mapping[str, object]
-) -> str | None:
-    """Refusal reason 3, distinct from reasons 1 and 2 above: a well-formed
-    40-hex commit is not, by itself, evidence it is reachable from the
-    product repository's protected `main` — a branch head is force-pushable,
-    rebasable away, or abandonable, so binding one would make this gate's
-    evidence unreproducible. Only called once `_revision_problem` has
-    already returned `None` for the same revision, so `revision` here is
-    always a genuine 40-hex commit.
+# ── The runner: verify ancestry, fetch the blob, parse the record ──────────
 
-    The proof this predicate demands is `evidence["protected_main_row"]`: a
-    single row shaped like an `adoption_evidence.py` row (reusing that
-    module's own `pinned_at`/`composed_at` kinds, never a gate-local kind),
-    naming the SAME commit, with a non-empty `expected` recording what a
-    protected-`main` ancestry check (e.g. `git merge-base --is-ancestor`)
-    actually found, AND a non-empty `artefact` naming the specific readiness
-    document/contract this exact commit is expected to carry. `artefact`
-    exists because ancestry alone cannot distinguish the RIGHT commit from
-    any other commit also on protected `main` — two real, valid ancestors
-    can both look "bindable" while only one is the readiness revision (the
-    exact hazard a plausible-but-wrong SHA presents: a real commit, on
-    protected main, that is simply the WRONG one).
 
-    This module does not run the ancestry check itself, and does not verify
-    `artefact`'s CONTENT against the product's actual tree — same "NOT
-    BUILT, the coordinates are the fetch instruction" limitation
-    `adoption_evidence.py`'s own `UNMONITORED_BY_THIS_GATE` already states
-    for `assertion_resolution`. It verifies the CLAIM is well-formed,
-    coherent with the bound revision, and that a specific artefact was
-    actually NAMED (forcing whoever binds a revision to record what they
-    believe it carries, so a reviewer has something concrete to check) —
-    not that the ancestry check was run correctly or that the artefact is
-    genuinely present at that commit.
-    """
-    if revision is None:  # pragma: no cover - callers gate on _revision_problem first
-        return f"no revision is bound for {product!r}"
-    row = evidence.get("protected_main_row")
-    if not isinstance(row, Mapping):
-        return (
-            f"{product}'s bound revision {revision!r} carries no "
-            "`protected_main_row` proving it is an ancestor of the product "
-            "repository's protected `main` — a valid-looking 40-hex commit "
-            "that exists only on a branch is refused by construction, "
-            "because a branch head can be force-pushed, rebased away, or "
-            "abandoned, which would make this gate's evidence unreproducible"
+@dataclass(frozen=True)
+class ReadinessRecord:
+    """A verified, parsed, subject-and-product-matching readiness record —
+    Michael's fixed envelope, structurally validated."""
+
+    repository: str
+    subject: str
+    requirements: tuple[Mapping[str, object], ...]
+    composition: tuple[Mapping[str, object], ...]
+    source_references: tuple[str, ...]
+
+    def requirement(self, requirement_id: str) -> Mapping[str, object] | None:
+        for entry in self.requirements:
+            if entry.get("id") == requirement_id:
+                return entry
+        return None
+
+
+@dataclass(frozen=True)
+class FetchOutcome:
+    """Exactly one of `record` or `problem` is set. `digest` may be set even
+    when `problem` is set (a blob can be read and hashed but fail to parse).
+    `problem_status` is one of the two existing statuses reserved for
+    runner-side refusals — never a new one."""
+
+    record: ReadinessRecord | None
+    digest: str | None
+    problem: str | None
+    problem_status: str | None
+
+
+def _clone_path_for(spec: ProductSpec) -> Path | None:
+    """The local clone coordinate is an INFRASTRUCTURE fact (a CI-provisioned
+    checkout path), read from the fixed env var named in `spec` — never from
+    a binding.
+
+    Returns `None` only when the env var is genuinely unset (the ordinary,
+    expected "no CI runner wired up yet" state — a soft refusal). Raises
+    `RuntimeError` when the env var IS set but the path does not exist: that
+    means the CI checkout step for this repository failed or was
+    misconfigured, which is an infrastructure failure and must fail the job,
+    never be reported as a gate refusal (see the module docstring,
+    "Infrastructure failure is not a status")."""
+    value = os.environ.get(spec.clone_env_var)
+    if value is None or not value.strip():
+        return None
+    path = Path(value)
+    if not path.is_dir():
+        raise RuntimeError(
+            f"{spec.clone_env_var}={value!r} is set but is not a directory "
+            f"-- the CI checkout step for {spec.repository} must have "
+            "failed or been misconfigured. This is an infrastructure "
+            "failure and must fail the CI job, not be reported as a gate "
+            "refusal."
         )
-    kind = row.get("kind")
-    if kind not in PROTECTED_MAIN_PROOF_KINDS:
-        return (
-            f"{product}'s `protected_main_row.kind` is {kind!r}; the only "
-            f"accepted kinds are {sorted(PROTECTED_MAIN_PROOF_KINDS)!r}, "
-            "reused verbatim from adoption_evidence.py's own closed "
-            "vocabulary — an unknown kind is a claim this gate does not "
-            "know how to verify"
+    return path
+
+
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+    command = ["git", *args]
+    return subprocess.run(command, cwd=cwd, capture_output=True, check=False)  # noqa: S603
+
+
+#: `git merge-base --is-ancestor` documents exactly two outcome codes: 0
+#: means "is an ancestor", 1 means "is not". Anything else (128 for "not a
+#: git repository" or "unknown revision", or the `git` binary missing
+#: entirely) is a tool/infrastructure failure, not an answer about the
+#: revision — see `_is_ancestor_of_protected_main`.
+_ANCESTOR_CHECK_EXIT_CODES: Final = frozenset({0, 1})
+
+
+def _is_ancestor_of_protected_main(clone: Path, revision: str) -> bool:
+    result = _run_git(["merge-base", "--is-ancestor", revision, "origin/main"], clone)
+    if result.returncode not in _ANCESTOR_CHECK_EXIT_CODES:
+        raise RuntimeError(
+            "git merge-base --is-ancestor failed unexpectedly against "
+            f"{clone} (exit {result.returncode}): "
+            f"{result.stderr.decode('utf-8', 'replace')!r} -- this is an "
+            "infrastructure failure (a broken or incomplete checkout, or "
+            "git itself failing), not evidence about the revision, and "
+            "must fail the CI job rather than being reported as a gate "
+            "refusal."
         )
-    row_repository = row.get("repository")
-    if not isinstance(row_repository, str) or not row_repository.strip():
-        return (
-            f"{product}'s `protected_main_row.repository` must be a "
-            "non-empty string naming the product repository"
+    return result.returncode == 0
+
+
+def _read_blob(clone: Path, revision: str, path: str) -> bytes | None:
+    """Called only once ancestry has already succeeded, so the clone is
+    already known to be a working repository with `revision` a known object
+    — a `git show` failure here is read as "no blob at that path", the
+    evidence-shaped refusal, not as a fresh infrastructure failure."""
+    result = _run_git(["show", f"{revision}:{path}"], clone)
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _readiness_shape_problems(payload: Mapping[str, object]) -> list[str]:
+    """Structural validation of Michael's fixed envelope: `requirements` and
+    `composition` are lists of well-formed objects, `source_references` is a
+    list of strings. Content (whether a `satisfied` boolean is actually true
+    of the product's tree) is explicitly not this module's job — see the
+    module docstring."""
+    problems: list[str] = []
+
+    requirements = payload.get("requirements")
+    if not isinstance(requirements, list):
+        problems.append("`requirements` must be a list")
+    else:
+        for index, entry in enumerate(requirements):
+            where = f"requirements[{index}]"
+            if not isinstance(entry, Mapping):
+                problems.append(f"{where} must be an object")
+                continue
+            if not isinstance(entry.get("id"), str) or not entry["id"].strip():
+                problems.append(f"{where}.id must be a non-empty string")
+            if (
+                not isinstance(entry.get("statement"), str)
+                or not entry["statement"].strip()
+            ):
+                problems.append(f"{where}.statement must be a non-empty string")
+            if not isinstance(entry.get("satisfied"), bool):
+                problems.append(f"{where}.satisfied must be a boolean")
+            if (
+                not isinstance(entry.get("source_reference"), str)
+                or not entry["source_reference"].strip()
+            ):
+                problems.append(f"{where}.source_reference must be a non-empty string")
+
+    composition = payload.get("composition")
+    if not isinstance(composition, list):
+        problems.append("`composition` must be a list")
+    else:
+        for index, entry in enumerate(composition):
+            where = f"composition[{index}]"
+            if not isinstance(entry, Mapping):
+                problems.append(f"{where} must be an object")
+                continue
+            if (
+                not isinstance(entry.get("declaration"), str)
+                or not entry["declaration"].strip()
+            ):
+                problems.append(f"{where}.declaration must be a non-empty string")
+            if (
+                not isinstance(entry.get("source_reference"), str)
+                or not entry["source_reference"].strip()
+            ):
+                problems.append(f"{where}.source_reference must be a non-empty string")
+
+    source_references = payload.get("source_references")
+    if not isinstance(source_references, list) or not all(
+        isinstance(item, str) and item.strip() for item in source_references
+    ):
+        problems.append("`source_references` must be a list of non-empty strings")
+
+    return problems
+
+
+def fetch_readiness_record(spec: ProductSpec, revision: str) -> FetchOutcome:
+    """The verifying runner. Every refusal states what was actually
+    observed, never a presumed reason, and every step is REAL: a local `git`
+    invocation against a CI-provisioned clone, not a claim this module takes
+    on faith."""
+    clone = _clone_path_for(spec)
+    if clone is None:
+        return FetchOutcome(
+            None,
+            None,
+            f"no local clone is configured for {spec.repository} "
+            f"({spec.clone_env_var} is unset) — the runner cannot verify "
+            "ancestry or read the readiness record without one",
+            "evidence_incomplete",
         )
-    row_commit = row.get("commit")
-    if row_commit != revision:
-        return (
-            f"{product}'s `protected_main_row.commit` {row_commit!r} does "
-            f"not match the bound revision {revision!r}; an ancestry proof "
-            "for a DIFFERENT commit is not evidence for THIS one"
+    if not _is_ancestor_of_protected_main(clone, revision):
+        return FetchOutcome(
+            None,
+            None,
+            f"{revision} was verified NOT to be an ancestor of "
+            f"{spec.repository}'s protected `main` (`git merge-base "
+            "--is-ancestor` returned 1)",
+            "not_on_protected_main",
         )
-    expected = row.get("expected")
-    if not isinstance(expected, str) or not expected.strip():
-        return (
-            f"{product}'s `protected_main_row.expected` must record what "
-            "the protected-`main` ancestry check actually found"
+    blob = _read_blob(clone, revision, READINESS_RECORD_PATH)
+    if blob is None:
+        return FetchOutcome(
+            None,
+            None,
+            f"no blob found at {revision}:{READINESS_RECORD_PATH} in "
+            f"{spec.repository}",
+            "evidence_incomplete",
         )
-    artefact = row.get("artefact")
-    if not isinstance(artefact, str) or not artefact.strip():
-        return (
-            f"{product}'s `protected_main_row.artefact` must record the "
-            "specific readiness artefact this revision is expected to "
-            "carry (e.g. the path of the readiness document or contract it "
-            "introduces). Ancestry alone does not distinguish THIS commit "
-            "from any other commit on protected `main` -- a plausible-but-"
-            "wrong SHA (a real ancestor, but the wrong readiness commit, "
-            "such as a customer-import-parity commit standing in for a "
-            "runtime-readiness one) would be invisible without naming what "
-            "the bound commit is supposed to contain"
+    digest = hashlib.sha256(blob).hexdigest()
+    try:
+        payload = json.loads(blob)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision} in {spec.repository} is "
+            f"not valid JSON: {exc}",
+            "evidence_incomplete",
         )
-    return None
+    if not isinstance(payload, Mapping):
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision} in {spec.repository} "
+            "must be a JSON object",
+            "evidence_incomplete",
+        )
+    schema = payload.get("schema")
+    if schema != READINESS_SCHEMA_MARKER:
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision} in {spec.repository}: "
+            f"`schema` is {schema!r}, expected {READINESS_SCHEMA_MARKER!r}",
+            "evidence_incomplete",
+        )
+    product = payload.get("product")
+    if product != spec.repository:
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision}: `product` is "
+            f"{product!r}, expected {spec.repository!r}",
+            "evidence_incomplete",
+        )
+    subject = payload.get("subject")
+    if subject != spec.subject:
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision} in {spec.repository}: "
+            f"`subject` is {subject!r}, expected {spec.subject!r} — a "
+            "record for a different subject is not evidence for this one",
+            "evidence_incomplete",
+        )
+    shape_problems = _readiness_shape_problems(payload)
+    if shape_problems:
+        return FetchOutcome(
+            None,
+            digest,
+            f"{READINESS_RECORD_PATH} at {revision} in {spec.repository} "
+            "failed schema validation: " + "; ".join(shape_problems),
+            "evidence_incomplete",
+        )
+    return FetchOutcome(
+        ReadinessRecord(
+            repository=product,
+            subject=subject,
+            requirements=tuple(payload["requirements"]),
+            composition=tuple(payload["composition"]),
+            source_references=tuple(payload["source_references"]),
+        ),
+        digest,
+        None,
+        None,
+    )
+
+
+def _requirement_problem(
+    record: ReadinessRecord, requirement_id: str
+) -> tuple[Mapping[str, object] | None, str | None]:
+    """Looks up one fixed requirement id in a verified record. Returns
+    `(entry, None)` on success or `(None, problem)` when the id is simply
+    absent — a shape gap in the record, not a failed requirement (that is a
+    different thing: an entry that IS present with `satisfied: false`)."""
+    entry = record.requirement(requirement_id)
+    if entry is None:
+        return None, (
+            f"the readiness record carries no requirement with id "
+            f"{requirement_id!r}"
+        )
+    return entry, None
 
 
 @dataclass(frozen=True)
 class ProductBinding:
-    """The evidence-binding seam's unit. Binding the real three revisions is
-    a DATA change — construct one of these with a real `revision` (and, once
-    product-side capture exists, `evidence`) — nothing below this dataclass
-    changes shape when that happens."""
+    """The evidence-binding seam's unit. `revision` is the ONLY thing a
+    binding supplies — repository, path, schema and subject are fixed in
+    `PRODUCT_SPECS`, never selectable here (see `ALLOWED_BINDING_ROW_KEYS`
+    and `load_default_bindings`'s refusal of any other field)."""
 
     product: str
     revision: str | None = None
-    evidence: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
 class EvaluationResult:
     """One product's evaluation. `revision` is always the exact value that
-    was evaluated (possibly `None`) — never a resolved or defaulted one, so a
-    reader can see exactly what was and was not checked.
+    was evaluated (possibly `None`).
 
     `status` is the STRUCTURED verdict, not just prose in `findings` — a
-    reader (or a downstream consumer) must be able to tell "this product has
-    not yet produced evidence" apart from "this product produced evidence and
-    the evaluation refused it" WITHOUT parsing free text, the same
-    ABSENT-versus-REGISTRY_DISAGREEMENT distinction Control's own vocabulary
-    already draws. Collapsing those two into one `satisfied=False` boolean is
-    exactly how "Academy: unbound, pending a prerequisite migration" gets
-    misread as "Academy: found incompatible" — a false and misdirecting
-    reading this field exists to rule out structurally, not just by writing
-    careful prose beside it.
+    reader must be able to tell "this product has not yet produced evidence"
+    apart from "this product produced evidence and the evaluation refused
+    it" WITHOUT parsing free text. `satisfied` is DERIVED from `status`,
+    never stored.
 
-    `satisfied` is DERIVED from `status`, never stored — there is no way to
-    construct a coherent-looking but self-contradicting result (a "satisfied"
-    status with `satisfied=False`, or vice versa)."""
+    `artefact_digest` is OUTPUT ONLY: the SHA-256 this module itself computed
+    from the fetched readiness-record blob's bytes, or `None` when no blob
+    was ever successfully read. No accepted input can set this field — see
+    the module docstring, "The digest is output, never input"."""
 
     product: str
     revision: str | None
     status: str
     findings: tuple[str, ...]
+    artefact_digest: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in EVALUATION_STATUSES:
@@ -543,6 +832,8 @@ class EvaluationResult:
         verdict = "SATISFIED" if self.satisfied else f"REFUSED ({self.status})"
         revision_text = self.revision or "<unbound>"
         lines = [f"{verdict} ({self.product}@{revision_text})"]
+        if self.artefact_digest is not None:
+            lines.append(f"  digest: sha256:{self.artefact_digest}")
         lines.extend(f"  - {finding}" for finding in self.findings)
         return "\n".join(lines)
 
@@ -593,26 +884,15 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     the same property `test_kernel_runtime_composition_seam.py`'s probe
     proves in the general, product-agnostic case.
 
-    KERNEL-SIDE (measured here, from this repository, regardless of any
-    bound revision): is `SessionLocal` — the attribute a non-request caller
-    without the runtime seam would reach for — a member of the PUBLISHED
-    surface? It is a bare module-level assignment in `db.py`
-    (`SessionLocal = runtime.session_factory`), and COMPATIBILITY.md defines
-    published names as members of a supported module's `__all__`.
-    `db.py`'s own module docstring names the supported alternative:
-    `resolve_database_runtime()` / `tenant_session` / `platform_session`.
-    If the Kernel's `__all__` does not carry `SessionLocal`, that is reported
-    as a finding about the SUCCESSOR's sufficiency, unconditionally — never
-    worked around by this evaluator inferring what Academy "probably" does.
+    KERNEL-SIDE (measured here, regardless of any bound revision): is
+    `SessionLocal` a member of the PUBLISHED surface? Reported unconditionally
+    as a finding about the SUCCESSOR's sufficiency.
 
-    PRODUCT-SIDE (needs a bound revision + captured evidence, on a commit
-    PROVEN an ancestor of Academy's protected `main` via `evidence
-    ["protected_main_row"]` — see `_protected_main_problem`): whether
-    Academy's own tree still reaches `dotmac_kernel.db.SessionLocal` by name,
-    and whether a strict bind was observed to succeed against it. Refused
-    when unbound, per the module's absence-is-refusal rule, and refused
-    separately (a distinct reason) when the revision is real but not proven
-    to be on protected `main`.
+    PRODUCT-SIDE: fetches and verifies Academy's typed readiness record (see
+    module docstring, "The runner") and reads the
+    `strict_bind_without_reference_import` and
+    `no_unpublished_session_local_usage` requirements' product-authored
+    `satisfied` booleans.
     """
     findings: list[str] = []
 
@@ -637,10 +917,10 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
     revision_problem = _revision_problem("academy", binding.revision)
     if revision_problem is not None:
         findings.append(
-            f"MEASURED: {revision_problem}; no product-side evidence has "
-            "been captured, so whether the product's own tree still reaches "
-            "the attribute above cannot be established from this repository "
-            "alone"
+            f"MEASURED: {revision_problem}; no readiness record can be "
+            "fetched without a revision, so whether the product's own tree "
+            "still reaches the attribute above cannot be established from "
+            "this repository alone"
         )
         return EvaluationResult(
             product="academy",
@@ -649,49 +929,27 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
             findings=tuple(findings),
         )
 
-    evidence = binding.evidence
-    if not isinstance(evidence, Mapping):
-        findings.append(
-            f"MEASURED: revision {binding.revision} is bound but no "
-            "product-side evidence is attached; a bound revision with "
-            "nothing captured against it is a coordinate with nothing to "
-            "check, which this gate treats as a refusal rather than a pass"
-        )
+    outcome = fetch_readiness_record(PRODUCT_SPECS["academy"], binding.revision)
+    if outcome.problem is not None:
+        findings.append(f"MEASURED: {outcome.problem}")
+        assert outcome.problem_status is not None
         return EvaluationResult(
             product="academy",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=outcome.problem_status,
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    protected_main_problem = _protected_main_problem(
-        "academy", binding.revision, evidence
+    assert outcome.record is not None
+    record = outcome.record
+    strict_bind, strict_bind_problem = _requirement_problem(
+        record, "strict_bind_without_reference_import"
     )
-    if protected_main_problem is not None:
-        findings.append(f"MEASURED: {protected_main_problem}")
-        return EvaluationResult(
-            product="academy",
-            revision=binding.revision,
-            status="not_on_protected_main",
-            findings=tuple(findings),
-        )
-
-    usage_sites = evidence.get("unpublished_session_local_usage_sites")
-    strict_bind_verified = evidence.get("strict_bind_without_reference_import")
-    shape_problems: list[str] = []
-    if not isinstance(usage_sites, list | tuple):
-        shape_problems.append(
-            "product-side evidence must carry "
-            "`unpublished_session_local_usage_sites` as a list (possibly "
-            "empty) of file:line locations captured against the bound "
-            "revision"
-        )
-    if not isinstance(strict_bind_verified, bool):
-        shape_problems.append(
-            "product-side evidence must carry a boolean "
-            "`strict_bind_without_reference_import`, observed at the bound "
-            "revision"
-        )
+    no_usage, no_usage_problem = _requirement_problem(
+        record, "no_unpublished_session_local_usage"
+    )
+    shape_problems = [p for p in (strict_bind_problem, no_usage_problem) if p]
     if shape_problems:
         findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
         return EvaluationResult(
@@ -699,51 +957,49 @@ def evaluate_academy(binding: ProductBinding) -> EvaluationResult:
             revision=binding.revision,
             status="evidence_incomplete",
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    usage_sites = tuple(usage_sites)  # type: ignore[arg-type]
-    if usage_sites:
+    assert strict_bind is not None and no_usage is not None
+    if strict_bind.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at academy@{binding.revision}: {len(usage_sites)} "
-            f"site(s) still reach the unpublished `dotmac_kernel.db"
-            f".SessionLocal` attribute directly: {usage_sites!r}"
+            f"OBSERVED at academy@{binding.revision}: requirement "
+            f"'strict_bind_without_reference_import' is satisfied="
+            f"{strict_bind.get('satisfied')!r} "
+            f"({strict_bind.get('source_reference')!r})"
         )
-    if strict_bind_verified is False:
+    if no_usage.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at academy@{binding.revision}: a strict "
-            "`bind_database_runtime(runtime, required=True)` did not "
-            "succeed while `dotmac_kernel.db` stayed unimported"
+            f"OBSERVED at academy@{binding.revision}: requirement "
+            f"'no_unpublished_session_local_usage' is satisfied="
+            f"{no_usage.get('satisfied')!r} ({no_usage.get('source_reference')!r})"
         )
 
-    satisfied = not usage_sites and strict_bind_verified is True
+    satisfied = (
+        strict_bind.get("satisfied") is True and no_usage.get("satisfied") is True
+    )
     return EvaluationResult(
         product="academy",
         revision=binding.revision,
         status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
+        artefact_digest=outcome.digest,
     )
 
 
 def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
     """ERP — synchronous session requirements are expressible against
     `dotmac_kernel.session_runtime.DatabaseRuntime`. Asynchronous support
-    stays EXPLICITLY TRANSITIONAL (ADR-0066's "async is out of scope",
-    restated by the ERP adoption plan's boundary 6 and named follow-up) —
-    recorded as such, never silently omitted and never silently satisfied by
-    a claim the Kernel side cannot back.
+    stays EXPLICITLY TRANSITIONAL, recorded as such, never silently omitted
+    and never silently satisfied by a claim the Kernel side cannot back.
 
-    KERNEL-SIDE (measured here): the successor's public, non-underscore
-    boundary methods on `DatabaseRuntime`, and confirmation that NONE of
-    them is `async def` — the Kernel publishes a sync-only runtime today,
-    exactly as ADR-0066 states, and this evaluator checks that claim rather
-    than repeating it.
+    KERNEL-SIDE (measured here): the successor's public boundary methods,
+    and confirmation that NONE is `async def`.
 
-    PRODUCT-SIDE (needs a bound revision + captured evidence): whether ERP's
-    sync session requirements are actually satisfied by that surface, and
-    an explicit `async_status`. `async_status == "satisfied"` is refused
-    outright: the Kernel side has no async runtime to satisfy it against, so
-    a claim of "satisfied" would be exactly the silent, quiet satisfaction
-    this evaluation exists to forbid.
+    PRODUCT-SIDE: fetches and verifies ERP's typed readiness record and reads
+    the `sync_requirements_satisfied` and
+    `async_support_explicitly_transitional` requirements' product-authored
+    `satisfied` booleans.
     """
     findings: list[str] = []
 
@@ -772,45 +1028,25 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
             findings=tuple(findings),
         )
 
-    evidence = binding.evidence
-    if not isinstance(evidence, Mapping):
-        findings.append(
-            f"MEASURED: revision {binding.revision} is bound but no "
-            "product-side evidence is attached; a bound revision with "
-            "nothing captured against it is a coordinate with nothing to "
-            "check, which this gate treats as a refusal rather than a pass"
-        )
+    outcome = fetch_readiness_record(PRODUCT_SPECS["erp"], binding.revision)
+    if outcome.problem is not None:
+        findings.append(f"MEASURED: {outcome.problem}")
+        assert outcome.problem_status is not None
         return EvaluationResult(
             product="erp",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=outcome.problem_status,
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    protected_main_problem = _protected_main_problem("erp", binding.revision, evidence)
-    if protected_main_problem is not None:
-        findings.append(f"MEASURED: {protected_main_problem}")
-        return EvaluationResult(
-            product="erp",
-            revision=binding.revision,
-            status="not_on_protected_main",
-            findings=tuple(findings),
-        )
-
-    sync_satisfied = evidence.get("sync_requirements_satisfied")
-    async_status = evidence.get("async_status")
-    shape_problems: list[str] = []
-    if not isinstance(sync_satisfied, bool):
-        shape_problems.append(
-            "product-side evidence must carry a boolean "
-            "`sync_requirements_satisfied`, observed at the bound revision"
-        )
-    if not isinstance(async_status, str) or not async_status.strip():
-        shape_problems.append(
-            "product-side evidence must carry a non-empty `async_status` "
-            f"string; the only accepted value today is {ASYNC_TRANSITIONAL!r} "
-            "since the Kernel publishes no async runtime"
-        )
+    assert outcome.record is not None
+    record = outcome.record
+    sync_req, sync_problem = _requirement_problem(record, "sync_requirements_satisfied")
+    async_req, async_problem = _requirement_problem(
+        record, ASYNC_TRANSITIONAL_REQUIREMENT_ID
+    )
+    shape_problems = [p for p in (sync_problem, async_problem) if p]
     if shape_problems:
         findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
         return EvaluationResult(
@@ -818,30 +1054,32 @@ def evaluate_erp(binding: ProductBinding) -> EvaluationResult:
             revision=binding.revision,
             status="evidence_incomplete",
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    assert isinstance(async_status, str)
-    if async_status != ASYNC_TRANSITIONAL:
+    assert sync_req is not None and async_req is not None
+    if sync_req.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at erp@{binding.revision}: `async_status` is "
-            f"{async_status!r}, not {ASYNC_TRANSITIONAL!r}; the Kernel "
-            "publishes no async DatabaseRuntime boundary, so any status "
-            "other than an explicit transitional acknowledgement is a claim "
-            "this evaluation refuses to accept silently"
+            f"OBSERVED at erp@{binding.revision}: requirement "
+            f"'sync_requirements_satisfied' is satisfied="
+            f"{sync_req.get('satisfied')!r} ({sync_req.get('source_reference')!r})"
         )
-    if sync_satisfied is False:
+    if async_req.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at erp@{binding.revision}: ERP's synchronous session "
-            "requirements were captured as NOT satisfied by the successor "
-            "surface"
+            f"OBSERVED at erp@{binding.revision}: requirement "
+            f"{ASYNC_TRANSITIONAL_REQUIREMENT_ID!r} is satisfied="
+            f"{async_req.get('satisfied')!r} — the Kernel publishes no async "
+            "DatabaseRuntime boundary, so ERP must explicitly record async "
+            f"support as transitional ({async_req.get('source_reference')!r})"
         )
 
-    satisfied = sync_satisfied is True and async_status == ASYNC_TRANSITIONAL
+    satisfied = sync_req.get("satisfied") is True and async_req.get("satisfied") is True
     return EvaluationResult(
         product="erp",
         revision=binding.revision,
         status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
+        artefact_digest=outcome.digest,
     )
 
 
@@ -849,21 +1087,17 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
     """Sub — tenant GUC behaviour plus the typed `readonly_session()` /
     `serializable_session()` transaction modes (slice 3, `#681`) are
     expressible. The part that matters is the GUC HOOK ORDERING relative to
-    those modes: the isolation mode must be applied before any `after_begin`
-    listener — a tenant-GUC hook among them — can fire, or the mode is
-    silently discarded (see `_isolated_session`'s own docstring in
-    `session_runtime.py`).
+    those modes.
 
     KERNEL-SIDE (measured here): `readonly_session`/`serializable_session`/
-    `tenant_scope` all exist on `DatabaseRuntime`, and — structurally, by
-    parsing `_isolated_session`'s own body — the `execution_options` call
-    that sets the isolation mode appears strictly BEFORE that method's
-    `yield`, which is what guarantees the mode is set ahead of any
-    `after_begin` GUC hook a caller composes inside the block.
+    `tenant_scope` all exist on `DatabaseRuntime`, and — structurally — the
+    `execution_options` call appears strictly BEFORE `_isolated_session`'s
+    `yield`.
 
-    PRODUCT-SIDE (needs a bound revision + captured evidence): whether Sub's
-    own tenant-GUC `after_begin` hook is actually composed inside
-    `tenant_scope`, ordered after the isolation mode, at the bound revision.
+    PRODUCT-SIDE: fetches and verifies Sub's typed readiness record and reads
+    the `guc_hook_ordered_after_isolation_mode` and
+    `tenant_scope_composed_with_readonly_or_serializable` requirements'
+    product-authored `satisfied` booleans.
     """
     findings: list[str] = []
 
@@ -903,48 +1137,27 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
             findings=tuple(findings),
         )
 
-    evidence = binding.evidence
-    if not isinstance(evidence, Mapping):
-        findings.append(
-            f"MEASURED: revision {binding.revision} is bound but no "
-            "product-side evidence is attached; a bound revision with "
-            "nothing captured against it is a coordinate with nothing to "
-            "check, which this gate treats as a refusal rather than a pass"
-        )
+    outcome = fetch_readiness_record(PRODUCT_SPECS["sub"], binding.revision)
+    if outcome.problem is not None:
+        findings.append(f"MEASURED: {outcome.problem}")
+        assert outcome.problem_status is not None
         return EvaluationResult(
             product="sub",
             revision=binding.revision,
-            status="evidence_incomplete",
+            status=outcome.problem_status,
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    protected_main_problem = _protected_main_problem("sub", binding.revision, evidence)
-    if protected_main_problem is not None:
-        findings.append(f"MEASURED: {protected_main_problem}")
-        return EvaluationResult(
-            product="sub",
-            revision=binding.revision,
-            status="not_on_protected_main",
-            findings=tuple(findings),
-        )
-
-    guc_hook_ordered_after_mode = evidence.get("guc_hook_ordered_after_isolation_mode")
-    tenant_scope_composed = evidence.get(
-        "tenant_scope_composed_with_readonly_or_serializable"
+    assert outcome.record is not None
+    record = outcome.record
+    guc_req, guc_problem = _requirement_problem(
+        record, "guc_hook_ordered_after_isolation_mode"
     )
-    shape_problems: list[str] = []
-    if not isinstance(guc_hook_ordered_after_mode, bool):
-        shape_problems.append(
-            "product-side evidence must carry a boolean "
-            "`guc_hook_ordered_after_isolation_mode`, observed at the bound "
-            "revision"
-        )
-    if not isinstance(tenant_scope_composed, bool):
-        shape_problems.append(
-            "product-side evidence must carry a boolean "
-            "`tenant_scope_composed_with_readonly_or_serializable`, observed "
-            "at the bound revision"
-        )
+    scope_req, scope_problem = _requirement_problem(
+        record, "tenant_scope_composed_with_readonly_or_serializable"
+    )
+    shape_problems = [p for p in (guc_problem, scope_problem) if p]
     if shape_problems:
         findings.extend(f"MEASURED: {problem}" for problem in shape_problems)
         return EvaluationResult(
@@ -952,31 +1165,36 @@ def evaluate_sub(binding: ProductBinding) -> EvaluationResult:
             revision=binding.revision,
             status="evidence_incomplete",
             findings=tuple(findings),
+            artefact_digest=outcome.digest,
         )
 
-    if guc_hook_ordered_after_mode is False:
+    assert guc_req is not None and scope_req is not None
+    if guc_req.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at sub@{binding.revision}: the tenant-GUC hook was "
-            "captured as NOT ordered after the isolation mode"
+            f"OBSERVED at sub@{binding.revision}: requirement "
+            f"'guc_hook_ordered_after_isolation_mode' is satisfied="
+            f"{guc_req.get('satisfied')!r} ({guc_req.get('source_reference')!r})"
         )
-    if tenant_scope_composed is False:
+    if scope_req.get("satisfied") is not True:
         findings.append(
-            f"OBSERVED at sub@{binding.revision}: `tenant_scope` was "
-            "captured as NOT composed with `readonly_session`/"
-            "`serializable_session`"
+            f"OBSERVED at sub@{binding.revision}: requirement "
+            f"'tenant_scope_composed_with_readonly_or_serializable' is "
+            f"satisfied={scope_req.get('satisfied')!r} "
+            f"({scope_req.get('source_reference')!r})"
         )
 
     satisfied = (
         not missing
         and ordering_holds
-        and guc_hook_ordered_after_mode is True
-        and tenant_scope_composed is True
+        and guc_req.get("satisfied") is True
+        and scope_req.get("satisfied") is True
     )
     return EvaluationResult(
         product="sub",
         revision=binding.revision,
         status="satisfied" if satisfied else "evaluation_refused",
         findings=tuple(findings),
+        artefact_digest=outcome.digest,
     )
 
 
@@ -992,10 +1210,7 @@ def evaluate_gate(bindings: Mapping[str, ProductBinding]) -> GateResult:
     fixed order, regardless of what `bindings` contains — a product absent
     from `bindings` is evaluated as unbound (refused), never skipped.
 
-    Raises `ValueError` for a key in `bindings` outside `PRODUCTS`: an
-    unknown product name is a claim no procedure here knows how to check,
-    and silently ignoring it would let a caller "pass" a product that was
-    never really evaluated.
+    Raises `ValueError` for a key in `bindings` outside `PRODUCTS`.
     """
     unknown = sorted(set(bindings) - set(PRODUCTS))
     if unknown:
@@ -1014,9 +1229,10 @@ def evaluate_gate(bindings: Mapping[str, ProductBinding]) -> GateResult:
 def load_default_bindings(
     path: Path = DEFAULT_BINDINGS_PATH,
 ) -> Mapping[str, ProductBinding]:
-    """Read the evidence-binding seam's one data file. Today every entry is
-    unbound (`revision: null`); binding a real revision is editing this file
-    alone."""
+    """Read the evidence-binding seam's one data file. A binding row supplies
+    ONLY `revision` (and an optional, unread `_note`) — any other field is
+    refused, because repository/path/schema/subject are fixed in
+    `PRODUCT_SPECS` and are not selectable per binding."""
     payload = json.loads(path.read_text())
     schema = payload.get("schema")
     if schema != BINDINGS_SCHEMA_VALUE:
@@ -1038,9 +1254,13 @@ def load_default_bindings(
         row = raw_bindings.get(product, {})
         if not isinstance(row, Mapping):
             raise ValueError(f"{path}: bindings[{product!r}] must be an object")
-        result[product] = ProductBinding(
-            product=product,
-            revision=row.get("revision"),
-            evidence=row.get("evidence"),
-        )
+        unknown_row_keys = sorted(set(row) - ALLOWED_BINDING_ROW_KEYS)
+        if unknown_row_keys:
+            raise ValueError(
+                f"{path}: bindings[{product!r}] carries unrecognised "
+                f"field(s) {unknown_row_keys!r}; a binding supplies a "
+                "`revision` only — repository, path, schema and subject are "
+                "fixed in PRODUCT_SPECS and are not selectable per binding"
+            )
+        result[product] = ProductBinding(product=product, revision=row.get("revision"))
     return result
