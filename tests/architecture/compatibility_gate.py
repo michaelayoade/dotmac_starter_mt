@@ -23,16 +23,17 @@ The evidence-binding seam
 
 ``load_default_bindings()`` reads ``compatibility_gate_bindings.json``, the
 ONE file that changes when a real revision's evidence has been captured.
-Every ``ProductBinding`` in it is unbound (``revision: null``) today, and
-``evaluate_gate(load_default_bindings())`` therefore refuses. Governance #87
-has merged (``6fbeffca``); named, protected-`main`-ancestor readiness
-revisions now exist for ERP and Sub (see "The absence-is-refusal rule"
-below); Academy #130 is still being re-derived under the merged classifier,
-blocked on a prerequisite migration, in a separate lane this slice does not
-touch. Binding a revision, once its ``protected_main_row``/``expected``/
-``artefact`` evidence has actually been captured against that tree, is
-editing this JSON file's ``revision``/``evidence`` fields — nothing in this
-module changes shape.
+Today ERP and Sub carry named, protected-`main`-ancestor revisions with a
+``protected_main_row`` but no product-specific facts yet, so both refuse at
+``"evidence_incomplete"``; Academy carries no revision at all (``revision:
+null``) and refuses at ``"unbound"``. ``evaluate_gate(load_default_bindings
+())`` therefore still refuses, for three separately-labelled reasons.
+Governance #87 has merged (``6fbeffca``); Academy #130 is still being
+re-derived under the merged classifier, blocked on a prerequisite migration,
+in a separate lane this slice does not touch. Completing ERP's or Sub's
+binding — capturing the product-specific facts against that exact tree — is
+editing this JSON file's ``evidence`` field; nothing in this module changes
+shape.
 
 Vocabulary reused, verbatim, from ``adoption_evidence.py``
 ------------------------------------------------------------
@@ -91,24 +92,32 @@ that read that as "nothing to refuse" would be the identical defect this
 whole programme has been chasing — a check over no files, passing for having
 nothing to check). See ``test_the_gate_cannot_pass_on_an_empty_evaluation_set``.
 
-**No product is bound in the checked-in seam file today.** ERP
-(``b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f``, #510) and Sub
+**ERP and Sub are revision-bound in the checked-in seam file today; Academy
+is not.** ERP (``b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f``, #510) and Sub
 (``288b68cf0ba4196b36641801093b501a75e80a0d``, #3015) have named,
-protected-`main`-ancestor readiness revisions as of this writing, but binding
-them into ``compatibility_gate_bindings.json`` requires the ``protected_main
-_row``/``expected``/``artefact`` evidence this module cannot itself measure
-(no access to those repositories, no network fetch) — a task this slice
-leaves to whoever CAN capture that evidence, not something this module
-fabricates. Academy is different in kind, not degree: it is not "found
-incompatible" — it is EVIDENCE-INELIGIBLE, blocked on a Governance-pin
-`schema_version` 9→10→11 migration prerequisite that has not landed, so it
-cannot yet produce a revision to bind at all. `EvaluationResult.status`
-distinguishes exactly this: an unbound product's status is ``"unbound"``,
-never the same status a product that DID produce evidence and failed
-evaluation would carry (``"evaluation_refused"``) — collapsing the two into
-one boolean is how "not yet eligible" gets misread as "incompatible". A run
-today therefore refuses with every product at status ``"unbound"`` — never a
-pass on an empty evidence set.
+protected-`main`-ancestor readiness revisions, reported by the orchestrating
+coordinator and recorded honestly as such (``protected_main_row.expected``
+says plainly that this module did not independently re-derive the ancestry —
+no access to those repositories, no network fetch). Their PRODUCT-SPECIFIC
+facts (``sync_requirements_satisfied``, ``async_status``,
+``guc_hook_ordered_after_isolation_mode``,
+``tenant_scope_composed_with_readonly_or_serializable``) have not been
+captured by anyone with access to those trees, so both stay at status
+``"evidence_incomplete"`` rather than a fabricated ``"satisfied"`` — this
+module records what it has been told and refuses to invent the rest.
+
+Academy is different IN KIND, not degree: it is not "found incompatible" —
+it is EVIDENCE-UNBOUND / not yet eligible, mid-adoption of the Foundation
+deployment contract and blocked on a Governance-pin ``schema_version``
+9→10→11 migration prerequisite that has not landed, so it cannot yet produce
+a revision to bind at all. `EvaluationResult.status` distinguishes exactly
+this: Academy's status is ``"unbound"``, never the same status ERP/Sub carry
+(``"evidence_incomplete"``) and never the status a product that DID produce
+complete evidence and failed evaluation would carry
+(``"evaluation_refused"``) — collapsing all of these into one boolean is how
+"not yet eligible" gets misread as "incompatible". A run today therefore
+refuses on all three products, each for its own distinct, correctly-labelled
+reason — never a pass on an empty or fabricated evidence set.
 
 What this module does NOT establish (unmonitored, stated per ADR-0018)
 --------------------------------------------------------------------------

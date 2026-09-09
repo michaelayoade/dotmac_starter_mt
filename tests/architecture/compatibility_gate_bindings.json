@@ -4,17 +4,33 @@
     "academy": {
       "revision": null,
       "evidence": null,
-      "_note": "EVIDENCE-INELIGIBLE, not incompatible: Academy #130 is being re-derived under Governance #87 (merged as 6fbeffca) in a separate lane, blocked on a Governance-pin schema_version 9->10->11 migration prerequisite that has not landed. Academy cannot yet produce a revision to bind -- this is not a Kernel-incompatibility finding. Unbound: status is 'unbound', never 'evaluation_refused'."
+      "_note": "EVIDENCE-UNBOUND / not yet eligible -- never incompatible. Academy #130 is being re-derived under Governance #87 (merged as 6fbeffca) in a separate lane, blocked on a Governance-pin schema_version 9->10->11 migration prerequisite that has not landed; Academy is mid-adoption of the Foundation deployment contract in that same separate lane. Nothing about the Kernel successor has failed for it -- it cannot yet produce a revision to bind at all. status stays 'unbound', never 'evaluation_refused'."
     },
     "erp": {
-      "revision": null,
-      "evidence": null,
-      "_note": "A named, protected-main-ancestor readiness revision exists (b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f, #510, carrying docs/architecture/erp-runtime-async-pid-fork-contract.md) -- NOT 1d82a4d2... (#509, customer import-parity work, explicitly ruled excluded). Still unbound HERE because this module cannot itself capture the protected_main_row/expected/artefact evidence (no access to dotmac_erp, no network fetch) -- binding is a data change once that evidence is captured by whoever can measure it."
+      "revision": "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f",
+      "evidence": {
+        "protected_main_row": {
+          "kind": "pinned_at",
+          "repository": "dotmac_erp",
+          "commit": "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f",
+          "expected": "Reported by the orchestrating coordinator as an ancestor of dotmac_erp's protected main (#510); NOT independently re-derived by this repository -- no access to dotmac_erp, no network fetch performed.",
+          "artefact": "docs/architecture/erp-runtime-async-pid-fork-contract.md"
+        }
+      },
+      "_note": "Revision is EXPLICITLY b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f (#510, runtime/async/PID-fork contract) -- NOT 1d82a4d2... (#509, customer import-parity work, explicitly ruled excluded). Deliberately still refuses at status 'evidence_incomplete': the product-specific facts (sync_requirements_satisfied, async_status) have not been captured by anyone with access to dotmac_erp's tree, so this module records the revision honestly without fabricating a passing evaluation."
     },
     "sub": {
-      "revision": null,
-      "evidence": null,
-      "_note": "A named, protected-main-ancestor readiness revision exists (288b68cf0ba4196b36641801093b501a75e80a0d, #3015, carrying docs/sub-runtime-readiness-inventory.md and the session-construction ratchet). Still unbound HERE for the same reason as erp's note: this module cannot itself capture the protected_main_row evidence."
+      "revision": "288b68cf0ba4196b36641801093b501a75e80a0d",
+      "evidence": {
+        "protected_main_row": {
+          "kind": "pinned_at",
+          "repository": "dotmac_sub",
+          "commit": "288b68cf0ba4196b36641801093b501a75e80a0d",
+          "expected": "Reported by the orchestrating coordinator as an ancestor of dotmac_sub's protected main (#3015); NOT independently re-derived by this repository -- no access to dotmac_sub, no network fetch performed.",
+          "artefact": "docs/sub-runtime-readiness-inventory.md (plus the session-construction ratchet)"
+        }
+      },
+      "_note": "Deliberately still refuses at status 'evidence_incomplete': the product-specific facts (guc_hook_ordered_after_isolation_mode, tenant_scope_composed_with_readonly_or_serializable) have not been captured by anyone with access to dotmac_sub's tree, so this module records the revision honestly without fabricating a passing evaluation."
     }
   }
 }

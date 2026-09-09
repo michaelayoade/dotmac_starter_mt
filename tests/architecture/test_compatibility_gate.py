@@ -52,21 +52,33 @@ def test_gate_result_passes_when_every_evaluation_is_satisfied() -> None:
 
 
 def test_the_gate_refuses_today_with_the_default_bindings() -> None:
-    """The default, checked-in bindings file has all three products unbound.
-    Running the gate against it today must refuse — not skip, not pass over
-    an empty evidence set."""
+    """The default, checked-in bindings file: ERP and Sub carry named,
+    protected-main-ancestor revisions with a `protected_main_row` but no
+    product-specific facts yet (`evidence_incomplete`); Academy has no
+    revision at all (`unbound`). Running the gate against it today must
+    refuse regardless — not skip, not pass over an incomplete evidence set."""
     bindings = gate.load_default_bindings()
     result = gate.evaluate_gate(bindings)
     assert result.satisfied is False
     assert len(result.refusing) == 3
     refusing_products = {evaluation.product for evaluation in result.refusing}
     assert refusing_products == set(gate.PRODUCTS)
-    # Structured, not just prose: every refusal today is UNBOUND, not a
-    # product that produced evidence and was found lacking — the exact
-    # ABSENT-versus-REGISTRY_DISAGREEMENT distinction a reader must be able
-    # to make from `status` alone, never by parsing `findings`.
-    for evaluation in result.refusing:
-        assert evaluation.status == "unbound"
+    # Structured, not just prose: Academy's refusal is UNBOUND -- not yet
+    # eligible, never "found incompatible" -- and it is DISTINCT from ERP's
+    # and Sub's status, which have a real revision and a proven
+    # protected-main ancestry but incomplete product-side facts. A reader
+    # must be able to make this ABSENT-versus-REGISTRY_DISAGREEMENT
+    # distinction from `status` alone, never by parsing `findings`.
+    statuses = {e.product: e.status for e in result.refusing}
+    assert statuses["academy"] == "unbound"
+    assert statuses["erp"] == "evidence_incomplete"
+    assert statuses["sub"] == "evidence_incomplete"
+    academy_result = next(e for e in result.evaluations if e.product == "academy")
+    assert academy_result.revision is None
+    erp_result = next(e for e in result.evaluations if e.product == "erp")
+    assert erp_result.revision == "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
+    sub_result = next(e for e in result.evaluations if e.product == "sub")
+    assert sub_result.revision == "288b68cf0ba4196b36641801093b501a75e80a0d"
 
 
 def test_the_gate_refuses_when_bindings_is_entirely_empty() -> None:
@@ -688,7 +700,13 @@ def test_load_default_bindings_reads_the_checked_in_seam_file() -> None:
     assert set(bindings) == set(gate.PRODUCTS)
     for product, binding in bindings.items():
         assert binding.product == product
-        assert binding.revision is None
+    # Academy is not yet eligible to bind at all (see its recorded note).
+    assert bindings["academy"].revision is None
+    # ERP and Sub carry named, protected-main-ancestor revisions -- distinct,
+    # real 40-hex commits, never each other's and never the excluded #509.
+    assert bindings["erp"].revision == "b3b191cc8e59013ab27ea5efac0e9c605f9b7a4f"
+    assert bindings["sub"].revision == "288b68cf0ba4196b36641801093b501a75e80a0d"
+    assert bindings["erp"].revision != bindings["sub"].revision
 
 
 def test_bindings_loader_refuses_an_undeclared_schema(tmp_path: Path) -> None:
