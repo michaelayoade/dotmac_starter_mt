@@ -40,9 +40,7 @@ _EXPECTED_STAGES = (
 )
 
 
-def _run_probe(
-    tmp_path: Path, probe: Path = PROBE
-) -> subprocess.CompletedProcess[str]:
+def _run_probe(tmp_path: Path, probe: Path = PROBE) -> subprocess.CompletedProcess[str]:
     env = {
         key: value
         for key, value in os.environ.items()
@@ -119,8 +117,7 @@ def test_the_seam_bites_a_reintroduced_transitive_reach(tmp_path: Path) -> None:
     deps_path.write_text(
         source.replace(
             anchor,
-            "    from dotmac_kernel.db import get_db as _reference_get_db  # noqa: F401\n"
-            + anchor,
+            "    from dotmac_kernel.db import get_db as _ref  # noqa: F401\n" + anchor,
             1,
         )
     )

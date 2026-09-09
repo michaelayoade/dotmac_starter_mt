@@ -63,14 +63,13 @@ sys.modules["dotmac_kernel.db"] = None  # type: ignore[assignment]
 
 
 def main() -> None:
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import StaticPool
-
     # dotmac_kernel.models_platform / .settings_models register their tables
     # on the shared `Base.metadata` this import brings in — needed before
     # `create_all` so the probe's engine has somewhere to write.
-    from dotmac_kernel import models_platform  # noqa: F401
-    from dotmac_kernel import settings_models  # noqa: F401
+    from dotmac_kernel import (
+        models_platform,  # noqa: F401
+        settings_models,  # noqa: F401
+    )
     from dotmac_kernel.api_documentation import (
         ApiDocumentationPolicy,
         DocumentationExposure,
@@ -82,6 +81,8 @@ def main() -> None:
     from dotmac_kernel.security import hash_password
     from dotmac_kernel.session_runtime import DatabaseRuntime, get_database_runtime
     from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
 
     # ── the product's own runtime: one SQLite engine, one shared connection ──
     #
@@ -99,7 +100,7 @@ def main() -> None:
     runtime = DatabaseRuntime(engine=engine)
 
     seeded_email = "probe-admin@platform.example.test"
-    seeded_password = "probe-password-not-a-secret"
+    seeded_password = "probe-password-not-a-secret"  # noqa: S105  # nosec B105 -- fixture
     with runtime.platform_session() as seed_db:
         seed_db.add(
             PlatformAdmin(
@@ -126,9 +127,9 @@ def main() -> None:
     app = create_app(spec)
     # `get_database_runtime()` must already resolve to the installed runtime
     # the instant `create_app` returns — before any request, before lifespan.
-    assert get_database_runtime() is runtime, (
-        "create_app(spec) did not install spec.database_runtime"
-    )
+    assert (
+        get_database_runtime() is runtime
+    ), "create_app(spec) did not install spec.database_runtime"
     with TestClient(app) as client:
         # Entering the context manager runs the ASGI lifespan, which is where
         # `_required_setting_errors()` calls
@@ -145,9 +146,8 @@ def main() -> None:
     # model reserves for the Postgres canaries: it primes/resets a real
     # Postgres GUC, so a SQLite probe exercises the guard and the dependency
     # directly, the same way `tests/unit/test_platform_auth.py` does).
-    from fastapi import FastAPI
-
     from dotmac_kernel.platform_auth import platform_auth_router
+    from fastapi import FastAPI
 
     platform_app = FastAPI()
     platform_app.include_router(platform_auth_router)
@@ -185,9 +185,7 @@ def main() -> None:
             ).first()
             if admin is None:
                 db.add(
-                    PlatformAdmin(
-                        email=email, password_hash=hash_password(password)
-                    )
+                    PlatformAdmin(email=email, password_hash=hash_password(password))
                 )
             else:
                 admin.password_hash = hash_password(password)
@@ -212,9 +210,8 @@ def main() -> None:
     # it reaches a real `execute()` on the product engine; the only failure is
     # the Postgres-only `claim_outbox_batch` function, which is a SQL-dialect
     # gap, not an import or configuration one.
-    from sqlalchemy.exc import OperationalError
-
     from dotmac_kernel.messaging.worker import LoggingTransport, run_once
+    from sqlalchemy.exc import OperationalError
 
     dispatcher_db = get_database_runtime().platform_session_factory()
     try:
@@ -249,9 +246,9 @@ def main() -> None:
         dispatcher_db.close()
 
     # ── the reference runtime was never reached, anywhere above ─────────────
-    assert sys.modules.get("dotmac_kernel.db") is None, (
-        "dotmac_kernel.db was imported during the probe"
-    )
+    assert (
+        sys.modules.get("dotmac_kernel.db") is None
+    ), "dotmac_kernel.db was imported during the probe"
     print("PASS dotmac_kernel.db stayed unimported for the whole probe")
 
 
